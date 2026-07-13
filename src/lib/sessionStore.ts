@@ -79,8 +79,8 @@ function event(message: string, detail?: string, seatId?: string): GameEvent {
 function seedVisibleBoard(seats: PlayerSeat[]) {
   const [human, veyra, malik, sable] = seats;
 
-  human.life = 37;
-  human.commanderDamage = { "seat-veyra": 2 };
+  human.life = 40;
+  human.commanderDamage = {};
   human.board.commander = card({
     id: "human-commander",
     name: "Atraxa, Praetors' Voice",
@@ -242,8 +242,8 @@ function seedVisibleBoard(seats: PlayerSeat[]) {
     })
   ];
 
-  malik.life = 32;
-  malik.commanderDamage = { "seat-sable": 5 };
+  malik.life = 40;
+  malik.commanderDamage = {};
   malik.board.hand = [
     card({
       id: "malik-hand-1",
@@ -316,8 +316,8 @@ function seedVisibleBoard(seats: PlayerSeat[]) {
     })
   ];
 
-  sable.life = 35;
-  sable.commanderDamage = { "seat-human": 4 };
+  sable.life = 40;
+  sable.commanderDamage = {};
   sable.board.hand = [
     card({
       id: "sable-hand-1",

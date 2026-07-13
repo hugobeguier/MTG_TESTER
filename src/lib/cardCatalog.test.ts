@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { lookupCard, normalizeCardName, type CardCatalog } from "./cardCatalog";
+import { buildCatalog, lookupCard, normalizeCardName, type CardCatalog } from "./cardCatalog";
 import { createDeckFromList } from "./deckParser";
 import type { CardRecord } from "./types";
 
@@ -22,6 +22,29 @@ const catalog: CardCatalog = {
 describe("card catalog deck enrichment", () => {
   it("looks up card names case-insensitively", () => {
     expect(lookupCard(catalog, "sol ring")?.name).toBe("Sol Ring");
+  });
+
+  it("normalizes single and double slash split-card separators", () => {
+    expect(normalizeCardName("Secret Arcade / Dusty Parlor")).toBe(normalizeCardName("Secret Arcade // Dusty Parlor"));
+  });
+
+  it("prefers exact card names over matching card-face aliases", () => {
+    const localCatalog = buildCatalog(
+      [
+        card("Brainstorm", "Instant", ["U"]),
+        {
+          ...card("Harmonized Trio // Brainstorm", "Creature - Merfolk Bard Wizard // Instant", ["U"]),
+          faces: [
+            { name: "Harmonized Trio", typeLine: "Creature - Merfolk Bard Wizard", oracleText: "Test front face.", colors: ["U"] },
+            { name: "Brainstorm", typeLine: "Instant", oracleText: "Test back face.", colors: ["U"] }
+          ]
+        }
+      ],
+      undefined,
+      "builtin"
+    );
+
+    expect(lookupCard(localCatalog, "Brainstorm")?.name).toBe("Brainstorm");
   });
 
   it("enriches valid Commander deck lists with real card data", () => {

@@ -61,6 +61,7 @@ export function normalizeCardName(name: string) {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[’']/g, "'")
     .replace(/[^a-z0-9/+ -]/g, "")
+    .replace(/\s*\/+\s*/g, " / ")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -69,13 +70,18 @@ export function preferredImage(imageUris?: CardImageUris) {
   return imageUris?.normal ?? imageUris?.large ?? imageUris?.png ?? imageUris?.small ?? imageUris?.borderCrop;
 }
 
-function buildCatalog(cards: CardRecord[], loadedAt: string | undefined, source: CardCatalog["source"]): CardCatalog {
+export function buildCatalog(cards: CardRecord[], loadedAt: string | undefined, source: CardCatalog["source"]): CardCatalog {
   const byName = new Map<string, CardRecord>();
   for (const card of cards) {
     byName.set(normalizeCardName(card.name), card);
+  }
+  for (const card of cards) {
     if (card.faces) {
       for (const face of card.faces) {
-        byName.set(normalizeCardName(face.name), card);
+        const faceName = normalizeCardName(face.name);
+        if (!byName.has(faceName)) {
+          byName.set(faceName, card);
+        }
       }
     }
   }
@@ -97,6 +103,7 @@ const BUILTIN_CARDS: CardRecord[] = [
     name: "Sol Ring",
     typeLine: "Artifact",
     oracleText: "Tap: Add two colorless mana.",
+    manaCost: "{1}",
     manaValue: 1,
     colors: [],
     colorIdentity: [],
@@ -107,6 +114,7 @@ const BUILTIN_CARDS: CardRecord[] = [
     name: "Arcane Signet",
     typeLine: "Artifact",
     oracleText: "Tap: Add one mana of any color in your commander's color identity.",
+    manaCost: "{2}",
     manaValue: 2,
     colors: [],
     colorIdentity: [],
@@ -144,6 +152,7 @@ function commander(name: string, colorIdentity: string[], oracleText: string, po
     name,
     typeLine: "Legendary Creature - Commander",
     oracleText,
+    manaCost: "{4}",
     manaValue: 4,
     colors: colorIdentity,
     colorIdentity,

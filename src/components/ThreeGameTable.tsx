@@ -4,23 +4,139 @@ import { useEffect, useMemo, useRef, useState, type DragEvent, type MutableRefOb
 import * as THREE from "three";
 import type { GameSession, PlayerSeat, VisibleCard } from "@/lib/types";
 
+type ManaColor = "W" | "U" | "B" | "R" | "G" | "C";
+type ManaPool = Record<ManaColor, number>;
+
 interface ThreeGameTableProps {
   session: GameSession;
   prioritySeatId?: string;
   selectedCardId?: string;
+  selectedCardCanRespond?: boolean;
   inspectedCard?: VisibleCard;
+  libraryLook?: LibraryLookState;
+  ruleChoice?: RuleChoiceView;
+  blockChoice?: BlockChoiceView;
+  myriadSearchCards?: VisibleCard[];
+  pendingAction?: PendingActionView;
+  stackActions?: PendingActionView[];
+  manaPool?: ManaPool;
+  manaChoice?: {
+    cardName: string;
+    choices: ManaColor[];
+  };
   onInspectCard?: (card: VisibleCard) => void;
+  onCloseInspectCard?: () => void;
   onSelectHandCard?: (card: VisibleCard) => void;
   onDrawCard?: (seatId: string) => void;
   onPlayCard?: (seatId: string, cardId: string, position?: { x: number; z: number }) => void;
+  onShuffleLibrary?: (seatId: string) => void;
+  onOpenLibrarySearch?: () => void;
+  onCloseLibrarySearch?: () => void;
+  onSearchLibraryCardToHand?: (cardId: string) => void;
+  onChooseNextTrigger?: (sourceCardId: string) => void;
+  onCloseMyriadSearch?: () => void;
+  onCompleteMyriadSearch?: (cardIds: string[]) => void;
+  onMoveCardToGraveyard?: (seatId: string, cardId: string) => void;
+  onMoveCardToExile?: (seatId: string, cardId: string) => void;
+  onMoveCardToHand?: (seatId: string, cardId: string) => void;
+  onMoveBattlefieldCard?: (seatId: string, cardId: string, position: { x: number; z: number }) => void;
+  onChangeCounter?: (seatId: string, cardId: string, kind: string, delta: number) => void;
+  onCastCommander?: (seatId: string, position?: { x: number; z: number }) => void;
+  onResolveMyriadLandscape?: (seatId: string, cardId: string) => void;
+  onChangeLife?: (seatId: string, delta: number) => void;
+  onScry?: (count: number) => void;
+  onSurveil?: (count: number) => void;
+  onKeepLibraryLookCardOnTop?: (cardId: string) => void;
+  onOrderLibraryLookCardOnTop?: (cardId: string) => void;
+  onPutLibraryLookCardOnBottom?: (cardId: string) => void;
+  onPutLibraryLookCardInGraveyard?: (cardId: string) => void;
+  onCloseLibraryLook?: () => void;
+  onToggleTapCard?: (seatId: string, cardId: string, location: CardUserData["location"]) => void;
+  onChooseMana?: (color: ManaColor) => void;
+  onCancelManaChoice?: () => void;
   gameStage?: "mulligan" | "playing";
   humanMulligans?: number;
+  mulliganReturnCardIds?: string[];
+  mulliganReturnRequired?: number;
   onKeepHand?: () => void;
   onMulligan?: () => void;
+  onToggleMulliganReturnCard?: (card: VisibleCard) => void;
   onAdvanceTurn?: () => void;
+  onEndTurn?: () => void;
   onPassPriority?: () => void;
   onRespond?: () => void;
+  onRespondWithSelectedCard?: () => void;
+  onResolvePendingTrigger?: () => void;
+  onChooseBlocker?: (blockerCardId: string) => void;
+  onPassBlocks?: () => void;
+  onPayCumulativeUpkeep?: () => void;
+  onSacrificeRuleSource?: () => void;
 }
+
+type PendingActionView =
+  | {
+      id: string;
+      type: "phase";
+      actorSeatId: string;
+      message: string;
+    }
+  | {
+      id: string;
+      type: "spell";
+      actorSeatId: string;
+      cardName: string;
+      message: string;
+    }
+  | {
+      id: string;
+      type: "trigger";
+      actorSeatId: string;
+      controllerSeatId: string;
+      sourceCardName: string;
+      triggerKind: "draw";
+      message: string;
+    };
+
+type RuleChoiceView =
+  | {
+      kind: "choose_card_from_library";
+      sourceCardName: string;
+      prompt: string;
+      cards: VisibleCard[];
+      destination: "hand" | "battlefield";
+      allowedCardFilter?: string;
+    }
+  | {
+      kind: "manual_review";
+      sourceCardId: string;
+      sourceCardName: string;
+      prompt: string;
+      isCumulativeUpkeep?: boolean;
+      cumulativeUpkeepCost?: number;
+    }
+  | {
+      kind: "order_triggers";
+      prompt: string;
+      triggers: Array<{ sourceCardId: string; sourceCardName: string; text: string }>;
+      orderedTriggers: Array<{ sourceCardId: string; sourceCardName: string; text: string }>;
+    };
+
+interface BlockChoiceView {
+  attackerName: string;
+  defenderName: string;
+  attackingCard: VisibleCard;
+  blockers: VisibleCard[];
+}
+
+interface LibraryLookState {
+  seatId: string;
+  mode: "scry" | "surveil" | "reorder";
+  cards: VisibleCard[];
+  remaining: number;
+  orderedCards?: VisibleCard[];
+}
+
+type DraggedZone = "hand" | "graveyard" | "exile";
 
 interface CardUserData {
   kind: "card";
@@ -55,9 +171,20 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
   const movementKeys = useRef({ forward: false, left: false, back: false, right: false });
   const boardInputActive = useRef(false);
   const pointer = useRef({ down: false, button: 0, x: 0, y: 0, moved: false });
+  const hoveredCardRef = useRef<CardUserData | undefined>(undefined);
+  const draggedBattlefieldCardRef = useRef<CardUserData | undefined>(undefined);
   const [draggingHandCardId, setDraggingHandCardId] = useState<string | undefined>();
+  const [draggingZone, setDraggingZone] = useState<DraggedZone | undefined>();
   const human = props.session.seats.find((seat) => seat.kind === "human") ?? props.session.seats[0];
   const latest = props.session.events[0];
+  const phaseNotice = latest?.detail === "Phase change" ? latest : undefined;
+  const recentEvents = props.session.events.slice(0, 8);
+  const prioritySeat = props.session.seats.find((seat) => seat.id === props.prioritySeatId);
+  const humanHasPriority = props.prioritySeatId === human.id;
+  const humanIsActive = props.session.activePlayerId === human.id;
+  const stackTopFirst = [...(props.stackActions ?? [])].reverse();
+  const mulliganSelectedCount = props.mulliganReturnCardIds?.length ?? 0;
+  const mulliganRequired = props.mulliganReturnRequired ?? 0;
 
   propsRef.current = props;
 
@@ -162,20 +289,57 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
       propsRef.current.onInspectCard?.(data.card);
     };
 
+    const updateHoveredCard = (event: PointerEvent) => {
+      const hit = raycastCard(event);
+      const data = hit?.object.userData as Partial<CardUserData> | undefined;
+      hoveredCardRef.current = data?.kind === "card" && data.card && data.seatId && data.location ? (data as CardUserData) : undefined;
+      const hovered = hoveredCardRef.current;
+      renderer.domElement.style.cursor = hovered?.location === "battlefield" && hovered.seatId === propsRef.current.session.seats.find((seat) => seat.kind === "human")?.id ? "grab" : hovered ? "pointer" : "";
+    };
+
+    const getTablePosition = (event: PointerEvent, seatId: string) => {
+      const seatIndex = Math.max(0, propsRef.current.session.seats.findIndex((seat) => seat.id === seatId));
+      const area = PLAYER_AREAS[seatIndex] ?? PLAYER_AREAS[0];
+      const rect = renderer.domElement.getBoundingClientRect();
+      const mouse = new THREE.Vector2(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1);
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(mouse, camera);
+      const point = raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.08), new THREE.Vector3());
+      if (!point) return { x: area.x, z: area.z };
+      return {
+        x: THREE.MathUtils.clamp(point.x, area.minX + 0.45, area.maxX - 0.45),
+        z: THREE.MathUtils.clamp(point.z, area.minZ + 0.6, area.maxZ - 0.6)
+      };
+    };
+
     const onPointerDown = (event: PointerEvent) => {
       boardInputActive.current = true;
       renderer.domElement.focus();
       pointer.current = { down: true, button: event.button, x: event.clientX, y: event.clientY, moved: false };
+      updateHoveredCard(event);
+      const hovered = hoveredCardRef.current;
+      const humanId = propsRef.current.session.seats.find((seat) => seat.kind === "human")?.id;
+      draggedBattlefieldCardRef.current =
+        event.button === 0 && !event.shiftKey && hovered?.location === "battlefield" && hovered.seatId === humanId ? hovered : undefined;
+      if (draggedBattlefieldCardRef.current) {
+        renderer.domElement.style.cursor = "grabbing";
+      }
       renderer.domElement.setPointerCapture(event.pointerId);
     };
 
     const onPointerMove = (event: PointerEvent) => {
+      updateHoveredCard(event);
       if (!pointer.current.down) return;
       const dx = event.clientX - pointer.current.x;
       const dy = event.clientY - pointer.current.y;
       pointer.current.x = event.clientX;
       pointer.current.y = event.clientY;
       if (Math.abs(dx) + Math.abs(dy) > 3) pointer.current.moved = true;
+      const draggedCard = draggedBattlefieldCardRef.current;
+      if (draggedCard) {
+        propsRef.current.onMoveBattlefieldCard?.(draggedCard.seatId, draggedCard.card.id, getTablePosition(event, draggedCard.seatId));
+        return;
+      }
       if (pointer.current.button === 2 || event.shiftKey) {
         cameraState.current.target.x -= dx * 0.025;
         cameraState.current.target.z -= dy * 0.025;
@@ -186,7 +350,12 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
     };
 
     const onPointerUp = (event: PointerEvent) => {
-      if (!pointer.current.moved) pickCard(event);
+      const draggedCard = draggedBattlefieldCardRef.current;
+      if (draggedCard) {
+        propsRef.current.onMoveBattlefieldCard?.(draggedCard.seatId, draggedCard.card.id, getTablePosition(event, draggedCard.seatId));
+        draggedBattlefieldCardRef.current = undefined;
+        updateHoveredCard(event);
+      } else if (!pointer.current.moved) pickCard(event);
       pointer.current.down = false;
     };
 
@@ -206,6 +375,9 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
     };
 
     const onPointerLeave = () => {
+      hoveredCardRef.current = undefined;
+      draggedBattlefieldCardRef.current = undefined;
+      renderer.domElement.style.cursor = "";
       boardInputActive.current = document.activeElement === renderer.domElement;
       if (!boardInputActive.current) clearMovementKeys();
     };
@@ -224,7 +396,11 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
       if (!boardInputActive.current && document.activeElement !== renderer.domElement) return;
       if (isEditableTarget(event.target)) return;
       const key = event.key.toLowerCase();
-      if (key === "w") movementKeys.current.forward = active;
+      if (key === "t" && active) {
+        const hovered = hoveredCardRef.current;
+        if (!hovered) return;
+        propsRef.current.onToggleTapCard?.(hovered.seatId, hovered.card.id, hovered.location);
+      } else if (key === "w") movementKeys.current.forward = active;
       else if (key === "a") movementKeys.current.left = active;
       else if (key === "s") movementKeys.current.back = active;
       else if (key === "d") movementKeys.current.right = active;
@@ -286,19 +462,22 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
     cameraState.current = { yaw: 0, pitch: -0.85, distance: 18, target: new THREE.Vector3(0, 0, 0) };
   }
 
-  function onHandCardDragStart(event: DragEvent<HTMLElement>, card: VisibleCard) {
+  function onCardDragStart(event: DragEvent<HTMLElement>, card: VisibleCard, zone: DraggedZone) {
     if (props.gameStage !== "playing") {
       event.preventDefault();
       return;
     }
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData("text/plain", card.id);
+    event.dataTransfer.setData("application/x-mtg-card", JSON.stringify({ cardId: card.id, zone }));
     setDraggingHandCardId(card.id);
-    props.onSelectHandCard?.(card);
+    setDraggingZone(zone);
+    if (zone === "hand") props.onSelectHandCard?.(card);
   }
 
-  function onHandCardDragEnd() {
+  function onCardDragEnd() {
     setDraggingHandCardId(undefined);
+    setDraggingZone(undefined);
   }
 
   function onBoardDragOver(event: DragEvent<HTMLDivElement>) {
@@ -329,19 +508,82 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
 
   function onBoardDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
-    const cardId = event.dataTransfer.getData("text/plain");
+    const { cardId, zone } = getDraggedCard(event);
     setDraggingHandCardId(undefined);
-    if (!cardId || props.gameStage !== "playing") return;
+    setDraggingZone(undefined);
+    if (!cardId || props.gameStage !== "playing" || zone !== "hand") return;
     props.onPlayCard?.(human.id, cardId, getClampedDropPosition(event));
   }
+
+  function onGraveyardDragOver(event: DragEvent<HTMLDivElement>) {
+    if (props.gameStage !== "playing") return;
+    const { zone } = getDraggedCard(event);
+    if (zone !== "hand") return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+  }
+
+  function onGraveyardDrop(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    const { cardId, zone } = getDraggedCard(event);
+    setDraggingHandCardId(undefined);
+    setDraggingZone(undefined);
+    if (!cardId || zone !== "hand") return;
+    props.onMoveCardToGraveyard?.(human.id, cardId);
+  }
+
+  function onHandDragOver(event: DragEvent<HTMLDivElement>) {
+    if (props.gameStage !== "playing") return;
+    const { zone } = getDraggedCard(event);
+    if (zone !== "graveyard") return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+  }
+
+  function onHandDrop(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    const { cardId, zone } = getDraggedCard(event);
+    setDraggingHandCardId(undefined);
+    setDraggingZone(undefined);
+    if (!cardId || zone !== "graveyard") return;
+    props.onMoveCardToHand?.(human.id, cardId);
+  }
+
+  function onExileDragOver(event: DragEvent<HTMLDivElement>) {
+    if (props.gameStage !== "playing") return;
+    const { zone } = getDraggedCard(event);
+    if (zone !== "hand" && zone !== "graveyard") return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+  }
+
+  function onExileDrop(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    const { cardId, zone } = getDraggedCard(event);
+    setDraggingHandCardId(undefined);
+    setDraggingZone(undefined);
+    if (!cardId || (zone !== "hand" && zone !== "graveyard")) return;
+    props.onMoveCardToExile?.(human.id, cardId);
+  }
+
+  const inspectedOwner = props.inspectedCard ? findCardOwner(props.session, props.inspectedCard.id) : undefined;
+  const graveyard = human.board.graveyard ?? [];
+  const exile = human.board.exile ?? [];
 
   return (
     <section className="three-game-shell">
       <div className={`three-board ${draggingHandCardId ? "is-drop-target" : ""}`} ref={mountRef} onDragOver={onBoardDragOver} onDrop={onBoardDrop} />
+      {phaseNotice ? (
+        <div className="phase-popup" role="status" aria-live="polite">
+          <span>Phase</span>
+          <strong>{phaseNotice.message}</strong>
+        </div>
+      ) : null}
       <div className="three-hud top-left">
         <span>Turn {props.session.turn}</span>
         <strong>{activeName}</strong>
         <small>{props.session.phase}</small>
+        <small>Priority: {prioritySeat?.name ?? "None"}</small>
       </div>
       <div className="three-hud top-right">
         <button type="button" onClick={resetCamera}>Reset Camera</button>
@@ -351,33 +593,75 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
         {props.gameStage === "mulligan" ? (
           <div className="hud-actions">
             <strong>{human.board.hand.length} cards</strong>
-            <small>{(props.humanMulligans ?? 0) <= 1 ? "You may keep 7. First mulligan is free." : `Keep ${Math.max(1, 8 - (props.humanMulligans ?? 0))}.`}</small>
-            <button type="button" onClick={props.onKeepHand}>Keep</button>
+            <small>
+              {mulliganRequired > 0
+                ? `Choose ${mulliganRequired} card${mulliganRequired === 1 ? "" : "s"} to shuffle into your library. Selected ${mulliganSelectedCount}/${mulliganRequired}.`
+                : "You may keep 7. First mulligan is free."}
+            </small>
+            <button type="button" disabled={mulliganSelectedCount !== mulliganRequired} onClick={props.onKeepHand}>Keep</button>
             <button type="button" onClick={props.onMulligan}>Mulligan</button>
           </div>
         ) : (
           <div className="hud-actions">
+            <div className="mana-pool" aria-label="Floating mana">
+              {(["W", "U", "B", "R", "G", "C"] as ManaColor[]).map((color) => (
+                <span className={`mana-symbol mana-${color.toLowerCase()}`} key={color}>
+                  {color} {props.manaPool?.[color] ?? 0}
+                </span>
+              ))}
+            </div>
             <button type="button" onClick={() => props.onDrawCard?.(human.id)}>Draw</button>
+            <button type="button" onClick={() => props.onShuffleLibrary?.(human.id)}>Shuffle</button>
+            <button type="button" onClick={props.onOpenLibrarySearch}>Search Library</button>
+            <button type="button" onClick={() => props.onScry?.(1)}>Scry 1</button>
+            <button type="button" onClick={() => props.onSurveil?.(2)}>Surveil 2</button>
+            <div className="life-adjuster" aria-label="Life total controls">
+              <button type="button" onClick={() => props.onChangeLife?.(human.id, -1)}>-</button>
+              <strong>{human.life}</strong>
+              <button type="button" onClick={() => props.onChangeLife?.(human.id, 1)}>+</button>
+            </div>
             <button type="button" disabled={!props.selectedCardId} onClick={() => props.selectedCardId && props.onPlayCard?.(human.id, props.selectedCardId)}>
               Play Selected
             </button>
-            <button type="button" onClick={props.onAdvanceTurn}>Next Turn</button>
-            <button type="button" disabled={props.prioritySeatId !== human.id} onClick={props.onPassPriority}>Pass Priority</button>
+            <button type="button" disabled={Boolean(props.pendingAction)} onClick={props.onAdvanceTurn}>Advance Phase</button>
+            <button type="button" disabled={Boolean(props.pendingAction) || !humanIsActive} onClick={props.onEndTurn}>End Turn</button>
+            <button type="button" disabled={!props.pendingAction || !humanHasPriority} onClick={props.onRespond}>Review Response</button>
+            <button type="button" disabled={!props.pendingAction || !humanHasPriority || !props.selectedCardCanRespond} onClick={props.onRespondWithSelectedCard}>
+              Respond Selected
+            </button>
+            <button type="button" disabled={props.pendingAction?.type !== "trigger" || !humanHasPriority} onClick={props.onResolvePendingTrigger}>
+              Resolve Trigger
+            </button>
+            <button type="button" disabled={!props.pendingAction || !humanHasPriority} onClick={props.onPassPriority}>Pass Priority</button>
           </div>
         )}
       </div>
       <div className="three-hud bottom-right">
-        {props.inspectedCard ? (
-          <div className="hud-card-detail">
-            {props.inspectedCard.imageUris?.normal ? <img src={props.inspectedCard.imageUris.normal} alt="" /> : null}
-            <strong>{props.inspectedCard.name}</strong>
-            <span>{props.inspectedCard.typeLine}</span>
-            <p>{props.inspectedCard.oracleText}</p>
+        {props.pendingAction ? (
+          <div className="hud-card-detail stack-detail">
+            <strong>{props.pendingAction.type === "spell" ? "Stack" : props.pendingAction.type === "trigger" ? "Trigger" : "Phase Change"}</strong>
+            <p>{props.pendingAction.message}</p>
+            {stackTopFirst.length > 0 ? (
+              <div className="stack-list" aria-label="Current stack">
+                <span>Top of stack</span>
+                {stackTopFirst.map((action, index) => (
+                  <div className="stack-item" key={action.id}>
+                    <small>{index === 0 ? "Resolving next" : "Below"}</small>
+                    <strong>{action.type === "spell" ? action.cardName : action.type === "trigger" ? `${action.sourceCardName} trigger` : "Phase change"}</strong>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            <span>{humanHasPriority ? "You have priority." : `${prioritySeat?.name ?? "An agent"} has priority.`}</span>
           </div>
         ) : latest ? (
           <div className="hud-card-detail">
-            <strong>Latest</strong>
-            <p>{latest.message}</p>
+            <strong>Agent Activity</strong>
+            <div className="activity-feed">
+              {recentEvents.map((event) => (
+                <p key={event.id}>{event.message}</p>
+              ))}
+            </div>
           </div>
         ) : (
           <div className="hud-card-detail">
@@ -385,32 +669,634 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
           </div>
         )}
       </div>
+      {props.inspectedCard ? (
+        <CardInspector
+          card={props.inspectedCard}
+          owner={inspectedOwner}
+          onClose={props.onCloseInspectCard}
+          onMoveToGraveyard={
+            inspectedOwner?.seat.kind === "human" && (inspectedOwner.zone === "hand" || inspectedOwner.zone === "battlefield" || inspectedOwner.zone === "exile")
+              ? () => props.onMoveCardToGraveyard?.(inspectedOwner.seat.id, props.inspectedCard!.id)
+              : undefined
+          }
+          onMoveToExile={
+            inspectedOwner?.seat.kind === "human" && (inspectedOwner.zone === "hand" || inspectedOwner.zone === "battlefield" || inspectedOwner.zone === "graveyard")
+              ? () => props.onMoveCardToExile?.(inspectedOwner.seat.id, props.inspectedCard!.id)
+              : undefined
+          }
+          onResolveMyriadLandscape={
+            inspectedOwner?.seat.kind === "human" && inspectedOwner.zone === "battlefield" && props.inspectedCard.name === "Myriad Landscape"
+              ? () => props.onResolveMyriadLandscape?.(inspectedOwner.seat.id, props.inspectedCard!.id)
+              : undefined
+          }
+          onCastCommander={
+            inspectedOwner?.seat.kind === "human" && inspectedOwner.zone === "command"
+              ? () => props.onCastCommander?.(inspectedOwner.seat.id)
+              : undefined
+          }
+          onChangeCounter={
+            inspectedOwner?.seat.kind === "human" && inspectedOwner.zone === "battlefield" && props.inspectedCard.typeLine.includes("Creature")
+              ? (delta) => props.onChangeCounter?.(inspectedOwner.seat.id, props.inspectedCard!.id, "+1/+1", delta)
+              : undefined
+          }
+        />
+      ) : null}
+      {props.manaChoice ? <ManaChoiceModal choice={props.manaChoice} onChoose={props.onChooseMana} onClose={props.onCancelManaChoice} /> : null}
+      {props.libraryLook ? (
+        <LibraryLookModal
+          look={props.libraryLook}
+          onClose={props.onCloseLibraryLook}
+          onKeepTop={props.onKeepLibraryLookCardOnTop}
+          onOrderTop={props.onOrderLibraryLookCardOnTop}
+          onBottom={props.onPutLibraryLookCardOnBottom}
+          onGraveyard={props.onPutLibraryLookCardInGraveyard}
+        />
+      ) : null}
+      {props.ruleChoice?.kind === "choose_card_from_library" ? (
+        <LibrarySearchModal
+          cards={props.ruleChoice.cards}
+          destination={props.ruleChoice.destination}
+          prompt={props.ruleChoice.prompt}
+          sourceCardName={props.ruleChoice.sourceCardName}
+          allowedCardFilter={props.ruleChoice.allowedCardFilter}
+          onClose={props.onCloseLibrarySearch}
+          onChoose={props.onSearchLibraryCardToHand}
+        />
+      ) : null}
+      {props.ruleChoice?.kind === "manual_review" ? (
+        <ManualRuleChoiceModal
+          choice={props.ruleChoice}
+          onClose={props.onCloseLibrarySearch}
+          onPayCumulativeUpkeep={props.onPayCumulativeUpkeep}
+          onSacrificeSource={props.onSacrificeRuleSource}
+        />
+      ) : null}
+      {props.ruleChoice?.kind === "order_triggers" ? (
+        <OrderTriggersModal choice={props.ruleChoice} onChoose={props.onChooseNextTrigger} onClose={props.onCloseLibrarySearch} />
+      ) : null}
+      {props.blockChoice ? <BlockChoiceModal choice={props.blockChoice} onChoose={props.onChooseBlocker} onPass={props.onPassBlocks} /> : null}
+      {props.myriadSearchCards ? (
+        <MyriadSearchModal cards={props.myriadSearchCards} onClose={props.onCloseMyriadSearch} onChoose={props.onCompleteMyriadSearch} />
+      ) : null}
       <div className="three-hand-panel" aria-label="Your hand">
-        <div className="three-hand-heading">
-          <strong>Your hand</strong>
-          <span>{human.board.hand.length} cards</span>
+        <div className="three-zone-strip">
+          <div className="three-hand-heading">
+            <strong>Your hand</strong>
+            <span>{human.board.hand.length} cards</span>
+          </div>
+          <div className="three-hand-row" onDragOver={onHandDragOver} onDrop={onHandDrop}>
+            {human.board.hand.map((card) => (
+              <article
+                className={`three-hand-card ${props.selectedCardId === card.id || props.mulliganReturnCardIds?.includes(card.id) ? "selected" : ""} ${draggingHandCardId === card.id ? "dragging" : ""}`}
+                draggable={props.gameStage === "playing"}
+                key={card.id}
+                onClick={() => {
+                  if (props.gameStage === "mulligan" && mulliganRequired > 0) {
+                    props.onToggleMulliganReturnCard?.(card);
+                    return;
+                  }
+                  props.onInspectCard?.(card);
+                  props.onSelectHandCard?.(card);
+                }}
+                onDragStart={(event) => onCardDragStart(event, card, "hand")}
+                onDragEnd={onCardDragEnd}
+                title={`${card.name}\n${card.typeLine}\n${card.oracleText}`}
+              >
+                {card.imageUris?.normal ? <img src={card.imageUris.normal} alt="" draggable={false} /> : <FallbackHandCard card={card} />}
+                <span className="sr-only">{card.name}</span>
+              </article>
+            ))}
+            {draggingZone === "graveyard" ? <div className="zone-drop-hint">Drop here to return to hand</div> : null}
+          </div>
         </div>
-        <div className="three-hand-row">
-          {human.board.hand.map((card) => (
-            <article
-              className={`three-hand-card ${props.selectedCardId === card.id ? "selected" : ""} ${draggingHandCardId === card.id ? "dragging" : ""}`}
-              draggable={props.gameStage === "playing"}
-              key={card.id}
-              onClick={() => {
-                props.onInspectCard?.(card);
-                props.onSelectHandCard?.(card);
-              }}
-              onDragStart={(event) => onHandCardDragStart(event, card)}
-              onDragEnd={onHandCardDragEnd}
-              title={`${card.name}\n${card.typeLine}\n${card.oracleText}`}
-            >
-              {card.imageUris?.normal ? <img src={card.imageUris.normal} alt="" draggable={false} /> : <FallbackHandCard card={card} />}
-              <span className="sr-only">{card.name}</span>
-            </article>
-          ))}
+        <div className="three-zone-strip graveyard-strip">
+          <div className="three-hand-heading">
+            <strong>Graveyard</strong>
+            <span>{graveyard.length} cards</span>
+          </div>
+          <div className={`three-graveyard-row ${draggingZone === "hand" ? "is-drop-target" : ""}`} onDragOver={onGraveyardDragOver} onDrop={onGraveyardDrop}>
+            {graveyard.length === 0 ? <span className="zone-empty">Drop hand cards here</span> : null}
+            {graveyard.map((card) => (
+              <article
+                className={`three-hand-card graveyard-card ${draggingHandCardId === card.id ? "dragging" : ""}`}
+                draggable={props.gameStage === "playing"}
+                key={card.id}
+                onClick={() => props.onInspectCard?.(card)}
+                onDragStart={(event) => onCardDragStart(event, card, "graveyard")}
+                onDragEnd={onCardDragEnd}
+                title={`${card.name}\n${card.typeLine}\n${card.oracleText}`}
+              >
+                {card.imageUris?.normal ? <img src={card.imageUris.normal} alt="" draggable={false} /> : <FallbackHandCard card={card} />}
+                <span className="sr-only">{card.name}</span>
+              </article>
+            ))}
+          </div>
+        </div>
+        <div className="three-zone-strip graveyard-strip">
+          <div className="three-hand-heading">
+            <strong>Exile</strong>
+            <span>{exile.length} cards</span>
+          </div>
+          <div className={`three-graveyard-row ${draggingZone === "hand" || draggingZone === "graveyard" ? "is-drop-target" : ""}`} onDragOver={onExileDragOver} onDrop={onExileDrop}>
+            {exile.length === 0 ? <span className="zone-empty">Drop cards here to exile</span> : null}
+            {exile.map((card) => (
+              <article
+                className="three-hand-card graveyard-card"
+                key={card.id}
+                onClick={() => props.onInspectCard?.(card)}
+                title={`${card.name}\n${card.typeLine}\n${card.oracleText}`}
+              >
+                {card.imageUris?.normal ? <img src={card.imageUris.normal} alt="" draggable={false} /> : <FallbackHandCard card={card} />}
+                <span className="sr-only">{card.name}</span>
+              </article>
+            ))}
+          </div>
         </div>
       </div>
     </section>
+  );
+}
+
+function getDraggedCard(event: DragEvent<HTMLElement>) {
+  const raw = event.dataTransfer.getData("application/x-mtg-card");
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as Partial<{ cardId: string; zone: DraggedZone }>;
+      if (parsed.cardId && (parsed.zone === "hand" || parsed.zone === "graveyard" || parsed.zone === "exile")) return { cardId: parsed.cardId, zone: parsed.zone };
+    } catch {
+      return { cardId: "", zone: undefined };
+    }
+  }
+  return { cardId: event.dataTransfer.getData("text/plain"), zone: undefined };
+}
+
+function findCardOwner(session: GameSession, cardId: string) {
+  for (const seat of session.seats) {
+    if (seat.board.commander?.id === cardId) return { seat, zone: "command" as const };
+    if (seat.board.hand.some((card) => card.id === cardId)) return { seat, zone: "hand" as const };
+    if (seat.board.battlefield.some((card) => card.id === cardId)) return { seat, zone: "battlefield" as const };
+    if ((seat.board.graveyard ?? []).some((card) => card.id === cardId)) return { seat, zone: "graveyard" as const };
+    if ((seat.board.exile ?? []).some((card) => card.id === cardId)) return { seat, zone: "exile" as const };
+  }
+  return undefined;
+}
+
+function CardInspector({
+  card,
+  owner,
+  onClose,
+  onMoveToGraveyard,
+  onMoveToExile,
+  onResolveMyriadLandscape,
+  onCastCommander,
+  onChangeCounter
+}: {
+  card: VisibleCard;
+  owner?: ReturnType<typeof findCardOwner>;
+  onClose?: () => void;
+  onMoveToGraveyard?: () => void;
+  onMoveToExile?: () => void;
+  onResolveMyriadLandscape?: () => void;
+  onCastCommander?: () => void;
+  onChangeCounter?: (delta: number) => void;
+}) {
+  const imageUrl = card.imageUris?.large ?? card.imageUris?.normal ?? card.imageUris?.png ?? card.faces?.[0]?.imageUris?.large ?? card.faces?.[0]?.imageUris?.normal;
+  const colorText = card.colors.length > 0 ? card.colors.join("") : "Colorless";
+  const identityText = card.colorIdentity && card.colorIdentity.length > 0 ? card.colorIdentity.join("") : colorText;
+  const faces = card.faces?.filter((face) => face.name !== card.name) ?? [];
+  const plusCounters = card.counters?.find((counter) => counter.kind === "+1/+1")?.count ?? 0;
+
+  return (
+    <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label={`${card.name} card detail`} onClick={onClose}>
+      <article className="card-inspector" onClick={(event) => event.stopPropagation()}>
+        <button className="card-inspector-close" type="button" onClick={onClose} aria-label="Close card detail">
+          x
+        </button>
+        <div className="card-inspector-image">
+          {imageUrl ? <img src={imageUrl} alt="" /> : <FallbackLargeCard card={card} />}
+        </div>
+        <div className="card-inspector-detail">
+          <div>
+            <p className="eyebrow">{owner?.zone ?? card.zone}</p>
+            <h2>{card.name}</h2>
+            <span>{card.typeLine}</span>
+          </div>
+          {onMoveToGraveyard ? (
+            <button className="inspector-action" type="button" onClick={onMoveToGraveyard}>
+              Move To Graveyard
+            </button>
+          ) : null}
+          {onMoveToExile ? (
+            <button className="inspector-action" type="button" onClick={onMoveToExile}>
+              Move To Exile
+            </button>
+          ) : null}
+          {onResolveMyriadLandscape ? (
+            <button className="inspector-action" type="button" onClick={onResolveMyriadLandscape}>
+              Resolve Myriad Landscape
+            </button>
+          ) : null}
+          {onCastCommander ? (
+            <button className="inspector-action" type="button" onClick={onCastCommander}>
+              Cast Commander{card.commanderTax ? ` (+${card.commanderTax})` : ""}
+            </button>
+          ) : null}
+          {onChangeCounter ? (
+            <div className="counter-controls" aria-label="+1/+1 counter controls">
+              <button className="inspector-action" type="button" onClick={() => onChangeCounter(-1)} disabled={plusCounters === 0}>
+                Remove +1/+1
+              </button>
+              <strong>+1/+1: {plusCounters}</strong>
+              <button className="inspector-action" type="button" onClick={() => onChangeCounter(1)}>
+                +1/+1
+              </button>
+            </div>
+          ) : null}
+          <p>{card.oracleText}</p>
+          {faces.length > 0 ? (
+            <div className="card-inspector-faces">
+              {faces.map((face) => (
+                <section key={face.name}>
+                  <strong>{face.name}</strong>
+                  <span>{face.typeLine}</span>
+                  <p>{face.oracleText}</p>
+                </section>
+              ))}
+            </div>
+          ) : null}
+          <dl>
+            <div>
+              <dt>Mana Value</dt>
+              <dd>{card.manaValue}</dd>
+            </div>
+            <div>
+              <dt>Colors</dt>
+              <dd>{colorText}</dd>
+            </div>
+            <div>
+              <dt>Identity</dt>
+              <dd>{identityText}</dd>
+            </div>
+            <div>
+              <dt>Role</dt>
+              <dd>{card.role}</dd>
+            </div>
+            {card.power && card.toughness ? (
+              <div>
+                <dt>Power / Toughness</dt>
+                <dd>{card.power}/{card.toughness}</dd>
+              </div>
+            ) : null}
+            {card.commander ? (
+              <div>
+                <dt>Commander</dt>
+                <dd>Yes</dd>
+              </div>
+            ) : null}
+          </dl>
+        </div>
+      </article>
+    </div>
+  );
+}
+
+function ManaChoiceModal({
+  choice,
+  onChoose,
+  onClose
+}: {
+  choice: { cardName: string; choices: ManaColor[] };
+  onChoose?: (color: ManaColor) => void;
+  onClose?: () => void;
+}) {
+  return (
+    <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label={`Choose mana for ${choice.cardName}`} onClick={onClose}>
+      <article className="mana-choice-modal" onClick={(event) => event.stopPropagation()}>
+        <button className="card-inspector-close" type="button" onClick={onClose} aria-label="Close mana choice">
+          x
+        </button>
+        <header>
+          <p className="eyebrow">Tap for mana</p>
+          <h2>{choice.cardName}</h2>
+        </header>
+        <div className="mana-choice-grid">
+          {choice.choices.map((color) => (
+            <button className={`mana-choice-button mana-${color.toLowerCase()}`} type="button" key={color} onClick={() => onChoose?.(color)}>
+              {color}
+            </button>
+          ))}
+        </div>
+      </article>
+    </div>
+  );
+}
+
+function LibraryLookModal({
+  look,
+  onClose,
+  onKeepTop,
+  onOrderTop,
+  onBottom,
+  onGraveyard
+}: {
+  look: LibraryLookState;
+  onClose?: () => void;
+  onKeepTop?: (cardId: string) => void;
+  onOrderTop?: (cardId: string) => void;
+  onBottom?: (cardId: string) => void;
+  onGraveyard?: (cardId: string) => void;
+}) {
+  return (
+    <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label={`${look.mode} library cards`} onClick={onClose}>
+      <article className="library-look-modal" onClick={(event) => event.stopPropagation()}>
+        <button className="card-inspector-close" type="button" onClick={onClose} aria-label="Close library look">
+          x
+        </button>
+        <header>
+          <p className="eyebrow">{look.mode}</p>
+          <h2>{look.mode === "scry" ? `Scry ${look.remaining}` : look.mode === "reorder" ? "Choose Order" : "Top of library"}</h2>
+          <p>
+            {look.mode === "surveil"
+              ? "Choose each card for the top of your library or your graveyard. The last card you put on top will be the top card."
+              : look.mode === "reorder"
+                ? "Choose the top card first, then the second card, and so on."
+              : "Choose Top to keep this card and finish scrying, or Bottom to look at the next card."}
+          </p>
+          {look.mode === "reorder" && look.orderedCards?.length ? (
+            <span>Chosen: {look.orderedCards.map((card) => card.name).join(" -> ")}</span>
+          ) : null}
+        </header>
+        <div className="library-look-row">
+          {look.cards.length === 0 ? <p>No cards to look at.</p> : null}
+          {look.cards.map((card) => (
+            <article className="library-look-card" key={card.id}>
+              <div className="library-look-image">
+                {card.imageUris?.normal ? <img src={card.imageUris.normal} alt="" /> : <FallbackLargeCard card={card} />}
+              </div>
+              <strong>{card.name}</strong>
+              <span>{card.typeLine}</span>
+              <div className="library-look-actions">
+                {look.mode === "reorder" ? (
+                  <button type="button" onClick={() => onOrderTop?.(card.id)}>Place Next</button>
+                ) : (
+                  <button type="button" onClick={() => onKeepTop?.(card.id)}>Top</button>
+                )}
+                {look.mode === "scry" ? <button type="button" onClick={() => onBottom?.(card.id)}>Bottom</button> : null}
+                {look.mode === "surveil" ? <button type="button" onClick={() => onGraveyard?.(card.id)}>Graveyard</button> : null}
+              </div>
+            </article>
+          ))}
+        </div>
+      </article>
+    </div>
+  );
+}
+
+function LibrarySearchModal({
+  cards,
+  destination,
+  prompt,
+  sourceCardName,
+  allowedCardFilter,
+  onClose,
+  onChoose
+}: {
+  cards: VisibleCard[];
+  destination: "hand" | "battlefield";
+  prompt?: string;
+  sourceCardName?: string;
+  allowedCardFilter?: string;
+  onClose?: () => void;
+  onChoose?: (cardId: string) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const normalizedQuery = query.trim().toLowerCase();
+  const filteredCards = normalizedQuery
+    ? cards.filter((card) => `${card.name} ${card.typeLine} ${card.oracleText}`.toLowerCase().includes(normalizedQuery))
+    : cards;
+
+  return (
+    <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label="Search library" onClick={onClose}>
+      <article className="library-search-modal" onClick={(event) => event.stopPropagation()}>
+        <button className="card-inspector-close" type="button" onClick={onClose} aria-label="Close library search">
+          x
+        </button>
+        <header>
+          <p className="eyebrow">{sourceCardName ?? "Library"}</p>
+          <h2>Search Library</h2>
+          {prompt ? <p>{prompt}</p> : null}
+          {allowedCardFilter ? <span>{allowedCardFilter}</span> : null}
+        </header>
+        <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search by card name, type, or text" />
+        <div className="library-search-results">
+          {filteredCards.length === 0 ? <p>No matching cards.</p> : null}
+          {filteredCards.map((card) => (
+            <article className="library-search-card" key={card.id}>
+              <div>
+                <strong>{card.name}</strong>
+                <span>{card.typeLine}</span>
+              </div>
+              <button type="button" onClick={() => onChoose?.(card.id)}>
+                {destination === "battlefield" ? "To Battlefield" : "To Hand"}
+              </button>
+            </article>
+          ))}
+        </div>
+      </article>
+    </div>
+  );
+}
+
+function ManualRuleChoiceModal({
+  choice,
+  onClose,
+  onPayCumulativeUpkeep,
+  onSacrificeSource
+}: {
+  choice: Extract<RuleChoiceView, { kind: "manual_review" }>;
+  onClose?: () => void;
+  onPayCumulativeUpkeep?: () => void;
+  onSacrificeSource?: () => void;
+}) {
+  return (
+    <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label={`Rules review for ${choice.sourceCardName}`} onClick={onClose}>
+      <article className="mana-choice-modal" onClick={(event) => event.stopPropagation()}>
+        <button className="card-inspector-close" type="button" onClick={onClose} aria-label="Close rules review">
+          x
+        </button>
+        <header>
+          <p className="eyebrow">Rules choice</p>
+          <h2>{choice.sourceCardName}</h2>
+        </header>
+        <p>{choice.prompt}</p>
+        {choice.isCumulativeUpkeep ? (
+          <div className="modal-actions">
+            <button className="inspector-action" type="button" onClick={onPayCumulativeUpkeep}>
+              Pay {choice.cumulativeUpkeepCost ?? 1}
+            </button>
+            <button className="inspector-action" type="button" onClick={onSacrificeSource}>
+              Sacrifice
+            </button>
+          </div>
+        ) : null}
+        <button type="button" onClick={onClose}>Acknowledge</button>
+      </article>
+    </div>
+  );
+}
+
+function OrderTriggersModal({
+  choice,
+  onChoose,
+  onClose
+}: {
+  choice: Extract<RuleChoiceView, { kind: "order_triggers" }>;
+  onChoose?: (sourceCardId: string) => void;
+  onClose?: () => void;
+}) {
+  return (
+    <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label="Order phase triggers" onClick={onClose}>
+      <article className="library-search-modal" onClick={(event) => event.stopPropagation()}>
+        <button className="card-inspector-close" type="button" onClick={onClose} aria-label="Close trigger order">
+          x
+        </button>
+        <header>
+          <p className="eyebrow">Phase triggers</p>
+          <h2>Choose Order</h2>
+          <p>{choice.prompt}</p>
+          {choice.orderedTriggers.length > 0 ? <span>Chosen: {choice.orderedTriggers.map((trigger) => trigger.sourceCardName).join(" -> ")}</span> : null}
+        </header>
+        <div className="library-search-results">
+          {choice.triggers.map((trigger) => (
+            <article className="library-search-card" key={trigger.sourceCardId}>
+              <div>
+                <strong>{trigger.sourceCardName}</strong>
+                <span>{trigger.text}</span>
+              </div>
+              <button type="button" onClick={() => onChoose?.(trigger.sourceCardId)}>Next</button>
+            </article>
+          ))}
+        </div>
+      </article>
+    </div>
+  );
+}
+
+function MyriadSearchModal({
+  cards,
+  onClose,
+  onChoose
+}: {
+  cards: VisibleCard[];
+  onClose?: () => void;
+  onChoose?: (cardIds: string[]) => void;
+}) {
+  const availableTypes = basicLandTypeOrder.filter((type) => cards.some((card) => cardBasicLandTypes(card).includes(type)));
+  const [selectedType, setSelectedType] = useState(availableTypes[0] ?? "Plains");
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const filteredCards = cards.filter((card) => cardBasicLandTypes(card).includes(selectedType));
+  const canConfirm = selectedIds.length > 0 && selectedIds.length <= 2;
+
+  function toggleCard(cardId: string) {
+    setSelectedIds((current) => {
+      if (current.includes(cardId)) return current.filter((id) => id !== cardId);
+      if (current.length >= 2) return current;
+      return [...current, cardId];
+    });
+  }
+
+  return (
+    <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label="Resolve Myriad Landscape" onClick={onClose}>
+      <article className="library-search-modal" onClick={(event) => event.stopPropagation()}>
+        <button className="card-inspector-close" type="button" onClick={onClose} aria-label="Close Myriad Landscape search">
+          x
+        </button>
+        <header>
+          <p className="eyebrow">Myriad Landscape</p>
+          <h2>Choose Basic Lands</h2>
+        </header>
+        <div className="mode-switch" role="group" aria-label="Basic land type">
+          {availableTypes.map((type) => (
+            <button
+              className={selectedType === type ? "selected" : ""}
+              key={type}
+              type="button"
+              onClick={() => {
+                setSelectedType(type);
+                setSelectedIds([]);
+              }}
+            >
+              {type}
+            </button>
+          ))}
+        </div>
+        <div className="library-search-results">
+          {filteredCards.length === 0 ? <p>No matching basic lands.</p> : null}
+          {filteredCards.map((card) => (
+            <article className={`library-search-card ${selectedIds.includes(card.id) ? "selected" : ""}`} key={card.id}>
+              <div>
+                <strong>{card.name}</strong>
+                <span>{card.typeLine}</span>
+              </div>
+              <button type="button" onClick={() => toggleCard(card.id)}>
+                {selectedIds.includes(card.id) ? "Selected" : "Select"}
+              </button>
+            </article>
+          ))}
+        </div>
+        <button type="button" disabled={!canConfirm} onClick={() => onChoose?.(selectedIds)}>
+          Put Selected Onto Battlefield Tapped
+        </button>
+      </article>
+    </div>
+  );
+}
+
+const basicLandTypeOrder = ["Plains", "Island", "Swamp", "Mountain", "Forest", "Wastes"];
+
+function cardBasicLandTypes(card: VisibleCard) {
+  return basicLandTypeOrder.filter((type) => card.name === type || card.typeLine.includes(type));
+}
+
+function FallbackLargeCard({ card }: { card: VisibleCard }) {
+  return (
+    <div className="card-inspector-fallback">
+      <strong>{card.name}</strong>
+      <span>{card.typeLine}</span>
+      <p>{card.oracleText}</p>
+      {card.power && card.toughness ? <em>{card.power}/{card.toughness}</em> : null}
+    </div>
+  );
+}
+
+function BlockChoiceModal({ choice, onChoose, onPass }: { choice: BlockChoiceView; onChoose?: (blockerCardId: string) => void; onPass?: () => void }) {
+  return (
+    <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label="Choose blockers">
+      <article className="library-search-modal" onClick={(event) => event.stopPropagation()}>
+        <header>
+          <p className="eyebrow">Blockers</p>
+          <h2>{choice.defenderName} is being attacked</h2>
+          <p>
+            {choice.attackerName} attacks with {choice.attackingCard.name}. Choose one blocker or take the damage.
+          </p>
+        </header>
+        <div className="library-card-grid">
+          {choice.blockers.map((card) => (
+            <button className="library-card-button" type="button" key={card.id} onClick={() => onChoose?.(card.id)}>
+              {card.imageUris?.normal ? <img src={card.imageUris.normal} alt="" /> : <FallbackHandCard card={card} />}
+              <span>{card.name}</span>
+              <small>{card.typeLine}</small>
+            </button>
+          ))}
+          {choice.blockers.length === 0 ? <p>No legal blockers are available.</p> : null}
+        </div>
+        <div className="modal-actions">
+          <button className="inspector-action" type="button" onClick={onPass}>
+            Do Not Block
+          </button>
+        </div>
+      </article>
+    </div>
   );
 }
 

@@ -5,6 +5,7 @@ import { loadCardCatalog, lookupCard } from "@/lib/cardCatalog";
 import { requestCommanderDeck } from "@/lib/ollama";
 import { createSampleDeck } from "@/lib/sampleDecks";
 import { createDeckFromList } from "@/lib/deckParser";
+import { repairCommanderDeckCards } from "@/lib/deckRepair";
 
 const BuildDeckRequestSchema = z.object({
   agentName: z.string().min(1),
@@ -44,12 +45,20 @@ export async function POST(request: NextRequest) {
       ...input,
       model: process.env.OLLAMA_MODEL ?? agentModelName(input.agentName)
     });
+    const commander = generated.commander || input.commander;
+    const colors = generated.colors.length > 0 ? generated.colors : input.colors;
+    const cards = repairCommanderDeckCards({
+      commander,
+      colors,
+      cards: generated.cards,
+      catalog: lookup
+    });
     const deck = createDeckFromCards({
       owner: input.agentName,
-      commander: generated.commander || input.commander,
-      colors: generated.colors.length > 0 ? generated.colors : input.colors,
-      cards: generated.cards,
-      name: `${generated.commander || input.commander} Ollama Deck`,
+      commander,
+      colors,
+      cards,
+      name: `${commander} Ollama Deck`,
       catalog: lookup
     });
 
@@ -74,11 +83,17 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     const fallback = createSampleDeck(input.agentName, input.commander, input.colors);
+    const cards = repairCommanderDeckCards({
+      commander: fallback.commander,
+      colors: fallback.colors,
+      cards: fallback.cards,
+      catalog: lookup
+    });
     const deck = createDeckFromCards({
       owner: fallback.createdBy,
       commander: fallback.commander,
       colors: fallback.colors,
-      cards: fallback.cards,
+      cards,
       name: fallback.name,
       catalog: lookup
     });

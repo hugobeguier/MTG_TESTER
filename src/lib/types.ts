@@ -16,6 +16,7 @@ export interface CardRecord {
   name: string;
   typeLine: string;
   oracleText: string;
+  manaCost?: string;
   manaValue: number;
   colors: string[];
   colorIdentity: string[];
@@ -100,6 +101,7 @@ export interface PlayerSeat {
   life: number;
   commanderDamage: Record<string, number>;
   deck?: CommanderDeck;
+  library?: VisibleCard[];
   zones: Record<ZoneName, number>;
   board: PlayerBoardState;
 }
@@ -109,9 +111,11 @@ export interface VisibleCard {
   name: string;
   typeLine: string;
   oracleText: string;
+  manaCost?: string;
   manaValue: number;
   colors: string[];
   colorIdentity?: string[];
+  producedMana?: string[];
   imageUris?: CardImageUris;
   faces?: CardFaceRecord[];
   role: string;
@@ -121,6 +125,7 @@ export interface VisibleCard {
   attacking?: boolean;
   blocking?: boolean;
   commander?: boolean;
+  commanderTax?: number;
   battlefieldPosition?: {
     x: number;
     z: number;
@@ -137,6 +142,8 @@ export interface PlayerBoardState {
   commander?: VisibleCard;
   hand: VisibleCard[];
   battlefield: VisibleCard[];
+  graveyard?: VisibleCard[];
+  exile?: VisibleCard[];
 }
 
 export interface GameEvent {
