@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { createDeckFromCards } from "@/lib/deckParser";
 import { loadCardCatalog, lookupCard } from "@/lib/cardCatalog";
-import { requestCommanderDeck } from "@/lib/ollama";
+import { createDeckFromCards, createDeckFromList } from "@/lib/deckParser";
 import { createSampleDeck } from "@/lib/sampleDecks";
-import { createDeckFromList } from "@/lib/deckParser";
 
 const BuildDeckRequestSchema = z.object({
   agentName: z.string().min(1),
@@ -17,6 +15,11 @@ export async function POST(request: NextRequest) {
   const input = BuildDeckRequestSchema.parse(await request.json());
   const catalog = loadCardCatalog();
   const lookup = { lookup: (name: string) => lookupCard(catalog, name) };
+  const catalogInfo = {
+    source: catalog.source,
+    cardCount: catalog.cards.length,
+    loadedAt: catalog.loadedAt
+  };
 
   if (input.deckList?.trim()) {
     const deck = createDeckFromList({
@@ -29,51 +32,33 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       source: "decklist",
-      catalog: {
-        source: catalog.source,
-        cardCount: catalog.cards.length,
-        loadedAt: catalog.loadedAt
-      },
+      catalog: catalogInfo,
       message: deck.validation.legal ? "Deck list is legal and enriched with real card data." : deck.validation.errors[0] ?? "Deck needs fixes.",
       deck
     });
   }
 
+  const commander = lookup.lookup(input.commander)?.name ?? input.commander;
   try {
-    const generated = await requestCommanderDeck({
-      ...input,
-      model: process.env.OLLAMA_MODEL ?? agentModelName(input.agentName)
-    });
-    const deck = createDeckFromCards({
+    const cards = await fetchEdhrecAverageDeck(commander);
+    const deck = createDeckFromList({
       owner: input.agentName,
-      commander: generated.commander || input.commander,
-      colors: generated.colors.length > 0 ? generated.colors : input.colors,
-      cards: generated.cards,
-      name: `${generated.commander || input.commander} Ollama Deck`,
+      commander,
+      deckList: cards.join("\n"),
+      colors: input.colors,
       catalog: lookup
     });
 
-    if (!deck.validation.legal) {
-      return NextResponse.json({
-        source: "ollama-invalid",
-        message: deck.validation.errors[0] ?? "Ollama returned a deck that needs fixes.",
-        notes: generated.notes,
-        deck
-      });
-    }
-
     return NextResponse.json({
-      source: "ollama",
-      message: generated.notes ?? "Ollama built and validated this Bracket 3 deck.",
-      catalog: {
-        source: catalog.source,
-        cardCount: catalog.cards.length,
-        loadedAt: catalog.loadedAt
-      },
+      source: "edhrec",
+      catalog: catalogInfo,
+      message: deck.validation.legal
+        ? `Grabbed the EDHREC average deck for ${commander}.`
+        : deck.validation.errors[0] ?? "EDHREC deck needs fixes.",
       deck
     });
   } catch (error) {
-    const fallback = createSampleDeck(input.agentName, input.commander, input.colors);
+    const fallback = createSampleDeck(input.agentName, commander, input.colors);
     const deck = createDeckFromCards({
       owner: fallback.createdBy,
       commander: fallback.commander,
@@ -86,18 +71,36 @@ export async function POST(request: NextRequest) {
       source: "fallback",
       message:
         error instanceof Error
-          ? `Ollama is unavailable or returned invalid JSON: ${error.message}. Used local role-based fallback.`
-          : "Ollama is unavailable. Used local role-based fallback.",
-      catalog: {
-        source: catalog.source,
-        cardCount: catalog.cards.length,
-        loadedAt: catalog.loadedAt
-      },
+          ? `EDHREC lookup failed: ${error.message} Used local role-based fallback.`
+          : "EDHREC is unavailable. Used local role-based fallback.",
+      catalog: catalogInfo,
       deck
     });
   }
 }
 
-function agentModelName(agentName: string) {
-  return `mtg-${agentName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+// EDHREC's average deck endpoint returns { deck: ["1 Card Name", ...] } — a ready deck list.
+async function fetchEdhrecAverageDeck(commander: string): Promise<string[]> {
+  const slug = edhrecSlug(commander);
+  const response = await fetch(`https://json.edhrec.com/pages/average-decks/${slug}.json`, {
+    headers: { "user-agent": "MTG-AI Commander Lab/0.1" }
+  });
+  if (!response.ok) {
+    throw new Error(`EDHREC returned HTTP ${response.status} for "${slug}".`);
+  }
+  const body = (await response.json()) as { deck?: string[] };
+  if (!Array.isArray(body.deck) || body.deck.length === 0) {
+    throw new Error(`EDHREC page for "${slug}" had no average deck list.`);
+  }
+  return body.deck;
+}
+
+function edhrecSlug(name: string) {
+  return name
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/["',.]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
 }

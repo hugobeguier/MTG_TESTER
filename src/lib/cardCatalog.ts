@@ -12,6 +12,7 @@ export interface CardCatalog {
 interface StoredCardCatalog {
   importedAt?: string;
   source?: string;
+  aliases?: Record<string, string>;
   cards: CardRecord[];
 }
 
@@ -24,7 +25,7 @@ export function loadCardCatalog(): CardCatalog {
 
   if (existsSync(CATALOG_PATH)) {
     const stored = JSON.parse(readFileSync(CATALOG_PATH, "utf8")) as StoredCardCatalog;
-    cachedCatalog = buildCatalog(stored.cards, stored.importedAt, "generated");
+    cachedCatalog = buildCatalog(stored.cards, stored.importedAt, "generated", stored.aliases);
     return cachedCatalog;
   }
 
@@ -69,7 +70,12 @@ export function preferredImage(imageUris?: CardImageUris) {
   return imageUris?.normal ?? imageUris?.large ?? imageUris?.png ?? imageUris?.small ?? imageUris?.borderCrop;
 }
 
-function buildCatalog(cards: CardRecord[], loadedAt: string | undefined, source: CardCatalog["source"]): CardCatalog {
+function buildCatalog(
+  cards: CardRecord[],
+  loadedAt: string | undefined,
+  source: CardCatalog["source"],
+  aliases?: Record<string, string>
+): CardCatalog {
   const byName = new Map<string, CardRecord>();
   for (const card of cards) {
     byName.set(normalizeCardName(card.name), card);
@@ -78,6 +84,12 @@ function buildCatalog(cards: CardRecord[], loadedAt: string | undefined, source:
         byName.set(normalizeCardName(face.name), card);
       }
     }
+  }
+  // Flavor-name aliases (Secret Lair printings etc.) resolve to their canonical card.
+  for (const [alias, canonical] of Object.entries(aliases ?? {})) {
+    const record = byName.get(normalizeCardName(canonical));
+    const key = normalizeCardName(alias);
+    if (record && !byName.has(key)) byName.set(key, record);
   }
   return { cards, byName, loadedAt, source };
 }

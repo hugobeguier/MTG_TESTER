@@ -102,6 +102,9 @@ export interface PlayerSeat {
   deck?: CommanderDeck;
   zones: Record<ZoneName, number>;
   board: PlayerBoardState;
+  landsPlayed?: number;
+  commanderCasts?: number;
+  lastThought?: string;
 }
 
 export interface VisibleCard {
@@ -114,6 +117,7 @@ export interface VisibleCard {
   colorIdentity?: string[];
   imageUris?: CardImageUris;
   faces?: CardFaceRecord[];
+  faceIndex?: number;
   role: string;
   zone: ZoneName;
   tapped?: boolean;
@@ -137,6 +141,8 @@ export interface PlayerBoardState {
   commander?: VisibleCard;
   hand: VisibleCard[];
   battlefield: VisibleCard[];
+  library: VisibleCard[];
+  graveyard: VisibleCard[];
 }
 
 export interface GameEvent {

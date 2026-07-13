@@ -16,7 +16,7 @@ describe("validateBracketThreeDeck", () => {
     expect(validateBracketThreeDeck({ commander: "Meren of Clan Nel Toth", cards }).legal).toBe(true);
   });
 
-  it("rejects non-basic duplicates and too many game changers", () => {
+  it("rejects non-basic duplicates and warns on too many game changers", () => {
     const cards: DeckCard[] = [
       { name: "Kess, Dissident Mage", count: 1 },
       { name: "Counterspell", count: 2 },
@@ -30,6 +30,6 @@ describe("validateBracketThreeDeck", () => {
     const report = validateBracketThreeDeck({ commander: "Kess, Dissident Mage", cards });
     expect(report.legal).toBe(false);
     expect(report.errors.join(" ")).toContain("Counterspell");
-    expect(report.errors.join(" ")).toContain("at most 3");
+    expect(report.warnings.join(" ")).toContain("at most 3");
   });
 });

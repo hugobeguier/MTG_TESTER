@@ -33,7 +33,8 @@ const cardsByOracle = new Map();
 
 for (const raw of rawCards) {
   if (raw.object !== "card") continue;
-  if (raw.digital) continue;
+  // Keep digital printings: commander legality already excludes digital-only cards, and for some
+  // cards (e.g. Cabal Ritual) the oracle-cards bulk's representative printing is MTGO-only.
   if (raw.legalities?.commander !== "legal") continue;
   if (raw.layout === "art_series" || raw.layout === "token" || raw.layout === "emblem") continue;
 
@@ -44,16 +45,31 @@ for (const raw of rawCards) {
   }
 }
 
+// Flavor names (e.g. Secret Lair "Gromp" = Spore Frog) so pasted lists using them still resolve.
+const aliases = {};
+let searchUrl = "https://api.scryfall.com/cards/search?q=has%3Aflavorname&unique=prints";
+while (searchUrl) {
+  const page = await fetchJson(searchUrl);
+  for (const raw of page.data ?? []) {
+    if (raw.flavor_name && raw.name) aliases[raw.flavor_name] = raw.name;
+    for (const face of raw.card_faces ?? []) {
+      if (face.flavor_name && face.name) aliases[face.flavor_name] = face.name;
+    }
+  }
+  searchUrl = page.has_more ? page.next_page : undefined;
+}
+
 const output = {
   source: "scryfall-oracle-cards",
   sourceUpdatedAt: bulk.updated_at,
   importedAt: new Date().toISOString(),
+  aliases,
   cards: [...cardsByOracle.values()].sort((a, b) => a.name.localeCompare(b.name))
 };
 
 await mkdir(path.dirname(OUT_PATH), { recursive: true });
 await writeFile(OUT_PATH, JSON.stringify(output), "utf8");
-console.log(`Imported ${output.cards.length} Commander-legal cards to ${OUT_PATH}`);
+console.log(`Imported ${output.cards.length} Commander-legal cards (${Object.keys(aliases).length} flavor-name aliases) to ${OUT_PATH}`);
 
 async function fetchJson(url) {
   const response = await fetch(url, {

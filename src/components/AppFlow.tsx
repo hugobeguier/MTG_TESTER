@@ -1,8 +1,30 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import type { CommanderDeck, GameEvent, GameSession, PlayerSeat, VisibleCard } from "@/lib/types";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { AgentAction, CommanderDeck, GameEvent, GameSession, PlayerSeat, VisibleCard } from "@/lib/types";
 import { createDeckFromList } from "@/lib/deckParser";
+import {
+  agentKeepsHand,
+  availableMana,
+  bottomExcess,
+  castCommander,
+  chooseAgentPlays,
+  commanderCost,
+  drawCards,
+  freshSeatForGame,
+  isLand,
+  libraryTopToBottom,
+  millTop,
+  mulliganHand,
+  openingHandKeepSize,
+  playFromHand,
+  removeFromBattlefield,
+  startOfTurn,
+  takeFromLibrary,
+  toggleTap,
+  transformCard,
+  type AgentPlays
+} from "@/lib/gameEngine";
 import { ThreeGameTable } from "./ThreeGameTable";
 
 type FlowMode = "setup" | "game";
@@ -40,20 +62,33 @@ const COMMANDER_COLOR_HINTS: Record<string, string[]> = {
 
 const DEFAULT_PLAYER_COMMANDER = "Atraxa, Praetors' Voice";
 const DEFAULT_PLAYER_DECKLIST = "Commander: Atraxa, Praetors' Voice\n1 Sol Ring\n1 Arcane Signet\n1 Command Tower\n96 Forest";
+const AGENT_ACTION_TIMEOUT_MS = 30000;
+
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function makeEvent(message: string, seatId?: string, detail?: string): GameEvent {
+  return { id: crypto.randomUUID(), at: new Date().toISOString(), message, detail, seatId };
+}
 
 export function AppFlow({ initialSession, ollama }: { initialSession: GameSession; ollama: OllamaStatus }) {
   const [mode, setMode] = useState<FlowMode>("setup");
   const [session, setSession] = useState(initialSession);
-  const [activeSeatId, setActiveSeatId] = useState(initialSession.activePlayerId ?? initialSession.seats[1]?.id);
-  const [prioritySeatId, setPrioritySeatId] = useState(initialSession.activePlayerId ?? initialSession.seats[1]?.id);
+  const [activeSeatId, setActiveSeatId] = useState(initialSession.activePlayerId ?? initialSession.seats[0]?.id);
+  const [prioritySeatId, setPrioritySeatId] = useState(initialSession.activePlayerId ?? initialSession.seats[0]?.id);
   const [selectedHandCardId, setSelectedHandCardId] = useState<string | undefined>();
   const [inspectedCard, setInspectedCard] = useState<VisibleCard | undefined>();
   const [gameStage, setGameStage] = useState<GameStage>("mulligan");
+  const [firstSeatId, setFirstSeatId] = useState<string | undefined>();
+  const [thinkingSeatId, setThinkingSeatId] = useState<string | undefined>();
   const [mulligans, setMulligans] = useState<Record<string, number>>({});
-  const [keptHands, setKeptHands] = useState<Record<string, boolean>>({});
   const [configs, setConfigs] = useState<SeatConfig[]>(() => createInitialConfigs(initialSession.seats));
+  const processedAgentTurns = useRef(new Set<string>());
+  const sessionRef = useRef(session);
+  const enrichedRef = useRef(false);
   const humanSeat = session.seats.find((seat) => seat.kind === "human") ?? session.seats[0];
   const playReady = configs.every((config) => config.status !== "building" && config.deck?.validation.legal);
+
+  sessionRef.current = session;
 
   const setupSummary = useMemo(() => {
     const ready = configs.filter((config) => config.deck?.validation.legal).length;
@@ -70,7 +105,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     updateConfig(config.seatId, {
       commander,
       status: "building",
-      message: config.mode === "decklist" ? "Validating deck list..." : "Asking Ollama to build this deck..."
+      message: config.mode === "decklist" ? "Validating deck list..." : "Fetching the EDHREC average deck..."
     });
 
     const response = await fetch("/api/decks/build", {
@@ -84,7 +119,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       })
     });
     const result = (await response.json()) as {
-      source: "decklist" | "ollama" | "ollama-invalid" | "fallback";
+      source: "decklist" | "edhrec" | "fallback";
       message: string;
       deck: CommanderDeck;
     };
@@ -94,143 +129,295 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       commander,
       deck,
       status: deck.validation.legal ? "ready" : "error",
-      message:
-        result.source === "decklist"
-          ? result.message
-          : result.source === "ollama"
-          ? "Ollama built and validated this deck."
-          : result.source === "fallback"
-            ? result.message
-            : deck.validation.errors[0] ?? result.message
+      message: deck.validation.legal ? result.message : deck.validation.errors[0] ?? result.message
     });
   }
 
+  // Enrich the default human deck with real card data once, so the table shows real cards/images.
+  useEffect(() => {
+    if (enrichedRef.current) return;
+    enrichedRef.current = true;
+    const human = configs.find((config) => config.kind === "human");
+    if (human?.deck && !human.deck.commanderCard) {
+      void buildDeck(human);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   function startGame() {
-    const deckedSeats = session.seats.map((seat) => {
+    const events: GameEvent[] = [];
+    const nextMulligans: Record<string, number> = {};
+
+    const seats = session.seats.map((seat) => {
       const config = configs.find((item) => item.seatId === seat.id);
-      if (!config?.deck) return seat;
-      return applyDeckToSeat(seat, config.deck);
+      let next = freshSeatForGame(seat, config?.deck ?? seat.deck);
+      next = drawCards(next, 7).seat;
+      if (seat.kind === "agent") {
+        let count = 0;
+        while (!agentKeepsHand(next) && count < 3) {
+          count += 1;
+          next = mulliganHand(next);
+        }
+        next = bottomExcess(next, openingHandKeepSize(count));
+        nextMulligans[seat.id] = count;
+        events.unshift(
+          makeEvent(count === 0 ? `${seat.name} kept 7.` : `${seat.name} mulliganed ${count === 1 ? "once" : `${count} times`} and kept ${openingHandKeepSize(count)}.`, seat.id)
+        );
+      } else {
+        nextMulligans[seat.id] = 0;
+      }
+      return next;
     });
-    const openingSeats = deckedSeats.map((seat) => withOpeningHand(seat, 7, 0));
-    const agentResolved = resolveAgentMulligans(openingSeats);
-    const nextSession: GameSession = {
-      ...session,
-      status: "ready",
-      activePlayerId: activeSeatId,
-      phase: "opening hand",
-      turn: 0,
-      seats: agentResolved.seats,
-      events: [
-        ...agentResolved.events,
-        {
-          id: crypto.randomUUID(),
-          at: new Date().toISOString(),
-          message: "Opening hands drawn. Agents resolved mulligans."
-        },
-        ...session.events
-      ]
-    };
-    setSession(nextSession);
-    setMulligans(agentResolved.mulligans);
-    setKeptHands(agentResolved.keptHands);
+
+    const first = seats[Math.floor(Math.random() * seats.length)];
+    events.unshift(makeEvent(`${first.name} won the roll and will go first.`));
+
+    processedAgentTurns.current.clear();
+    setFirstSeatId(first.id);
+    setMulligans(nextMulligans);
+    setSelectedHandCardId(undefined);
+    setInspectedCard(undefined);
+    setActiveSeatId(first.id);
+    setPrioritySeatId(first.id);
     setGameStage("mulligan");
     setMode("game");
+    setSession({
+      ...session,
+      status: "ready",
+      activePlayerId: first.id,
+      phase: "opening hand",
+      turn: 0,
+      seats,
+      events: [...events, makeEvent("Fresh Commander game: 40 life, commanders in the command zone."), ...session.events]
+    });
+  }
+
+  function beginTurnForSeats(seats: PlayerSeat[], seatId: string): { seats: PlayerSeat[]; events: GameEvent[] } {
+    const events: GameEvent[] = [];
+    const nextSeats = seats.map((seat) => {
+      if (seat.id !== seatId) return seat;
+      const untapped = startOfTurn(seat);
+      const { seat: drawnSeat, drawn, failed } = drawCards(untapped, 1);
+      events.push(makeEvent(seat.kind === "human" ? "You start your turn." : `${seat.name} starts their turn.`, seat.id));
+      if (failed > 0) {
+        events.unshift(makeEvent(`${seat.name} cannot draw from an empty library. In a real game they would lose.`, seat.id));
+      } else if (seat.kind === "human" && drawn[0]) {
+        events.unshift(makeEvent(`You draw ${drawn[0].name}.`, seat.id));
+      } else {
+        events.unshift(makeEvent(`${seat.name} draws for turn.`, seat.id));
+      }
+      return drawnSeat;
+    });
+    return { seats: nextSeats, events };
   }
 
   function keepOpeningHand() {
+    if (!firstSeatId) return;
     const keepSize = openingHandKeepSize(mulligans[humanSeat.id] ?? 0);
-    setKeptHands((current) => ({ ...current, [humanSeat.id]: true }));
     setGameStage("playing");
-    setActiveSeatId(session.seats[1]?.id ?? humanSeat.id);
-    setPrioritySeatId(session.seats[1]?.id ?? humanSeat.id);
-    setSession((current) => ({
-      ...current,
-      status: "playing",
-      activePlayerId: current.seats[1]?.id ?? humanSeat.id,
-      phase: "main phase 1",
-      turn: 1,
-      seats: current.seats.map((seat) => (seat.id === humanSeat.id ? keepOpeningHandSize(seat, keepSize) : seat)),
-      events: [
-        {
-          id: crypto.randomUUID(),
-          at: new Date().toISOString(),
-          seatId: humanSeat.id,
-          message: keepSize === 7 ? "You kept 7. The game begins." : `You kept ${keepSize} and bottomed ${7 - keepSize}. The game begins.`
-        },
-        ...current.events
-      ]
-    }));
+    setActiveSeatId(firstSeatId);
+    setPrioritySeatId(firstSeatId);
+    setSession((current) => {
+      const kept = current.seats.map((seat) => (seat.id === humanSeat.id ? bottomExcess(seat, keepSize) : seat));
+      const { seats, events } = beginTurnForSeats(kept, firstSeatId);
+      return {
+        ...current,
+        status: "playing",
+        activePlayerId: firstSeatId,
+        phase: "main phase",
+        turn: 1,
+        seats,
+        events: [
+          ...events,
+          makeEvent(keepSize === 7 ? "You kept 7. The game begins." : `You kept ${keepSize} and bottomed ${7 - keepSize}. The game begins.`, humanSeat.id),
+          ...current.events
+        ]
+      };
+    });
   }
 
   function mulliganOpeningHand() {
-    const currentCount = mulligans[humanSeat.id] ?? 0;
-    const nextCount = currentCount + 1;
-    const nextKeepSize = openingHandKeepSize(nextCount);
+    const nextCount = (mulligans[humanSeat.id] ?? 0) + 1;
     setMulligans((current) => ({ ...current, [humanSeat.id]: nextCount }));
     setSelectedHandCardId(undefined);
     setSession((current) => ({
       ...current,
-      seats: current.seats.map((seat) => (seat.id === humanSeat.id ? withOpeningHand(seat, 7, nextCount) : seat)),
+      seats: current.seats.map((seat) => (seat.id === humanSeat.id ? mulliganHand(seat) : seat)),
       events: [
-        {
-          id: crypto.randomUUID(),
-          at: new Date().toISOString(),
-          seatId: humanSeat.id,
-          message: nextCount === 1 ? "You took a free mulligan. You can still keep 7." : `You mulliganed. You draw 7 and will keep ${nextKeepSize}.`
-        },
+        makeEvent(
+          nextCount === 1 ? "You took a free mulligan. You can still keep 7." : `You mulliganed. You draw 7 and will keep ${openingHandKeepSize(nextCount)}.`,
+          humanSeat.id
+        ),
         ...current.events
       ]
     }));
   }
 
-  function advanceTurn() {
-    setSession((current) => {
-      const index = current.seats.findIndex((seat) => seat.id === activeSeatId);
-      const nextSeat = current.seats[(index + 1) % current.seats.length];
-      setActiveSeatId(nextSeat.id);
-      setPrioritySeatId(nextSeat.id);
-      setSelectedHandCardId(undefined);
-
-      let nextSession: GameSession = {
-        ...current,
-        activePlayerId: nextSeat.id,
-        turn: current.turn + 1,
-        phase: "beginning phase",
-        events: [
-          {
-            id: crypto.randomUUID(),
-            at: new Date().toISOString(),
-            seatId: nextSeat.id,
-            message: `${nextSeat.name} starts their turn.`
-          },
-          ...current.events
-        ]
+  function advanceToNextSeat() {
+    const current = sessionRef.current;
+    const index = current.seats.findIndex((seat) => seat.id === current.activePlayerId);
+    const next = current.seats[(index + 1) % current.seats.length];
+    setActiveSeatId(next.id);
+    setPrioritySeatId(next.id);
+    setSelectedHandCardId(undefined);
+    setSession((latest) => {
+      const { seats, events } = beginTurnForSeats(latest.seats, next.id);
+      return {
+        ...latest,
+        activePlayerId: next.id,
+        phase: "main phase",
+        turn: latest.turn + 1,
+        seats,
+        events: [...events, ...latest.events]
       };
-
-      if (nextSeat.kind === "agent") {
-        nextSession = drawForSeat(nextSession, nextSeat.id, `${nextSeat.name} draws for turn.`);
-        nextSession = playFirstHandCard(nextSession, nextSeat.id);
-      }
-
-      return nextSession;
     });
   }
 
-  function passPriority() {
-    const index = session.seats.findIndex((seat) => seat.id === prioritySeatId);
-    const nextSeat = session.seats[(index + 1) % session.seats.length];
-    setPrioritySeatId(nextSeat.id);
+  // Agent turns run automatically: pause, decide (Ollama with heuristic fallback), play, pass.
+  useEffect(() => {
+    if (mode !== "game" || gameStage !== "playing") return;
+    const seat = session.seats.find((item) => item.id === activeSeatId);
+    if (!seat || seat.kind !== "agent") return;
+    const key = `${session.turn}:${seat.id}`;
+    if (processedAgentTurns.current.has(key)) return;
+    processedAgentTurns.current.add(key);
+
+    let cancelled = false;
+    let acted = false;
+    (async () => {
+      await delay(900);
+      if (cancelled) return;
+      acted = true;
+      await runAgentTurn(seat.id);
+      if (cancelled) return;
+      await delay(900);
+      if (!cancelled) advanceToNextSeat();
+    })();
+    return () => {
+      cancelled = true;
+      if (!acted) processedAgentTurns.current.delete(key);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, gameStage, activeSeatId, session.turn]);
+
+  async function runAgentTurn(seatId: string) {
+    const seat = sessionRef.current.seats.find((item) => item.id === seatId);
+    if (!seat) return;
+    const plays = chooseAgentPlays(seat);
+    setThinkingSeatId(seat.id);
+    updateThought(seat.id, "");
+    const decision = await requestOllamaDecision(seat, sessionRef.current, plays);
+    setThinkingSeatId(undefined);
+    applyAgentPlays(seatId, plays, decision);
+  }
+
+  function updateThought(seatId: string, thought: string) {
     setSession((current) => ({
       ...current,
-      events: [
-        {
-          id: crypto.randomUUID(),
-          at: new Date().toISOString(),
-          seatId: prioritySeatId,
-          message: `${current.seats.find((seat) => seat.id === prioritySeatId)?.name ?? "Player"} passed priority.`
-        },
-        ...current.events
-      ]
+      seats: current.seats.map((seat) => (seat.id === seatId ? { ...seat, lastThought: thought || undefined } : seat))
+    }));
+  }
+
+  async function requestOllamaDecision(seat: PlayerSeat, current: GameSession, plays: AgentPlays) {
+    if (!seat.agentName) return undefined;
+    try {
+      const response = await fetch("/api/agent/action", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ agentName: seat.agentName, prompt: buildAgentPrompt(seat, current, plays) }),
+        signal: AbortSignal.timeout(AGENT_ACTION_TIMEOUT_MS)
+      });
+      if (!response.ok || !response.body) return undefined;
+
+      // NDJSON stream: live "content" partials (reasoning streams first), then the final action.
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffered = "";
+      let action: AgentAction | undefined;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffered += decoder.decode(value, { stream: true });
+        const lines = buffered.split("\n");
+        buffered = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const message = JSON.parse(line) as { type: string; content?: string; action?: AgentAction };
+          if (message.type === "content" && message.content) {
+            const partial = extractPartialReason(message.content);
+            if (partial) updateThought(seat.id, partial.slice(0, 300));
+          } else if (message.type === "action") {
+            action = message.action;
+          }
+        }
+      }
+      return action;
+    } catch {
+      return undefined;
+    }
+  }
+
+  function applyAgentPlays(seatId: string, plays: AgentPlays, decision?: AgentAction) {
+    setSession((current) => {
+      const events: GameEvent[] = [];
+      const seats = current.seats.map((seat) => {
+        if (seat.id !== seatId) return seat;
+        let next = decision?.reason ? { ...seat, lastThought: decision.reason.slice(0, 300) } : seat;
+
+        if (plays.landId) {
+          const result = playFromHand(next, plays.landId);
+          if (result.played) {
+            next = result.seat;
+            events.unshift(makeEvent(`${seat.name} plays ${result.played.name}.`, seat.id));
+          }
+        }
+
+        const mana = availableMana(next);
+        if (plays.castCommander && next.board.commander?.zone === "command" && commanderCost(next) <= mana) {
+          const result = castCommander(next);
+          if (!result.error) {
+            next = result.seat;
+            events.unshift(makeEvent(`${seat.name} casts their commander, ${next.board.commander?.name}.`, seat.id));
+          }
+        } else {
+          const chosen = resolveAgentSpell(next, plays, decision, mana);
+          if (chosen) {
+            const result = playFromHand(next, chosen.id);
+            if (result.played) {
+              next = result.seat;
+              events.unshift(
+                makeEvent(
+                  `${seat.name} casts ${result.played.name}${result.destination === "graveyard" ? ", which goes to the graveyard" : ""}.`,
+                  seat.id,
+                  decision?.reason ? `${seat.name}: ${decision.reason.slice(0, 200)}` : undefined
+                )
+              );
+            }
+          } else if (decision?.actionType === "pass_priority" && decision.reason) {
+            events.unshift(makeEvent(`${seat.name} holds up mana.`, seat.id, `${seat.name}: ${decision.reason.slice(0, 200)}`));
+          }
+        }
+        return next;
+      });
+      return { ...current, seats, events: [...events, ...current.events] };
+    });
+  }
+
+  function resolveAgentSpell(seat: PlayerSeat, plays: AgentPlays, decision: AgentAction | undefined, mana: number): VisibleCard | undefined {
+    if (decision?.actionType === "pass_priority") return undefined;
+    const wanted = decision?.cardId?.replace(/[[\]]/g, "").trim().toLowerCase();
+    if (wanted) {
+      const match = seat.board.hand.find((card) => card.id.toLowerCase() === wanted || card.name.toLowerCase() === wanted);
+      if (match && !isLand(match) && match.manaValue <= mana) return match;
+    }
+    return plays.spellId ? seat.board.hand.find((card) => card.id === plays.spellId) : undefined;
+  }
+
+  function passPriority() {
+    setPrioritySeatId(activeSeatId);
+    setSession((current) => ({
+      ...current,
+      events: [makeEvent("You pass priority. The table passes and the stack resolves.", humanSeat.id), ...current.events]
     }));
   }
 
@@ -239,25 +426,212 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     setSession((current) => ({
       ...current,
       events: [
-        {
-          id: crypto.randomUUID(),
-          at: new Date().toISOString(),
-          seatId: humanSeat.id,
-          message: "Response window opened for the player.",
-          detail: "Mock interaction mode: choose Pass Priority after reviewing the board."
-        },
+        makeEvent("Response window opened for the player.", humanSeat.id, "Cast instants from hand, then pass priority."),
         ...current.events
       ]
     }));
   }
 
   function drawCard(seatId: string) {
-    setSession((current) => drawForSeat(current, seatId, `${current.seats.find((seat) => seat.id === seatId)?.name ?? "Player"} draws a card.`));
+    setSession((current) => {
+      const events: GameEvent[] = [];
+      const seats = current.seats.map((seat) => {
+        if (seat.id !== seatId) return seat;
+        const { seat: next, drawn, failed } = drawCards(seat, 1);
+        events.unshift(
+          failed > 0
+            ? makeEvent(`${seat.name} cannot draw from an empty library.`, seat.id)
+            : makeEvent(`${seat.name} draws ${seat.kind === "human" ? (drawn[0]?.name ?? "a card") : "a card"}.`, seat.id)
+        );
+        return next;
+      });
+      return { ...current, seats, events: [...events, ...current.events] };
+    });
   }
 
   function playCard(seatId: string, cardId: string, position?: { x: number; z: number }) {
-    setSession((current) => playCardFromHand(current, seatId, cardId, undefined, position));
+    setSession((current) => {
+      const events: GameEvent[] = [];
+      const seats = current.seats.map((seat) => {
+        if (seat.id !== seatId) return seat;
+        const card = seat.board.hand.find((item) => item.id === cardId);
+        if (card && isLand(card) && current.activePlayerId !== seatId) {
+          events.unshift(makeEvent("You can only play lands on your own turn.", seat.id));
+          return seat;
+        }
+        const result = playFromHand(seat, cardId, position, { keepNonPermanents: true });
+        if (result.error) {
+          events.unshift(makeEvent(result.error, seat.id));
+          return seat;
+        }
+        if (result.played) {
+          const verb = isLand(result.played) ? "play" : "cast";
+          events.unshift(
+            makeEvent(`${seat.kind === "human" ? `You ${verb}` : `${seat.name} ${verb}s`} ${result.played.name}.`, seat.id)
+          );
+        }
+        return result.seat;
+      });
+      return { ...current, seats, events: [...events, ...current.events] };
+    });
     setSelectedHandCardId(undefined);
+  }
+
+  function millCard() {
+    setSession((current) => {
+      const events: GameEvent[] = [];
+      const seats = current.seats.map((seat) => {
+        if (seat.id !== humanSeat.id) return seat;
+        const result = millTop(seat);
+        events.unshift(result.milled ? makeEvent(`You mill ${result.milled.name}.`, seat.id) : makeEvent("Your library is empty.", seat.id));
+        return result.seat;
+      });
+      return { ...current, seats, events: [...events, ...current.events] };
+    });
+  }
+
+  function scryToBottom() {
+    setSession((current) => {
+      const events: GameEvent[] = [];
+      const seats = current.seats.map((seat) => {
+        if (seat.id !== humanSeat.id) return seat;
+        const result = libraryTopToBottom(seat);
+        events.unshift(
+          result.moved
+            ? makeEvent("You put the top card of your library on the bottom.", seat.id)
+            : makeEvent("Your library is empty.", seat.id)
+        );
+        return result.seat;
+      });
+      return { ...current, seats, events: [...events, ...current.events] };
+    });
+  }
+
+  function tutorCard(cardId: string) {
+    setSession((current) => {
+      const events: GameEvent[] = [];
+      const seats = current.seats.map((seat) => {
+        if (seat.id !== humanSeat.id) return seat;
+        const result = takeFromLibrary(seat, cardId);
+        if (result.taken) {
+          events.unshift(makeEvent(`You search your library for ${result.taken.name} and shuffle.`, seat.id));
+        }
+        return result.seat;
+      });
+      return { ...current, seats, events: [...events, ...current.events] };
+    });
+  }
+
+  function moveCard(seatId: string, cardId: string, position: { x: number; z: number }) {
+    setSession((current) => ({
+      ...current,
+      seats: current.seats.map((seat) =>
+        seat.id !== seatId
+          ? seat
+          : {
+              ...seat,
+              board: {
+                ...seat.board,
+                battlefield: seat.board.battlefield.map((card) =>
+                  card.id === cardId ? { ...card, battlefieldPosition: position } : card
+                )
+              }
+            }
+      )
+    }));
+  }
+
+  function castHumanCommander() {
+    setSession((current) => {
+      const events: GameEvent[] = [];
+      const seats = current.seats.map((seat) => {
+        if (seat.id !== humanSeat.id) return seat;
+        const tax = 2 * (seat.commanderCasts ?? 0);
+        const result = castCommander(seat);
+        if (result.error) {
+          events.unshift(makeEvent(result.error, seat.id));
+          return seat;
+        }
+        events.unshift(
+          makeEvent(`You cast your commander, ${result.seat.board.commander?.name}.${tax > 0 ? ` Commander tax: +${tax}.` : ""}`, seat.id)
+        );
+        return result.seat;
+      });
+      return { ...current, seats, events: [...events, ...current.events] };
+    });
+  }
+
+  function adjustLife(seatId: string, delta: number) {
+    setSession((current) => {
+      const events: GameEvent[] = [];
+      const seats = current.seats.map((seat) => {
+        if (seat.id !== seatId) return seat;
+        const life = seat.life + delta;
+        if (life <= 0 && seat.life > 0) {
+          events.unshift(makeEvent(`${seat.name} is at ${life} life and is eliminated.`, seat.id));
+        }
+        return { ...seat, life };
+      });
+      return { ...current, seats, events: [...events, ...current.events] };
+    });
+  }
+
+  function toggleTapCard(cardId: string) {
+    setSession((current) => ({
+      ...current,
+      seats: current.seats.map((seat) =>
+        seat.board.battlefield.some((card) => card.id === cardId) ? toggleTap(seat, cardId) : seat
+      )
+    }));
+    setInspectedCard((current) => (current?.id === cardId ? { ...current, tapped: !current.tapped } : current));
+  }
+
+  function transformBattlefieldCard(cardId: string) {
+    const owner = sessionRef.current.seats.find((seat) => seat.board.battlefield.some((card) => card.id === cardId));
+    const card = owner?.board.battlefield.find((item) => item.id === cardId);
+    if (!owner || !card) return;
+    const next = transformCard(card);
+    if (next === card) return;
+    setSession((current) => ({
+      ...current,
+      seats: current.seats.map((seat) =>
+        seat.id !== owner.id
+          ? seat
+          : {
+              ...seat,
+              board: {
+                ...seat.board,
+                battlefield: seat.board.battlefield.map((item) => (item.id === cardId ? next : item)),
+                commander: seat.board.commander?.id === cardId ? next : seat.board.commander
+              }
+            }
+      ),
+      events: [makeEvent(`${card.name} transforms into ${next.name}.`, owner.id), ...current.events]
+    }));
+    setInspectedCard(next);
+  }
+
+  function destroyCard(cardId: string) {
+    setSession((current) => {
+      const events: GameEvent[] = [];
+      const seats = current.seats.map((seat) => {
+        if (!seat.board.battlefield.some((card) => card.id === cardId)) return seat;
+        const result = removeFromBattlefield(seat, cardId);
+        if (result.removed) {
+          events.unshift(
+            makeEvent(
+              result.toCommandZone
+                ? `${result.removed.name} returns to ${seat.name}'s command zone.`
+                : `${result.removed.name} goes to ${seat.name}'s graveyard.`,
+              seat.id
+            )
+          );
+        }
+        return result.seat;
+      });
+      return { ...current, seats, events: [...events, ...current.events] };
+    });
+    setInspectedCard((current) => (current?.id === cardId ? undefined : current));
   }
 
   if (mode === "setup") {
@@ -300,20 +674,61 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         humanMulligans={mulligans[humanSeat.id] ?? 0}
         session={{ ...session, activePlayerId: activeSeatId }}
         prioritySeatId={prioritySeatId}
+        thinkingSeatId={thinkingSeatId}
         onKeepHand={keepOpeningHand}
         onMulligan={mulliganOpeningHand}
-        onAdvanceTurn={advanceTurn}
+        onAdvanceTurn={advanceToNextSeat}
         onDrawCard={drawCard}
         onInspectCard={setInspectedCard}
         onPassPriority={passPriority}
         onPlayCard={playCard}
+        onMoveCard={moveCard}
         onRespond={openResponseWindow}
+        onCastCommander={castHumanCommander}
+        onMill={millCard}
+        onScryBottom={scryToBottom}
+        onTutor={tutorCard}
+        onAdjustLife={adjustLife}
+        onToggleTap={toggleTapCard}
+        onTransform={transformBattlefieldCard}
+        onDestroyCard={destroyCard}
         onSelectHandCard={(card) => setSelectedHandCardId((current) => (current === card.id ? undefined : card.id))}
         inspectedCard={inspectedCard}
         selectedCardId={selectedHandCardId}
       />
     </main>
   );
+}
+
+// Pull the (possibly still-growing) reason string out of partially generated JSON.
+function extractPartialReason(content: string) {
+  const match = content.match(/"reason"\s*:\s*"((?:[^"\\]|\\.)*)/);
+  if (!match) return undefined;
+  try {
+    return JSON.parse(`"${match[1]}"`) as string;
+  } catch {
+    return match[1].replace(/\\"/g, '"').replace(/\\n/g, " ");
+  }
+}
+
+function buildAgentPrompt(seat: PlayerSeat, session: GameSession, plays: AgentPlays): string {
+  const mana = availableMana(seat) + (plays.landId ? 1 : 0);
+  const opponents = session.seats
+    .filter((other) => other.id !== seat.id)
+    .map((other) => `${other.name}: ${other.life} life, ${other.zones.battlefield} permanents`)
+    .join("; ");
+  const battlefield = seat.board.battlefield.map((card) => card.name).join(", ") || "empty";
+  const hand = seat.board.hand
+    .map((card) => `[${card.id}] ${card.name} (cost ${card.manaValue}, ${card.typeLine})`)
+    .join("; ");
+  return [
+    `Turn ${session.turn}. You are ${seat.name}, playing a ${seat.deck?.commander ?? "Commander"} deck with ${seat.life} life.`,
+    `Opponents: ${opponents}.`,
+    `Your battlefield: ${battlefield}.`,
+    `Mana available this turn: ${mana}.`,
+    `Your hand: ${hand || "empty"}.`,
+    `Choose ONE spell to cast this main phase. Respond with actionType "cast_spell" and set cardId to the id in [brackets]. Only pick a non-Land card with cost <= ${mana}. If nothing is worth casting, respond with actionType "pass_priority". Give a short reason.`
+  ].join("\n");
 }
 
 function DeckSetupPanel({
@@ -427,50 +842,6 @@ function createInitialConfigs(seats: PlayerSeat[]): SeatConfig[] {
   }));
 }
 
-function applyDeckToSeat(seat: PlayerSeat, deck: CommanderDeck): PlayerSeat {
-  const commander = createCommanderCard(deck, seat.board.commander);
-  const battlefield = seat.board.battlefield.map((card) => (card.commander ? commander : card));
-  return {
-    ...seat,
-    deck,
-    board: {
-      ...seat.board,
-      commander,
-      hand: [],
-      battlefield: battlefield.some((card) => card.commander) ? battlefield : [commander, ...battlefield]
-    },
-    zones: {
-      ...seat.zones,
-      battlefield: battlefield.some((card) => card.commander) ? battlefield.length : battlefield.length + 1,
-      hand: 0,
-      command: commander.zone === "command" ? 1 : 0
-    }
-  };
-}
-
-function createCommanderCard(deck: CommanderDeck, existing?: VisibleCard): VisibleCard {
-  const card = deck.commanderCard;
-  return {
-    id: existing?.id ?? crypto.randomUUID(),
-    name: card?.name ?? deck.commander,
-    typeLine: card?.typeLine ?? existing?.typeLine ?? "Legendary Creature - Commander",
-    oracleText: card?.oracleText ?? existing?.oracleText ?? "AI-selected commander. Full card text will come from card data lookup in the next integration pass.",
-    manaValue: card?.manaValue ?? existing?.manaValue ?? 4,
-    colors: card?.colors ?? deck.colors,
-    colorIdentity: card?.colorIdentity ?? deck.colors,
-    imageUris: card?.imageUris,
-    faces: card?.faces,
-    role: "commander",
-    zone: existing?.zone ?? "battlefield",
-    commander: true,
-    power: card?.power ?? existing?.power ?? "3",
-    toughness: card?.toughness ?? existing?.toughness ?? "4",
-    tapped: existing?.tapped,
-    summoningSick: existing?.summoningSick,
-    counters: existing?.counters
-  };
-}
-
 function inferColors(commander: string) {
   const lower = commander.toLowerCase();
   const matched = Object.entries(COMMANDER_COLOR_HINTS).find(([hint]) => lower.includes(hint));
@@ -482,208 +853,4 @@ function fallbackCommander(name: string) {
   if (name.includes("Sable")) return "Meren of Clan Nel Toth";
   if (name.includes("Veyra")) return "Shalai, Voice of Plenty";
   return "Atraxa, Praetors' Voice";
-}
-
-function resolveAgentMulligans(seats: PlayerSeat[]) {
-  const mulligans: Record<string, number> = {};
-  const keptHands: Record<string, boolean> = {};
-  const events: GameEvent[] = [];
-
-  const resolvedSeats = seats.map((seat) => {
-    if (seat.kind !== "agent") return seat;
-    let nextSeat = seat;
-    let count = 0;
-    while (!agentKeepsHand(nextSeat) && count < 3) {
-      count += 1;
-      nextSeat = withOpeningHand(nextSeat, 7, count);
-    }
-    mulligans[seat.id] = count;
-    keptHands[seat.id] = true;
-    nextSeat = keepOpeningHandSize(nextSeat, openingHandKeepSize(count));
-    events.push({
-      id: crypto.randomUUID(),
-      at: new Date().toISOString(),
-      seatId: seat.id,
-      message: count === 0 ? `${seat.name} kept 7.` : `${seat.name} mulliganed and kept ${openingHandKeepSize(count)}.`
-    });
-    return nextSeat;
-  });
-
-  return { seats: resolvedSeats, mulligans, keptHands, events };
-}
-
-function agentKeepsHand(seat: PlayerSeat) {
-  const lands = seat.board.hand.filter((card) => card.role === "land" || card.typeLine === "Land").length;
-  const ramp = seat.board.hand.filter((card) => card.role === "ramp").length;
-  return lands >= 2 && lands <= 5 && lands + ramp >= 3;
-}
-
-function openingHandKeepSize(mulliganCount: number) {
-  if (mulliganCount <= 1) return 7;
-  return Math.max(1, 8 - mulliganCount);
-}
-
-function keepOpeningHandSize(seat: PlayerSeat, keepSize: number): PlayerSeat {
-  const hand = seat.board.hand.slice(0, keepSize);
-  const bottomed = Math.max(0, seat.board.hand.length - hand.length);
-  return {
-    ...seat,
-    board: {
-      ...seat.board,
-      hand
-    },
-    zones: {
-      ...seat.zones,
-      hand: hand.length,
-      library: seat.zones.library + bottomed
-    }
-  };
-}
-
-function withOpeningHand(seat: PlayerSeat, size: number, mulliganCount: number): PlayerSeat {
-  const hand = makeOpeningHand(seat, size, mulliganCount);
-  return {
-    ...seat,
-    board: {
-      ...seat.board,
-      hand
-    },
-    zones: {
-      ...seat.zones,
-      hand: hand.length,
-      library: Math.max(0, 99 - hand.length - seat.board.battlefield.filter((card) => !card.commander).length)
-    }
-  };
-}
-
-function makeOpeningHand(seat: PlayerSeat, size: number, mulliganCount: number) {
-  const deckCards = expandDeckCards(seat);
-  if (deckCards.length === 0) {
-    return Array.from({ length: size }, (_, index) =>
-      createVisibleFromDeckCard({ name: "Wastes", role: "land" }, [], `${seat.id}-fallback-opening-${mulliganCount}-${index}`, "hand")
-    );
-  }
-  const offset = (mulliganCount * 11 + seat.id.length) % Math.max(1, deckCards.length);
-  return Array.from({ length: size }, (_, index) => {
-    const card = deckCards[(offset + index) % deckCards.length];
-    return createVisibleFromDeckCard(card, seat.deck?.colors ?? [], `${seat.id}-opening-${mulliganCount}-${index}`, "hand");
-  });
-}
-
-function expandDeckCards(seat: PlayerSeat) {
-  const cards = seat.deck?.cards.filter((card) => card.role !== "commander") ?? [];
-  return cards.flatMap((card) => Array.from({ length: card.count }, () => card));
-}
-
-function drawForSeat(session: GameSession, seatId: string, message: string): GameSession {
-  const seats = session.seats.map((seat) => {
-    if (seat.id !== seatId || seat.zones.library <= 0) return seat;
-    const drawn = nextLibraryCard(seat);
-    return {
-      ...seat,
-      board: {
-        ...seat.board,
-        hand: [...seat.board.hand, drawn]
-      },
-      zones: {
-        ...seat.zones,
-        hand: seat.zones.hand + 1,
-        library: Math.max(0, seat.zones.library - 1)
-      }
-    };
-  });
-
-  return {
-    ...session,
-    seats,
-    events: [
-      {
-        id: crypto.randomUUID(),
-        at: new Date().toISOString(),
-        seatId,
-        message
-      },
-      ...session.events
-    ]
-  };
-}
-
-function playFirstHandCard(session: GameSession, seatId: string): GameSession {
-  const seat = session.seats.find((item) => item.id === seatId);
-  const card = seat?.board.hand[0];
-  return card ? playCardFromHand(session, seatId, card.id, `${seat?.name ?? "Agent"} plays ${card.name}.`) : session;
-}
-
-function playCardFromHand(session: GameSession, seatId: string, cardId: string, message?: string, position?: { x: number; z: number }): GameSession {
-  let playedName = "";
-  const seats = session.seats.map((seat) => {
-    if (seat.id !== seatId) return seat;
-    const card = seat.board.hand.find((item) => item.id === cardId);
-    if (!card) return seat;
-    playedName = card.name;
-    const played: VisibleCard = {
-      ...card,
-      zone: "battlefield",
-      battlefieldPosition: position,
-      summoningSick: card.typeLine.includes("Creature") ? true : card.summoningSick
-    };
-    return {
-      ...seat,
-      board: {
-        ...seat.board,
-        hand: seat.board.hand.filter((item) => item.id !== cardId),
-        battlefield: [...seat.board.battlefield, played]
-      },
-      zones: {
-        ...seat.zones,
-        battlefield: seat.zones.battlefield + 1,
-        hand: Math.max(0, seat.zones.hand - 1)
-      }
-    };
-  });
-
-  if (!playedName) return session;
-
-  return {
-    ...session,
-    seats,
-    events: [
-      {
-        id: crypto.randomUUID(),
-        at: new Date().toISOString(),
-        seatId,
-        message: message ?? `${session.seats.find((seat) => seat.id === seatId)?.name ?? "Player"} plays ${playedName}.`
-      },
-      ...session.events
-    ]
-  };
-}
-
-function nextLibraryCard(seat: PlayerSeat): VisibleCard {
-  const cards = seat.deck?.cards.filter((card) => card.role !== "commander") ?? [];
-  const card = cards[(seat.board.hand.length + seat.board.battlefield.length) % Math.max(1, cards.length)];
-  return createVisibleFromDeckCard(card ?? { name: "Mystery Card", role: "spell" }, seat.deck?.colors ?? [], `${seat.id}-draw-${crypto.randomUUID()}`, "hand");
-}
-
-function createVisibleFromDeckCard(deckCard: { name: string; role?: string; card?: CommanderDeck["cards"][number]["card"] }, colors: string[], id: string, zone: VisibleCard["zone"]): VisibleCard {
-  const name = deckCard.card?.name ?? deckCard.name;
-  const role = deckCard.role ?? "spell";
-  const isLand = role === "land" || ["Plains", "Island", "Swamp", "Mountain", "Forest", "Wastes"].includes(name);
-  const typeLine = deckCard.card?.typeLine;
-  const isCreature = typeLine?.includes("Creature") ?? (["creature", "synergy", "wincon", "ramp", "draw"].includes(role) && !isLand);
-  return {
-    id,
-    name,
-    typeLine: typeLine ?? (isLand ? "Land" : isCreature ? "Creature - Spell" : role === "removal" ? "Instant" : "Spell"),
-    oracleText: deckCard.card?.oracleText ?? (isLand ? "Tap: Add mana." : `Mock ${role} card. Full rules text will come from card data lookup.`),
-    manaValue: deckCard.card?.manaValue ?? (isLand ? 0 : role === "ramp" ? 2 : role === "removal" ? 2 : 4),
-    colors: deckCard.card?.colors ?? (isLand ? [] : colors.slice(0, 1)),
-    colorIdentity: deckCard.card?.colorIdentity ?? colors,
-    imageUris: deckCard.card?.imageUris,
-    faces: deckCard.card?.faces,
-    role,
-    zone,
-    power: deckCard.card?.power ?? (isCreature ? "2" : undefined),
-    toughness: deckCard.card?.toughness ?? (isCreature ? "2" : undefined)
-  };
 }

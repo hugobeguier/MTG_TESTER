@@ -79,11 +79,10 @@ export function validateBracketThreeDeck(
     }
   }
 
+  // Bracket guidelines are house rules, not legality — flag overages without blocking the deck.
   if (gameChangerCount > 3) {
-    errors.push(`Bracket 3 allows at most 3 Game Changer cards; found ${gameChangerCount}.`);
-  }
-
-  if (gameChangerCount === 3) {
+    warnings.push(`Bracket 3 suggests at most 3 Game Changer cards; found ${gameChangerCount}. This plays above Bracket 3.`);
+  } else if (gameChangerCount === 3) {
     warnings.push("This deck is at the Bracket 3 Game Changer limit.");
   }
 

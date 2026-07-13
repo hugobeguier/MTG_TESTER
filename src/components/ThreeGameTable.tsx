@@ -7,12 +7,14 @@ import type { GameSession, PlayerSeat, VisibleCard } from "@/lib/types";
 interface ThreeGameTableProps {
   session: GameSession;
   prioritySeatId?: string;
+  thinkingSeatId?: string;
   selectedCardId?: string;
   inspectedCard?: VisibleCard;
-  onInspectCard?: (card: VisibleCard) => void;
+  onInspectCard?: (card: VisibleCard | undefined) => void;
   onSelectHandCard?: (card: VisibleCard) => void;
   onDrawCard?: (seatId: string) => void;
   onPlayCard?: (seatId: string, cardId: string, position?: { x: number; z: number }) => void;
+  onMoveCard?: (seatId: string, cardId: string, position: { x: number; z: number }) => void;
   gameStage?: "mulligan" | "playing";
   humanMulligans?: number;
   onKeepHand?: () => void;
@@ -20,6 +22,14 @@ interface ThreeGameTableProps {
   onAdvanceTurn?: () => void;
   onPassPriority?: () => void;
   onRespond?: () => void;
+  onCastCommander?: () => void;
+  onMill?: () => void;
+  onScryBottom?: () => void;
+  onTutor?: (cardId: string) => void;
+  onAdjustLife?: (seatId: string, delta: number) => void;
+  onToggleTap?: (cardId: string) => void;
+  onTransform?: (cardId: string) => void;
+  onDestroyCard?: (cardId: string) => void;
 }
 
 interface CardUserData {
@@ -27,6 +37,14 @@ interface CardUserData {
   card: VisibleCard;
   seatId: string;
   location: "battlefield" | "command";
+}
+
+interface PileUserData {
+  kind: "pile";
+  seatId: string;
+  seatName: string;
+  zone: "library" | "graveyard";
+  count: number;
 }
 
 const TABLE_WIDTH = 24;
@@ -49,15 +67,33 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
   const dynamicGroupRef = useRef<THREE.Group | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const cardMeshesRef = useRef<THREE.Object3D[]>([]);
+  const pileMeshesRef = useRef<THREE.Object3D[]>([]);
+  const pileTooltipRef = useRef<HTMLDivElement>(null);
   const frameRef = useRef<number | undefined>(undefined);
   const propsRef = useRef(props);
   const cameraState = useRef({ yaw: 0, pitch: -0.85, distance: 18, target: new THREE.Vector3(0, 0, 0) });
   const movementKeys = useRef({ forward: false, left: false, back: false, right: false });
   const boardInputActive = useRef(false);
   const pointer = useRef({ down: false, button: 0, x: 0, y: 0, moved: false });
+  const cardDrag = useRef<{ mesh: THREE.Object3D; cardId: string; seatId: string } | null>(null);
   const [draggingHandCardId, setDraggingHandCardId] = useState<string | undefined>();
+  const [logOpen, setLogOpen] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [librarySearch, setLibrarySearch] = useState("");
+  const [thoughtSeatId, setThoughtSeatId] = useState<string | undefined>();
+  const [openPile, setOpenPile] = useState<{ seatId: string; zone: "library" | "graveyard" } | undefined>();
+
+  // Auto-open the bubble of whichever agent is currently reasoning, so it reads in real time.
+  useEffect(() => {
+    if (props.thinkingSeatId) setThoughtSeatId(props.thinkingSeatId);
+  }, [props.thinkingSeatId]);
   const human = props.session.seats.find((seat) => seat.kind === "human") ?? props.session.seats[0];
-  const latest = props.session.events[0];
+  const logEvents = props.session.events.slice(0, 30);
+  const isHumanTurn = props.session.activePlayerId === human.id;
+  const commanderCastable = human.board.commander?.zone === "command";
+  const inspectedOnBattlefield = props.inspectedCard
+    ? props.session.seats.some((seat) => seat.board.battlefield.some((card) => card.id === props.inspectedCard?.id))
+    : false;
 
   propsRef.current = props;
 
@@ -147,19 +183,72 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
       frameRef.current = requestAnimationFrame(animate);
     };
 
-    const raycastCard = (event: PointerEvent) => {
+    const raycastScene = (event: PointerEvent) => {
       const rect = renderer.domElement.getBoundingClientRect();
       const mouse = new THREE.Vector2(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1);
       const raycaster = new THREE.Raycaster();
       raycaster.setFromCamera(mouse, camera);
-      return raycaster.intersectObjects(cardMeshesRef.current, true)[0];
+      return raycaster.intersectObjects([...cardMeshesRef.current, ...pileMeshesRef.current], true)[0];
+    };
+
+    const raycastTablePoint = (event: PointerEvent) => {
+      const rect = renderer.domElement.getBoundingClientRect();
+      const mouse = new THREE.Vector2(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1);
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(mouse, camera);
+      return raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.08), new THREE.Vector3());
+    };
+
+    const humanArea = () => {
+      const seats = propsRef.current.session.seats;
+      const humanIndex = Math.max(0, seats.findIndex((seat) => seat.kind === "human"));
+      return PLAYER_AREAS[humanIndex] ?? PLAYER_AREAS[0];
+    };
+
+    const beginCardDrag = (event: PointerEvent) => {
+      const hit = raycastScene(event);
+      const data = hit?.object.userData as Partial<CardUserData> | undefined;
+      if (data?.kind !== "card" || !data.card || !data.seatId || data.location !== "battlefield") return false;
+      const humanId = propsRef.current.session.seats.find((seat) => seat.kind === "human")?.id;
+      if (data.seatId !== humanId) return false;
+      cardDrag.current = { mesh: hit!.object, cardId: data.card.id, seatId: data.seatId };
+      renderer.domElement.style.cursor = "grabbing";
+      return true;
     };
 
     const pickCard = (event: PointerEvent) => {
-      const hit = raycastCard(event);
-      const data = hit?.object.userData as Partial<CardUserData> | undefined;
-      if (data?.kind !== "card" || !data.card) return;
-      propsRef.current.onInspectCard?.(data.card);
+      const hit = raycastScene(event);
+      const data = hit?.object.userData as CardUserData | PileUserData | undefined;
+      if (data?.kind === "card" && data.card) {
+        propsRef.current.onInspectCard?.(data.card);
+      } else if (data?.kind === "pile" && data.seatId && data.zone) {
+        const humanId = propsRef.current.session.seats.find((seat) => seat.kind === "human")?.id;
+        if (data.zone === "library" && data.seatId === humanId) {
+          // Your own library opens the full search/scry panel.
+          setOpenPile(undefined);
+          setLibraryOpen(true);
+        } else {
+          setLibraryOpen(false);
+          setOpenPile({ seatId: data.seatId, zone: data.zone });
+        }
+      }
+    };
+
+    const updatePileTooltip = (event: PointerEvent) => {
+      const tooltip = pileTooltipRef.current;
+      if (!tooltip) return;
+      const hit = raycastScene(event);
+      const data = hit?.object.userData as Partial<PileUserData> | undefined;
+      if (data?.kind === "pile") {
+        tooltip.textContent = `${data.seatName} — ${data.zone === "library" ? "library" : "graveyard"} · ${data.count} card${data.count === 1 ? "" : "s"}`;
+        tooltip.style.display = "block";
+        tooltip.style.left = `${event.clientX + 14}px`;
+        tooltip.style.top = `${event.clientY + 14}px`;
+        renderer.domElement.style.cursor = "pointer";
+      } else {
+        tooltip.style.display = "none";
+        if (!cardDrag.current) renderer.domElement.style.cursor = "";
+      }
     };
 
     const onPointerDown = (event: PointerEvent) => {
@@ -167,15 +256,31 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
       renderer.domElement.focus();
       pointer.current = { down: true, button: event.button, x: event.clientX, y: event.clientY, moved: false };
       renderer.domElement.setPointerCapture(event.pointerId);
+      if (event.button === 0 && !event.shiftKey) beginCardDrag(event);
     };
 
     const onPointerMove = (event: PointerEvent) => {
-      if (!pointer.current.down) return;
+      if (!pointer.current.down) {
+        updatePileTooltip(event);
+        return;
+      }
+      if (pileTooltipRef.current) pileTooltipRef.current.style.display = "none";
       const dx = event.clientX - pointer.current.x;
       const dy = event.clientY - pointer.current.y;
       pointer.current.x = event.clientX;
       pointer.current.y = event.clientY;
       if (Math.abs(dx) + Math.abs(dy) > 3) pointer.current.moved = true;
+
+      if (cardDrag.current) {
+        const point = raycastTablePoint(event);
+        if (point) {
+          const area = humanArea();
+          cardDrag.current.mesh.position.x = THREE.MathUtils.clamp(point.x, area.minX + 0.45, area.maxX - 0.45);
+          cardDrag.current.mesh.position.z = THREE.MathUtils.clamp(point.z, area.minZ + 0.6, area.maxZ - 0.6);
+        }
+        return;
+      }
+
       if (pointer.current.button === 2 || event.shiftKey) {
         cameraState.current.target.x -= dx * 0.025;
         cameraState.current.target.z -= dy * 0.025;
@@ -186,13 +291,21 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
     };
 
     const onPointerUp = (event: PointerEvent) => {
-      if (!pointer.current.moved) pickCard(event);
+      const drag = cardDrag.current;
+      if (drag && pointer.current.moved) {
+        propsRef.current.onMoveCard?.(drag.seatId, drag.cardId, { x: drag.mesh.position.x, z: drag.mesh.position.z });
+      } else if (!pointer.current.moved) {
+        pickCard(event);
+      }
+      cardDrag.current = null;
+      renderer.domElement.style.cursor = "";
       pointer.current.down = false;
     };
 
     const onWheel = (event: WheelEvent) => {
       event.preventDefault();
-      cameraState.current.distance = THREE.MathUtils.clamp(cameraState.current.distance + event.deltaY * 0.015, 7, 34);
+      // Multiplicative zoom stays smooth up close; near plane is 0.1 so 0.5 won't clip the table.
+      cameraState.current.distance = THREE.MathUtils.clamp(cameraState.current.distance * (1 + event.deltaY * 0.001), 0.5, 60);
     };
 
     const onContextMenu = (event: MouseEvent) => event.preventDefault();
@@ -208,6 +321,7 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
     const onPointerLeave = () => {
       boardInputActive.current = document.activeElement === renderer.domElement;
       if (!boardInputActive.current) clearMovementKeys();
+      if (pileTooltipRef.current) pileTooltipRef.current.style.display = "none";
     };
 
     const onCanvasBlur = () => {
@@ -274,7 +388,7 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
   }, []);
 
   useEffect(() => {
-    rebuildDynamicScene(dynamicGroupRef.current, props.session, props.selectedCardId, cardMeshesRef);
+    rebuildDynamicScene(dynamicGroupRef.current, props.session, props.selectedCardId, cardMeshesRef, pileMeshesRef);
   }, [props.session, props.selectedCardId]);
 
   const activeName = useMemo(
@@ -345,7 +459,61 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
       </div>
       <div className="three-hud top-right">
         <button type="button" onClick={resetCamera}>Reset Camera</button>
-        <small>WASD move | drag rotate | wheel zoom | shift/right drag pan</small>
+        <small>drag your cards to move them | WASD move | drag rotate | wheel zoom | shift/right drag pan</small>
+      </div>
+      <button
+        className="log-toggle"
+        type="button"
+        aria-label={logOpen ? "Hide game log" : "Show game log"}
+        aria-expanded={logOpen}
+        title="Game log"
+        onClick={() => setLogOpen((open) => !open)}
+      >
+        🗒
+      </button>
+      {logOpen ? (
+        <div className="three-hud log-panel hud-log" aria-label="Game log">
+          <strong>Log</strong>
+          <div className="log-entries">
+            {logEvents.map((event) => (
+              <p key={event.id} title={event.detail}>{event.message}</p>
+            ))}
+          </div>
+        </div>
+      ) : null}
+      <div className="three-hud top-center life-strip" aria-label="Life totals">
+        {props.session.seats.map((seat) => (
+          <div className={`life-chip ${seat.id === props.session.activePlayerId ? "active" : ""}`} key={seat.id}>
+            <span>{seat.name}</span>
+            {seat.kind === "agent" ? (
+              <button
+                className={`thought-toggle ${seat.lastThought ? "has-thought" : ""}`}
+                type="button"
+                aria-label={`What is ${seat.name} thinking?`}
+                aria-expanded={thoughtSeatId === seat.id}
+                title={`What is ${seat.name} thinking?`}
+                onClick={() => setThoughtSeatId((current) => (current === seat.id ? undefined : seat.id))}
+              >
+                💬
+              </button>
+            ) : null}
+            <button type="button" aria-label={`${seat.name} lose life`} onClick={() => props.onAdjustLife?.(seat.id, -1)}>−</button>
+            <strong>{seat.life}</strong>
+            <button type="button" aria-label={`${seat.name} gain life`} onClick={() => props.onAdjustLife?.(seat.id, 1)}>+</button>
+            {thoughtSeatId === seat.id ? (
+              <div className="thought-bubble" role="note">
+                <strong>{seat.name} is thinking:</strong>
+                <p>
+                  {seat.lastThought
+                    ? `${seat.lastThought}${props.thinkingSeatId === seat.id ? " ▌" : ""}`
+                    : props.thinkingSeatId === seat.id
+                      ? "Thinking…"
+                      : "Nothing yet — they share their reasoning on their turn."}
+                </p>
+              </div>
+            ) : null}
+          </div>
+        ))}
       </div>
       <div className="three-hud bottom-left">
         {props.gameStage === "mulligan" ? (
@@ -361,11 +529,67 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
             <button type="button" disabled={!props.selectedCardId} onClick={() => props.selectedCardId && props.onPlayCard?.(human.id, props.selectedCardId)}>
               Play Selected
             </button>
-            <button type="button" onClick={props.onAdvanceTurn}>Next Turn</button>
-            <button type="button" disabled={props.prioritySeatId !== human.id} onClick={props.onPassPriority}>Pass Priority</button>
+            {commanderCastable ? (
+              <button type="button" onClick={props.onCastCommander}>Cast Commander</button>
+            ) : null}
+            <button type="button" onClick={() => { setOpenPile(undefined); setLibraryOpen((open) => !open); }}>
+              {libraryOpen ? "Close Library" : "Library"}
+            </button>
+            <button type="button" disabled={!isHumanTurn} onClick={props.onAdvanceTurn} title={isHumanTurn ? undefined : "Agents finish their turns automatically."}>
+              End Turn
+            </button>
+            {props.prioritySeatId === human.id ? (
+              <button type="button" onClick={props.onPassPriority}>Pass Priority</button>
+            ) : (
+              <button type="button" onClick={props.onRespond}>Respond</button>
+            )}
           </div>
         )}
       </div>
+      {libraryOpen && props.gameStage === "playing" ? (
+        <div className="three-hud library-panel" aria-label="Your library">
+          <div className="library-heading">
+            <strong>Library · {human.board.library.length} cards</strong>
+            <button type="button" aria-label="Close library" onClick={() => setLibraryOpen(false)}>×</button>
+          </div>
+          {human.board.library[0] ? (
+            <div className="library-top">
+              <span>
+                Top: <strong>{human.board.library[0].name}</strong> · {human.board.library[0].typeLine}
+              </span>
+              <div className="hud-card-actions">
+                <button type="button" title="Surveil/mill: put the top card into your graveyard" onClick={props.onMill}>Mill 1</button>
+                <button type="button" title="Scry: put the top card on the bottom" onClick={props.onScryBottom}>Bottom</button>
+              </div>
+            </div>
+          ) : (
+            <span>Your library is empty.</span>
+          )}
+          <input
+            placeholder="Search your library..."
+            value={librarySearch}
+            onChange={(event) => setLibrarySearch(event.target.value)}
+          />
+          <div className="library-list">
+            {[...human.board.library]
+              .filter((card) => card.name.toLowerCase().includes(librarySearch.trim().toLowerCase()))
+              .sort((a, b) => a.name.localeCompare(b.name))
+              .map((card) => (
+                <button
+                  key={card.id}
+                  type="button"
+                  title={`${card.typeLine}\n${card.oracleText}\nClick to put into your hand (then shuffle).`}
+                  onClick={() => props.onTutor?.(card.id)}
+                >
+                  <span>{card.name}</span>
+                  <small>{card.manaValue > 0 ? `${card.manaValue} · ` : ""}{card.typeLine}</small>
+                </button>
+              ))}
+          </div>
+        </div>
+      ) : null}
+      {openPile ? <ZoneViewer openPile={openPile} session={props.session} onClose={() => setOpenPile(undefined)} onInspectCard={props.onInspectCard} /> : null}
+      <div className="pile-tooltip" ref={pileTooltipRef} />
       <div className="three-hud bottom-right">
         {props.inspectedCard ? (
           <div className="hud-card-detail">
@@ -373,11 +597,22 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
             <strong>{props.inspectedCard.name}</strong>
             <span>{props.inspectedCard.typeLine}</span>
             <p>{props.inspectedCard.oracleText}</p>
-          </div>
-        ) : latest ? (
-          <div className="hud-card-detail">
-            <strong>Latest</strong>
-            <p>{latest.message}</p>
+            {inspectedOnBattlefield ? (
+              <div className="hud-card-actions">
+                <button type="button" onClick={() => props.inspectedCard && props.onToggleTap?.(props.inspectedCard.id)}>
+                  {props.inspectedCard.tapped ? "Untap" : "Tap"}
+                </button>
+                {(props.inspectedCard.faces?.length ?? 0) >= 2 ? (
+                  <button type="button" onClick={() => props.inspectedCard && props.onTransform?.(props.inspectedCard.id)}>
+                    Transform
+                  </button>
+                ) : null}
+                <button type="button" onClick={() => props.inspectedCard && props.onDestroyCard?.(props.inspectedCard.id)}>
+                  {props.inspectedCard.commander ? "To Command Zone" : "To Graveyard"}
+                </button>
+              </div>
+            ) : null}
+            <button type="button" onClick={() => props.onInspectCard?.(undefined)}>Close</button>
           </div>
         ) : (
           <div className="hud-card-detail">
@@ -414,6 +649,45 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
   );
 }
 
+function ZoneViewer({
+  openPile,
+  session,
+  onClose,
+  onInspectCard
+}: {
+  openPile: { seatId: string; zone: "library" | "graveyard" };
+  session: GameSession;
+  onClose: () => void;
+  onInspectCard?: (card: VisibleCard | undefined) => void;
+}) {
+  const seat = session.seats.find((item) => item.id === openPile.seatId);
+  if (!seat) return null;
+  // Graveyards show newest on top; libraries are sorted alphabetically so draw order stays hidden.
+  const cards =
+    openPile.zone === "graveyard"
+      ? [...seat.board.graveyard].reverse()
+      : [...seat.board.library].sort((a, b) => a.name.localeCompare(b.name));
+  return (
+    <div className="three-hud library-panel" aria-label={`${seat.name} ${openPile.zone}`}>
+      <div className="library-heading">
+        <strong>
+          {seat.name} · {openPile.zone} · {cards.length} cards
+        </strong>
+        <button type="button" aria-label="Close" onClick={onClose}>×</button>
+      </div>
+      {cards.length === 0 ? <span>Empty.</span> : null}
+      <div className="library-list">
+        {cards.map((card) => (
+          <button key={card.id} type="button" title={`${card.typeLine}\n${card.oracleText}`} onClick={() => onInspectCard?.(card)}>
+            <span>{card.name}</span>
+            <small>{card.manaValue > 0 ? `${card.manaValue} · ` : ""}{card.typeLine}</small>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function FallbackHandCard({ card }: { card: VisibleCard }) {
   return (
     <div className="three-hand-fallback">
@@ -427,24 +701,26 @@ function rebuildDynamicScene(
   group: THREE.Group | null,
   session: GameSession,
   selectedCardId: string | undefined,
-  cardMeshesRef: MutableRefObject<THREE.Object3D[]>
+  cardMeshesRef: MutableRefObject<THREE.Object3D[]>,
+  pileMeshesRef: MutableRefObject<THREE.Object3D[]>
 ) {
   if (!group) return;
   group.clear();
   cardMeshesRef.current = [];
+  pileMeshesRef.current = [];
 
   session.seats.forEach((seat, index) => {
     const area = PLAYER_AREAS[index] ?? PLAYER_AREAS[0];
     addBattlefieldArea(group, area, seat.kind === "human");
     addPlayerLabel(group, seat, area);
-    addZonePile(group, "Deck", seat.zones.library, area.minX + 0.75, area.maxZ - 0.8, area.rot);
-    addZonePile(group, "Grave", seat.zones.graveyard, area.maxX - 0.75, area.maxZ - 0.8, area.rot);
+    addZonePile(group, "Deck", seat, "library", area.minX + 0.75, area.maxZ - 0.8, area.rot, pileMeshesRef);
+    addZonePile(group, "Grave", seat, "graveyard", area.maxX - 0.75, area.maxZ - 0.8, area.rot, pileMeshesRef);
 
-    if (seat.board.commander) {
+    if (seat.board.commander?.zone === "command") {
       addCard(group, seat.board.commander, seat.id, "command", area.minX + 0.9, area.minZ + 0.8, area.rot, selectedCardId, cardMeshesRef);
     }
 
-    seat.board.battlefield.slice(0, 12).forEach((card, cardIndex) => {
+    seat.board.battlefield.slice(0, 18).forEach((card, cardIndex) => {
       const point = card.battlefieldPosition ?? defaultBattlefieldPosition(area, cardIndex);
       addCard(group, card, seat.id, "battlefield", point.x, point.z, area.rot, selectedCardId, cardMeshesRef);
     });
@@ -483,8 +759,8 @@ function addBattlefieldArea(
 }
 
 function defaultBattlefieldPosition(area: (typeof PLAYER_AREAS)[number], cardIndex: number) {
-  const col = cardIndex % 5;
-  const row = Math.floor(cardIndex / 5);
+  const col = cardIndex % 6;
+  const row = Math.floor(cardIndex / 6);
   const x = THREE.MathUtils.clamp(area.minX + 2 + col * 1.15, area.minX + 0.55, area.maxX - 0.55);
   const zStep = area.rot === 0 ? -1 : 1;
   const startZ = area.rot === 0 ? area.maxZ - 2 : area.minZ + 2;
@@ -542,7 +818,18 @@ function applyImageTexture(url: string, material: THREE.MeshBasicMaterial) {
   );
 }
 
-function addZonePile(group: THREE.Group, label: string, count: number, x: number, z: number, rot: number) {
+function addZonePile(
+  group: THREE.Group,
+  label: string,
+  seat: PlayerSeat,
+  zone: PileUserData["zone"],
+  x: number,
+  z: number,
+  rot: number,
+  pileMeshesRef: MutableRefObject<THREE.Object3D[]>
+) {
+  const count = seat.zones[zone];
+  const userData: PileUserData = { kind: "pile", seatId: seat.id, seatName: seat.name, zone, count };
   const pile = new THREE.Group();
   for (let index = 0; index < Math.min(4, count); index += 1) {
     const mesh = new THREE.Mesh(
@@ -550,11 +837,26 @@ function addZonePile(group: THREE.Group, label: string, count: number, x: number
       new THREE.MeshStandardMaterial({ color: "#263b57", roughness: 0.75 })
     );
     mesh.position.y = 0.04 + index * 0.035;
+    mesh.userData = userData;
     pile.add(mesh);
+    pileMeshesRef.current.push(mesh);
   }
   pile.position.set(x, 0.05, z);
   pile.rotation.y = rot;
   group.add(pile);
+
+  // Always-present hit plane so empty piles stay clickable/hoverable.
+  const hitPlane = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.9, 1.2),
+    new THREE.MeshBasicMaterial({ color: "#263b57", transparent: true, opacity: count === 0 ? 0.15 : 0.01, side: THREE.DoubleSide })
+  );
+  hitPlane.rotation.x = -Math.PI / 2;
+  hitPlane.rotation.z = rot;
+  hitPlane.position.set(x, 0.03, z);
+  hitPlane.userData = userData;
+  group.add(hitPlane);
+  pileMeshesRef.current.push(hitPlane);
+
   addTextPlane(group, `${label} ${count}`, x, z + 0.75, rot, 0.42);
 }
 
