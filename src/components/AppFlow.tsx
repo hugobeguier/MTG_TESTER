@@ -73,24 +73,18 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       message: config.mode === "decklist" ? "Validating deck list..." : "Asking Ollama to build this deck..."
     });
 
-    if (config.mode === "decklist" && config.deckList.trim()) {
-      const deck = createDeckFromList({ owner: config.name, commander, deckList: config.deckList, colors });
-      updateConfig(config.seatId, {
-        commander,
-        deck,
-        status: deck.validation.legal ? "ready" : "error",
-        message: deck.validation.legal ? "Deck list is ready for play." : deck.validation.errors[0] ?? "Deck needs fixes."
-      });
-      return;
-    }
-
     const response = await fetch("/api/decks/build", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ agentName: config.name, commander, colors })
+      body: JSON.stringify({
+        agentName: config.name,
+        commander,
+        colors,
+        deckList: config.mode === "decklist" ? config.deckList : undefined
+      })
     });
     const result = (await response.json()) as {
-      source: "ollama" | "ollama-invalid" | "fallback";
+      source: "decklist" | "ollama" | "ollama-invalid" | "fallback";
       message: string;
       deck: CommanderDeck;
     };
@@ -101,7 +95,9 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       deck,
       status: deck.validation.legal ? "ready" : "error",
       message:
-        result.source === "ollama"
+        result.source === "decklist"
+          ? result.message
+          : result.source === "ollama"
           ? "Ollama built and validated this deck."
           : result.source === "fallback"
             ? result.message
@@ -259,8 +255,8 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     setSession((current) => drawForSeat(current, seatId, `${current.seats.find((seat) => seat.id === seatId)?.name ?? "Player"} draws a card.`));
   }
 
-  function playCard(seatId: string, cardId: string) {
-    setSession((current) => playCardFromHand(current, seatId, cardId));
+  function playCard(seatId: string, cardId: string, position?: { x: number; z: number }) {
+    setSession((current) => playCardFromHand(current, seatId, cardId, undefined, position));
     setSelectedHandCardId(undefined);
   }
 
@@ -295,14 +291,10 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   }
 
   return (
-    <main className="app-shell">
-      <Topbar setupSummary="Game board" onBack={() => setMode("setup")} />
-      <section className="status-grid" aria-label="Runtime status">
-        <Status label="Priority" value={session.seats.find((seat) => seat.id === prioritySeatId)?.name ?? "None"} detail="Priority moves clockwise when passed." />
-        <Status label="Active" value={session.seats.find((seat) => seat.id === activeSeatId)?.name ?? "None"} detail={`${session.phase}, turn ${session.turn}`} />
-        <Status label="Ollama" value={ollama.ok ? "Ready" : "Offline"} detail={ollama.message} />
-        <Status label="XMage" value={session.xmage.status.replace("_", " ")} detail={session.xmage.message} />
-      </section>
+    <main className="app-shell game-shell">
+      <button className="game-back-button" type="button" onClick={() => setMode("setup")} aria-label="Back to setup">
+        ×
+      </button>
       <ThreeGameTable
         gameStage={gameStage}
         humanMulligans={mulligans[humanSeat.id] ?? 0}
@@ -436,7 +428,7 @@ function createInitialConfigs(seats: PlayerSeat[]): SeatConfig[] {
 }
 
 function applyDeckToSeat(seat: PlayerSeat, deck: CommanderDeck): PlayerSeat {
-  const commander = createCommanderCard(deck.commander, deck.colors, seat.board.commander);
+  const commander = createCommanderCard(deck, seat.board.commander);
   const battlefield = seat.board.battlefield.map((card) => (card.commander ? commander : card));
   return {
     ...seat,
@@ -456,19 +448,23 @@ function applyDeckToSeat(seat: PlayerSeat, deck: CommanderDeck): PlayerSeat {
   };
 }
 
-function createCommanderCard(commander: string, colors: string[], existing?: VisibleCard): VisibleCard {
+function createCommanderCard(deck: CommanderDeck, existing?: VisibleCard): VisibleCard {
+  const card = deck.commanderCard;
   return {
     id: existing?.id ?? crypto.randomUUID(),
-    name: commander,
-    typeLine: existing?.typeLine ?? "Legendary Creature - Commander",
-    oracleText: existing?.oracleText ?? "AI-selected commander. Full card text will come from card data lookup in the next integration pass.",
-    manaValue: existing?.manaValue ?? 4,
-    colors,
+    name: card?.name ?? deck.commander,
+    typeLine: card?.typeLine ?? existing?.typeLine ?? "Legendary Creature - Commander",
+    oracleText: card?.oracleText ?? existing?.oracleText ?? "AI-selected commander. Full card text will come from card data lookup in the next integration pass.",
+    manaValue: card?.manaValue ?? existing?.manaValue ?? 4,
+    colors: card?.colors ?? deck.colors,
+    colorIdentity: card?.colorIdentity ?? deck.colors,
+    imageUris: card?.imageUris,
+    faces: card?.faces,
     role: "commander",
     zone: existing?.zone ?? "battlefield",
     commander: true,
-    power: existing?.power ?? "3",
-    toughness: existing?.toughness ?? "4",
+    power: card?.power ?? existing?.power ?? "3",
+    toughness: card?.toughness ?? existing?.toughness ?? "4",
     tapped: existing?.tapped,
     summoningSick: existing?.summoningSick,
     counters: existing?.counters
@@ -564,13 +560,13 @@ function makeOpeningHand(seat: PlayerSeat, size: number, mulliganCount: number) 
   const deckCards = expandDeckCards(seat);
   if (deckCards.length === 0) {
     return Array.from({ length: size }, (_, index) =>
-      createVisibleFromDeckCard("Wastes", "land", [], `${seat.id}-fallback-opening-${mulliganCount}-${index}`, "hand")
+      createVisibleFromDeckCard({ name: "Wastes", role: "land" }, [], `${seat.id}-fallback-opening-${mulliganCount}-${index}`, "hand")
     );
   }
   const offset = (mulliganCount * 11 + seat.id.length) % Math.max(1, deckCards.length);
   return Array.from({ length: size }, (_, index) => {
     const card = deckCards[(offset + index) % deckCards.length];
-    return createVisibleFromDeckCard(card.name, card.role ?? "spell", seat.deck?.colors ?? [], `${seat.id}-opening-${mulliganCount}-${index}`, "hand");
+    return createVisibleFromDeckCard(card, seat.deck?.colors ?? [], `${seat.id}-opening-${mulliganCount}-${index}`, "hand");
   });
 }
 
@@ -618,7 +614,7 @@ function playFirstHandCard(session: GameSession, seatId: string): GameSession {
   return card ? playCardFromHand(session, seatId, card.id, `${seat?.name ?? "Agent"} plays ${card.name}.`) : session;
 }
 
-function playCardFromHand(session: GameSession, seatId: string, cardId: string, message?: string): GameSession {
+function playCardFromHand(session: GameSession, seatId: string, cardId: string, message?: string, position?: { x: number; z: number }): GameSession {
   let playedName = "";
   const seats = session.seats.map((seat) => {
     if (seat.id !== seatId) return seat;
@@ -628,6 +624,7 @@ function playCardFromHand(session: GameSession, seatId: string, cardId: string, 
     const played: VisibleCard = {
       ...card,
       zone: "battlefield",
+      battlefieldPosition: position,
       summoningSick: card.typeLine.includes("Creature") ? true : card.summoningSick
     };
     return {
@@ -665,22 +662,28 @@ function playCardFromHand(session: GameSession, seatId: string, cardId: string, 
 function nextLibraryCard(seat: PlayerSeat): VisibleCard {
   const cards = seat.deck?.cards.filter((card) => card.role !== "commander") ?? [];
   const card = cards[(seat.board.hand.length + seat.board.battlefield.length) % Math.max(1, cards.length)];
-  return createVisibleFromDeckCard(card?.name ?? "Mystery Card", card?.role ?? "spell", seat.deck?.colors ?? [], `${seat.id}-draw-${crypto.randomUUID()}`, "hand");
+  return createVisibleFromDeckCard(card ?? { name: "Mystery Card", role: "spell" }, seat.deck?.colors ?? [], `${seat.id}-draw-${crypto.randomUUID()}`, "hand");
 }
 
-function createVisibleFromDeckCard(name: string, role: string, colors: string[], id: string, zone: VisibleCard["zone"]): VisibleCard {
+function createVisibleFromDeckCard(deckCard: { name: string; role?: string; card?: CommanderDeck["cards"][number]["card"] }, colors: string[], id: string, zone: VisibleCard["zone"]): VisibleCard {
+  const name = deckCard.card?.name ?? deckCard.name;
+  const role = deckCard.role ?? "spell";
   const isLand = role === "land" || ["Plains", "Island", "Swamp", "Mountain", "Forest", "Wastes"].includes(name);
-  const isCreature = ["creature", "synergy", "wincon", "ramp", "draw"].includes(role) && !isLand;
+  const typeLine = deckCard.card?.typeLine;
+  const isCreature = typeLine?.includes("Creature") ?? (["creature", "synergy", "wincon", "ramp", "draw"].includes(role) && !isLand);
   return {
     id,
     name,
-    typeLine: isLand ? "Land" : isCreature ? "Creature - Spell" : role === "removal" ? "Instant" : "Spell",
-    oracleText: isLand ? "Tap: Add mana." : `Mock ${role} card. Full rules text will come from card data lookup.`,
-    manaValue: isLand ? 0 : role === "ramp" ? 2 : role === "removal" ? 2 : 4,
-    colors: isLand ? [] : colors.slice(0, 1),
+    typeLine: typeLine ?? (isLand ? "Land" : isCreature ? "Creature - Spell" : role === "removal" ? "Instant" : "Spell"),
+    oracleText: deckCard.card?.oracleText ?? (isLand ? "Tap: Add mana." : `Mock ${role} card. Full rules text will come from card data lookup.`),
+    manaValue: deckCard.card?.manaValue ?? (isLand ? 0 : role === "ramp" ? 2 : role === "removal" ? 2 : 4),
+    colors: deckCard.card?.colors ?? (isLand ? [] : colors.slice(0, 1)),
+    colorIdentity: deckCard.card?.colorIdentity ?? colors,
+    imageUris: deckCard.card?.imageUris,
+    faces: deckCard.card?.faces,
     role,
     zone,
-    power: isCreature ? "2" : undefined,
-    toughness: isCreature ? "2" : undefined
+    power: deckCard.card?.power ?? (isCreature ? "2" : undefined),
+    toughness: deckCard.card?.toughness ?? (isCreature ? "2" : undefined)
   };
 }

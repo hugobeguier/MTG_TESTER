@@ -23,6 +23,7 @@ export function VisualCard({
 }) {
   const colorClass = card.colors.length === 0 ? "card-colorless" : `card-${card.colors[0].toLowerCase()}`;
   const counters = card.counters?.map((counter) => `${counter.count} ${counter.kind}`).join(", ");
+  const imageUrl = card.imageUris?.normal ?? card.imageUris?.large ?? card.faces?.[0]?.imageUris?.normal;
 
   return (
     <article
@@ -32,12 +33,15 @@ export function VisualCard({
       aria-pressed={selected}
       onClick={() => onClick?.(card)}
     >
-      <header className="visual-card-header">
-        <strong>{card.name}</strong>
-        <span>{card.manaValue}</span>
-      </header>
-      <p className="type-line">{card.typeLine}</p>
-      <p className="oracle-text">{card.oracleText}</p>
+      {imageUrl ? <img className="visual-card-image" src={imageUrl} alt="" loading="lazy" /> : null}
+      <div className={imageUrl ? "visual-card-fallback sr-only" : "visual-card-fallback"}>
+        <header className="visual-card-header">
+          <strong>{card.name}</strong>
+          <span>{card.manaValue}</span>
+        </header>
+        <p className="type-line">{card.typeLine}</p>
+        <p className="oracle-text">{card.oracleText}</p>
+      </div>
       <footer className="visual-card-footer">
         <div className="badges" aria-label={`${card.name} state`}>
           {card.commander ? <span>Commander</span> : null}

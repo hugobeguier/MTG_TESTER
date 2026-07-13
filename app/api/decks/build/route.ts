@@ -1,17 +1,43 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createDeckFromCards } from "@/lib/deckParser";
+import { loadCardCatalog, lookupCard } from "@/lib/cardCatalog";
 import { requestCommanderDeck } from "@/lib/ollama";
 import { createSampleDeck } from "@/lib/sampleDecks";
+import { createDeckFromList } from "@/lib/deckParser";
 
 const BuildDeckRequestSchema = z.object({
   agentName: z.string().min(1),
   commander: z.string().min(1),
-  colors: z.array(z.enum(["W", "U", "B", "R", "G"])).default([])
+  colors: z.array(z.enum(["W", "U", "B", "R", "G"])).default([]),
+  deckList: z.string().optional()
 });
 
 export async function POST(request: NextRequest) {
   const input = BuildDeckRequestSchema.parse(await request.json());
+  const catalog = loadCardCatalog();
+  const lookup = { lookup: (name: string) => lookupCard(catalog, name) };
+
+  if (input.deckList?.trim()) {
+    const deck = createDeckFromList({
+      owner: input.agentName,
+      commander: input.commander,
+      deckList: input.deckList,
+      colors: input.colors,
+      catalog: lookup
+    });
+
+    return NextResponse.json({
+      source: "decklist",
+      catalog: {
+        source: catalog.source,
+        cardCount: catalog.cards.length,
+        loadedAt: catalog.loadedAt
+      },
+      message: deck.validation.legal ? "Deck list is legal and enriched with real card data." : deck.validation.errors[0] ?? "Deck needs fixes.",
+      deck
+    });
+  }
 
   try {
     const generated = await requestCommanderDeck({
@@ -23,7 +49,8 @@ export async function POST(request: NextRequest) {
       commander: generated.commander || input.commander,
       colors: generated.colors.length > 0 ? generated.colors : input.colors,
       cards: generated.cards,
-      name: `${generated.commander || input.commander} Ollama Deck`
+      name: `${generated.commander || input.commander} Ollama Deck`,
+      catalog: lookup
     });
 
     if (!deck.validation.legal) {
@@ -38,17 +65,35 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       source: "ollama",
       message: generated.notes ?? "Ollama built and validated this Bracket 3 deck.",
+      catalog: {
+        source: catalog.source,
+        cardCount: catalog.cards.length,
+        loadedAt: catalog.loadedAt
+      },
       deck
     });
   } catch (error) {
     const fallback = createSampleDeck(input.agentName, input.commander, input.colors);
+    const deck = createDeckFromCards({
+      owner: fallback.createdBy,
+      commander: fallback.commander,
+      colors: fallback.colors,
+      cards: fallback.cards,
+      name: fallback.name,
+      catalog: lookup
+    });
     return NextResponse.json({
       source: "fallback",
       message:
         error instanceof Error
           ? `Ollama is unavailable or returned invalid JSON: ${error.message}. Used local role-based fallback.`
           : "Ollama is unavailable. Used local role-based fallback.",
-      deck: fallback
+      catalog: {
+        source: catalog.source,
+        cardCount: catalog.cards.length,
+        loadedAt: catalog.loadedAt
+      },
+      deck
     });
   }
 }

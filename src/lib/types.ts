@@ -12,20 +12,50 @@ export type AgentName = "Veyra" | "Malik" | "Sable";
 
 export interface CardRecord {
   id: string;
+  oracleId?: string;
   name: string;
   typeLine: string;
   oracleText: string;
   manaValue: number;
   colors: string[];
   colorIdentity: string[];
+  producedMana?: string[];
+  rarity?: string;
+  set?: string;
+  collectorNumber?: string;
+  power?: string;
+  toughness?: string;
+  imageUris?: CardImageUris;
+  faces?: CardFaceRecord[];
   legalities?: Record<string, string>;
   isGameChanger?: boolean;
+}
+
+export interface CardImageUris {
+  small?: string;
+  normal?: string;
+  large?: string;
+  png?: string;
+  artCrop?: string;
+  borderCrop?: string;
+}
+
+export interface CardFaceRecord {
+  name: string;
+  typeLine: string;
+  oracleText: string;
+  colors: string[];
+  power?: string;
+  toughness?: string;
+  imageUris?: CardImageUris;
 }
 
 export interface DeckCard {
   name: string;
   count: number;
   role?: string;
+  cardId?: string;
+  card?: CardRecord;
 }
 
 export interface CommanderDeck {
@@ -34,6 +64,7 @@ export interface CommanderDeck {
   commander: string;
   bracket: 3;
   colors: string[];
+  commanderCard?: CardRecord;
   cards: DeckCard[];
   createdBy: string;
   createdAt: string;
@@ -80,6 +111,9 @@ export interface VisibleCard {
   oracleText: string;
   manaValue: number;
   colors: string[];
+  colorIdentity?: string[];
+  imageUris?: CardImageUris;
+  faces?: CardFaceRecord[];
   role: string;
   zone: ZoneName;
   tapped?: boolean;
@@ -87,6 +121,10 @@ export interface VisibleCard {
   attacking?: boolean;
   blocking?: boolean;
   commander?: boolean;
+  battlefieldPosition?: {
+    x: number;
+    z: number;
+  };
   power?: string;
   toughness?: string;
   counters?: Array<{

@@ -1,10 +1,14 @@
-import type { CommanderDeck, DeckCard } from "./types";
+import type { CardRecord, CommanderDeck, DeckCard } from "./types";
 import { scoreDeck, validateBracketThreeDeck } from "./bracketPolicy";
 
 export interface ParsedDeckList {
   commander?: string;
   cards: DeckCard[];
   errors: string[];
+}
+
+export interface DeckCardLookup {
+  lookup(name: string): CardRecord | undefined;
 }
 
 const COUNTED_LINE = /^(\d+)\s+(.+?)\s*$/;
@@ -58,22 +62,28 @@ export function createDeckFromList(input: {
   commander?: string;
   deckList: string;
   colors?: string[];
+  catalog?: DeckCardLookup;
 }): CommanderDeck {
   const parsed = parseDeckList(input.deckList, input.commander);
-  const commander = parsed.commander ?? input.commander?.trim() ?? "Unknown Commander";
-  const validation = validateBracketThreeDeck({ commander, cards: parsed.cards });
+  const commanderRecord = input.catalog && parsed.commander ? input.catalog.lookup(parsed.commander) : undefined;
+  const commander = commanderRecord?.name ?? parsed.commander ?? input.commander?.trim() ?? "Unknown Commander";
+  const cards = enrichParsedCards(parsed.cards, input.catalog);
+  const unknownErrors = input.catalog ? cards.filter((card) => !card.card).map((card) => `Unknown card: ${card.name}.`) : [];
+  const colors = commanderRecord?.colorIdentity ?? input.colors ?? [];
+  const validation = validateBracketThreeDeck({ commander, cards, colors, commanderCard: commanderRecord });
   const deck: CommanderDeck = {
     id: slug(`${input.owner}-${commander}`),
     name: `${commander} Deck List`,
     commander,
     bracket: 3,
-    colors: input.colors ?? [],
-    cards: parsed.cards,
+    colors,
+    commanderCard: commanderRecord,
+    cards,
     createdBy: input.owner,
     createdAt: new Date().toISOString(),
     validation: {
       ...validation,
-      errors: [...parsed.errors, ...validation.errors]
+      errors: [...parsed.errors, ...unknownErrors, ...validation.errors]
     },
     score: {
       total: 0,
@@ -97,18 +107,24 @@ export function createDeckFromCards(input: {
   cards: DeckCard[];
   colors?: string[];
   name?: string;
+  catalog?: DeckCardLookup;
 }): CommanderDeck {
-  const validation = validateBracketThreeDeck({ commander: input.commander, cards: input.cards });
+  const commanderRecord = input.catalog?.lookup(input.commander);
+  const cards = enrichParsedCards(input.cards, input.catalog);
+  const unknownErrors = input.catalog ? cards.filter((card) => !card.card).map((card) => `Unknown card: ${card.name}.`) : [];
+  const colors = commanderRecord?.colorIdentity ?? input.colors ?? [];
+  const validation = validateBracketThreeDeck({ commander: commanderRecord?.name ?? input.commander, cards, colors, commanderCard: commanderRecord });
   const deck: CommanderDeck = {
     id: slug(`${input.owner}-${input.commander}`),
     name: input.name ?? `${input.commander} Generated Deck`,
-    commander: input.commander,
+    commander: commanderRecord?.name ?? input.commander,
     bracket: 3,
-    colors: input.colors ?? [],
-    cards: input.cards,
+    colors,
+    commanderCard: commanderRecord,
+    cards,
     createdBy: input.owner,
     createdAt: new Date().toISOString(),
-    validation,
+    validation: { ...validation, errors: [...unknownErrors, ...validation.errors], legal: unknownErrors.length === 0 && validation.legal },
     score: {
       total: 0,
       curve: 0,
@@ -122,6 +138,23 @@ export function createDeckFromCards(input: {
   };
   deck.score = scoreDeck(deck);
   return deck;
+}
+
+function enrichParsedCards(cards: DeckCard[], catalog?: DeckCardLookup) {
+  if (!catalog) return cards;
+  return cards.map((card) => {
+    const record = catalog.lookup(card.name);
+    return record ? { ...card, name: record.name, cardId: record.id, card: record, role: card.role ?? inferRoleFromRecord(record) } : card;
+  });
+}
+
+function inferRoleFromRecord(card: CardRecord) {
+  if (card.typeLine.includes("Land")) return "land";
+  if (card.typeLine.includes("Creature")) return "creature";
+  if (card.typeLine.includes("Artifact") && /add .*mana|mana of any color/i.test(card.oracleText)) return "ramp";
+  if (/draw.*card/i.test(card.oracleText)) return "draw";
+  if (/destroy target|exile target|counter target/i.test(card.oracleText)) return "removal";
+  return "spell";
 }
 
 function addCard(cards: Map<string, DeckCard>, name: string, count: number, role?: string) {

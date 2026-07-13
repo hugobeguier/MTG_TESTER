@@ -62,6 +62,34 @@ textarea {
   min-height: 100vh;
 }
 
+.app-shell.game-shell {
+  position: relative;
+}
+
+.game-back-button {
+  align-items: center;
+  background: rgba(20, 24, 18, 0.86);
+  border: 1px solid rgba(242, 240, 232, 0.2);
+  border-radius: 999px;
+  color: var(--text);
+  display: flex;
+  font-size: 1.45rem;
+  height: 40px;
+  justify-content: center;
+  line-height: 1;
+  padding: 0;
+  position: absolute;
+  right: 1rem;
+  top: 1rem;
+  width: 40px;
+  z-index: 10;
+}
+
+.game-back-button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .topbar,
 .game-table,
 .workbench,
@@ -271,8 +299,10 @@ h3 {
 .three-game-shell {
   background: #090b08;
   border-top: 1px solid var(--line);
-  height: min(78vh, 900px);
-  min-height: 620px;
+  display: grid;
+  grid-template-rows: minmax(460px, 1fr) auto;
+  height: 100vh;
+  min-height: 680px;
   overflow: hidden;
   position: relative;
   width: 100%;
@@ -280,7 +310,14 @@ h3 {
 
 .three-board {
   height: 100%;
+  min-height: 0;
+  position: relative;
   width: 100%;
+}
+
+.three-board.is-drop-target {
+  outline: 2px solid rgba(244, 201, 93, 0.75);
+  outline-offset: -6px;
 }
 
 .three-board canvas {
@@ -309,18 +346,110 @@ h3 {
 }
 
 .three-hud.top-right {
-  right: 1rem;
+  right: 4.5rem;
   top: 1rem;
 }
 
 .three-hud.bottom-left {
-  bottom: 1rem;
+  bottom: calc(188px + 1rem);
   left: 1rem;
 }
 
 .three-hud.bottom-right {
-  bottom: 1rem;
+  bottom: calc(188px + 1rem);
   right: 1rem;
+}
+
+.three-hand-panel {
+  background: rgba(10, 12, 10, 0.96);
+  border-top: 1px solid rgba(242, 240, 232, 0.16);
+  display: grid;
+  gap: 0.55rem;
+  min-height: 188px;
+  padding: 0.75rem 1rem 0.9rem;
+  position: relative;
+  z-index: 4;
+}
+
+.three-hand-heading {
+  align-items: center;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+}
+
+.three-hand-heading strong {
+  color: var(--text);
+}
+
+.three-hand-heading span {
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+}
+
+.three-hand-row {
+  display: flex;
+  gap: 0.65rem;
+  min-height: 136px;
+  overflow-x: auto;
+  overflow-y: visible;
+  padding: 0.3rem 0.25rem 0.8rem;
+}
+
+.three-hand-card {
+  aspect-ratio: 488 / 680;
+  background: #111;
+  border: 1px solid rgba(242, 240, 232, 0.22);
+  border-radius: 8px;
+  cursor: pointer;
+  flex: 0 0 96px;
+  overflow: hidden;
+  position: relative;
+  transform-origin: bottom center;
+  transition: transform 130ms ease, box-shadow 130ms ease, border-color 130ms ease, opacity 130ms ease;
+}
+
+.three-hand-card:hover,
+.three-hand-card:focus-within {
+  border-color: rgba(244, 201, 93, 0.75);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+  transform: translateY(-18px) scale(1.28);
+  z-index: 5;
+}
+
+.three-hand-card.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(244, 201, 93, 0.5);
+}
+
+.three-hand-card.dragging {
+  opacity: 0.48;
+}
+
+.three-hand-card img {
+  display: block;
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.three-hand-fallback {
+  color: var(--text);
+  display: grid;
+  gap: 0.5rem;
+  height: 100%;
+  padding: 0.55rem;
+}
+
+.three-hand-fallback strong {
+  font-size: 0.72rem;
+  line-height: 1.15;
+}
+
+.three-hand-fallback span {
+  color: var(--muted);
+  font-size: 0.62rem;
 }
 
 .three-hud strong {
@@ -346,6 +475,12 @@ h3 {
 .hud-card-detail {
   display: grid;
   gap: 0.35rem;
+}
+
+.hud-card-detail img {
+  border-radius: 6px;
+  max-height: 220px;
+  width: min(100%, 158px);
 }
 
 .hud-card-detail p {
@@ -590,6 +725,36 @@ h3 {
   overflow: hidden;
   padding: 0.65rem;
   position: relative;
+}
+
+.visual-card-image {
+  border-radius: 6px;
+  height: 100%;
+  inset: 0;
+  object-fit: cover;
+  position: absolute;
+  width: 100%;
+  z-index: 0;
+}
+
+.visual-card-fallback,
+.visual-card-footer {
+  position: relative;
+  z-index: 1;
+}
+
+.visual-card:has(.visual-card-image) {
+  aspect-ratio: 488 / 680;
+  background: #111;
+  min-height: 0;
+  padding: 0.45rem;
+}
+
+.visual-card:has(.visual-card-image) .visual-card-footer {
+  align-self: end;
+  background: rgba(0, 0, 0, 0.58);
+  border-radius: 6px;
+  padding: 0.35rem;
 }
 
 .visual-card.is-compact {

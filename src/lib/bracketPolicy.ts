@@ -1,4 +1,4 @@
-import type { CommanderDeck, DeckValidationReport } from "./types";
+import type { CardRecord, CommanderDeck, DeckValidationReport } from "./types";
 
 const BASIC_LANDS = new Set([
   "Plains",
@@ -30,21 +30,33 @@ export const GAME_CHANGERS = new Set([
 ]);
 
 export function validateBracketThreeDeck(
-  deck: Pick<CommanderDeck, "commander" | "cards">
+  deck: Pick<CommanderDeck, "commander" | "cards"> & { colors?: string[]; commanderCard?: CardRecord }
 ): DeckValidationReport {
   const errors: string[] = [];
   const warnings: string[] = [];
   const total = deck.cards.reduce((sum, card) => sum + card.count, 0);
   const nonBasicDuplicates = deck.cards.filter(
-    (card) => card.count > 1 && !BASIC_LANDS.has(card.name)
+    (card) => card.count > 1 && !isBasicLand(card)
   );
   const gameChangerCount = deck.cards.reduce(
-    (sum, card) => sum + (GAME_CHANGERS.has(card.name) ? card.count : 0),
+    (sum, card) => sum + (isGameChanger(card.name, card.card) ? card.count : 0),
     0
   );
 
   if (!deck.commander.trim()) {
     errors.push("A Commander deck must name a commander.");
+  }
+
+  if (deck.commanderCard) {
+    const canBeCommander =
+      (deck.commanderCard.typeLine.includes("Legendary") && deck.commanderCard.typeLine.includes("Creature")) ||
+      /can be your commander/i.test(deck.commanderCard.oracleText);
+    if (!canBeCommander) {
+      errors.push(`${deck.commanderCard.name} is not a legendary creature commander in this validator.`);
+    }
+    if (deck.commanderCard.legalities?.commander && deck.commanderCard.legalities.commander !== "legal") {
+      errors.push(`${deck.commanderCard.name} is not legal in Commander.`);
+    }
   }
 
   if (total !== 100) {
@@ -53,6 +65,18 @@ export function validateBracketThreeDeck(
 
   for (const duplicate of nonBasicDuplicates) {
     errors.push(`${duplicate.name} appears ${duplicate.count} times; non-basic cards must be singleton.`);
+  }
+
+  const commanderColors = new Set(deck.commanderCard?.colorIdentity ?? deck.colors ?? []);
+  for (const card of deck.cards) {
+    if (!card.card) continue;
+    if (card.card.legalities?.commander && card.card.legalities.commander !== "legal") {
+      errors.push(`${card.card.name} is not legal in Commander.`);
+    }
+    const offColor = card.card.colorIdentity.filter((color) => !commanderColors.has(color));
+    if ((deck.commanderCard || commanderColors.size > 0) && offColor.length > 0) {
+      errors.push(`${card.card.name} has color identity ${card.card.colorIdentity.join("")}, outside commander identity ${[...commanderColors].join("")}.`);
+    }
   }
 
   if (gameChangerCount > 3) {
@@ -68,14 +92,14 @@ export function validateBracketThreeDeck(
     errors,
     warnings,
     cardCount: total,
-    uniqueNonBasicCount: deck.cards.filter((card) => !BASIC_LANDS.has(card.name)).length,
+    uniqueNonBasicCount: deck.cards.filter((card) => !isBasicLand(card)).length,
     gameChangerCount
   };
 }
 
 export function scoreDeck(deck: Pick<CommanderDeck, "cards" | "validation">) {
   const landCount = deck.cards
-    .filter((card) => card.role === "land" || BASIC_LANDS.has(card.name))
+    .filter((card) => card.role === "land" || isBasicLand(card))
     .reduce((sum, card) => sum + card.count, 0);
   const rampCount = deck.cards.filter((card) => card.role === "ramp").length;
   const drawCount = deck.cards.filter((card) => card.role === "draw").length;
@@ -96,6 +120,14 @@ export function scoreDeck(deck: Pick<CommanderDeck, "cards" | "validation">) {
 
   const total = Math.round((curve + mana + interaction + synergy + resilience + bracketFit) / 6);
   return { total, curve, mana, interaction, synergy, resilience, bracketFit, notes };
+}
+
+function isBasicLand(card: CommanderDeck["cards"][number]) {
+  return BASIC_LANDS.has(card.name) || card.card?.typeLine.includes("Basic Land") === true;
+}
+
+function isGameChanger(name: string, card?: CardRecord) {
+  return card?.isGameChanger === true || GAME_CHANGERS.has(name);
 }
 
 function clampScore(value: number) {
