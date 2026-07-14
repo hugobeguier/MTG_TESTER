@@ -164,3 +164,37 @@ Then start the web app from the second terminal:
 cd D:\MTG-AI
 npm.cmd run dev -- --hostname 127.0.0.1 --port 3001
 ```
+
+# TO RESTART ALL FOLLOW THIS:
+
+To fully restart it cleanly:
+
+  1. Stop the Next app terminal:
+
+  Ctrl + C
+
+  2. If rendering looks stale or broken, clear Next’s cache:
+
+  cd D:\MTG-AI
+  Remove-Item -LiteralPath .next -Recurse -Force
+
+  3. Start the app again:
+
+  npm.cmd run dev -- --hostname 127.0.0.1 --port 3001
+
+  4. Open:
+
+  http://127.0.0.1:3001
+
+  For Ollama: if you already have Ollama running, do not start another ollama serve. That “bind” error means it is
+  already running. You can check with:
+
+  ollama list
+
+  About cards losing their design: that usually means the browser or Next dev server is holding stale rendered state/
+  assets. After restarting, do a hard refresh in the browser:
+
+  Ctrl + Shift + R
+
+  If it still happens after that, it is likely not a restart issue anymore. Then it is probably a card image/render
+  fallback bug, especially for cards on the battlefield.

@@ -26,6 +26,7 @@ export interface CardRecord {
   collectorNumber?: string;
   power?: string;
   toughness?: string;
+  loyalty?: string;
   imageUris?: CardImageUris;
   faces?: CardFaceRecord[];
   legalities?: Record<string, string>;
@@ -46,8 +47,10 @@ export interface CardFaceRecord {
   typeLine: string;
   oracleText: string;
   colors: string[];
+  manaCost?: string;
   power?: string;
   toughness?: string;
+  loyalty?: string;
   imageUris?: CardImageUris;
 }
 
@@ -100,10 +103,22 @@ export interface PlayerSeat {
   agentName?: AgentName;
   life: number;
   commanderDamage: Record<string, number>;
+  hasLost?: boolean;
+  lossReason?: string;
   deck?: CommanderDeck;
   library?: VisibleCard[];
   zones: Record<ZoneName, number>;
   board: PlayerBoardState;
+}
+
+export interface InterpretedEffect {
+  kind: "attack_tax";
+  amountPerAttacker: number;
+  formula?: "enchantment_count";
+  appliesTo: "controller" | "planeswalkers" | "both";
+  sourceCardId: string;
+  sourceCardName: string;
+  interpretedBy: "deterministic" | "ollama";
 }
 
 export interface VisibleCard {
@@ -118,20 +133,29 @@ export interface VisibleCard {
   producedMana?: string[];
   imageUris?: CardImageUris;
   faces?: CardFaceRecord[];
+  unlockedFaceIndices?: number[];
+  interpretedEffects?: InterpretedEffect[];
   role: string;
   zone: ZoneName;
   tapped?: boolean;
   summoningSick?: boolean;
   attacking?: boolean;
+  attackTargetId?: string;
+  blockDecided?: boolean;
   blocking?: boolean;
+  blockingTargetId?: string;
   commander?: boolean;
   commanderTax?: number;
+  token?: boolean;
+  tokenSourceCardId?: string;
+  ownerSeatId?: string;
   battlefieldPosition?: {
     x: number;
     z: number;
   };
   power?: string;
   toughness?: string;
+  loyalty?: string;
   counters?: Array<{
     kind: string;
     count: number;
@@ -158,6 +182,7 @@ export interface GameSession {
   id: string;
   createdAt: string;
   status: "lobby" | "deckbuilding" | "ready" | "playing" | "complete";
+  winnerSeatId?: string;
   activePlayerId?: string;
   phase: string;
   turn: number;
@@ -177,11 +202,13 @@ export interface AgentAction {
     | "mulligan"
     | "play_land"
     | "cast_spell"
+    | "cast_commander"
     | "activate_ability"
     | "attack"
     | "block"
     | "pass_priority"
     | "end_turn";
+  legalActionId?: string;
   targetIds: string[];
   cardId?: string;
   manaPlan?: string;

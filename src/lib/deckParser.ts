@@ -149,12 +149,29 @@ function enrichParsedCards(cards: DeckCard[], catalog?: DeckCardLookup) {
 }
 
 function inferRoleFromRecord(card: CardRecord) {
+  const spellFace = modalDfcSpellFace(card);
+  if (spellFace) {
+    if (spellFace.typeLine.includes("Creature")) return "creature";
+    if (/draw.*card/i.test(spellFace.oracleText)) return "draw";
+    if (/destroy target|exile target|counter target/i.test(spellFace.oracleText)) return "removal";
+    return "spell";
+  }
   if (card.typeLine.includes("Land")) return "land";
   if (card.typeLine.includes("Creature")) return "creature";
   if (card.typeLine.includes("Artifact") && /add .*mana|mana of any color/i.test(card.oracleText)) return "ramp";
   if (/draw.*card/i.test(card.oracleText)) return "draw";
   if (/destroy target|exile target|counter target/i.test(card.oracleText)) return "removal";
   return "spell";
+}
+
+// A modal double-faced "spell // land" card's combined typeLine (e.g. "Sorcery // Land")
+// would otherwise be misread as a land by the plain substring check above.
+function modalDfcSpellFace(card: CardRecord) {
+  if (!card.faces || card.faces.length !== 2) return undefined;
+  const [first, second] = card.faces;
+  if (!first.typeLine.includes("Land") && second.typeLine.includes("Land")) return first;
+  if (first.typeLine.includes("Land") && !second.typeLine.includes("Land")) return second;
+  return undefined;
 }
 
 function addCard(cards: Map<string, DeckCard>, name: string, count: number, role?: string) {

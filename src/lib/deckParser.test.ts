@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { createDeckFromList, parseDeckList } from "./deckParser";
+import { createDeckFromCards, createDeckFromList, parseDeckList } from "./deckParser";
+import type { CardRecord } from "./types";
 
 describe("parseDeckList", () => {
   it("accepts common counted deck list lines", () => {
@@ -45,5 +46,32 @@ describe("parseDeckList", () => {
       { name: "Sol Ring", count: 1, role: "ramp" },
       { name: "Island", count: 6, role: "land" }
     ]);
+  });
+
+  it("infers role from the spell face of a modal double-faced spell // land card, not the combined type line", () => {
+    const mdfc: CardRecord = {
+      id: "mdfc-1",
+      name: "Sea Gate Restoration // Sea Gate, Reborn",
+      typeLine: "Sorcery // Land",
+      oracleText: "Draw cards equal to the number of cards in your hand plus one.",
+      manaCost: "{4}{U}{U}{U}",
+      manaValue: 7,
+      colors: ["U"],
+      colorIdentity: ["U"],
+      faces: [
+        { name: "Sea Gate Restoration", typeLine: "Sorcery", oracleText: "Draw cards equal to the number of cards in your hand plus one.", colors: ["U"], manaCost: "{4}{U}{U}{U}" },
+        { name: "Sea Gate, Reborn", typeLine: "Land", oracleText: "{T}: Add {U}.", colors: [] }
+      ]
+    };
+    const catalog = { lookup: (name: string) => (name === "Sea Gate Restoration // Sea Gate, Reborn" ? mdfc : undefined) };
+    const deck = createDeckFromCards({
+      owner: "test",
+      commander: "Aminatou, Veil Piercer",
+      cards: [{ name: "Sea Gate Restoration // Sea Gate, Reborn", count: 1 }],
+      catalog
+    });
+
+    expect(deck.cards[0].role).not.toBe("land");
+    expect(deck.cards[0].role).toBe("draw");
   });
 });

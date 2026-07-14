@@ -68,6 +68,21 @@ export function deterministicRuleWorkflow(input: RuleAdvisorInput): RuleWorkflow
     };
   }
 
+  // A land whose entire text is just its tapped-entry condition plus a mana ability (e.g. check
+  // lands, most tap-lands) has nothing left for the advisor to do — that condition is already
+  // evaluated automatically. Lands with a genuine extra trigger (Bojuka Bog's exile, Halimar
+  // Depths' reorder, ...) have a line that doesn't match either shape, so they fall through as before.
+  if (isOnlyTappedConditionText(input.sourceCard.oracleText)) {
+    return {
+      workflow: "none",
+      summary: `${input.sourceCard.name}'s tapped-entry condition is evaluated automatically; no additional workflow is needed.`,
+      sourceCardId: input.sourceCard.id,
+      maxChoices: 0,
+      requiresHumanChoice: false,
+      warnings: []
+    };
+  }
+
   const scryCount = extractKeywordCount(text, "scry");
   if (scryCount) {
     return {
@@ -92,18 +107,8 @@ export function deterministicRuleWorkflow(input: RuleAdvisorInput): RuleWorkflow
     };
   }
 
-  const drawCount = extractDrawCount(text);
-  if (drawCount) {
-    return {
-      workflow: "draw_cards",
-      summary: `${input.sourceCard.name} instructs ${input.actorName} to draw ${drawCount} card${drawCount === 1 ? "" : "s"}.`,
-      sourceCardId: input.sourceCard.id,
-      maxChoices: drawCount,
-      requiresHumanChoice: false,
-      warnings: []
-    };
-  }
-
+  // Checked before the plain draw count below: a card that both reorders its top cards and
+  // later says "draw a card" (e.g. Ponder) must not be short-circuited into just drawing.
   const lookCount = extractLookAtTopCount(text);
   if (lookCount && (text.includes("put them back in any order") || text.includes("put those cards back in any order"))) {
     return {
@@ -112,7 +117,7 @@ export function deterministicRuleWorkflow(input: RuleAdvisorInput): RuleWorkflow
       sourceCardId: input.sourceCard.id,
       maxChoices: lookCount,
       requiresHumanChoice: true,
-      warnings: []
+      warnings: extractDrawCount(text) ? [`${input.sourceCard.name} also draws a card after this resolves; that follow-up draw is not yet automated.`] : []
     };
   }
 
@@ -124,6 +129,18 @@ export function deterministicRuleWorkflow(input: RuleAdvisorInput): RuleWorkflow
       maxChoices: lookCount,
       requiresHumanChoice: true,
       warnings: ["This opens a look window; exact follow-up placement still needs a specific workflow."]
+    };
+  }
+
+  const drawCount = extractDrawCount(text);
+  if (drawCount) {
+    return {
+      workflow: "draw_cards",
+      summary: `${input.sourceCard.name} instructs ${input.actorName} to draw ${drawCount} card${drawCount === 1 ? "" : "s"}.`,
+      sourceCardId: input.sourceCard.id,
+      maxChoices: drawCount,
+      requiresHumanChoice: false,
+      warnings: []
     };
   }
 
@@ -183,6 +200,18 @@ export function deterministicRuleWorkflow(input: RuleAdvisorInput): RuleWorkflow
 
 function isUpkeepTriggeredText(text: string) {
   return text.includes("at the beginning of your upkeep") || text.includes("at the beginning of each upkeep");
+}
+
+function isOnlyTappedConditionText(oracleText: string): boolean {
+  const lines = oracleText
+    .toLowerCase()
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length === 0) return false;
+  return lines.every(
+    (line) => /\bthis land enters (?:the battlefield )?tapped\b/.test(line) || /^\{t\}/.test(line)
+  );
 }
 
 function extractKeywordCount(text: string, keyword: "scry" | "surveil") {

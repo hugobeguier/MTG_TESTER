@@ -7,17 +7,22 @@ const AgentActionSchema = z.object({
     "mulligan",
     "play_land",
     "cast_spell",
+    "cast_commander",
     "activate_ability",
     "attack",
     "block",
     "pass_priority",
     "end_turn"
   ]),
+  legalActionId: z.string().optional(),
   targetIds: z.array(z.string()).default([]),
   cardId: z.string().optional(),
   manaPlan: z.string().optional(),
   reason: z.string().min(1),
-  fallbackAction: z.enum(["pass_priority", "end_turn"])
+  fallbackAction: z
+    .string()
+    .default("pass_priority")
+    .transform((value): "pass_priority" | "end_turn" => (value === "end_turn" ? "end_turn" : "pass_priority"))
 });
 
 const OllamaDeckCardSchema = z.object({
@@ -74,6 +79,7 @@ export async function requestAgentAction(input: {
         type: "object",
         properties: {
           actionType: { type: "string" },
+          legalActionId: { type: "string" },
           targetIds: { type: "array", items: { type: "string" } },
           cardId: { type: "string" },
           manaPlan: { type: "string" },

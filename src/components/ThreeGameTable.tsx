@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type DragEvent, type MutableRefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent, type MutableRefObject, type PointerEvent as ReactPointerEvent } from "react";
 import * as THREE from "three";
 import type { GameSession, PlayerSeat, VisibleCard } from "@/lib/types";
+import { effectivePower, effectiveToughness } from "@/lib/counters";
 
 type ManaColor = "W" | "U" | "B" | "R" | "G" | "C";
 type ManaPool = Record<ManaColor, number>;
@@ -12,11 +13,18 @@ interface ThreeGameTableProps {
   prioritySeatId?: string;
   selectedCardId?: string;
   selectedCardCanRespond?: boolean;
+  selectedCardFaceOptions?: Array<{ faceIndex: number; actionKind: "play_land" | "cast_spell"; label: string; payable: boolean }>;
+  lockedRoomDoorFaceIndex?: number;
+  humanAttackTargets?: Array<{ targetId: string; label: string }>;
   inspectedCard?: VisibleCard;
   libraryLook?: LibraryLookState;
   ruleChoice?: RuleChoiceView;
   blockChoice?: BlockChoiceView;
   myriadSearchCards?: VisibleCard[];
+  basicLandFetchSearch?: {
+    sourceCardName: string;
+    cards: VisibleCard[];
+  };
   pendingAction?: PendingActionView;
   stackActions?: PendingActionView[];
   manaPool?: ManaPool;
@@ -29,20 +37,29 @@ interface ThreeGameTableProps {
   onSelectHandCard?: (card: VisibleCard) => void;
   onDrawCard?: (seatId: string) => void;
   onPlayCard?: (seatId: string, cardId: string, position?: { x: number; z: number }) => void;
+  onPlayCardFace?: (seatId: string, cardId: string, faceIndex: number) => void;
+  onUnlockRoomDoor?: (seatId: string, cardId: string, faceIndex: number) => void;
+  onDeclareAttack?: (cardId: string, targetId: string) => void;
   onShuffleLibrary?: (seatId: string) => void;
   onOpenLibrarySearch?: () => void;
   onCloseLibrarySearch?: () => void;
   onSearchLibraryCardToHand?: (cardId: string) => void;
   onChooseNextTrigger?: (sourceCardId: string) => void;
+  onAcceptMiracle?: () => void;
+  onDeclineMiracle?: () => void;
   onCloseMyriadSearch?: () => void;
   onCompleteMyriadSearch?: (cardIds: string[]) => void;
+  onCloseBasicLandFetchSearch?: () => void;
+  onCompleteBasicLandFetchSearch?: (cardId: string) => void;
   onMoveCardToGraveyard?: (seatId: string, cardId: string) => void;
   onMoveCardToExile?: (seatId: string, cardId: string) => void;
   onMoveCardToHand?: (seatId: string, cardId: string) => void;
   onMoveBattlefieldCard?: (seatId: string, cardId: string, position: { x: number; z: number }) => void;
   onChangeCounter?: (seatId: string, cardId: string, kind: string, delta: number) => void;
+  onActivateLoyalty?: (seatId: string, cardId: string, loyaltyCost: number, abilityText: string) => void;
   onCastCommander?: (seatId: string, position?: { x: number; z: number }) => void;
   onResolveMyriadLandscape?: (seatId: string, cardId: string) => void;
+  onResolveBasicLandFetch?: (seatId: string, cardId: string) => void;
   onChangeLife?: (seatId: string, delta: number) => void;
   onScry?: (count: number) => void;
   onSurveil?: (count: number) => void;
@@ -93,7 +110,7 @@ type PendingActionView =
       actorSeatId: string;
       controllerSeatId: string;
       sourceCardName: string;
-      triggerKind: "draw";
+      triggerKind: "common";
       message: string;
     };
 
@@ -119,6 +136,12 @@ type RuleChoiceView =
       prompt: string;
       triggers: Array<{ sourceCardId: string; sourceCardName: string; text: string }>;
       orderedTriggers: Array<{ sourceCardId: string; sourceCardName: string; text: string }>;
+    }
+  | {
+      kind: "miracle_offer";
+      sourceCardName: string;
+      prompt: string;
+      miracleCost: number;
     };
 
 interface BlockChoiceView {
@@ -137,6 +160,7 @@ interface LibraryLookState {
 }
 
 type DraggedZone = "hand" | "graveyard" | "exile";
+type TableZone = "graveyard" | "exile";
 
 interface CardUserData {
   kind: "card";
@@ -144,6 +168,14 @@ interface CardUserData {
   seatId: string;
   location: "battlefield" | "command";
 }
+
+interface ZoneUserData {
+  kind: "zone";
+  seatId: string;
+  zone: TableZone;
+}
+
+type InteractionUserData = CardUserData | ZoneUserData;
 
 const TABLE_WIDTH = 24;
 const TABLE_DEPTH = 10;
@@ -156,7 +188,10 @@ const PLAYER_AREAS = [
 ];
 
 const imageTextureLoader = new THREE.TextureLoader();
+imageTextureLoader.setCrossOrigin("anonymous");
 const cardImageTextureCache = new Map<string, THREE.Texture>();
+const cardImageTexturePending = new Map<string, Promise<THREE.Texture>>();
+const failedCardImageUrls = new Set<string>();
 
 export function ThreeGameTable(props: ThreeGameTableProps) {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -175,6 +210,10 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
   const draggedBattlefieldCardRef = useRef<CardUserData | undefined>(undefined);
   const [draggingHandCardId, setDraggingHandCardId] = useState<string | undefined>();
   const [draggingZone, setDraggingZone] = useState<DraggedZone | undefined>();
+  const [zoneView, setZoneView] = useState<{ seatId: string; zone: TableZone } | undefined>();
+  const [activityOpen, setActivityOpen] = useState(false);
+  const [activityPosition, setActivityPosition] = useState({ x: 24, y: 144 });
+  const [activityDragOffset, setActivityDragOffset] = useState<{ x: number; y: number } | undefined>();
   const human = props.session.seats.find((seat) => seat.kind === "human") ?? props.session.seats[0];
   const latest = props.session.events[0];
   const phaseNotice = latest?.detail === "Phase change" ? latest : undefined;
@@ -185,6 +224,7 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
   const stackTopFirst = [...(props.stackActions ?? [])].reverse();
   const mulliganSelectedCount = props.mulliganReturnCardIds?.length ?? 0;
   const mulliganRequired = props.mulliganReturnRequired ?? 0;
+  const tableRenderKey = useMemo(() => buildTableRenderKey(props.session, props.selectedCardId), [props.session, props.selectedCardId]);
 
   propsRef.current = props;
 
@@ -284,17 +324,22 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
 
     const pickCard = (event: PointerEvent) => {
       const hit = raycastCard(event);
-      const data = hit?.object.userData as Partial<CardUserData> | undefined;
-      if (data?.kind !== "card" || !data.card) return;
-      propsRef.current.onInspectCard?.(data.card);
+      const data = hit?.object.userData as Partial<InteractionUserData> | undefined;
+      if (data?.kind === "card" && data.card) {
+        propsRef.current.onInspectCard?.(data.card);
+        return;
+      }
+      if (data?.kind === "zone" && data.seatId && data.zone) {
+        setZoneView({ seatId: data.seatId, zone: data.zone });
+      }
     };
 
     const updateHoveredCard = (event: PointerEvent) => {
       const hit = raycastCard(event);
-      const data = hit?.object.userData as Partial<CardUserData> | undefined;
+      const data = hit?.object.userData as Partial<InteractionUserData> | undefined;
       hoveredCardRef.current = data?.kind === "card" && data.card && data.seatId && data.location ? (data as CardUserData) : undefined;
       const hovered = hoveredCardRef.current;
-      renderer.domElement.style.cursor = hovered?.location === "battlefield" && hovered.seatId === propsRef.current.session.seats.find((seat) => seat.kind === "human")?.id ? "grab" : hovered ? "pointer" : "";
+      renderer.domElement.style.cursor = hovered?.location === "battlefield" && hovered.seatId === propsRef.current.session.seats.find((seat) => seat.kind === "human")?.id ? "grab" : hovered || data?.kind === "zone" ? "pointer" : "";
     };
 
     const getTablePosition = (event: PointerEvent, seatId: string) => {
@@ -450,17 +495,13 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
   }, []);
 
   useEffect(() => {
-    rebuildDynamicScene(dynamicGroupRef.current, props.session, props.selectedCardId, cardMeshesRef);
-  }, [props.session, props.selectedCardId]);
+    rebuildDynamicScene(dynamicGroupRef.current, propsRef.current.session, propsRef.current.selectedCardId, cardMeshesRef);
+  }, [tableRenderKey]);
 
   const activeName = useMemo(
     () => props.session.seats.find((seat) => seat.id === props.session.activePlayerId)?.name ?? "Active player",
     [props.session]
   );
-
-  function resetCamera() {
-    cameraState.current = { yaw: 0, pitch: -0.85, distance: 18, target: new THREE.Vector3(0, 0, 0) };
-  }
 
   function onCardDragStart(event: DragEvent<HTMLElement>, card: VisibleCard, zone: DraggedZone) {
     if (props.gameStage !== "playing") {
@@ -473,6 +514,30 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
     setDraggingHandCardId(card.id);
     setDraggingZone(zone);
     if (zone === "hand") props.onSelectHandCard?.(card);
+  }
+
+  function beginActivityDrag(event: ReactPointerEvent<HTMLElement>) {
+    const panel = event.currentTarget.closest<HTMLElement>(".activity-panel");
+    if (!panel) return;
+    const rect = panel.getBoundingClientRect();
+    setActivityDragOffset({ x: event.clientX - rect.left, y: event.clientY - rect.top });
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function moveActivityPanel(event: ReactPointerEvent<HTMLElement>) {
+    if (!activityDragOffset) return;
+    const width = 360;
+    const height = 260;
+    setActivityPosition({
+      x: Math.max(8, Math.min(window.innerWidth - width - 8, event.clientX - activityDragOffset.x)),
+      y: Math.max(8, Math.min(window.innerHeight - height - 8, event.clientY - activityDragOffset.y))
+    });
+  }
+
+  function endActivityDrag(event: ReactPointerEvent<HTMLElement>) {
+    if (!activityDragOffset) return;
+    setActivityDragOffset(undefined);
+    event.currentTarget.releasePointerCapture(event.pointerId);
   }
 
   function onCardDragEnd() {
@@ -512,24 +577,17 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
     setDraggingHandCardId(undefined);
     setDraggingZone(undefined);
     if (!cardId || props.gameStage !== "playing" || zone !== "hand") return;
-    props.onPlayCard?.(human.id, cardId, getClampedDropPosition(event));
-  }
-
-  function onGraveyardDragOver(event: DragEvent<HTMLDivElement>) {
-    if (props.gameStage !== "playing") return;
-    const { zone } = getDraggedCard(event);
-    if (zone !== "hand") return;
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "move";
-  }
-
-  function onGraveyardDrop(event: DragEvent<HTMLDivElement>) {
-    event.preventDefault();
-    const { cardId, zone } = getDraggedCard(event);
-    setDraggingHandCardId(undefined);
-    setDraggingZone(undefined);
-    if (!cardId || zone !== "hand") return;
-    props.onMoveCardToGraveyard?.(human.id, cardId);
+    const position = getClampedDropPosition(event);
+    const tableZone = tableZoneAtPosition(props.session, human.id, position);
+    if (tableZone === "graveyard") {
+      props.onMoveCardToGraveyard?.(human.id, cardId);
+      return;
+    }
+    if (tableZone === "exile") {
+      props.onMoveCardToExile?.(human.id, cardId);
+      return;
+    }
+    props.onPlayCard?.(human.id, cardId, position);
   }
 
   function onHandDragOver(event: DragEvent<HTMLDivElement>) {
@@ -549,26 +607,7 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
     props.onMoveCardToHand?.(human.id, cardId);
   }
 
-  function onExileDragOver(event: DragEvent<HTMLDivElement>) {
-    if (props.gameStage !== "playing") return;
-    const { zone } = getDraggedCard(event);
-    if (zone !== "hand" && zone !== "graveyard") return;
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "move";
-  }
-
-  function onExileDrop(event: DragEvent<HTMLDivElement>) {
-    event.preventDefault();
-    const { cardId, zone } = getDraggedCard(event);
-    setDraggingHandCardId(undefined);
-    setDraggingZone(undefined);
-    if (!cardId || (zone !== "hand" && zone !== "graveyard")) return;
-    props.onMoveCardToExile?.(human.id, cardId);
-  }
-
   const inspectedOwner = props.inspectedCard ? findCardOwner(props.session, props.inspectedCard.id) : undefined;
-  const graveyard = human.board.graveyard ?? [];
-  const exile = human.board.exile ?? [];
 
   return (
     <section className="three-game-shell">
@@ -586,9 +625,26 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
         <small>Priority: {prioritySeat?.name ?? "None"}</small>
       </div>
       <div className="three-hud top-right">
-        <button type="button" onClick={resetCamera}>Reset Camera</button>
-        <small>WASD move | drag rotate | wheel zoom | shift/right drag pan</small>
+        <button type="button" onClick={() => setActivityOpen((current) => !current)}>Agent Activity</button>
       </div>
+      {activityOpen ? (
+        <aside className="activity-panel" style={{ left: activityPosition.x, top: activityPosition.y }}>
+          <header
+            onPointerDown={beginActivityDrag}
+            onPointerMove={moveActivityPanel}
+            onPointerUp={endActivityDrag}
+            onPointerCancel={endActivityDrag}
+          >
+            <strong>Agent Activity</strong>
+            <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => setActivityOpen(false)}>x</button>
+          </header>
+          <div className="activity-feed">
+            {recentEvents.map((event) => (
+              <p key={event.id}>{event.message}</p>
+            ))}
+          </div>
+        </aside>
+      ) : null}
       <div className="three-hud bottom-left">
         {props.gameStage === "mulligan" ? (
           <div className="hud-actions">
@@ -620,9 +676,22 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
               <strong>{human.life}</strong>
               <button type="button" onClick={() => props.onChangeLife?.(human.id, 1)}>+</button>
             </div>
-            <button type="button" disabled={!props.selectedCardId} onClick={() => props.selectedCardId && props.onPlayCard?.(human.id, props.selectedCardId)}>
-              Play Selected
-            </button>
+            {props.selectedCardFaceOptions && props.selectedCardFaceOptions.length > 0 ? (
+              props.selectedCardFaceOptions.map((option) => (
+                <button
+                  key={option.faceIndex}
+                  type="button"
+                  disabled={!option.payable}
+                  onClick={() => props.selectedCardId && props.onPlayCardFace?.(human.id, props.selectedCardId, option.faceIndex)}
+                >
+                  {option.label}
+                </button>
+              ))
+            ) : (
+              <button type="button" disabled={!props.selectedCardId} onClick={() => props.selectedCardId && props.onPlayCard?.(human.id, props.selectedCardId)}>
+                Play Selected
+              </button>
+            )}
             <button type="button" disabled={Boolean(props.pendingAction)} onClick={props.onAdvanceTurn}>Advance Phase</button>
             <button type="button" disabled={Boolean(props.pendingAction) || !humanIsActive} onClick={props.onEndTurn}>End Turn</button>
             <button type="button" disabled={!props.pendingAction || !humanHasPriority} onClick={props.onRespond}>Review Response</button>
@@ -636,8 +705,8 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
           </div>
         )}
       </div>
-      <div className="three-hud bottom-right">
-        {props.pendingAction ? (
+      {props.pendingAction ? (
+        <div className="three-hud bottom-right">
           <div className="hud-card-detail stack-detail">
             <strong>{props.pendingAction.type === "spell" ? "Stack" : props.pendingAction.type === "trigger" ? "Trigger" : "Phase Change"}</strong>
             <p>{props.pendingAction.message}</p>
@@ -654,21 +723,8 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
             ) : null}
             <span>{humanHasPriority ? "You have priority." : `${prioritySeat?.name ?? "An agent"} has priority.`}</span>
           </div>
-        ) : latest ? (
-          <div className="hud-card-detail">
-            <strong>Agent Activity</strong>
-            <div className="activity-feed">
-              {recentEvents.map((event) => (
-                <p key={event.id}>{event.message}</p>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <div className="hud-card-detail">
-            <p>Click a card to inspect it.</p>
-          </div>
-        )}
-      </div>
+        </div>
+      ) : null}
       {props.inspectedCard ? (
         <CardInspector
           card={props.inspectedCard}
@@ -689,6 +745,24 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
               ? () => props.onResolveMyriadLandscape?.(inspectedOwner.seat.id, props.inspectedCard!.id)
               : undefined
           }
+          onResolveBasicLandFetch={
+            inspectedOwner?.seat.kind === "human" && inspectedOwner.zone === "battlefield" && isBasicLandFetchAbility(props.inspectedCard)
+              ? () => props.onResolveBasicLandFetch?.(inspectedOwner.seat.id, props.inspectedCard!.id)
+              : undefined
+          }
+          onUnlockRoomDoor={
+            inspectedOwner?.seat.kind === "human" && inspectedOwner.zone === "battlefield" && props.lockedRoomDoorFaceIndex !== undefined
+              ? () => props.onUnlockRoomDoor?.(inspectedOwner.seat.id, props.inspectedCard!.id, props.lockedRoomDoorFaceIndex!)
+              : undefined
+          }
+          attackTargets={
+            inspectedOwner?.seat.kind === "human" && inspectedOwner.zone === "battlefield" && props.humanAttackTargets && props.humanAttackTargets.length > 0
+              ? props.humanAttackTargets
+              : undefined
+          }
+          onDeclareAttack={
+            props.onDeclareAttack ? (targetId) => props.onDeclareAttack?.(props.inspectedCard!.id, targetId) : undefined
+          }
           onCastCommander={
             inspectedOwner?.seat.kind === "human" && inspectedOwner.zone === "command"
               ? () => props.onCastCommander?.(inspectedOwner.seat.id)
@@ -697,6 +771,16 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
           onChangeCounter={
             inspectedOwner?.seat.kind === "human" && inspectedOwner.zone === "battlefield" && props.inspectedCard.typeLine.includes("Creature")
               ? (delta) => props.onChangeCounter?.(inspectedOwner.seat.id, props.inspectedCard!.id, "+1/+1", delta)
+              : undefined
+          }
+          onChangeLoyalty={
+            inspectedOwner?.seat.kind === "human" && inspectedOwner.zone === "battlefield" && props.inspectedCard.typeLine.includes("Planeswalker")
+              ? (delta) => props.onChangeCounter?.(inspectedOwner.seat.id, props.inspectedCard!.id, "loyalty", delta)
+              : undefined
+          }
+          onActivateLoyalty={
+            inspectedOwner?.seat.kind === "human" && inspectedOwner.zone === "battlefield" && props.inspectedCard.typeLine.includes("Planeswalker")
+              ? (cost, text) => props.onActivateLoyalty?.(inspectedOwner.seat.id, props.inspectedCard!.id, cost, text)
               : undefined
           }
         />
@@ -734,9 +818,35 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
       {props.ruleChoice?.kind === "order_triggers" ? (
         <OrderTriggersModal choice={props.ruleChoice} onChoose={props.onChooseNextTrigger} onClose={props.onCloseLibrarySearch} />
       ) : null}
+      {props.ruleChoice?.kind === "miracle_offer" ? (
+        <MiracleOfferModal choice={props.ruleChoice} onAccept={props.onAcceptMiracle} onDecline={props.onDeclineMiracle} />
+      ) : null}
       {props.blockChoice ? <BlockChoiceModal choice={props.blockChoice} onChoose={props.onChooseBlocker} onPass={props.onPassBlocks} /> : null}
       {props.myriadSearchCards ? (
         <MyriadSearchModal cards={props.myriadSearchCards} onClose={props.onCloseMyriadSearch} onChoose={props.onCompleteMyriadSearch} />
+      ) : null}
+      {props.basicLandFetchSearch ? (
+        <BasicLandFetchModal
+          sourceCardName={props.basicLandFetchSearch.sourceCardName}
+          cards={props.basicLandFetchSearch.cards}
+          onClose={props.onCloseBasicLandFetchSearch}
+          onChoose={props.onCompleteBasicLandFetchSearch}
+        />
+      ) : null}
+      {zoneView ? (
+        <ZoneViewerModal
+          seat={props.session.seats.find((seat) => seat.id === zoneView.seatId)}
+          zone={zoneView.zone}
+          onClose={() => setZoneView(undefined)}
+          onInspect={(card) => {
+            setZoneView(undefined);
+            props.onInspectCard?.(card);
+          }}
+          onMoveToHand={(cardId) => {
+            props.onMoveCardToHand?.(zoneView.seatId, cardId);
+            setZoneView(undefined);
+          }}
+        />
       ) : null}
       <div className="three-hand-panel" aria-label="Your hand">
         <div className="three-zone-strip">
@@ -767,49 +877,6 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
               </article>
             ))}
             {draggingZone === "graveyard" ? <div className="zone-drop-hint">Drop here to return to hand</div> : null}
-          </div>
-        </div>
-        <div className="three-zone-strip graveyard-strip">
-          <div className="three-hand-heading">
-            <strong>Graveyard</strong>
-            <span>{graveyard.length} cards</span>
-          </div>
-          <div className={`three-graveyard-row ${draggingZone === "hand" ? "is-drop-target" : ""}`} onDragOver={onGraveyardDragOver} onDrop={onGraveyardDrop}>
-            {graveyard.length === 0 ? <span className="zone-empty">Drop hand cards here</span> : null}
-            {graveyard.map((card) => (
-              <article
-                className={`three-hand-card graveyard-card ${draggingHandCardId === card.id ? "dragging" : ""}`}
-                draggable={props.gameStage === "playing"}
-                key={card.id}
-                onClick={() => props.onInspectCard?.(card)}
-                onDragStart={(event) => onCardDragStart(event, card, "graveyard")}
-                onDragEnd={onCardDragEnd}
-                title={`${card.name}\n${card.typeLine}\n${card.oracleText}`}
-              >
-                {card.imageUris?.normal ? <img src={card.imageUris.normal} alt="" draggable={false} /> : <FallbackHandCard card={card} />}
-                <span className="sr-only">{card.name}</span>
-              </article>
-            ))}
-          </div>
-        </div>
-        <div className="three-zone-strip graveyard-strip">
-          <div className="three-hand-heading">
-            <strong>Exile</strong>
-            <span>{exile.length} cards</span>
-          </div>
-          <div className={`three-graveyard-row ${draggingZone === "hand" || draggingZone === "graveyard" ? "is-drop-target" : ""}`} onDragOver={onExileDragOver} onDrop={onExileDrop}>
-            {exile.length === 0 ? <span className="zone-empty">Drop cards here to exile</span> : null}
-            {exile.map((card) => (
-              <article
-                className="three-hand-card graveyard-card"
-                key={card.id}
-                onClick={() => props.onInspectCard?.(card)}
-                title={`${card.name}\n${card.typeLine}\n${card.oracleText}`}
-              >
-                {card.imageUris?.normal ? <img src={card.imageUris.normal} alt="" draggable={false} /> : <FallbackHandCard card={card} />}
-                <span className="sr-only">{card.name}</span>
-              </article>
-            ))}
           </div>
         </div>
       </div>
@@ -848,8 +915,14 @@ function CardInspector({
   onMoveToGraveyard,
   onMoveToExile,
   onResolveMyriadLandscape,
+  onResolveBasicLandFetch,
+  onUnlockRoomDoor,
+  attackTargets,
+  onDeclareAttack,
   onCastCommander,
-  onChangeCounter
+  onChangeCounter,
+  onChangeLoyalty,
+  onActivateLoyalty
 }: {
   card: VisibleCard;
   owner?: ReturnType<typeof findCardOwner>;
@@ -857,14 +930,22 @@ function CardInspector({
   onMoveToGraveyard?: () => void;
   onMoveToExile?: () => void;
   onResolveMyriadLandscape?: () => void;
+  onResolveBasicLandFetch?: () => void;
+  onUnlockRoomDoor?: () => void;
+  attackTargets?: Array<{ targetId: string; label: string }>;
+  onDeclareAttack?: (targetId: string) => void;
   onCastCommander?: () => void;
   onChangeCounter?: (delta: number) => void;
+  onChangeLoyalty?: (delta: number) => void;
+  onActivateLoyalty?: (loyaltyCost: number, abilityText: string) => void;
 }) {
   const imageUrl = card.imageUris?.large ?? card.imageUris?.normal ?? card.imageUris?.png ?? card.faces?.[0]?.imageUris?.large ?? card.faces?.[0]?.imageUris?.normal;
   const colorText = card.colors.length > 0 ? card.colors.join("") : "Colorless";
   const identityText = card.colorIdentity && card.colorIdentity.length > 0 ? card.colorIdentity.join("") : colorText;
   const faces = card.faces?.filter((face) => face.name !== card.name) ?? [];
   const plusCounters = card.counters?.find((counter) => counter.kind === "+1/+1")?.count ?? 0;
+  const loyaltyCounters = card.counters?.find((counter) => counter.kind === "loyalty")?.count ?? 0;
+  const loyaltyAbilities = parseLoyaltyAbilities(card.oracleText);
 
   return (
     <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label={`${card.name} card detail`} onClick={onClose}>
@@ -896,6 +977,25 @@ function CardInspector({
               Resolve Myriad Landscape
             </button>
           ) : null}
+          {onResolveBasicLandFetch ? (
+            <button className="inspector-action" type="button" onClick={onResolveBasicLandFetch}>
+              Resolve {card.name}
+            </button>
+          ) : null}
+          {onUnlockRoomDoor ? (
+            <button className="inspector-action" type="button" onClick={onUnlockRoomDoor}>
+              Unlock Other Door
+            </button>
+          ) : null}
+          {attackTargets && attackTargets.length > 0 ? (
+            <div className="modal-actions" aria-label="Attack target options">
+              {attackTargets.map((target) => (
+                <button key={target.targetId} className="inspector-action" type="button" onClick={() => onDeclareAttack?.(target.targetId)}>
+                  {target.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
           {onCastCommander ? (
             <button className="inspector-action" type="button" onClick={onCastCommander}>
               Cast Commander{card.commanderTax ? ` (+${card.commanderTax})` : ""}
@@ -910,6 +1010,26 @@ function CardInspector({
               <button className="inspector-action" type="button" onClick={() => onChangeCounter(1)}>
                 +1/+1
               </button>
+            </div>
+          ) : null}
+          {onChangeLoyalty ? (
+            <div className="counter-controls" aria-label="loyalty counter controls">
+              <button className="inspector-action" type="button" onClick={() => onChangeLoyalty(-1)} disabled={loyaltyCounters === 0}>
+                Remove Loyalty
+              </button>
+              <strong>Loyalty: {loyaltyCounters}</strong>
+              <button className="inspector-action" type="button" onClick={() => onChangeLoyalty(1)}>
+                + Loyalty
+              </button>
+            </div>
+          ) : null}
+          {onActivateLoyalty && loyaltyAbilities.length > 0 ? (
+            <div className="counter-controls" aria-label="loyalty ability controls">
+              {loyaltyAbilities.map((ability) => (
+                <button className="inspector-action" type="button" key={`${ability.cost}:${ability.text}`} onClick={() => onActivateLoyalty(ability.cost, ability.text)}>
+                  {formatLoyaltyCost(ability.cost)}: {ability.text}
+                </button>
+              ))}
             </div>
           ) : null}
           <p>{card.oracleText}</p>
@@ -944,13 +1064,19 @@ function CardInspector({
             {card.power && card.toughness ? (
               <div>
                 <dt>Power / Toughness</dt>
-                <dd>{card.power}/{card.toughness}</dd>
+                <dd>{effectivePower(card)}/{effectiveToughness(card)}</dd>
               </div>
             ) : null}
             {card.commander ? (
               <div>
                 <dt>Commander</dt>
                 <dd>Yes</dd>
+              </div>
+            ) : null}
+            {card.typeLine.includes("Planeswalker") ? (
+              <div>
+                <dt>Loyalty</dt>
+                <dd>{loyaltyCounters}</dd>
               </div>
             ) : null}
           </dl>
@@ -1145,6 +1271,36 @@ function ManualRuleChoiceModal({
   );
 }
 
+function MiracleOfferModal({
+  choice,
+  onAccept,
+  onDecline
+}: {
+  choice: Extract<RuleChoiceView, { kind: "miracle_offer" }>;
+  onAccept?: () => void;
+  onDecline?: () => void;
+}) {
+  return (
+    <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label={`Miracle offer for ${choice.sourceCardName}`} onClick={onDecline}>
+      <article className="mana-choice-modal" onClick={(event) => event.stopPropagation()}>
+        <header>
+          <p className="eyebrow">Miracle</p>
+          <h2>{choice.sourceCardName}</h2>
+        </header>
+        <p>{choice.prompt}</p>
+        <div className="modal-actions">
+          <button className="inspector-action" type="button" onClick={onAccept}>
+            Cast for Miracle Cost ({choice.miracleCost})
+          </button>
+          <button className="inspector-action" type="button" onClick={onDecline}>
+            Decline
+          </button>
+        </div>
+      </article>
+    </div>
+  );
+}
+
 function OrderTriggersModal({
   choice,
   onChoose,
@@ -1252,10 +1408,79 @@ function MyriadSearchModal({
   );
 }
 
+function BasicLandFetchModal({
+  sourceCardName,
+  cards,
+  onClose,
+  onChoose
+}: {
+  sourceCardName: string;
+  cards: VisibleCard[];
+  onClose?: () => void;
+  onChoose?: (cardId: string) => void;
+}) {
+  return (
+    <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label={`Resolve ${sourceCardName}`} onClick={onClose}>
+      <article className="library-search-modal" onClick={(event) => event.stopPropagation()}>
+        <button className="card-inspector-close" type="button" onClick={onClose} aria-label={`Close ${sourceCardName} search`}>
+          x
+        </button>
+        <header>
+          <p className="eyebrow">{sourceCardName}</p>
+          <h2>Choose Basic Land</h2>
+        </header>
+        <div className="library-search-results">
+          {cards.length === 0 ? <p>No basic lands found.</p> : null}
+          {cards.map((card) => (
+            <article className="library-search-card" key={card.id}>
+              <div>
+                <strong>{card.name}</strong>
+                <span>{card.typeLine}</span>
+              </div>
+              <button type="button" onClick={() => onChoose?.(card.id)}>
+                Put Onto Battlefield Tapped
+              </button>
+            </article>
+          ))}
+        </div>
+      </article>
+    </div>
+  );
+}
+
 const basicLandTypeOrder = ["Plains", "Island", "Swamp", "Mountain", "Forest", "Wastes"];
 
 function cardBasicLandTypes(card: VisibleCard) {
   return basicLandTypeOrder.filter((type) => card.name === type || card.typeLine.includes(type));
+}
+
+function isBasicLandFetchAbility(card: VisibleCard) {
+  const text = card.oracleText.toLowerCase();
+  return (
+    text.includes("search your library for a basic land card") &&
+    text.includes("put it onto the battlefield tapped") &&
+    text.includes("sacrifice") &&
+    (text.includes("{t}") || text.includes("{tap}") || text.includes("tap,"))
+  );
+}
+
+function parseLoyaltyAbilities(oracleText: string) {
+  return oracleText
+    .split("\n")
+    .map((line) => line.trim())
+    .map((line) => {
+      const match = line.match(/^([+\u2212-]?\d+):\s*(.+)$/);
+      if (!match) return undefined;
+      return {
+        cost: Number.parseInt(match[1].replace("\u2212", "-"), 10),
+        text: match[2]
+      };
+    })
+    .filter((ability): ability is { cost: number; text: string } => Boolean(ability && Number.isFinite(ability.cost) && ability.text));
+}
+
+function formatLoyaltyCost(cost: number) {
+  return cost > 0 ? `+${cost}` : `${cost}`;
 }
 
 function FallbackLargeCard({ card }: { card: VisibleCard }) {
@@ -1264,7 +1489,7 @@ function FallbackLargeCard({ card }: { card: VisibleCard }) {
       <strong>{card.name}</strong>
       <span>{card.typeLine}</span>
       <p>{card.oracleText}</p>
-      {card.power && card.toughness ? <em>{card.power}/{card.toughness}</em> : null}
+      {card.power && card.toughness ? <em>{effectivePower(card)}/{effectiveToughness(card)}</em> : null}
     </div>
   );
 }
@@ -1300,6 +1525,53 @@ function BlockChoiceModal({ choice, onChoose, onPass }: { choice: BlockChoiceVie
   );
 }
 
+function ZoneViewerModal({
+  seat,
+  zone,
+  onClose,
+  onInspect,
+  onMoveToHand
+}: {
+  seat?: PlayerSeat;
+  zone: TableZone;
+  onClose?: () => void;
+  onInspect?: (card: VisibleCard) => void;
+  onMoveToHand?: (cardId: string) => void;
+}) {
+  const cards = zone === "graveyard" ? (seat?.board.graveyard ?? []) : (seat?.board.exile ?? []);
+  const title = zone === "graveyard" ? "Graveyard" : "Exile";
+  const canReturnToHand = seat?.kind === "human" && zone === "graveyard";
+
+  return (
+    <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label={`${seat?.name ?? "Player"} ${title}`} onClick={onClose}>
+      <article className="library-search-modal" onClick={(event) => event.stopPropagation()}>
+        <button className="card-inspector-close" type="button" onClick={onClose} aria-label={`Close ${title}`}>
+          x
+        </button>
+        <header>
+          <p className="eyebrow">{seat?.name ?? "Player"}</p>
+          <h2>{title}</h2>
+          <p>{cards.length} card{cards.length === 1 ? "" : "s"}</p>
+        </header>
+        <div className="library-search-results">
+          {cards.length === 0 ? <p>No cards in {title.toLowerCase()}.</p> : null}
+          {cards.map((card) => (
+            <article className="library-search-card" key={card.id}>
+              {card.imageUris?.normal ? <img src={card.imageUris.normal} alt="" /> : <FallbackHandCard card={card} />}
+              <div>
+                <strong>{card.name}</strong>
+                <span>{card.typeLine}</span>
+              </div>
+              <button type="button" onClick={() => onInspect?.(card)}>Inspect</button>
+              {canReturnToHand ? <button type="button" onClick={() => onMoveToHand?.(card.id)}>To Hand</button> : null}
+            </article>
+          ))}
+        </div>
+      </article>
+    </div>
+  );
+}
+
 function FallbackHandCard({ card }: { card: VisibleCard }) {
   return (
     <div className="three-hand-fallback">
@@ -1307,6 +1579,40 @@ function FallbackHandCard({ card }: { card: VisibleCard }) {
       <span>{card.typeLine}</span>
     </div>
   );
+}
+
+function buildTableRenderKey(session: GameSession, selectedCardId: string | undefined) {
+  return JSON.stringify({
+    active: session.activePlayerId,
+    selected: selectedCardId,
+    seats: session.seats.map((seat) => ({
+      id: seat.id,
+      life: seat.life,
+      zones: {
+        library: seat.zones.library,
+        hand: seat.zones.hand,
+        graveyard: seat.zones.graveyard,
+        exile: seat.zones.exile,
+        command: seat.zones.command
+      },
+      commander: seat.board.commander ? cardRenderKey(seat.board.commander) : undefined,
+      battlefield: seat.board.battlefield.map(cardRenderKey)
+    }))
+  });
+}
+
+function cardRenderKey(card: VisibleCard) {
+  return {
+    id: card.id,
+    name: card.name,
+    tapped: Boolean(card.tapped),
+    attacking: Boolean(card.attacking),
+    blocking: Boolean(card.blocking),
+    image: battlefieldImageUrls(card)[0],
+    x: card.battlefieldPosition?.x,
+    z: card.battlefieldPosition?.z,
+    counters: card.counters?.map((counter) => `${counter.kind}:${counter.count}`).join("|")
+  };
 }
 
 function rebuildDynamicScene(
@@ -1324,7 +1630,8 @@ function rebuildDynamicScene(
     addBattlefieldArea(group, area, seat.kind === "human");
     addPlayerLabel(group, seat, area);
     addZonePile(group, "Deck", seat.zones.library, area.minX + 0.75, area.maxZ - 0.8, area.rot);
-    addZonePile(group, "Grave", seat.zones.graveyard, area.maxX - 0.75, area.maxZ - 0.8, area.rot);
+    addZonePile(group, "Grave", seat.zones.graveyard, zonePilePosition(area, "graveyard").x, zonePilePosition(area, "graveyard").z, area.rot, cardMeshesRef, seat.id, "graveyard");
+    addZonePile(group, "Exile", seat.zones.exile, zonePilePosition(area, "exile").x, zonePilePosition(area, "exile").z, area.rot, cardMeshesRef, seat.id, "exile");
 
     if (seat.board.commander) {
       addCard(group, seat.board.commander, seat.id, "command", area.minX + 0.9, area.minZ + 0.8, area.rot, selectedCardId, cardMeshesRef);
@@ -1378,6 +1685,26 @@ function defaultBattlefieldPosition(area: (typeof PLAYER_AREAS)[number], cardInd
   return { x, z };
 }
 
+function zonePilePosition(area: (typeof PLAYER_AREAS)[number], zone: TableZone) {
+  const offset = zone === "graveyard" ? 0.75 : 1.75;
+  return {
+    x: area.maxX - offset,
+    z: area.maxZ - 0.8
+  };
+}
+
+function tableZoneAtPosition(session: GameSession, seatId: string, position: { x: number; z: number }): TableZone | undefined {
+  const seatIndex = session.seats.findIndex((seat) => seat.id === seatId);
+  const area = PLAYER_AREAS[seatIndex] ?? PLAYER_AREAS[0];
+  for (const zone of ["graveyard", "exile"] as TableZone[]) {
+    const pile = zonePilePosition(area, zone);
+    const dx = position.x - pile.x;
+    const dz = position.z - pile.z;
+    if (Math.sqrt(dx * dx + dz * dz) <= 0.9) return zone;
+  }
+  return undefined;
+}
+
 function addCard(
   group: THREE.Group,
   card: VisibleCard,
@@ -1392,9 +1719,9 @@ function addCard(
   const texture = makeCardTexture(card, selectedCardId === card.id);
   const material = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide });
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.72, 1.02), material);
-  const imageUrl = card.imageUris?.normal ?? card.imageUris?.large ?? card.imageUris?.png ?? card.faces?.[0]?.imageUris?.normal;
-  if (imageUrl) {
-    applyImageTexture(imageUrl, material);
+  const imageUrls = battlefieldImageUrls(card);
+  if (imageUrls.length > 0) {
+    applyImageTexture(imageUrls, material);
   }
   mesh.rotation.x = -Math.PI / 2;
   mesh.rotation.z = rot + (card.tapped ? Math.PI / 2 : 0);
@@ -1404,7 +1731,9 @@ function addCard(
   cardMeshesRef.current.push(mesh);
 }
 
-function applyImageTexture(url: string, material: THREE.MeshBasicMaterial) {
+function applyImageTexture(urls: string[], material: THREE.MeshBasicMaterial) {
+  const [url, ...fallbacks] = urls.filter((item) => !failedCardImageUrls.has(item));
+  if (!url) return;
   const cached = cardImageTextureCache.get(url);
   if (cached) {
     material.map = cached;
@@ -1412,30 +1741,97 @@ function applyImageTexture(url: string, material: THREE.MeshBasicMaterial) {
     return;
   }
 
-  imageTextureLoader.load(
-    url,
-    (texture) => {
-      texture.colorSpace = THREE.SRGBColorSpace;
-      texture.anisotropy = 4;
-      cardImageTextureCache.set(url, texture);
+  loadCardImageTexture(url)
+    .then((texture) => {
       material.map = texture;
       material.needsUpdate = true;
-    },
-    undefined,
-    () => {
-      cardImageTextureCache.delete(url);
-    }
-  );
+    })
+    .catch(() => {
+      if (fallbacks.length > 0) applyImageTexture(fallbacks, material);
+    });
 }
 
-function addZonePile(group: THREE.Group, label: string, count: number, x: number, z: number, rot: number) {
+function loadCardImageTexture(url: string) {
+  const cached = cardImageTextureCache.get(url);
+  if (cached) return Promise.resolve(cached);
+
+  const pending = cardImageTexturePending.get(url);
+  if (pending) return pending;
+
+  const request = new Promise<THREE.Texture>((resolve, reject) => {
+    imageTextureLoader.load(
+      url,
+      (texture) => {
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.anisotropy = 4;
+        cardImageTextureCache.set(url, texture);
+        cardImageTexturePending.delete(url);
+        resolve(texture);
+      },
+      undefined,
+      () => {
+        failedCardImageUrls.add(url);
+        cardImageTextureCache.delete(url);
+        cardImageTexturePending.delete(url);
+        reject(new Error(`Card image failed to load: ${url}`));
+      }
+    );
+  });
+
+  cardImageTexturePending.set(url, request);
+  return request;
+}
+
+function battlefieldImageUrls(card: VisibleCard) {
+  return Array.from(new Set([
+    card.imageUris?.normal ??
+      card.imageUris?.large ??
+      card.imageUris?.png ??
+      card.faces?.[0]?.imageUris?.normal ??
+      card.faces?.[0]?.imageUris?.large ??
+      card.imageUris?.borderCrop ??
+      card.faces?.[0]?.imageUris?.borderCrop,
+    card.imageUris?.large,
+    card.imageUris?.png,
+    card.faces?.[0]?.imageUris?.normal,
+    card.faces?.[0]?.imageUris?.large,
+    card.imageUris?.borderCrop,
+    card.faces?.[0]?.imageUris?.borderCrop
+  ].filter((url): url is string => Boolean(url))));
+}
+
+function addZonePile(
+  group: THREE.Group,
+  label: string,
+  count: number,
+  x: number,
+  z: number,
+  rot: number,
+  interactionMeshesRef?: MutableRefObject<THREE.Object3D[]>,
+  seatId?: string,
+  zone?: TableZone
+) {
   const pile = new THREE.Group();
+  const hitbox = new THREE.Mesh(
+    new THREE.BoxGeometry(0.95, 0.08, 1.2),
+    new THREE.MeshBasicMaterial({ transparent: true, opacity: 0 })
+  );
+  hitbox.position.y = 0.05;
+  if (seatId && zone) {
+    hitbox.userData = { kind: "zone", seatId, zone } satisfies ZoneUserData;
+    interactionMeshesRef?.current.push(hitbox);
+  }
+  pile.add(hitbox);
   for (let index = 0; index < Math.min(4, count); index += 1) {
     const mesh = new THREE.Mesh(
       new THREE.BoxGeometry(0.7, 0.035, 1),
       new THREE.MeshStandardMaterial({ color: "#263b57", roughness: 0.75 })
     );
     mesh.position.y = 0.04 + index * 0.035;
+    if (seatId && zone) {
+      mesh.userData = { kind: "zone", seatId, zone } satisfies ZoneUserData;
+      interactionMeshesRef?.current.push(mesh);
+    }
     pile.add(mesh);
   }
   pile.position.set(x, 0.05, z);
@@ -1481,7 +1877,7 @@ function makeCardTexture(card: VisibleCard, selected: boolean) {
   context.fillStyle = "#111";
   context.font = "bold 18px Arial";
   context.fillText(card.role, 22, 324);
-  if (card.power && card.toughness) context.fillText(`${card.power}/${card.toughness}`, 186, 324);
+  if (card.power && card.toughness) context.fillText(`${effectivePower(card)}/${effectiveToughness(card)}`, 186, 324);
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   return texture;

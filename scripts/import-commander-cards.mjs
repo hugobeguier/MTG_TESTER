@@ -76,6 +76,7 @@ function compactCard(raw) {
     colors: face.colors ?? [],
     power: face.power,
     toughness: face.toughness,
+    loyalty: face.loyalty,
     imageUris: compactImages(face.image_uris)
   }));
 
@@ -95,6 +96,7 @@ function compactCard(raw) {
     collectorNumber: raw.collector_number,
     power: raw.power ?? faces?.[0]?.power,
     toughness: raw.toughness ?? faces?.[0]?.toughness,
+    loyalty: raw.loyalty ?? faces?.[0]?.loyalty,
     imageUris: compactImages(raw.image_uris) ?? compactImages(faces?.[0]?.imageUris),
     faces,
     legalities: raw.legalities,
