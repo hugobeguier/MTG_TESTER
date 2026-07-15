@@ -10,10 +10,16 @@ export function plusMinusCounterBonus(card: VisibleCard): number {
   return counterCount(card, "+1/+1") - counterCount(card, "-1/-1");
 }
 
+// Layer order (rule 613): 7a characteristic-defining abilities establish the base, 7b "set base
+// power/toughness" effects replace that base outright (newest one wins — see
+// GameSession.effectTimestampCounter), then 7c counters and 7d other +N/-N effects (temporary
+// buffs, Aura/Equipment pumps) add on top of whichever base layers 7a/7b left behind.
 export function effectivePower(card: VisibleCard): number {
-  return (Number.parseInt(card.power ?? "0", 10) || 0) + plusMinusCounterBonus(card);
+  const base = card.setPowerOverride ?? card.cdaPower ?? (Number.parseInt(card.power ?? "0", 10) || 0);
+  return base + plusMinusCounterBonus(card) + (card.temporaryPowerBonus ?? 0) + (card.attachmentPowerBonus ?? 0);
 }
 
 export function effectiveToughness(card: VisibleCard): number {
-  return (Number.parseInt(card.toughness ?? "0", 10) || 0) + plusMinusCounterBonus(card);
+  const base = card.setToughnessOverride ?? card.cdaToughness ?? (Number.parseInt(card.toughness ?? "0", 10) || 0);
+  return base + plusMinusCounterBonus(card) + (card.temporaryToughnessBonus ?? 0) + (card.attachmentToughnessBonus ?? 0);
 }

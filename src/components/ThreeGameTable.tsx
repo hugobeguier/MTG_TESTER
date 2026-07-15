@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, useState, type DragEvent, type MutableRefOb
 import * as THREE from "three";
 import type { GameSession, PlayerSeat, VisibleCard } from "@/lib/types";
 import { effectivePower, effectiveToughness } from "@/lib/counters";
+import { parseGenericSacrificeAbilities, type SacrificeAbility } from "@/lib/activatedAbilities";
+import { equipCost, isEquipment } from "@/lib/attachments";
 
 type ManaColor = "W" | "U" | "B" | "R" | "G" | "C";
 type ManaPool = Record<ManaColor, number>;
@@ -47,6 +49,8 @@ interface ThreeGameTableProps {
   onChooseNextTrigger?: (sourceCardId: string) => void;
   onAcceptMiracle?: () => void;
   onDeclineMiracle?: () => void;
+  onAcceptOptionalTrigger?: () => void;
+  onDeclineOptionalTrigger?: () => void;
   onCloseMyriadSearch?: () => void;
   onCompleteMyriadSearch?: (cardIds: string[]) => void;
   onCloseBasicLandFetchSearch?: () => void;
@@ -60,6 +64,8 @@ interface ThreeGameTableProps {
   onCastCommander?: (seatId: string, position?: { x: number; z: number }) => void;
   onResolveMyriadLandscape?: (seatId: string, cardId: string) => void;
   onResolveBasicLandFetch?: (seatId: string, cardId: string) => void;
+  onActivateSacrificeAbility?: (seatId: string, cardId: string, abilityIndex: number) => void;
+  onActivateEquip?: (seatId: string, cardId: string) => void;
   onChangeLife?: (seatId: string, delta: number) => void;
   onScry?: (count: number) => void;
   onSurveil?: (count: number) => void;
@@ -142,6 +148,11 @@ type RuleChoiceView =
       sourceCardName: string;
       prompt: string;
       miracleCost: number;
+    }
+  | {
+      kind: "optional_trigger";
+      sourceCardName: string;
+      prompt: string;
     };
 
 interface BlockChoiceView {
@@ -192,6 +203,7 @@ imageTextureLoader.setCrossOrigin("anonymous");
 const cardImageTextureCache = new Map<string, THREE.Texture>();
 const cardImageTexturePending = new Map<string, Promise<THREE.Texture>>();
 const failedCardImageUrls = new Set<string>();
+const counterBadgeTextureCache = new Map<string, THREE.Texture>();
 
 export function ThreeGameTable(props: ThreeGameTableProps) {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -208,6 +220,8 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
   const pointer = useRef({ down: false, button: 0, x: 0, y: 0, moved: false });
   const hoveredCardRef = useRef<CardUserData | undefined>(undefined);
   const draggedBattlefieldCardRef = useRef<CardUserData | undefined>(undefined);
+  const draggedHandCardRef = useRef<VisibleCard | undefined>(undefined);
+  const dropGhostRef = useRef<THREE.Group | null>(null);
   const [draggingHandCardId, setDraggingHandCardId] = useState<string | undefined>();
   const [draggingZone, setDraggingZone] = useState<DraggedZone | undefined>();
   const [zoneView, setZoneView] = useState<{ seatId: string; zone: TableZone } | undefined>();
@@ -239,6 +253,25 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
     const dynamicGroup = new THREE.Group();
     dynamicGroupRef.current = dynamicGroup;
     scene.add(dynamicGroup);
+
+    // Landing-spot preview for a permanent being dragged from hand — lives outside dynamicGroup so
+    // it survives rebuildDynamicScene's group.clear() and can be repositioned every dragover
+    // without waiting on a session-driven re-render.
+    const dropGhost = new THREE.Group();
+    dropGhost.visible = false;
+    dropGhost.rotation.x = -Math.PI / 2;
+    dropGhost.position.y = 0.09;
+    const dropGhostFill = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.72, 1.02),
+      new THREE.MeshBasicMaterial({ color: "#f4c95d", transparent: true, opacity: 0.25, side: THREE.DoubleSide, depthWrite: false })
+    );
+    const dropGhostOutline = new THREE.LineSegments(
+      new THREE.EdgesGeometry(new THREE.PlaneGeometry(0.72, 1.02)),
+      new THREE.LineBasicMaterial({ color: "#f4c95d", transparent: true, opacity: 0.85 })
+    );
+    dropGhost.add(dropGhostFill, dropGhostOutline);
+    scene.add(dropGhost);
+    dropGhostRef.current = dropGhost;
 
     const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
     cameraRef.current = camera;
@@ -513,6 +546,7 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
     event.dataTransfer.setData("application/x-mtg-card", JSON.stringify({ cardId: card.id, zone }));
     setDraggingHandCardId(card.id);
     setDraggingZone(zone);
+    draggedHandCardRef.current = zone === "hand" ? card : undefined;
     if (zone === "hand") props.onSelectHandCard?.(card);
   }
 
@@ -543,12 +577,38 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
   function onCardDragEnd() {
     setDraggingHandCardId(undefined);
     setDraggingZone(undefined);
+    draggedHandCardRef.current = undefined;
+    hideDropGhost();
+  }
+
+  function hideDropGhost() {
+    if (dropGhostRef.current) dropGhostRef.current.visible = false;
   }
 
   function onBoardDragOver(event: DragEvent<HTMLDivElement>) {
     if (props.gameStage !== "playing") return;
     event.preventDefault();
     event.dataTransfer.dropEffect = "move";
+
+    const draggedCard = draggedHandCardRef.current;
+    const ghost = dropGhostRef.current;
+    // Only permanents (and lands, which aren't "spells" but land on the battlefield the same way)
+    // have a landing spot worth previewing — instants/sorceries resolve straight to the graveyard.
+    if (!draggedCard || !ghost || draggedCard.typeLine.includes("Instant") || draggedCard.typeLine.includes("Sorcery")) {
+      hideDropGhost();
+      return;
+    }
+    const position = getClampedDropPosition(event);
+    const humanIndex = Math.max(0, props.session.seats.findIndex((seat) => seat.id === human.id));
+    const rot = PLAYER_AREAS[humanIndex]?.rot ?? 0;
+    ghost.position.x = position.x;
+    ghost.position.z = position.z;
+    ghost.rotation.z = rot;
+    ghost.visible = true;
+  }
+
+  function onBoardDragLeave() {
+    hideDropGhost();
   }
 
   function getClampedDropPosition(event: DragEvent<HTMLDivElement>) {
@@ -576,6 +636,8 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
     const { cardId, zone } = getDraggedCard(event);
     setDraggingHandCardId(undefined);
     setDraggingZone(undefined);
+    draggedHandCardRef.current = undefined;
+    hideDropGhost();
     if (!cardId || props.gameStage !== "playing" || zone !== "hand") return;
     const position = getClampedDropPosition(event);
     const tableZone = tableZoneAtPosition(props.session, human.id, position);
@@ -611,7 +673,13 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
 
   return (
     <section className="three-game-shell">
-      <div className={`three-board ${draggingHandCardId ? "is-drop-target" : ""}`} ref={mountRef} onDragOver={onBoardDragOver} onDrop={onBoardDrop} />
+      <div
+        className={`three-board ${draggingHandCardId ? "is-drop-target" : ""}`}
+        ref={mountRef}
+        onDragOver={onBoardDragOver}
+        onDragLeave={onBoardDragLeave}
+        onDrop={onBoardDrop}
+      />
       {phaseNotice ? (
         <div className="phase-popup" role="status" aria-live="polite">
           <span>Phase</span>
@@ -750,9 +818,24 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
               ? () => props.onResolveBasicLandFetch?.(inspectedOwner.seat.id, props.inspectedCard!.id)
               : undefined
           }
+          sacrificeAbilities={
+            inspectedOwner?.seat.kind === "human" && inspectedOwner.zone === "battlefield"
+              ? parseGenericSacrificeAbilities(props.inspectedCard.oracleText)
+              : []
+          }
+          onActivateSacrificeAbility={
+            inspectedOwner?.seat.kind === "human" && inspectedOwner.zone === "battlefield"
+              ? (abilityIndex) => props.onActivateSacrificeAbility?.(inspectedOwner.seat.id, props.inspectedCard!.id, abilityIndex)
+              : undefined
+          }
           onUnlockRoomDoor={
             inspectedOwner?.seat.kind === "human" && inspectedOwner.zone === "battlefield" && props.lockedRoomDoorFaceIndex !== undefined
               ? () => props.onUnlockRoomDoor?.(inspectedOwner.seat.id, props.inspectedCard!.id, props.lockedRoomDoorFaceIndex!)
+              : undefined
+          }
+          onActivateEquip={
+            inspectedOwner?.seat.kind === "human" && inspectedOwner.zone === "battlefield" && isEquipment(props.inspectedCard) && equipCost(props.inspectedCard.oracleText) !== undefined
+              ? () => props.onActivateEquip?.(inspectedOwner.seat.id, props.inspectedCard!.id)
               : undefined
           }
           attackTargets={
@@ -820,6 +903,9 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
       ) : null}
       {props.ruleChoice?.kind === "miracle_offer" ? (
         <MiracleOfferModal choice={props.ruleChoice} onAccept={props.onAcceptMiracle} onDecline={props.onDeclineMiracle} />
+      ) : null}
+      {props.ruleChoice?.kind === "optional_trigger" ? (
+        <OptionalTriggerModal choice={props.ruleChoice} onAccept={props.onAcceptOptionalTrigger} onDecline={props.onDeclineOptionalTrigger} />
       ) : null}
       {props.blockChoice ? <BlockChoiceModal choice={props.blockChoice} onChoose={props.onChooseBlocker} onPass={props.onPassBlocks} /> : null}
       {props.myriadSearchCards ? (
@@ -917,6 +1003,9 @@ function CardInspector({
   onResolveMyriadLandscape,
   onResolveBasicLandFetch,
   onUnlockRoomDoor,
+  sacrificeAbilities,
+  onActivateSacrificeAbility,
+  onActivateEquip,
   attackTargets,
   onDeclareAttack,
   onCastCommander,
@@ -932,6 +1021,9 @@ function CardInspector({
   onResolveMyriadLandscape?: () => void;
   onResolveBasicLandFetch?: () => void;
   onUnlockRoomDoor?: () => void;
+  sacrificeAbilities?: SacrificeAbility[];
+  onActivateSacrificeAbility?: (abilityIndex: number) => void;
+  onActivateEquip?: () => void;
   attackTargets?: Array<{ targetId: string; label: string }>;
   onDeclareAttack?: (targetId: string) => void;
   onCastCommander?: () => void;
@@ -986,6 +1078,20 @@ function CardInspector({
             <button className="inspector-action" type="button" onClick={onUnlockRoomDoor}>
               Unlock Other Door
             </button>
+          ) : null}
+          {onActivateEquip ? (
+            <button className="inspector-action" type="button" onClick={onActivateEquip}>
+              Equip {card.name}
+            </button>
+          ) : null}
+          {sacrificeAbilities && sacrificeAbilities.length > 0 ? (
+            <div className="modal-actions" aria-label="Sacrifice ability options">
+              {sacrificeAbilities.map((ability, abilityIndex) => (
+                <button key={abilityIndex} className="inspector-action" type="button" onClick={() => onActivateSacrificeAbility?.(abilityIndex)}>
+                  {ability.clause}
+                </button>
+              ))}
+            </div>
           ) : null}
           {attackTargets && attackTargets.length > 0 ? (
             <div className="modal-actions" aria-label="Attack target options">
@@ -1294,6 +1400,36 @@ function MiracleOfferModal({
           </button>
           <button className="inspector-action" type="button" onClick={onDecline}>
             Decline
+          </button>
+        </div>
+      </article>
+    </div>
+  );
+}
+
+function OptionalTriggerModal({
+  choice,
+  onAccept,
+  onDecline
+}: {
+  choice: Extract<RuleChoiceView, { kind: "optional_trigger" }>;
+  onAccept?: () => void;
+  onDecline?: () => void;
+}) {
+  return (
+    <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label={`Optional trigger for ${choice.sourceCardName}`} onClick={onDecline}>
+      <article className="mana-choice-modal" onClick={(event) => event.stopPropagation()}>
+        <header>
+          <p className="eyebrow">You may</p>
+          <h2>{choice.sourceCardName}</h2>
+        </header>
+        <p>{choice.prompt}</p>
+        <div className="modal-actions">
+          <button className="inspector-action" type="button" onClick={onAccept}>
+            Yes
+          </button>
+          <button className="inspector-action" type="button" onClick={onDecline}>
+            No
           </button>
         </div>
       </article>
@@ -1729,6 +1865,75 @@ function addCard(
   mesh.userData = { kind: "card", card, seatId, location } satisfies CardUserData;
   group.add(mesh);
   cardMeshesRef.current.push(mesh);
+  addCounterBadges(group, card, x, z);
+}
+
+interface CounterBadge {
+  text: string;
+  color: string;
+}
+
+// +1/+1 and -1/-1 net into a single "+N"/"-N" badge (they always move together — a permanent never
+// visibly carries both), loyalty gets its own badge since it's the primary stat to track for a
+// planeswalker, and every other counter kind (charge, age, ice, ...) gets a plain count badge —
+// this is a glance-level readout, not a full breakdown; the exact kind names are still in the
+// card inspector.
+function describeCounterBadges(card: VisibleCard): CounterBadge[] {
+  const counters = card.counters ?? [];
+  const badges: CounterBadge[] = [];
+  const plusMinus = (counters.find((counter) => counter.kind === "+1/+1")?.count ?? 0) - (counters.find((counter) => counter.kind === "-1/-1")?.count ?? 0);
+  if (plusMinus !== 0) badges.push({ text: plusMinus > 0 ? `+${plusMinus}` : `${plusMinus}`, color: plusMinus > 0 ? "#2f9e44" : "#c92a2a" });
+  const loyalty = counters.find((counter) => counter.kind === "loyalty")?.count;
+  if (loyalty !== undefined) badges.push({ text: `${loyalty}`, color: "#4263eb" });
+  for (const counter of counters) {
+    if (counter.kind === "+1/+1" || counter.kind === "-1/-1" || counter.kind === "loyalty" || counter.count <= 0) continue;
+    badges.push({ text: `${counter.count}`, color: "#c98a2b" });
+  }
+  return badges;
+}
+
+// Billboard sprites (always face the camera) rather than flat card-aligned planes, since this
+// camera can orbit and a flat badge would go edge-on and unreadable from a low angle.
+function addCounterBadges(group: THREE.Group, card: VisibleCard, x: number, z: number) {
+  const badges = describeCounterBadges(card);
+  if (badges.length === 0) return;
+  badges.forEach((badge, index) => {
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: counterBadgeTexture(badge), transparent: true, depthTest: false }));
+    sprite.scale.set(0.26, 0.26, 1);
+    sprite.position.set(x + (index - (badges.length - 1) / 2) * 0.28, 0.32, z);
+    sprite.renderOrder = 10;
+    group.add(sprite);
+  });
+}
+
+function counterBadgeTexture(badge: CounterBadge): THREE.Texture {
+  const key = `${badge.text}|${badge.color}`;
+  const cached = counterBadgeTextureCache.get(key);
+  if (cached) return cached;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = 128;
+  canvas.height = 128;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return new THREE.Texture();
+
+  ctx.beginPath();
+  ctx.arc(64, 64, 58, 0, Math.PI * 2);
+  ctx.fillStyle = badge.color;
+  ctx.fill();
+  ctx.lineWidth = 6;
+  ctx.strokeStyle = "rgba(0, 0, 0, 0.65)";
+  ctx.stroke();
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 52px sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(badge.text, 64, 68);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.needsUpdate = true;
+  counterBadgeTextureCache.set(key, texture);
+  return texture;
 }
 
 function applyImageTexture(urls: string[], material: THREE.MeshBasicMaterial) {

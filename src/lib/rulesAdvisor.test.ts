@@ -76,4 +76,43 @@ describe("deterministicRuleWorkflow", () => {
     const workflow = deterministicRuleWorkflow(input(halimarDepths, "land_played"));
     expect(workflow?.workflow).toBe("reorder_top_cards");
   });
+
+  it("does not offer draw_cards when an artifact with a sacrifice-cost draw ability resolves to the battlefield (Mind Stone)", () => {
+    const mindStone = card({
+      id: "mind-stone-1",
+      name: "Mind Stone",
+      typeLine: "Artifact",
+      oracleText: "{T}: Add {C}.\n{1}, {T}, Sacrifice this artifact: Draw a card."
+    });
+    const workflow = deterministicRuleWorkflow(input(mindStone, "spell_resolved_to_battlefield"));
+    expect(workflow?.workflow).toBe("none");
+  });
+
+  it("picks the ETB land-search trigger, not the unrelated dies-triggered draw, when a creature enters (Solemn Simulacrum)", () => {
+    const solemnSimulacrum = card({
+      id: "solemn-simulacrum-1",
+      name: "Solemn Simulacrum",
+      typeLine: "Artifact Creature",
+      oracleText:
+        "When this creature enters, you may search your library for a basic land card, put that card onto the battlefield tapped, then shuffle.\nWhen this creature dies, you may draw a card."
+    });
+    const enterWorkflow = deterministicRuleWorkflow(input(solemnSimulacrum, "spell_resolved_to_battlefield"));
+    expect(enterWorkflow?.workflow).toBe("search_library_to_battlefield");
+    expect(enterWorkflow?.tapped).toBe(true);
+
+    const deathWorkflow = deterministicRuleWorkflow(input(solemnSimulacrum, "card_moved_to_graveyard"));
+    expect(deathWorkflow?.workflow).toBe("draw_cards");
+  });
+
+  it("recognizes a direct-cast proliferate spell and requires no human choice (Contentious Plan)", () => {
+    const contentiousPlan = card({
+      id: "contentious-plan-1",
+      name: "Contentious Plan",
+      typeLine: "Sorcery",
+      oracleText: "Proliferate. (Choose any number of permanents and/or players, then give each another counter of each kind already there.)\nDraw a card."
+    });
+    const workflow = deterministicRuleWorkflow(input(contentiousPlan, "spell_resolved_to_graveyard"));
+    expect(workflow?.workflow).toBe("proliferate");
+    expect(workflow?.requiresHumanChoice).toBe(false);
+  });
 });

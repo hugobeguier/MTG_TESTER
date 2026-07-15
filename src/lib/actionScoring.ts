@@ -23,6 +23,7 @@ export interface ScorableAction {
 export interface CardLike {
   id: string;
   name?: string;
+  typeLine?: string;
   power?: string;
   toughness?: string;
   manaValue?: number;
@@ -36,6 +37,11 @@ export interface ScoringContext {
   turn?: number;
   you?: {
     life?: number;
+    poison?: number;
+    // Commander damage this seat has taken, keyed by the dealing commander's card id (see
+    // AppFlow.tsx's applyCombatDamageToTarget) — lets scoring recognize "this specific attacker
+    // is already close to the 21-damage loss condition" rather than just comparing raw stats.
+    commanderDamage?: Record<string, number>;
     battlefield?: CardLike[];
     hand?: CardLike[];
     commander?: CardLike;
@@ -45,9 +51,15 @@ export interface ScoringContext {
     id?: string;
     name?: string;
     life?: number;
+    poison?: number;
+    commanderDamage?: Record<string, number>;
     battlefield?: CardLike[];
   }>;
-  stack?: Array<{ id?: string; cardName?: string }>;
+  stack?: Array<{ id?: string; cardName?: string; oracleText?: string }>;
+  // The item currently awaiting a response (as opposed to `stack`, which holds everything already
+  // passed on and waiting below it) — see AppFlow.tsx's pendingActionSourceCard for how oracleText
+  // gets attached.
+  pendingAction?: { id?: string; cardName?: string; oracleText?: string };
 }
 
 export interface ScoredAction extends ScorableAction {
@@ -116,6 +128,10 @@ function hasDoubleStrike(card: CardLike) {
 
 function hasIndestructible(card: CardLike) {
   return hasKeyword(card, "indestructible");
+}
+
+function hasInfect(card: CardLike) {
+  return hasKeyword(card, "infect");
 }
 
 function canLegallyBlock(attacker: CardLike, blocker: CardLike): boolean {
@@ -228,6 +244,200 @@ function scoreUpkeepValue(action: ScorableAction, context: ScoringContext, delta
   }
 }
 
+// Mirrors scoreAttackProfitability's trade simulation from the blocker's side. Only "block" and
+// "no blocks" actions from a declare_blockers decision carry a meaningful attacker/blocker pair —
+// everything else (including block actions outside that purpose) is left at baseline.
+function scoreBlockDecision(action: ScorableAction, context: ScoringContext, delta: (amount: number, reason: string) => void) {
+  if (context.purpose !== "declare_blockers" || action.actionType !== "block") return;
+  const blocker = findCard(context.you?.battlefield, action.cardId);
+  const attacker = findCard(opponentBattlefields(context), action.targetIds[0]);
+  if (!blocker || !attacker) return;
+
+  const blockerPower = parseNum(blocker.power) ?? 0;
+  const blockerToughness = parseNum(blocker.toughness);
+  const attackerPower = parseNum(attacker.power) ?? 0;
+  const attackerToughness = parseNum(attacker.toughness);
+
+  const blockerDies = blockerToughness !== undefined && !hasIndestructible(blocker) && isLethalTo(attacker, attackerPower, blockerToughness);
+  const attackerDies = attackerToughness !== undefined && !hasIndestructible(attacker) && isLethalTo(blocker, blockerPower, attackerToughness);
+
+  if (attackerDies && !blockerDies) {
+    delta(3, "block kills the attacker while the blocker survives");
+  } else if (attackerDies && blockerDies) {
+    delta(1, "block trades with the attacker");
+  } else if (!attackerDies && blockerDies) {
+    const life = context.you?.life ?? 40;
+    if (life <= attackerPower) {
+      delta(2, "chump block needed to avoid taking lethal or near-lethal damage");
+    } else {
+      // Block's baseline score is +2 (BASELINE_SCORE_BY_ACTION_TYPE), so this needs to outweigh
+      // that on its own to actually rank below declining to block, not just cancel it out to a tie.
+      delta(-3, "blocker dies for no value against a survivable attacker");
+    }
+  } else {
+    delta(1, "block absorbs damage with no losses on either side");
+  }
+
+  if (hasDeathtouch(blocker) && !attackerDies) {
+    delta(1, "deathtouch blocker threatens the attacker regardless of toughness");
+  }
+}
+
+const IDEAL_MIN_LANDS = 2;
+const IDEAL_MAX_LANDS = 4;
+const ACCEPTABLE_MAX_LANDS = 5;
+const MIN_TOTAL_MANA_SOURCES = 3;
+
+function isLandLike(card: CardLike): boolean {
+  return card.role === "land" || (card.typeLine ?? "").includes("Land");
+}
+
+function isRampLike(card: CardLike): boolean {
+  return card.role === "ramp";
+}
+
+// A slimmed-down version of src/lib/mulliganHeuristics.ts' evaluateOpeningHand, reimplemented
+// against this module's CardLike/ScoringContext shape rather than the full VisibleCard/PlayerSeat
+// types that function needs — this module crosses the API boundary (it's what the /api/agents/action
+// route falls back to when Ollama is unreachable) and only ever sees the JSON snapshot sent over
+// the wire. Deliberately narrower: no color-identity coverage check, since producedMana/
+// colorIdentity aren't part of that snapshot today. Land/early-play thresholds match the fuller
+// heuristic so the two don't disagree on the same hand.
+function openingHandScore(hand: CardLike[]): number {
+  const lands = hand.filter(isLandLike);
+  const ramp = hand.filter(isRampLike);
+  const totalSources = lands.length + ramp.length;
+  let score = 0;
+  if (lands.length < IDEAL_MIN_LANDS) score -= 3;
+  else if (lands.length <= IDEAL_MAX_LANDS) score += 2;
+  else if (lands.length > ACCEPTABLE_MAX_LANDS) score -= 3;
+  if (totalSources < MIN_TOTAL_MANA_SOURCES) score -= 2;
+  const earlyPlays = hand.filter((card) => !isLandLike(card) && (card.manaValue ?? 0) >= 1 && (card.manaValue ?? 0) <= 3).length;
+  score += earlyPlays > 0 ? 1 : -1;
+  return score;
+}
+
+// Without this, the deterministic fallback (used whenever Ollama is unreachable) picks whichever
+// action has the higher static baseline score, which for keep_hand vs. mulligan is always
+// keep_hand — meaning agents always kept a bad opening hand any time the LLM was unavailable.
+function scoreMulliganDecision(action: ScorableAction, context: ScoringContext, delta: (amount: number, reason: string) => void) {
+  if (context.purpose !== "opening_hand_mulligan") return;
+  if (action.actionType !== "keep_hand" && action.actionType !== "mulligan") return;
+  const hand = context.you?.hand;
+  if (!hand) return;
+  const handScore = openingHandScore(hand);
+  if (action.actionType === "keep_hand") {
+    delta(handScore, `opening hand quality score ${handScore}`);
+  } else {
+    delta(-handScore, `mulligan value relative to opening hand quality score ${handScore}`);
+  }
+}
+
+const COMMANDER_DAMAGE_LETHAL = 21;
+const COMMANDER_DAMAGE_DANGER_THRESHOLD = 13;
+const POISON_LETHAL = 10;
+const POISON_DANGER_THRESHOLD = 6;
+
+// "Immediate-win prevention" (the system prompt already asks the LLM to weigh this, but gives it
+// no structured signal) — recognizes a specific attacker/target that's already close to one of the
+// two alternate loss conditions (21 commander damage from a single source, 10 poison counters) and
+// prioritizes answering it over a same-sized but non-threatening permanent. Deliberately narrow:
+// only removal and block decisions get this bonus; it doesn't (yet) push your own commander damage
+// or poison output on offense, and it doesn't weigh general "who's ahead" multiplayer politics —
+// that's still left to the LLM's own judgment, per the system prompt.
+function scoreImmediateWinThreats(action: ScorableAction, context: ScoringContext, delta: (amount: number, reason: string) => void) {
+  const you = context.you;
+  if (!you) return;
+  const poison = you.poison ?? 0;
+
+  if (action.actionType === "cast_spell" && action.role === "removal") {
+    const target = findCard(opponentBattlefields(context), action.targetIds[0]);
+    if (!target) return;
+    const existingCommanderDamage = you.commanderDamage?.[target.id] ?? 0;
+    if (existingCommanderDamage >= COMMANDER_DAMAGE_DANGER_THRESHOLD) {
+      // Large enough to outweigh scoreRemovalTargeting's "minor permanent" penalty (-2) when this
+      // source is small relative to other threats on the board — near-lethal commander damage is
+      // a bigger deal than raw stats, matching the system prompt's "immediate-win prevention"
+      // instruction to override the default higher-scored-action preference.
+      delta(5, `removing a source that has already dealt ${existingCommanderDamage} commander damage (21 is lethal)`);
+    }
+    if (hasInfect(target) && poison >= POISON_DANGER_THRESHOLD) {
+      delta(3, `removing an infect creature while already at ${poison} poison counters (10 is lethal)`);
+    }
+    return;
+  }
+
+  if (action.actionType === "block") {
+    const attacker = findCard(opponentBattlefields(context), action.targetIds[0]);
+    if (!attacker) return;
+    const attackerPower = parseNum(attacker.power) ?? 0;
+    const existingCommanderDamage = you.commanderDamage?.[attacker.id] ?? 0;
+    if (existingCommanderDamage > 0) {
+      if (existingCommanderDamage + attackerPower >= COMMANDER_DAMAGE_LETHAL) {
+        delta(4, "this attacker would deal lethal (21+) commander damage if left unblocked");
+      } else if (existingCommanderDamage >= COMMANDER_DAMAGE_DANGER_THRESHOLD) {
+        delta(2, "this attacker is a commander already dealing significant damage to you");
+      }
+    }
+    if (hasInfect(attacker)) {
+      if (poison + attackerPower >= POISON_LETHAL) {
+        delta(4, "this infect attacker would deal lethal (10+) poison counters if left unblocked");
+      } else if (poison >= POISON_DANGER_THRESHOLD) {
+        delta(2, `already at ${poison} poison counters, infect damage is dangerous`);
+      }
+    }
+  }
+}
+
+const BOARD_WIPE_PATTERNS = [
+  /\bdestroy all creatures\b/,
+  /\ball creatures? (?:get|gets) -\d+\/-\d+\b/,
+  /\beach (?:creature|player'?s? creatures?)\b.{0,40}\b(?:dies|destroyed|sacrifice)\b/,
+  /\bdeals? \d+ damage to each creature\b/,
+  /\beach player sacrifices\b.{0,20}\bcreatures?\b/
+];
+
+function isBoardWipeText(oracleText: string): boolean {
+  const text = oracleText.toLowerCase();
+  return BOARD_WIPE_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+function isCounterspellAction(action: ScorableAction): boolean {
+  return /\bcounter target spell\b/i.test(action.detail ?? "");
+}
+
+function boardValue(battlefield: CardLike[] | undefined): number {
+  return (battlefield ?? []).reduce((total, card) => total + (parseNum(card.power) ?? 0) + (parseNum(card.toughness) ?? 0), 0);
+}
+
+// "If I have a counterspell and an opponent casts a board wipe, does it actually benefit me to
+// stop it, or would I lose more by letting my own (bigger) board get destroyed along with
+// everyone else's?" — the general instant-holding heuristic above has no opinion on THIS
+// specific spell; this compares board value before deciding whether answering it is correct.
+// Deliberately narrow: only recognizes symmetric board wipes (not one-sided removal, which is
+// good to answer or ignore for unrelated reasons already covered elsewhere), and only scores an
+// actual counterspell response specially — a different instant being cast in response (e.g.
+// value-grabbing removal before the wipe lands) isn't assumed to be an attempt to stop it.
+function scoreStackResponse(action: ScorableAction, context: ScoringContext, delta: (amount: number, reason: string) => void) {
+  if (context.purpose !== "priority_response") return;
+  const pending = context.pendingAction;
+  if (!pending?.oracleText || !isBoardWipeText(pending.oracleText)) return;
+
+  const myValue = boardValue(context.you?.battlefield);
+  const opponentsValue = (context.opponents ?? []).reduce((total, opponent) => total + boardValue(opponent.battlefield), 0);
+  const iAmAhead = myValue > opponentsValue;
+
+  if (action.actionType === "cast_spell" && isCounterspellAction(action)) {
+    if (iAmAhead) {
+      delta(4, `countering ${pending.cardName ?? "a board wipe"} protects your board lead (you: ${myValue}, opponents combined: ${opponentsValue})`);
+    } else {
+      delta(-4, `countering ${pending.cardName ?? "a board wipe"} while behind on board (you: ${myValue}, opponents combined: ${opponentsValue}) throws away a reset that would help you`);
+    }
+  } else if (action.actionType === "pass_priority" && !iAmAhead) {
+    delta(2, "letting a board wipe resolve while behind on board resets to a more even position");
+  }
+}
+
 export function scoreLegalAction(action: ScorableAction, context: ScoringContext): { score: number; reasons: string[] } {
   let score = BASELINE_SCORE_BY_ACTION_TYPE[action.actionType] ?? 0;
   const reasons: string[] = [];
@@ -240,8 +450,12 @@ export function scoreLegalAction(action: ScorableAction, context: ScoringContext
   scoreRampEarly(action, context, delta);
   scoreRemovalTargeting(action, context, delta);
   scoreAttackProfitability(action, context, delta);
+  scoreBlockDecision(action, context, delta);
   scoreHoldInstants(action, context, delta);
   scoreUpkeepValue(action, context, delta);
+  scoreMulliganDecision(action, context, delta);
+  scoreImmediateWinThreats(action, context, delta);
+  scoreStackResponse(action, context, delta);
 
   return { score, reasons };
 }

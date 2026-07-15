@@ -49,4 +49,34 @@ describe("counters", () => {
     expect(effectivePower(noPrintedPT)).toBe(1);
     expect(effectiveToughness(noPrintedPT)).toBe(1);
   });
+
+  it("adds temporary until-end-of-turn bonuses (prowess) on top of counters", () => {
+    const prowessCreature = card({ power: "1", toughness: "1", counters: [{ kind: "+1/+1", count: 1 }], temporaryPowerBonus: 2, temporaryToughnessBonus: 2 });
+    expect(effectivePower(prowessCreature)).toBe(4);
+    expect(effectiveToughness(prowessCreature)).toBe(4);
+  });
+
+  it("adds attachment bonuses (Aura/Equipment) on top of everything else", () => {
+    const rancored = card({ power: "1", toughness: "1", counters: [{ kind: "+1/+1", count: 1 }], attachmentPowerBonus: 2, attachmentToughnessBonus: 0 });
+    expect(effectivePower(rancored)).toBe(4);
+    expect(effectiveToughness(rancored)).toBe(2);
+  });
+
+  it("layer 7a: a characteristic-defining ability replaces the printed base before counters/pumps stack on top", () => {
+    const cdaCreature = card({ power: "*", toughness: "*", cdaPower: 3, cdaToughness: 3, counters: [{ kind: "+1/+1", count: 1 }] });
+    expect(effectivePower(cdaCreature)).toBe(4);
+    expect(effectiveToughness(cdaCreature)).toBe(4);
+  });
+
+  it("layer 7b: a 'set base power/toughness' effect overrides both the printed value and a CDA", () => {
+    const overridden = card({ power: "*", toughness: "*", cdaPower: 8, cdaToughness: 8, setPowerOverride: 9, setToughnessOverride: 10 });
+    expect(effectivePower(overridden)).toBe(9);
+    expect(effectiveToughness(overridden)).toBe(10);
+  });
+
+  it("counters and pumps still apply on top of a 7b override (Almost Perfect on a creature with a +1/+1 counter)", () => {
+    const overriddenWithCounter = card({ power: "1", toughness: "1", setPowerOverride: 9, setToughnessOverride: 10, counters: [{ kind: "+1/+1", count: 1 }] });
+    expect(effectivePower(overriddenWithCounter)).toBe(10);
+    expect(effectiveToughness(overriddenWithCounter)).toBe(11);
+  });
 });

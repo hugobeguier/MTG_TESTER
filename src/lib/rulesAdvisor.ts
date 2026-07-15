@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { VisibleCard } from "./types";
+import { deathEffectText, etbEffectText } from "./oracleClauses";
 
 const DestinationSchema = z.preprocess((value) => {
   if (value === null || value === undefined) return undefined;
@@ -19,6 +20,7 @@ export const RuleWorkflowSchema = z.object({
     "look_at_top_cards",
     "reorder_top_cards",
     "move_card_between_zones",
+    "proliferate",
     "manual_review"
   ]),
   summary: z.string().min(1),
@@ -83,7 +85,36 @@ export function deterministicRuleWorkflow(input: RuleAdvisorInput): RuleWorkflow
     };
   }
 
-  const scryCount = extractKeywordCount(text, "scry");
+  // For an ETB or "dies" event, only the clause(s) actually gated by that trigger apply — a
+  // sacrifice-cost or dies-triggered ability elsewhere in the same oracle text (e.g. Mind Stone's
+  // "{1}, {T}, Sacrifice this artifact: Draw a card." or Solemn Simulacrum's "When this creature
+  // dies, you may draw a card.") must not be read as something that happens on entering.
+  const scopedText = eventRelevantOracleText(input.event, input.sourceCard.oracleText).toLowerCase();
+  const isEtbOrDeathEvent =
+    input.event === "land_played" || input.event === "spell_resolved_to_battlefield" || input.event === "card_moved_to_graveyard";
+  if (isEtbOrDeathEvent && !scopedText.trim()) {
+    return {
+      workflow: "none",
+      summary: `${input.sourceCard.name} has no clause relevant to ${input.event}; no workflow is needed.`,
+      sourceCardId: input.sourceCard.id,
+      maxChoices: 0,
+      requiresHumanChoice: false,
+      warnings: []
+    };
+  }
+
+  if (scopedText.includes("proliferate")) {
+    return {
+      workflow: "proliferate",
+      summary: `${input.sourceCard.name} instructs ${input.actorName} to proliferate.`,
+      sourceCardId: input.sourceCard.id,
+      maxChoices: 0,
+      requiresHumanChoice: false,
+      warnings: extractDrawCount(scopedText) ? [`${input.sourceCard.name} also draws a card after this resolves; that follow-up draw is not yet automated.`] : []
+    };
+  }
+
+  const scryCount = extractKeywordCount(scopedText, "scry");
   if (scryCount) {
     return {
       workflow: "scry_cards",
@@ -95,7 +126,7 @@ export function deterministicRuleWorkflow(input: RuleAdvisorInput): RuleWorkflow
     };
   }
 
-  const surveilCount = extractKeywordCount(text, "surveil");
+  const surveilCount = extractKeywordCount(scopedText, "surveil");
   if (surveilCount) {
     return {
       workflow: "surveil_cards",
@@ -109,15 +140,15 @@ export function deterministicRuleWorkflow(input: RuleAdvisorInput): RuleWorkflow
 
   // Checked before the plain draw count below: a card that both reorders its top cards and
   // later says "draw a card" (e.g. Ponder) must not be short-circuited into just drawing.
-  const lookCount = extractLookAtTopCount(text);
-  if (lookCount && (text.includes("put them back in any order") || text.includes("put those cards back in any order"))) {
+  const lookCount = extractLookAtTopCount(scopedText);
+  if (lookCount && (scopedText.includes("put them back in any order") || scopedText.includes("put those cards back in any order"))) {
     return {
       workflow: "reorder_top_cards",
       summary: `${input.sourceCard.name} instructs ${input.actorName} to look at the top ${lookCount} card${lookCount === 1 ? "" : "s"} and put them back in any order.`,
       sourceCardId: input.sourceCard.id,
       maxChoices: lookCount,
       requiresHumanChoice: true,
-      warnings: extractDrawCount(text) ? [`${input.sourceCard.name} also draws a card after this resolves; that follow-up draw is not yet automated.`] : []
+      warnings: extractDrawCount(scopedText) ? [`${input.sourceCard.name} also draws a card after this resolves; that follow-up draw is not yet automated.`] : []
     };
   }
 
@@ -132,7 +163,7 @@ export function deterministicRuleWorkflow(input: RuleAdvisorInput): RuleWorkflow
     };
   }
 
-  const drawCount = extractDrawCount(text);
+  const drawCount = extractDrawCount(scopedText);
   if (drawCount) {
     return {
       workflow: "draw_cards",
@@ -147,9 +178,9 @@ export function deterministicRuleWorkflow(input: RuleAdvisorInput): RuleWorkflow
   if (
     (input.event.includes("activated") && input.sourceCard.name === "Myriad Landscape") ||
     (input.sourceCard.name !== "Myriad Landscape" &&
-      text.includes("search your library") &&
-      text.includes("two basic land") &&
-      text.includes("share a land type"))
+      scopedText.includes("search your library") &&
+      scopedText.includes("two basic land") &&
+      scopedText.includes("share a land type"))
   ) {
     return {
       workflow: "search_basic_lands_shared_type_to_battlefield_tapped",
@@ -164,7 +195,7 @@ export function deterministicRuleWorkflow(input: RuleAdvisorInput): RuleWorkflow
     };
   }
 
-  if (text.includes("search your library") && text.includes("put") && text.includes("hand")) {
+  if (scopedText.includes("search your library") && scopedText.includes("put") && scopedText.includes("hand")) {
     return {
       workflow: "search_library_to_hand",
       summary: `${input.sourceCard.name} can search the library for a card and put it into hand.`,
@@ -178,9 +209,9 @@ export function deterministicRuleWorkflow(input: RuleAdvisorInput): RuleWorkflow
   }
 
   if (
-    text.includes("search your library") &&
-    (text.includes("put") || text.includes("onto the battlefield")) &&
-    text.includes("battlefield")
+    scopedText.includes("search your library") &&
+    (scopedText.includes("put") || scopedText.includes("onto the battlefield")) &&
+    scopedText.includes("battlefield")
   ) {
     return {
       workflow: "search_library_to_battlefield",
@@ -189,13 +220,23 @@ export function deterministicRuleWorkflow(input: RuleAdvisorInput): RuleWorkflow
       maxChoices: 1,
       allowedCardFilter: "cards matching the source effect",
       destination: "battlefield",
-      tapped: text.includes("tapped"),
+      tapped: scopedText.includes("tapped"),
       requiresHumanChoice: true,
       warnings: ["Exact card restrictions may need manual review."]
     };
   }
 
   return undefined;
+}
+
+// "land_played"/"spell_resolved_to_battlefield" are ETB-shaped; "card_moved_to_graveyard" is a
+// death event. Everything else (an instant/sorcery resolving, a loyalty ability's own text, a
+// phase trigger already isolated by its caller, ...) keeps using the full oracle text, since
+// there's no single later-gated clause to strip out of those.
+function eventRelevantOracleText(event: string, oracleText: string): string {
+  if (event === "land_played" || event === "spell_resolved_to_battlefield") return etbEffectText(oracleText);
+  if (event === "card_moved_to_graveyard") return deathEffectText(oracleText);
+  return oracleText;
 }
 
 function isUpkeepTriggeredText(text: string) {
@@ -256,6 +297,13 @@ export async function requestRuleWorkflow(input: RuleAdvisorInput, baseUrl = pro
   const deterministic = deterministicRuleWorkflow(input);
   if (deterministic) return { source: "deterministic" as const, workflow: deterministic };
 
+  // Scope the oracle text the same way the deterministic pass does, so the LLM fallback can't
+  // reintroduce the same "dies"/activated-ability-cost misread the deterministic layer avoids.
+  const scopedInput = {
+    ...input,
+    sourceCard: { ...input.sourceCard, oracleText: eventRelevantOracleText(input.event, input.sourceCard.oracleText) }
+  };
+
   const model = process.env.OLLAMA_RULES_MODEL ?? process.env.OLLAMA_MODEL ?? "llama3.2";
   const response = await fetch(`${baseUrl}/api/chat`, {
     method: "POST",
@@ -282,11 +330,11 @@ export async function requestRuleWorkflow(input: RuleAdvisorInput, baseUrl = pro
         {
           role: "system",
           content:
-            "You are an MTG rules workflow classifier. Return JSON only. Do not change game state. Classify what UI workflow is needed for the source card effect using the supplied battlefield, hand, graveyard, exile, and library preview. Use scry_cards for scry N, surveil_cards for surveil N, draw_cards for draw N, look_at_top_cards for effects that only look at top N cards, reorder_top_cards for effects that look at top N cards and put them back in any order, search_library_to_hand or search_library_to_battlefield for library search effects. Put N in maxChoices. Prefer manual_review if unsure."
+            "You are an MTG rules workflow classifier. Return JSON only. Do not change game state. Classify what UI workflow is needed for the source card effect using the supplied battlefield, hand, graveyard, exile, and library preview. The sourceCard's oracleText has already been trimmed to only the clause relevant to this event — do not infer or recall other abilities the card might have from training data; classify based solely on the given text. Use scry_cards for scry N, surveil_cards for surveil N, draw_cards for draw N, look_at_top_cards for effects that only look at top N cards, reorder_top_cards for effects that look at top N cards and put them back in any order, search_library_to_hand or search_library_to_battlefield for library search effects. Put N in maxChoices. Prefer manual_review if unsure."
         },
         {
           role: "user",
-          content: JSON.stringify(input)
+          content: JSON.stringify(scopedInput)
         }
       ]
     })
