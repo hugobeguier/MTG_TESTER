@@ -44,7 +44,77 @@ describe("parseRemovalEffect — destroy", () => {
   });
 
   it("parses a board wipe (Wrath of God, Damnation)", () => {
-    expect(parseRemovalEffect("Destroy all creatures. They can't be regenerated.")).toEqual({ kind: "destroy_all" });
+    expect(parseRemovalEffect("Destroy all creatures. They can't be regenerated.")).toEqual({ kind: "destroy_all", targetType: "creature" });
+  });
+
+  it("does not treat a conditional wipe's substring match as an unconditional wipe (Austere Command's creature mode)", () => {
+    expect(parseRemovalEffect("Destroy all creatures with mana value 3 or less.")).toEqual({
+      kind: "destroy_all_conditional",
+      threshold: 3,
+      comparison: "or_less"
+    });
+    expect(parseRemovalEffect("Destroy all creatures with mana value 4 or greater.")).toEqual({
+      kind: "destroy_all_conditional",
+      threshold: 4,
+      comparison: "or_greater"
+    });
+  });
+
+  it("parses an all-artifacts and all-enchantments wipe", () => {
+    expect(parseRemovalEffect("Destroy all artifacts.")).toEqual({ kind: "destroy_all", targetType: "artifact" });
+    expect(parseRemovalEffect("Destroy all enchantments.")).toEqual({ kind: "destroy_all", targetType: "enchantment" });
+  });
+});
+
+describe("parseRemovalEffect — modal", () => {
+  it("parses a 'choose one' spell, keeping only the removal-shaped mode (Boros Charm)", () => {
+    expect(
+      parseRemovalEffect(
+        "Choose one —\n• Boros Charm deals 4 damage to target player or planeswalker.\n• Permanents you control gain indestructible until end of turn.\n• Target creature gains double strike until end of turn."
+      )
+    ).toEqual({
+      kind: "modal",
+      chooseCount: 1,
+      modes: [{ kind: "damage", amount: 4, targetType: "player" }]
+    });
+  });
+
+  it("parses a 'choose two' spell into all four destroy modes (Austere Command)", () => {
+    const result = parseRemovalEffect(
+      "Choose two —\n• Destroy all artifacts.\n• Destroy all enchantments.\n• Destroy all creatures with mana value 3 or less.\n• Destroy all creatures with mana value 4 or greater."
+    );
+    expect(result).toEqual({
+      kind: "modal",
+      chooseCount: 2,
+      modes: [
+        { kind: "destroy_all", targetType: "artifact" },
+        { kind: "destroy_all", targetType: "enchantment" },
+        { kind: "destroy_all_conditional", threshold: 3, comparison: "or_less" },
+        { kind: "destroy_all_conditional", threshold: 4, comparison: "or_greater" }
+      ]
+    });
+  });
+
+  it("declines a modal spell where no mode is removal-shaped (Return of the Wildspeaker)", () => {
+    expect(
+      parseRemovalEffect(
+        "Choose one —\n• Draw cards equal to the greatest power among non-Human creatures you control.\n• Non-Human creatures you control get +3/+3 until end of turn."
+      )
+    ).toBeUndefined();
+  });
+});
+
+describe("parseRemovalEffect — variable (X) damage", () => {
+  it("parses 'deals X damage to any target' (a Fireball-shaped X spell with a single target)", () => {
+    expect(parseRemovalEffect("This spell deals X damage to any target.")).toEqual({ kind: "damage", amount: "X", targetType: "any" });
+  });
+
+  it("parses the split target-then-damage phrasing (Comet Storm), modeling only the base single-target case", () => {
+    expect(
+      parseRemovalEffect(
+        "Multikicker {1} (You may pay an additional {1} any number of times as you cast this spell.)\nChoose any target, then choose another target for each time this spell was kicked. Comet Storm deals X damage to each of them."
+      )
+    ).toEqual({ kind: "damage", amount: "X", targetType: "any" });
   });
 });
 
@@ -58,6 +128,26 @@ describe("parseRemovalEffect — exile", () => {
 
   it("parses exile target nonland permanent (Utter End)", () => {
     expect(parseRemovalEffect("Exile target nonland permanent.")).toEqual({ kind: "exile", targetType: "nonland_permanent" });
+  });
+
+  it("parses 'exile another target' (Aetherjacket)", () => {
+    expect(parseRemovalEffect("Destroy another target artifact.")).toEqual({
+      kind: "destroy",
+      targetType: "artifact",
+      excludedColors: [],
+      artifactsExcluded: false
+    });
+    expect(parseRemovalEffect("Exile another target creature.")).toEqual({ kind: "exile", targetType: "creature" });
+  });
+
+  it("declines a temporary exile (flicker) instead of misreading it as permanent removal (Touch the Spirit Realm)", () => {
+    expect(parseRemovalEffect("Exile target artifact or creature. Return it to the battlefield under its owner's control at the beginning of the next end step.")).toBeUndefined();
+  });
+
+  it("declines a temporary exile even when the target uses 'another' (Angel of Condemnation)", () => {
+    expect(
+      parseRemovalEffect("Exile another target creature. Return that card to the battlefield under its owner's control at the beginning of the next end step.")
+    ).toBeUndefined();
   });
 });
 
@@ -89,6 +179,10 @@ describe("parseRemovalEffect — bounce", () => {
       kind: "bounce",
       targetType: "creature"
     });
+  });
+
+  it("parses 'return another target ... to its owner's hand' (Aegis Automaton)", () => {
+    expect(parseRemovalEffect("Return another target creature you control to its owner's hand.")).toEqual({ kind: "bounce", targetType: "creature" });
   });
 });
 

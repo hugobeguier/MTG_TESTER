@@ -30,3 +30,25 @@ export function counterSpellCanTarget(ability: CounterSpellAbility, targetTypeLi
   if (ability.restriction === "commander") return targetIsCommanderSpell;
   return true;
 }
+
+// "This spell can't be countered." (Void Rend, ...) — a self-immunity printed directly on the
+// targeted spell's own oracle text, independent of anything its controller has on the battlefield.
+export function hasCantBeCountered(oracleText: string): boolean {
+  return /\bthis spell can'?t be countered\b/i.test(oracleText);
+}
+
+export type CounterImmunityScope = "creature_spells" | "spells";
+
+// "[Creature s]pells you [control/cast] can't be countered." — a static grant from a permanent the
+// caster controls, distinct from hasCantBeCountered's on-the-spell-itself wording. "creature_spells"
+// narrows to creature spells only; "spells" covers everything the controller casts.
+export function parseCounterImmunityGrant(oracleText: string): CounterImmunityScope | undefined {
+  const text = oracleText.toLowerCase();
+  if (/\bcreature spells you (?:control|cast) can'?t be countered\b/.test(text)) return "creature_spells";
+  if (/\bspells you (?:control|cast) can'?t be countered\b/.test(text)) return "spells";
+  return undefined;
+}
+
+export function counterImmunityScopeMatches(scope: CounterImmunityScope, targetTypeLine: string): boolean {
+  return scope === "spells" || targetTypeLine.includes("Creature");
+}

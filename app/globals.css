@@ -411,6 +411,251 @@ h3 {
   top: 1rem;
 }
 
+/* One shared box anchored to the table's own center point (where the old decorative ring mesh used
+   to sit) and projected to screen space every frame (see updateScoreboardAnchor in
+   ThreeGameTable's animate loop) — same technique .agent-hand-anchor uses below, so this stays put
+   on the board itself as the camera orbits/pans/zooms instead of floating over whatever happens to
+   be behind it. left/top are overwritten imperatively every frame; the 50%/50% here is just the
+   pre-first-frame fallback. The transform keeps the anchor point at the box's own center, matching
+   where left/top get set. */
+.scoreboard-hud {
+  backdrop-filter: blur(10px);
+  background: rgba(20, 24, 18, 0.86);
+  border: 1px solid rgba(215, 179, 90, 0.35);
+  border-radius: 10px;
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  left: 50%;
+  padding: 0.6rem;
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 4;
+}
+
+.scoreboard-flip {
+  align-self: center;
+  font-size: 0.72rem;
+}
+
+/* Cell order in the JSX is spatial (matches PLAYER_AREAS' table layout), not turn order — see the
+   comment at the map() call site — so this plain 2-column grid lands each cell above the real
+   player it belongs to. */
+.scoreboard-grid {
+  display: grid;
+  gap: 0.4rem;
+  grid-template-columns: repeat(2, minmax(100px, 1fr));
+}
+
+.scoreboard-cell {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(242, 240, 232, 0.1);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.4rem 0.5rem;
+}
+
+.scoreboard-life {
+  font-size: 1.4rem;
+  font-weight: 700;
+}
+
+.scoreboard-poison {
+  color: #8fce6a;
+  font-size: 0.72rem;
+}
+
+.scoreboard-muted {
+  color: rgba(242, 240, 232, 0.55);
+  font-size: 0.7rem;
+}
+
+.scoreboard-commander-damage {
+  display: grid;
+  font-size: 0.7rem;
+  gap: 0.1rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* Positioned imperatively (left/top set every frame in ThreeGameTable's animate loop, projecting
+   each agent's 3D name-label position to screen space) rather than via CSS placement — this box
+   tracks that world position as the camera orbits/pans/zooms instead of sitting fixed on screen. */
+.agent-hand-anchor {
+  backdrop-filter: blur(10px);
+  background: rgba(20, 24, 18, 0.9);
+  border: 1px solid rgba(242, 240, 232, 0.16);
+  border-radius: 8px;
+  color: var(--text);
+  display: none;
+  gap: 0.3rem;
+  padding: 0.45rem 0.55rem;
+  pointer-events: none;
+  position: absolute;
+  transform: translate(-50%, -100%);
+  /* Fixed to fit exactly 7 card-width columns (see .agent-hand-card's flex-basis + gap below) —
+     an 8th+ card scrolls horizontally instead of growing the box. */
+  width: 468px;
+  z-index: 3;
+}
+
+.agent-hand-anchor header {
+  align-items: baseline;
+  display: flex;
+  gap: 0.4rem;
+  justify-content: space-between;
+}
+
+.agent-hand-anchor header strong {
+  font-size: 0.76rem;
+}
+
+.agent-hand-anchor header span {
+  color: var(--muted);
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.agent-hand-row {
+  display: flex;
+  gap: 0.3rem;
+  min-height: 58px;
+  overflow-x: auto;
+  overflow-y: visible;
+  padding-top: 0.15rem;
+  pointer-events: auto;
+}
+
+.agent-hand-card {
+  aspect-ratio: 488 / 680;
+  background: #111;
+  border: 1px solid rgba(242, 240, 232, 0.18);
+  border-radius: 5px;
+  cursor: pointer;
+  flex: 0 0 60px;
+  overflow: hidden;
+  position: relative;
+  transition: border-color 130ms ease;
+}
+
+/* Used to scale up in place on hover to act as a makeshift zoom, but at this container's fixed
+   width that blew the card up past the anchor box's own edges (see the width comment above) —
+   clicking to open the same CardInspector popup the battlefield already uses reads the full card
+   without that overflow problem, so hover here is just a click affordance now. */
+.agent-hand-card:hover {
+  border-color: rgba(244, 201, 93, 0.7);
+}
+
+.agent-hand-card img {
+  display: block;
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.agent-hand-empty {
+  color: var(--muted);
+  font-size: 0.7rem;
+  margin: 0;
+}
+
+.three-hud.agent-thinking-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.5rem;
+  right: 1rem;
+  top: 4.75rem;
+}
+
+.agent-thinking-badge {
+  align-items: center;
+  background: transparent;
+  border: 1px solid rgba(242, 240, 232, 0.16);
+  border-radius: 999px;
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  gap: 0.4rem;
+  padding: 0.3rem 0.6rem;
+  transition: opacity 0.15s ease, border-color 0.15s ease;
+}
+
+.agent-thinking-badge.is-empty {
+  opacity: 0.4;
+}
+
+.agent-thinking-badge.is-ready {
+  border-color: rgba(242, 240, 232, 0.32);
+}
+
+.agent-thinking-badge.is-thinking {
+  border-color: var(--accent);
+}
+
+.agent-thinking-icon {
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.agent-thinking-badge.is-thinking .agent-thinking-icon {
+  animation: agent-thinking-pulse 1.1s ease-in-out infinite;
+}
+
+.agent-thinking-name {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+}
+
+@keyframes agent-thinking-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.55;
+    transform: scale(1.3);
+  }
+}
+
+.agent-reasoning-purpose {
+  color: var(--accent);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+}
+
+.agent-reasoning-label {
+  font-weight: 600;
+}
+
+.agent-reasoning-deliberation {
+  background: rgba(242, 240, 232, 0.06);
+  border-left: 2px solid var(--accent);
+  border-radius: 4px;
+  margin: 0.5rem 0;
+  padding: 0.5rem 0.75rem;
+}
+
+.agent-reasoning-deliberation-label {
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-weight: 600;
+  margin: 0 0 0.25rem;
+  text-transform: uppercase;
+}
+
+.agent-reasoning-deliberation-text {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
 .activity-panel {
   backdrop-filter: blur(12px);
   background: rgba(20, 24, 18, 0.9);
@@ -508,11 +753,13 @@ h3 {
   transition: transform 130ms ease, box-shadow 130ms ease, border-color 130ms ease, opacity 130ms ease;
 }
 
+/* No hover scale-up (used to translateY+scale, same overflow problem as .agent-hand-card above) —
+   a click already opens the same CardInspector popup the battlefield uses (see the onClick handler
+   where this class is used), so hover is just a click affordance, not a zoom. */
 .three-hand-card:hover,
 .three-hand-card:focus-within {
   border-color: rgba(244, 201, 93, 0.75);
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
-  transform: translateY(-18px) scale(1.28);
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.35);
   z-index: 5;
 }
 
@@ -723,6 +970,12 @@ h3 {
   text-transform: uppercase;
 }
 
+.stack-type-line {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-style: italic;
+}
+
 .stack-item strong {
   font-size: 0.86rem;
   line-height: 1.25;
@@ -894,6 +1147,19 @@ h3 {
 
 .counter-controls strong {
   font-size: 0.85rem;
+}
+
+.creature-type-list {
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.mana-choice-modal input[type="text"] {
+  background: rgba(242, 240, 232, 0.08);
+  border: 1px solid rgba(242, 240, 232, 0.22);
+  border-radius: 6px;
+  color: #eee9d8;
+  padding: 0.5rem 0.65rem;
 }
 
 .library-look-modal {
@@ -1629,6 +1895,102 @@ ol {
   position: absolute;
   white-space: nowrap;
   width: 1px;
+}
+
+.block-assign-panel {
+  background: rgba(16, 19, 15, 0.96);
+  border: 1px solid rgba(244, 201, 93, 0.55);
+  border-radius: 8px;
+  bottom: calc(132px + 1rem);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.5);
+  color: var(--text);
+  display: grid;
+  gap: 0.6rem;
+  max-width: min(360px, calc(100vw - 24px));
+  padding: 0.85rem;
+  position: absolute;
+  right: 1rem;
+  z-index: 10;
+}
+
+.block-assign-panel header h2 {
+  font-size: 1rem;
+  margin: 0.15rem 0 0;
+}
+
+.block-assign-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.block-assign-actions button {
+  flex: 1;
+}
+
+.block-assign-actions .block-confirm {
+  background: var(--accent);
+  color: #16190f;
+  font-weight: 600;
+}
+
+.block-assign-hint {
+  color: var(--muted);
+  font-size: 0.75rem;
+  margin: 0;
+}
+
+.block-assign-list {
+  display: grid;
+  gap: 0.4rem;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.block-assign-card {
+  align-items: center;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.45rem 0.6rem;
+  text-align: left;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.block-assign-card:hover {
+  border-color: rgba(244, 201, 93, 0.6);
+}
+
+.block-assign-card.selected {
+  background: rgba(244, 201, 93, 0.14);
+  border-color: var(--accent);
+}
+
+.block-assign-order {
+  align-items: center;
+  background: var(--accent);
+  border-radius: 999px;
+  color: #16190f;
+  display: flex;
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  font-weight: 700;
+  height: 18px;
+  justify-content: center;
+  width: 18px;
+}
+
+.block-assign-name {
+  flex: 1;
+  font-size: 0.85rem;
+}
+
+.block-assign-stats {
+  color: var(--muted);
+  font-size: 0.78rem;
 }
 
 @media (max-width: 860px) {

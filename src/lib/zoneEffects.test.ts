@@ -5,14 +5,24 @@ describe("parseZoneEffect — reanimate", () => {
   it("parses reanimation from any graveyard (Reanimate)", () => {
     expect(parseZoneEffect("Put target creature card from a graveyard onto the battlefield under your control. You lose life equal to that card's mana value.")).toEqual({
       kind: "reanimate",
-      anyGraveyard: true
+      anyGraveyard: true,
+      targetType: "creature"
     });
   });
 
   it("parses reanimation restricted to your own graveyard (Persist)", () => {
     expect(parseZoneEffect("Return target nonlegendary creature card from your graveyard to the battlefield with a -1/-1 counter on it.")).toEqual({
       kind: "reanimate",
-      anyGraveyard: false
+      anyGraveyard: false,
+      targetType: "creature"
+    });
+  });
+
+  it("parses reanimation restricted to a non-creature card type (Starfield of Nyx)", () => {
+    expect(parseZoneEffect("At the beginning of your upkeep, you may return target enchantment card from your graveyard to the battlefield.")).toEqual({
+      kind: "reanimate",
+      anyGraveyard: false,
+      targetType: "enchantment"
     });
   });
 
@@ -123,6 +133,15 @@ describe("parseZoneEffect — steal and play", () => {
         "Search target opponent's library for a card and exile it face down. Then that player shuffles. You may play that card for as long as it remains exiled."
       )
     ).toEqual({ kind: "steal_and_play" });
+  });
+});
+
+describe("parseZoneEffect — draw X then put back", () => {
+  it("parses draw X then put N cards from hand on top of library in any order (Brainsurge)", () => {
+    expect(parseZoneEffect("Draw X cards, then put two cards from your hand on top of your library in any order.")).toEqual({
+      kind: "draw_x_then_put_back",
+      putBackAmount: 2
+    });
   });
 });
 

@@ -1,5 +1,9 @@
-import type { CommanderDeck, DeckCard } from "./types";
+import type { CardRecord, CommanderDeck, DeckCard } from "./types";
 import { scoreDeck, validateBracketThreeDeck } from "./bracketPolicy";
+
+export interface SampleDeckCatalog {
+  lookup(name: string): CardRecord | undefined;
+}
 
 const BASICS_BY_COLOR: Record<string, string> = {
   W: "Plains",
@@ -110,8 +114,17 @@ const ROLE_PACKAGES: Record<string, string[]> = {
   ]
 };
 
-export function createSampleDeck(agentName: string, commander: string, colors: string[]): CommanderDeck {
-  const normalizedColors = colors.length === 0 ? ["G"] : colors;
+// `catalog` is optional so callers with no card database loaded (the demo-seat seed in
+// sessionStore.ts, this module's own tests) can keep passing colors directly — but whenever it's
+// available (the /api/decks/build fallback path), the commander's real color identity always wins
+// over the caller's guess. Without this, a caller that mis-guesses a commander's colors (e.g. a
+// naive "dragon = red" hint for a 5-color commander like The Ur-Dragon) would bake that wrong,
+// lopsided mana base into the deck here, before repairCommanderDeckCards ever gets a chance to
+// recompute it correctly — basics aren't deduped/rebalanced later, only topped up.
+export function createSampleDeck(agentName: string, commander: string, colors: string[], catalog?: SampleDeckCatalog): CommanderDeck {
+  const commanderColorIdentity = catalog?.lookup(commander)?.colorIdentity;
+  const baseColors = commanderColorIdentity && commanderColorIdentity.length > 0 ? commanderColorIdentity : colors;
+  const normalizedColors = baseColors.length === 0 ? ["G"] : baseColors;
   const cards = uniqueCards([
     { name: commander, count: 1, role: "commander" },
     ...takeRole("ramp", 12),

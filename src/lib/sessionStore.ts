@@ -1,6 +1,9 @@
-import type { GameEvent, GameSession, PlayerSeat, VisibleCard } from "./types";
+import type { CommanderDeck, GameEvent, GameSession, PlayerSeat, VisibleCard } from "./types";
 import { createSampleDeck } from "./sampleDecks";
 import { getXMageStatus } from "./xmageBridge";
+import { loadCardCatalog, lookupCard } from "./cardCatalog";
+import { repairCommanderDeckCards } from "./deckRepair";
+import { createDeckFromCards } from "./deckParser";
 
 let currentSession: GameSession | undefined;
 
@@ -9,6 +12,29 @@ export async function getOrCreateSession() {
     currentSession = await createSession();
   }
   return currentSession;
+}
+
+function buildEnrichedSampleDeck(
+  agentName: string,
+  commander: string,
+  colors: string[],
+  catalog: { lookup(name: string): ReturnType<typeof lookupCard> }
+): CommanderDeck {
+  const draft = createSampleDeck(agentName, commander, colors, catalog);
+  const cards = repairCommanderDeckCards({
+    commander: draft.commander,
+    colors: draft.colors,
+    cards: draft.cards,
+    catalog
+  });
+  return createDeckFromCards({
+    owner: draft.createdBy,
+    commander: draft.commander,
+    colors: draft.colors,
+    cards,
+    name: draft.name,
+    catalog
+  });
 }
 
 export async function createSession(): Promise<GameSession> {
@@ -20,9 +46,23 @@ export async function createSession(): Promise<GameSession> {
     emptySeat("seat-sable", "Sable", "agent", "Sable")
   ];
 
-  seats[1].deck = createSampleDeck("Veyra", "Shalai, Voice of Plenty", ["G", "W"]);
-  seats[2].deck = createSampleDeck("Malik", "Kess, Dissident Mage", ["U", "B", "R"]);
-  seats[3].deck = createSampleDeck("Sable", "Meren of Clan Nel Toth", ["B", "G"]);
+  // createSampleDeck only ever attaches a real card record for the commander color-identity lookup
+  // — every package card it adds (takeRole) is a bare {name, count, role}, relying on a caller to
+  // run the result through the same enrichment pipeline /api/decks/build's fallback path uses
+  // (repairCommanderDeckCards + createDeckFromCards). This seed session skipped that step entirely,
+  // so every non-commander card in every agent's starting deck had no real oracle text at all — the
+  // UI's mock-placeholder fallback ("Mock ramp card. Full rules text will come from card data
+  // lookup.") silently stood in for the whole deck. Worse, this demo/seed session's own validation
+  // never caught it: unlike createDeckFromCards's real "Unknown card" check, a bare createSampleDeck
+  // result was never run through it, so the setup screen showed "4/4 decks ready" and let Play
+  // through with agents whose entire decks were placeholder text — nothing any agent decided about
+  // any card in that deck could ever be correct, since there was no real oracle text to read.
+  // Found live via a Playwright playtest that captured agent hands and reasoning directly.
+  const catalog = loadCardCatalog();
+  const catalogLookup = { lookup: (name: string) => lookupCard(catalog, name) };
+  seats[1].deck = buildEnrichedSampleDeck("Veyra", "Shalai, Voice of Plenty", ["G", "W"], catalogLookup);
+  seats[2].deck = buildEnrichedSampleDeck("Malik", "Kess, Dissident Mage", ["U", "B", "R"], catalogLookup);
+  seats[3].deck = buildEnrichedSampleDeck("Sable", "Meren of Clan Nel Toth", ["B", "G"], catalogLookup);
   seedVisibleBoard(seats);
 
   currentSession = {

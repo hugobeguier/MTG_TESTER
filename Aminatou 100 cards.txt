@@ -1,0 +1,103 @@
+1 Aminatou, Veil Piercer (DSC) 1
+1 Adarkar Wastes (DSC) 258
+1 Aminatou, the Fateshifter (C18) 37 *F*
+1 Arcane Denial (DSC) 110
+1 Arcane Sanctum (DSC) 259
+1 Arcane Signet (DSC) 92
+1 Archaeomancer's Map (FIC) 230
+1 Archon of Sun's Grace (J22) 151
+1 Athreos, Shroud-Veiled (DSC) 212
+1 Blasphemous Edict (FDN) 57
+1 Boon of the Spirit Realm (CMM) 720
+1 Brainstorm (DSC) 113
+1 Brainsurge (MH3) 53
+1 Callaphe, Beloved of the Sea (THB) 260
+1 Caves of Koilos (DSC) 268
+1 Command Tower (DSC) 96
+1 Contaminated Aquifer (DMU) 245
+1 Counterspell (A25) 50
+1 Debtors' Knell (GK2) 39
+1 Demon of Fate's Design (DSC) 137
+1 Devastation Tide (LTC) 189
+1 Diabolic Vision (DSC) 87
+1 Doomwake Giant (DSC) 138
+1 Drowned Catacomb (M13) 223
+1 Enhanced Surveillance (MKC) 102
+1 Esper Sentinel (MH2) 12
+1 Estrid's Invocation (MH3) 269
+1 Evolving Wilds (DSC) 274
+1 Extravagant Replication (DSC) 117
+1 Fear of Sleep Paralysis (DSC) 12
+1 Glacial Fortress (PIP) 266
+1 Greed (MH2) 274
+1 Halimar Depths (DSC) 282
+1 Heliod, the Radiant Dawn / Heliod, the Warped Eclipse (MOM) 293
+1 Inkshield (DSC) 221
+1 Inquisitive Glimmer (DSK) 217
+6 Island (DSK) 280
+1 Isolated Chapel (LCC) 337
+1 Ledger Shredder (SNC) 46
+1 Lim-Dûl's Vault (MB2) 87
+1 Mind's Dilation (EMN) 70
+1 Monologue Tax (SLD) 1838
+1 Moon-Blessed Cleric (DSC) 69
+1 Myriad Landscape (PIP) 274
+1 Mystic Remora (ICE) 87
+1 Negate (M12) 69
+1 Obscura Storefront (DSC) 291
+1 Omniscience (M13) 63
+1 One with the Multiverse (DSC) 121
+1 Otherworldly Gaze (DSC) 122
+1 Overwhelming Splendor (HOU) 19
+6 Plains (DSK) 278
+1 Ponder (DSC) 73
+1 Portent (DSC) 74
+1 Prairie Stream (C20) 299
+1 Propaganda (WHO) 219
+1 Redress Fate (DSC) 9
+1 Secret Arcade / Dusty Parlor (DSC) 10
+1 Shadow of the Second Sun (MH3) 402
+1 Shark Typhoon (DSC) 127
+1 Sigil of the Empty Throne (DSC) 103
+1 Soaring Lightbringer (DSC) 11
+1 Sol Ring (DSC) 94
+1 Sphere of Safety (DSC) 104
+1 Starfield of Nyx (CMM) 840
+1 Sunken Palace (M3C) 133
+4 Swamp (DSK) 282
+1 Swords to Plowshares (PIP) 173
+1 Tainted Field (LCC) 356
+1 Talisman of Dominance (WHO) 250
+1 Talisman of Hierarchy (CLB) 878
+1 Talisman of Progress (MKC) 243
+1 Temple of Deceit (OTC) 328
+1 Temple of Silence (DSC) 312
+1 Temporal Mastery (INR) 90
+1 Thriving Heath (DSC) 315
+1 Thriving Isle (DSC) 316
+1 Thriving Moor (DSC) 317
+1 Timely Ward (DSC) 107
+1 Underground River (DSC) 321
+1 Utter End (DSC) 91
+1 Utter Insignificance (MH3) 78
+1 Vanishing (VIS) 48
+1 Virtue of Persistence / Locthwain Scorn (WOE) 281
+1 Void Rend (FIC) 331
+1 Wayfarer's Bauble (PIP) 252
+1 Zur, Eternal Schemer (PDMU) 228p
+
+SIDEBOARD:
+1 Archetype of Imagination (DSC) 111
+1 Consider (MKC) 98
+1 Copy Enchantment (RVR) 39
+1 Flawless Maneuver (CMM) 24
+1 Grave Betrayal (RTR) 67
+1 Imprisoned in the Moon (FDN) 156
+1 Mesa Enchantress (M10) 20
+1 Mirrormade (DSC) 120
+1 Ondu Spiritdancer (DSC) 101
+1 Orzhov Signet (DSC) 249
+1 Overlord of the Mistmoors (DSK) 23
+1 Return to Dust (CMR) 43
+1 Smuggler's Share (MKC) 84
+1 Yennett, Cryptic Sovereign (CMM) 363

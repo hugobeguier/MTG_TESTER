@@ -105,12 +105,17 @@ function inferRoleFromCard(card: CardRecord) {
 }
 
 // A modal double-faced "spell // land" card's combined typeLine (e.g. "Sorcery // Land")
-// would otherwise be misread as a land by the plain substring check above.
+// would otherwise be misread as a land by the plain substring check above. Requires the
+// non-land face to carry a real printed mana cost, same reasoning as
+// AppFlow.tsx's modalDoubleFacedLandSplit: a transform land's back face (Westvale Abbey ->
+// Ormendahl, Profane Prince) has an empty manaCost since it's never actually cast, so without
+// this check it was misread as a castable spell face and the land got inferred as role
+// "creature" instead of "land".
 function modalDfcSpellFace(card: CardRecord) {
   if (!card.faces || card.faces.length !== 2) return undefined;
   const [first, second] = card.faces;
-  if (!first.typeLine.includes("Land") && second.typeLine.includes("Land")) return first;
-  if (first.typeLine.includes("Land") && !second.typeLine.includes("Land")) return second;
+  if (!first.typeLine.includes("Land") && second.typeLine.includes("Land") && first.manaCost) return first;
+  if (first.typeLine.includes("Land") && !second.typeLine.includes("Land") && second.manaCost) return second;
   return undefined;
 }
 

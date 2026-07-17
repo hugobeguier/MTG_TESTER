@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { VisibleCard } from "./types";
 import { deathEffectText, etbEffectText } from "./oracleClauses";
+import { ollamaFetch, OLLAMA_TIMEOUT_MS } from "./ollama";
 
 const DestinationSchema = z.preprocess((value) => {
   if (value === null || value === undefined) return undefined;
@@ -14,6 +15,7 @@ export const RuleWorkflowSchema = z.object({
     "search_basic_lands_shared_type_to_battlefield_tapped",
     "search_library_to_hand",
     "search_library_to_battlefield",
+    "search_library_to_graveyard",
     "draw_cards",
     "scry_cards",
     "surveil_cards",
@@ -195,6 +197,24 @@ export function deterministicRuleWorkflow(input: RuleAdvisorInput): RuleWorkflow
     };
   }
 
+  // "Search your library for a card, put that card into your graveyard, then shuffle." (Entomb,
+  // Buried Alive, ...) — checked before the to-hand/to-battlefield branches below since those two
+  // would otherwise never match this shape anyway (neither "hand" nor "battlefield" appears), but
+  // ordering it first keeps the graveyard-destination intent unambiguous if a future card's text
+  // happens to mention more than one zone.
+  if (scopedText.includes("search your library") && scopedText.includes("put") && scopedText.includes("graveyard")) {
+    return {
+      workflow: "search_library_to_graveyard",
+      summary: `${input.sourceCard.name} can search the library for a card and put it into the graveyard.`,
+      sourceCardId: input.sourceCard.id,
+      maxChoices: 1,
+      allowedCardFilter: "cards matching the source effect",
+      destination: "graveyard",
+      requiresHumanChoice: true,
+      warnings: ["Exact card restrictions may need manual review."]
+    };
+  }
+
   if (scopedText.includes("search your library") && scopedText.includes("put") && scopedText.includes("hand")) {
     return {
       workflow: "search_library_to_hand",
@@ -305,7 +325,7 @@ export async function requestRuleWorkflow(input: RuleAdvisorInput, baseUrl = pro
   };
 
   const model = process.env.OLLAMA_RULES_MODEL ?? process.env.OLLAMA_MODEL ?? "llama3.2";
-  const response = await fetch(`${baseUrl}/api/chat`, {
+  const response = await ollamaFetch(`${baseUrl}/api/chat`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -330,7 +350,7 @@ export async function requestRuleWorkflow(input: RuleAdvisorInput, baseUrl = pro
         {
           role: "system",
           content:
-            "You are an MTG rules workflow classifier. Return JSON only. Do not change game state. Classify what UI workflow is needed for the source card effect using the supplied battlefield, hand, graveyard, exile, and library preview. The sourceCard's oracleText has already been trimmed to only the clause relevant to this event — do not infer or recall other abilities the card might have from training data; classify based solely on the given text. Use scry_cards for scry N, surveil_cards for surveil N, draw_cards for draw N, look_at_top_cards for effects that only look at top N cards, reorder_top_cards for effects that look at top N cards and put them back in any order, search_library_to_hand or search_library_to_battlefield for library search effects. Put N in maxChoices. Prefer manual_review if unsure."
+            "You are an MTG rules workflow classifier. Return JSON only. Do not change game state. Classify what UI workflow is needed for the source card effect using the supplied battlefield, hand, graveyard, exile, and library preview. The sourceCard's oracleText has already been trimmed to only the clause relevant to this event — do not infer or recall other abilities the card might have from training data; classify based solely on the given text. Use scry_cards for scry N, surveil_cards for surveil N, draw_cards for draw N, look_at_top_cards for effects that only look at top N cards, reorder_top_cards for effects that look at top N cards and put them back in any order, search_library_to_hand/search_library_to_battlefield/search_library_to_graveyard for library search effects depending on which zone the found card actually goes to (never open a search of the graveyard itself — the search always happens in the library; the destination is just where the found card ends up). Put N in maxChoices. Prefer manual_review if unsure."
         },
         {
           role: "user",
@@ -338,7 +358,7 @@ export async function requestRuleWorkflow(input: RuleAdvisorInput, baseUrl = pro
         }
       ]
     })
-  });
+  }, OLLAMA_TIMEOUT_MS);
 
   if (!response.ok) {
     throw new Error(`Ollama rules request failed with HTTP ${response.status}.`);

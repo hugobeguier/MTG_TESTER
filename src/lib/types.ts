@@ -110,6 +110,10 @@ export interface PlayerSeat {
   library?: VisibleCard[];
   zones: Record<ZoneName, number>;
   board: PlayerBoardState;
+  // "The next spell you cast this turn has affinity for artifacts" (Saheeli, the Gifted's second
+  // +1) — a boolean rather than a locked-in number because the reduction is "for each artifact you
+  // control as you cast it" (reminder text), i.e. evaluated at cast time, not activation time.
+  nextSpellHasArtifactAffinity?: boolean;
 }
 
 export interface InterpretedEffect {
@@ -139,6 +143,10 @@ export interface VisibleCard {
   temporaryPowerBonus?: number;
   temporaryToughnessBonus?: number;
   attachedToId?: string;
+  // Set instead of attachedToId for an "Enchant player" Aura (Overwhelming Splendor, the Curse
+  // cycle, ...) — this engine has no per-creature-permanent object for a player to attach to, so
+  // the enchanted seat is referenced directly.
+  attachedToSeatId?: string;
   attachmentPowerBonus?: number;
   attachmentToughnessBonus?: number;
   grantedKeywords?: string[];
@@ -149,6 +157,14 @@ export interface VisibleCard {
   // directly still ignores this; hasCardType() (src/lib/typeGrants.ts) is the choke point for
   // code that needs to see through it.
   grantedTypes?: string[];
+  // "As this enters, choose a creature type." (Cavern of Souls, Urza's Incubator, Morophon, ...) —
+  // locked in once at ETB and referenced by later "of the chosen type" clauses on the same card.
+  // Real Magic leaves the choice up to the controller with no UI to prompt for it yet, so this
+  // engine picks deterministically (see pickChosenCreatureType in characteristics.ts).
+  chosenCreatureType?: string;
+  // "As this land enters, choose a color other than X." (the Thriving cycle, the Gate cycle, ...)
+  // — a single WUBRG letter, locked in once at ETB the same way chosenCreatureType is.
+  chosenColor?: string;
   attachTimestamp?: number;
   cdaPower?: number;
   cdaToughness?: number;
@@ -163,6 +179,10 @@ export interface VisibleCard {
   blockDecided?: boolean;
   blocking?: boolean;
   blockingTargetId?: string;
+  // Set on the ATTACKING creature when it has two or more blockers: the order (blocker card ids)
+  // its controller assigns combat damage in — first entry gets lethal before any excess moves to
+  // the next (rule 509.2/510.1c). Undefined/single-blocker attacks don't need it.
+  damageAssignmentOrder?: string[];
   commander?: boolean;
   commanderTax?: number;
   token?: boolean;
@@ -181,6 +201,10 @@ export interface VisibleCard {
   // The last turn number this exile-play permission is valid through; undefined means no time
   // limit (Praetor's Grasp-style "for as long as it remains exiled" — only losing exile ends it).
   exiledPlayableUntilTurn?: number;
+  // Set when the exile-play permission also waives the mana cost (Mind's Dilation-style "you may
+  // cast that card without paying its mana cost") — undefined/false means the normal cost still
+  // applies, same as any other exile-cast permission.
+  exiledPlayableFree?: boolean;
   // Set when a "gain control...until end of turn" effect (Threaten-style) moved this permanent to
   // a new controller's battlefield — cleared, and control reverted to ownerSeatId, by
   // clearTemporaryBuffs at the next turn change, same timing as temporaryPowerBonus.
@@ -214,6 +238,23 @@ export interface GameEvent {
   detail?: string;
 }
 
+// A snapshot of one agent seat's most recent LLM decision, kept purely for the "thinking" HUD
+// badge/modal (AppFlow -> ThreeGameTable) — UI/debug state, not real game-rules state, so it never
+// touches GameSession itself. reason may be "" for deterministic fallback decisions (no LLM
+// round-trip happened, e.g. a JSON-parse failure or network error on the /api/agents/action call).
+export interface AgentReasoning {
+  label: string;
+  reason: string;
+  purpose: string;
+  at: string;
+  // The agent's internal "argue with itself" pass over its top candidate actions before committing
+  // — only requested for main_phase/priority_response purposes (see app/api/agents/action/route.ts),
+  // since asking for it on every attack/block declaration too would meaningfully slow the game down
+  // for a small local model with no proportional benefit (those choices are already fairly
+  // mechanical). Undefined for deterministic-fallback decisions and for purposes that don't ask for it.
+  deliberation?: string;
+}
+
 export interface GameSession {
   id: string;
   createdAt: string;
@@ -240,7 +281,11 @@ export interface GameSession {
   // action pass, looks up "whenever a creature dies" triggers against it, and clears it — so every
   // death path (combat, removal spells, sacrifice, state-based 0-toughness) fires death triggers
   // uniformly instead of each call site having to remember to do it.
-  pendingDeaths?: Array<{ seatId: string; card: VisibleCard }>;
+  // attachedSourceIds: ids of any Equipment/Aura that were attached to this card at the moment it
+  // died, captured before the same state-based-action pass clears their attachedToId (since the
+  // creature is already gone from the battlefield by then) — "whenever equipped/enchanted creature
+  // dies" triggers need this snapshot rather than the (by-then-cleared) live attachedToId.
+  pendingDeaths?: Array<{ seatId: string; card: VisibleCard; attachedSourceIds?: string[] }>;
   // Dedup keys ("turn:sourceCardId:effectKind") for triggered effects restricted by a trailing
   // "Do this only once each turn" clause — resolveTriggerEffect() is a pure function with no
   // per-turn ref to check against, so the dedup state lives on the session itself instead.
@@ -269,5 +314,9 @@ export interface AgentAction {
   cardId?: string;
   manaPlan?: string;
   reason: string;
+  // The agent's own written-out argument with itself over its top candidate actions, weighing what
+  // each accomplishes against what it costs or risks, before settling on legalActionId — see
+  // AgentReasoning.deliberation for where this ends up surfaced.
+  deliberation?: string;
   fallbackAction: "pass_priority" | "end_turn";
 }

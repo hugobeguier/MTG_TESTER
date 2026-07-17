@@ -6,6 +6,8 @@ import { requestCommanderDeck } from "@/lib/ollama";
 import { createSampleDeck } from "@/lib/sampleDecks";
 import { createDeckFromList } from "@/lib/deckParser";
 import { repairCommanderDeckCards } from "@/lib/deckRepair";
+import { fetchEdhrecSynergyData } from "@/lib/edhrec";
+import { knowledgeFilesForPurpose, loadKnowledgePack } from "@/lib/knowledge";
 
 const BuildDeckRequestSchema = z.object({
   agentName: z.string().min(1),
@@ -40,18 +42,33 @@ export async function POST(request: NextRequest) {
     });
   }
 
+  // The commander's real color identity, looked up from the local card catalog, is the ground
+  // truth from here on — never the client's naive name-based color guess, and never whatever an
+  // LLM echoes back for "commander"/"colors". A small local model has no reliable way to know e.g.
+  // that The Ur-Dragon is WUBRG rather than "dragon = red", and trusting its answer (or failing to
+  // look the card up because it mangled the name slightly) is what used to produce a five-color
+  // commander whose deck was padded with 28 Basic Mountains.
+  const commanderRecord = lookupCard(catalog, input.commander);
+  const commander = commanderRecord?.name ?? input.commander;
+  const colors = commanderRecord && commanderRecord.colorIdentity.length > 0 ? commanderRecord.colorIdentity : input.colors;
+  const synergyData = await fetchEdhrecSynergyData(commander);
+
   try {
+    const knowledge = await loadKnowledgePack(knowledgeFilesForPurpose("deckbuilding"));
     const generated = await requestCommanderDeck({
       ...input,
-      model: process.env.OLLAMA_MODEL ?? agentModelName(input.agentName)
+      commander,
+      colors,
+      model: process.env.OLLAMA_MODEL ?? agentModelName(input.agentName),
+      synergyCardNames: synergyData?.cards.slice(0, 40).map((card) => card.name),
+      knowledge
     });
-    const commander = generated.commander || input.commander;
-    const colors = generated.colors.length > 0 ? generated.colors : input.colors;
     const cards = repairCommanderDeckCards({
       commander,
       colors,
       cards: generated.cards,
-      catalog: lookup
+      catalog: lookup,
+      synergyCards: synergyData?.cards
     });
     const deck = createDeckFromCards({
       owner: input.agentName,
@@ -82,12 +99,13 @@ export async function POST(request: NextRequest) {
       deck
     });
   } catch (error) {
-    const fallback = createSampleDeck(input.agentName, input.commander, input.colors);
+    const fallback = createSampleDeck(input.agentName, commander, colors, lookup);
     const cards = repairCommanderDeckCards({
       commander: fallback.commander,
       colors: fallback.colors,
       cards: fallback.cards,
-      catalog: lookup
+      catalog: lookup,
+      synergyCards: synergyData?.cards
     });
     const deck = createDeckFromCards({
       owner: fallback.createdBy,

@@ -1,0 +1,11 @@
+1. Not sure but I think the agents mix up the sacrifice ability a bit, it played a land called Phyrexian Tower and tapped it to sacrifice a creature to add two black mana, but that putted the land into the graveyard, and there were no legal target since it have to be a creature they own and out on the battlefield to be sacrificed, then it played an enchantment Animate Dead but since there where no creatures on the battlefield or in the graveyard it just resolved and ended up in the graveyard.
+
+2. check RuleAdvisorErrors.jpg it is behaving weirdly cant resolve the cards for some reason. and that stops the agent from moving on during their turn
+
+3. when I have mana up and have an instant spell I can cast, and the Agents passes through phases I dont get to respond, seems like the Human player and maybe even the agents cant respond on anything at this moment 
+
+4. When being attacked I would like lesser popups and more on the battlefield design, right now it just gives me a big popup with my potential blockers, not letting me not block since that button gets hidden by the big picture of the card, I would like to be able to just select the creatures I want to block with and then select what creature my creature will block. the human and the Agents should be able to block with multiple creatures on one creature and they choose which creature takes the first amount of damage.
+
+5. Can I know see the Agents hands so I can observe what they are thinking? 
+
+6. Bigger rework but instead of having to open a card to do their tap ability can it not be like this instead: If I tap prismatic lens I will get its free tap giving me a generic mana, if I tap a land bnefore tapping the Prismatic Lens it will ask me if I want to trigger its ability or just tap it for generic mana. each tap symbol when tapping an object with a tap symbol should give its abilities for the Agents/Human to decide what to do with it. 

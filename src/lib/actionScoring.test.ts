@@ -56,6 +56,49 @@ describe("scoreLegalActions", () => {
     expect(noBlockers.score).toBeGreaterThan(withBadBlocker.score);
   });
 
+  it("prefers attacking the opponent with the lowest life among several opponents", () => {
+    const attacker: CardLike = { id: "atk", power: "3", toughness: "3" };
+    const context = baseContext({
+      you: { battlefield: [attacker] },
+      opponents: [
+        { id: "weak", name: "Weak", life: 5, battlefield: [] },
+        { id: "healthy", name: "Healthy", life: 40, battlefield: [] }
+      ]
+    });
+    const attackWeak = scoreLegalAction(action({ id: "attack:weak", actionType: "attack", cardId: "atk", targetIds: ["weak"] }), context);
+    const attackHealthy = scoreLegalAction(action({ id: "attack:healthy", actionType: "attack", cardId: "atk", targetIds: ["healthy"] }), context);
+    expect(attackWeak.score).toBeGreaterThan(attackHealthy.score);
+  });
+
+  it("prefers attacking the opponent with the most board presence (imminent-winner signal)", () => {
+    const attacker: CardLike = { id: "atk", power: "3", toughness: "3" };
+    const bigBoard: CardLike[] = [{ id: "c1", power: "8", toughness: "8" }];
+    const context = baseContext({
+      you: { battlefield: [attacker] },
+      opponents: [
+        { id: "ahead", name: "Ahead", life: 40, battlefield: bigBoard },
+        { id: "behind", name: "Behind", life: 40, battlefield: [] }
+      ]
+    });
+    const attackAhead = scoreLegalAction(action({ id: "attack:ahead", actionType: "attack", cardId: "atk", targetIds: ["ahead"] }), context);
+    const attackBehind = scoreLegalAction(action({ id: "attack:behind", actionType: "attack", cardId: "atk", targetIds: ["behind"] }), context);
+    expect(attackAhead.score).toBeGreaterThan(attackBehind.score);
+  });
+
+  it("does not favor any opponent when all are tied on life and board presence", () => {
+    const attacker: CardLike = { id: "atk", power: "3", toughness: "3" };
+    const context = baseContext({
+      you: { battlefield: [attacker] },
+      opponents: [
+        { id: "a", name: "A", life: 40, battlefield: [] },
+        { id: "b", name: "B", life: 40, battlefield: [] }
+      ]
+    });
+    const attackA = scoreLegalAction(action({ id: "attack:a", actionType: "attack", cardId: "atk", targetIds: ["a"] }), context);
+    const attackB = scoreLegalAction(action({ id: "attack:b", actionType: "attack", cardId: "atk", targetIds: ["b"] }), context);
+    expect(attackA.score).toBe(attackB.score);
+  });
+
   it("prefers holding instants when the stack is empty during priority", () => {
     const respond = action({ id: "respond:x", actionType: "cast_spell" });
     const pass = action({ id: "pass-priority", actionType: "pass_priority" });
@@ -300,5 +343,101 @@ describe("scoreStackResponse", () => {
       context
     );
     expect(counter.reasons.some((reason) => reason.includes("board lead") || reason.includes("throws away"))).toBe(false);
+  });
+});
+
+describe("scoreSacrificeValue", () => {
+  const mindStone: CardLike = { id: "mind-stone", oracleText: "{T}: Add {C}.\n{1}, {T}, Sacrifice this artifact: Draw a card." };
+
+  it("penalizes sacrificing a mana rock for a card while still holding a full hand", () => {
+    const context = baseContext({ you: { battlefield: [mindStone], hand: [{ id: "c1" }, { id: "c2" }, { id: "c3" }] } });
+    const sac = scoreLegalAction(
+      action({
+        id: "activate-sacrifice:mind-stone:0",
+        actionType: "activate_ability",
+        cardId: "mind-stone",
+        label: "activate Mind Stone (sacrifice Mind Stone)",
+        detail: "Sacrifice this artifact: Draw a card."
+      }),
+      context
+    );
+    const pass = scoreLegalAction(action({ id: "pass-priority", actionType: "pass_priority" }), context);
+    expect(pass.score).toBeGreaterThan(sac.score);
+  });
+
+  it("allows it when hellbent (empty hand)", () => {
+    const context = baseContext({ you: { battlefield: [mindStone], hand: [] } });
+    const sac = scoreLegalAction(
+      action({
+        id: "activate-sacrifice:mind-stone:0",
+        actionType: "activate_ability",
+        cardId: "mind-stone",
+        label: "activate Mind Stone (sacrifice Mind Stone)",
+        detail: "Sacrifice this artifact: Draw a card."
+      }),
+      context
+    );
+    const pass = scoreLegalAction(action({ id: "pass-priority", actionType: "pass_priority" }), context);
+    expect(sac.score).toBeGreaterThan(pass.score);
+  });
+
+  it("does not penalize a pure sacrifice outlet with no recurring mana ability", () => {
+    const viscera: CardLike = { id: "viscera-seer", oracleText: "Sacrifice a creature: Scry 1." };
+    const context = baseContext({ you: { battlefield: [viscera], hand: [{ id: "c1" }, { id: "c2" }] } });
+    const sac = scoreLegalAction(
+      action({
+        id: "activate-sacrifice:viscera-seer:0",
+        actionType: "activate_ability",
+        cardId: "viscera-seer",
+        label: "activate Viscera Seer (sacrifice a creature)",
+        detail: "Sacrifice a creature: Scry 1."
+      }),
+      context
+    );
+    expect(sac.reasons.some((reason) => reason.includes("mana rock"))).toBe(false);
+  });
+
+  it("does not penalize sacrificing OTHER creatures to transform a mana source into something bigger (Westvale Abbey)", () => {
+    const westvale: CardLike = { id: "westvale", oracleText: "{T}: Add {C}.\n{5}, {T}, Sacrifice five creatures: Transform this land, then untap it." };
+    const creatures = Array.from({ length: 6 }, (_, index) => ({ id: `c${index}`, power: "1", toughness: "1", typeLine: "Creature" }));
+    const context = baseContext({
+      you: { battlefield: [westvale, ...creatures], hand: [{ id: "h1" }, { id: "h2" }, { id: "h3" }] }
+    });
+    const sac = scoreLegalAction(
+      action({
+        id: "activate-sacrifice:westvale:0",
+        actionType: "activate_ability",
+        cardId: "westvale",
+        label: "activate Westvale Abbey (sacrifice c0, c1, c2, c3, c4)",
+        detail: "Sacrifice five creatures: Transform this land, then untap it."
+      }),
+      context
+    );
+    expect(sac.reasons.some((reason) => reason.includes("mana rock"))).toBe(false);
+  });
+});
+
+describe("scoreTransformSacrifice", () => {
+  const westvale: CardLike = { id: "westvale", oracleText: "{T}: Add {C}.\n{5}, {T}, Sacrifice five creatures: Transform this land, then untap it." };
+  const transformAction = action({
+    id: "activate-sacrifice:westvale:0",
+    actionType: "activate_ability",
+    cardId: "westvale",
+    label: "activate Westvale Abbey (sacrifice c0, c1, c2, c3, c4)",
+    detail: "Sacrifice five creatures: Transform this land, then untap it."
+  });
+
+  it("rewards transforming while keeping creatures in reserve", () => {
+    const creatures = Array.from({ length: 7 }, (_, index) => ({ id: `c${index}`, typeLine: "Creature" }));
+    const context = baseContext({ you: { battlefield: [westvale, ...creatures] } });
+    const scored = scoreLegalAction(transformAction, context);
+    expect(scored.reasons.some((reason) => reason.includes("reserve"))).toBe(true);
+  });
+
+  it("penalizes a transform that would require sacrificing the entire board", () => {
+    const creatures = Array.from({ length: 5 }, (_, index) => ({ id: `c${index}`, typeLine: "Creature" }));
+    const context = baseContext({ you: { battlefield: [westvale, ...creatures] } });
+    const scored = scoreLegalAction(transformAction, context);
+    expect(scored.reasons.some((reason) => reason.includes("entire board"))).toBe(true);
   });
 });

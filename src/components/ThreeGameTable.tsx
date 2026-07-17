@@ -2,13 +2,31 @@
 
 import { useEffect, useMemo, useRef, useState, type DragEvent, type MutableRefObject, type PointerEvent as ReactPointerEvent } from "react";
 import * as THREE from "three";
-import type { GameSession, PlayerSeat, VisibleCard } from "@/lib/types";
+import type { AgentReasoning, GameSession, PlayerSeat, VisibleCard } from "@/lib/types";
 import { effectivePower, effectiveToughness } from "@/lib/counters";
-import { parseGenericSacrificeAbilities, type SacrificeAbility } from "@/lib/activatedAbilities";
+import {
+  parseGenericManaAbilities,
+  parseGenericSacrificeAbilities,
+  parseGenericTapAbilities,
+  parseSelfUntapAbilities,
+  type GenericManaAbility,
+  type SacrificeAbility,
+  type GenericTapAbility,
+  type SelfUntapAbility
+} from "@/lib/activatedAbilities";
 import { equipCost, isEquipment } from "@/lib/attachments";
+import { hasKeyword as hasOracleKeyword } from "@/lib/keywords";
 
 type ManaColor = "W" | "U" | "B" | "R" | "G" | "C";
 type ManaPool = Record<ManaColor, number>;
+
+// Real creature types found across the card catalog (data/commander-cards.json), for the
+// choose_creature_type rule-choice picker (Cavern of Souls, Metallic Mimic, etc.) — non-creature
+// card types/supertypes/subtypes that leak into a naive type-line scan (Artifact, Aura, Land,
+// Saga, ...) are filtered out.
+const CREATURE_TYPES = [
+  "Advisor","Aetherborn","Alien","Ally","Angel","Antelope","Ape","Archer","Archon","Armadillo","Artificer","Assassin","Assembly-Worker","Astartes","Atog","Aurochs","Avatar","Azra","Badger","Barbarian","Bard","Basilisk","Bat","Bear","Beast","Beaver","Beeble","Beholder","Berserker","Bird","Bison","Boar","Bringer","Brushwagg","C'tan","Camel","Capybara","Carrier","Cat","Centaur","Child","Chimera","Citizen","Cleric","Clown","Cockatrice","Construct","Coward","Coyote","Crab","Crocodile","Custodes","Cyberman","Cyclops","Dalek","Dauthi","Demigod","Demon","Detective","Devil","Dinosaur","Djinn","Doctor","Dog","Dragon","Drake","Dreadnought","Drix","Drone","Druid","Dryad","Dwarf","Echidna","Efreet","Elder","Eldrazi","Elemental","Elephant","Elf","Elk","Employee","Eye","Faerie","Fish","Flagbearer","Fox","Fractal","Frog","Fungus","Gamer","Gamma","Gargoyle","Giant","Giraffe","Gith","Glimmer","Gnoll","Gnome","Goat","Goblin","God","Golem","Gorgon","Gremlin","Griffin","Guest","Hag","Halfling","Hamster","Harpy","Hedgehog","Hellion","Hero","Hippo","Hippogriff","Homarid","Homunculus","Horror","Horse","Human","Hydra","Hyena","Illusion","Imp","Incarnation","Inhuman","Inkling","Inquisitor","Insect","Jackal","Jellyfish","Juggernaut","Kangaroo","Kavu","Kirin","Kithkin","Knight","Kobold","Kor","Kraken","Kree","Lamia","Lammasu","Leech","Lemur","Leviathan","Lhurgoyf","Licid","Lizard","Lobster","Lord","Manticore","Masticore","Mercenary","Merfolk","Metathran","Minion","Minotaur","Mite","Mole","Monger","Mongoose","Monk","Monkey","Moogle","Moonfolk","Mount","Mouse","Mutant","Myr","Mystic","Nautilus","Necron","Nephilim","Nightmare","Nightstalker","Ninja","Noble","Noggle","Nomad","Nymph","Octopus","Ogre","Ooze","Orc","Orgg","Otter","Ouphe","Ox","Oyster","Pangolin","Peasant","Pegasus","Performer","Pest","Phelddagrif","Phoenix","Phyrexian","Pilot","Pirate","Plant","Platypus","Porcupine","Possum","Praetor","Primarch","Processor","Qu","Rabbit","Raccoon","Ranger","Rat","Rebel","Rhino","Rigger","Robot","Rogue","Sable","Salamander","Samurai","Sand","Saproling","Satyr","Scarecrow","Scientist","Scorpion","Scout","Seal","Serpent","Shade","Shaman","Shapeshifter","Shark","Sheep","Shi'ar","Siege","Siren","Skeleton","Skrull","Skunk","Slith","Sliver","Sloth","Slug","Snail","Snake","Soldier","Soltari","Sorcerer","Spawn","Specter","Spellshaper","Sphinx","Spider","Spike","Spirit","Sponge","Spy","Squid","Squirrel","Starfish","Surrakar","Survivor","Symbiote","Synth","Thalakos","Thopter","Thrull","Tiefling","Treefolk","Trilobite","Troll","Turtle","Tyranid","Unicorn","Utrom","Vampire","Varmint","Vedalken","Villain","Volver","Wall","Walrus","Warlock","Warrior","Weasel","Weird","Werewolf","Whale","Wizard","Wolf","Wolverine","Wombat","Worm","Wraith","Wurm","Yeti","Zombie","Zubera"
+] as const;
 
 interface ThreeGameTableProps {
   session: GameSession;
@@ -29,6 +47,8 @@ interface ThreeGameTableProps {
   };
   pendingAction?: PendingActionView;
   stackActions?: PendingActionView[];
+  agentThinking?: Record<string, boolean>;
+  agentReasoning?: Record<string, AgentReasoning>;
   manaPool?: ManaPool;
   manaChoice?: {
     cardName: string;
@@ -38,7 +58,10 @@ interface ThreeGameTableProps {
   onCloseInspectCard?: () => void;
   onSelectHandCard?: (card: VisibleCard) => void;
   onDrawCard?: (seatId: string) => void;
-  onPlayCard?: (seatId: string, cardId: string, position?: { x: number; z: number }) => void;
+  onPlayCard?: (seatId: string, cardId: string, position?: { x: number; z: number }, sourceZone?: "hand" | "exile") => void;
+  // Routes through AppFlow's respondWithCard when a response window is open, instead of onPlayCard
+  // (which only handles main-phase casting and silently no-ops if something's already on the stack).
+  onCastFromExile?: (seatId: string, cardId: string) => void;
   onPlayCardFace?: (seatId: string, cardId: string, faceIndex: number) => void;
   onUnlockRoomDoor?: (seatId: string, cardId: string, faceIndex: number) => void;
   onDeclareAttack?: (cardId: string, targetId: string) => void;
@@ -51,6 +74,9 @@ interface ThreeGameTableProps {
   onDeclineMiracle?: () => void;
   onAcceptOptionalTrigger?: () => void;
   onDeclineOptionalTrigger?: () => void;
+  onCompleteDiscardChoice?: (cardIds: string[]) => void;
+  onChooseCreatureType?: (creatureType: string) => void;
+  onChooseColor?: (color: ManaColor) => void;
   onCloseMyriadSearch?: () => void;
   onCompleteMyriadSearch?: (cardIds: string[]) => void;
   onCloseBasicLandFetchSearch?: () => void;
@@ -65,6 +91,9 @@ interface ThreeGameTableProps {
   onResolveMyriadLandscape?: (seatId: string, cardId: string) => void;
   onResolveBasicLandFetch?: (seatId: string, cardId: string) => void;
   onActivateSacrificeAbility?: (seatId: string, cardId: string, abilityIndex: number) => void;
+  onActivateTapAbility?: (seatId: string, cardId: string, abilityIndex: number) => void;
+  onActivateSelfUntap?: (seatId: string, cardId: string, abilityIndex: number) => void;
+  onActivateGenericMana?: (seatId: string, cardId: string, abilityIndex: number) => void;
   onActivateEquip?: (seatId: string, cardId: string) => void;
   onChangeLife?: (seatId: string, delta: number) => void;
   onScry?: (count: number) => void;
@@ -73,6 +102,7 @@ interface ThreeGameTableProps {
   onOrderLibraryLookCardOnTop?: (cardId: string) => void;
   onPutLibraryLookCardOnBottom?: (cardId: string) => void;
   onPutLibraryLookCardInGraveyard?: (cardId: string) => void;
+  onSendLibraryLookCardToHand?: (cardId: string) => void;
   onCloseLibraryLook?: () => void;
   onToggleTapCard?: (seatId: string, cardId: string, location: CardUserData["location"]) => void;
   onChooseMana?: (color: ManaColor) => void;
@@ -90,7 +120,9 @@ interface ThreeGameTableProps {
   onRespond?: () => void;
   onRespondWithSelectedCard?: () => void;
   onResolvePendingTrigger?: () => void;
-  onChooseBlocker?: (blockerCardId: string) => void;
+  onToggleBlocker?: (blockerCardId: string) => void;
+  selectedBlockerIds?: string[];
+  onConfirmBlockers?: () => void;
   onPassBlocks?: () => void;
   onPayCumulativeUpkeep?: () => void;
   onSacrificeRuleSource?: () => void;
@@ -108,6 +140,7 @@ type PendingActionView =
       type: "spell";
       actorSeatId: string;
       cardName: string;
+      cardTypeLine?: string;
       message: string;
     }
   | {
@@ -126,7 +159,7 @@ type RuleChoiceView =
       sourceCardName: string;
       prompt: string;
       cards: VisibleCard[];
-      destination: "hand" | "battlefield";
+      destination: "hand" | "battlefield" | "graveyard";
       allowedCardFilter?: string;
     }
   | {
@@ -153,6 +186,25 @@ type RuleChoiceView =
       kind: "optional_trigger";
       sourceCardName: string;
       prompt: string;
+    }
+  | {
+      kind: "discard_to_hand_size";
+      prompt: string;
+      hand: VisibleCard[];
+      requiredDiscards: number;
+    }
+  | {
+      kind: "choose_creature_type";
+      sourceCardName: string;
+      prompt: string;
+      currentChoice?: string;
+    }
+  | {
+      kind: "choose_color";
+      sourceCardName: string;
+      prompt: string;
+      currentChoice?: string;
+      excludedColor?: string;
     };
 
 interface BlockChoiceView {
@@ -164,7 +216,7 @@ interface BlockChoiceView {
 
 interface LibraryLookState {
   seatId: string;
-  mode: "scry" | "surveil" | "reorder";
+  mode: "scry" | "surveil" | "reorder" | "choose_one";
   cards: VisibleCard[];
   remaining: number;
   orderedCards?: VisibleCard[];
@@ -188,15 +240,42 @@ interface ZoneUserData {
 
 type InteractionUserData = CardUserData | ZoneUserData;
 
-const TABLE_WIDTH = 24;
-const TABLE_DEPTH = 10;
+// Sized to give each player's battlefield rectangle (see PLAYER_AREAS) real room before permanents
+// start crowding, plus a side strip outside each rectangle for the non-battlefield zones (see
+// zoneStripX) and margin beyond the near edge for the hand-count label (see zoneStripPosition and
+// the "Hand N" placement in rebuildDynamicScene) — both used to be squeezed inside the battlefield
+// rectangle itself, competing with permanents for the same space.
+const TABLE_WIDTH = 40;
+const TABLE_DEPTH = 16;
 
+// Ordered as a clockwise walk around the table's perimeter (front-left -> front-right -> back-right
+// -> back-left), not just "left column then right column" — this array is indexed by seat position
+// in the turn-order array (session.seats), so the walk order here IS the visual turn order. Getting
+// this wrong doesn't break legality (turns still advance by array index either way), but it makes
+// play visibly hop diagonally across the table instead of proceeding around it like a real game.
 const PLAYER_AREAS = [
-  { x: -6, z: 2.55, rot: 0, minX: -11.25, maxX: -0.75, minZ: 0.45, maxZ: 4.45 },
-  { x: 6, z: 2.55, rot: 0, minX: 0.75, maxX: 11.25, minZ: 0.45, maxZ: 4.45 },
-  { x: -6, z: -2.55, rot: Math.PI, minX: -11.25, maxX: -0.75, minZ: -4.45, maxZ: -0.45 },
-  { x: 6, z: -2.55, rot: Math.PI, minX: 0.75, maxX: 11.25, minZ: -4.45, maxZ: -0.45 }
+  { x: -8.6, z: 3.35, rot: 0, minX: -15.8, maxX: -1.4, minZ: 0.6, maxZ: 6.1 },
+  { x: 8.6, z: 3.35, rot: 0, minX: 1.4, maxX: 15.8, minZ: 0.6, maxZ: 6.1 },
+  { x: 8.6, z: -3.35, rot: Math.PI, minX: 1.4, maxX: 15.8, minZ: -6.1, maxZ: -0.6 },
+  { x: -8.6, z: -3.35, rot: Math.PI, minX: -15.8, maxX: -1.4, minZ: -6.1, maxZ: -0.6 }
 ];
+
+// commanderDamage is keyed by the dealing commander's own card id (see AppFlow.tsx's damage-
+// application code), not by seat or name — so displaying it means resolving each id back to a
+// commander. Looked up across every seat's CURRENT commander (not just the reader's own), because a
+// theft effect (Word of Seizing, ...) can leave a commander dealing damage while controlled by
+// someone other than its owner — including hitting its own owner, which is exactly the case this
+// view exists to make visible. A commander that's since left the battlefield for good has no
+// current position to resolve against and falls back to a generic label rather than guessing.
+function commanderDamageSources(session: GameSession, seat: PlayerSeat) {
+  return Object.entries(seat.commanderDamage)
+    .filter(([, amount]) => amount > 0)
+    .map(([sourceId, amount]) => {
+      const commander = session.seats.map((source) => source.board.commander).find((card) => card?.id === sourceId);
+      return { sourceId, commanderName: commander?.name ?? "Unknown commander", amount };
+    })
+    .sort((a, b) => b.amount - a.amount);
+}
 
 const imageTextureLoader = new THREE.TextureLoader();
 imageTextureLoader.setCrossOrigin("anonymous");
@@ -214,7 +293,7 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
   const cardMeshesRef = useRef<THREE.Object3D[]>([]);
   const frameRef = useRef<number | undefined>(undefined);
   const propsRef = useRef(props);
-  const cameraState = useRef({ yaw: 0, pitch: -0.85, distance: 18, target: new THREE.Vector3(0, 0, 0) });
+  const cameraState = useRef({ yaw: 0, pitch: -0.85, distance: 26, target: new THREE.Vector3(0, 0, 0) });
   const movementKeys = useRef({ forward: false, left: false, back: false, right: false });
   const boardInputActive = useRef(false);
   const pointer = useRef({ down: false, button: 0, x: 0, y: 0, moved: false });
@@ -222,13 +301,22 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
   const draggedBattlefieldCardRef = useRef<CardUserData | undefined>(undefined);
   const draggedHandCardRef = useRef<VisibleCard | undefined>(undefined);
   const dropGhostRef = useRef<THREE.Group | null>(null);
+  // Screen-space anchors for the agent-hand overlays (see the animate() loop) — kept out of React
+  // state and written directly to each div's style every frame, the same way camera movement itself
+  // is imperative, so tracking a moving/orbiting camera doesn't mean a state update (and full
+  // reconciliation) 60 times a second.
+  const agentHandAnchorRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const scoreboardAnchorRef = useRef<HTMLDivElement | null>(null);
   const [draggingHandCardId, setDraggingHandCardId] = useState<string | undefined>();
   const [draggingZone, setDraggingZone] = useState<DraggedZone | undefined>();
   const [zoneView, setZoneView] = useState<{ seatId: string; zone: TableZone } | undefined>();
   const [activityOpen, setActivityOpen] = useState(false);
+  const [showCommanderDamage, setShowCommanderDamage] = useState(false);
   const [activityPosition, setActivityPosition] = useState({ x: 24, y: 144 });
   const [activityDragOffset, setActivityDragOffset] = useState<{ x: number; y: number } | undefined>();
+  const [reasoningSeatId, setReasoningSeatId] = useState<string | undefined>();
   const human = props.session.seats.find((seat) => seat.kind === "human") ?? props.session.seats[0];
+  const agentSeats = props.session.seats.filter((seat) => seat.kind === "agent");
   const latest = props.session.events[0];
   const phaseNotice = latest?.detail === "Phase change" ? latest : undefined;
   const recentEvents = props.session.events.slice(0, 8);
@@ -294,14 +382,6 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
     table.position.y = -0.22;
     scene.add(table);
 
-    const center = new THREE.Mesh(
-      new THREE.RingGeometry(1.2, 2.15, 64),
-      new THREE.MeshBasicMaterial({ color: "#d7b35a", transparent: true, opacity: 0.16, side: THREE.DoubleSide })
-    );
-    center.rotation.x = -Math.PI / 2;
-    center.position.y = 0.02;
-    scene.add(center);
-
     const resize = () => {
       const width = mount.clientWidth;
       const height = mount.clientHeight;
@@ -337,12 +417,61 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
       state.target.add(movement);
     };
 
+    // Anchors each agent's hand overlay (a real DOM box, so it can have a real scrollbar) to that
+    // agent's name-label position in the 3D scene, re-projected to screen space every frame so it
+    // tracks camera orbit/pan/zoom instead of sitting fixed on the screen regardless of where the
+    // table actually is.
+    const projected = new THREE.Vector3();
+    const updateAgentHandAnchors = () => {
+      const currentSeats = propsRef.current.session.seats;
+      const width = mount.clientWidth;
+      const height = mount.clientHeight;
+      if (width === 0 || height === 0) return;
+      currentSeats.forEach((seat, index) => {
+        if (seat.kind !== "agent") return;
+        const el = agentHandAnchorRefs.current[seat.id];
+        if (!el) return;
+        const area = PLAYER_AREAS[index] ?? PLAYER_AREAS[0];
+        const z = area.rot === 0 ? area.maxZ + 0.35 : area.minZ - 0.35;
+        projected.set(area.x, 0.1, z).project(camera);
+        if (projected.z > 1) {
+          el.style.display = "none";
+          return;
+        }
+        el.style.display = "grid";
+        el.style.left = `${(projected.x * 0.5 + 0.5) * width}px`;
+        el.style.top = `${(-projected.y * 0.5 + 0.5) * height}px`;
+      });
+    };
+
+    // Same anchoring technique as updateAgentHandAnchors above, for the life-total scoreboard —
+    // pinned to the table's own center point (where the old decorative ring mesh used to sit)
+    // instead of the screen center, so it stays put on the board itself as the camera orbits/pans/
+    // zooms rather than floating in place over whatever happens to be behind it.
+    const updateScoreboardAnchor = () => {
+      const el = scoreboardAnchorRef.current;
+      if (!el) return;
+      const width = mount.clientWidth;
+      const height = mount.clientHeight;
+      if (width === 0 || height === 0) return;
+      projected.set(0, 0.1, 0).project(camera);
+      if (projected.z > 1) {
+        el.style.display = "none";
+        return;
+      }
+      el.style.display = "flex";
+      el.style.left = `${(projected.x * 0.5 + 0.5) * width}px`;
+      el.style.top = `${(-projected.y * 0.5 + 0.5) * height}px`;
+    };
+
     const animate = () => {
       const now = performance.now();
       const deltaSeconds = Math.min((now - lastFrameTime) / 1000, 0.05);
       lastFrameTime = now;
       updateKeyboardMovement(deltaSeconds);
       updateCamera();
+      updateAgentHandAnchors();
+      updateScoreboardAnchor();
       renderer.render(scene, camera);
       frameRef.current = requestAnimationFrame(animate);
     };
@@ -429,17 +558,25 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
 
     const onPointerUp = (event: PointerEvent) => {
       const draggedCard = draggedBattlefieldCardRef.current;
-      if (draggedCard) {
+      // A pointerdown on one of the human's own battlefield cards always arms drag-to-reposition
+      // (see onPointerDown), even for what's really just a click with no intent to move anything —
+      // real mice rarely report zero movement between down and up. Gate on pointer.current.moved so
+      // a plain click still opens the inspector (attack targets, tap abilities, equip, ...) instead
+      // of being swallowed as a no-op reposition every time.
+      if (draggedCard && pointer.current.moved) {
         propsRef.current.onMoveBattlefieldCard?.(draggedCard.seatId, draggedCard.card.id, getTablePosition(event, draggedCard.seatId));
         draggedBattlefieldCardRef.current = undefined;
         updateHoveredCard(event);
-      } else if (!pointer.current.moved) pickCard(event);
+      } else {
+        draggedBattlefieldCardRef.current = undefined;
+        if (!pointer.current.moved) pickCard(event);
+      }
       pointer.current.down = false;
     };
 
     const onWheel = (event: WheelEvent) => {
       event.preventDefault();
-      cameraState.current.distance = THREE.MathUtils.clamp(cameraState.current.distance + event.deltaY * 0.015, 7, 34);
+      cameraState.current.distance = THREE.MathUtils.clamp(cameraState.current.distance + event.deltaY * 0.015, 2.5, 50);
     };
 
     const onContextMenu = (event: MouseEvent) => event.preventDefault();
@@ -695,6 +832,94 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
       <div className="three-hud top-right">
         <button type="button" onClick={() => setActivityOpen((current) => !current)}>Agent Activity</button>
       </div>
+      <div className="scoreboard-hud" ref={scoreboardAnchorRef} aria-label="Life totals">
+        <button type="button" className="scoreboard-flip" onClick={() => setShowCommanderDamage((current) => !current)}>
+          {showCommanderDamage ? "Show Life" : "Show Commander Damage"}
+        </button>
+        <div className="scoreboard-grid">
+          {/* PLAYER_AREAS is a clockwise walk (front-left, front-right, back-right, back-left) —
+              reordering to [back-left, back-right, front-left, front-right] lays this 2x2 grid out
+              left-to-right/top-to-bottom in the same spatial arrangement as the actual battlefields
+              around the table, not turn order, so each cell sits above the real player it belongs
+              to instead of needing a legend to match name to position. */}
+          {[3, 2, 0, 1].map((areaIndex) => props.session.seats[areaIndex]).filter((seat): seat is PlayerSeat => Boolean(seat)).map((seat) => {
+            const damageSources = showCommanderDamage ? commanderDamageSources(props.session, seat) : [];
+            return (
+              <div className="scoreboard-cell" key={seat.id}>
+                <strong>{seat.name}</strong>
+                {showCommanderDamage ? (
+                  damageSources.length > 0 ? (
+                    <ul className="scoreboard-commander-damage">
+                      {damageSources.map((source) => (
+                        <li key={source.sourceId}>
+                          {source.commanderName}: {source.amount}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <span className="scoreboard-muted">No commander damage</span>
+                  )
+                ) : (
+                  <>
+                    <span className="scoreboard-life">{seat.life}</span>
+                    {seat.poison ? <span className="scoreboard-poison">{seat.poison} poison</span> : null}
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      {agentSeats.map((seat) => (
+        <div
+          className="agent-hand-anchor"
+          key={seat.id}
+          ref={(el) => {
+            agentHandAnchorRefs.current[seat.id] = el;
+          }}
+          aria-label={`${seat.name}'s hand (observer view)`}
+        >
+          <header>
+            <strong>{seat.name}</strong>
+            <span>{seat.board.hand.length} cards</span>
+          </header>
+          <div className="agent-hand-row">
+            {seat.board.hand.length === 0 ? (
+              <p className="agent-hand-empty">Empty hand</p>
+            ) : (
+              seat.board.hand.map((card) => (
+                <article
+                  className="agent-hand-card"
+                  key={card.id}
+                  title={`${card.name}\n${card.typeLine}\n${card.oracleText}`}
+                  onClick={() => props.onInspectCard?.(card)}
+                >
+                  {card.imageUris?.normal ? <img src={card.imageUris.normal} alt="" draggable={false} /> : <FallbackHandCard card={card} />}
+                </article>
+              ))
+            )}
+          </div>
+        </div>
+      ))}
+      <div className="three-hud agent-thinking-strip" aria-label="Agent thinking indicators">
+        {agentSeats.map((seat) => {
+          const thinking = Boolean(props.agentThinking?.[seat.id]);
+          const reasoning = props.agentReasoning?.[seat.id];
+          const stateClass = thinking ? "is-thinking" : reasoning ? "is-ready" : "is-empty";
+          return (
+            <button
+              key={seat.id}
+              type="button"
+              className={`agent-thinking-badge ${stateClass}`}
+              onClick={() => setReasoningSeatId(seat.id)}
+              aria-label={`${seat.name} thinking indicator${thinking ? " (deciding)" : ""}`}
+            >
+              <span className="agent-thinking-icon" aria-hidden="true">🧠</span>
+              <span className="agent-thinking-name">{seat.name}</span>
+            </button>
+          );
+        })}
+      </div>
       {activityOpen ? (
         <aside className="activity-panel" style={{ left: activityPosition.x, top: activityPosition.y }}>
           <header
@@ -760,7 +985,7 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
                 Play Selected
               </button>
             )}
-            <button type="button" disabled={Boolean(props.pendingAction)} onClick={props.onAdvanceTurn}>Advance Phase</button>
+            <button type="button" disabled={Boolean(props.pendingAction) || !humanIsActive} onClick={props.onAdvanceTurn}>Advance Phase</button>
             <button type="button" disabled={Boolean(props.pendingAction) || !humanIsActive} onClick={props.onEndTurn}>End Turn</button>
             <button type="button" disabled={!props.pendingAction || !humanHasPriority} onClick={props.onRespond}>Review Response</button>
             <button type="button" disabled={!props.pendingAction || !humanHasPriority || !props.selectedCardCanRespond} onClick={props.onRespondWithSelectedCard}>
@@ -778,6 +1003,9 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
           <div className="hud-card-detail stack-detail">
             <strong>{props.pendingAction.type === "spell" ? "Stack" : props.pendingAction.type === "trigger" ? "Trigger" : "Phase Change"}</strong>
             <p>{props.pendingAction.message}</p>
+            {props.pendingAction.type === "spell" && props.pendingAction.cardTypeLine ? (
+              <p className="stack-type-line">{props.pendingAction.cardTypeLine}</p>
+            ) : null}
             {stackTopFirst.length > 0 ? (
               <div className="stack-list" aria-label="Current stack">
                 <span>Top of stack</span>
@@ -785,6 +1013,7 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
                   <div className="stack-item" key={action.id}>
                     <small>{index === 0 ? "Resolving next" : "Below"}</small>
                     <strong>{action.type === "spell" ? action.cardName : action.type === "trigger" ? `${action.sourceCardName} trigger` : "Phase change"}</strong>
+                    {action.type === "spell" && action.cardTypeLine ? <small>{action.cardTypeLine}</small> : null}
                   </div>
                 ))}
               </div>
@@ -828,6 +1057,36 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
               ? (abilityIndex) => props.onActivateSacrificeAbility?.(inspectedOwner.seat.id, props.inspectedCard!.id, abilityIndex)
               : undefined
           }
+          tapAbilities={
+            inspectedOwner?.seat.kind === "human" && inspectedOwner.zone === "battlefield" && !props.inspectedCard.tapped
+              ? parseGenericTapAbilities(props.inspectedCard.oracleText)
+              : []
+          }
+          onActivateTapAbility={
+            inspectedOwner?.seat.kind === "human" && inspectedOwner.zone === "battlefield"
+              ? (abilityIndex) => props.onActivateTapAbility?.(inspectedOwner.seat.id, props.inspectedCard!.id, abilityIndex)
+              : undefined
+          }
+          selfUntapAbilities={
+            inspectedOwner?.seat.kind === "human" && inspectedOwner.zone === "battlefield" && props.inspectedCard.tapped
+              ? parseSelfUntapAbilities(props.inspectedCard.oracleText)
+              : []
+          }
+          onActivateSelfUntap={
+            inspectedOwner?.seat.kind === "human" && inspectedOwner.zone === "battlefield"
+              ? (abilityIndex) => props.onActivateSelfUntap?.(inspectedOwner.seat.id, props.inspectedCard!.id, abilityIndex)
+              : undefined
+          }
+          genericManaAbilities={
+            inspectedOwner?.seat.kind === "human" && inspectedOwner.zone === "battlefield"
+              ? parseGenericManaAbilities(props.inspectedCard.oracleText)
+              : []
+          }
+          onActivateGenericMana={
+            inspectedOwner?.seat.kind === "human" && inspectedOwner.zone === "battlefield"
+              ? (abilityIndex) => props.onActivateGenericMana?.(inspectedOwner.seat.id, props.inspectedCard!.id, abilityIndex)
+              : undefined
+          }
           onUnlockRoomDoor={
             inspectedOwner?.seat.kind === "human" && inspectedOwner.zone === "battlefield" && props.lockedRoomDoorFaceIndex !== undefined
               ? () => props.onUnlockRoomDoor?.(inspectedOwner.seat.id, props.inspectedCard!.id, props.lockedRoomDoorFaceIndex!)
@@ -849,6 +1108,17 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
           onCastCommander={
             inspectedOwner?.seat.kind === "human" && inspectedOwner.zone === "command"
               ? () => props.onCastCommander?.(inspectedOwner.seat.id)
+              : undefined
+          }
+          onCastFromExile={
+            inspectedOwner?.seat.kind === "human" &&
+            inspectedOwner.zone === "exile" &&
+            props.inspectedCard.exiledPlayableBySeatId === inspectedOwner.seat.id &&
+            (props.inspectedCard.exiledPlayableUntilTurn === undefined || props.session.turn <= props.inspectedCard.exiledPlayableUntilTurn) &&
+            // If a response window is open, only an instant/flash card is actually castable —
+            // main-phase casting (no pendingAction) has no such restriction.
+            (!props.pendingAction || canCastAtInstantSpeed(props.inspectedCard))
+              ? () => props.onCastFromExile?.(inspectedOwner.seat.id, props.inspectedCard!.id)
               : undefined
           }
           onChangeCounter={
@@ -877,6 +1147,7 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
           onOrderTop={props.onOrderLibraryLookCardOnTop}
           onBottom={props.onPutLibraryLookCardOnBottom}
           onGraveyard={props.onPutLibraryLookCardInGraveyard}
+          onToHand={props.onSendLibraryLookCardToHand}
         />
       ) : null}
       {props.ruleChoice?.kind === "choose_card_from_library" ? (
@@ -907,7 +1178,32 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
       {props.ruleChoice?.kind === "optional_trigger" ? (
         <OptionalTriggerModal choice={props.ruleChoice} onAccept={props.onAcceptOptionalTrigger} onDecline={props.onDeclineOptionalTrigger} />
       ) : null}
-      {props.blockChoice ? <BlockChoiceModal choice={props.blockChoice} onChoose={props.onChooseBlocker} onPass={props.onPassBlocks} /> : null}
+      {props.ruleChoice?.kind === "discard_to_hand_size" ? (
+        <DiscardToHandSizeModal choice={props.ruleChoice} onConfirm={props.onCompleteDiscardChoice} />
+      ) : null}
+      {props.ruleChoice?.kind === "choose_creature_type" ? (
+        <ChooseCreatureTypeModal choice={props.ruleChoice} onChoose={props.onChooseCreatureType} />
+      ) : null}
+      {props.ruleChoice?.kind === "choose_color" ? (
+        <ChooseColorModal choice={props.ruleChoice} onChoose={props.onChooseColor} />
+      ) : null}
+      {props.blockChoice ? (
+        <BlockChoiceModal
+          choice={props.blockChoice}
+          selectedBlockerIds={props.selectedBlockerIds ?? []}
+          onToggle={props.onToggleBlocker}
+          onConfirm={props.onConfirmBlockers}
+          onPass={props.onPassBlocks}
+        />
+      ) : null}
+      {reasoningSeatId ? (
+        <AgentReasoningModal
+          seat={props.session.seats.find((seat) => seat.id === reasoningSeatId)}
+          reasoning={props.agentReasoning?.[reasoningSeatId]}
+          thinking={Boolean(props.agentThinking?.[reasoningSeatId])}
+          onClose={() => setReasoningSeatId(undefined)}
+        />
+      ) : null}
       {props.myriadSearchCards ? (
         <MyriadSearchModal cards={props.myriadSearchCards} onClose={props.onCloseMyriadSearch} onChoose={props.onCompleteMyriadSearch} />
       ) : null}
@@ -923,6 +1219,8 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
         <ZoneViewerModal
           seat={props.session.seats.find((seat) => seat.id === zoneView.seatId)}
           zone={zoneView.zone}
+          turn={props.session.turn}
+          hasOpenResponseWindow={Boolean(props.pendingAction)}
           onClose={() => setZoneView(undefined)}
           onInspect={(card) => {
             setZoneView(undefined);
@@ -930,6 +1228,10 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
           }}
           onMoveToHand={(cardId) => {
             props.onMoveCardToHand?.(zoneView.seatId, cardId);
+            setZoneView(undefined);
+          }}
+          onCastFromExile={(cardId) => {
+            props.onCastFromExile?.(zoneView.seatId, cardId);
             setZoneView(undefined);
           }}
         />
@@ -1005,13 +1307,20 @@ function CardInspector({
   onUnlockRoomDoor,
   sacrificeAbilities,
   onActivateSacrificeAbility,
+  tapAbilities,
+  onActivateTapAbility,
+  selfUntapAbilities,
+  onActivateSelfUntap,
+  genericManaAbilities,
+  onActivateGenericMana,
   onActivateEquip,
   attackTargets,
   onDeclareAttack,
   onCastCommander,
   onChangeCounter,
   onChangeLoyalty,
-  onActivateLoyalty
+  onActivateLoyalty,
+  onCastFromExile
 }: {
   card: VisibleCard;
   owner?: ReturnType<typeof findCardOwner>;
@@ -1023,6 +1332,12 @@ function CardInspector({
   onUnlockRoomDoor?: () => void;
   sacrificeAbilities?: SacrificeAbility[];
   onActivateSacrificeAbility?: (abilityIndex: number) => void;
+  tapAbilities?: GenericTapAbility[];
+  onActivateTapAbility?: (abilityIndex: number) => void;
+  selfUntapAbilities?: SelfUntapAbility[];
+  onActivateSelfUntap?: (abilityIndex: number) => void;
+  genericManaAbilities?: GenericManaAbility[];
+  onActivateGenericMana?: (abilityIndex: number) => void;
   onActivateEquip?: () => void;
   attackTargets?: Array<{ targetId: string; label: string }>;
   onDeclareAttack?: (targetId: string) => void;
@@ -1030,6 +1345,7 @@ function CardInspector({
   onChangeCounter?: (delta: number) => void;
   onChangeLoyalty?: (delta: number) => void;
   onActivateLoyalty?: (loyaltyCost: number, abilityText: string) => void;
+  onCastFromExile?: () => void;
 }) {
   const imageUrl = card.imageUris?.large ?? card.imageUris?.normal ?? card.imageUris?.png ?? card.faces?.[0]?.imageUris?.large ?? card.faces?.[0]?.imageUris?.normal;
   const colorText = card.colors.length > 0 ? card.colors.join("") : "Colorless";
@@ -1093,6 +1409,33 @@ function CardInspector({
               ))}
             </div>
           ) : null}
+          {tapAbilities && tapAbilities.length > 0 ? (
+            <div className="modal-actions" aria-label="Tap ability options">
+              {tapAbilities.map((ability, abilityIndex) => (
+                <button key={abilityIndex} className="inspector-action" type="button" onClick={() => onActivateTapAbility?.(abilityIndex)}>
+                  {ability.clause}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {selfUntapAbilities && selfUntapAbilities.length > 0 ? (
+            <div className="modal-actions" aria-label="Untap ability options">
+              {selfUntapAbilities.map((ability, abilityIndex) => (
+                <button key={abilityIndex} className="inspector-action" type="button" onClick={() => onActivateSelfUntap?.(abilityIndex)}>
+                  {ability.clause}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {genericManaAbilities && genericManaAbilities.length > 0 ? (
+            <div className="modal-actions" aria-label="Activated ability options">
+              {genericManaAbilities.map((ability, abilityIndex) => (
+                <button key={abilityIndex} className="inspector-action" type="button" onClick={() => onActivateGenericMana?.(abilityIndex)}>
+                  {ability.clause}
+                </button>
+              ))}
+            </div>
+          ) : null}
           {attackTargets && attackTargets.length > 0 ? (
             <div className="modal-actions" aria-label="Attack target options">
               {attackTargets.map((target) => (
@@ -1105,6 +1448,11 @@ function CardInspector({
           {onCastCommander ? (
             <button className="inspector-action" type="button" onClick={onCastCommander}>
               Cast Commander{card.commanderTax ? ` (+${card.commanderTax})` : ""}
+            </button>
+          ) : null}
+          {onCastFromExile ? (
+            <button className="inspector-action" type="button" onClick={onCastFromExile}>
+              Cast from Exile
             </button>
           ) : null}
           {onChangeCounter ? (
@@ -1173,6 +1521,12 @@ function CardInspector({
                 <dd>{effectivePower(card)}/{effectiveToughness(card)}</dd>
               </div>
             ) : null}
+            {card.counters && card.counters.length > 0 ? (
+              <div>
+                <dt>Counters</dt>
+                <dd>{card.counters.map((counter) => `${counter.count} ${counter.kind}`).join(", ")}</dd>
+              </div>
+            ) : null}
             {card.commander ? (
               <div>
                 <dt>Commander</dt>
@@ -1183,6 +1537,12 @@ function CardInspector({
               <div>
                 <dt>Loyalty</dt>
                 <dd>{loyaltyCounters}</dd>
+              </div>
+            ) : null}
+            {card.zone === "battlefield" ? (
+              <div>
+                <dt>Status</dt>
+                <dd>{battlefieldStatusText(card) || "Ready"}</dd>
               </div>
             ) : null}
           </dl>
@@ -1229,7 +1589,8 @@ function LibraryLookModal({
   onKeepTop,
   onOrderTop,
   onBottom,
-  onGraveyard
+  onGraveyard,
+  onToHand
 }: {
   look: LibraryLookState;
   onClose?: () => void;
@@ -1237,6 +1598,7 @@ function LibraryLookModal({
   onOrderTop?: (cardId: string) => void;
   onBottom?: (cardId: string) => void;
   onGraveyard?: (cardId: string) => void;
+  onToHand?: (cardId: string) => void;
 }) {
   return (
     <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label={`${look.mode} library cards`} onClick={onClose}>
@@ -1246,13 +1608,23 @@ function LibraryLookModal({
         </button>
         <header>
           <p className="eyebrow">{look.mode}</p>
-          <h2>{look.mode === "scry" ? `Scry ${look.remaining}` : look.mode === "reorder" ? "Choose Order" : "Top of library"}</h2>
+          <h2>
+            {look.mode === "scry"
+              ? `Scry ${look.remaining}`
+              : look.mode === "reorder"
+                ? "Choose Order"
+                : look.mode === "choose_one"
+                  ? `Top ${look.cards.length}`
+                  : "Top of library"}
+          </h2>
           <p>
             {look.mode === "surveil"
               ? "Choose each card for the top of your library or your graveyard. The last card you put on top will be the top card."
               : look.mode === "reorder"
                 ? "Choose the top card first, then the second card, and so on."
-              : "Choose Top to keep this card and finish scrying, or Bottom to look at the next card."}
+                : look.mode === "choose_one"
+                  ? "Choose one card to put into your hand. The rest go back on top — you'll then order them."
+                  : "Choose Top to keep this card and finish scrying, or Bottom to look at the next card."}
           </p>
           {look.mode === "reorder" && look.orderedCards?.length ? (
             <span>Chosen: {look.orderedCards.map((card) => card.name).join(" -> ")}</span>
@@ -1270,6 +1642,8 @@ function LibraryLookModal({
               <div className="library-look-actions">
                 {look.mode === "reorder" ? (
                   <button type="button" onClick={() => onOrderTop?.(card.id)}>Place Next</button>
+                ) : look.mode === "choose_one" ? (
+                  <button type="button" onClick={() => onToHand?.(card.id)}>To Hand</button>
                 ) : (
                   <button type="button" onClick={() => onKeepTop?.(card.id)}>Top</button>
                 )}
@@ -1294,7 +1668,7 @@ function LibrarySearchModal({
   onChoose
 }: {
   cards: VisibleCard[];
-  destination: "hand" | "battlefield";
+  destination: "hand" | "battlefield" | "graveyard";
   prompt?: string;
   sourceCardName?: string;
   allowedCardFilter?: string;
@@ -1407,6 +1781,59 @@ function MiracleOfferModal({
   );
 }
 
+const AGENT_REASONING_PURPOSE_LABELS: Record<string, string> = {
+  main_phase: "Main phase",
+  declare_attackers: "Declaring attackers",
+  priority_response: "Responding to the stack",
+  declare_blockers: "Declaring blockers"
+};
+
+function AgentReasoningModal({
+  seat,
+  reasoning,
+  thinking,
+  onClose
+}: {
+  seat?: PlayerSeat;
+  reasoning?: AgentReasoning;
+  thinking: boolean;
+  onClose?: () => void;
+}) {
+  const seatName = seat?.name ?? "Agent";
+  return (
+    <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label={`${seatName} thinking`} onClick={onClose}>
+      <article className="mana-choice-modal" onClick={(event) => event.stopPropagation()}>
+        <header>
+          <p className="eyebrow">🧠 Thinking</p>
+          <h2>{seatName}</h2>
+        </header>
+        {thinking ? (
+          <p>{seatName} is deciding{reasoning ? " again" : ""}...</p>
+        ) : reasoning ? (
+          <>
+            <p className="agent-reasoning-purpose">{AGENT_REASONING_PURPOSE_LABELS[reasoning.purpose] ?? reasoning.purpose}</p>
+            {reasoning.deliberation ? (
+              <div className="agent-reasoning-deliberation">
+                <p className="agent-reasoning-deliberation-label">Arguing it out</p>
+                <p className="agent-reasoning-deliberation-text">{reasoning.deliberation}</p>
+              </div>
+            ) : null}
+            <p className="agent-reasoning-label">Chose: {reasoning.label}</p>
+            <p>{reasoning.reason || "No reasoning was given for this decision."}</p>
+          </>
+        ) : (
+          <p>No decision yet this game.</p>
+        )}
+        <div className="modal-actions">
+          <button className="inspector-action" type="button" onClick={onClose}>
+            Close
+          </button>
+        </div>
+      </article>
+    </div>
+  );
+}
+
 function OptionalTriggerModal({
   choice,
   onAccept,
@@ -1431,6 +1858,157 @@ function OptionalTriggerModal({
           <button className="inspector-action" type="button" onClick={onDecline}>
             No
           </button>
+        </div>
+      </article>
+    </div>
+  );
+}
+
+function DiscardToHandSizeModal({
+  choice,
+  onConfirm
+}: {
+  choice: Extract<RuleChoiceView, { kind: "discard_to_hand_size" }>;
+  onConfirm?: (cardIds: string[]) => void;
+}) {
+  const [selected, setSelected] = useState<string[]>([]);
+
+  function toggle(cardId: string) {
+    setSelected((current) => {
+      if (current.includes(cardId)) return current.filter((id) => id !== cardId);
+      if (current.length >= choice.requiredDiscards) return current;
+      return [...current, cardId];
+    });
+  }
+
+  // No backdrop-dismiss: cleanup-step discard is a required action (rule 514.2), not an optional
+  // review, so unlike the other rule-choice modals this one has nothing for onClick to call.
+  return (
+    <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label="Discard to hand size">
+      <article className="mana-choice-modal" onClick={(event) => event.stopPropagation()}>
+        <header>
+          <p className="eyebrow">Cleanup step</p>
+          <h2>Discard to hand size</h2>
+        </header>
+        <p>{choice.prompt}</p>
+        <p>
+          Selected {selected.length}/{choice.requiredDiscards}
+        </p>
+        <div className="modal-actions discard-hand-list">
+          {choice.hand.map((card) => (
+            <button
+              key={card.id}
+              type="button"
+              className="inspector-action"
+              aria-pressed={selected.includes(card.id)}
+              onClick={() => toggle(card.id)}
+            >
+              {selected.includes(card.id) ? "✓ " : ""}
+              {card.name}
+            </button>
+          ))}
+        </div>
+        <div className="modal-actions">
+          <button
+            className="inspector-action"
+            type="button"
+            disabled={selected.length !== choice.requiredDiscards}
+            onClick={() => onConfirm?.(selected)}
+          >
+            Discard {choice.requiredDiscards} card{choice.requiredDiscards === 1 ? "" : "s"}
+          </button>
+        </div>
+      </article>
+    </div>
+  );
+}
+
+function ChooseCreatureTypeModal({
+  choice,
+  onChoose
+}: {
+  choice: Extract<RuleChoiceView, { kind: "choose_creature_type" }>;
+  onChoose?: (creatureType: string) => void;
+}) {
+  const [filter, setFilter] = useState("");
+  const [selected, setSelected] = useState(choice.currentChoice ?? "");
+  const options = useMemo(
+    () => (filter.trim() ? CREATURE_TYPES.filter((type) => type.toLowerCase().includes(filter.trim().toLowerCase())) : CREATURE_TYPES),
+    [filter]
+  );
+
+  return (
+    <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label="Choose a creature type">
+      <article className="mana-choice-modal" onClick={(event) => event.stopPropagation()}>
+        <header>
+          <p className="eyebrow">{choice.sourceCardName}</p>
+          <h2>Choose a creature type</h2>
+        </header>
+        <p>{choice.prompt}</p>
+        <input
+          type="text"
+          placeholder="Search creature types..."
+          value={filter}
+          onChange={(event) => setFilter(event.target.value)}
+          autoFocus
+        />
+        <div className="modal-actions discard-hand-list creature-type-list">
+          {options.map((type) => (
+            <button
+              key={type}
+              type="button"
+              className="inspector-action"
+              aria-pressed={selected === type}
+              onClick={() => setSelected(type)}
+            >
+              {selected === type ? "✓ " : ""}
+              {type}
+            </button>
+          ))}
+        </div>
+        <div className="modal-actions">
+          <button className="inspector-action" type="button" disabled={!selected} onClick={() => onChoose?.(selected)}>
+            Confirm {selected || "creature type"}
+          </button>
+        </div>
+      </article>
+    </div>
+  );
+}
+
+const MANA_COLORS: ManaColor[] = ["W", "U", "B", "R", "G"];
+const MANA_COLOR_LABELS: Record<ManaColor, string> = { W: "White", U: "Blue", B: "Black", R: "Red", G: "Green", C: "Colorless" };
+
+function ChooseColorModal({
+  choice,
+  onChoose
+}: {
+  choice: Extract<RuleChoiceView, { kind: "choose_color" }>;
+  onChoose?: (color: ManaColor) => void;
+}) {
+  const options = MANA_COLORS.filter((color) => color !== choice.excludedColor);
+
+  return (
+    <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label="Choose a color">
+      <article className="mana-choice-modal" onClick={(event) => event.stopPropagation()}>
+        <header>
+          <p className="eyebrow">{choice.sourceCardName}</p>
+          <h2>Choose a color</h2>
+        </header>
+        <p>{choice.prompt}</p>
+        <div className="modal-actions">
+          {options.map((color) => (
+            <button
+              key={color}
+              type="button"
+              className="inspector-action"
+              aria-pressed={choice.currentChoice === color}
+              onClick={() => onChoose?.(color)}
+            >
+              {choice.currentChoice === color ? "✓ " : ""}
+              {MANA_COLOR_LABELS[color]}
+            </button>
+          ))}
         </div>
       </article>
     </div>
@@ -1619,6 +2197,13 @@ function formatLoyaltyCost(cost: number) {
   return cost > 0 ? `+${cost}` : `${cost}`;
 }
 
+// Mirrors AppFlow.tsx's canCastAtInstantSpeed — used only to decide whether to show a "Cast from
+// Exile" button during an open response window (a sorcery sitting in exile still isn't castable
+// there, only an instant/flash card is).
+function canCastAtInstantSpeed(card: VisibleCard) {
+  return card.typeLine.includes("Instant") || /\bflash\b/i.test(card.oracleText);
+}
+
 function FallbackLargeCard({ card }: { card: VisibleCard }) {
   return (
     <div className="card-inspector-fallback">
@@ -1630,53 +2215,119 @@ function FallbackLargeCard({ card }: { card: VisibleCard }) {
   );
 }
 
-function BlockChoiceModal({ choice, onChoose, onPass }: { choice: BlockChoiceView; onChoose?: (blockerCardId: string) => void; onPass?: () => void }) {
+function BlockChoiceModal({
+  choice,
+  selectedBlockerIds,
+  onToggle,
+  onConfirm,
+  onPass
+}: {
+  choice: BlockChoiceView;
+  selectedBlockerIds: string[];
+  onToggle?: (blockerCardId: string) => void;
+  onConfirm?: () => void;
+  onPass?: () => void;
+}) {
+  const selectedCount = selectedBlockerIds.length;
   return (
-    <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label="Choose blockers">
-      <article className="library-search-modal" onClick={(event) => event.stopPropagation()}>
-        <header>
-          <p className="eyebrow">Blockers</p>
-          <h2>{choice.defenderName} is being attacked</h2>
-          <p>
-            {choice.attackerName} attacks with {choice.attackingCard.name}. Choose one blocker or take the damage.
+    <aside className="block-assign-panel" role="dialog" aria-label="Choose blockers">
+      <header>
+        <p className="eyebrow">Blockers</p>
+        <h2>
+          {choice.attackerName} attacks with {choice.attackingCard.name} ({effectivePowerText(choice.attackingCard)})
+        </h2>
+      </header>
+      <div className="block-assign-actions">
+        <button className="inspector-action block-confirm" type="button" onClick={onConfirm} disabled={selectedCount === 0}>
+          {selectedCount === 0 ? "Confirm (no blocks)" : `Confirm ${selectedCount} Blocker${selectedCount === 1 ? "" : "s"}`}
+        </button>
+        <button className="inspector-action" type="button" onClick={onPass}>
+          Do Not Block
+        </button>
+      </div>
+      {choice.blockers.length > 0 ? (
+        <>
+          <p className="block-assign-hint">
+            Tap creatures to add them as blockers{selectedCount > 1 ? " — first tapped takes damage first" : ""}.
           </p>
-        </header>
-        <div className="library-card-grid">
-          {choice.blockers.map((card) => (
-            <button className="library-card-button" type="button" key={card.id} onClick={() => onChoose?.(card.id)}>
-              {card.imageUris?.normal ? <img src={card.imageUris.normal} alt="" /> : <FallbackHandCard card={card} />}
-              <span>{card.name}</span>
-              <small>{card.typeLine}</small>
-            </button>
-          ))}
-          {choice.blockers.length === 0 ? <p>No legal blockers are available.</p> : null}
-        </div>
-        <div className="modal-actions">
-          <button className="inspector-action" type="button" onClick={onPass}>
-            Do Not Block
-          </button>
-        </div>
-      </article>
-    </div>
+          <div className="block-assign-list">
+            {choice.blockers.map((card) => {
+              const order = selectedBlockerIds.indexOf(card.id);
+              const selected = order >= 0;
+              return (
+                <button
+                  key={card.id}
+                  type="button"
+                  className={`block-assign-card ${selected ? "selected" : ""}`}
+                  onClick={() => onToggle?.(card.id)}
+                >
+                  {selected ? <span className="block-assign-order">{order + 1}</span> : null}
+                  <span className="block-assign-name">{card.name}</span>
+                  <span className="block-assign-stats">{effectivePowerText(card)}</span>
+                </button>
+              );
+            })}
+          </div>
+        </>
+      ) : (
+        <p className="block-assign-hint">No legal blockers are available.</p>
+      )}
+    </aside>
   );
+}
+
+// Surfaces why a creature can't currently attack/tap — the engine itself always enforces this
+// correctly (see canAttack/legalAttackActions in AppFlow.tsx), but nothing in the UI ever told a
+// human *why* a just-played creature was sitting idle, which reads as the game "not knowing" about
+// summoning sickness even though it's tracked and enforced under the hood.
+function battlefieldStatusText(card: VisibleCard): string {
+  const parts: string[] = [];
+  if (card.tapped) parts.push("Tapped");
+  const hasHaste = hasOracleKeyword(card.oracleText, "haste") || Boolean(card.grantedKeywords?.includes("haste"));
+  if (card.typeLine.includes("Creature") && card.summoningSick && !hasHaste) parts.push("Summoning sick");
+  if (card.attacking) parts.push("Attacking");
+  if (card.blocking) parts.push("Blocking");
+  if (card.chosenCreatureType) parts.push(`Chosen type: ${card.chosenCreatureType}`);
+  if (card.chosenColor) parts.push(`Chosen color: ${card.chosenColor}`);
+  return parts.join(", ");
+}
+
+function effectivePowerText(card: VisibleCard) {
+  return card.power !== undefined && card.toughness !== undefined ? `${effectivePower(card)}/${effectiveToughness(card)}` : card.typeLine;
 }
 
 function ZoneViewerModal({
   seat,
   zone,
+  turn,
+  hasOpenResponseWindow,
   onClose,
   onInspect,
-  onMoveToHand
+  onMoveToHand,
+  onCastFromExile
 }: {
   seat?: PlayerSeat;
   zone: TableZone;
+  turn: number;
+  hasOpenResponseWindow: boolean;
   onClose?: () => void;
   onInspect?: (card: VisibleCard) => void;
   onMoveToHand?: (cardId: string) => void;
+  onCastFromExile?: (cardId: string) => void;
 }) {
   const cards = zone === "graveyard" ? (seat?.board.graveyard ?? []) : (seat?.board.exile ?? []);
   const title = zone === "graveyard" ? "Graveyard" : "Exile";
   const canReturnToHand = seat?.kind === "human" && zone === "graveyard";
+  // Impulse-draw/steal-and-play effects (see zoneEffects.ts) grant temporary or indefinite
+  // permission to cast a card straight out of exile — only the seat that was granted it, only
+  // while any time limit hasn't expired, and only an instant/flash card if a response window is
+  // currently open (main-phase casting has no speed restriction).
+  const canCastFromExile = (card: VisibleCard) =>
+    seat?.kind === "human" &&
+    zone === "exile" &&
+    card.exiledPlayableBySeatId === seat.id &&
+    (card.exiledPlayableUntilTurn === undefined || turn <= card.exiledPlayableUntilTurn) &&
+    (!hasOpenResponseWindow || canCastAtInstantSpeed(card));
 
   return (
     <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label={`${seat?.name ?? "Player"} ${title}`} onClick={onClose}>
@@ -1700,6 +2351,7 @@ function ZoneViewerModal({
               </div>
               <button type="button" onClick={() => onInspect?.(card)}>Inspect</button>
               {canReturnToHand ? <button type="button" onClick={() => onMoveToHand?.(card.id)}>To Hand</button> : null}
+              {canCastFromExile(card) ? <button type="button" onClick={() => onCastFromExile?.(card.id)}>Cast</button> : null}
             </article>
           ))}
         </div>
@@ -1764,21 +2416,28 @@ function rebuildDynamicScene(
   session.seats.forEach((seat, index) => {
     const area = PLAYER_AREAS[index] ?? PLAYER_AREAS[0];
     addBattlefieldArea(group, area, seat.kind === "human");
-    addPlayerLabel(group, seat, area);
-    addZonePile(group, "Deck", seat.zones.library, area.minX + 0.75, area.maxZ - 0.8, area.rot);
-    addZonePile(group, "Grave", seat.zones.graveyard, zonePilePosition(area, "graveyard").x, zonePilePosition(area, "graveyard").z, area.rot, cardMeshesRef, seat.id, "graveyard");
-    addZonePile(group, "Exile", seat.zones.exile, zonePilePosition(area, "exile").x, zonePilePosition(area, "exile").z, area.rot, cardMeshesRef, seat.id, "exile");
+    const commanderSlot = zoneStripPosition(area, 0);
+    const librarySlot = zoneStripPosition(area, 1);
+    const graveyardSlot = zoneStripPosition(area, 2);
+    const exileSlot = zoneStripPosition(area, 3);
+    addZonePile(group, "Deck", seat.zones.library, librarySlot.x, librarySlot.z, area.rot);
+    addZonePile(group, "Grave", seat.zones.graveyard, graveyardSlot.x, graveyardSlot.z, area.rot, cardMeshesRef, seat.id, "graveyard");
+    addZonePile(group, "Exile", seat.zones.exile, exileSlot.x, exileSlot.z, area.rot, cardMeshesRef, seat.id, "exile");
 
     if (seat.board.commander) {
-      addCard(group, seat.board.commander, seat.id, "command", area.minX + 0.9, area.minZ + 0.8, area.rot, selectedCardId, cardMeshesRef);
+      addCard(group, seat.board.commander, seat.id, "command", commanderSlot.x, commanderSlot.z, area.rot, selectedCardId, cardMeshesRef);
     }
 
-    seat.board.battlefield.slice(0, 12).forEach((card, cardIndex) => {
-      const point = card.battlefieldPosition ?? defaultBattlefieldPosition(area, cardIndex);
+    seat.board.battlefield.forEach((card, cardIndex) => {
+      const point = card.battlefieldPosition ?? defaultBattlefieldPosition(area, cardIndex, seat.board.battlefield.length);
       addCard(group, card, seat.id, "battlefield", point.x, point.z, area.rot, selectedCardId, cardMeshesRef);
     });
 
-    addTextPlane(group, `Hand ${seat.zones.hand}`, area.x, area.maxZ - 0.8, area.rot, 0.34);
+    // Outside the battlefield rectangle's own near edge (past where addPlayerLabel puts the
+    // name/life plate) rather than inside it, so it doesn't eat into permanent placement room —
+    // see the module comment on TABLE_WIDTH/TABLE_DEPTH.
+    const handLabelZ = area.rot === 0 ? area.maxZ + 0.9 : area.minZ - 0.9;
+    addTextPlane(group, `Hand ${seat.zones.hand}`, area.x, handLabelZ, area.rot, 0.34);
   });
 }
 
@@ -1811,22 +2470,49 @@ function addBattlefieldArea(
   group.add(border);
 }
 
-function defaultBattlefieldPosition(area: (typeof PLAYER_AREAS)[number], cardIndex: number) {
-  const col = cardIndex % 5;
-  const row = Math.floor(cardIndex / 5);
-  const x = THREE.MathUtils.clamp(area.minX + 2 + col * 1.15, area.minX + 0.55, area.maxX - 0.55);
-  const zStep = area.rot === 0 ? -1 : 1;
+// A player's battlefield area is a fixed-size rectangle (see PLAYER_AREAS), but a Commander board
+// routinely grows past what a static 5-wide/2-row grid can hold without overlap — this used to be
+// papered over by hard-capping rendering at 12 permanents (see git history), which made anything
+// beyond that literally invisible and unclickable rather than just cramped. Instead, grow the
+// column count (and shrink row spacing) with the actual permanent count so everything still gets a
+// mesh and a screen position, even if cards sit closer together once a board gets very wide.
+function defaultBattlefieldPosition(area: (typeof PLAYER_AREAS)[number], cardIndex: number, totalCards: number) {
+  const availableWidth = area.maxX - area.minX - 1.1;
+  const availableDepth = area.maxZ - area.minZ - 1.3;
+  const maxColumnsByWidth = Math.max(1, Math.floor(availableWidth / 0.85) + 1);
+  const columns = Math.min(maxColumnsByWidth, Math.max(5, Math.ceil(Math.sqrt(totalCards * 2.2))));
+  const rows = Math.max(1, Math.ceil(totalCards / columns));
+  const xStep = columns > 1 ? Math.min(1.15, availableWidth / (columns - 1)) : 0;
+  const zStep = rows > 1 ? Math.min(1.25, availableDepth / (rows - 1)) : 1.25;
+
+  const col = cardIndex % columns;
+  const row = Math.floor(cardIndex / columns);
+  const x = THREE.MathUtils.clamp(area.minX + 2 + col * xStep, area.minX + 0.55, area.maxX - 0.55);
+  const zDir = area.rot === 0 ? -1 : 1;
   const startZ = area.rot === 0 ? area.maxZ - 2 : area.minZ + 2;
-  const z = THREE.MathUtils.clamp(startZ + row * zStep * 1.25, area.minZ + 0.65, area.maxZ - 0.65);
+  const z = THREE.MathUtils.clamp(startZ + row * zDir * zStep, area.minZ + 0.55, area.maxZ - 0.55);
   return { x, z };
 }
 
+// Just past the outer (away-from-center) edge of this player's battlefield rectangle — left of
+// minX for a left-side player, right of maxX for a right-side player — so the non-battlefield
+// zones (see zoneStripPosition) never sit on top of, or compete for space with, actual permanents.
+function zoneStripX(area: (typeof PLAYER_AREAS)[number]) {
+  return area.x < 0 ? area.minX - 1.3 : area.maxX + 1.3;
+}
+
+// Stacks the four non-battlefield zones (commander, library, graveyard, exile — slots 0-3) along
+// this player's own near/far axis, at a single x just outside their battlefield rectangle. Order is
+// arbitrary (any consistent order works) but keeps command zone nearest the table's center and
+// exile nearest the player, roughly mirroring where they used to sit before both were moved out of
+// the battlefield rectangle itself.
+function zoneStripPosition(area: (typeof PLAYER_AREAS)[number], slot: 0 | 1 | 2 | 3) {
+  const depth = area.maxZ - area.minZ;
+  return { x: zoneStripX(area), z: area.minZ + depth * ((slot + 0.5) / 4) };
+}
+
 function zonePilePosition(area: (typeof PLAYER_AREAS)[number], zone: TableZone) {
-  const offset = zone === "graveyard" ? 0.75 : 1.75;
-  return {
-    x: area.maxX - offset,
-    z: area.maxZ - 0.8
-  };
+  return zoneStripPosition(area, zone === "graveyard" ? 2 : 3);
 }
 
 function tableZoneAtPosition(session: GameSession, seatId: string, position: { x: number; z: number }): TableZone | undefined {
@@ -2043,11 +2729,6 @@ function addZonePile(
   pile.rotation.y = rot;
   group.add(pile);
   addTextPlane(group, `${label} ${count}`, x, z + 0.75, rot, 0.42);
-}
-
-function addPlayerLabel(group: THREE.Group, seat: PlayerSeat, area: (typeof PLAYER_AREAS)[number]) {
-  const z = area.rot === 0 ? area.maxZ + 0.35 : area.minZ - 0.35;
-  addTextPlane(group, `${seat.name} | ${seat.life}`, area.x, z, area.rot, 0.62);
 }
 
 function makeCardTexture(card: VisibleCard, selected: boolean) {

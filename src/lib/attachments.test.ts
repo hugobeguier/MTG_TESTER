@@ -28,6 +28,13 @@ describe("enchantRestriction", () => {
   it("parses a creature-you-control restriction (Cartouche of Strength)", () => {
     expect(enchantRestriction("Enchant creature you control\nEnchanted creature gets +1/+1 and has trample.")).toBe("creature_you_control");
   });
+
+  it("parses a player restriction (Overwhelming Splendor, the Curse cycle)", () => {
+    expect(enchantRestriction("Enchant player\nEnchanted player can't cast spells with the same name as a permanent you control.")).toBe("player");
+    expect(enchantRestriction("Enchant opponent\nWhenever a creature enters the battlefield under your control, that creature deals 1 damage to enchanted player.")).toBe(
+      "player"
+    );
+  });
 });
 
 describe("equipCost", () => {

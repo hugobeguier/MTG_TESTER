@@ -104,6 +104,18 @@ describe("deterministicRuleWorkflow", () => {
     expect(deathWorkflow?.workflow).toBe("draw_cards");
   });
 
+  it("chooses search_library_to_graveyard for a tutor-to-graveyard spell, not to_hand or manual review (Entomb)", () => {
+    const entomb = card({
+      id: "entomb-1",
+      name: "Entomb",
+      typeLine: "Instant",
+      oracleText: "Search your library for a card, put that card into your graveyard, then shuffle."
+    });
+    const workflow = deterministicRuleWorkflow(input(entomb));
+    expect(workflow?.workflow).toBe("search_library_to_graveyard");
+    expect(workflow?.destination).toBe("graveyard");
+  });
+
   it("recognizes a direct-cast proliferate spell and requires no human choice (Contentious Plan)", () => {
     const contentiousPlan = card({
       id: "contentious-plan-1",

@@ -134,7 +134,17 @@ function hasInfect(card: CardLike) {
   return hasKeyword(card, "infect");
 }
 
+function hasMenace(card: CardLike) {
+  return hasKeyword(card, "menace");
+}
+
+// Mirrors AppFlow.tsx's canBlock: a menace attacker needs two-or-more blockers assigned at once,
+// which this engine's single-blocker-per-attacker model can never offer — so no single candidate
+// here is ever a legal block for one. Without this, attack-profitability scoring would think a
+// menace attacker "has a potential blocker" and hold back an attack the engine will actually just
+// wave through unblocked.
 function canLegallyBlock(attacker: CardLike, blocker: CardLike): boolean {
+  if (hasMenace(attacker)) return false;
   return !hasFlying(attacker) || hasFlying(blocker) || hasReach(blocker);
 }
 
@@ -221,6 +231,38 @@ function scoreAttackProfitability(action: ScorableAction, context: ScoringContex
   }
 }
 
+// Without this, every opponent an attacker could legally hit scores identically (scoreAttackProfitability
+// only judges "is attacking good," not "who"), so the deterministic fallback's stable sort always
+// broke the tie in favor of whichever opponent happened to come first in the opponents array — which
+// in this engine is consistently the same seat (the human sits at a fixed index), producing a
+// systematic "always attacks the human" pattern regardless of actual board state. Comparing each
+// candidate target against the *other* opponents (not you) gives a real multiplayer signal instead:
+// attack whoever's weakest (easiest to close out) or whoever's biggest (an imminent-winner threat),
+// matching gameplay-heuristics.md's "prioritize players with imminent wins" guidance.
+function scoreAttackTargetSelection(action: ScorableAction, context: ScoringContext, delta: (amount: number, reason: string) => void) {
+  if (action.actionType !== "attack") return;
+  const targetId = action.targetIds[0];
+  const opponents = context.opponents ?? [];
+  if (!targetId || opponents.length < 2) return;
+
+  const targetOpponent = opponents.find((opponent) => opponent.id === targetId) ?? opponents.find((opponent) => (opponent.battlefield ?? []).some((card) => card.id === targetId));
+  if (!targetOpponent) return;
+
+  const lifeTotals = opponents.map((opponent) => opponent.life ?? 40);
+  const lowestLife = Math.min(...lifeTotals);
+  const targetLife = targetOpponent.life ?? 40;
+  if (targetLife <= lowestLife && lifeTotals.some((life) => life !== targetLife)) {
+    delta(2, `${targetOpponent.name ?? "this opponent"} has the lowest life among opponents (${targetLife})`);
+  }
+
+  const boardValues = opponents.map((opponent) => boardValue(opponent.battlefield));
+  const highestBoardValue = Math.max(...boardValues);
+  const targetBoardValue = boardValue(targetOpponent.battlefield);
+  if (targetBoardValue >= highestBoardValue && boardValues.some((value) => value !== targetBoardValue)) {
+    delta(2, `${targetOpponent.name ?? "this opponent"} has the most board presence among opponents and looks like the biggest threat`);
+  }
+}
+
 function scoreHoldInstants(action: ScorableAction, context: ScoringContext, delta: (amount: number, reason: string) => void) {
   if (context.purpose !== "priority_response") return;
   const stackHasSomethingToAnswer = (context.stack?.length ?? 0) > 0;
@@ -241,6 +283,76 @@ function scoreUpkeepValue(action: ScorableAction, context: ScoringContext, delta
   const life = context.you?.life ?? 40;
   if (life <= 10) {
     delta(-1, "paying a rising upkeep cost while at low life is risky");
+  }
+}
+
+// Generic-sacrifice activated abilities (parseGenericSacrificeAbilities in activatedAbilities.ts)
+// get a flat activate_ability baseline (2) with nothing discounting a bad trade — legalMainPhaseActions
+// offers "sacrifice Mind Stone: draw a card" as just another action, and once no cast_spell/play_land
+// is affordable it can out-score pass_priority (0), so an agent (or the zero-judgment fallback picker)
+// sacrifices a permanent that still has ongoing value the instant nothing else scores higher. The
+// common shape this misfires on is a mana rock with BOTH a plain recurring tap ability and a separate
+// sacrifice-cost ability (Mind Stone's "{T}: Add {C}." plus "...Sacrifice this artifact: Draw a card.")
+// — trading away the recurring ramp for a one-shot card is usually wrong while the hand still has
+// options, and only reasonable when hellbent (empty/near-empty hand).
+function scoreSacrificeValue(action: ScorableAction, context: ScoringContext, delta: (amount: number, reason: string) => void) {
+  if (action.actionType !== "activate_ability") return;
+  // Only the "sacrifice THIS permanent" self-sacrifice shape (Mind Stone: "Sacrifice this
+  // artifact: Draw a card.") is the one-shot-vs-ongoing-ramp trade-off this heuristic is about.
+  // Sacrificing OTHER creatures to power up/transform this permanent (Westvale Abbey: "Sacrifice
+  // five creatures: Transform this land...") keeps the recurring mana ability intact and buys a
+  // much bigger payoff — a completely different trade (see scoreTransformSacrifice) that this
+  // heuristic must not weigh in on just because its label also contains "(sacrifice ...)".
+  if (!/\bsacrifice this\b/i.test(action.detail ?? "")) return;
+  const source = findCard(context.you?.battlefield, action.cardId);
+  if (!source?.oracleText) return;
+  const hasRecurringTapAbility = /\{t\}:\s*add\b/i.test(source.oracleText);
+  if (!hasRecurringTapAbility) return;
+  const handSize = context.you?.hand?.length ?? 0;
+  if (handSize <= 1) {
+    delta(1, "hellbent — trading a mana rock's ramp for a card is worth it with an empty hand");
+    return;
+  }
+  delta(-3, "sacrificing a mana rock's ongoing ramp for a one-shot payoff while still holding cards");
+}
+
+const NUMBER_WORD_TO_INT: Record<string, number> = {
+  a: 1,
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+  eight: 8,
+  nine: 9,
+  ten: 10
+};
+
+function wordOrDigitToInt(value: string): number | undefined {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : NUMBER_WORD_TO_INT[value.toLowerCase()];
+}
+
+// A multi-creature sacrifice that transforms/upgrades its source into something dramatically
+// bigger (Westvale Abbey -> Ormendahl, Profane Prince) is a strong trade as long as it doesn't
+// require giving up most of the board to pay for it. With no signal at all, this action just sat
+// at the generic activate_ability baseline — indistinguishable from a marginal upkeep tap ability
+// — so an agent (or the zero-judgment deterministic fallback) had no reason to prefer it even when
+// it was clearly worth doing, and no reason to avoid it when it would empty the board.
+function scoreTransformSacrifice(action: ScorableAction, context: ScoringContext, delta: (amount: number, reason: string) => void) {
+  if (action.actionType !== "activate_ability" || !/\btransform\b/i.test(action.detail ?? "")) return;
+  const countMatch = (action.detail ?? "").match(/\bsacrifice (\w+) creatures\b/i);
+  if (!countMatch) return;
+  const sacrificeCount = wordOrDigitToInt(countMatch[1]);
+  if (!sacrificeCount) return;
+  const creatureCount = (context.you?.battlefield ?? []).filter((card) => (card.typeLine ?? "").includes("Creature")).length;
+  const remaining = creatureCount - sacrificeCount;
+  if (remaining >= 2) {
+    delta(4, `transforms into a much bigger threat while keeping ${remaining} creature${remaining === 1 ? "" : "s"} in reserve`);
+  } else if (remaining <= 0) {
+    delta(-3, "this transform would require sacrificing the entire board");
   }
 }
 
@@ -450,9 +562,12 @@ export function scoreLegalAction(action: ScorableAction, context: ScoringContext
   scoreRampEarly(action, context, delta);
   scoreRemovalTargeting(action, context, delta);
   scoreAttackProfitability(action, context, delta);
+  scoreAttackTargetSelection(action, context, delta);
   scoreBlockDecision(action, context, delta);
   scoreHoldInstants(action, context, delta);
   scoreUpkeepValue(action, context, delta);
+  scoreSacrificeValue(action, context, delta);
+  scoreTransformSacrifice(action, context, delta);
   scoreMulliganDecision(action, context, delta);
   scoreImmediateWinThreats(action, context, delta);
   scoreStackResponse(action, context, delta);

@@ -1,4 +1,6 @@
 import type { CardRecord, DeckCard } from "./types";
+import { isBracketThreeBannedCard, wouldCompleteEarlyCombo } from "./bracketPolicy";
+import type { EdhrecSynergyCard } from "./edhrec";
 
 export interface CardLookup {
   lookup(name: string): CardRecord | undefined;
@@ -14,6 +16,10 @@ const BASICS_BY_COLOR: Record<string, string> = {
 
 const BASIC_LANDS = new Set([...Object.values(BASICS_BY_COLOR), "Wastes"]);
 const TARGET_LANDS = 37;
+// Non-land slots are capped at this so fillWithBasics always has room left to reach TARGET_LANDS —
+// without this, a land-light generated deck (small local models routinely under-supply lands) gets
+// its 100 slots filled entirely by curated spells before basics ever run, and never recovers.
+const MAX_NONLAND_CARDS = 100 - TARGET_LANDS;
 
 const CURATED_PACKAGES: Record<string, string[]> = {
   ramp: [
@@ -160,6 +166,8 @@ export function repairCommanderDeckCards(input: {
   cards: DeckCard[];
   colors: string[];
   catalog: CardLookup;
+  /** EDHREC's live synergy data for this commander, highest-synergy-first; omit if unavailable. */
+  synergyCards?: EdhrecSynergyCard[];
 }) {
   const commanderRecord = input.catalog.lookup(input.commander);
   const commanderColors = new Set(commanderRecord?.colorIdentity ?? input.colors);
@@ -176,10 +184,16 @@ export function repairCommanderDeckCards(input: {
     const record = input.catalog.lookup(card.name);
     if (!record) continue;
     if (!isCommanderIdentityLegal(record, commanderColors)) continue;
+    if (isBracketThreeBannedCard(record.name)) continue;
 
     const isBasic = isBasicLand(record.name);
+    // Once non-land slots are full, stop admitting more spells (even ones already in the input)
+    // so there's still room left for fillWithCuratedCards/fillWithBasics to reach TARGET_LANDS —
+    // covers the pathological case where the input itself is already ~100 cards but land-light.
+    if (!isBasic && !record.typeLine.includes("Land") && nonLandCount(repaired) >= MAX_NONLAND_CARDS) continue;
     const key = normalizeName(record.name);
     if (!isBasic && seenNonBasics.has(key)) continue;
+    if (!isBasic && wouldCompleteEarlyCombo(record.name, seenNonBasics)) continue;
     if (!isBasic) seenNonBasics.add(key);
 
     const remainingSlots = 100 - countCards(repaired);
@@ -187,6 +201,31 @@ export function repairCommanderDeckCards(input: {
       ...card,
       name: record.name,
       count: isBasic ? Math.min(card.count, remainingSlots) : 1,
+      cardId: record.id,
+      card: record
+    });
+  }
+
+  // EDHREC's synergy picks for this exact commander are a better default than the static curated
+  // packages below (which are generic across every commander in a color combination) — slotted in
+  // after whatever the LLM/decklist already chose, but before the generic fill, so they get priority
+  // over "any removal spell" while still yielding to cards the caller explicitly picked.
+  for (const synergyCard of input.synergyCards ?? []) {
+    if (countCards(repaired) >= 100) break;
+    const key = normalizeName(synergyCard.name);
+    if (key === normalizeName(input.commander) || seenNonBasics.has(key)) continue;
+    if (isBracketThreeBannedCard(synergyCard.name)) continue;
+    const record = input.catalog.lookup(synergyCard.name);
+    if (!record) continue;
+    if (!isCommanderIdentityLegal(record, commanderColors)) continue;
+    if (wouldCompleteEarlyCombo(record.name, seenNonBasics)) continue;
+    const isLand = synergyCard.category === "utilitylands" || record.typeLine.includes("Land");
+    if (!isLand && nonLandCount(repaired) >= MAX_NONLAND_CARDS) continue;
+    seenNonBasics.add(key);
+    addCard(repaired, {
+      name: record.name,
+      count: 1,
+      role: synergyCard.category === "utilitylands" ? "land" : undefined,
       cardId: record.id,
       card: record
     });
@@ -204,13 +243,20 @@ function isCommanderIdentityLegal(card: CardRecord, commanderColors: Set<string>
 function fillWithCuratedCards(cards: DeckCard[], seenNonBasics: Set<string>, commanderColors: Set<string>, catalog: CardLookup, colors: string[]) {
   addPackage(cards, seenNonBasics, commanderColors, catalog, "utilityLand", Math.max(0, TARGET_LANDS - landCount(cards)));
 
+  // Both spell-filling passes below are capped by the remaining non-land budget, not by
+  // "however many slots are left until 100" — that's what used to let curated spells claim every
+  // remaining slot before fillWithBasics ever got a turn. Land completion (fillWithBasics) always
+  // runs last and reaches TARGET_LANDS precisely because these loops can never exceed
+  // MAX_NONLAND_CARDS between them.
   for (const [role, target] of PACKAGE_TARGETS) {
-    addPackage(cards, seenNonBasics, commanderColors, catalog, role, Math.max(0, target - roleCount(cards, role)));
+    const budget = Math.max(0, MAX_NONLAND_CARDS - nonLandCount(cards));
+    addPackage(cards, seenNonBasics, commanderColors, catalog, role, Math.min(Math.max(0, target - roleCount(cards, role)), budget));
   }
 
   for (const [role] of PACKAGE_TARGETS) {
-    if (countCards(cards) >= 100) break;
-    addPackage(cards, seenNonBasics, commanderColors, catalog, role, 100 - countCards(cards));
+    const budget = Math.max(0, MAX_NONLAND_CARDS - nonLandCount(cards));
+    if (budget <= 0) break;
+    addPackage(cards, seenNonBasics, commanderColors, catalog, role, budget);
   }
 
   fillWithBasics(cards, colors, 100);
@@ -230,9 +276,11 @@ function addPackage(
     const record = catalog.lookup(name);
     if (!record) continue;
     if (!isCommanderIdentityLegal(record, commanderColors)) continue;
+    if (isBracketThreeBannedCard(record.name)) continue;
     if (role === "utilityLand" && landCount(cards) >= TARGET_LANDS) break;
     const key = normalizeName(record.name);
     if (seenNonBasics.has(key)) continue;
+    if (wouldCompleteEarlyCombo(record.name, seenNonBasics)) continue;
     seenNonBasics.add(key);
     addCard(cards, { name: record.name, count: 1, role: role === "utilityLand" ? "land" : role, cardId: record.id, card: record });
     added += 1;
@@ -263,6 +311,10 @@ function countCards(cards: DeckCard[]) {
 
 function landCount(cards: DeckCard[]) {
   return cards.filter((card) => card.role === "land" || isBasicLand(card.name)).reduce((sum, card) => sum + card.count, 0);
+}
+
+function nonLandCount(cards: DeckCard[]) {
+  return countCards(cards) - landCount(cards);
 }
 
 function roleCount(cards: DeckCard[], role: string) {

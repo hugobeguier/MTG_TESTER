@@ -1,4 +1,5 @@
 import type { VisibleCard } from "@/lib/types";
+import { effectivePower, effectiveToughness } from "@/lib/counters";
 
 const COLOR_LABELS: Record<string, string> = {
   W: "White",
@@ -52,7 +53,7 @@ export function VisualCard({
           {counters ? <span>{counters}</span> : null}
           <span>{card.role}</span>
         </div>
-        {card.power && card.toughness ? <strong className="pt">{card.power}/{card.toughness}</strong> : null}
+        {card.power && card.toughness ? <strong className="pt">{effectivePower(card)}/{effectiveToughness(card)}</strong> : null}
       </footer>
       <span className="sr-only">
         {card.colors.map((color) => COLOR_LABELS[color] ?? color).join(", ") || "Colorless"}

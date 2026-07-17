@@ -5,13 +5,14 @@
 // (fractional mill like "mills half their library", conditional reveal-based mill, Aura-based
 // reanimation like Animate Dead, "return ... unless" clauses) are declined rather than guessed at.
 
+export type RegrowTargetType = "card" | "permanent" | "creature" | "land" | "enchantment" | "artifact";
+
 export interface ReanimateEffect {
   kind: "reanimate";
   // "a graveyard" (any player's) vs "your graveyard" (self only) — Reanimate vs Persist.
   anyGraveyard: boolean;
+  targetType: RegrowTargetType;
 }
-
-export type RegrowTargetType = "card" | "permanent" | "creature" | "land";
 
 export interface RegrowEffect {
   kind: "regrow";
@@ -54,6 +55,15 @@ export interface StealAndPlayEffect {
   kind: "steal_and_play";
 }
 
+// Brainsurge-style: "Draw X cards, then put N cards from your hand on top of your library in any
+// order." The draw amount is the spell's own paid X, which only the caller (AppFlow.tsx, at spell
+// resolution) has access to via the cast action's chosenX — this effect only carries the fixed
+// put-back count; the caller supplies X separately when applying it.
+export interface DrawXThenPutBackEffect {
+  kind: "draw_x_then_put_back";
+  putBackAmount: number;
+}
+
 export type ZoneEffect =
   | ReanimateEffect
   | RegrowEffect
@@ -61,7 +71,8 @@ export type ZoneEffect =
   | GraveyardToLibraryEffect
   | GainControlEffect
   | ImpulseDrawEffect
-  | StealAndPlayEffect;
+  | StealAndPlayEffect
+  | DrawXThenPutBackEffect;
 
 function numberWordToInt(value?: string): number | undefined {
   if (!value) return undefined;
@@ -89,9 +100,12 @@ export function parseZoneEffect(oracleText: string): ZoneEffect | undefined {
 
   // "target [non]legendary creature card" — a restriction word can sit between "target" and
   // "creature" (e.g. Persist's "target nonlegendary creature card"), same qualifier-tolerance
-  // gap fixed in removalSpells.ts's target-type patterns earlier this session.
-  const reanimate = text.match(/\b(?:put|return) target (?:\w+ )?creature card from (a|your) graveyard (?:onto|to) the battlefield\b/);
-  if (reanimate) return { kind: "reanimate", anyGraveyard: reanimate[1] === "a" };
+  // gap fixed in removalSpells.ts's target-type patterns earlier this session. Not every reanimate
+  // effect targets a creature card, though (Starfield of Nyx: "return target enchantment card from
+  // your graveyard to the battlefield") — captures the actual type word instead of assuming
+  // "creature" universally.
+  const reanimate = text.match(/\b(?:put|return) target (?:\w+ )?(creature|enchantment|artifact) card from (a|your) graveyard (?:onto|to) the battlefield\b/);
+  if (reanimate) return { kind: "reanimate", targetType: reanimate[1] as RegrowTargetType, anyGraveyard: reanimate[2] === "a" };
 
   const regrow = text.match(/\breturn target (permanent|creature|land)?\s*card from your graveyard to your hand\b/);
   if (regrow) {
@@ -149,6 +163,14 @@ export function parseZoneEffect(oracleText: string): ZoneEffect | undefined {
 
   if (/\bsearch target opponent'?s library for a card and exile it\b/.test(text) && /\byou may play\b/.test(text)) {
     return { kind: "steal_and_play" };
+  }
+
+  const drawXThenPutBack = text.match(
+    /\bdraw x cards?,?\s*then put (a|one|two|three|four|five|\d+) cards? from your hand on top of your library in any order\b/
+  );
+  if (drawXThenPutBack) {
+    const putBackAmount = numberWordToInt(drawXThenPutBack[1]);
+    if (putBackAmount) return { kind: "draw_x_then_put_back", putBackAmount };
   }
 
   return undefined;

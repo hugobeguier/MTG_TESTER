@@ -13,7 +13,7 @@ export function isEquipment(card: { typeLine: string }): boolean {
   return card.typeLine.includes("Equipment");
 }
 
-export type EnchantRestriction = "creature" | "creature_you_control" | "permanent" | "other";
+export type EnchantRestriction = "creature" | "creature_you_control" | "permanent" | "player" | "other";
 
 export function enchantRestriction(oracleText: string): EnchantRestriction | undefined {
   const match = oracleText.match(/^enchant\s+(.+)$/im);
@@ -22,6 +22,7 @@ export function enchantRestriction(oracleText: string): EnchantRestriction | und
   if (target === "creature you control") return "creature_you_control";
   if (target === "creature") return "creature";
   if (target.includes("permanent")) return "permanent";
+  if (target === "player" || target === "opponent") return "player";
   return "other";
 }
 

@@ -46,6 +46,11 @@ export async function POST(request: NextRequest) {
 
   try {
     const knowledge = await loadKnowledgePack(knowledgeFilesForPurpose(scoringContext.purpose));
+    // Only the two consequential decision points get asked to deliberate at length — attack/block
+    // declarations are already fairly mechanical and there can be many of them per turn, so asking
+    // for a full internal argument there would slow the game down for little benefit with a small
+    // local model.
+    const wantsDeliberation = scoringContext.purpose === "main_phase" || scoringContext.purpose === "priority_response";
     const system = [
       knowledge,
       [
@@ -57,7 +62,18 @@ export async function POST(request: NextRequest) {
         "prevention clearly favor a different legal action.",
         "Return JSON only. Set legalActionId to the chosen legalActions.id.",
         "Prefer legal, useful plays, but pass when no action improves your position."
-      ].join("\n")
+      ].join("\n"),
+      wantsDeliberation
+        ? [
+            "Before deciding, argue with yourself: pick out the 2-3 legalActions genuinely worth considering",
+            "(not every option — skip the obviously bad ones), and for each one write 1-2 sentences on what it",
+            "accomplishes and what it costs, risks, or gives up (tempo, a card, exposing yourself to a blowout,",
+            "provoking an opponent, ...). Weigh them against each other, then say which one wins the argument",
+            "and why. Put this full internal argument in `deliberation` (plain text, a few sentences per option",
+            "is fine). Then set legalActionId to whichever action you actually decided on, and give a short",
+            "one-sentence `reason` summarizing the final call — deliberation is the working-out, reason is the verdict."
+          ].join("\n")
+        : undefined
     ]
       .filter(Boolean)
       .join("\n\n---\n\n");
@@ -69,7 +85,8 @@ export async function POST(request: NextRequest) {
         seatName: input.seatName,
         context: input.context,
         legalActions: scoredActions
-      })
+      }),
+      requireDeliberation: wantsDeliberation
     });
 
     if (!action.legalActionId || !legalActionIds.has(action.legalActionId)) {
@@ -82,9 +99,13 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ source: "ollama", action });
   } catch (error) {
+    const message =
+      error instanceof Error
+        ? `Ollama is unavailable or returned an invalid decision: ${error.message}. Used deterministic fallback.`
+        : "Ollama is unavailable. Used deterministic fallback.";
     return NextResponse.json({
       source: "fallback",
-      message: error instanceof Error ? error.message : "Agent decision failed.",
+      message,
       action: fallbackAction(scoredActions, "Ollama unavailable; using deterministic fallback.")
     });
   }
