@@ -238,7 +238,32 @@ interface ZoneUserData {
   zone: TableZone;
 }
 
-type InteractionUserData = CardUserData | ZoneUserData;
+interface ScoreboardToggleUserData {
+  kind: "scoreboardToggle";
+}
+
+interface DeckUserData {
+  kind: "deck";
+  seatId: string;
+}
+
+interface ScoreboardUserData {
+  kind: "scoreboard";
+}
+
+type InteractionUserData = CardUserData | ZoneUserData | ScoreboardToggleUserData | DeckUserData | ScoreboardUserData;
+
+// A small context menu anchored where the user clicked a game item (deck, scoreboard, hand card) —
+// the controls that used to live in the permanent left HUD column now appear here on demand.
+interface ContextMenuState {
+  x: number;
+  y: number;
+  kind: "deck" | "scoreboard" | "handCard";
+  cardId?: string;
+  // Render upward from the anchor (bottom edge at y) instead of downward — used for hand cards,
+  // which sit at the screen's bottom edge where a downward menu would clip off-screen.
+  above?: boolean;
+}
 
 // Sized to give each player's battlefield rectangle (see PLAYER_AREAS) real room before permanents
 // start crowding, plus a side strip outside each rectangle for the non-battlefield zones (see
@@ -306,19 +331,17 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
   // is imperative, so tracking a moving/orbiting camera doesn't mean a state update (and full
   // reconciliation) 60 times a second.
   const agentHandAnchorRefs = useRef<Record<string, HTMLDivElement | null>>({});
-  const scoreboardAnchorRef = useRef<HTMLDivElement | null>(null);
   const [draggingHandCardId, setDraggingHandCardId] = useState<string | undefined>();
   const [draggingZone, setDraggingZone] = useState<DraggedZone | undefined>();
   const [zoneView, setZoneView] = useState<{ seatId: string; zone: TableZone } | undefined>();
   const [activityOpen, setActivityOpen] = useState(false);
   const [showCommanderDamage, setShowCommanderDamage] = useState(false);
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | undefined>();
   const [activityPosition, setActivityPosition] = useState({ x: 24, y: 144 });
   const [activityDragOffset, setActivityDragOffset] = useState<{ x: number; y: number } | undefined>();
   const [reasoningSeatId, setReasoningSeatId] = useState<string | undefined>();
   const human = props.session.seats.find((seat) => seat.kind === "human") ?? props.session.seats[0];
   const agentSeats = props.session.seats.filter((seat) => seat.kind === "agent");
-  const latest = props.session.events[0];
-  const phaseNotice = latest?.detail === "Phase change" ? latest : undefined;
   const recentEvents = props.session.events.slice(0, 8);
   const prioritySeat = props.session.seats.find((seat) => seat.id === props.prioritySeatId);
   const humanHasPriority = props.prioritySeatId === human.id;
@@ -329,6 +352,33 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
   const tableRenderKey = useMemo(() => buildTableRenderKey(props.session, props.selectedCardId), [props.session, props.selectedCardId]);
 
   propsRef.current = props;
+
+  // Uses only stable refs/setters, so the mount effect's first-render closure over it stays valid.
+  function openItemMenu(clientX: number, clientY: number, menu: Omit<ContextMenuState, "x" | "y">) {
+    const rect = mountRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setContextMenu({
+      ...menu,
+      x: Math.max(0, Math.min(clientX - rect.left, rect.width - 210)),
+      y: Math.max(0, Math.min(clientY - rect.top, rect.height - 60))
+    });
+  }
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = () => setContextMenu(undefined);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    // pointerdown (not click) so starting a camera drag on the canvas also dismisses the menu; the
+    // menu itself stops pointerdown propagation.
+    window.addEventListener("pointerdown", close);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("pointerdown", close);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [contextMenu]);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -444,26 +494,6 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
       });
     };
 
-    // Same anchoring technique as updateAgentHandAnchors above, for the life-total scoreboard —
-    // pinned to the table's own center point (where the old decorative ring mesh used to sit)
-    // instead of the screen center, so it stays put on the board itself as the camera orbits/pans/
-    // zooms rather than floating in place over whatever happens to be behind it.
-    const updateScoreboardAnchor = () => {
-      const el = scoreboardAnchorRef.current;
-      if (!el) return;
-      const width = mount.clientWidth;
-      const height = mount.clientHeight;
-      if (width === 0 || height === 0) return;
-      projected.set(0, 0.1, 0).project(camera);
-      if (projected.z > 1) {
-        el.style.display = "none";
-        return;
-      }
-      el.style.display = "flex";
-      el.style.left = `${(projected.x * 0.5 + 0.5) * width}px`;
-      el.style.top = `${(-projected.y * 0.5 + 0.5) * height}px`;
-    };
-
     const animate = () => {
       const now = performance.now();
       const deltaSeconds = Math.min((now - lastFrameTime) / 1000, 0.05);
@@ -471,7 +501,6 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
       updateKeyboardMovement(deltaSeconds);
       updateCamera();
       updateAgentHandAnchors();
-      updateScoreboardAnchor();
       renderer.render(scene, camera);
       frameRef.current = requestAnimationFrame(animate);
     };
@@ -487,12 +516,27 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
     const pickCard = (event: PointerEvent) => {
       const hit = raycastCard(event);
       const data = hit?.object.userData as Partial<InteractionUserData> | undefined;
+      // Inspect is right-click only (left-click stays free for drag-reposition); zone piles and
+      // the scoreboard toggle stay on left-click.
       if (data?.kind === "card" && data.card) {
-        propsRef.current.onInspectCard?.(data.card);
+        if (event.button === 2) propsRef.current.onInspectCard?.(data.card);
         return;
       }
+      if (event.button !== 0) return;
       if (data?.kind === "zone" && data.seatId && data.zone) {
         setZoneView({ seatId: data.seatId, zone: data.zone });
+        return;
+      }
+      if (data?.kind === "scoreboardToggle") {
+        setShowCommanderDamage((current) => !current);
+        return;
+      }
+      if (data?.kind === "deck") {
+        openItemMenu(event.clientX, event.clientY, { kind: "deck" });
+        return;
+      }
+      if (data?.kind === "scoreboard") {
+        openItemMenu(event.clientX, event.clientY, { kind: "scoreboard" });
       }
     };
 
@@ -501,7 +545,8 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
       const data = hit?.object.userData as Partial<InteractionUserData> | undefined;
       hoveredCardRef.current = data?.kind === "card" && data.card && data.seatId && data.location ? (data as CardUserData) : undefined;
       const hovered = hoveredCardRef.current;
-      renderer.domElement.style.cursor = hovered?.location === "battlefield" && hovered.seatId === propsRef.current.session.seats.find((seat) => seat.kind === "human")?.id ? "grab" : hovered || data?.kind === "zone" ? "pointer" : "";
+      const clickableKind = data?.kind === "zone" || data?.kind === "scoreboardToggle" || data?.kind === "deck" || data?.kind === "scoreboard";
+      renderer.domElement.style.cursor = hovered?.location === "battlefield" && hovered.seatId === propsRef.current.session.seats.find((seat) => seat.kind === "human")?.id ? "grab" : hovered || clickableKind ? "pointer" : "";
     };
 
     const getTablePosition = (event: PointerEvent, seatId: string) => {
@@ -665,8 +710,8 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
   }, []);
 
   useEffect(() => {
-    rebuildDynamicScene(dynamicGroupRef.current, propsRef.current.session, propsRef.current.selectedCardId, cardMeshesRef);
-  }, [tableRenderKey]);
+    rebuildDynamicScene(dynamicGroupRef.current, propsRef.current.session, propsRef.current.selectedCardId, cardMeshesRef, showCommanderDamage);
+  }, [tableRenderKey, showCommanderDamage]);
 
   const activeName = useMemo(
     () => props.session.seats.find((seat) => seat.id === props.session.activePlayerId)?.name ?? "Active player",
@@ -807,9 +852,11 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
   }
 
   const inspectedOwner = props.inspectedCard ? findCardOwner(props.session, props.inspectedCard.id) : undefined;
+  // Resolved each render so the menu vanishes if the card has left the hand (played, discarded).
+  const contextMenuCard = contextMenu?.kind === "handCard" ? human.board.hand.find((card) => card.id === contextMenu.cardId) : undefined;
 
   return (
-    <section className="three-game-shell">
+    <section className="three-game-shell" onContextMenu={(event) => event.preventDefault()}>
       <div
         className={`three-board ${draggingHandCardId ? "is-drop-target" : ""}`}
         ref={mountRef}
@@ -817,12 +864,6 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
         onDragLeave={onBoardDragLeave}
         onDrop={onBoardDrop}
       />
-      {phaseNotice ? (
-        <div className="phase-popup" role="status" aria-live="polite">
-          <span>Phase</span>
-          <strong>{phaseNotice.message}</strong>
-        </div>
-      ) : null}
       <div className="three-hud top-left">
         <span>Turn {props.session.turn}</span>
         <strong>{activeName}</strong>
@@ -831,44 +872,6 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
       </div>
       <div className="three-hud top-right">
         <button type="button" onClick={() => setActivityOpen((current) => !current)}>Agent Activity</button>
-      </div>
-      <div className="scoreboard-hud" ref={scoreboardAnchorRef} aria-label="Life totals">
-        <button type="button" className="scoreboard-flip" onClick={() => setShowCommanderDamage((current) => !current)}>
-          {showCommanderDamage ? "Show Life" : "Show Commander Damage"}
-        </button>
-        <div className="scoreboard-grid">
-          {/* PLAYER_AREAS is a clockwise walk (front-left, front-right, back-right, back-left) —
-              reordering to [back-left, back-right, front-left, front-right] lays this 2x2 grid out
-              left-to-right/top-to-bottom in the same spatial arrangement as the actual battlefields
-              around the table, not turn order, so each cell sits above the real player it belongs
-              to instead of needing a legend to match name to position. */}
-          {[3, 2, 0, 1].map((areaIndex) => props.session.seats[areaIndex]).filter((seat): seat is PlayerSeat => Boolean(seat)).map((seat) => {
-            const damageSources = showCommanderDamage ? commanderDamageSources(props.session, seat) : [];
-            return (
-              <div className="scoreboard-cell" key={seat.id}>
-                <strong>{seat.name}</strong>
-                {showCommanderDamage ? (
-                  damageSources.length > 0 ? (
-                    <ul className="scoreboard-commander-damage">
-                      {damageSources.map((source) => (
-                        <li key={source.sourceId}>
-                          {source.commanderName}: {source.amount}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <span className="scoreboard-muted">No commander damage</span>
-                  )
-                ) : (
-                  <>
-                    <span className="scoreboard-life">{seat.life}</span>
-                    {seat.poison ? <span className="scoreboard-poison">{seat.poison} poison</span> : null}
-                  </>
-                )}
-              </div>
-            );
-          })}
-        </div>
       </div>
       {agentSeats.map((seat) => (
         <div
@@ -892,7 +895,7 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
                   className="agent-hand-card"
                   key={card.id}
                   title={`${card.name}\n${card.typeLine}\n${card.oracleText}`}
-                  onClick={() => props.onInspectCard?.(card)}
+                  onContextMenu={() => props.onInspectCard?.(card)}
                 >
                   {card.imageUris?.normal ? <img src={card.imageUris.normal} alt="" draggable={false} /> : <FallbackHandCard card={card} />}
                 </article>
@@ -959,42 +962,8 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
                 </span>
               ))}
             </div>
-            <button type="button" onClick={() => props.onDrawCard?.(human.id)}>Draw</button>
-            <button type="button" onClick={() => props.onShuffleLibrary?.(human.id)}>Shuffle</button>
-            <button type="button" onClick={props.onOpenLibrarySearch}>Search Library</button>
-            <button type="button" onClick={() => props.onScry?.(1)}>Scry 1</button>
-            <button type="button" onClick={() => props.onSurveil?.(2)}>Surveil 2</button>
-            <div className="life-adjuster" aria-label="Life total controls">
-              <button type="button" onClick={() => props.onChangeLife?.(human.id, -1)}>-</button>
-              <strong>{human.life}</strong>
-              <button type="button" onClick={() => props.onChangeLife?.(human.id, 1)}>+</button>
-            </div>
-            {props.selectedCardFaceOptions && props.selectedCardFaceOptions.length > 0 ? (
-              props.selectedCardFaceOptions.map((option) => (
-                <button
-                  key={option.faceIndex}
-                  type="button"
-                  disabled={!option.payable}
-                  onClick={() => props.selectedCardId && props.onPlayCardFace?.(human.id, props.selectedCardId, option.faceIndex)}
-                >
-                  {option.label}
-                </button>
-              ))
-            ) : (
-              <button type="button" disabled={!props.selectedCardId} onClick={() => props.selectedCardId && props.onPlayCard?.(human.id, props.selectedCardId)}>
-                Play Selected
-              </button>
-            )}
             <button type="button" disabled={Boolean(props.pendingAction) || !humanIsActive} onClick={props.onAdvanceTurn}>Advance Phase</button>
             <button type="button" disabled={Boolean(props.pendingAction) || !humanIsActive} onClick={props.onEndTurn}>End Turn</button>
-            <button type="button" disabled={!props.pendingAction || !humanHasPriority} onClick={props.onRespond}>Review Response</button>
-            <button type="button" disabled={!props.pendingAction || !humanHasPriority || !props.selectedCardCanRespond} onClick={props.onRespondWithSelectedCard}>
-              Respond Selected
-            </button>
-            <button type="button" disabled={props.pendingAction?.type !== "trigger" || !humanHasPriority} onClick={props.onResolvePendingTrigger}>
-              Resolve Trigger
-            </button>
-            <button type="button" disabled={!props.pendingAction || !humanHasPriority} onClick={props.onPassPriority}>Pass Priority</button>
           </div>
         )}
       </div>
@@ -1019,6 +988,13 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
               </div>
             ) : null}
             <span>{humanHasPriority ? "You have priority." : `${prioritySeat?.name ?? "An agent"} has priority.`}</span>
+            <div className="stack-panel-actions">
+              <button type="button" disabled={!humanHasPriority} onClick={props.onRespond}>Review Response</button>
+              {props.pendingAction.type === "trigger" ? (
+                <button type="button" disabled={!humanHasPriority} onClick={props.onResolvePendingTrigger}>Resolve Trigger</button>
+              ) : null}
+              <button type="button" disabled={!humanHasPriority} onClick={props.onPassPriority}>Pass Priority</button>
+            </div>
           </div>
         </div>
       ) : null}
@@ -1237,25 +1213,24 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
         />
       ) : null}
       <div className="three-hand-panel" aria-label="Your hand">
-        <div className="three-zone-strip">
-          <div className="three-hand-heading">
-            <strong>Your hand</strong>
-            <span>{human.board.hand.length} cards</span>
-          </div>
-          <div className="three-hand-row" onDragOver={onHandDragOver} onDrop={onHandDrop}>
+        <div className="three-hand-row" onDragOver={onHandDragOver} onDrop={onHandDrop}>
             {human.board.hand.map((card) => (
               <article
                 className={`three-hand-card ${props.selectedCardId === card.id || props.mulliganReturnCardIds?.includes(card.id) ? "selected" : ""} ${draggingHandCardId === card.id ? "dragging" : ""}`}
                 draggable={props.gameStage === "playing"}
                 key={card.id}
-                onClick={() => {
+                onClick={(event) => {
                   if (props.gameStage === "mulligan" && mulliganRequired > 0) {
                     props.onToggleMulliganReturnCard?.(card);
                     return;
                   }
-                  props.onInspectCard?.(card);
                   props.onSelectHandCard?.(card);
+                  if (props.gameStage === "playing") {
+                    const cardRect = event.currentTarget.getBoundingClientRect();
+                    openItemMenu(cardRect.left, cardRect.top - 8, { kind: "handCard", cardId: card.id, above: true });
+                  }
                 }}
+                onContextMenu={() => props.onInspectCard?.(card)}
                 onDragStart={(event) => onCardDragStart(event, card, "hand")}
                 onDragEnd={onCardDragEnd}
                 title={`${card.name}\n${card.typeLine}\n${card.oracleText}`}
@@ -1265,9 +1240,55 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
               </article>
             ))}
             {draggingZone === "graveyard" ? <div className="zone-drop-hint">Drop here to return to hand</div> : null}
-          </div>
         </div>
       </div>
+      {contextMenu && (contextMenu.kind !== "handCard" || contextMenuCard) ? (
+        <div
+          className="item-context-menu"
+          role="menu"
+          style={{ left: contextMenu.x, top: contextMenu.y, transform: contextMenu.above ? "translateY(-100%)" : undefined }}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          {contextMenu.kind === "deck" ? (
+            <>
+              <button type="button" onClick={() => { props.onDrawCard?.(human.id); setContextMenu(undefined); }}>Draw</button>
+              <button type="button" onClick={() => { props.onShuffleLibrary?.(human.id); setContextMenu(undefined); }}>Shuffle</button>
+              <button type="button" onClick={() => { props.onOpenLibrarySearch?.(); setContextMenu(undefined); }}>Search Library</button>
+              <button type="button" onClick={() => { props.onScry?.(1); setContextMenu(undefined); }}>Scry 1</button>
+              <button type="button" onClick={() => { props.onSurveil?.(2); setContextMenu(undefined); }}>Surveil 2</button>
+            </>
+          ) : null}
+          {contextMenu.kind === "scoreboard" ? (
+            // Stays open so life can be adjusted repeatedly; dismiss with outside click or Escape.
+            <>
+              <button type="button" onClick={() => props.onChangeLife?.(human.id, -1)}>-1 Life</button>
+              <button type="button" onClick={() => props.onChangeLife?.(human.id, 1)}>+1 Life</button>
+            </>
+          ) : null}
+          {contextMenuCard ? (
+            <>
+              {props.selectedCardFaceOptions && props.selectedCardFaceOptions.length > 0 ? (
+                props.selectedCardFaceOptions.map((option) => (
+                  <button
+                    key={option.faceIndex}
+                    type="button"
+                    disabled={!option.payable}
+                    onClick={() => { props.onPlayCardFace?.(human.id, contextMenuCard.id, option.faceIndex); setContextMenu(undefined); }}
+                  >
+                    {option.label}
+                  </button>
+                ))
+              ) : (
+                <button type="button" onClick={() => { props.onPlayCard?.(human.id, contextMenuCard.id); setContextMenu(undefined); }}>Play</button>
+              )}
+              {props.pendingAction && humanHasPriority && props.selectedCardCanRespond ? (
+                <button type="button" onClick={() => { props.onRespondWithSelectedCard?.(); setContextMenu(undefined); }}>Respond with this</button>
+              ) : null}
+              <button type="button" onClick={() => { props.onInspectCard?.(contextMenuCard); setContextMenu(undefined); }}>Inspect</button>
+            </>
+          ) : null}
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -2376,6 +2397,8 @@ function buildTableRenderKey(session: GameSession, selectedCardId: string | unde
     seats: session.seats.map((seat) => ({
       id: seat.id,
       life: seat.life,
+      poison: seat.poison,
+      commanderDamage: seat.commanderDamage,
       zones: {
         library: seat.zones.library,
         hand: seat.zones.hand,
@@ -2407,20 +2430,22 @@ function rebuildDynamicScene(
   group: THREE.Group | null,
   session: GameSession,
   selectedCardId: string | undefined,
-  cardMeshesRef: MutableRefObject<THREE.Object3D[]>
+  cardMeshesRef: MutableRefObject<THREE.Object3D[]>,
+  showCommanderDamage: boolean
 ) {
   if (!group) return;
   group.clear();
   cardMeshesRef.current = [];
+  addCenterScoreboard(group, session, showCommanderDamage, cardMeshesRef);
 
   session.seats.forEach((seat, index) => {
     const area = PLAYER_AREAS[index] ?? PLAYER_AREAS[0];
-    addBattlefieldArea(group, area, seat.kind === "human");
+    addBattlefieldArea(group, area, session.activePlayerId === seat.id);
     const commanderSlot = zoneStripPosition(area, 0);
     const librarySlot = zoneStripPosition(area, 1);
     const graveyardSlot = zoneStripPosition(area, 2);
     const exileSlot = zoneStripPosition(area, 3);
-    addZonePile(group, "Deck", seat.zones.library, librarySlot.x, librarySlot.z, area.rot);
+    addDeckStack(group, seat.zones.library, librarySlot.x, librarySlot.z, area.rot, seat.kind === "human" ? { seatId: seat.id, cardMeshesRef } : undefined);
     addZonePile(group, "Grave", seat.zones.graveyard, graveyardSlot.x, graveyardSlot.z, area.rot, cardMeshesRef, seat.id, "graveyard");
     addZonePile(group, "Exile", seat.zones.exile, exileSlot.x, exileSlot.z, area.rot, cardMeshesRef, seat.id, "exile");
 
@@ -2439,6 +2464,112 @@ function rebuildDynamicScene(
     const handLabelZ = area.rot === 0 ? area.maxZ + 0.9 : area.minZ - 0.9;
     addTextPlane(group, `Hand ${seat.zones.hand}`, area.x, handLabelZ, area.rot, 0.34);
   });
+}
+
+// The life scoreboard drawn onto a flat plane at the table's center — on the field itself, so it
+// orbits/zooms with the camera like every other mesh instead of floating as a DOM overlay.
+// PLAYER_AREAS is a clockwise walk (front-left, front-right, back-right, back-left) — reordering to
+// [back-left, back-right, front-left, front-right] lays the 2x2 grid out in the same spatial
+// arrangement as the battlefields around the table, so each cell sits beside its real player.
+function addCenterScoreboard(
+  group: THREE.Group,
+  session: GameSession,
+  showCommanderDamage: boolean,
+  cardMeshesRef: MutableRefObject<THREE.Object3D[]>
+) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 1024;
+  canvas.height = 512;
+  const context = canvas.getContext("2d");
+  if (!context) return;
+  context.fillStyle = "rgba(8, 12, 9, 0.82)";
+  roundRect(context, 0, 0, canvas.width, canvas.height, 36);
+  context.fill();
+  context.strokeStyle = "#f4c95d";
+  context.lineWidth = 6;
+  context.stroke();
+
+  const seats = [3, 2, 0, 1].map((areaIndex) => session.seats[areaIndex]).filter((seat): seat is PlayerSeat => Boolean(seat));
+  seats.forEach((seat, cell) => {
+    const cx = (cell % 2) * 512;
+    const cy = Math.floor(cell / 2) * 256;
+    context.save();
+    context.beginPath();
+    context.rect(cx, cy, 512, 256);
+    context.clip();
+    context.textAlign = "center";
+    context.fillStyle = "#f2f0e8";
+    context.font = "bold 40px Arial";
+    context.fillText(seat.name, cx + 256, cy + 64);
+    if (showCommanderDamage) {
+      const sources = commanderDamageSources(session, seat);
+      if (sources.length === 0) {
+        context.fillStyle = "rgba(242, 240, 232, 0.55)";
+        context.font = "30px Arial";
+        context.fillText("No commander damage", cx + 256, cy + 140);
+      } else {
+        context.font = "30px Arial";
+        sources.slice(0, 4).forEach((source, line) => {
+          context.fillText(`${source.commanderName}: ${source.amount}`, cx + 256, cy + 116 + line * 36);
+        });
+      }
+    } else {
+      context.fillStyle = "#f4c95d";
+      context.font = "bold 100px Arial";
+      context.fillText(`${seat.life}`, cx + 256, cy + 180);
+      if (seat.poison) {
+        context.fillStyle = "#9be29b";
+        context.font = "bold 30px Arial";
+        context.fillText(`${seat.poison} poison`, cx + 256, cy + 228);
+      }
+    }
+    context.restore();
+  });
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(4.2, 2.1),
+    new THREE.MeshBasicMaterial({ map: texture, transparent: true, side: THREE.DoubleSide })
+  );
+  mesh.rotation.x = -Math.PI / 2;
+  // y 0.03: above the battlefield planes/borders (0.015/0.025), below cards (0.08).
+  mesh.position.set(0, 0.03, 0);
+  // Clicking the scoreboard opens the life-adjust context menu.
+  mesh.userData = { kind: "scoreboard" } satisfies ScoreboardUserData;
+  cardMeshesRef.current.push(mesh);
+  group.add(mesh);
+
+  // The flip toggle lives on the field too, just past the scoreboard's near edge (+z is toward
+  // the default camera, so it reads as "below" the scoreboard on screen). Clicks reach it through
+  // the same raycast list the cards use — see pickCard's scoreboardToggle branch. Styled like the
+  // HUD's gold buttons so it reads as clickable despite being a texture on the table.
+  const buttonCanvas = document.createElement("canvas");
+  buttonCanvas.width = 512;
+  buttonCanvas.height = 128;
+  const buttonContext = buttonCanvas.getContext("2d");
+  if (!buttonContext) return;
+  buttonContext.fillStyle = "#d7b35a";
+  roundRect(buttonContext, 0, 0, buttonCanvas.width, buttonCanvas.height, 28);
+  buttonContext.fill();
+  buttonContext.strokeStyle = "rgba(0, 0, 0, 0.55)";
+  buttonContext.lineWidth = 6;
+  buttonContext.stroke();
+  buttonContext.fillStyle = "#1b1b1b";
+  buttonContext.font = "bold 40px Arial";
+  buttonContext.textAlign = "center";
+  buttonContext.fillText(showCommanderDamage ? "Show Life" : "Show Commander Damage", 256, 78);
+  const buttonTexture = new THREE.CanvasTexture(buttonCanvas);
+  buttonTexture.colorSpace = THREE.SRGBColorSpace;
+  const toggle = new THREE.Mesh(
+    new THREE.PlaneGeometry(2.6, 0.65),
+    new THREE.MeshBasicMaterial({ map: buttonTexture, transparent: true, side: THREE.DoubleSide })
+  );
+  toggle.rotation.x = -Math.PI / 2;
+  toggle.position.set(0, 0.03, 1.55);
+  toggle.userData = { kind: "scoreboardToggle" } satisfies ScoreboardToggleUserData;
+  group.add(toggle);
+  cardMeshesRef.current.push(toggle);
 }
 
 function addBattlefieldArea(
@@ -2508,7 +2639,10 @@ function zoneStripX(area: (typeof PLAYER_AREAS)[number]) {
 // the battlefield rectangle itself.
 function zoneStripPosition(area: (typeof PLAYER_AREAS)[number], slot: 0 | 1 | 2 | 3) {
   const depth = area.maxZ - area.minZ;
-  return { x: zoneStripX(area), z: area.minZ + depth * ((slot + 0.5) / 4) };
+  // Mirrored for far-side (rot=π) seats so the strip always reads commander → library → graveyard
+  // → exile from that player's own perspective, not the human's.
+  const fraction = (slot + 0.5) / 4;
+  return { x: zoneStripX(area), z: area.rot === 0 ? area.minZ + depth * fraction : area.maxZ - depth * fraction };
 }
 
 function zonePilePosition(area: (typeof PLAYER_AREAS)[number], zone: TableZone) {
@@ -2689,6 +2823,66 @@ function battlefieldImageUrls(card: VisibleCard) {
     card.imageUris?.borderCrop,
     card.faces?.[0]?.imageUris?.borderCrop
   ].filter((url): url is string => Boolean(url))));
+}
+
+// A stylized face-down card back (brown field, tan border, dark center oval — deliberately not the
+// real WotC back), drawn once and cached: every deck top shares this texture.
+let cardBackTexture: THREE.Texture | undefined;
+function getCardBackTexture(): THREE.Texture {
+  if (cardBackTexture) return cardBackTexture;
+  const canvas = document.createElement("canvas");
+  canvas.width = 256;
+  canvas.height = 360;
+  const context = canvas.getContext("2d");
+  if (!context) return new THREE.Texture();
+  context.fillStyle = "#3b2416";
+  roundRect(context, 0, 0, 256, 360, 18);
+  context.fill();
+  context.strokeStyle = "#120a05";
+  context.lineWidth = 8;
+  context.stroke();
+  context.strokeStyle = "#a98961";
+  context.lineWidth = 5;
+  roundRect(context, 14, 14, 228, 332, 12);
+  context.stroke();
+  context.fillStyle = "#241209";
+  context.beginPath();
+  context.ellipse(128, 180, 82, 108, 0, 0, Math.PI * 2);
+  context.fill();
+  context.strokeStyle = "#a98961";
+  context.lineWidth = 4;
+  context.stroke();
+  cardBackTexture = new THREE.CanvasTexture(canvas);
+  cardBackTexture.colorSpace = THREE.SRGBColorSpace;
+  return cardBackTexture;
+}
+
+// The library rendered as an actual face-down deck: one card-sized box whose height tracks the
+// remaining card count, card back on the top face.
+function addDeckStack(
+  group: THREE.Group,
+  count: number,
+  x: number,
+  z: number,
+  rot: number,
+  interaction?: { seatId: string; cardMeshesRef: MutableRefObject<THREE.Object3D[]> }
+) {
+  if (count > 0) {
+    const height = Math.max(0.04, count * 0.006);
+    const side = new THREE.MeshStandardMaterial({ color: "#2a1a0f", roughness: 0.85 });
+    const back = new THREE.MeshBasicMaterial({ map: getCardBackTexture() });
+    // BoxGeometry material order is +x, -x, +y, -y, +z, -z — the card back goes on top (+y).
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.72, height, 1.02), [side, side, back, side, side, side]);
+    mesh.position.set(x, 0.04 + height / 2, z);
+    mesh.rotation.y = rot;
+    // Only the human's own deck opens the deck context menu (Draw/Shuffle/Search/Scry/Surveil).
+    if (interaction) {
+      mesh.userData = { kind: "deck", seatId: interaction.seatId } satisfies DeckUserData;
+      interaction.cardMeshesRef.current.push(mesh);
+    }
+    group.add(mesh);
+  }
+  addTextPlane(group, `Deck ${count}`, x, z + 0.75, rot, 0.42);
 }
 
 function addZonePile(

@@ -322,17 +322,6 @@ h3 {
   line-height: 1.35;
 }
 
-.game-table {
-  display: grid;
-  gap: 1rem;
-  grid-template-areas:
-    "agent-one center agent-two"
-    "agent-three center human";
-  grid-template-columns: minmax(0, 1fr) minmax(240px, 0.5fr) minmax(0, 1fr);
-  grid-template-rows: minmax(430px, auto) minmax(430px, auto);
-  padding: 0.5rem 0 1rem;
-}
-
 .three-game-shell {
   background: #090b08;
   border-top: 1px solid var(--line);
@@ -340,7 +329,9 @@ h3 {
   grid-template-rows: minmax(460px, 1fr) auto;
   height: 100vh;
   min-height: 680px;
-  overflow: hidden;
+  /* clip, not hidden: the tucked hand cards' transforms overflow the bottom edge, and hidden
+     still lets focus/scrollIntoView scroll this box internally with no way to scroll back. */
+  overflow: clip;
   position: relative;
   width: 100%;
 }
@@ -363,30 +354,6 @@ h3 {
   width: 100%;
 }
 
-.phase-popup {
-  background: rgba(10, 12, 10, 0.92);
-  border: 1px solid rgba(244, 201, 93, 0.75);
-  border-radius: 8px;
-  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.36);
-  color: var(--text);
-  display: grid;
-  gap: 0.35rem;
-  left: 50%;
-  max-width: min(520px, calc(100vw - 32px));
-  padding: 0.9rem 1rem;
-  position: absolute;
-  text-align: center;
-  top: 1rem;
-  transform: translateX(-50%);
-  z-index: 6;
-}
-
-.phase-popup span {
-  color: var(--accent);
-  font-size: 0.72rem;
-  text-transform: uppercase;
-}
-
 .three-hud {
   backdrop-filter: blur(10px);
   background: rgba(20, 24, 18, 0.84);
@@ -406,81 +373,33 @@ h3 {
   top: 1rem;
 }
 
+/* Context window opened by clicking a game item (deck, scoreboard, hand card). */
+.item-context-menu {
+  backdrop-filter: blur(10px);
+  background: rgba(20, 24, 18, 0.92);
+  border: 1px solid rgba(215, 179, 90, 0.55);
+  border-radius: 8px;
+  display: grid;
+  gap: 0.3rem;
+  min-width: 170px;
+  padding: 0.45rem;
+  position: absolute;
+  z-index: 8;
+}
+
+.item-context-menu button {
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+}
+
+.stack-panel-actions {
+  display: grid;
+  gap: 0.35rem;
+}
+
 .three-hud.top-right {
   right: 4.5rem;
   top: 1rem;
-}
-
-/* One shared box anchored to the table's own center point (where the old decorative ring mesh used
-   to sit) and projected to screen space every frame (see updateScoreboardAnchor in
-   ThreeGameTable's animate loop) — same technique .agent-hand-anchor uses below, so this stays put
-   on the board itself as the camera orbits/pans/zooms instead of floating over whatever happens to
-   be behind it. left/top are overwritten imperatively every frame; the 50%/50% here is just the
-   pre-first-frame fallback. The transform keeps the anchor point at the box's own center, matching
-   where left/top get set. */
-.scoreboard-hud {
-  backdrop-filter: blur(10px);
-  background: rgba(20, 24, 18, 0.86);
-  border: 1px solid rgba(215, 179, 90, 0.35);
-  border-radius: 10px;
-  color: var(--text);
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  left: 50%;
-  padding: 0.6rem;
-  position: absolute;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  z-index: 4;
-}
-
-.scoreboard-flip {
-  align-self: center;
-  font-size: 0.72rem;
-}
-
-/* Cell order in the JSX is spatial (matches PLAYER_AREAS' table layout), not turn order — see the
-   comment at the map() call site — so this plain 2-column grid lands each cell above the real
-   player it belongs to. */
-.scoreboard-grid {
-  display: grid;
-  gap: 0.4rem;
-  grid-template-columns: repeat(2, minmax(100px, 1fr));
-}
-
-.scoreboard-cell {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(242, 240, 232, 0.1);
-  border-radius: 6px;
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-  padding: 0.4rem 0.5rem;
-}
-
-.scoreboard-life {
-  font-size: 1.4rem;
-  font-weight: 700;
-}
-
-.scoreboard-poison {
-  color: #8fce6a;
-  font-size: 0.72rem;
-}
-
-.scoreboard-muted {
-  color: rgba(242, 240, 232, 0.55);
-  font-size: 0.7rem;
-}
-
-.scoreboard-commander-damage {
-  display: grid;
-  font-size: 0.7rem;
-  gap: 0.1rem;
-  list-style: none;
-  margin: 0;
-  padding: 0;
 }
 
 /* Positioned imperatively (left/top set every frame in ThreeGameTable's animate loop, projecting
@@ -696,70 +615,50 @@ h3 {
   right: 1rem;
 }
 
+/* Tabletop-Simulator-style floating hand: no panel chrome, cards tucked into the bottom screen
+   edge with just their top band peeking up; hovering a card springs it up to full art. The panel
+   is an absolute overlay so the 3D board underneath keeps the full viewport height. */
 .three-hand-panel {
-  background: rgba(10, 12, 10, 0.96);
-  border-top: 1px solid rgba(242, 240, 232, 0.16);
-  display: grid;
-  gap: 0.55rem;
-  grid-template-columns: minmax(0, 1fr);
-  min-height: 132px;
-  padding: 0.55rem 1rem 0.65rem;
-  position: relative;
+  bottom: 0;
+  left: 0;
+  pointer-events: none;
+  position: absolute;
+  right: 0;
   z-index: 4;
 }
 
-.three-zone-strip {
-  display: grid;
-  gap: 0.45rem;
-  min-width: 0;
-}
-
-.three-hand-heading {
-  align-items: center;
-  display: flex;
-  gap: 1rem;
-  justify-content: space-between;
-}
-
-.three-hand-heading strong {
-  color: var(--text);
-}
-
-.three-hand-heading span {
-  color: var(--muted);
-  font-size: 0.8rem;
-  text-transform: uppercase;
-}
-
+/* ponytail: fixed -14px overlap fan — a very large hand (15+ cards) can outgrow the viewport
+   width; switch to count-based overlap if that becomes real. */
 .three-hand-row {
+  align-items: flex-end;
   display: flex;
-  gap: 0.65rem;
+  justify-content: center;
   min-height: 84px;
-  overflow-x: auto;
-  overflow-y: visible;
-  padding: 0.2rem 0.25rem 0.55rem;
+  overflow: visible;
+  padding: 0 1rem;
 }
 
 .three-hand-card {
   aspect-ratio: 488 / 680;
   background: #111;
   border: 1px solid rgba(242, 240, 232, 0.22);
-  border-radius: 8px;
+  border-radius: 10px;
   cursor: pointer;
-  flex: 0 0 82px;
+  flex: 0 0 150px;
+  margin: 0 -14px;
   overflow: hidden;
+  pointer-events: auto;
   position: relative;
+  transform: translateY(72%);
   transform-origin: bottom center;
-  transition: transform 130ms ease, box-shadow 130ms ease, border-color 130ms ease, opacity 130ms ease;
+  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease, opacity 130ms ease;
 }
 
-/* No hover scale-up (used to translateY+scale, same overflow problem as .agent-hand-card above) —
-   a click already opens the same CardInspector popup the battlefield uses (see the onClick handler
-   where this class is used), so hover is just a click affordance, not a zoom. */
 .three-hand-card:hover,
 .three-hand-card:focus-within {
   border-color: rgba(244, 201, 93, 0.75);
-  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.5);
+  transform: translateY(0) scale(1.04);
   z-index: 5;
 }
 
@@ -788,6 +687,7 @@ h3 {
   justify-content: center;
   min-height: 112px;
   padding: 0.75rem;
+  pointer-events: auto;
   text-align: center;
 }
 
@@ -834,23 +734,6 @@ h3 {
 .hud-actions button,
 .three-hud button {
   padding: 0.55rem 0.75rem;
-}
-
-.life-adjuster {
-  align-items: center;
-  display: grid;
-  gap: 0.45rem;
-  grid-template-columns: 42px 1fr 42px;
-}
-
-.life-adjuster strong {
-  color: var(--green);
-  text-align: center;
-}
-
-.life-adjuster button {
-  min-height: 40px;
-  padding: 0;
 }
 
 .mana-pool {
@@ -1349,156 +1232,6 @@ h3 {
   grid-area: human;
 }
 
-.player-board-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1rem;
-}
-
-.player-board-header h2 {
-  font-size: 1.2rem;
-}
-
-.life-cluster {
-  display: grid;
-  place-items: center;
-  min-width: 62px;
-  aspect-ratio: 1;
-  border: 2px solid var(--green);
-  border-radius: 50%;
-  color: var(--green);
-}
-
-.life-cluster strong {
-  font-size: 1.7rem;
-  line-height: 1;
-}
-
-.life-cluster span {
-  color: var(--muted);
-  font-size: 0.7rem;
-  text-transform: uppercase;
-}
-
-.battlefield-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.55rem;
-  min-height: 190px;
-  min-width: 0;
-  overflow-x: auto;
-  padding: 0.25rem;
-  scrollbar-color: var(--line) transparent;
-}
-
-.empty-zone {
-  border: 1px dashed var(--line);
-  border-radius: 6px;
-  color: var(--muted);
-  display: grid;
-  min-height: 150px;
-  width: 100%;
-  place-items: center;
-  padding: 1rem;
-}
-
-.tabletop-zones {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(56px, 1fr));
-  gap: 0.45rem;
-}
-
-.card-pile {
-  align-items: center;
-  background: rgba(0, 0, 0, 0.12);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  color: var(--text);
-  display: grid;
-  gap: 0.25rem;
-  justify-items: center;
-  min-height: 86px;
-  padding: 0.45rem;
-}
-
-.card-pile:disabled {
-  cursor: default;
-  filter: none;
-  opacity: 1;
-}
-
-.card-back {
-  background:
-    linear-gradient(135deg, transparent 22%, rgba(255,255,255,0.12) 22%, rgba(255,255,255,0.12) 28%, transparent 28%),
-    linear-gradient(180deg, #4d3524, #1d2a3d);
-  border: 2px solid rgba(242, 240, 232, 0.28);
-  border-radius: 5px;
-  box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.28);
-  height: 44px;
-  width: 32px;
-}
-
-.card-pile span {
-  color: var(--muted);
-  font-size: 0.68rem;
-  text-transform: uppercase;
-}
-
-.card-pile strong {
-  font-size: 0.95rem;
-}
-
-.commander-damage {
-  color: var(--red);
-  font-size: 0.78rem;
-}
-
-.playmat {
-  background:
-    radial-gradient(circle at center, rgba(215, 179, 90, 0.08), transparent 58%),
-    #151913;
-  border: 1px solid rgba(242, 240, 232, 0.08);
-  border-radius: 8px;
-  display: grid;
-  gap: 0.65rem;
-  grid-template-columns: minmax(120px, 0.24fr) minmax(0, 1fr);
-  min-height: 260px;
-  padding: 0.65rem;
-}
-
-.command-slot {
-  align-content: start;
-  display: grid;
-}
-
-.hand-zone {
-  background: rgba(0, 0, 0, 0.18);
-  border: 1px solid rgba(242, 240, 232, 0.1);
-  border-radius: 8px;
-  display: grid;
-  gap: 0.55rem;
-  padding: 0.65rem;
-}
-
-.hand-heading {
-  align-items: center;
-  display: flex;
-  justify-content: space-between;
-  gap: 0.75rem;
-}
-
-.hand-heading span {
-  color: var(--muted);
-  font-size: 0.75rem;
-  text-transform: uppercase;
-}
-
-.hand-heading button,
-.play-selected {
-  padding: 0.5rem 0.75rem;
-}
-
 .hand-row {
   display: flex;
   gap: 0.55rem;
@@ -1507,83 +1240,10 @@ h3 {
   padding: 0.2rem 0.2rem 0.45rem;
 }
 
-.hand-row .visual-card[aria-pressed="true"] {
-  outline: 2px solid var(--accent);
-  transform: translateY(-8px);
-}
-
-.play-selected {
-  justify-self: start;
-}
-
-.visual-card {
-  background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(0,0,0,0.12)), var(--card);
-  border: 1px solid rgba(242, 240, 232, 0.22);
-  border-radius: 8px;
-  box-shadow: inset 0 0 0 3px rgba(0, 0, 0, 0.15);
-  color: var(--text);
-  display: grid;
-  flex: 0 0 210px;
-  grid-template-rows: auto auto 1fr auto;
-  min-height: 292px;
-  overflow: hidden;
-  padding: 0.65rem;
-  position: relative;
-}
-
-.visual-card-image {
-  border-radius: 6px;
-  height: 100%;
-  inset: 0;
-  object-fit: cover;
-  position: absolute;
-  width: 100%;
-  z-index: 0;
-}
-
 .visual-card-fallback,
 .visual-card-footer {
   position: relative;
   z-index: 1;
-}
-
-.visual-card:has(.visual-card-image) {
-  aspect-ratio: 488 / 680;
-  background: #111;
-  min-height: 0;
-  padding: 0.45rem;
-}
-
-.visual-card:has(.visual-card-image) .visual-card-footer {
-  align-self: end;
-  background: rgba(0, 0, 0, 0.58);
-  border-radius: 6px;
-  padding: 0.35rem;
-}
-
-.visual-card.is-compact {
-  flex-basis: 144px;
-  min-height: 198px;
-}
-
-.visual-card.is-tabletop {
-  cursor: pointer;
-  flex-basis: 118px;
-  grid-template-rows: auto auto 1fr auto;
-  min-height: 164px;
-  padding: 0.5rem;
-}
-
-.visual-card.is-tabletop .oracle-text {
-  display: none;
-}
-
-.visual-card.is-tabletop:focus {
-  outline: 2px solid var(--accent);
-}
-
-.visual-card.is-tapped {
-  transform: rotate(2deg);
 }
 
 .card-w {
@@ -1610,29 +1270,6 @@ h3 {
   border-color: rgba(184, 183, 173, 0.55);
 }
 
-.visual-card-header {
-  align-items: flex-start;
-  display: flex;
-  gap: 0.5rem;
-  justify-content: space-between;
-}
-
-.visual-card-header strong {
-  font-size: 0.86rem;
-  line-height: 1.15;
-}
-
-.visual-card-header span {
-  background: rgba(0, 0, 0, 0.28);
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 999px;
-  display: grid;
-  flex: 0 0 28px;
-  font-weight: 700;
-  height: 28px;
-  place-items: center;
-}
-
 .type-line {
   border-bottom: 1px solid rgba(255, 255, 255, 0.18);
   border-top: 1px solid rgba(255, 255, 255, 0.18);
@@ -1655,14 +1292,6 @@ h3 {
 
 .is-compact .oracle-text {
   -webkit-line-clamp: 4;
-}
-
-.visual-card-footer {
-  align-items: flex-end;
-  display: flex;
-  gap: 0.5rem;
-  justify-content: space-between;
-  margin-top: 0.6rem;
 }
 
 .badges {
@@ -1696,109 +1325,10 @@ h3 {
   padding: 1rem;
 }
 
-.center-control {
-  align-self: stretch;
-  display: grid;
-  gap: 1rem;
-  grid-area: center;
-  grid-template-rows: auto auto auto auto auto;
-  position: sticky;
-  top: 1rem;
-}
-
 .stack-panel h2,
 .center-control h2 {
   font-size: 1.5rem;
   margin: 0;
-}
-
-.phase-pill,
-.stack-chip,
-.event-chip {
-  background: var(--panel-2);
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  color: var(--muted);
-  padding: 0.55rem 0.75rem;
-  text-align: center;
-  text-transform: capitalize;
-}
-
-.card-detail-panel,
-.card-detail-empty {
-  background: var(--panel-2);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  display: grid;
-  gap: 0.45rem;
-  padding: 0.75rem;
-}
-
-.card-detail-panel strong {
-  line-height: 1.2;
-}
-
-.card-detail-panel span,
-.card-detail-panel small,
-.card-detail-empty {
-  color: var(--muted);
-}
-
-.card-detail-panel p {
-  color: #eee9d8;
-  line-height: 1.4;
-  text-align: left;
-}
-
-.life-controls {
-  align-items: center;
-  background: var(--panel-2);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  display: grid;
-  gap: 0.75rem;
-  grid-template-columns: 52px 1fr 52px;
-  padding: 0.75rem;
-}
-
-.life-controls strong {
-  color: var(--green);
-  font-size: 2.2rem;
-  text-align: center;
-}
-
-.life-controls button {
-  min-height: 48px;
-  padding: 0;
-}
-
-.priority-actions {
-  display: grid;
-  gap: 0.5rem;
-}
-
-.priority-actions button {
-  width: 100%;
-}
-
-.mulligan-panel {
-  background: var(--panel-2);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  display: grid;
-  gap: 0.65rem;
-  padding: 0.85rem;
-}
-
-.mulligan-panel strong {
-  color: var(--green);
-  font-size: 1.6rem;
-  text-align: center;
-}
-
-.mulligan-panel p {
-  color: var(--muted);
-  text-align: center;
 }
 
 .latest-event div {
@@ -2010,35 +1540,6 @@ ol {
   .setup-heading {
     align-items: stretch;
     flex-direction: column;
-  }
-
-  .game-table {
-    grid-template-areas:
-      "human"
-      "center"
-      "agent-one"
-      "agent-two"
-      "agent-three";
-    grid-template-columns: 1fr;
-    grid-template-rows: auto;
-  }
-
-  .center-control {
-    position: static;
-  }
-
-  .zone-summary {
-    grid-template-columns: repeat(2, 1fr);
-  }
-
-  .visual-card,
-  .visual-card.is-compact {
-    flex-basis: 178px;
-    min-height: 230px;
-  }
-
-  .battlefield-row {
-    min-height: 238px;
   }
 
   .card-inspector {

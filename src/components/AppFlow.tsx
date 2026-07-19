@@ -9818,9 +9818,11 @@ function manaRequirementForCard(card: VisibleCard, totalCost: number) {
       colors[value as ColoredMana] += 1;
     }
   }
-  if (symbols.length === 0 && totalCost > 0) {
-    const fallbackColors = card.colors && card.colors.length > 0 ? card.colors : (card.colorIdentity ?? []);
-    for (const color of normalizeManaColors(fallbackColors)) {
+  // When manaCost is absent (older card catalogs didn't store it), approximate pips from the
+  // card's own cast colors ONLY — never colorIdentity, which also counts ability/back-face colors
+  // and turned {2} artifacts like Talisman of Progress into a fake {W}{U} requirement.
+  if (symbols.length === 0 && totalCost > 0 && card.colors && card.colors.length > 0) {
+    for (const color of normalizeManaColors(card.colors)) {
       if (color !== "C") colors[color] += 1;
     }
   }
