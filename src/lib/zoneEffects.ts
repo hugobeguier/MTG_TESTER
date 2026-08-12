@@ -34,6 +34,16 @@ export interface GraveyardToLibraryEffect {
   scope: GraveyardToLibraryScope;
 }
 
+// "Exile target player's graveyard." (Bojuka Bog) / "Exile all cards from target player's
+// graveyard." (Tormod's Crypt-style) — same four-scope shape as MillScope above, just a whole-zone
+// exile instead of a whole-zone-to-library move.
+export type ExileGraveyardScope = "you" | "target_player" | "each_opponent" | "each_player";
+
+export interface ExileGraveyardEffect {
+  kind: "exile_graveyard";
+  scope: ExileGraveyardScope;
+}
+
 export interface GainControlEffect {
   kind: "gain_control";
   untilEndOfTurn: boolean;
@@ -69,6 +79,7 @@ export type ZoneEffect =
   | RegrowEffect
   | MillEffect
   | GraveyardToLibraryEffect
+  | ExileGraveyardEffect
   | GainControlEffect
   | ImpulseDrawEffect
   | StealAndPlayEffect
@@ -139,6 +150,13 @@ export function parseZoneEffect(oracleText: string): ZoneEffect | undefined {
   if (/\btarget player shuffles (?:their|your) graveyard into (?:their|your) library\b/.test(text)) {
     return { kind: "graveyard_to_library", scope: "target_player" };
   }
+
+  if (/\bexile your graveyard\b/.test(text)) return { kind: "exile_graveyard", scope: "you" };
+  if (/\bexile target player'?s graveyard\b/.test(text) || /\bexile all cards from target player'?s graveyard\b/.test(text)) {
+    return { kind: "exile_graveyard", scope: "target_player" };
+  }
+  if (/\beach opponent exiles (?:their|his or her) graveyard\b/.test(text)) return { kind: "exile_graveyard", scope: "each_opponent" };
+  if (/\beach player exiles (?:their|his or her) graveyard\b/.test(text)) return { kind: "exile_graveyard", scope: "each_player" };
 
   const gainControl = text.match(/\bgain control of (?:it|target creature)\b/);
   if (gainControl) {

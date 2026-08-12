@@ -239,13 +239,21 @@ describe("parseSelfUntapAbilities", () => {
 
 describe("parseGenericManaAbilities", () => {
   it("parses a plain mana-only-cost ability, handing back the raw effect text", () => {
-    expect(parseGenericManaAbilities("{2}: Draw a card.")).toEqual([{ costMana: 2, costDiscard: false, effectText: "Draw a card", clause: "{2}: Draw a card." }]);
+    expect(parseGenericManaAbilities("{2}: Draw a card.")).toEqual([
+      { costManaText: "{2}", costLife: 0, costDiscard: false, effectText: "Draw a card", clause: "{2}: Draw a card." }
+    ]);
   });
 
   it("parses a discard-cost ability", () => {
     const abilities = parseGenericManaAbilities("{1}, Discard a card: Return target creature card from your graveyard to your hand.");
     expect(abilities).toHaveLength(1);
-    expect(abilities[0]).toMatchObject({ costMana: 1, costDiscard: true });
+    expect(abilities[0]).toMatchObject({ costManaText: "{1}", costDiscard: true });
+  });
+
+  it("parses a colored-mana-plus-life-cost ability (Greed)", () => {
+    const abilities = parseGenericManaAbilities("{B}, Pay 2 life: Draw a card.");
+    expect(abilities).toHaveLength(1);
+    expect(abilities[0]).toMatchObject({ costManaText: "{B}", costLife: 2, costDiscard: false, effectText: "Draw a card" });
   });
 
   it("does not match a {T}-cost clause (that's parseGenericTapAbilities' shape instead)", () => {

@@ -1,5 +1,49 @@
 import { describe, expect, it } from "vitest";
-import { deathEffectText, etbEffectText, isActivatedAbilityClause, isNonEtbWheneverClause, mergeModalBulletClauses, oracleClauses, parseModalHeader } from "./oracleClauses";
+import {
+  deathEffectText,
+  etbEffectText,
+  isActivatedAbilityClause,
+  isNonEtbWheneverClause,
+  mergeModalBulletClauses,
+  oracleClauses,
+  parseAdditionalSacrificeCost,
+  parseEmblemGrant,
+  parseModalHeader
+} from "./oracleClauses";
+
+describe("parseEmblemGrant", () => {
+  it("captures the quoted rules text from a loyalty ultimate's emblem grant (Tezzeret, Artifice Master's -9)", () => {
+    expect(
+      parseEmblemGrant(
+        '−9: You get an emblem with "At the beginning of your end step, you may cast target artifact card from your graveyard without paying its mana cost."'
+      )
+    ).toEqual({
+      text: "At the beginning of your end step, you may cast target artifact card from your graveyard without paying its mana cost."
+    });
+  });
+
+  it("returns undefined for text with no emblem grant", () => {
+    expect(parseEmblemGrant("+1: Create a 1/1 colorless Thopter artifact creature token with flying.")).toBeUndefined();
+  });
+});
+
+describe("parseAdditionalSacrificeCost", () => {
+  it("recognizes Village Rites' single-creature additional cost", () => {
+    expect(parseAdditionalSacrificeCost("As an additional cost to cast this spell, sacrifice a creature.\nDraw two cards.")).toEqual({ count: 1 });
+  });
+
+  it("recognizes a two-creature additional cost", () => {
+    expect(parseAdditionalSacrificeCost("As an additional cost to cast this spell, sacrifice two creatures.")).toEqual({ count: 2 });
+  });
+
+  it("does not match a plain resolution-effect sacrifice (not an additional cost)", () => {
+    expect(parseAdditionalSacrificeCost("Target player sacrifices a creature.")).toBeUndefined();
+  });
+
+  it("does not match an activated ability's sacrifice cost", () => {
+    expect(parseAdditionalSacrificeCost("{T}, Sacrifice a creature: Add {B}{B}.")).toBeUndefined();
+  });
+});
 
 describe("isActivatedAbilityClause", () => {
   it("recognizes mana-cost activated abilities", () => {

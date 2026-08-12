@@ -36,7 +36,14 @@ const AgentActionSchema = z.object({
   targetIds: z.array(z.string()).default([]),
   cardId: z.string().optional(),
   manaPlan: z.string().optional(),
-  reason: z.string().min(1),
+  // No .min(1): the JSON schema handed to Ollama for this field (see requestAgentAction's `format`
+  // below) is a bare `{ type: "string" }` with no length constraint, so an empty "" is a valid
+  // response by that contract. Requiring non-empty here meant an otherwise-correct decision (a real
+  // actionType/legalActionId, just with an empty reason string) got discarded entirely and replaced
+  // with a full "Ollama unavailable" fallback — reproduced live via Playwright (Myriad Landscape:
+  // "Ollama is unavailable or returned an invalid decision: ... reason ... String must contain at
+  // least 1 character(s)"). reason is display text only, never used to drive game logic.
+  reason: z.string().default(""),
   deliberation: z.string().optional(),
   fallbackAction: z
     .string()

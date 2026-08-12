@@ -97,6 +97,21 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    // legalActionId is a free-form string the model must copy verbatim out of a JSON array, unlike
+    // actionType (a schema-constrained enum). A small local model can garble/misselect the id while
+    // still reasoning correctly and setting actionType right — e.g. arguing for play_land but landing
+    // on the "pass-phase" id, which passes the membership check above and would silently execute the
+    // wrong action. Cross-check the two so a mismatched id falls back instead of overriding the model's
+    // own stated intent.
+    const matchedLegalAction = input.legalActions.find((candidate) => candidate.id === action.legalActionId);
+    if (!matchedLegalAction || matchedLegalAction.actionType !== action.actionType) {
+      return NextResponse.json({
+        source: "invalid",
+        message: "Agent's legalActionId did not match its stated actionType; using fallback.",
+        action: fallbackAction(scoredActions, "Mismatched action id/type; using fallback.")
+      });
+    }
+
     return NextResponse.json({ source: "ollama", action });
   } catch (error) {
     const message =

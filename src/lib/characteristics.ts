@@ -209,22 +209,33 @@ export function parseGroupAnthemBoost(oracleText: string): GroupAnthemBoost[] {
   return boosts;
 }
 
-const BROAD_CATEGORIES: Record<string, (typeLine: string) => boolean> = {
-  land: (typeLine) => typeLine.includes("Land"),
-  lands: (typeLine) => typeLine.includes("Land"),
-  creature: (typeLine) => typeLine.includes("Creature"),
-  creatures: (typeLine) => typeLine.includes("Creature"),
-  artifact: (typeLine) => typeLine.includes("Artifact"),
-  artifacts: (typeLine) => typeLine.includes("Artifact"),
-  enchantment: (typeLine) => typeLine.includes("Enchantment"),
-  enchantments: (typeLine) => typeLine.includes("Enchantment"),
+type QualifiableCard = { typeLine: string; token?: boolean; grantedTypes?: string[] };
+
+// A granted type (Zur, Eternal Schemer's "target non-Aura enchantment becomes a creature," Secret
+// Arcade/Biotransference-style "are Xs in addition to their other types," ...) counts the same as a
+// printed one here — matches hasCardType's own "typeLine OR grantedTypes" rule (src/lib/typeGrants.ts)
+// so a type-granted permanent is recognized by every qualifier-matching static ability that cares
+// about its type, not just the ones that granted it.
+function hasType(card: QualifiableCard, type: string): boolean {
+  return card.typeLine.includes(type) || Boolean(card.grantedTypes?.includes(type));
+}
+
+const BROAD_CATEGORIES: Record<string, (card: QualifiableCard) => boolean> = {
+  land: (card) => hasType(card, "Land"),
+  lands: (card) => hasType(card, "Land"),
+  creature: (card) => hasType(card, "Creature"),
+  creatures: (card) => hasType(card, "Creature"),
+  artifact: (card) => hasType(card, "Artifact"),
+  artifacts: (card) => hasType(card, "Artifact"),
+  enchantment: (card) => hasType(card, "Enchantment"),
+  enchantments: (card) => hasType(card, "Enchantment"),
   permanent: () => true,
   permanents: () => true
 };
 
-function matchesQualifierWord(card: { typeLine: string; token?: boolean }, word: string): boolean {
+function matchesQualifierWord(card: QualifiableCard, word: string): boolean {
   const broad = BROAD_CATEGORIES[word];
-  if (broad) return broad(card.typeLine);
+  if (broad) return broad(card);
   if (word === "token" || word === "tokens") return Boolean(card.token);
 
   // Fall back to a creature-subtype match (Elves, Goblins, Zombies, ...): singularize crudely and
@@ -240,14 +251,14 @@ function matchesQualifierWord(card: { typeLine: string; token?: boolean }, word:
 // A qualifier can be multiple words ("artifact creatures," "creature tokens," "enchantment
 // creatures") — every word must match (each narrows the set further), same as how the printed
 // English phrase reads as a conjunction of type/token requirements.
-export function permanentMatchesQualifier(card: { typeLine: string; token?: boolean }, matcher: string): boolean {
+export function permanentMatchesQualifier(card: QualifiableCard, matcher: string): boolean {
   const words = matcher.trim().toLowerCase().split(/\s+/).filter(Boolean);
   if (words.length === 0) return false;
   return words.every((word) => matchesQualifierWord(card, word));
 }
 
 // Counts the matcher against a single battlefield (the CDA's own controller's — "you control").
-export function countMatchingPermanents(battlefield: Array<{ typeLine: string; token?: boolean }>, matcher: string): number {
+export function countMatchingPermanents(battlefield: QualifiableCard[], matcher: string): number {
   return battlefield.filter((card) => permanentMatchesQualifier(card, matcher)).length;
 }
 

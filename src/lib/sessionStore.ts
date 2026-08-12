@@ -60,8 +60,8 @@ export async function createSession(): Promise<GameSession> {
   // Found live via a Playwright playtest that captured agent hands and reasoning directly.
   const catalog = loadCardCatalog();
   const catalogLookup = { lookup: (name: string) => lookupCard(catalog, name) };
-  seats[1].deck = buildEnrichedSampleDeck("Veyra", "Shalai, Voice of Plenty", ["G", "W"], catalogLookup);
-  seats[2].deck = buildEnrichedSampleDeck("Malik", "Kess, Dissident Mage", ["U", "B", "R"], catalogLookup);
+  seats[1].deck = buildEnrichedSampleDeck("Veyra", "The Ur-Dragon", ["W", "U", "B", "R", "G"], catalogLookup);
+  seats[2].deck = buildEnrichedSampleDeck("Malik", "Saheeli, the Gifted", ["U", "R"], catalogLookup);
   seats[3].deck = buildEnrichedSampleDeck("Sable", "Meren of Clan Nel Toth", ["B", "G"], catalogLookup);
   seedVisibleBoard(seats);
 

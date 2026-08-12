@@ -469,6 +469,12 @@ h3 {
   font-size: 0.72rem;
 }
 
+.scoreboard-emblems {
+  color: #c9a4f2;
+  font-size: 0.72rem;
+  cursor: help;
+}
+
 .scoreboard-muted {
   color: rgba(242, 240, 232, 0.55);
   font-size: 0.7rem;

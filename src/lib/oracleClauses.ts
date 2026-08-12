@@ -69,6 +69,29 @@ export function etbEffectText(oracleText: string): string {
     .join(" ");
 }
 
+// "You get an emblem with '...'" (planeswalker ultimates mostly — Tezzeret, Artifice Master's -9,
+// Nissa/Karn/Chandra's ultimates, ...). Only the quoted rules text is captured; everything else in
+// the granting ability's own text (the "You get an emblem with" wrapper itself, any surrounding
+// mode text) is irrelevant once the emblem exists — from then on it only ever acts through its own
+// captured text, same as a permanent acts through its own oracleText.
+export function parseEmblemGrant(oracleText: string): { text: string } | undefined {
+  const match = oracleText.match(/you get an emblem with\s+"([^"]+)"/i);
+  return match ? { text: match[1] } : undefined;
+}
+
+// "As an additional cost to cast this spell, sacrifice a creature." (Village Rites, Altar's Reap,
+// Costly Plunder, ...) — rule 601.2h: this is paid immediately when casting, from the caster's own
+// battlefield, not part of the spell's resolution effect that follows it. Scoped to the single-
+// creature "sacrifice a/an creature" shape, the overwhelmingly common real-world form of this cost;
+// a numbered/multi-permanent or non-creature ("sacrifice an artifact/land/permanent") variant isn't
+// recognized here.
+export function parseAdditionalSacrificeCost(oracleText: string): { count: number } | undefined {
+  const match = oracleText.toLowerCase().match(/as an additional cost to cast this spell,\s*sacrifice (a|an|two|three)\s+creatures?\b/);
+  if (!match) return undefined;
+  const count = match[1] === "two" ? 2 : match[1] === "three" ? 3 : 1;
+  return { count };
+}
+
 // The inverse: isolates just the "dies"-triggered clause(s), so a permanent's death effect (e.g.
 // Solemn Simulacrum's "When this creature dies, you may draw a card.") is parsed from the right
 // sentence instead of the whole card (which would otherwise also match its unrelated ETB clause).

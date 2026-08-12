@@ -114,6 +114,18 @@ export interface PlayerSeat {
   // +1) — a boolean rather than a locked-in number because the reduction is "for each artifact you
   // control as you cast it" (reminder text), i.e. evaluated at cast time, not activation time.
   nextSpellHasArtifactAffinity?: boolean;
+  // Rule 111.7-111.9: an emblem has no physical card, so it can't live in board.battlefield (which
+  // every other system in this engine assumes only holds real permanents — mana sources, attackers/
+  // blockers, sacrifice fodder, ...). It exists only for its own rules text (a phase-triggered
+  // ability, almost always), which is scanned for the same way as a permanent's (see
+  // phaseTriggeredCards/applyDeterministicPhaseTrigger in AppFlow.tsx) but from this separate list.
+  emblems?: EmblemState[];
+}
+
+export interface EmblemState {
+  id: string;
+  sourceName: string;
+  oracleText: string;
 }
 
 export interface InterpretedEffect {
@@ -170,6 +182,15 @@ export interface VisibleCard {
   cdaToughness?: number;
   setPowerOverride?: number;
   setToughnessOverride?: number;
+  // "Target non-Aura enchantment becomes a creature. It's still an enchantment. Its power and
+  // toughness are each equal to its mana value." (Zur, Eternal Schemer's activated ability) — a
+  // marker rather than a straight cdaPower/cdaToughness set, since those are recomputed fresh every
+  // state-based-action pass from the CARD'S OWN oracle text (this card's own text has no CDA; the
+  // "power = mana value" clause is on Zur, a different card) and would otherwise be wiped out the
+  // next pass. Persists only while this permanent stays this same object on the battlefield —
+  // cleared on any zone change (resetForZoneChange/moveCardBetweenVisibleZones), matching the
+  // ability's own "only a creature on the battlefield" wording.
+  animatedAsCreature?: boolean;
   role: string;
   zone: ZoneName;
   tapped?: boolean;
@@ -295,6 +316,12 @@ export interface GameSession {
   // restriction is per-object, not per-player, so each fresh copy can trigger again) gets stopped
   // instead of looping forever. Self-resets when the turn number changes.
   triggerChainGuard?: { turn: number; count: number };
+  // Rule 500.7: "Take an extra turn after this one." (Temporal Mastery, Time Warp, ...) — a FIFO
+  // queue of seatIds, consumed one entry per turn-change instead of the normal rotation. Queuing
+  // rather than mutating activePlayerId/turn order directly means the two turn-change call sites
+  // (resolvePhaseAdvance's end-of-cleanup branch, resolveEndTurn) share one insertion point
+  // (nextSeatForTurn in AppFlow.tsx) without needing to know about each other.
+  extraTurnsQueue?: string[];
 }
 
 export interface AgentAction {

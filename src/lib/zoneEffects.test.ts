@@ -83,6 +83,34 @@ describe("parseZoneEffect — graveyard to library", () => {
   });
 });
 
+describe("parseZoneEffect — exile graveyard", () => {
+  it("parses exiling a target player's graveyard (Bojuka Bog)", () => {
+    expect(parseZoneEffect("When Bojuka Bog enters, exile target player's graveyard.")).toEqual({
+      kind: "exile_graveyard",
+      scope: "target_player"
+    });
+  });
+
+  it("parses the 'exile all cards from' phrasing (Tormod's Crypt)", () => {
+    expect(parseZoneEffect("Exile all cards from target player's graveyard.")).toEqual({
+      kind: "exile_graveyard",
+      scope: "target_player"
+    });
+  });
+
+  it("parses exiling your own graveyard", () => {
+    expect(parseZoneEffect("Exile your graveyard.")).toEqual({ kind: "exile_graveyard", scope: "you" });
+  });
+
+  it("parses each opponent exiling their graveyard", () => {
+    expect(parseZoneEffect("Each opponent exiles their graveyard.")).toEqual({ kind: "exile_graveyard", scope: "each_opponent" });
+  });
+
+  it("parses each player exiling their graveyard", () => {
+    expect(parseZoneEffect("Each player exiles their graveyard.")).toEqual({ kind: "exile_graveyard", scope: "each_player" });
+  });
+});
+
 describe("parseZoneEffect — gain control", () => {
   it("parses a temporary control change (Threaten)", () => {
     expect(parseZoneEffect("Untap target creature and gain control of it until end of turn. That creature gains haste until end of turn.")).toEqual({

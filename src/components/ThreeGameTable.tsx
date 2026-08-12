@@ -45,6 +45,7 @@ interface ThreeGameTableProps {
     sourceCardName: string;
     cards: VisibleCard[];
   };
+  urzaSagaSearchCards?: VisibleCard[];
   pendingAction?: PendingActionView;
   stackActions?: PendingActionView[];
   agentThinking?: Record<string, boolean>;
@@ -53,6 +54,9 @@ interface ThreeGameTableProps {
   manaChoice?: {
     cardName: string;
     choices: ManaColor[];
+  };
+  myriadTapChoice?: {
+    cardName: string;
   };
   onInspectCard?: (card: VisibleCard) => void;
   onCloseInspectCard?: () => void;
@@ -75,10 +79,13 @@ interface ThreeGameTableProps {
   onAcceptOptionalTrigger?: () => void;
   onDeclineOptionalTrigger?: () => void;
   onCompleteDiscardChoice?: (cardIds: string[]) => void;
+  onCompletePutCardsOnLibrary?: (cardIds: string[]) => void;
   onChooseCreatureType?: (creatureType: string) => void;
   onChooseColor?: (color: ManaColor) => void;
   onCloseMyriadSearch?: () => void;
   onCompleteMyriadSearch?: (cardIds: string[]) => void;
+  onCloseUrzaSagaSearch?: () => void;
+  onCompleteUrzaSagaSearch?: (cardId: string) => void;
   onCloseBasicLandFetchSearch?: () => void;
   onCompleteBasicLandFetchSearch?: (cardId: string) => void;
   onMoveCardToGraveyard?: (seatId: string, cardId: string) => void;
@@ -107,6 +114,9 @@ interface ThreeGameTableProps {
   onToggleTapCard?: (seatId: string, cardId: string, location: CardUserData["location"]) => void;
   onChooseMana?: (color: ManaColor) => void;
   onCancelManaChoice?: () => void;
+  onChooseMyriadTapMana?: () => void;
+  onChooseMyriadTapSearch?: () => void;
+  onCancelMyriadTapChoice?: () => void;
   gameStage?: "mulligan" | "playing";
   humanMulligans?: number;
   mulliganReturnCardIds?: string[];
@@ -192,6 +202,13 @@ type RuleChoiceView =
       prompt: string;
       hand: VisibleCard[];
       requiredDiscards: number;
+    }
+  | {
+      kind: "put_cards_on_library";
+      sourceCardName: string;
+      prompt: string;
+      hand: VisibleCard[];
+      requiredCount: number;
     }
   | {
       kind: "choose_creature_type";
@@ -824,7 +841,10 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
         </div>
       ) : null}
       <div className="three-hud top-left">
-        <span>Turn {props.session.turn}</span>
+        {/* session.turn increments once per individual player's turn (a 4-player round spans
+            turns 1-4), not once per round — divide it back down to the round number players
+            actually mean by "turn N". */}
+        <span>Turn {Math.max(1, Math.ceil(props.session.turn / Math.max(1, props.session.seats.length)))}</span>
         <strong>{activeName}</strong>
         <small>{props.session.phase}</small>
         <small>Priority: {prioritySeat?.name ?? "None"}</small>
@@ -863,6 +883,14 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
                   <>
                     <span className="scoreboard-life">{seat.life}</span>
                     {seat.poison ? <span className="scoreboard-poison">{seat.poison} poison</span> : null}
+                    {seat.emblems && seat.emblems.length > 0 ? (
+                      <span
+                        className="scoreboard-emblems"
+                        title={seat.emblems.map((emblem) => `${emblem.sourceName}: ${emblem.oracleText}`).join("\n\n")}
+                      >
+                        {seat.emblems.length} emblem{seat.emblems.length === 1 ? "" : "s"}
+                      </span>
+                    ) : null}
                   </>
                 )}
               </div>
@@ -1139,6 +1167,14 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
         />
       ) : null}
       {props.manaChoice ? <ManaChoiceModal choice={props.manaChoice} onChoose={props.onChooseMana} onClose={props.onCancelManaChoice} /> : null}
+      {props.myriadTapChoice ? (
+        <MyriadTapChoiceModal
+          choice={props.myriadTapChoice}
+          onTapMana={props.onChooseMyriadTapMana}
+          onSearch={props.onChooseMyriadTapSearch}
+          onClose={props.onCancelMyriadTapChoice}
+        />
+      ) : null}
       {props.libraryLook ? (
         <LibraryLookModal
           look={props.libraryLook}
@@ -1181,6 +1217,9 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
       {props.ruleChoice?.kind === "discard_to_hand_size" ? (
         <DiscardToHandSizeModal choice={props.ruleChoice} onConfirm={props.onCompleteDiscardChoice} />
       ) : null}
+      {props.ruleChoice?.kind === "put_cards_on_library" ? (
+        <PutCardsOnLibraryModal choice={props.ruleChoice} onConfirm={props.onCompletePutCardsOnLibrary} />
+      ) : null}
       {props.ruleChoice?.kind === "choose_creature_type" ? (
         <ChooseCreatureTypeModal choice={props.ruleChoice} onChoose={props.onChooseCreatureType} />
       ) : null}
@@ -1206,6 +1245,9 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
       ) : null}
       {props.myriadSearchCards ? (
         <MyriadSearchModal cards={props.myriadSearchCards} onClose={props.onCloseMyriadSearch} onChoose={props.onCompleteMyriadSearch} />
+      ) : null}
+      {props.urzaSagaSearchCards ? (
+        <UrzaSagaSearchModal cards={props.urzaSagaSearchCards} onClose={props.onCloseUrzaSagaSearch} onChoose={props.onCompleteUrzaSagaSearch} />
       ) : null}
       {props.basicLandFetchSearch ? (
         <BasicLandFetchModal
@@ -1583,6 +1625,40 @@ function ManaChoiceModal({
   );
 }
 
+function MyriadTapChoiceModal({
+  choice,
+  onTapMana,
+  onSearch,
+  onClose
+}: {
+  choice: { cardName: string };
+  onTapMana?: () => void;
+  onSearch?: () => void;
+  onClose?: () => void;
+}) {
+  return (
+    <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label={`Choose ability for ${choice.cardName}`} onClick={onClose}>
+      <article className="mana-choice-modal" onClick={(event) => event.stopPropagation()}>
+        <button className="card-inspector-close" type="button" onClick={onClose} aria-label="Close ability choice">
+          x
+        </button>
+        <header>
+          <p className="eyebrow">Choose an ability</p>
+          <h2>{choice.cardName}</h2>
+        </header>
+        <div className="mode-switch" role="group" aria-label="Myriad Landscape ability">
+          <button className="inspector-action" type="button" onClick={onTapMana}>
+            Tap for {"{C}"}
+          </button>
+          <button className="inspector-action" type="button" onClick={onSearch}>
+            {"{2}"}, Sacrifice: Search two basic lands
+          </button>
+        </div>
+      </article>
+    </div>
+  );
+}
+
 function LibraryLookModal({
   look,
   onClose,
@@ -1923,6 +1999,65 @@ function DiscardToHandSizeModal({
   );
 }
 
+function PutCardsOnLibraryModal({
+  choice,
+  onConfirm
+}: {
+  choice: Extract<RuleChoiceView, { kind: "put_cards_on_library" }>;
+  onConfirm?: (cardIds: string[]) => void;
+}) {
+  const [selected, setSelected] = useState<string[]>([]);
+
+  function toggle(cardId: string) {
+    setSelected((current) => {
+      if (current.includes(cardId)) return current.filter((id) => id !== cardId);
+      if (current.length >= choice.requiredCount) return current;
+      return [...current, cardId];
+    });
+  }
+
+  // No backdrop-dismiss: this is a mandatory part of resolving the source ability (e.g. Aminatou,
+  // the Fateshifter's +1), not an optional review — same reasoning as DiscardToHandSizeModal.
+  return (
+    <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label={`Put cards on top of library for ${choice.sourceCardName}`}>
+      <article className="mana-choice-modal" onClick={(event) => event.stopPropagation()}>
+        <header>
+          <p className="eyebrow">{choice.sourceCardName}</p>
+          <h2>Put cards on top of library</h2>
+        </header>
+        <p>{choice.prompt}</p>
+        <p>
+          Selected {selected.length}/{choice.requiredCount}
+        </p>
+        <div className="modal-actions discard-hand-list">
+          {choice.hand.map((card) => (
+            <button
+              key={card.id}
+              type="button"
+              className="inspector-action"
+              aria-pressed={selected.includes(card.id)}
+              onClick={() => toggle(card.id)}
+            >
+              {selected.includes(card.id) ? "✓ " : ""}
+              {card.name}
+            </button>
+          ))}
+        </div>
+        <div className="modal-actions">
+          <button
+            className="inspector-action"
+            type="button"
+            disabled={selected.length !== choice.requiredCount}
+            onClick={() => onConfirm?.(selected)}
+          >
+            Put {choice.requiredCount} card{choice.requiredCount === 1 ? "" : "s"} on top
+          </button>
+        </div>
+      </article>
+    </div>
+  );
+}
+
 function ChooseCreatureTypeModal({
   choice,
   onChoose
@@ -2153,6 +2288,44 @@ function BasicLandFetchModal({
               </div>
               <button type="button" onClick={() => onChoose?.(card.id)}>
                 Put Onto Battlefield Tapped
+              </button>
+            </article>
+          ))}
+        </div>
+      </article>
+    </div>
+  );
+}
+
+function UrzaSagaSearchModal({
+  cards,
+  onClose,
+  onChoose
+}: {
+  cards: VisibleCard[];
+  onClose?: () => void;
+  onChoose?: (cardId: string) => void;
+}) {
+  return (
+    <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label="Resolve Urza's Saga chapter III" onClick={onClose}>
+      <article className="library-search-modal" onClick={(event) => event.stopPropagation()}>
+        <button className="card-inspector-close" type="button" onClick={onClose} aria-label="Close Urza's Saga search">
+          x
+        </button>
+        <header>
+          <p className="eyebrow">{"Urza's Saga — Chapter III"}</p>
+          <h2>Choose an Artifact (Mana Value 0 or 1)</h2>
+        </header>
+        <div className="library-search-results">
+          {cards.length === 0 ? <p>No artifact card with mana value 0 or 1 was found.</p> : null}
+          {cards.map((card) => (
+            <article className="library-search-card" key={card.id}>
+              <div>
+                <strong>{card.name}</strong>
+                <span>{card.typeLine}</span>
+              </div>
+              <button type="button" onClick={() => onChoose?.(card.id)}>
+                Put Onto Battlefield
               </button>
             </article>
           ))}

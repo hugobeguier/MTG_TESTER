@@ -269,23 +269,29 @@ export function parseSelfUntapAbilities(oracleText: string): SelfUntapAbility[] 
   return abilities;
 }
 
-// Plain "{cost}[, Discard a card]: effect." activated abilities — no {T}, no sacrifice (those are
-// parseGenericTapAbilities'/parseGenericSacrificeAbilities' shapes respectively) and no bare
-// "Untap ~" effect (parseSelfUntapAbilities' shape). The effect itself isn't parsed here: unlike
-// the sacrifice/tap parsers above (which only ever recognize a handful of hardcoded effect shapes),
-// this hands back the raw effect text so the caller (AppFlow.tsx) can dispatch it through the same
-// removal/zone/common-trigger parsers already used for modal spells and recurring phase triggers —
-// reusing that machinery instead of re-narrowing the effect vocabulary all over again. {X} costs
-// are declined rather than guessed at: the digit-only mana-symbol sum below would otherwise treat
-// an X-cost ability as free.
+// Plain "{cost}[, Discard a card][, Pay N life]: effect." activated abilities — no {T}, no
+// sacrifice (those are parseGenericTapAbilities'/parseGenericSacrificeAbilities' shapes
+// respectively) and no bare "Untap ~" effect (parseSelfUntapAbilities' shape). The effect itself
+// isn't parsed here: unlike the sacrifice/tap parsers above (which only ever recognize a handful of
+// hardcoded effect shapes), this hands back the raw effect text so the caller (AppFlow.tsx) can
+// dispatch it through the same removal/zone/common-trigger parsers already used for modal spells
+// and recurring phase triggers — reusing that machinery instead of re-narrowing the effect
+// vocabulary all over again. {X} costs are declined rather than guessed at: costManaText's mana
+// value would otherwise treat an X-cost ability as free (X=0).
 export interface GenericManaAbility {
-  costMana: number;
+  // Raw concatenated {..} symbols from the cost prefix (e.g. "{B}", "{2}{U}", or "" if the cost is
+  // pure life/discard) — kept as text rather than pre-summed to a number so the caller can build a
+  // shim card and pay it through chooseManaSourcesForCost/manaRequirementForCard, which already
+  // understand colored pips; a plain digit sum here would silently treat a colored cost like
+  // Greed's "{B}, Pay 2 life: Draw a card." as free, since {B} has no digit to sum.
+  costManaText: string;
+  costLife: number;
   costDiscard: boolean;
   effectText: string;
   clause: string;
 }
 
-const GENERIC_MANA_CLAUSE_PATTERN = /^((?:(?:\{[^}]+\}|discard a card)\s*,?\s*)+):\s*(.+?)\.?\s*$/i;
+const GENERIC_MANA_CLAUSE_PATTERN = /^((?:(?:\{[^}]+\}|discard a card|pay \d+ life)\s*,?\s*)+):\s*(.+?)\.?\s*$/i;
 
 export function parseGenericManaAbilities(oracleText: string): GenericManaAbility[] {
   const abilities: GenericManaAbility[] = [];
@@ -304,10 +310,11 @@ export function parseGenericManaAbilities(oracleText: string): GenericManaAbilit
     if (/^untap\b/i.test(effectText)) continue;
 
     const costDiscard = /discard a card/i.test(costPrefix);
-    const manaSymbols = costPrefix.match(/\{(\d+)\}/g) ?? [];
-    const costMana = manaSymbols.reduce((total, symbol) => total + (Number.parseInt(symbol.replace(/[{}]/g, ""), 10) || 0), 0);
+    const costManaText = (costPrefix.match(/\{[^}]+\}/g) ?? []).join("");
+    const lifeMatch = costPrefix.match(/pay (\d+) life/i);
+    const costLife = lifeMatch ? Number.parseInt(lifeMatch[1], 10) : 0;
 
-    abilities.push({ costMana, costDiscard, effectText, clause });
+    abilities.push({ costManaText, costLife, costDiscard, effectText, clause });
   }
 
   return abilities;

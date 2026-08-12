@@ -5,8 +5,15 @@ import { ollamaFetch, OLLAMA_TIMEOUT_MS } from "./ollama";
 
 const DestinationSchema = z.preprocess((value) => {
   if (value === null || value === undefined) return undefined;
-  if (typeof value === "string" && (value.trim() === "" || value.trim().toLowerCase() === "none")) return undefined;
-  return value;
+  if (typeof value !== "string") return value;
+  // A small local model sometimes wraps the value in stray punctuation (":hand:", "[hand]", "Hand.",
+  // ...) — strip anything that isn't a letter before matching the enum, rather than discarding an
+  // otherwise-correct classification outright. Reproduced live via Playwright: destination came back
+  // as the literal string ":hand:", which failed z.enum entirely and fell back to "Rules advisor
+  // unavailable" for a card whose classification was otherwise fine.
+  const cleaned = value.trim().toLowerCase().replace(/[^a-z]/g, "");
+  if (cleaned === "" || cleaned === "none") return undefined;
+  return cleaned;
 }, z.enum(["hand", "battlefield", "graveyard", "exile", "library"]).optional());
 
 export const RuleWorkflowSchema = z.object({
@@ -25,7 +32,16 @@ export const RuleWorkflowSchema = z.object({
     "proliferate",
     "manual_review"
   ]),
-  summary: z.string().min(1),
+  // No .min(1): the JSON schema handed to Ollama for this field is a bare `{ type: "string" }`
+  // with no length constraint (see requestRuleWorkflow's `format`), so a small local model
+  // returning "" here is a valid response by that contract, not a malformed one. Requiring a
+  // non-empty summary meant a real, otherwise-correct classification (e.g. Bojuka Bog's "exile
+  // target player's graveyard" — nothing else in the workflow enum fits it, so the model correctly
+  // classifies it manual_review) got thrown out entirely and replaced with a "Rules advisor
+  // unavailable" fallback purely because of this one empty descriptive field, discarding a good
+  // classification over a cosmetic one. summary is display text only (the event-log line), never
+  // used to drive game logic, so a blank value only degrades a log message, not correctness.
+  summary: z.string().default(""),
   sourceCardId: z.string().optional(),
   maxChoices: z.number().int().min(0).max(20).default(0),
   allowedCardFilter: z.string().optional(),
