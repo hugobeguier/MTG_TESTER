@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  basicLandFetchCostRequiresTap,
+  basicLandFetchManaCost,
   deathEffectText,
   etbEffectText,
   isActivatedAbilityClause,
+  isBasicLandFetchAbility,
   isNonEtbWheneverClause,
   mergeModalBulletClauses,
   oracleClauses,
@@ -10,6 +13,29 @@ import {
   parseEmblemGrant,
   parseModalHeader
 } from "./oracleClauses";
+
+describe("isBasicLandFetchAbility / basicLandFetchCostRequiresTap / basicLandFetchManaCost", () => {
+  it("recognizes Wayfarer's Bauble, including its 'put that card' phrasing and its {2} generic mana cost", () => {
+    const bauble = { oracleText: "{2}, {T}, Sacrifice this artifact: Search your library for a basic land card, put that card onto the battlefield tapped, then shuffle." };
+    expect(isBasicLandFetchAbility(bauble)).toBe(true);
+    expect(basicLandFetchCostRequiresTap(bauble)).toBe(true);
+    expect(basicLandFetchManaCost(bauble)).toBe(2);
+  });
+
+  it("recognizes Evolving Wilds' 'put it' phrasing with no generic mana cost", () => {
+    const evolvingWilds = { oracleText: "{T}, Sacrifice this land: Search your library for a basic land card, put it onto the battlefield tapped, then shuffle." };
+    expect(isBasicLandFetchAbility(evolvingWilds)).toBe(true);
+    expect(basicLandFetchCostRequiresTap(evolvingWilds)).toBe(true);
+    expect(basicLandFetchManaCost(evolvingWilds)).toBe(0);
+  });
+
+  it("recognizes Sakura-Tribe Elder's tap-free, mana-free sacrifice cost", () => {
+    const elder = { oracleText: "Sacrifice Sakura-Tribe Elder: Search your library for a basic land card, put it onto the battlefield tapped, then shuffle." };
+    expect(isBasicLandFetchAbility(elder)).toBe(true);
+    expect(basicLandFetchCostRequiresTap(elder)).toBe(false);
+    expect(basicLandFetchManaCost(elder)).toBe(0);
+  });
+});
 
 describe("parseEmblemGrant", () => {
   it("captures the quoted rules text from a loyalty ultimate's emblem grant (Tezzeret, Artifice Master's -9)", () => {
@@ -54,6 +80,18 @@ describe("isActivatedAbilityClause", () => {
     expect(isActivatedAbilityClause("+1: Create a 1/1 colorless Thopter artifact creature token with flying.")).toBe(true);
     expect(isActivatedAbilityClause("0: Draw a card. If you control three or more artifacts, draw two cards instead.")).toBe(true);
     expect(isActivatedAbilityClause('−9: You get an emblem with "At the beginning of your end step, you may cast target artifact card from your graveyard without paying its mana cost."')).toBe(true);
+  });
+
+  it("recognizes a plain-English-cost activated ability with no leading mana/tap symbol (Sakura-Tribe Elder)", () => {
+    // Reproduced live: this clause leaked into etbEffectText and let an agent get its
+    // (separately, correctly costed) search-a-basic-land ability a second time, for free and
+    // unrestricted, the instant the creature resolved — see Sakura-Tribe Elder's Comprehensive
+    // Rules-templated "Sacrifice Sakura-Tribe Elder: Search your library for a basic land card,
+    // put it onto the battlefield tapped, then shuffle."
+    expect(isActivatedAbilityClause("Sacrifice Sakura-Tribe Elder: Search your library for a basic land card, put it onto the battlefield tapped, then shuffle.")).toBe(
+      true
+    );
+    expect(isActivatedAbilityClause("Sacrifice a land: Add one mana of any color.")).toBe(true);
   });
 
   it("does not flag ordinary static or triggered text as activated", () => {

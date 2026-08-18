@@ -35,6 +35,30 @@ describe("parseZoneEffect — reanimate", () => {
   });
 });
 
+describe("parseZoneEffect — sacrifice_then_reanimate", () => {
+  it("parses Victimize's choose-target-cards / sacrifice / conditional-return shape", () => {
+    expect(parseZoneEffect("Choose two target creature cards in your graveyard. Sacrifice a creature. If you do, return the chosen cards to the battlefield tapped.")).toEqual({
+      kind: "sacrifice_then_reanimate",
+      targetCount: 2,
+      sacrificeCount: 1,
+      tapped: true
+    });
+  });
+
+  it("does not require the return to be tapped", () => {
+    expect(parseZoneEffect("Choose one target creature card in your graveyard. Sacrifice a creature. If you do, return the chosen card to the battlefield.")).toEqual({
+      kind: "sacrifice_then_reanimate",
+      targetCount: 1,
+      sacrificeCount: 1,
+      tapped: false
+    });
+  });
+
+  it("declines when only the targeting half is present (not this shape)", () => {
+    expect(parseZoneEffect("Choose two target creature cards in your graveyard. Put them into your hand.")).toBeUndefined();
+  });
+});
+
 describe("parseZoneEffect — regrow", () => {
   it("parses a plain card regrow (Regrowth)", () => {
     expect(parseZoneEffect("Return target card from your graveyard to your hand.")).toEqual({ kind: "regrow", targetType: "card" });
@@ -42,6 +66,13 @@ describe("parseZoneEffect — regrow", () => {
 
   it("parses a permanent-restricted regrow (Nature's Spiral)", () => {
     expect(parseZoneEffect("Return target permanent card from your graveyard to your hand.")).toEqual({ kind: "regrow", targetType: "permanent" });
+  });
+
+  it("parses an enchantment-restricted regrow with a trailing qualifier clause (Heliod, the Radiant Dawn)", () => {
+    expect(parseZoneEffect("When Heliod enters, return target enchantment card that isn't a God from your graveyard to your hand.")).toEqual({
+      kind: "regrow",
+      targetType: "enchantment"
+    });
   });
 });
 

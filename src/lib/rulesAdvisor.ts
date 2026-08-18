@@ -23,7 +23,9 @@ export const RuleWorkflowSchema = z.object({
     "search_library_to_hand",
     "search_library_to_battlefield",
     "search_library_to_graveyard",
+    "search_library_to_library",
     "draw_cards",
+    "draw_then_put_back",
     "scry_cards",
     "surveil_cards",
     "look_at_top_cards",
@@ -44,6 +46,11 @@ export const RuleWorkflowSchema = z.object({
   summary: z.string().default(""),
   sourceCardId: z.string().optional(),
   maxChoices: z.number().int().min(0).max(20).default(0),
+  // draw_then_put_back only: how many of the cards just drawn (via maxChoices, reusing that field's
+  // existing "N" convention the same way every other counted workflow does) go back on top of the
+  // library (Brainstorm's "draw three cards, then put two cards from your hand on top of your
+  // library" — maxChoices is 3, putBackAmount is 2).
+  putBackAmount: z.number().int().min(0).max(20).optional(),
   allowedCardFilter: z.string().optional(),
   destination: DestinationSchema,
   tapped: z.boolean().optional(),
@@ -156,6 +163,27 @@ export function deterministicRuleWorkflow(input: RuleAdvisorInput): RuleWorkflow
     };
   }
 
+  // "As many times as you choose, you may pay 1 life, put those cards on the bottom of your
+  // library in any order, then look at the top five cards of your library again" (Lim-Dûl's Vault,
+  // and the same "repeatable optional cost, re-look each time" template a handful of other cards
+  // share) — a genuinely iterative loop this engine has no model for at all, distinct from a plain
+  // one-shot "look at the top N" effect. Without this check, it still matched the lookCount pattern
+  // below (its own text does say "look at the top five cards") and got misclassified as
+  // look_at_top_cards — the same one-shot "pick one for hand" flow Diabolic Vision uses, which
+  // doesn't fit this card's actual effect at all (nothing ever goes to hand here). Declining to
+  // manual_review is honest about not modeling the loop, rather than confidently running the wrong
+  // workflow.
+  if (scopedText.includes("as many times as you choose")) {
+    return {
+      workflow: "manual_review",
+      summary: `${input.sourceCard.name} has a repeatable "look, then optionally pay to look again" effect this engine doesn't model as a loop — resolve it manually.`,
+      sourceCardId: input.sourceCard.id,
+      maxChoices: 0,
+      requiresHumanChoice: true,
+      warnings: [`${input.sourceCard.name}'s repeat-until-satisfied loop isn't automated; walk through it by hand.`]
+    };
+  }
+
   // Checked before the plain draw count below: a card that both reorders its top cards and
   // later says "draw a card" (e.g. Ponder) must not be short-circuited into just drawing.
   const lookCount = extractLookAtTopCount(scopedText);
@@ -179,6 +207,32 @@ export function deterministicRuleWorkflow(input: RuleAdvisorInput): RuleWorkflow
       requiresHumanChoice: true,
       warnings: ["This opens a look window; exact follow-up placement still needs a specific workflow."]
     };
+  }
+
+  // Checked before the plain draw count below: a card that both draws and puts cards back
+  // (Brainstorm's "draw three cards, then put two cards from your hand on top of your library")
+  // would otherwise short-circuit into just draw_cards — extractDrawCount happily matches the
+  // "draw three cards" prefix on its own — silently dropping the put-back half and leaving the
+  // player with three cards' worth of extra hand size the card never actually gives them. Mirrors
+  // the identical ordering fix already applied to commonTriggerEffect's own drawThenPutBack check
+  // (used for a permanent's triggered ability rather than a cast spell).
+  const drawThenPutBack = scopedText.match(
+    /\bdraw\s+(a|one|two|three|four|five|\d+)\s+cards?,?\s*then put\s+(a|one|two|three|four|five|\d+)\s+cards?\s+from your hand on top of your library\b/
+  );
+  if (drawThenPutBack) {
+    const drawAmount = numberWordToInt(drawThenPutBack[1]);
+    const putBackAmount = numberWordToInt(drawThenPutBack[2]);
+    if (drawAmount && putBackAmount !== undefined) {
+      return {
+        workflow: "draw_then_put_back",
+        summary: `${input.sourceCard.name} instructs ${input.actorName} to draw ${drawAmount} card${drawAmount === 1 ? "" : "s"}, then put ${putBackAmount} back on top of their library.`,
+        sourceCardId: input.sourceCard.id,
+        maxChoices: drawAmount,
+        putBackAmount,
+        requiresHumanChoice: true,
+        warnings: []
+      };
+    }
   }
 
   const drawCount = extractDrawCount(scopedText);
@@ -257,6 +311,24 @@ export function deterministicRuleWorkflow(input: RuleAdvisorInput): RuleWorkflow
       allowedCardFilter: "cards matching the source effect",
       destination: "battlefield",
       tapped: scopedText.includes("tapped"),
+      requiresHumanChoice: true,
+      warnings: ["Exact card restrictions may need manual review."]
+    };
+  }
+
+  // "Search your library for a[n] [type] card, reveal it, then shuffle and put that card on top."
+  // (Mystical Tutor, Enlightened Tutor, Moon-Blessed Cleric, the Harbinger cycle, ...) — none of the
+  // three destination branches above match this shape since the found card never reaches hand,
+  // battlefield, or graveyard, so without this branch it fell through to manual_review or an LLM
+  // classification that had no matching workflow to pick, and the tutor silently did nothing.
+  if (scopedText.includes("search your library") && scopedText.includes("shuffle and put") && scopedText.includes("top")) {
+    return {
+      workflow: "search_library_to_library",
+      summary: `${input.sourceCard.name} can search the library for a card and put it on top of the library.`,
+      sourceCardId: input.sourceCard.id,
+      maxChoices: 1,
+      allowedCardFilter: "cards matching the source effect",
+      destination: "library",
       requiresHumanChoice: true,
       warnings: ["Exact card restrictions may need manual review."]
     };
@@ -366,7 +438,7 @@ export async function requestRuleWorkflow(input: RuleAdvisorInput, baseUrl = pro
         {
           role: "system",
           content:
-            "You are an MTG rules workflow classifier. Return JSON only. Do not change game state. Classify what UI workflow is needed for the source card effect using the supplied battlefield, hand, graveyard, exile, and library preview. The sourceCard's oracleText has already been trimmed to only the clause relevant to this event — do not infer or recall other abilities the card might have from training data; classify based solely on the given text. Use scry_cards for scry N, surveil_cards for surveil N, draw_cards for draw N, look_at_top_cards for effects that only look at top N cards, reorder_top_cards for effects that look at top N cards and put them back in any order, search_library_to_hand/search_library_to_battlefield/search_library_to_graveyard for library search effects depending on which zone the found card actually goes to (never open a search of the graveyard itself — the search always happens in the library; the destination is just where the found card ends up). Put N in maxChoices. Prefer manual_review if unsure."
+            "You are an MTG rules workflow classifier. Return JSON only. Do not change game state. Classify what UI workflow is needed for the source card effect using the supplied battlefield, hand, graveyard, exile, and library preview. The sourceCard's oracleText has already been trimmed to only the clause relevant to this event — do not infer or recall other abilities the card might have from training data; classify based solely on the given text. Use scry_cards for scry N, surveil_cards for surveil N, draw_cards for draw N, look_at_top_cards for effects that only look at top N cards, reorder_top_cards for effects that look at top N cards and put them back in any order, search_library_to_hand/search_library_to_battlefield/search_library_to_graveyard/search_library_to_library for library search effects depending on which zone the found card actually goes to — search_library_to_library is for a tutor that puts the found card on top of the library instead of into hand/battlefield/graveyard (e.g. \"search your library for a card, reveal it, then shuffle and put that card on top\") (never open a search of the graveyard itself — the search always happens in the library; the destination is just where the found card ends up). Put N in maxChoices. Prefer manual_review if unsure."
         },
         {
           role: "user",

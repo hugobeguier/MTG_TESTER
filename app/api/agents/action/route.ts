@@ -60,6 +60,10 @@ export async function POST(request: NextRequest) {
         "legalActions are pre-sorted by a deterministic heuristic score (higher = generally better);",
         "prefer higher-scored actions unless multiplayer politics, threat assessment, or immediate-win",
         "prevention clearly favor a different legal action.",
+        "A card in context.you/context.opponents may carry a ruledEffects array: plain-English summaries",
+        "a rules engine already worked out for that exact card's ability. When present, trust it over your",
+        "own reading of its oracleText — it is the authoritative, already-resolved answer for what that",
+        "ability actually does, not just another hint.",
         "Return JSON only. Set legalActionId to the chosen legalActions.id.",
         "Prefer legal, useful plays, but pass when no action improves your position."
       ].join("\n"),

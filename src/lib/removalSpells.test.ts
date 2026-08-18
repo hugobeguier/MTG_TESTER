@@ -44,7 +44,36 @@ describe("parseRemovalEffect — destroy", () => {
   });
 
   it("parses a board wipe (Wrath of God, Damnation)", () => {
-    expect(parseRemovalEffect("Destroy all creatures. They can't be regenerated.")).toEqual({ kind: "destroy_all", targetType: "creature" });
+    expect(parseRemovalEffect("Destroy all creatures. They can't be regenerated.")).toEqual({
+      kind: "destroy_all",
+      targetType: "creature",
+      excludeType: undefined,
+      excludedColors: []
+    });
+  });
+
+  it("parses a type-qualified board wipe, excluding the named creature type (Crux of Fate's Dragon mode)", () => {
+    expect(parseRemovalEffect("Destroy all non-Dragon creatures.")).toEqual({
+      kind: "destroy_all",
+      targetType: "creature",
+      excludeType: "dragon",
+      excludedColors: []
+    });
+    expect(parseRemovalEffect("Destroy all nonartifact creatures.")).toEqual({
+      kind: "destroy_all",
+      targetType: "creature",
+      excludeType: "artifact",
+      excludedColors: []
+    });
+  });
+
+  it("parses a color-qualified board wipe, excluding the named color instead of a type (Crux of Fate-adjacent 'nonwhite')", () => {
+    expect(parseRemovalEffect("Destroy all nonwhite creatures.")).toEqual({
+      kind: "destroy_all",
+      targetType: "creature",
+      excludeType: undefined,
+      excludedColors: ["white"]
+    });
   });
 
   it("does not treat a conditional wipe's substring match as an unconditional wipe (Austere Command's creature mode)", () => {
@@ -61,8 +90,52 @@ describe("parseRemovalEffect — destroy", () => {
   });
 
   it("parses an all-artifacts and all-enchantments wipe", () => {
-    expect(parseRemovalEffect("Destroy all artifacts.")).toEqual({ kind: "destroy_all", targetType: "artifact" });
-    expect(parseRemovalEffect("Destroy all enchantments.")).toEqual({ kind: "destroy_all", targetType: "enchantment" });
+    expect(parseRemovalEffect("Destroy all artifacts.")).toEqual({ kind: "destroy_all", targetType: "artifact", excludedColors: [] });
+    expect(parseRemovalEffect("Destroy all enchantments.")).toEqual({ kind: "destroy_all", targetType: "enchantment", excludedColors: [] });
+  });
+});
+
+describe("parseRemovalEffect — mass damage", () => {
+  it("parses an unqualified mass-damage sweeper (Anger of the Gods)", () => {
+    expect(parseRemovalEffect("Anger of the Gods deals 3 damage to each creature.")).toEqual({
+      kind: "mass_damage",
+      amount: 3,
+      excludeType: undefined,
+      scope: "all"
+    });
+  });
+
+  it("parses a type-qualified mass-damage sweeper (Whipflare's 'nonartifact', Breath Weapon's 'non-Dragon')", () => {
+    expect(parseRemovalEffect("Whipflare deals 2 damage to each nonartifact creature.")).toEqual({
+      kind: "mass_damage",
+      amount: 2,
+      excludeType: "artifact",
+      scope: "all"
+    });
+    expect(parseRemovalEffect("Breath Weapon deals 2 damage to each non-Dragon creature.")).toEqual({
+      kind: "mass_damage",
+      amount: 2,
+      excludeType: "dragon",
+      scope: "all"
+    });
+  });
+
+  it("parses a controller-scoped mass-damage sweeper ('you don't control')", () => {
+    expect(parseRemovalEffect("Deals 2 damage to each creature you don't control.")).toEqual({
+      kind: "mass_damage",
+      amount: 2,
+      excludeType: undefined,
+      scope: "opponents"
+    });
+  });
+
+  it("parses a variable (X) mass-damage sweeper (Earthquake)", () => {
+    expect(parseRemovalEffect("Earthquake deals X damage to each creature and each player without flying.")).toEqual({
+      kind: "mass_damage",
+      amount: "X",
+      excludeType: undefined,
+      scope: "all"
+    });
   });
 });
 
@@ -87,8 +160,8 @@ describe("parseRemovalEffect — modal", () => {
       kind: "modal",
       chooseCount: 2,
       modes: [
-        { kind: "destroy_all", targetType: "artifact" },
-        { kind: "destroy_all", targetType: "enchantment" },
+        { kind: "destroy_all", targetType: "artifact", excludedColors: [] },
+        { kind: "destroy_all", targetType: "enchantment", excludedColors: [] },
         { kind: "destroy_all_conditional", threshold: 3, comparison: "or_less" },
         { kind: "destroy_all_conditional", threshold: 4, comparison: "or_greater" }
       ]

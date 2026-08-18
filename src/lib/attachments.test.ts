@@ -2,13 +2,17 @@ import { describe, expect, it } from "vitest";
 import {
   attachedBasePowerToughness,
   attachedPowerToughnessBonus,
+  attachmentGrantsExtraBeginningPhase,
+  attachmentStripsAllAbilities,
   enchantRestriction,
   equipCost,
   grantedKeywords,
   grantedProtectionColors,
   isAura,
   isEquipment,
-  isRemovalStyleAura
+  isRemovalStyleAura,
+  playerCreatureLockEffect,
+  restrictsNonManaNonLoyaltyAbilities
 } from "./attachments";
 
 describe("isAura / isEquipment", () => {
@@ -81,6 +85,61 @@ describe("attachedBasePowerToughness", () => {
 
   it("returns undefined for a plain +N/+N pump (Rancor)", () => {
     expect(attachedBasePowerToughness("Enchanted creature gets +2/+0 and has trample.")).toBeUndefined();
+  });
+
+  it("parses a base P/T override sharing a sentence with an ability-loss clause (Utter Insignificance)", () => {
+    expect(attachedBasePowerToughness("Flash\nEnchant creature\nEnchanted creature loses all abilities and has base power and toughness 1/1.\n{2}{C}: Exile enchanted creature.")).toEqual(
+      { power: 1, toughness: 1 }
+    );
+  });
+});
+
+describe("attachmentStripsAllAbilities", () => {
+  it("flags an enchanted-creature ability-loss clause (Utter Insignificance)", () => {
+    expect(attachmentStripsAllAbilities("Enchanted creature loses all abilities and has base power and toughness 1/1.")).toBe(true);
+  });
+
+  it("does not flag an ordinary buff or removal aura (Rancor, Pacifism)", () => {
+    expect(attachmentStripsAllAbilities("Enchanted creature gets +2/+0 and has trample.")).toBe(false);
+    expect(attachmentStripsAllAbilities("Enchanted creature can't attack or block.")).toBe(false);
+  });
+});
+
+describe("playerCreatureLockEffect", () => {
+  it("parses the board-wide creature lock (Overwhelming Splendor)", () => {
+    expect(
+      playerCreatureLockEffect(
+        "Enchant player\nCreatures enchanted player controls lose all abilities and have base power and toughness 1/1.\nEnchanted player can't activate abilities that aren't mana abilities or loyalty abilities."
+      )
+    ).toEqual({ power: 1, toughness: 1 });
+  });
+
+  it("returns undefined for a single-creature ability-loss aura (Utter Insignificance)", () => {
+    expect(playerCreatureLockEffect("Enchanted creature loses all abilities and has base power and toughness 1/1.")).toBeUndefined();
+  });
+});
+
+describe("restrictsNonManaNonLoyaltyAbilities", () => {
+  it("flags Overwhelming Splendor's activation lock", () => {
+    expect(restrictsNonManaNonLoyaltyAbilities("Enchanted player can't activate abilities that aren't mana abilities or loyalty abilities.")).toBe(true);
+  });
+
+  it("does not flag an unrelated aura", () => {
+    expect(restrictsNonManaNonLoyaltyAbilities("Enchanted creature can't attack or block.")).toBe(false);
+  });
+});
+
+describe("attachmentGrantsExtraBeginningPhase", () => {
+  it("flags Shadow of the Second Sun's extra-phase trigger", () => {
+    expect(
+      attachmentGrantsExtraBeginningPhase(
+        "Enchant player\nAt the beginning of each of enchanted player's postcombat main phases, there is an additional beginning phase after this phase."
+      )
+    ).toBe(true);
+  });
+
+  it("does not flag an unrelated player-enchanting aura", () => {
+    expect(restrictsNonManaNonLoyaltyAbilities("Enchant player\nEnchanted player can't cast spells with the same name as a permanent you control.")).toBe(false);
   });
 });
 

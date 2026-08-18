@@ -49,12 +49,53 @@ export type AttachedBaseOverride = AttachedBonus | "life_total";
 
 export function attachedBasePowerToughness(oracleText: string): AttachedBaseOverride | undefined {
   const text = oracleText.toLowerCase();
-  if (/\b(?:enchanted|equipped) creature has base power and toughness x\/x, where x is your life total\b/.test(text)) {
+  // "[^.]*" between "creature" and "has base power" tolerates other clauses sharing the same
+  // sentence (Utter Insignificance: "Enchanted creature loses all abilities and has base power and
+  // toughness 1/1.") — a direct "creature has base power" adjacency requirement missed this real
+  // card entirely, silently never applying the 1/1 override.
+  if (/\b(?:enchanted|equipped) creature[^.]*\bhas base power and toughness x\/x, where x is your life total\b/.test(text)) {
     return "life_total";
   }
-  const fixed = text.match(/\b(?:enchanted|equipped) creature has base power and toughness (\d+)\/(\d+)/);
+  const fixed = text.match(/\b(?:enchanted|equipped) creature[^.]*\bhas base power and toughness (\d+)\/(\d+)/);
   if (fixed) return { power: Number.parseInt(fixed[1], 10), toughness: Number.parseInt(fixed[2], 10) };
   return undefined;
+}
+
+// "Enchanted/equipped creature loses all abilities" (Utter Insignificance) — a single-target
+// counterpart to playerCreatureLockEffect below (Overwhelming Splendor's player-wide version).
+// Scoped to this exact "enchanted/equipped creature ... loses all abilities" shape rather than a
+// bare substring search, so a card that merely mentions losing abilities in some other clause isn't
+// misread as this effect.
+export function attachmentStripsAllAbilities(oracleText: string): boolean {
+  return /\b(?:enchanted|equipped) creature loses all abilities\b/i.test(oracleText);
+}
+
+// "Creatures enchanted player controls lose all abilities and have base power and toughness N/M."
+// (Overwhelming Splendor) — deliberately narrow to this card's exact real-world wording rather than
+// a general "enchant player + board-wide creature debuff" grammar, following this codebase's
+// declined-rather-than-guessed pattern for effect shapes with only one real motivating example.
+export function playerCreatureLockEffect(oracleText: string): AttachedBonus | undefined {
+  const match = oracleText.toLowerCase().match(/\bcreatures enchanted player controls lose all abilities and have base power and toughness (\d+)\/(\d+)\b/);
+  if (!match) return undefined;
+  return { power: Number.parseInt(match[1], 10), toughness: Number.parseInt(match[2], 10) };
+}
+
+// "Enchanted player can't activate abilities that aren't mana abilities or loyalty abilities."
+// (Overwhelming Splendor's second clause) — same narrow, single-card scoping as
+// playerCreatureLockEffect above.
+export function restrictsNonManaNonLoyaltyAbilities(oracleText: string): boolean {
+  return /\benchanted player can'?t activate abilities that aren'?t mana abilities or loyalty abilities\b/i.test(oracleText);
+}
+
+// "At the beginning of each of enchanted player's postcombat main phases, there is an additional
+// beginning phase after this phase." (Shadow of the Second Sun) — same narrow single-card scoping
+// as the two functions above; the trigger's own "enchanted player's" phrasing doesn't match the
+// generic "at the beginning of your postcombat main phase" pattern every other phase trigger uses
+// (see phaseTriggerTextMatches in AppFlow.tsx), and even if it did, that dispatch only ever looks
+// at the ACTIVE seat's own battlefield — this Aura lives on its CASTER's battlefield, not the
+// enchanted player's, so resolvePhaseAdvance checks for it directly instead.
+export function attachmentGrantsExtraBeginningPhase(oracleText: string): boolean {
+  return /\badditional beginning phase after this phase\b/i.test(oracleText);
 }
 
 const GRANTABLE_KEYWORDS = [

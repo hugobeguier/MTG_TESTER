@@ -125,6 +125,38 @@ describe("parseGenericSacrificeAbilities", () => {
       )
     ).toHaveLength(0);
   });
+
+  it("parses Cankerbloom's real modal destroy ability, merging its 'Choose one —' header with its bullet modes", () => {
+    const [ability] = parseGenericSacrificeAbilities(
+      "{1}, Sacrifice this creature: Choose one —\n• Destroy target artifact.\n• Destroy target enchantment.\n• Proliferate."
+    );
+    expect(ability).toMatchObject({
+      costMana: 1,
+      costTap: false,
+      sacrificeTarget: "self",
+      effect: {
+        kind: "removal",
+        effect: {
+          kind: "modal",
+          chooseCount: 1,
+          modes: [
+            { kind: "destroy", targetType: "artifact" },
+            { kind: "destroy", targetType: "enchantment" }
+          ]
+        }
+      }
+    });
+  });
+
+  it("parses a plain (non-modal) sacrifice-for-destroy ability via the removal fallback", () => {
+    const [ability] = parseGenericSacrificeAbilities("{T}, Sacrifice this artifact: Destroy target creature.");
+    expect(ability).toMatchObject({
+      costMana: 0,
+      costTap: true,
+      sacrificeTarget: "self",
+      effect: { kind: "removal", effect: { kind: "destroy", targetType: "creature" } }
+    });
+  });
 });
 
 describe("parseGenericTapAbilities", () => {
@@ -215,6 +247,24 @@ describe("parseSearchLibraryEffectText", () => {
 
   it("returns undefined for text with no search-library shape", () => {
     expect(parseSearchLibraryEffectText("draw a card.")).toBeUndefined();
+  });
+
+  it("parses a typed tutor-to-top-of-library ability (Sterling Grove)", () => {
+    expect(parseSearchLibraryEffectText("search your library for an enchantment card, reveal it, then shuffle and put that card on top.")).toEqual({
+      kind: "search_library",
+      destination: "library",
+      tapped: false,
+      cardTypeFilter: "enchantment"
+    });
+  });
+
+  it("parses an untyped tutor-to-top-of-library ability (Vampiric Tutor-shaped)", () => {
+    expect(parseSearchLibraryEffectText("search your library for a card, then shuffle and put that card on top.")).toEqual({
+      kind: "search_library",
+      destination: "library",
+      tapped: false,
+      cardTypeFilter: undefined
+    });
   });
 });
 

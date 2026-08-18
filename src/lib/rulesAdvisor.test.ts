@@ -38,6 +38,31 @@ describe("deterministicRuleWorkflow", () => {
     expect(workflow?.maxChoices).toBe(2);
   });
 
+  it("chooses draw_then_put_back for Brainstorm's real text instead of short-circuiting into a plain draw", () => {
+    const brainstorm = card({
+      id: "brainstorm-1",
+      name: "Brainstorm",
+      typeLine: "Instant",
+      oracleText: "Draw three cards, then put two cards from your hand on top of your library in any order."
+    });
+    const workflow = deterministicRuleWorkflow(input(brainstorm));
+    expect(workflow?.workflow).toBe("draw_then_put_back");
+    expect(workflow?.maxChoices).toBe(3);
+    expect(workflow?.putBackAmount).toBe(2);
+  });
+
+  it("declines to manual_review for Lim-Dûl's Vault's repeatable pay-to-look-again loop, instead of misfiring look_at_top_cards", () => {
+    const limDulsVault = card({
+      id: "lim-duls-vault-1",
+      name: "Lim-Dûl's Vault",
+      typeLine: "Instant",
+      oracleText:
+        "Look at the top five cards of your library. As many times as you choose, you may pay 1 life, put those cards on the bottom of your library in any order, then look at the top five cards of your library. Then shuffle and put the last cards you looked at this way on top in any order."
+    });
+    const workflow = deterministicRuleWorkflow(input(limDulsVault));
+    expect(workflow?.workflow).toBe("manual_review");
+  });
+
   it("chooses look_at_top_cards for a look-only effect with no reorder or draw text", () => {
     const peek = card({ id: "peek-1", name: "Peek Effect", oracleText: "Look at the top four cards of target opponent's library." });
     const workflow = deterministicRuleWorkflow(input(peek));
@@ -114,6 +139,30 @@ describe("deterministicRuleWorkflow", () => {
     const workflow = deterministicRuleWorkflow(input(entomb));
     expect(workflow?.workflow).toBe("search_library_to_graveyard");
     expect(workflow?.destination).toBe("graveyard");
+  });
+
+  it("chooses search_library_to_library for a tutor-to-top-of-library ETB trigger (Moon-Blessed Cleric)", () => {
+    const moonBlessedCleric = card({
+      id: "moon-blessed-cleric-1",
+      name: "Moon-Blessed Cleric",
+      typeLine: "Creature — Human Elf Cleric",
+      oracleText: "Divine Intervention — When this creature enters, you may search your library for an enchantment card, reveal it, then shuffle and put that card on top."
+    });
+    const workflow = deterministicRuleWorkflow(input(moonBlessedCleric, "spell_resolved_to_battlefield"));
+    expect(workflow?.workflow).toBe("search_library_to_library");
+    expect(workflow?.destination).toBe("library");
+  });
+
+  it("chooses search_library_to_library for a tutor-to-top-of-library spell, not manual review (Mystical Tutor)", () => {
+    const mysticalTutor = card({
+      id: "mystical-tutor-1",
+      name: "Mystical Tutor",
+      typeLine: "Instant",
+      oracleText: "Search your library for an instant or sorcery card, reveal it, then shuffle and put that card on top."
+    });
+    const workflow = deterministicRuleWorkflow(input(mysticalTutor));
+    expect(workflow?.workflow).toBe("search_library_to_library");
+    expect(workflow?.destination).toBe("library");
   });
 
   it("recognizes a direct-cast proliferate spell and requires no human choice (Contentious Plan)", () => {

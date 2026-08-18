@@ -16,6 +16,7 @@ import {
 } from "@/lib/activatedAbilities";
 import { equipCost, isEquipment } from "@/lib/attachments";
 import { hasKeyword as hasOracleKeyword } from "@/lib/keywords";
+import { isBasicLandFetchAbility } from "@/lib/oracleClauses";
 
 type ManaColor = "W" | "U" | "B" | "R" | "G" | "C";
 type ManaPool = Record<ManaColor, number>;
@@ -169,7 +170,7 @@ type RuleChoiceView =
       sourceCardName: string;
       prompt: string;
       cards: VisibleCard[];
-      destination: "hand" | "battlefield" | "graveyard";
+      destination: "hand" | "battlefield" | "graveyard" | "library";
       allowedCardFilter?: string;
     }
   | {
@@ -1744,7 +1745,7 @@ function LibrarySearchModal({
   onChoose
 }: {
   cards: VisibleCard[];
-  destination: "hand" | "battlefield" | "graveyard";
+  destination: "hand" | "battlefield" | "graveyard" | "library";
   prompt?: string;
   sourceCardName?: string;
   allowedCardFilter?: string;
@@ -1779,7 +1780,13 @@ function LibrarySearchModal({
                 <span>{card.typeLine}</span>
               </div>
               <button type="button" onClick={() => onChoose?.(card.id)}>
-                {destination === "battlefield" ? "To Battlefield" : "To Hand"}
+                {destination === "battlefield"
+                  ? "To Battlefield"
+                  : destination === "graveyard"
+                    ? "To Graveyard"
+                    : destination === "library"
+                      ? "To Top of Library"
+                      : "To Hand"}
               </button>
             </article>
           ))}
@@ -2341,16 +2348,6 @@ function cardBasicLandTypes(card: VisibleCard) {
   return basicLandTypeOrder.filter((type) => card.name === type || card.typeLine.includes(type));
 }
 
-function isBasicLandFetchAbility(card: VisibleCard) {
-  const text = card.oracleText.toLowerCase();
-  return (
-    text.includes("search your library for a basic land card") &&
-    text.includes("put it onto the battlefield tapped") &&
-    text.includes("sacrifice") &&
-    (text.includes("{t}") || text.includes("{tap}") || text.includes("tap,"))
-  );
-}
-
 function parseLoyaltyAbilities(oracleText: string) {
   return oracleText
     .split("\n")
@@ -2601,8 +2598,8 @@ function rebuildDynamicScene(
       addCard(group, seat.board.commander, seat.id, "command", commanderSlot.x, commanderSlot.z, area.rot, selectedCardId, cardMeshesRef);
     }
 
-    seat.board.battlefield.forEach((card, cardIndex) => {
-      const point = card.battlefieldPosition ?? defaultBattlefieldPosition(area, cardIndex, seat.board.battlefield.length);
+    seat.board.battlefield.forEach((card) => {
+      const point = card.battlefieldPosition ?? defaultBattlefieldPosition(area, card, seat.board.battlefield);
       addCard(group, card, seat.id, "battlefield", point.x, point.z, area.rot, selectedCardId, cardMeshesRef);
     });
 
@@ -2643,28 +2640,80 @@ function addBattlefieldArea(
   group.add(border);
 }
 
-// A player's battlefield area is a fixed-size rectangle (see PLAYER_AREAS), but a Commander board
-// routinely grows past what a static 5-wide/2-row grid can hold without overlap — this used to be
-// papered over by hard-capping rendering at 12 permanents (see git history), which made anything
-// beyond that literally invisible and unclickable rather than just cramped. Instead, grow the
-// column count (and shrink row spacing) with the actual permanent count so everything still gets a
-// mesh and a screen position, even if cards sit closer together once a board gets very wide.
-function defaultBattlefieldPosition(area: (typeof PLAYER_AREAS)[number], cardIndex: number, totalCards: number) {
-  const availableWidth = area.maxX - area.minX - 1.1;
-  const availableDepth = area.maxZ - area.minZ - 1.3;
+// Groups a permanent into one of three rendering bands: lands read as "mana base" and creatures/
+// planeswalkers read as "board state," which is what a player actually scans for at a glance — see
+// defaultBattlefieldPosition for how each band is laid out.
+function battlefieldCardCategory(card: VisibleCard): "land" | "creature" | "other" {
+  if (card.typeLine.includes("Land")) return "land";
+  if (card.typeLine.includes("Creature") || card.typeLine.includes("Planeswalker")) return "creature";
+  return "other";
+}
+
+// A Commander board routinely grows past what a static 5-wide/2-row grid can hold without overlap —
+// this used to be papered over by hard-capping rendering at 12 permanents (see git history), which
+// made anything beyond that literally invisible and unclickable rather than just cramped. Instead,
+// grow the column count (and shrink row spacing) with the actual permanent count so everything still
+// gets a mesh and a screen position, even if cards sit closer together once a board gets very wide.
+// minX/maxX/edgeZ/dir/depth describe an arbitrary sub-rectangle (a "band") rather than the whole
+// player area, so defaultBattlefieldPosition can carve the area into per-role bands below.
+function bandGridPosition(minX: number, maxX: number, edgeZ: number, dir: 1 | -1, depth: number, cardIndex: number, totalCards: number) {
+  const availableWidth = Math.max(0.1, maxX - minX);
+  const availableDepth = Math.max(0.1, depth);
   const maxColumnsByWidth = Math.max(1, Math.floor(availableWidth / 0.85) + 1);
-  const columns = Math.min(maxColumnsByWidth, Math.max(5, Math.ceil(Math.sqrt(totalCards * 2.2))));
+  const columns = Math.min(maxColumnsByWidth, Math.max(2, Math.ceil(Math.sqrt(Math.max(1, totalCards) * 2.2))));
   const rows = Math.max(1, Math.ceil(totalCards / columns));
   const xStep = columns > 1 ? Math.min(1.15, availableWidth / (columns - 1)) : 0;
-  const zStep = rows > 1 ? Math.min(1.25, availableDepth / (rows - 1)) : 1.25;
+  const zStep = rows > 1 ? Math.min(1.25, availableDepth / (rows - 1)) : 0;
 
   const col = cardIndex % columns;
   const row = Math.floor(cardIndex / columns);
-  const x = THREE.MathUtils.clamp(area.minX + 2 + col * xStep, area.minX + 0.55, area.maxX - 0.55);
-  const zDir = area.rot === 0 ? -1 : 1;
-  const startZ = area.rot === 0 ? area.maxZ - 2 : area.minZ + 2;
-  const z = THREE.MathUtils.clamp(startZ + row * zDir * zStep, area.minZ + 0.55, area.maxZ - 0.55);
+  const x = THREE.MathUtils.clamp(minX + col * xStep, minX, maxX);
+  const farZ = edgeZ + dir * availableDepth;
+  const z = THREE.MathUtils.clamp(edgeZ + row * dir * zStep, Math.min(edgeZ, farZ), Math.max(edgeZ, farZ));
   return { x, z };
+}
+
+// Auto-arranges a player's permanents by role instead of raw play order, so lands sit as a strip
+// along this player's own near edge (their mana base — least urgent to track), creatures and
+// planeswalkers sit front-and-center toward the table's middle (the board state a player actually
+// needs to read at a glance), and artifacts/enchantments flank them on the left/right rather than
+// mixing into either — mirroring how a player organizes a real tabletop board. Only used for
+// permanents that have never been manually dragged (battlefieldPosition undefined); once a player
+// drags a card, that explicit position always wins over this, for every seat including agents.
+function defaultBattlefieldPosition(area: (typeof PLAYER_AREAS)[number], card: VisibleCard, battlefield: VisibleCard[]) {
+  const category = battlefieldCardCategory(card);
+  const sameCategory = battlefield.filter((item) => battlefieldCardCategory(item) === category);
+  const cardIndex = Math.max(0, sameCategory.findIndex((item) => item.id === card.id));
+  const totalInCategory = sameCategory.length;
+
+  // outerZ is this player's own near edge (where lands live); innerZ is the far edge toward the
+  // table's middle (where creatures/planeswalkers live) — rot flips which raw Z value that is.
+  const outerZ = area.rot === 0 ? area.maxZ - 0.55 : area.minZ + 0.55;
+  const innerZ = area.rot === 0 ? area.minZ + 0.55 : area.maxZ - 0.55;
+  const dir: 1 | -1 = innerZ >= outerZ ? 1 : -1;
+  const totalDepth = Math.abs(innerZ - outerZ);
+  const landDepth = totalDepth * 0.4;
+  const frontDepth = totalDepth - landDepth;
+  const frontEdgeZ = outerZ + dir * landDepth;
+
+  if (category === "land") {
+    return bandGridPosition(area.minX + 0.55, area.maxX - 0.55, outerZ, dir, landDepth, cardIndex, totalInCategory);
+  }
+
+  const width = area.maxX - area.minX;
+  const sideWidth = width * 0.22;
+  if (category === "other") {
+    // Alternate left/right so artifacts and enchantments split evenly across both flanks instead of
+    // piling onto one side.
+    const onLeft = cardIndex % 2 === 0;
+    const minX = onLeft ? area.minX + 0.5 : area.maxX - sideWidth + 0.15;
+    const maxX = onLeft ? area.minX + sideWidth - 0.15 : area.maxX - 0.5;
+    const sideIndex = Math.floor(cardIndex / 2);
+    const sideTotal = Math.max(1, Math.ceil(totalInCategory / 2));
+    return bandGridPosition(minX, maxX, frontEdgeZ, dir, frontDepth, sideIndex, sideTotal);
+  }
+
+  return bandGridPosition(area.minX + sideWidth, area.maxX - sideWidth, frontEdgeZ, dir, frontDepth, cardIndex, totalInCategory);
 }
 
 // Just past the outer (away-from-center) edge of this player's battlefield rectangle — left of

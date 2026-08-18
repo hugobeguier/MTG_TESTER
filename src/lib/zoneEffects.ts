@@ -74,12 +74,29 @@ export interface DrawXThenPutBackEffect {
   putBackAmount: number;
 }
 
+// Victimize-style: "Choose N target creature cards in your graveyard. Sacrifice a creature. If you
+// do, return the chosen cards to the battlefield[ tapped]." Rule 601.2c requires legal targets for
+// the "choose N target creature cards" half at cast time (targetCount creature cards must actually
+// be in the caster's graveyard) — but the sacrifice is NOT an additional cost (contrast Village
+// Rites' "As an additional cost to cast this spell, sacrifice a creature."), it's a resolution-time
+// instruction the caster can simply fail to perform if they control no creatures (rule 608.2c), in
+// which case "if you do" never triggers and the chosen cards just stay in the graveyard — a legal,
+// if pointless, cast. So this deliberately does NOT require a sacrifice-able creature to be castable
+// at all, only the graveyard targets.
+export interface SacrificeThenReanimateEffect {
+  kind: "sacrifice_then_reanimate";
+  targetCount: number;
+  sacrificeCount: number;
+  tapped: boolean;
+}
+
 export type ZoneEffect =
   | ReanimateEffect
   | RegrowEffect
   | MillEffect
   | GraveyardToLibraryEffect
   | ExileGraveyardEffect
+  | SacrificeThenReanimateEffect
   | GainControlEffect
   | ImpulseDrawEffect
   | StealAndPlayEffect
@@ -118,10 +135,34 @@ export function parseZoneEffect(oracleText: string): ZoneEffect | undefined {
   const reanimate = text.match(/\b(?:put|return) target (?:\w+ )?(creature|enchantment|artifact) card from (a|your) graveyard (?:onto|to) the battlefield\b/);
   if (reanimate) return { kind: "reanimate", targetType: reanimate[1] as RegrowTargetType, anyGraveyard: reanimate[2] === "a" };
 
-  const regrow = text.match(/\breturn target (permanent|creature|land)?\s*card from your graveyard to your hand\b/);
+  // "that isn't a God" (Heliod, the Radiant Dawn's own ETB: "return target enchantment card that
+  // isn't a God from your graveyard to your hand") sits between "card" and "from your graveyard" —
+  // same qualifier-tolerance gap as the reanimate pattern's "target (?:\w+ )?type" above, just in a
+  // different position in the sentence. The exclusion itself isn't separately enforced at the
+  // target-choosing call site (a God card could still, rarely, get picked) — narrow, matching this
+  // codebase's other declared simplifications, since correctly excluding it needs the God subtype,
+  // which this text-only parser has no way to check.
+  const regrow = text.match(/\breturn target (permanent|creature|land|enchantment|artifact)?\s*cards?(?: that isn'?t an? [a-z]+)? from your graveyard to your hand\b/);
   if (regrow) {
     const typeWord = regrow[1] as RegrowTargetType | undefined;
     return { kind: "regrow", targetType: typeWord ?? "card" };
+  }
+
+  // Victimize: "Choose two target creature cards in your graveyard. Sacrifice a creature. If you
+  // do, return the chosen cards to the battlefield tapped." — the targeting sentence and the
+  // sacrifice/return sentence are matched separately (both must be present) since real card text
+  // sometimes has other sentences between them.
+  const targetCountPattern = "(a|one|two|three|four|five|\\d+)";
+  const chooseTargetsMatch = text.match(new RegExp(`\\bchoose ${targetCountPattern} target creature cards? in your graveyard\\b`));
+  const sacrificeThenReturnMatch = text.match(
+    new RegExp(`\\bsacrifice ${targetCountPattern} creatures?\\.\\s*if you do,\\s*return the chosen cards? to the battlefield(\\s+tapped)?\\b`)
+  );
+  if (chooseTargetsMatch && sacrificeThenReturnMatch) {
+    const targetCount = numberWordToInt(chooseTargetsMatch[1]);
+    const sacrificeCount = numberWordToInt(sacrificeThenReturnMatch[1]);
+    if (targetCount && sacrificeCount) {
+      return { kind: "sacrifice_then_reanimate", targetCount, sacrificeCount, tapped: Boolean(sacrificeThenReturnMatch[2]) };
+    }
   }
 
   const millAmountPattern = "(a|one|two|three|four|five|six|seven|eight|nine|ten|\\d+)";

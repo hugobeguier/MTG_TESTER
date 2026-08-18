@@ -4,6 +4,9 @@
 // producing and temporary-pump effects are recognized as "sacrifice ability shaped" but return no
 // effect, so callers can choose not to surface them as legal actions rather than silently no-op.
 
+import { mergeModalBulletClauses, oracleClauses } from "./oracleClauses";
+import { parseRemovalEffect, type RemovalEffect } from "./removalSpells";
+
 // "Search your library for a[n] [Type] card[, reveal it], put it/that card into your hand/onto the
 // battlefield[ tapped], then shuffle." — the general tutor shape underlying most non-basic-land
 // search effects (Fauna Shaman, Diabolic Intent-style "for a card," Sakura-Tribe Elder-style
@@ -16,7 +19,7 @@
 // sacrificed, which this text-only parser has no way to see.
 export interface SearchLibraryEffect {
   kind: "search_library";
-  destination: "hand" | "battlefield";
+  destination: "hand" | "battlefield" | "library";
   tapped: boolean;
   cardTypeFilter?: string;
 }
@@ -24,18 +27,38 @@ export interface SearchLibraryEffect {
 const SEARCH_LIBRARY_PATTERN =
   /^search your library for an? (?:([a-z][a-z ]*?)\s+)?cards?,?(?: reveal it,?)? put (?:it|that card|them) (into your hand|onto the battlefield(?: tapped)?),? then shuffle\.?/i;
 
+// "Search your library for a[n] [type] card, reveal it, then shuffle and put that card on top."
+// (Sterling Grove's sacrifice ability, Mystical Tutor-shaped effects on a permanent's own activated
+// ability) — same tutor shape as SEARCH_LIBRARY_PATTERN above but with "shuffle" before the "put"
+// clause and always landing on top of the library rather than hand/battlefield.
+const SEARCH_LIBRARY_TO_TOP_PATTERN =
+  /^search your library for an? (?:([a-z][a-z ]*?)\s+)?cards?,?(?: reveal it,?)? then shuffle and put (?:it|that card|them|the card) on top(?: of your library)?\.?/i;
+
 export function parseSearchLibraryEffectText(text: string): SearchLibraryEffect | undefined {
   const match = text.match(SEARCH_LIBRARY_PATTERN);
-  if (!match) return undefined;
-  const typeWord = match[1]?.trim();
-  if (typeWord && /\bwith\b/i.test(typeWord)) return undefined;
-  const destinationText = match[2].toLowerCase();
-  return {
-    kind: "search_library",
-    destination: destinationText.includes("battlefield") ? "battlefield" : "hand",
-    tapped: destinationText.includes("tapped"),
-    cardTypeFilter: typeWord && !/^cards?$/i.test(typeWord) ? typeWord : undefined
-  };
+  if (match) {
+    const typeWord = match[1]?.trim();
+    if (typeWord && /\bwith\b/i.test(typeWord)) return undefined;
+    const destinationText = match[2].toLowerCase();
+    return {
+      kind: "search_library",
+      destination: destinationText.includes("battlefield") ? "battlefield" : "hand",
+      tapped: destinationText.includes("tapped"),
+      cardTypeFilter: typeWord && !/^cards?$/i.test(typeWord) ? typeWord : undefined
+    };
+  }
+  const topMatch = text.match(SEARCH_LIBRARY_TO_TOP_PATTERN);
+  if (topMatch) {
+    const typeWord = topMatch[1]?.trim();
+    if (typeWord && /\bwith\b/i.test(typeWord)) return undefined;
+    return {
+      kind: "search_library",
+      destination: "library",
+      tapped: false,
+      cardTypeFilter: typeWord && !/^cards?$/i.test(typeWord) ? typeWord : undefined
+    };
+  }
+  return undefined;
 }
 
 export type SacrificeEffect =
@@ -47,7 +70,13 @@ export type SacrificeEffect =
   // Profane Prince). Whether it also untaps is read straight from the clause text at apply time
   // (transformPermanent in AppFlow.tsx), not carried here, since it's a trailing modifier on the
   // same sentence rather than a distinct effect shape.
-  | { kind: "transform_self" };
+  | { kind: "transform_self" }
+  // "{T}, Sacrifice this creature: Choose one — Destroy target artifact. Destroy target
+  // enchantment. ..." (Cankerbloom, and any other sacrifice ability whose effect is a destroy/
+  // exile/damage/bounce shape, modal or not) — reuses removalSpells.ts's own parser/executor
+  // instead of re-narrowing that same vocabulary here, the same way AppFlow.tsx's
+  // GenericAbilityEffect already does for non-sacrifice/non-tap activated abilities.
+  | { kind: "removal"; effect: RemovalEffect };
 
 export interface SacrificeAbility {
   costMana: number;
@@ -93,17 +122,22 @@ function numberWordToInt(value: string | undefined): number | undefined {
 // in a DIFFERENT shape this parser doesn't model — "sacrifice a land"/"sacrifice a permanent"/
 // "sacrifice an artifact" name a category, not a creature type, and guessing they're a creature
 // type would search for the wrong kind of permanent at resolution time.
+// The effect-text group uses [\s\S] rather than "." so it still captures a modal ability's bullet
+// modes — those are printed as their own "\n"-separated lines in this card data's convention (same
+// as any other pair of clauses), merged back onto the "Sacrifice ~: Choose one —" header line by
+// mergeModalBulletClauses below before this pattern ever sees them (Cankerbloom's "{1}, Sacrifice
+// this creature: Choose one — Destroy target artifact. Destroy target enchantment. ..." is the
+// motivating case — without the merge, the header line has no effect text at all, and the bullet
+// lines don't start with "sacrifice", so the whole ability silently vanished, letting whatever
+// resolved it downstream apply the destroy effect without ever charging the sacrifice cost).
 const SACRIFICE_CLAUSE_PATTERN =
-  /^((?:(?:\{[^}]+\}|discard a card)\s*,?\s*)*)sacrifice\s+(this\s+[a-z]+|an?\s+creature|(?:a|one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+creatures|an?\s+(?!permanents?\b|lands?\b|cards?\b|artifacts?\b|enchantments?\b|planeswalkers?\b|tokens?\b)[a-z]+)\s*:\s*(.+?)\.?\s*$/i;
+  /^((?:(?:\{[^}]+\}|discard a card)\s*,?\s*)*)sacrifice\s+(this\s+[a-z]+|an?\s+creature|(?:a|one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+creatures|an?\s+(?!permanents?\b|lands?\b|cards?\b|artifacts?\b|enchantments?\b|planeswalkers?\b|tokens?\b)[a-z]+)\s*:\s*([\s\S]+?)\.?\s*$/i;
 
 const SACRIFICE_COUNT_PATTERN = /^(a|one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+creatures$/i;
 
 export function parseGenericSacrificeAbilities(oracleText: string): SacrificeAbility[] {
   const abilities: SacrificeAbility[] = [];
-  const clauses = oracleText
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
+  const clauses = mergeModalBulletClauses(oracleClauses(oracleText));
 
   for (const clause of clauses) {
     const match = clause.match(SACRIFICE_CLAUSE_PATTERN);
@@ -362,6 +396,16 @@ function parseSacrificeEffectText(text: string): SacrificeEffect | undefined {
 
   const searchLibrary = parseSearchLibraryEffectText(lower);
   if (searchLibrary) return searchLibrary;
+
+  // Catches "Destroy/Exile/deals damage to/Return target X [to its owner's hand]" shapes, plain or
+  // modal ("Choose one — ..."), by reusing removalSpells.ts's own parser rather than re-narrowing
+  // that vocabulary here — see the SacrificeEffect "removal" case's doc comment above. removalSpells
+  // .ts's own single-effect patterns all require a trailing period to terminate their "target
+  // [^.]+" match; SACRIFICE_CLAUSE_PATTERN already stripped the sacrifice ability's own trailing
+  // period off before this text ever got here (a plain, non-modal "Destroy target creature" would
+  // otherwise never match), so it's added back rather than assuming it survived.
+  const removal = parseRemovalEffect(text.endsWith(".") ? text : `${text}.`);
+  if (removal) return { kind: "removal", effect: removal };
 
   return undefined;
 }

@@ -25,7 +25,21 @@ export function isActivatedAbilityClause(clause: string): boolean {
   // unlike every other activated ability's "cost: effect" templating — without this, that line
   // wasn't recognized as a cost/ability clause by anything, so it slipped straight into ETB-effect
   // text as if it were part of what the permanent does the moment it enters.
-  return /^(equip|reconfigure)\b/i.test(clause);
+  if (/^(equip|reconfigure)\b/i.test(clause)) return true;
+  // General case (rule 602.1a): every activated ability is templated "Cost: Effect.", with a colon,
+  // even when its cost is spelled out in plain English rather than mana/tap symbols — Sakura-Tribe
+  // Elder's "Sacrifice Sakura-Tribe Elder: Search your library for a basic land card, put it onto
+  // the battlefield tapped, then shuffle." has no leading {..}, no loyalty number, and isn't equip/
+  // reconfigure, so the three checks above all missed it — reproduced live: the clause leaked
+  // straight into etbEffectText and got read as something that happens automatically and for free
+  // the instant the creature resolves, on top of (not instead of) its real, separately-costed
+  // activation later. Real Magic's templating is consistent enough to lean on directly here:
+  // triggered abilities are always phrased "When/Whenever/At ~, ..." with no colon; a colon
+  // anywhere in a clause that ISN'T one of those is, in practice, always an activated ability's
+  // cost/effect divider.
+  const colonIndex = clause.indexOf(":");
+  if (colonIndex === -1) return false;
+  return !/\b(when|whenever|at the beginning)\b/i.test(clause.slice(0, colonIndex));
 }
 
 export function isDeathTriggerClause(clause: string): boolean {
@@ -157,4 +171,50 @@ export function parseModalHeader(oracleText: string): ModalHeader | undefined {
     .filter(Boolean);
   if (modeTexts.length < 2) return undefined;
   return { chooseCount, modeTexts };
+}
+
+// "Evolving Wilds/Terramorphic Expanse/Wayfarer's Bauble-style" search-a-basic-land-and-sacrifice
+// ability recognizer — shared between AppFlow.tsx (which resolves the ability) and
+// ThreeGameTable.tsx (which decides whether to show its activate button). This used to be defined
+// independently in both files; ThreeGameTable.tsx's copy never got the "put THAT CARD onto the
+// battlefield tapped" alternative added alongside "put IT onto the battlefield tapped" (Wayfarer's
+// Bauble is worded the former way), so its button silently never appeared for that card at all —
+// reproduced live, reported as "can't activate despite having the mana," when the real cause had
+// nothing to do with mana; the button just never rendered. A single shared definition here means
+// the two files can no longer drift apart on which cards this recognizes.
+export function isBasicLandFetchAbility(card: { oracleText: string }): boolean {
+  const text = card.oracleText.toLowerCase();
+  return (
+    text.includes("search your library for a basic land card") &&
+    (text.includes("put it onto the battlefield tapped") || text.includes("put that card onto the battlefield tapped")) &&
+    text.includes("sacrifice")
+  );
+}
+
+// Not every basic-land-fetch ability actually costs {T} — Sakura-Tribe Elder's is plain "Sacrifice
+// this creature:" with no tap at all (that's the whole point of the card: block, then still get
+// its ramp the same turn), unlike Evolving Wilds' "{T}, Sacrifice this land:". Gating on
+// card.tapped/summoning sickness unconditionally for every basic-land-fetch source — as if they all
+// cost {T} — wrongly blocked Sakura-Tribe Elder's ability the instant it was already tapped (e.g.
+// from blocking) or still summoning sick, neither of which rule 302.6 actually restricts when the
+// cost has no {T}/{Q} in it.
+export function basicLandFetchCostRequiresTap(card: { oracleText: string }): boolean {
+  const clause = card.oracleText.split("\n").find((line) => /search your library for a basic land card/i.test(line));
+  const costPortion = clause?.split(":")[0] ?? "";
+  return /\{t\}/i.test(costPortion);
+}
+
+// Evolving Wilds/Terramorphic Expanse cost only {T}, Sacrifice (no generic mana at all), which is
+// the only shape this whole basic-land-fetch system originally modeled — every affordability check
+// and every actual resolution path for it paid {T}+sacrifice and nothing else, with no generic-mana
+// component anywhere. Wayfarer's Bauble's real cost is "{2}, {T}, Sacrifice this artifact: ...", so
+// it was being let through both as always-legal-to-activate and as free-to-activate, silently
+// dropping its {2} entirely — reproduced live alongside the isBasicLandFetchAbility button-visibility
+// bug above. Sums the {N} generic-mana symbols in the cost portion (before the colon), same pattern
+// basicLandFetchCostRequiresTap already uses to isolate that portion.
+export function basicLandFetchManaCost(card: { oracleText: string }): number {
+  const clause = card.oracleText.split("\n").find((line) => /search your library for a basic land card/i.test(line));
+  const costPortion = clause?.split(":")[0] ?? "";
+  const manaSymbols = costPortion.match(/\{(\d+)\}/g) ?? [];
+  return manaSymbols.reduce((total, symbol) => total + (Number.parseInt(symbol.replace(/[{}]/g, ""), 10) || 0), 0);
 }

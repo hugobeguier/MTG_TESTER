@@ -163,6 +163,15 @@ export interface VisibleCard {
   attachmentToughnessBonus?: number;
   grantedKeywords?: string[];
   grantedProtectionColors?: string[];
+  // "Enchanted/equipped creature loses all abilities" (Utter Insignificance), or "Creatures
+  // enchanted player controls lose all abilities" (Overwhelming Splendor) — recomputed every
+  // state-based-action pass from current attachments, same pattern as grantedKeywords. hasKeyword()
+  // (src/components/AppFlow.tsx) is the choke point that suppresses both printed and granted
+  // keywords once this is set; legalActivatedAbilityActions similarly stops offering this card's
+  // own activated abilities. Triggered abilities already in flight (an ETB/death trigger resolved
+  // at the moment of entering/dying, before this pass ever runs) aren't retroactively suppressed —
+  // this only ever affects a permanent that's continuously on the battlefield.
+  abilitiesStripped?: boolean;
   // Additional card types granted by a static ability elsewhere (Secret Arcade-style "X you
   // control are Y in addition to their other types") — recomputed every state-based-action pass
   // from current board state, same pattern as grantedKeywords. Everything reading card.typeLine
@@ -191,6 +200,11 @@ export interface VisibleCard {
   // cleared on any zone change (resetForZoneChange/moveCardBetweenVisibleZones), matching the
   // ability's own "only a creature on the battlefield" wording.
   animatedAsCreature?: boolean;
+  // "Enchanted/equipped creature phases out." (Vanishing). Enforced at canAttack/canBlock and
+  // chooseRemovalTarget (AppFlow.tsx) rather than every board-scanning function — see applyPhaseOut's
+  // doc comment for the scoping rationale. Cleared (phasing back in) at its controller's next untap
+  // step, same as a real untap.
+  phasedOut?: boolean;
   role: string;
   zone: ZoneName;
   tapped?: boolean;
@@ -322,6 +336,15 @@ export interface GameSession {
   // (resolvePhaseAdvance's end-of-cleanup branch, resolveEndTurn) share one insertion point
   // (nextSeatForTurn in AppFlow.tsx) without needing to know about each other.
   extraTurnsQueue?: string[];
+  // Rule-text equivalent of "there is an additional beginning phase after this phase" (Shadow of
+  // the Second Sun, enchanting a player): rather than reworking phase advancement from a fixed-
+  // array index into a general queue, resolvePhaseAdvance (AppFlow.tsx) special-cases the two
+  // transitions this affects — postcombat main phase -> untap step instead of -> end step, and
+  // (while this is set) draw step -> end step instead of -> precombat main phase — so the inserted
+  // untap/upkeep/draw steps are the SAME real phases everything else already fires triggers off of
+  // (Mystic Remora's cumulative upkeep, other "at the beginning of your upkeep" cards, ...), not a
+  // separate hand-rolled resolution path. Cleared once the inserted draw step hands off to end step.
+  extraBeginningPhaseActive?: boolean;
 }
 
 export interface AgentAction {

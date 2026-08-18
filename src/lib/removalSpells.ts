@@ -25,6 +25,16 @@ export interface DestroyEffect {
 export interface DestroyAllEffect {
   kind: "destroy_all";
   targetType: "creature" | "artifact" | "enchantment";
+  // "Destroy all non-Dragon/nonartifact/nonlegendary/nontoken/... creatures" (Crux of Fate, Toxic
+  // Deluge-adjacent sweepers, ...) — a single lowercased qualifier word, or undefined for an
+  // unqualified full wipe. Only ever populated for targetType "creature" in this codebase's real
+  // card pool (no "destroy all nonartifact enchantments"-shaped card exists to motivate supporting
+  // it there too).
+  excludeType?: string;
+  // "Destroy all nonwhite creatures" — full color names ("white"), distinct from excludeType since
+  // color is checked against a card's colors, not its type line (same split parseDestroy's
+  // single-target DestroyEffect already makes between excludedColors and artifactsExcluded).
+  excludedColors: string[];
 }
 
 // "Destroy all creatures with mana value N or less/greater" (Austere Command's creature modes,
@@ -52,6 +62,18 @@ export interface DamageEffect {
   targetType: "any" | "creature" | "player";
 }
 
+// "Deals N damage to each [non-Type] creature [you control/you don't control]." (Anger of the
+// Gods, Blasphemous Act, Whipflare's "nonartifact," Breath Weapon's "non-Dragon," the whole
+// Pyroclasm/Earthquake-shaped sweeper family, ...) — board-wide sibling of DamageEffect's
+// single-"target creature" shape, previously entirely unmodeled (this parser only ever recognized
+// a single targeted hit, so a mass-damage sweeper matched nothing and silently did nothing).
+export interface MassDamageEffect {
+  kind: "mass_damage";
+  amount: number | "X";
+  excludeType?: string;
+  scope: "all" | "opponents";
+}
+
 export interface BounceEffect {
   kind: "bounce";
   targetType: RemovalTargetType;
@@ -67,7 +89,7 @@ export interface ModalEffect {
   modes: Exclude<RemovalEffect, ModalEffect>[];
 }
 
-export type RemovalEffect = DestroyEffect | DestroyAllEffect | DestroyAllConditionalEffect | ExileEffect | DamageEffect | BounceEffect | ModalEffect;
+export type RemovalEffect = DestroyEffect | DestroyAllEffect | DestroyAllConditionalEffect | ExileEffect | DamageEffect | MassDamageEffect | BounceEffect | ModalEffect;
 
 // "target [nonX, nonY] <type>" — restrictions like "target nonartifact, nonblack creature" sit
 // between "target" and the type noun, so every pattern needs to tolerate them.
@@ -96,9 +118,19 @@ function parseDestroy(text: string): DestroyEffect | DestroyAllEffect | DestroyA
   // Command) from matching as an unconditional wipe — it used to, since "destroy all creatures"
   // is a literal substring of that conditional clause, which meant a "choose two" modal wipe with
   // a mana-value-gated creature mode always resolved as an unconditional full board wipe.
-  if (/\bdestroy all creatures\b(?!\s+with\b)/.test(text)) return { kind: "destroy_all", targetType: "creature" };
-  if (/\bdestroy all artifacts\b/.test(text)) return { kind: "destroy_all", targetType: "artifact" };
-  if (/\bdestroy all enchantments\b/.test(text)) return { kind: "destroy_all", targetType: "enchantment" };
+  const destroyAllCreatures = text.match(/\bdestroy all (?:non-?([a-z]+) )?creatures\b(?!\s+with\b)/);
+  if (destroyAllCreatures) {
+    const qualifier = destroyAllCreatures[1]?.toLowerCase();
+    const isColor = qualifier ? COLORS.includes(qualifier) : false;
+    return {
+      kind: "destroy_all",
+      targetType: "creature",
+      excludeType: qualifier && !isColor ? qualifier : undefined,
+      excludedColors: qualifier && isColor ? [qualifier] : []
+    };
+  }
+  if (/\bdestroy all artifacts\b/.test(text)) return { kind: "destroy_all", targetType: "artifact", excludedColors: [] };
+  if (/\bdestroy all enchantments\b/.test(text)) return { kind: "destroy_all", targetType: "enchantment", excludedColors: [] };
   const conditional = text.match(/\bdestroy all creatures with mana value (\d+) or (less|greater)\b/);
   if (conditional) {
     return {
@@ -158,6 +190,29 @@ function parseDamage(text: string): DamageEffect | undefined {
   return undefined;
 }
 
+// "Deals N/X damage to each [non-Type] creature [you don't control]." — checked as its own parser
+// rather than folded into parseDamage since it has no single "target" to find at all; a fixed or
+// X amount, an optional type-exclusion qualifier (color words are declined here — this codebase's
+// real "nonwhite creatures"-shaped card always pairs it with the same destroy_all wipe wording, not
+// a damage one, so there's nothing in the pool to motivate the extra branch), and an optional
+// "you don't control" scope (Fiery Cannonade, ...) are all this shape ever varies by.
+function parseMassDamage(text: string): MassDamageEffect | undefined {
+  const match = text.match(/deals (x|\d+) damage to each (?:non-?([a-z]+) )?creatures?(?: (you don'?t control))?/i);
+  if (!match) return undefined;
+  const qualifier = match[2]?.toLowerCase();
+  // A color-word qualifier ("nonwhite") would need to check the card's colors, not its type line —
+  // no such card exists in this codebase's real data for a mass-damage effect (only for destroy_all
+  // wipes, which already handle it separately), so this declines rather than silently mismatching.
+  if (qualifier && COLORS.includes(qualifier)) return undefined;
+  const amountText = match[1].toLowerCase();
+  return {
+    kind: "mass_damage",
+    amount: amountText === "x" ? "X" : Number.parseInt(amountText, 10),
+    excludeType: qualifier,
+    scope: match[3] ? "opponents" : "all"
+  };
+}
+
 // "Return target [nonX] <type> to its owner's hand" (Unsummon, Cyclonic Rift, Vapor Snag, ...).
 // A "you don't control" qualifier some bounce spells carry (Cyclonic Rift) isn't separately
 // enforced — this engine's removal targeting already defaults to preferring opponents' permanents
@@ -171,7 +226,7 @@ function parseBounce(text: string): BounceEffect | undefined {
 }
 
 function parseSingleRemovalEffect(text: string): Exclude<RemovalEffect, ModalEffect> | undefined {
-  return parseDestroy(text) ?? parseExile(text) ?? parseDamage(text) ?? parseBounce(text);
+  return parseDestroy(text) ?? parseExile(text) ?? parseDamage(text) ?? parseMassDamage(text) ?? parseBounce(text);
 }
 
 // "Choose one/two —\n• mode.\n• mode. ..." (Boros Charm, Austere Command, ...). Each bullet is

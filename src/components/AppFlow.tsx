@@ -21,9 +21,12 @@ import {
   type SelfUntapAbility
 } from "@/lib/activatedAbilities";
 import {
+  basicLandFetchCostRequiresTap,
+  basicLandFetchManaCost,
   deathEffectText,
   etbEffectText,
   isActivatedAbilityClause,
+  isBasicLandFetchAbility,
   mergeModalBulletClauses,
   oracleClauses,
   parseAdditionalSacrificeCost,
@@ -46,13 +49,17 @@ import {
 import {
   attachedBasePowerToughness,
   attachedPowerToughnessBonus,
+  attachmentStripsAllAbilities,
   enchantRestriction,
   equipCost,
   grantedKeywords as attachmentGrantedKeywords,
   grantedProtectionColors as attachmentGrantedProtectionColors,
+  attachmentGrantsExtraBeginningPhase,
   isAura,
   isEquipment,
-  isRemovalStyleAura
+  isRemovalStyleAura,
+  playerCreatureLockEffect,
+  restrictsNonManaNonLoyaltyAbilities
 } from "@/lib/attachments";
 import {
   computeDevotion,
@@ -104,6 +111,11 @@ type TriggerEffect = (
   | { kind: "add_counter"; counterKind: string; amount: number; scope: "self" | "context" | "target_creature" | "target_creature_you_control" }
   | { kind: "copy_token"; scope: "self" | "context" }
   | { kind: "draw_then_put_back"; drawAmount: number; putBackAmount: number }
+  // Board-wide temporary pump/debuff off a triggered ability (Doomwake Giant's Constellation
+  // "creatures your opponents control get -1/-1 until end of turn") — shares its shape with
+  // spell-cast MassPumpEffect (see parseMassPump/applyMassPumpEffect) so the same application
+  // logic is reused rather than duplicated.
+  | { kind: "mass_pump"; power: number; toughness: number; excludeType?: string; scope: "all" | "controlled" | "opponents" }
   // Mind's Dilation-style "exile the top card of [that player]'s library. Until end of turn, you
   // may cast that card without paying its mana cost if it's a nonland card." — cross-seat (exiles
   // from fromSeatId's library, grants cast permission to the trigger's own controller) and waives
@@ -196,7 +208,7 @@ type PendingRuleChoice =
       sourceCardId: string;
       sourceCardName: string;
       prompt: string;
-      destination: "hand" | "battlefield" | "graveyard";
+      destination: "hand" | "battlefield" | "graveyard" | "library";
       tapped?: boolean;
       maxChoices: number;
       allowedCardFilter?: string;
@@ -259,8 +271,13 @@ type PendingRuleChoice =
       sourceCardName: string;
       prompt: string;
       requiredCount: number;
-      trigger: Extract<PendingAction, { type: "trigger" }>;
-      remainingStack: PendingAction[];
+      // Present only when this choice grew out of resolving a triggered ability (finishTriggerResolution's
+      // draw_then_put_back branch) — there's a real stack/parent action to resume once the choice is
+      // made. A plain cast spell's own "draw N, then put M back" (Brainstorm, ...) reaches this same
+      // choice via applyRuleWorkflow instead, well after the spell itself already finished resolving
+      // and priority already moved on, so it has neither of these and nothing left to resume.
+      trigger?: Extract<PendingAction, { type: "trigger" }>;
+      remainingStack?: PendingAction[];
     }
   | {
       id: string;
@@ -464,6 +481,133 @@ const TURN_PHASES = [
 // phase out of ever being retried.
 const AGENT_REQUEST_TIMEOUT_MS = 25000;
 
+// A RuleWorkflow classification is a pure function of (event, the card's own oracle text) —
+// deterministicRuleWorkflow only ever reads those two fields, and the Ollama fallback's
+// classification is meant to be one too even though it's also handed board-state context (that
+// context is for picking sensible warnings/targets, not for changing what kind of effect a fixed
+// piece of oracle text fundamentally is). So a classification learned once from any real encounter
+// (either seat, this game or an earlier one via the localStorage-backed persistence below) is safe
+// to reuse for every later encounter of the exact same card+event shape — both to skip a repeat
+// Ollama round-trip, and to let agentCardSnapshot surface a plain-English "what this does" summary
+// to the playing agent's own decision-making instead of it having to re-guess from raw oracle text
+// alone every single time (see consultRulesAdvisor/agentCardSnapshot below).
+const RULE_WORKFLOW_CACHE_STORAGE_KEY = "mtg-rule-workflow-cache-v1";
+const ruleWorkflowCache = new Map<string, RuleWorkflow>();
+let ruleWorkflowCacheLoaded = false;
+
+function ruleWorkflowCacheKey(event: string, oracleText: string) {
+  return `${event}::${oracleText}`;
+}
+
+function loadRuleWorkflowCacheOnce() {
+  if (ruleWorkflowCacheLoaded || typeof window === "undefined") return;
+  ruleWorkflowCacheLoaded = true;
+  try {
+    const raw = window.localStorage.getItem(RULE_WORKFLOW_CACHE_STORAGE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw) as Record<string, RuleWorkflow>;
+    for (const [key, value] of Object.entries(parsed)) ruleWorkflowCache.set(key, value);
+  } catch {
+    // Corrupt/incompatible cache from an older shape — safe to ignore, everything just
+    // re-classifies as if the cache were empty, same as any other cache miss.
+  }
+}
+
+function saveRuleWorkflowCache(key: string, workflow: RuleWorkflow) {
+  ruleWorkflowCache.set(key, workflow);
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(RULE_WORKFLOW_CACHE_STORAGE_KEY, JSON.stringify(Object.fromEntries(ruleWorkflowCache)));
+  } catch {
+    // Storage full/unavailable (private browsing, quota, ...) — the in-memory cache still works
+    // for the rest of this session, it just won't survive a reload.
+  }
+}
+
+// Every cached classification whose key matches this card's exact oracle text, regardless of which
+// event it was originally learned from (an ETB trigger and a death trigger on the same card are
+// cached under different keys but both describe the same physical card) — used by agentCardSnapshot
+// to hand the playing agent's decision context a digest of what the rules advisor already
+// established this card does, without needing a fresh consultation for every card it's holding.
+function cachedRuleSummariesForCard(oracleText: string): string[] {
+  const suffix = `::${oracleText}`;
+  const summaries: string[] = [];
+  for (const [key, workflow] of ruleWorkflowCache) {
+    if (!key.endsWith(suffix) || workflow.workflow === "none" || !workflow.summary) continue;
+    summaries.push(workflow.summary);
+  }
+  return summaries;
+}
+
+const PREWARM_CONCURRENCY = 2;
+
+async function runWithConcurrencyLimit<T>(items: T[], limit: number, task: (item: T) => Promise<void>) {
+  let nextIndex = 0;
+  async function worker() {
+    while (nextIndex < items.length) {
+      const item = items[nextIndex];
+      nextIndex += 1;
+      await task(item);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+}
+
+// Fire-and-forget, called once from startGame with every seat's full opening deck: classifies every
+// unique card the rules advisor would ever plausibly need to look at, in the background, so the
+// FIRST real encounter of a card during play already has a cached ruling too — not just the second-
+// and-later ones consultRulesAdvisor's own cache check already covers. Never awaited by the caller;
+// the game starts immediately and this just fills the cache in as it goes.
+//
+// Scoped to only the two event shapes the deterministic classifier's own eventRelevantOracleText
+// meaningfully distinguishes: "land_played" for lands, "spell_resolved_to_battlefield" for every
+// other permanent type. Bare Instants/Sorceries are deliberately skipped — their effects are read by
+// parseRemovalEffect/parseZoneEffect/parseTargetedPump/parseMassPump directly at resolution time,
+// never through consultRulesAdvisor, so there's no real gameplay path that would ever look up a
+// cache entry keyed under either event for one; warming them would just be wasted requests. Death
+// triggers and activated abilities aren't prewarmed either — a real, if incomplete, scope limit
+// (the ETB shape this covers is what every rules-advisor bug found so far this session turned out
+// to be), not an oversight.
+async function prewarmRuleWorkflowCache(seats: PlayerSeat[]) {
+  loadRuleWorkflowCacheOnce();
+  const seen = new Set<string>();
+  const candidates: Array<{ event: string; card: VisibleCard }> = [];
+  for (const seat of seats) {
+    const allCards = [...(seat.board.commander ? [seat.board.commander] : []), ...seat.board.hand, ...(seat.library ?? [])];
+    for (const card of allCards) {
+      if (!card.oracleText.trim()) continue;
+      if (!isLandCard(card) && (card.typeLine.includes("Instant") || card.typeLine.includes("Sorcery"))) continue;
+      const event = isLandCard(card) ? "land_played" : "spell_resolved_to_battlefield";
+      const key = ruleWorkflowCacheKey(event, card.oracleText);
+      if (seen.has(key) || ruleWorkflowCache.has(key) || !shouldConsultRulesAdvisor(event, card)) continue;
+      seen.add(key);
+      candidates.push({ event, card });
+    }
+  }
+  if (candidates.length === 0) return;
+  await runWithConcurrencyLimit(candidates, PREWARM_CONCURRENCY, async ({ event, card }) => {
+    const key = ruleWorkflowCacheKey(event, card.oracleText);
+    try {
+      const response = await fetch("/api/rules/check", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        signal: AbortSignal.timeout(AGENT_REQUEST_TIMEOUT_MS),
+        // "its controller" rather than a real seat name — this classification isn't tied to any
+        // actual cast/trigger yet, and a real later encounter's own cache check (consultRulesAdvisor)
+        // will only ever hit this same entry, never overwrite it with a seat-specific phrasing; the
+        // generic wording reads fine either way ("Temple of Deceit instructs its controller to scry 1").
+        body: JSON.stringify({ event, actorName: "its controller", sourceCard: card, battlefield: [], hand: [], graveyard: [], exile: [], libraryPreview: [] })
+      });
+      if (!response.ok) return;
+      const result = (await response.json()) as { workflow: RuleWorkflow };
+      saveRuleWorkflowCache(key, result.workflow);
+    } catch {
+      // Best-effort background warm-up — a failure here just means this card gets classified the
+      // normal reactive way the first time it's actually played, same as before this existed.
+    }
+  });
+}
+
 export function AppFlow({ initialSession, ollama }: { initialSession: GameSession; ollama: OllamaStatus }) {
   const [mode, setMode] = useState<FlowMode>("setup");
   const [session, rawSetSession] = useState(() => checkStateBasedActions(initialSession));
@@ -471,6 +615,12 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   // after every single change, instead of relying on scattered call sites to remember to do it.
   const setSession = useCallback((update: GameSession | ((prev: GameSession) => GameSession)) => {
     rawSetSession((current) => checkStateBasedActions(typeof update === "function" ? update(current) : update));
+  }, []);
+  // One-time load of whatever rule-workflow classifications persisted from earlier sessions —
+  // localStorage isn't available during SSR, so this has to happen client-side on mount rather than
+  // at module init time.
+  useEffect(() => {
+    loadRuleWorkflowCacheOnce();
   }, []);
   const [activeSeatId, setActiveSeatId] = useState(initialSession.activePlayerId ?? initialSession.seats[1]?.id);
   const [prioritySeatId, setPrioritySeatId] = useState(initialSession.activePlayerId ?? initialSession.seats[1]?.id);
@@ -564,7 +714,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     ? canCastAtInstantSpeed(selectedHandCard) &&
       selectedCardCanLegallyCounter &&
       (payCostFromPool(poolForSeat(humanSeat.id), selectedHandCard, selectedHandCard.manaValue).ok ||
-        chooseManaSourcesForCost(humanSeat, selectedHandCard, selectedHandCard.manaValue).ok)
+        chooseManaSourcesForCost(humanSeat, selectedHandCard, selectedHandCard.manaValue, undefined, session.seats).ok)
     : false;
   const selectedCardFaceOptions = selectedHandCard
     ? handCardFaceOptions(humanSeat, selectedHandCard, hasPlayedLandThisTurn(humanSeat.id, session.turn), activeSeatId, poolForSeat(humanSeat.id), session.seats)
@@ -1156,8 +1306,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       return;
     }
     if (action.actionType === "activate_ability" && action.cardId && action.abilityKind === "basic_land_fetch") {
-      const cardId = action.cardId;
-      setSession((current) => resolveBasicLandFetchSearch(current, seat.id, cardId));
+      activateBasicLandFetchForAgent(seat.id, action.cardId);
       return;
     }
     if (action.actionType === "activate_ability" && action.cardId && action.abilityKind === "unlock_room_door" && action.faceIndex !== undefined) {
@@ -1185,7 +1334,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       return;
     }
     if (action.actionType === "activate_ability" && action.cardId && action.abilityKind === "equip") {
-      setSession((current) => resolveEquip(current, seat.id, action.cardId!));
+      setSession((current) => resolveEquip(current, seat.id, action.cardId!)?.session ?? current);
       return;
     }
     if (action.actionType === "activate_ability" && action.cardId && action.abilityKind === "loyalty_ability" && action.loyaltyCost !== undefined) {
@@ -1237,8 +1386,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       return;
     }
     if (legal.actionType === "activate_ability" && legal.cardId && legal.abilityKind === "basic_land_fetch") {
-      const cardId = legal.cardId;
-      setSession((current) => resolveBasicLandFetchSearch(current, seat.id, cardId));
+      activateBasicLandFetchForAgent(seat.id, legal.cardId);
       window.setTimeout(() => passPriority(), 0);
       return;
     }
@@ -1282,7 +1430,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     const fixedCost = adjustedCastingCost(seat, card, card.manaValue, sourceZone === "exile" ? "exile" : "hand", activeSeatId, session.seats);
     const chosenX = maxAffordableX(seat, card, fixedCost);
     const adjustedCost = totalCastingCost(seat, card, card.manaValue, chosenX);
-    const payment = chooseManaSourcesForCost(seat, card, adjustedCost);
+    const payment = chooseManaSourcesForCost(seat, card, adjustedCost, undefined, session.seats);
     if (!payment.ok) {
       addEvent(cannotPayMessage(seat, card, selectedManaTotal(seat, payment.sourceIds), adjustedCost, payment.reason), seat.id, "Mana");
       passPriority();
@@ -1385,6 +1533,10 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       return applyDeckToSeat(seat, config.deck);
     });
     const openingSeats = deckedSeats.map((seat) => withOpeningHand(seat, 7, 0));
+    // Fire-and-forget: not awaited, so it never delays the game actually starting. Runs over every
+    // seat's full deck (not just the human's) since the cache is shared board-wide — any seat
+    // encountering a card benefits every other seat's later encounter of the same card too.
+    void prewarmRuleWorkflowCache(openingSeats);
     const agentResolved = await resolveAgentMulligansWithLLM(openingSeats);
     const nextSession: GameSession = {
       ...session,
@@ -1580,6 +1732,32 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       });
       return;
     }
+
+    // Don't let this shortcut silently skip past a phase where something on the board (anyone's
+    // board — "at the beginning of each end step"/"each upkeep" cards fire off the active player's
+    // own turn too) still has a triggered ability waiting to fire, e.g. an end step trigger, or a
+    // beginning-of-combat trigger the human hasn't reached yet. When one exists somewhere between
+    // here and cleanup, advance a single phase at a time instead so the normal per-phase trigger
+    // detection (the phaseTriggersChecked effect above) gets a chance to run, rather than jumping
+    // straight to the next player's untap step the way the full skip below does.
+    const remainingPhases = TURN_PHASES.slice(Math.max(0, TURN_PHASES.indexOf(session.phase as TurnPhase)));
+    const hasPendingTrigger = remainingPhases.some((phase) =>
+      session.seats.some((seat) => phaseTriggeredCards(seat, phase).length > 0)
+    );
+    // Shadow of the Second Sun's extra untap/upkeep/draw never shows up in phaseTriggeredCards
+    // (the Aura granting it lives on its caster's battlefield, not the active seat's, and its own
+    // trigger text doesn't match the generic phase-trigger patterns anyway — see
+    // hasExtraBeginningPhaseAura) — checked separately so this shortcut can't skip straight past it
+    // to the next player's untap step the same way a real pending trigger already prevents above.
+    const hasPendingExtraBeginningPhase =
+      TURN_PHASES.indexOf(session.phase as TurnPhase) <= TURN_PHASES.indexOf("postcombat main phase") &&
+      hasExtraBeginningPhaseAura(session, activeSeat.id);
+    if (hasPendingTrigger || hasPendingExtraBeginningPhase) {
+      setPriorityPasses([]);
+      setSession((current) => resolvePhaseAdvance(current));
+      return;
+    }
+
     setSelectedHandCardId(undefined);
     setPriorityPasses([]);
     setSession((current) => resolveEndTurn(current, activeSeat.id));
@@ -1600,7 +1778,22 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     const activeIndex = Math.max(0, current.seats.findIndex((seat) => seat.id === activeId));
     const activeSeat = current.seats[activeIndex];
     const phaseIndex = TURN_PHASES.indexOf(current.phase as TurnPhase);
-    const nextPhase = phaseIndex >= 0 ? TURN_PHASES[phaseIndex + 1] : TURN_PHASES[0];
+    let nextPhase = phaseIndex >= 0 ? TURN_PHASES[phaseIndex + 1] : TURN_PHASES[0];
+    // Shadow of the Second Sun: "At the beginning of each of enchanted player's postcombat main
+    // phases, there is an additional beginning phase after this phase." Reroutes postcombat main's
+    // normal -> end step transition through a real untap/upkeep/draw sequence instead (see
+    // extraBeginningPhaseActive's doc comment on GameSession) so every other permanent's own
+    // upkeep-triggered ability (Mystic Remora's cumulative upkeep, etc.) fires exactly like it would
+    // on any other turn — this isn't a separate hand-rolled resolution path, just the same phases
+    // visited twice.
+    let extraBeginningPhaseActive = current.extraBeginningPhaseActive;
+    if (current.phase === "postcombat main phase" && hasExtraBeginningPhaseAura(current, activeSeat.id)) {
+      nextPhase = "untap step";
+      extraBeginningPhaseActive = true;
+    } else if (current.phase === "draw step" && current.extraBeginningPhaseActive) {
+      nextPhase = "end step";
+      extraBeginningPhaseActive = false;
+    }
     clearAllManaPools(current.seats);
 
     if (!nextPhase) {
@@ -1618,6 +1811,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
           turn: current.turn + 1,
           phase: TURN_PHASES[0],
           extraTurnsQueue: queue,
+          extraBeginningPhaseActive: false,
           // session.turn is an internal per-seat turn index (it increments once for every individual
           // player's turn, so a 4-player game's first full round is turns 1-4, not turn 1) — real
           // players talk about "turn 1/2/3" meaning the round (everyone's Nth turn), so the
@@ -1640,6 +1834,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       {
         ...current,
         phase: nextPhase,
+        extraBeginningPhaseActive,
         events: [phaseEvent(activeSeat.id, `${activeSeat.name} passes to ${nextPhase}.`), ...current.events]
       },
       activeSeat.id,
@@ -1673,6 +1868,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         turn: current.turn + 1,
         phase: TURN_PHASES[0],
         extraTurnsQueue: queue,
+        extraBeginningPhaseActive: false,
         events: [
           phaseEvent(
             nextSeat.id,
@@ -1753,6 +1949,20 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
 
   function untapForSeat(session: GameSession, seatId: string): GameSession {
     const seat = session.seats.find((item) => item.id === seatId);
+    // Rule 701.44b: a permanent with a stun counter removes one stun counter instead of untapping
+    // this step — it stays tapped, but the counter comes off, so it untaps normally again once none
+    // are left. summoningSick/attacking/blocking still clear either way (those track "since your
+    // last turn began"/"this combat", not tap state).
+    // Rule 702.26h: a phased-out permanent phases IN at the start of this same step, before any
+    // untapping happens — simplified here to just untapping it along with everything else rather
+    // than separately restoring its exact pre-phase-out tapped status, which this engine doesn't
+    // track (see phasedOut's doc comment on VisibleCard).
+    const untapOrRemoveStun = (card: VisibleCard): VisibleCard => {
+      if (card.phasedOut) return { ...card, phasedOut: false, tapped: false, summoningSick: false, attacking: false, blocking: false };
+      return counterCount(card, "stun") > 0
+        ? { ...applyCounterDelta(card, "stun", -1), summoningSick: false, attacking: false, blocking: false }
+        : { ...card, tapped: false, summoningSick: false, attacking: false, blocking: false };
+    };
     return {
       ...session,
       seats: session.seats.map((item) =>
@@ -1761,8 +1971,8 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
               ...item,
               board: {
                 ...item.board,
-                commander: item.board.commander ? { ...item.board.commander, tapped: false, summoningSick: false, attacking: false, blocking: false } : undefined,
-                battlefield: item.board.battlefield.map((card) => ({ ...card, tapped: false, summoningSick: false, attacking: false, blocking: false }))
+                commander: item.board.commander ? untapOrRemoveStun(item.board.commander) : undefined,
+                battlefield: item.board.battlefield.map(untapOrRemoveStun)
               }
             }
           : item
@@ -1786,7 +1996,13 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
 
     const targetLabel = target.planeswalker ? `${target.planeswalker.name} (${target.seat.name})` : target.seat.name;
     const tax = totalAttackTax(target.seat, Boolean(target.planeswalker));
-    const payment = tax > 0 ? chooseManaSourcesForCost(attacker, genericCostShim(tax), tax) : undefined;
+    const taxCard = genericCostShim(tax);
+    // Prefer whatever the attacker (a human) has already manually tapped into their floating pool —
+    // same pool-first-then-auto-tap preference as every other cost in this engine, so choosing which
+    // specific lands pay an attack tax actually works instead of always auto-tapping invisibly.
+    const attackerPool = attacker.kind === "human" ? poolForSeat(seatId) : undefined;
+    const taxPoolPayment = tax > 0 && attackerPool ? payCostFromPool(attackerPool, taxCard, tax) : undefined;
+    const payment = tax > 0 ? (taxPoolPayment?.ok ? taxPoolPayment : chooseManaSourcesForCost(attacker, taxCard, tax, undefined, session.seats)) : undefined;
     if (tax > 0 && !payment?.ok) {
       return {
         ...session,
@@ -1796,9 +2012,13 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         ]
       };
     }
+    if (taxPoolPayment?.ok) {
+      setSeatManaPool(seatId, taxPoolPayment.pool);
+      clearManaContributions(seatId);
+    }
 
     const staysUntapped = hasVigilance(attackingCard);
-    const taxedAttacker = payment?.ok ? spendManaSources(attacker, payment.sourceIds) : attacker;
+    const taxedAttacker = payment?.ok && !taxPoolPayment?.ok ? spendManaSources(attacker, payment.sourceIds) : attacker;
 
     const attackDeclaredSession: GameSession = {
       ...session,
@@ -1826,12 +2046,60 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       ]
     };
 
+    // "Whenever you attack a player, EFFECT" (Soaring Lightbringer's token creation, ...) — a
+    // genuinely different trigger family from the phase-based triggers this engine already models:
+    // hasPhaseTrigger's "declare attackers step" match only fires once per phase entry (not once per
+    // individual attack declared) and doesn't distinguish attacking a player from attacking a
+    // planeswalker, so it was never actually wired up anywhere. Checked directly here, the one place
+    // that already knows an attack against a PLAYER specifically (not a planeswalker) was just
+    // declared. Scoped to token-creation effects only (the only shape this card pool needs); other
+    // effect kinds are declined rather than guessed at.
+    let attackTriggeredSession = attackDeclaredSession;
+    if (!target.planeswalker) {
+      for (const source of taxedAttacker.board.battlefield) {
+        const attackEffectClause = oracleClauses(source.oracleText)
+          .map((clause) => clause.match(/^whenever you attack an? player,\s*(.+)$/i))
+          .find((match): match is RegExpMatchArray => match !== null)?.[1];
+        if (!attackEffectClause) continue;
+        const tokenSpecs = parseCreateTokenSpecs(attackEffectClause);
+        if (tokenSpecs.length === 0) continue;
+        const created = createTokensForSeat(attackTriggeredSession, seatId, source.id, tokenSpecs);
+        const createdTokenIds = new Set(created.createdTokens.map((token) => token.id));
+        attackTriggeredSession = {
+          ...created.session,
+          seats: created.session.seats.map((seat) =>
+            seat.id === seatId
+              ? {
+                  ...seat,
+                  board: {
+                    ...seat.board,
+                    battlefield: seat.board.battlefield.map((card) =>
+                      createdTokenIds.has(card.id) ? { ...card, tapped: true, attacking: true, attackTargetId: target.seat.id, summoningSick: false } : card
+                    )
+                  }
+                }
+              : seat
+          ),
+          events: [
+            {
+              id: crypto.randomUUID(),
+              at: new Date().toISOString(),
+              seatId,
+              message: `${source.name} triggers: ${attacker.name} creates ${created.createdTokens.map((token) => token.name).join(", ")}, tapped and attacking ${target.seat.name}.`,
+              detail: "Rules action"
+            },
+            ...created.session.events
+          ]
+        };
+      }
+    }
+
     const annihilatorN = annihilatorAmount(attackingCard.oracleText);
-    if (!annihilatorN) return attackDeclaredSession;
+    if (!annihilatorN) return attackTriggeredSession;
     const sacrifices = chooseAnnihilatorSacrifices(target.seat, annihilatorN);
-    if (sacrifices.length === 0) return attackDeclaredSession;
+    if (sacrifices.length === 0) return attackTriggeredSession;
     return destroyCreatures(
-      attackDeclaredSession,
+      attackTriggeredSession,
       sacrifices.map((card) => ({
         seatId: target.seat.id,
         cardId: card.id,
@@ -1925,26 +2193,39 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     const source = seat?.board.battlefield.find((card) => card.id === choice.sourceCardId);
     if (!seat || !source || !isCumulativeUpkeepCard(source)) return;
     const cost = cumulativeUpkeepCost(source);
+    const costCard = genericCostShim(cost);
+    // Prefer whatever the player has already manually tapped into their floating pool (so choosing
+    // which specific lands to tap for this actually works, same as casting a spell from hand does),
+    // falling back to auto-tapping untapped lands if they haven't pre-tapped anything — upkeep is
+    // the very start of a turn, so there's usually nothing floating yet, and this can't force the
+    // player to have pre-tapped before the choice even opens. This used to only ever check the pool
+    // with no fallback, so pressing "Pay 1" silently failed every time (reported live as "I press
+    // Pay 1 and nothing happens") since nothing is ever floating this early in the turn.
     const pool = poolForSeat(seat.id);
-    if (manaPoolTotal(pool) < cost) {
-      addEvent(`${seat.name} cannot pay ${source.name}'s cumulative upkeep; ${cost} generic mana is required.`, seat.id, "Rules advisor");
+    const poolPayment = payCostFromPool(pool, costCard, cost);
+    const payment = poolPayment.ok ? poolPayment : chooseManaSourcesForCost(seat, costCard, cost, source.id, session.seats);
+    const availableMana = poolPayment.ok ? manaPoolTotal(pool) : selectedManaTotal(seat, payment.sourceIds);
+    if (!payment.ok) {
+      addEvent(cannotPayMessage(seat, costCard, availableMana, cost, payment.reason), seat.id, "Mana");
       return;
     }
-    setSeatManaPool(seat.id, spendGenericMana(pool, cost));
-    clearManaContributions(seat.id);
+    if (poolPayment.ok) {
+      setSeatManaPool(seat.id, poolPayment.pool);
+      clearManaContributions(seat.id);
+    }
     setSession((current) => ({
       ...current,
-      seats: current.seats.map((item) =>
-        item.id === seat.id
-          ? {
-              ...item,
-              board: {
-                ...item.board,
-                battlefield: item.board.battlefield.map((card) => (card.id === source.id ? applyCounterDelta(card, "age", 1) : card))
-              }
-            }
-          : item
-      ),
+      seats: current.seats.map((item) => {
+        if (item.id !== seat.id) return item;
+        const spent = poolPayment.ok ? item : spendManaSources(item, payment.sourceIds);
+        return {
+          ...spent,
+          board: {
+            ...spent.board,
+            battlefield: spent.board.battlefield.map((card) => (card.id === source.id ? applyCounterDelta(card, "age", 1) : card))
+          }
+        };
+      }),
       events: [
         {
           id: crypto.randomUUID(),
@@ -1998,7 +2279,9 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   // going through the async round trip for this shape at all. Returns whether it matched.
   function resolvePhaseScryOrSurveil(seatId: string, sourceCard: VisibleCard, phase: TurnPhase): boolean {
     const clauseText = phaseEffectText(sourceCard.oracleText, phase);
-    if (/^if\b/i.test(clauseText.replace(/^at the beginning of[^,]*,\s*/i, ""))) return false;
+    // Same non-anchored strip as applyDeterministicPhaseTrigger's own leading-condition guard (see
+    // its comment) — a keyword ability name can sit in front of "at the beginning of..." here too.
+    if (/^if\b/i.test(clauseText.replace(/^.*?\bat the beginning of[^,]*,\s*/i, ""))) return false;
     const match = clauseText.match(/\b(scry|surveil)\s+(\d+|a|one|two|three|four|five)\b/i);
     if (!match) return false;
     const count = numberWordToInt(match[2]);
@@ -2206,6 +2489,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
 
     const dfcSplit = modalDoubleFacedLandSplit(card);
     const doors = roomDoorFaces(card);
+    const spellFaces = independentlyCastableSpellFaces(card);
     const playingAsLand = dfcSplit ? faceIndex === dfcSplit.landIndex : isLandCard(card);
 
     // Sorcery-speed timing (rule 305.3 for lands, 307.5/601.3a-adjacent for sorcery-speed spells):
@@ -2315,12 +2599,40 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     }
 
     const doorFace = doors && faceIndex !== undefined ? doors[faceIndex] : undefined;
-    const costCard = doorFace ? cardWithFaceManaCost(card, doorFace.manaCost) : card;
-    const baseCost = doorFace ? manaValueFromManaCost(doorFace.manaCost) : card.manaValue;
-    const fixedCost = adjustedCastingCost(seat, costCard, baseCost, sourceZone, activeSeatId, session.seats) + (sourceZone === "command" ? card.commanderTax ?? 0 : 0);
+    const spellFace = spellFaces && faceIndex !== undefined ? spellFaces[faceIndex] : undefined;
+    const costCard = doorFace ? cardWithFaceManaCost(card, doorFace.manaCost) : spellFace ? cardWithFaceManaCost(card, spellFace.manaCost) : card;
+    const baseCost = doorFace ? manaValueFromManaCost(doorFace.manaCost) : spellFace ? manaValueFromManaCost(spellFace.manaCost) : card.manaValue;
+    const fixedCost =
+      adjustedCastingCost(seat, costCard, baseCost, sourceZone, activeSeatId, session.seats, session.turn, session.onceEachTurnEffectsUsed) +
+      (sourceZone === "command" ? card.commanderTax ?? 0 : 0);
+    // One with the Multiverse: fixedCost came back 0 specifically because of its once-per-turn
+    // permission (not because the card is genuinely free or discounted some other way) — recorded
+    // now, at the moment this cast actually commits, not inside adjustedCastingCost itself (a pure
+    // function called from many purely-informational sites too — see its own doc comment).
+    const usesOnceEachTurnFreeCast =
+      sourceZone === "hand" &&
+      fixedCost === 0 &&
+      baseCost > 0 &&
+      !(card.exiledPlayableFree || hasOmniscienceFreeHandCast(seat)) &&
+      hasOnceEachTurnFreeHandCastPermission(seat);
+    // Demon of Fate's Design: same "fixedCost came back 0 because of a specific permission, not
+    // because the spell is genuinely free" reasoning as usesOnceEachTurnFreeCast above, except this
+    // one also charges real life (adjustedCastingCost only waives the mana half).
+    const usesFateDesignLifeAltCost =
+      sourceZone === "hand" &&
+      fixedCost === 0 &&
+      baseCost > 0 &&
+      !usesOnceEachTurnFreeCast &&
+      !(card.exiledPlayableFree || hasOmniscienceFreeHandCast(seat)) &&
+      card.typeLine.includes("Enchantment") &&
+      hasFateDesignLifeAltCost(seat);
+    // Room doors never carry an {X} in their real card pool, so forcing chosenX to 0 there was
+    // never a live bug — but an Adventure/Omen spell face (Exude Toxin's {X}{B}{B}) needs the same
+    // X-affordability logic every other X spell gets, so spellFace goes through maxAffordableX
+    // instead of being forced to 0 the way doorFace is.
     const chosenX = doorFace ? 0 : maxAffordableX(seat, costCard, fixedCost, seat.kind === "human" ? poolForSeat(seatId) : undefined);
     const totalCost = totalCastingCost(seat, costCard, baseCost, chosenX) + (sourceZone === "command" ? card.commanderTax ?? 0 : 0);
-    const payment = seat.kind === "human" ? payCostFromPool(poolForSeat(seatId), costCard, totalCost) : chooseManaSourcesForCost(seat, costCard, totalCost);
+    const payment = seat.kind === "human" ? payCostFromPool(poolForSeat(seatId), costCard, totalCost) : chooseManaSourcesForCost(seat, costCard, totalCost, undefined, session.seats);
     const availableMana = seat.kind === "human" ? manaPoolTotal(poolForSeat(seatId)) : selectedManaTotal(seat, payment.sourceIds);
     if (!payment.ok) {
       addEvent(cannotPayMessage(seat, costCard, availableMana, totalCost, payment.reason), seatId, "Mana");
@@ -2333,8 +2645,8 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       clearManaContributions(seatId);
     }
 
-    const castName = doorFace?.name ?? (dfcSplit ? dfcSplit.spellFace.name : card.name);
-    const castTypeLine = doorFace?.typeLine ?? (dfcSplit ? dfcSplit.spellFace.typeLine : card.typeLine);
+    const castName = doorFace?.name ?? spellFace?.name ?? (dfcSplit ? dfcSplit.spellFace.name : card.name);
+    const castTypeLine = doorFace?.typeLine ?? spellFace?.typeLine ?? (dfcSplit ? dfcSplit.spellFace.typeLine : card.typeLine);
     const spentManaText = seat.kind === "human" && payment.ok ? ` spending ${formatManaPoolPayment(payment.spent)}` : ` using ${availableMana} mana`;
     const xText = chosenX > 0 ? ` (X=${chosenX})` : "";
     const action: PendingAction = {
@@ -2347,10 +2659,40 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       sourceZone,
       manaSourceIds: payment.sourceIds,
       position,
-      faceIndex: doorFace ? faceIndex : dfcSplit?.spellIndex,
+      // A genuine transform DFC creature (Heliod, the Radiant Dawn // Heliod, the Warped Eclipse)
+      // isn't a Room door, an Adventure/Omen spell face, or an MDFC land — none of doorFace/
+      // spellFace/dfcSplit apply, so without this it would enter still carrying its combined,
+      // both-faces oracleText (this card data's convention for any 2-faced card) instead of
+      // resolving to just its front face the way applyChosenFaceToCard needs a real faceIndex to do.
+      // It only ever enters showing face 0 (the front); transformPermanent flips it later.
+      faceIndex:
+        doorFace ? faceIndex : spellFace ? faceIndex : dfcSplit ? dfcSplit.spellIndex : !doors && card.faces?.length === 2 ? 0 : undefined,
       chosenX: chosenX > 0 ? chosenX : undefined,
       message: `${seat.name} casts ${castName}${xText}${sourceZone === "command" ? " from the command zone" : sourceZone === "exile" ? " from exile" : ""}${spentManaText}.`
     };
+    if (usesOnceEachTurnFreeCast) {
+      setSession((current) => ({
+        ...current,
+        onceEachTurnEffectsUsed: [...(current.onceEachTurnEffectsUsed ?? []), onceEachTurnFreeCastKey(current.turn, seatId)]
+      }));
+    }
+    if (usesFateDesignLifeAltCost) {
+      setSession((current) => ({
+        ...current,
+        onceEachTurnEffectsUsed: [...(current.onceEachTurnEffectsUsed ?? []), fateDesignLifeAltCostKey(current.turn, seatId)],
+        seats: current.seats.map((item) => (item.id === seatId ? { ...item, life: item.life - baseCost } : item)),
+        events: [
+          {
+            id: crypto.randomUUID(),
+            at: new Date().toISOString(),
+            seatId,
+            message: `${seat.name} pays ${baseCost} life instead of ${castName}'s mana cost.`,
+            detail: "Rules action"
+          },
+          ...current.events
+        ]
+      }));
+    }
     beginPendingAction(action, "Stack");
     setSelectedHandCardId(undefined);
   }
@@ -2368,19 +2710,26 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     if (!seat || !card || !doors) return;
     const lockedDoor = doors[faceIndex];
     const shim = cardWithFaceManaCost(card, lockedDoor.manaCost);
-    const totalCost = manaValueFromManaCost(lockedDoor.manaCost);
-    // Unlocking is paid for on the spot rather than through the normal pre-tap-then-cast flow, so
-    // auto-select untapped battlefield sources for both humans and agents (mirrors acceptMiracleOffer).
-    const payment = chooseManaSourcesForCost(seat, shim, totalCost);
+    const totalCost = Math.max(0, manaValueFromManaCost(lockedDoor.manaCost) - unlockCostReduction(seat));
+    // Prefer whatever's already floating in the human's pool, same pool-first-then-auto-tap
+    // preference as every other cost (unlike acceptMiracleOffer/Room-door-unlock's sibling cases
+    // above, this one IS a deliberate button click, so a human gets a real chance to pre-tap first).
+    const pool = seat.kind === "human" ? poolForSeat(seatId) : undefined;
+    const poolPayment = pool ? payCostFromPool(pool, shim, totalCost) : undefined;
+    const payment = poolPayment?.ok ? poolPayment : chooseManaSourcesForCost(seat, shim, totalCost, undefined, session.seats);
     if (!payment.ok) {
       addEvent(cannotPayMessage(seat, shim, selectedManaTotal(seat, payment.sourceIds), totalCost, payment.reason), seatId, "Mana");
       return;
+    }
+    if (poolPayment?.ok) {
+      setSeatManaPool(seatId, poolPayment.pool);
+      clearManaContributions(seatId);
     }
     setSession((current) => ({
       ...current,
       seats: current.seats.map((item) => {
         if (item.id !== seatId) return item;
-        const spent = spendManaSources(item, payment.sourceIds);
+        const spent = poolPayment?.ok ? item : spendManaSources(item, payment.sourceIds);
         return {
           ...spent,
           board: {
@@ -2404,17 +2753,23 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   }
 
   // A search_library effect needs the interactive library-search choice UI (pendingRuleChoice),
-  // which the pure resolveGenericSacrificeAbility/applySacrificeEffect functions can't reach —
+  // which the pure payGenericSacrificeCost/applySacrificeEffect functions can't reach —
   // detected here first, cost paid synchronously against the current session (mirroring how
   // toggleTapCard already reads `session` directly for a same-tick decision), then the same
   // choose_card_from_library flow real tutor spells already use takes over: resolveAgentRuleChoice's
   // existing effect auto-resolves it for agent seats, and the human gets the normal search modal.
   function activateGenericSacrificeAbility(seatId: string, cardId: string, abilityIndex: number) {
-    const card = session.seats.find((item) => item.id === seatId)?.board.battlefield.find((item) => item.id === cardId);
+    const seat = session.seats.find((item) => item.id === seatId);
+    const card = seat?.board.battlefield.find((item) => item.id === cardId);
     const ability = card ? parseGenericSacrificeAbilities(card.oracleText)[abilityIndex] : undefined;
+    const humanPool = seat?.kind === "human" ? poolForSeat(seatId) : undefined;
     if (card && ability?.effect.kind === "search_library") {
-      const paid = payGenericSacrificeCost(session, seatId, cardId, abilityIndex);
+      const paid = payGenericSacrificeCost(session, seatId, cardId, abilityIndex, humanPool);
       if (!paid) return;
+      if (paid.poolSpent) {
+        setSeatManaPool(seatId, paid.poolSpent);
+        clearManaContributions(seatId);
+      }
       const searchEffect = ability.effect;
       setSession(() => paid.session);
       setPendingRuleChoice({
@@ -2431,15 +2786,27 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       });
       return;
     }
-    setSession((current) => resolveGenericSacrificeAbility(current, seatId, cardId, abilityIndex));
+    const paid = payGenericSacrificeCost(session, seatId, cardId, abilityIndex, humanPool);
+    if (!paid) return;
+    if (paid.poolSpent) {
+      setSeatManaPool(seatId, paid.poolSpent);
+      clearManaContributions(seatId);
+    }
+    setSession(() => applySacrificeEffect(paid.session, seatId, paid.card, paid.ability.effect, paid.ability.clause));
   }
 
   function activateGenericTapAbility(seatId: string, cardId: string, abilityIndex: number) {
-    const card = session.seats.find((item) => item.id === seatId)?.board.battlefield.find((item) => item.id === cardId);
+    const seat = session.seats.find((item) => item.id === seatId);
+    const card = seat?.board.battlefield.find((item) => item.id === cardId);
     const ability = card ? parseGenericTapAbilities(card.oracleText)[abilityIndex] : undefined;
+    const humanPool = seat?.kind === "human" ? poolForSeat(seatId) : undefined;
     if (card && ability?.effect.kind === "search_library") {
-      const paid = payGenericTapCost(session, seatId, cardId, abilityIndex);
+      const paid = payGenericTapCost(session, seatId, cardId, abilityIndex, humanPool);
       if (!paid) return;
+      if (paid.poolSpent) {
+        setSeatManaPool(seatId, paid.poolSpent);
+        clearManaContributions(seatId);
+      }
       const searchEffect = ability.effect;
       setSession(() => paid.session);
       setPendingRuleChoice({
@@ -2456,20 +2823,39 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       });
       return;
     }
-    setSession((current) => resolveGenericTapAbility(current, seatId, cardId, abilityIndex));
+    const paid = payGenericTapCost(session, seatId, cardId, abilityIndex, humanPool);
+    if (!paid) return;
+    if (paid.poolSpent) {
+      setSeatManaPool(seatId, paid.poolSpent);
+      clearManaContributions(seatId);
+    }
+    setSession(() => applyGenericTapEffect(paid.session, seatId, cardId, paid.card.name, paid.ability.effect, paid.ability.clause));
   }
 
   function activateSelfUntapAbility(seatId: string, cardId: string, abilityIndex: number) {
-    setSession((current) => resolveSelfUntapAbility(current, seatId, cardId, abilityIndex));
+    const seat = session.seats.find((item) => item.id === seatId);
+    const humanPool = seat?.kind === "human" ? poolForSeat(seatId) : undefined;
+    const resolved = resolveSelfUntapAbility(session, seatId, cardId, abilityIndex, humanPool);
+    if (resolved.poolSpent) {
+      setSeatManaPool(seatId, resolved.poolSpent);
+      clearManaContributions(seatId);
+    }
+    setSession(() => resolved.session);
   }
 
   function activateGenericManaAbility(seatId: string, cardId: string, abilityIndex: number) {
-    const card = session.seats.find((item) => item.id === seatId)?.board.battlefield.find((item) => item.id === cardId);
+    const seat = session.seats.find((item) => item.id === seatId);
+    const card = seat?.board.battlefield.find((item) => item.id === cardId);
     const ability = card ? parseGenericManaAbilities(card.oracleText)[abilityIndex] : undefined;
     const effect = ability ? parseGenericAbilityEffect(ability.effectText) : undefined;
+    const humanPool = seat?.kind === "human" ? poolForSeat(seatId) : undefined;
     if (card && ability && effect?.kind === "search_library") {
-      const paid = payGenericManaCost(session, seatId, cardId, abilityIndex);
+      const paid = payGenericManaCost(session, seatId, cardId, abilityIndex, humanPool);
       if (!paid) return;
+      if (paid.poolSpent) {
+        setSeatManaPool(seatId, paid.poolSpent);
+        clearManaContributions(seatId);
+      }
       const searchEffect = effect.effect;
       setSession(() => paid.session);
       setPendingRuleChoice({
@@ -2486,11 +2872,25 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       });
       return;
     }
-    setSession((current) => resolveGenericManaAbility(current, seatId, cardId, abilityIndex));
+    const paid = payGenericManaCost(session, seatId, cardId, abilityIndex, humanPool);
+    if (!paid) return;
+    if (paid.poolSpent) {
+      setSeatManaPool(seatId, paid.poolSpent);
+      clearManaContributions(seatId);
+    }
+    setSession(() => applyGenericAbilityEffect(paid.session, seatId, paid.card, paid.effect));
   }
 
   function activateEquip(seatId: string, cardId: string) {
-    setSession((current) => resolveEquip(current, seatId, cardId));
+    const seat = session.seats.find((item) => item.id === seatId);
+    const humanPool = seat?.kind === "human" ? poolForSeat(seatId) : undefined;
+    const resolved = resolveEquip(session, seatId, cardId, humanPool);
+    if (!resolved) return;
+    if (resolved.poolSpent) {
+      setSeatManaPool(seatId, resolved.poolSpent);
+      clearManaContributions(seatId);
+    }
+    setSession(() => resolved.session);
   }
 
   // Prowess and extort both trigger the instant a spell is cast (put on the stack), regardless of
@@ -2550,7 +2950,10 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     const extortSources = caster.board.battlefield.filter((card) => hasKeyword(card, "extort"));
     for (const extortSource of extortSources) {
       const manaSource = caster.board.battlefield.find(
-        (card) => isAvailableManaSource(card, caster) && !card.tapped && (manaChoicesForCard(card, caster).includes("W") || manaChoicesForCard(card, caster).includes("B"))
+        (card) =>
+          isAvailableManaSource(card, caster, session.seats) &&
+          !card.tapped &&
+          (manaChoicesForCard(card, caster, session.seats).includes("W") || manaChoicesForCard(card, caster, session.seats).includes("B"))
       );
       if (!manaSource) continue;
       const opponentIds = session.seats.filter((seat) => seat.id !== caster.id && !seat.hasLost).map((seat) => seat.id);
@@ -2613,9 +3016,9 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       if (sourceCard) {
         const turnSeatKey = `${session.turn}:${action.actorSeatId}`;
         const priorSpellCount = spellsCastThisTurn.current.get(turnSeatKey) ?? 0;
-        const isFirstSpellThisTurn = priorSpellCount === 0;
-        spellsCastThisTurn.current.set(turnSeatKey, priorSpellCount + 1);
-        const castTriggers = findCastTriggers(session, action.actorSeatId, sourceCard, isFirstSpellThisTurn);
+        const castOrdinal = priorSpellCount + 1;
+        spellsCastThisTurn.current.set(turnSeatKey, castOrdinal);
+        const castTriggers = findCastTriggers(session, action.actorSeatId, sourceCard, castOrdinal);
         // Deferred, same reasoning as the land-ETB-trigger scheduling elsewhere in this file:
         // queueCommonTriggers itself calls beginPendingAction, so calling it synchronously here
         // (still inside this very call to beginPendingAction) would be reentrant.
@@ -2750,7 +3153,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     const chosenX = manaPoolTotal(pool) > 0 ? maxAffordableX(humanSeat, card, fixedCost, pool) : maxAffordableX(humanSeat, card, fixedCost);
     const adjustedCost = totalCastingCost(humanSeat, card, card.manaValue, chosenX);
     const poolPayment = payCostFromPool(pool, card, adjustedCost);
-    const payment = poolPayment.ok ? poolPayment : chooseManaSourcesForCost(humanSeat, card, adjustedCost);
+    const payment = poolPayment.ok ? poolPayment : chooseManaSourcesForCost(humanSeat, card, adjustedCost, undefined, session.seats);
     const availableMana = poolPayment.ok ? manaPoolTotal(pool) : selectedManaTotal(humanSeat, payment.sourceIds);
     if (!isLandCard(card) && !payment.ok) {
       addEvent(cannotPayMessage(humanSeat, card, availableMana, adjustedCost, payment.reason), humanSeat.id, "Mana");
@@ -2788,7 +3191,15 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       respondWithCard(cardId, "exile");
       return;
     }
-    playCard(seatId, cardId, undefined, "exile");
+    // An Adventure/Omen-shaped card in exile can only be cast as its permanent face from here on
+    // (see legalMainPhaseActions' matching exile-loop comment) — playCard needs that face's index
+    // explicitly, since without one it falls back to the stale combined card for cost/effect
+    // purposes instead of the specific face this button actually means to cast.
+    const seat = session.seats.find((item) => item.id === seatId);
+    const card = seat?.board.exile?.find((item) => item.id === cardId);
+    const spellFaces = card ? independentlyCastableSpellFaces(card) : undefined;
+    const permanentFaceIndex = spellFaces?.findIndex((face) => !face.typeLine.includes("Adventure") && !face.typeLine.includes("Omen"));
+    playCard(seatId, cardId, undefined, "exile", permanentFaceIndex !== undefined && permanentFaceIndex >= 0 ? permanentFaceIndex : undefined);
   }
 
   function resolvePendingTrigger() {
@@ -2901,10 +3312,16 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     if (!choice || choice.kind !== "put_cards_on_library") return;
     setPendingRuleChoice(undefined);
     setSession((current) => applyPutCardsOnLibrary(current, choice.controllerSeatId, choice.sourceCardName, cardIds.slice(0, choice.requiredCount)));
-    if (choice.trigger.parentAction) {
-      window.setTimeout(() => beginPendingAction(choice.trigger.parentAction!, "Stack"), 0);
+    const trigger = choice.trigger;
+    if (!trigger) {
+      // A cast spell's own draw_then_put_back (see the type's own comment) — the stack/priority
+      // were already resolved before this choice ever opened, so there's nothing left to resume.
+      return;
+    }
+    if (trigger.parentAction) {
+      window.setTimeout(() => beginPendingAction(trigger.parentAction!, "Stack"), 0);
     } else {
-      resumeTopStackAction(choice.remainingStack);
+      resumeTopStackAction(choice.remainingStack ?? []);
     }
   }
 
@@ -2940,10 +3357,23 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         const counterCardRaw = findSpellSourceCard(session, action);
         const counterAbility = counterCardRaw ? parseCounterSpellAbility(counterCardRaw.oracleText) : undefined;
         const targetSeat = session.seats.find((seat) => seat.id === counterTargetAction.actorSeatId);
+        // Prefer whatever the targeted caster (a human) already has floating, same pool-first-then-
+        // auto-tap preference as every other cost — they get one shot at this the instant the
+        // counterspell resolves, so if they'd pre-tapped specific lands in anticipation, that choice
+        // is honored instead of being silently ignored in favor of auto-tapping different lands.
+        const taxCard = counterAbility?.taxAmount !== undefined ? genericCostShim(counterAbility.taxAmount) : undefined;
+        const targetPool = targetSeat?.kind === "human" ? poolForSeat(targetSeat.id) : undefined;
+        const taxPoolPayment = taxCard && targetPool ? payCostFromPool(targetPool, taxCard, counterAbility!.taxAmount!) : undefined;
         const taxPayment =
           counterAbility?.taxAmount !== undefined && targetSeat
-            ? chooseManaSourcesForCost(targetSeat, genericCostShim(counterAbility.taxAmount), counterAbility.taxAmount)
+            ? taxPoolPayment?.ok
+              ? taxPoolPayment
+              : chooseManaSourcesForCost(targetSeat, taxCard!, counterAbility.taxAmount, undefined, session.seats)
             : undefined;
+        if (taxPoolPayment?.ok && targetSeat) {
+          setSeatManaPool(targetSeat.id, taxPoolPayment.pool);
+          clearManaContributions(targetSeat.id);
+        }
         const counterTargetCard = findSpellSourceCard(session, counterTargetAction);
         const immune = counterTargetCard ? spellIsImmuneToCounters(session, counterTargetCard, counterTargetAction.actorSeatId) : false;
         const isCountered = !immune && !(counterAbility?.taxAmount !== undefined && taxPayment?.ok);
@@ -2992,7 +3422,9 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
           } else {
             next = {
               ...next,
-              seats: next.seats.map((seat) => (taxPayment?.ok && seat.id === counterTargetAction.actorSeatId ? spendManaSources(seat, taxPayment.sourceIds) : seat)),
+              seats: next.seats.map((seat) =>
+                taxPayment?.ok && !taxPoolPayment?.ok && seat.id === counterTargetAction.actorSeatId ? spendManaSources(seat, taxPayment.sourceIds) : seat
+              ),
               events: [
                 {
                   id: crypto.randomUUID(),
@@ -3109,6 +3541,25 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
           : undefined;
       const pumpResolvedSession =
         pumpEffect && sourceCard ? applyTargetedPumpEffect(zoneResolvedSession, action.actorSeatId, sourceCard, pumpEffect) : zoneResolvedSession;
+      // Board-wide sibling of the single-target pump above: "Each non-Dragon creature gets -X/-X
+      // until end of turn." (Exude Toxin, ...) — same X-substitution-first handling, just no single
+      // "target creature" to find, so it needed its own parser/applier instead of reusing pumpEffect.
+      const massPumpEffect =
+        sourceCard && !isModalCard
+          ? parseMassPump(action.chosenX !== undefined ? substituteX(etbEffectText(sourceCard.oracleText), action.chosenX) : etbEffectText(sourceCard.oracleText))
+          : undefined;
+      const massPumpResolvedSession =
+        massPumpEffect && sourceCard ? applyMassPumpEffect(pumpResolvedSession, action.actorSeatId, sourceCard.name, massPumpEffect) : pumpResolvedSession;
+      // "Target creature gets -3/-3 until end of turn. You gain 2 life." (Locthwain Scorn, and the
+      // same "removal/pump plus a flat life change" template on plenty of other real cards) — a
+      // second, independent clause on the same spell that removalEffect/pumpEffect/massPumpEffect
+      // above don't touch (each of those only ever recognizes its own one effect per card and
+      // returns early), so without this the life change was silently dropped whenever the spell's
+      // main effect was something else. Scanned as its own pass over the same scoped text, same
+      // "applies regardless of the spell's own destination" reasoning as removal/zone/pump.
+      const simpleLifeEffect = sourceCard && !isModalCard ? parseSimpleLifeChange(etbEffectText(sourceCard.oracleText)) : undefined;
+      const simpleLifeResolvedSession =
+        simpleLifeEffect && sourceCard ? applySimpleLifeChange(massPumpResolvedSession, action.actorSeatId, sourceCard.name, simpleLifeEffect) : massPumpResolvedSession;
       // Rule 500.7: "Take an extra turn after this one." (Temporal Mastery, Time Warp, ...) —
       // applies regardless of the spell's own destination, same "still happens even though the
       // instant/sorcery itself resolves to the graveyard" reasoning as removal/zone/pump above.
@@ -3116,8 +3567,8 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       // the current turn's own cleanup step or an End Turn shortcut next needs to pick who's next.
       const extraTurnGrantedSession =
         sourceCard && grantsExtraTurn(sourceCard.oracleText)
-          ? { ...pumpResolvedSession, extraTurnsQueue: [...(pumpResolvedSession.extraTurnsQueue ?? []), action.actorSeatId] }
-          : pumpResolvedSession;
+          ? { ...simpleLifeResolvedSession, extraTurnsQueue: [...(simpleLifeResolvedSession.extraTurnsQueue ?? []), action.actorSeatId] }
+          : simpleLifeResolvedSession;
       const genericModalEffect = sourceCard && isModalCard && !removalEffect ? parseGenericModalEffect(sourceCard.oracleText, action.chosenX) : undefined;
       const preTriggerSession =
         genericModalEffect && sourceCard ? applyGenericModalEffect(extraTurnGrantedSession, action.actorSeatId, sourceCard, genericModalEffect) : extraTurnGrantedSession;
@@ -3264,6 +3715,17 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     const seat = session.seats.find((item) => item.id === seatId);
     if (!seat || !shouldConsultRulesAdvisor(event, sourceCard)) return;
 
+    // A classification is a pure function of (event, this card's own oracle text) — see
+    // ruleWorkflowCache's own comment — so a prior real consultation for the exact same shape
+    // (this game or, thanks to loadRuleWorkflowCacheOnce, an earlier one) can be reused outright,
+    // skipping the network round-trip to Ollama entirely.
+    const cacheKey = ruleWorkflowCacheKey(event, sourceCard.oracleText);
+    const cached = ruleWorkflowCache.get(cacheKey);
+    if (cached) {
+      applyRuleWorkflow(seatId, sourceCard, cached, "cached");
+      return;
+    }
+
     setRulesAdvisorPending((count) => count + 1);
     try {
       const response = await fetch("/api/rules/check", {
@@ -3288,6 +3750,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const result = (await response.json()) as { source: "deterministic" | "ollama" | "fallback"; workflow: RuleWorkflow };
+      saveRuleWorkflowCache(cacheKey, result.workflow);
       applyRuleWorkflow(seatId, sourceCard, result.workflow, result.source);
     } catch (error) {
       addEvent(
@@ -3300,7 +3763,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     }
   }
 
-  function applyRuleWorkflow(seatId: string, sourceCard: VisibleCard, workflow: RuleWorkflow, source: "deterministic" | "ollama" | "fallback") {
+  function applyRuleWorkflow(seatId: string, sourceCard: VisibleCard, workflow: RuleWorkflow, source: "deterministic" | "ollama" | "fallback" | "cached") {
     if (workflow.workflow === "none") return;
 
     const seat = session.seats.find((item) => item.id === seatId);
@@ -3336,16 +3799,19 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     if (
       workflow.workflow === "search_library_to_hand" ||
       workflow.workflow === "search_library_to_battlefield" ||
-      workflow.workflow === "search_library_to_graveyard"
+      workflow.workflow === "search_library_to_graveyard" ||
+      workflow.workflow === "search_library_to_library"
     ) {
-      const destination: "hand" | "battlefield" | "graveyard" =
+      const destination: "hand" | "battlefield" | "graveyard" | "library" =
         workflow.workflow === "search_library_to_battlefield"
           ? "battlefield"
           : workflow.workflow === "search_library_to_graveyard"
             ? "graveyard"
-            : workflow.destination === "battlefield" || workflow.destination === "graveyard"
-              ? workflow.destination
-              : "hand";
+            : workflow.workflow === "search_library_to_library"
+              ? "library"
+              : workflow.destination === "battlefield" || workflow.destination === "graveyard" || workflow.destination === "library"
+                ? workflow.destination
+                : "hand";
       setPendingRuleChoice({
         id: crypto.randomUUID(),
         kind: "choose_card_from_library",
@@ -3368,6 +3834,36 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         checkMiracleAfterDraw(current, next);
         return next;
       });
+      return;
+    }
+
+    if (workflow.workflow === "draw_then_put_back") {
+      // Same shape as finishTriggerResolution's draw_then_put_back branch (a permanent's triggered
+      // "draw N, then put M back," e.g. Aminatou's +1) but for a cast spell (Brainstorm, ...) —
+      // the draw itself isn't a choice, so it happens immediately; only which cards go back is a
+      // real decision, routed through the same put_cards_on_library choice (a real prompt for a
+      // human, resolveAgentRuleChoice's highest-mana-value-first pick for an agent).
+      const drawAmount = Math.max(1, workflow.maxChoices || 1);
+      const putBackAmount = workflow.putBackAmount ?? 0;
+      let postDrawHandSize = 0;
+      setSession((current) => {
+        const drawnSession = drawMultipleForSeat(current, seatId, drawAmount, `${seat.name} draws ${drawAmount} from ${sourceCard.name}.`);
+        postDrawHandSize = drawnSession.seats.find((item) => item.id === seatId)?.board.hand.length ?? 0;
+        checkMiracleAfterDraw(current, drawnSession);
+        return drawnSession;
+      });
+      const requiredCount = Math.min(putBackAmount, postDrawHandSize);
+      if (requiredCount > 0) {
+        setPendingRuleChoice({
+          id: crypto.randomUUID(),
+          kind: "put_cards_on_library",
+          controllerSeatId: seatId,
+          sourceCardId: workflow.sourceCardId ?? sourceCard.id,
+          sourceCardName: sourceCard.name,
+          prompt: `${seat.name} must put ${requiredCount} card${requiredCount === 1 ? "" : "s"} from hand on top of their library.`,
+          requiredCount
+        });
+      }
       return;
     }
 
@@ -3698,16 +4194,27 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     }
     const totalCost = 2;
     // Myriad Landscape's own {T} is a separate cost component of this same ability (302.6) — it must
-    // stay untapped to pay that, so it can't also be tapped as one of the 2 generic mana sources.
-    const payment = chooseManaSourcesForCost(seat, genericCostShim(totalCost), totalCost, cardId);
+    // stay untapped to pay that, so it can't also be tapped as one of the 2 generic mana sources
+    // (moot for the pool path below: this function already bailed out above if the card itself were
+    // tapped, so its own mana can never be sitting in the floating pool at this point).
+    const costCard = genericCostShim(totalCost);
+    const pool = poolForSeat(seatId);
+    const poolPayment = payCostFromPool(pool, costCard, totalCost);
+    const payment = poolPayment.ok ? poolPayment : chooseManaSourcesForCost(seat, costCard, totalCost, cardId, session.seats);
+    const availableMana = poolPayment.ok ? manaPoolTotal(pool) : selectedManaTotal(seat, payment.sourceIds);
     if (!payment.ok) {
-      addEvent(cannotPayMessage(seat, genericCostShim(totalCost), selectedManaTotal(seat, payment.sourceIds), totalCost, payment.reason), seatId, "Mana");
+      addEvent(cannotPayMessage(seat, costCard, availableMana, totalCost, payment.reason), seatId, "Mana");
       return;
     }
-    setSession((current) => ({
-      ...current,
-      seats: current.seats.map((item) => (item.id === seatId ? spendManaSources(item, payment.sourceIds) : item))
-    }));
+    if (poolPayment.ok) {
+      setSeatManaPool(seatId, poolPayment.pool);
+      clearManaContributions(seatId);
+    } else {
+      setSession((current) => ({
+        ...current,
+        seats: current.seats.map((item) => (item.id === seatId ? spendManaSources(item, payment.sourceIds) : item))
+      }));
+    }
     setMyriadSearch({ seatId, sourceCardId: cardId });
   }
 
@@ -3732,7 +4239,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     const card = seat?.board.battlefield.find((item) => item.id === cardId);
     if (!seat || !card || card.tapped) return;
     const totalCost = 2;
-    const payment = chooseManaSourcesForCost(seat, genericCostShim(totalCost), totalCost, cardId);
+    const payment = chooseManaSourcesForCost(seat, genericCostShim(totalCost), totalCost, cardId, session.seats);
     if (!payment.ok) return;
     const pair = chooseBestBasicLandPairForMyriad(seat);
     if (pair.length !== 2) return;
@@ -3756,7 +4263,49 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       addEvent(`${seat.name} has no basic lands to find with ${card.name}.`, seatId, "Rules action");
       return;
     }
+    // Wayfarer's Bauble-style "{2}, {T}, Sacrifice ...: Search..." has a real generic-mana
+    // component that this whole system never used to pay at all (it was modeled only on Evolving
+    // Wilds' plain "{T}, Sacrifice ...", which costs 0 here) — paid up front, same "pay first, then
+    // open the picker" order as resolveMyriadLandscape, so a human who can't afford it gets a clear
+    // message instead of picking a land only to have nothing happen.
+    const manaCost = basicLandFetchManaCost(card);
+    if (manaCost > 0) {
+      const costCard = genericCostShim(manaCost);
+      const pool = poolForSeat(seatId);
+      const poolPayment = payCostFromPool(pool, costCard, manaCost);
+      const payment = poolPayment.ok ? poolPayment : chooseManaSourcesForCost(seat, costCard, manaCost, cardId, session.seats);
+      const availableMana = poolPayment.ok ? manaPoolTotal(pool) : selectedManaTotal(seat, payment.sourceIds);
+      if (!payment.ok) {
+        addEvent(cannotPayMessage(seat, costCard, availableMana, manaCost, payment.reason), seatId, "Mana");
+        return;
+      }
+      if (poolPayment.ok) {
+        setSeatManaPool(seatId, poolPayment.pool);
+        clearManaContributions(seatId);
+      } else {
+        setSession((current) => ({
+          ...current,
+          seats: current.seats.map((item) => (item.id === seatId ? spendManaSources(item, payment.sourceIds) : item))
+        }));
+      }
+    }
     setBasicLandFetchSearch({ seatId, sourceCardId: cardId, sourceCardName: card.name });
+  }
+
+  // Agent counterpart to resolveBasicLandFetch — pays the same {2}-if-any generic mana cost, then
+  // auto-picks a basic land the same way resolveBasicLandFetchSearch always has for agents (no
+  // chosenCardId).
+  function activateBasicLandFetchForAgent(seatId: string, cardId: string) {
+    const seat = session.seats.find((item) => item.id === seatId);
+    const card = seat?.board.battlefield.find((item) => item.id === cardId);
+    if (!seat || !card || !isBasicLandFetchAbility(card)) return;
+    const manaCost = basicLandFetchManaCost(card);
+    const payment = manaCost > 0 ? chooseManaSourcesForCost(seat, genericCostShim(manaCost), manaCost, cardId, session.seats) : undefined;
+    if (manaCost > 0 && !payment?.ok) return;
+    setSession((current) => {
+      const spentSeats = payment?.ok ? current.seats.map((item) => (item.id === seatId ? spendManaSources(item, payment.sourceIds) : item)) : current.seats;
+      return resolveBasicLandFetchSearch({ ...current, seats: spentSeats }, seatId, cardId);
+    });
   }
 
   function completeBasicLandFetch(cardId: string) {
@@ -3781,28 +4330,23 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   }
 
   function startLibraryLook(mode: LibraryLookMode, count: number) {
-    setSession((current) => {
-      const seat = current.seats.find((item) => item.id === humanSeat.id);
-      const cards = (seat?.library ?? []).slice(0, mode === "scry" ? 1 : count);
-      setLibraryLook({ seatId: humanSeat.id, mode, cards, remaining: count, orderedCards: mode === "reorder" ? [] : undefined });
-      return {
-        ...current,
-        events: [
-          {
-            id: crypto.randomUUID(),
-            at: new Date().toISOString(),
-            seatId: humanSeat.id,
-            message:
-              mode === "scry"
-                ? `${humanSeat.name} starts scry ${count}.`
-                : mode === "reorder"
-                  ? `${humanSeat.name} looks at the top ${cards.length} card${cards.length === 1 ? "" : "s"} and will put them back in any order.`
-                  : `${humanSeat.name} looks at the top ${cards.length} card${cards.length === 1 ? "" : "s"} to ${mode}.`
-          },
-          ...current.events
-        ]
-      };
-    });
+    // setLibraryLook must not be called from inside setSession's updater (React may invoke that
+    // updater more than once, and other setState calls inside it are unreliable) — computed against
+    // the current session directly instead, mirroring every other modal-opening call in this file.
+    // Reproduced live as Diabolic Vision's "look at the top 5, pick one" window never opening at
+    // all: the event log line this same call also wrote could still show up (the returned session
+    // object was still correct), while the actual look-window state silently never stuck.
+    const seat = session.seats.find((item) => item.id === humanSeat.id);
+    const cards = (seat?.library ?? []).slice(0, mode === "scry" ? 1 : count);
+    setLibraryLook({ seatId: humanSeat.id, mode, cards, remaining: count, orderedCards: mode === "reorder" ? [] : undefined });
+    addEvent(
+      mode === "scry"
+        ? `${humanSeat.name} starts scry ${count}.`
+        : mode === "reorder"
+          ? `${humanSeat.name} looks at the top ${cards.length} card${cards.length === 1 ? "" : "s"} and will put them back in any order.`
+          : `${humanSeat.name} looks at the top ${cards.length} card${cards.length === 1 ? "" : "s"} to ${mode}.`,
+      humanSeat.id
+    );
   }
 
   function chooseRuleLibraryCard(cardId: string) {
@@ -3972,7 +4516,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     // Miracle is an interrupt that fires the instant a card is drawn, so a human never gets a
     // chance to pre-tap lands into their floating pool the way normal casting requires. Auto-select
     // untapped battlefield sources instead, same as the agent path, and tap them on resolution.
-    const payment = chooseManaSourcesForCost(seat, card, choice.miracleCost);
+    const payment = chooseManaSourcesForCost(seat, card, choice.miracleCost, undefined, session.seats);
     if (!payment.ok) {
       addEvent(cannotPayMessage(seat, card, selectedManaTotal(seat, payment.sourceIds), choice.miracleCost, payment.reason), seat.id, "Rules advisor");
       setPendingRuleChoice(undefined);
@@ -4025,7 +4569,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     }
     if (choice.kind === "miracle_offer") {
       const card = seat.board.hand.find((item) => item.id === choice.sourceCardId);
-      const payment = card ? chooseManaSourcesForCost(seat, card, choice.miracleCost) : undefined;
+      const payment = card ? chooseManaSourcesForCost(seat, card, choice.miracleCost, undefined, session.seats) : undefined;
       if (card && payment?.ok) {
         acceptMiracleOffer();
         return;
@@ -4079,7 +4623,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       // other optional-cost decision in this file is made without needing an LLM judgment call.
       if (source && isCumulativeUpkeepCard(source)) {
         const cost = cumulativeUpkeepCost(source);
-        const payment = chooseManaSourcesForCost(seat, genericCostShim(cost), cost);
+        const payment = chooseManaSourcesForCost(seat, genericCostShim(cost), cost, undefined, session.seats);
         if (payment.ok) {
           setSession((current) => ({
             ...current,
@@ -4244,34 +4788,76 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     // Myriad Landscape isn't "simple" — besides tapping for {C} it also has a second, unrelated
     // {2}, T, Sacrifice ability, so a bare click can't just auto-resolve to the mana tap the way it
     // does for every other land/rock here (see the dedicated branch in handleInspectCard).
-    return !card.typeLine.includes("Creature") && !isEquipment(card) && card.name !== "Myriad Landscape" && isAvailableManaSource(card, seat);
+    return !card.typeLine.includes("Creature") && !isEquipment(card) && card.name !== "Myriad Landscape" && isAvailableManaSource(card, seat, session.seats);
   }
 
   function handleInspectCard(card: VisibleCard) {
     const ownerSeat = session.seats.find((seat) => seat.board.battlefield.some((item) => item.id === card.id));
-    if (ownerSeat?.id === humanSeat.id && card.name === "Myriad Landscape" && !card.tapped) {
+    // A battlefield click hands this function whatever card object was baked into the 3D mesh's
+    // userData at the last scene rebuild (keyed off tableRenderKey) — that can lag one render behind
+    // the real session state (e.g. its tapped flag), unlike the "T" hotkey's toggleTapCard, which
+    // already re-reads the card straight from session and never had this problem. Re-resolving to
+    // the live battlefield card here (falling back to the passed-in one for non-battlefield cards,
+    // e.g. hand clicks, which are plain DOM-rendered and never go stale) keeps every check below, and
+    // the inspector modal itself, in sync with what's actually on the table right now.
+    const liveCard = ownerSeat?.board.battlefield.find((item) => item.id === card.id) ?? card;
+    if (ownerSeat?.id === humanSeat.id && liveCard.name === "Myriad Landscape" && !liveCard.tapped) {
       // Only offer the choice when the search ability is actually payable (2 generic from sources
       // other than this land itself); otherwise there's nothing to choose between, so just tap for
       // the colorless mana like any other simple mana source.
-      if (chooseManaSourcesForCost(ownerSeat, genericCostShim(2), 2, card.id).ok) {
-        setMyriadTapChoice({ seatId: ownerSeat.id, cardId: card.id, cardName: card.name });
+      if (chooseManaSourcesForCost(ownerSeat, genericCostShim(2), 2, liveCard.id, session.seats).ok) {
+        setMyriadTapChoice({ seatId: ownerSeat.id, cardId: liveCard.id, cardName: liveCard.name });
       } else {
-        tapForMana(ownerSeat.id, card.id, "battlefield", "C");
+        tapForMana(ownerSeat.id, liveCard.id, "battlefield", "C");
       }
       return;
     }
-    if (ownerSeat?.id === humanSeat.id && isSimpleManaSourcePermanent(card, humanSeat)) {
-      toggleTapCard(humanSeat.id, card.id, "battlefield");
+    if (ownerSeat?.id === humanSeat.id && isSimpleManaSourcePermanent(liveCard, humanSeat)) {
+      toggleTapCard(humanSeat.id, liveCard.id, "battlefield");
       return;
     }
-    setInspectedCard(card);
+    setInspectedCard(liveCard);
   }
 
   function toggleTapCard(seatId: string, cardId: string, location: "battlefield" | "command") {
     const seat = session.seats.find((item) => item.id === seatId);
     const card = location === "command" ? seat?.board.commander : seat?.board.battlefield.find((item) => item.id === cardId);
-    if (seat && card && !card.tapped && isAvailableManaSource(card, seat)) {
-      const choices = manaChoicesForCard(card, seat);
+    // Same special-case as handleInspectCard's dedicated Myriad Landscape branch, needed here too
+    // since the "T" keyboard shortcut (see ThreeGameTable's setMovementKey) calls this function
+    // directly, bypassing handleInspectCard entirely — without this, that shortcut always just
+    // tapped Myriad Landscape for colorless mana with no way to ever reach its search ability.
+    if (seatId === humanSeat.id && location === "battlefield" && card?.name === "Myriad Landscape" && !card.tapped && seat) {
+      if (chooseManaSourcesForCost(seat, genericCostShim(2), 2, card.id, session.seats).ok) {
+        setMyriadTapChoice({ seatId, cardId, cardName: card.name });
+      } else {
+        tapForMana(seatId, cardId, "battlefield", "C");
+      }
+      return;
+    }
+    // Generalizes the Myriad Landscape case above to every other permanent whose {T} is the cost of
+    // a real non-mana activated ability (a generic sacrifice ability like Wayfarer's Bauble's
+    // "{2}, {T}, Sacrifice: search for a basic land," or a generic tap ability like Retrofitter
+    // Foundry's) — this isn't a mana source (isAvailableManaSource is false for it, so it falls
+    // through everything below to the blind "just flip tapped" fallback), which left it "spent"
+    // with nothing actually resolved, and then silently blocked the real ability afterward since its
+    // own {T} cost could never be paid a second time. Routes to the same card inspector a click
+    // already opens instead, so the human gets an actual choice of what to activate.
+    if (
+      seatId === humanSeat.id &&
+      location === "battlefield" &&
+      seat &&
+      card &&
+      !card.tapped &&
+      !isAvailableManaSource(card, seat, session.seats) &&
+      (parseGenericSacrificeAbilities(card.oracleText).some((ability) => ability.costTap) ||
+        parseGenericTapAbilities(card.oracleText).length > 0 ||
+        (isBasicLandFetchAbility(card) && basicLandFetchCostRequiresTap(card)))
+    ) {
+      setInspectedCard(card);
+      return;
+    }
+    if (seat && card && !card.tapped && isAvailableManaSource(card, seat, session.seats)) {
+      const choices = manaChoicesForCard(card, seat, session.seats);
       if (choices.length > 1) {
         setManaChoice({ seatId, cardId, cardName: card.name, location, choices });
         return;
@@ -4313,7 +4899,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   function tapForMana(seatId: string, cardId: string, location: "battlefield" | "command", color: ManaColor) {
     const seat = session.seats.find((item) => item.id === seatId);
     const card = location === "command" ? seat?.board.commander : seat?.board.battlefield.find((item) => item.id === cardId);
-    if (!seat || !card || card.tapped || !isAvailableManaSource(card, seat)) return;
+    if (!seat || !card || card.tapped || !isAvailableManaSource(card, seat, session.seats)) return;
     setSession((current) => tapVisibleCard(current, seatId, cardId, location));
     const amount = manaProducedBy(card, seat);
     setManaPools((current) => {
@@ -4705,11 +5291,11 @@ function createCommanderCard(deck: CommanderDeck, existing?: VisibleCard): Visib
 }
 
 function canAttack(card: VisibleCard) {
-  return card.typeLine.includes("Creature") && !card.tapped && (!card.summoningSick || hasHaste(card)) && !card.attacking && !hasDefender(card);
+  return card.typeLine.includes("Creature") && !card.tapped && !card.phasedOut && (!card.summoningSick || hasHaste(card)) && !card.attacking && !hasDefender(card);
 }
 
 function canBlock(card: VisibleCard, attacker?: VisibleCard) {
-  if (!card.typeLine.includes("Creature") || card.tapped || card.blocking) return false;
+  if (!card.typeLine.includes("Creature") || card.tapped || card.phasedOut || card.blocking) return false;
   if (attacker && hasFlying(attacker) && !hasFlying(card) && !hasReach(card)) return false;
   if (attacker && isProtectedFrom(attacker, card)) return false;
   // Rule 702.111b: menace requires the attacker be blocked by two or more creatures, assigned
@@ -4722,6 +5308,10 @@ function canBlock(card: VisibleCard, attacker?: VisibleCard) {
 }
 
 function hasKeyword(card: VisibleCard, keyword: string) {
+  // Layer 6: a creature that's lost all abilities (Utter Insignificance, Overwhelming Splendor —
+  // see abilitiesStripped's doc comment) has neither its printed keywords nor any granted ones,
+  // regardless of what either source's text says.
+  if (card.abilitiesStripped) return false;
   return hasKeywordText(card.oracleText, keyword) || Boolean(card.grantedKeywords?.includes(keyword));
 }
 
@@ -5289,7 +5879,7 @@ function legalMainPhaseActions(
     const split = modalDoubleFacedLandSplit(card);
     if (split) {
       const totalCost = adjustedCastingCost(seat, card, card.manaValue, "hand", activeSeatId, session.seats);
-      const payment = chooseManaSourcesForCost(seat, card, totalCost);
+      const payment = chooseManaSourcesForCost(seat, card, totalCost, undefined, session.seats);
       // hasResolvableTarget reads oracleText/typeLine off whatever card it's given — the top-level
       // VisibleCard fields describe the *primary* face, not necessarily this spell face (Malakir
       // Rebirth // Malakir Mire and the rest of the Zendikar Rising MDFC cycle put the spell face
@@ -5317,7 +5907,7 @@ function legalMainPhaseActions(
       doors.forEach((door, index) => {
         const shim = cardWithFaceManaCost(card, door.manaCost);
         const totalCost = adjustedCastingCost(seat, shim, manaValueFromManaCost(door.manaCost), "hand", activeSeatId, session.seats);
-        const payment = chooseManaSourcesForCost(seat, shim, totalCost);
+        const payment = chooseManaSourcesForCost(seat, shim, totalCost, undefined, session.seats);
         if (!payment.ok) return;
         actions.push({
           id: `cast:${card.id}:face${index}`,
@@ -5333,12 +5923,38 @@ function legalMainPhaseActions(
       continue;
     }
 
+    const spellFaces = independentlyCastableSpellFaces(card);
+    if (spellFaces) {
+      spellFaces.forEach((face, index) => {
+        const shim = cardWithFaceManaCost(card, face.manaCost);
+        const baseCost = manaValueFromManaCost(face.manaCost);
+        const fixedCost = adjustedCastingCost(seat, shim, baseCost, "hand", activeSeatId, session.seats);
+        const chosenX = maxAffordableX(seat, shim, fixedCost);
+        const totalCost = totalCastingCost(seat, shim, baseCost, chosenX);
+        const payment = chooseManaSourcesForCost(seat, shim, totalCost, undefined, session.seats);
+        if (!payment.ok) return;
+        if (!hasResolvableTarget(session, seat.id, { ...card, name: face.name, typeLine: face.typeLine, oracleText: face.oracleText })) return;
+        const xNote = chosenX > 0 ? ` Casting for X=${chosenX}.` : "";
+        actions.push({
+          id: `cast:${card.id}:face${index}`,
+          actionType: "cast_spell",
+          cardId: card.id,
+          faceIndex: index,
+          targetIds: [],
+          label: chosenX > 0 ? `cast ${face.name} (X=${chosenX})` : `cast ${face.name}`,
+          detail: `${face.manaCost ?? ""} ${face.typeLine}. ${face.oracleText} Payable with ${formatManaPoolPayment(payment.spent)}.${xNote}`.trim(),
+          role: card.role
+        });
+      });
+      continue;
+    }
+
     if (isLandCard(card)) continue;
 
     const fixedCost = adjustedCastingCost(seat, card, card.manaValue, "hand", activeSeatId, session.seats);
     const chosenX = maxAffordableX(seat, card, fixedCost);
     const totalCost = totalCastingCost(seat, card, card.manaValue, chosenX);
-    const payment = chooseManaSourcesForCost(seat, card, totalCost);
+    const payment = chooseManaSourcesForCost(seat, card, totalCost, undefined, session.seats);
     if (!payment.ok) continue;
     if (!hasResolvableTarget(session, seat.id, card)) continue;
     const xNote = chosenX > 0 ? ` Casting for X=${chosenX}.` : "";
@@ -5352,34 +5968,51 @@ function legalMainPhaseActions(
       role: card.role
     });
   }
-  // Cards exiled by an impulse-draw/steal-and-play effect (see zoneEffects.ts) that this seat is
-  // currently permitted to cast — land-plays from exile aren't offered (a deliberate scope limit,
-  // see playCard's playingAsLand branch, which only ever removes from hand).
+  // Cards exiled by an impulse-draw/steal-and-play effect (see zoneEffects.ts), or by casting an
+  // Adventure card's spell half (see spellResolutionDestination's "exile" branch), that this seat
+  // is currently permitted to cast — land-plays from exile aren't offered (a deliberate scope
+  // limit, see playCard's playingAsLand branch, which only ever removes from hand).
   for (const card of seat.board.exile ?? []) {
     if (card.exiledPlayableBySeatId !== seat.id || isLandCard(card)) continue;
     if (card.exiledPlayableUntilTurn !== undefined && turn > card.exiledPlayableUntilTurn) continue;
-    const fixedCost = adjustedCastingCost(seat, card, card.manaValue, "exile", activeSeatId, session.seats);
-    const chosenX = maxAffordableX(seat, card, fixedCost);
-    const totalCost = totalCastingCost(seat, card, card.manaValue, chosenX);
-    const payment = chooseManaSourcesForCost(seat, card, totalCost);
+    // An Adventure/Omen-shaped card in exile can only be cast as its OTHER (permanent) face from
+    // here on — the spell half is what got it exiled in the first place, and real rules don't let
+    // it be cast again. Simplification: this also applies to the much rarer case of an Adventure
+    // card exiled by an unrelated impulse-draw/steal effect before either face was ever cast, where
+    // real rules would actually allow choosing either face — declined in favor of always offering
+    // the permanent face, since nothing here tracks whether this specific exiled copy has already
+    // used its spell half.
+    const spellFaces = independentlyCastableSpellFaces(card);
+    const permanentFace = spellFaces?.find((face) => !face.typeLine.includes("Adventure") && !face.typeLine.includes("Omen"));
+    const permanentFaceIndex = permanentFace ? spellFaces!.indexOf(permanentFace) : undefined;
+    const castCard = permanentFace ? cardWithFaceManaCost(card, permanentFace.manaCost) : card;
+    const baseCost = permanentFace ? manaValueFromManaCost(permanentFace.manaCost) : card.manaValue;
+    const fixedCost = adjustedCastingCost(seat, castCard, baseCost, "exile", activeSeatId, session.seats);
+    const chosenX = maxAffordableX(seat, castCard, fixedCost);
+    const totalCost = totalCastingCost(seat, castCard, baseCost, chosenX);
+    const payment = chooseManaSourcesForCost(seat, castCard, totalCost, undefined, session.seats);
     if (!payment.ok) continue;
-    if (!hasResolvableTarget(session, seat.id, card)) continue;
+    const targetCheckCard = permanentFace ? { ...card, name: permanentFace.name, typeLine: permanentFace.typeLine, oracleText: permanentFace.oracleText } : card;
+    if (!hasResolvableTarget(session, seat.id, targetCheckCard)) continue;
     actions.push({
       id: `cast-exile:${card.id}`,
       actionType: "cast_spell",
       cardId: card.id,
       sourceZone: "exile",
+      faceIndex: permanentFaceIndex,
       targetIds: [],
-      label: `cast ${card.name} from exile`,
-      detail: `${card.manaCost ?? ""} ${card.typeLine}. ${card.oracleText} Payable with ${formatManaPoolPayment(payment.spent)}.`.trim(),
+      label: `cast ${permanentFace?.name ?? card.name} from exile`,
+      detail: permanentFace
+        ? `${permanentFace.manaCost ?? ""} ${permanentFace.typeLine}. ${permanentFace.oracleText} Payable with ${formatManaPoolPayment(payment.spent)}.`.trim()
+        : `${card.manaCost ?? ""} ${card.typeLine}. ${card.oracleText} Payable with ${formatManaPoolPayment(payment.spent)}.`.trim(),
       role: card.role
     });
   }
-  actions.push(...legalRoomUnlockActions(seat));
+  actions.push(...legalRoomUnlockActions(seat, session.seats));
   const commander = seat.board.commander;
   if (commander) {
     const totalCost = adjustedCastingCost(seat, commander, commander.manaValue, "command", activeSeatId, session.seats) + (commander.commanderTax ?? 0);
-    const payment = chooseManaSourcesForCost(seat, commander, totalCost);
+    const payment = chooseManaSourcesForCost(seat, commander, totalCost, undefined, session.seats);
     if (payment.ok && hasResolvableTarget(session, seat.id, commander)) {
       actions.push({
         id: `cast-commander:${commander.id}`,
@@ -5510,7 +6143,7 @@ function legalAttackActions(seat: PlayerSeat, opponents: PlayerSeat[] = []): Leg
     for (const opponent of opponents) {
       const legalBlockers = opponent.board.battlefield.filter((blocker) => canBlock(blocker, card));
       const tax = totalAttackTax(opponent, false);
-      if (tax === 0 || chooseManaSourcesForCost(seat, genericCostShim(tax), tax).ok) {
+      if (tax === 0 || chooseManaSourcesForCost(seat, genericCostShim(tax), tax, undefined, opponents).ok) {
         actions.push({
           id: `attack:${card.id}:${opponent.id}`,
           actionType: "attack",
@@ -5523,7 +6156,7 @@ function legalAttackActions(seat: PlayerSeat, opponents: PlayerSeat[] = []): Leg
       }
       for (const planeswalker of opponent.board.battlefield.filter(isPlaneswalkerCard)) {
         const planeswalkerTax = totalAttackTax(opponent, true);
-        if (planeswalkerTax > 0 && !chooseManaSourcesForCost(seat, genericCostShim(planeswalkerTax), planeswalkerTax).ok) continue;
+        if (planeswalkerTax > 0 && !chooseManaSourcesForCost(seat, genericCostShim(planeswalkerTax), planeswalkerTax, undefined, opponents).ok) continue;
         actions.push({
           id: `attack:${card.id}:${planeswalker.id}`,
           actionType: "attack",
@@ -5581,7 +6214,7 @@ function legalPriorityActions(seat: PlayerSeat, pendingAction: PendingAction, ac
     .filter(({ card }) => {
       const fixedCost = adjustedCastingCost(seat, card, card.manaValue, "hand", activeSeatId, session.seats);
       const chosenX = maxAffordableX(seat, card, fixedCost);
-      return chooseManaSourcesForCost(seat, card, totalCastingCost(seat, card, card.manaValue, chosenX)).ok;
+      return chooseManaSourcesForCost(seat, card, totalCastingCost(seat, card, card.manaValue, chosenX), undefined, session.seats).ok;
     })
     .filter(({ card }) => hasResolvableTarget(session, seat.id, card))
     .map(({ card, sourceZone }) => ({
@@ -5606,12 +6239,18 @@ const EMPTY_LOYALTY_KEYS = new Set<string>();
 function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllowed: boolean, turn: number, activatedLoyaltyKeys: Set<string>, session: GameSession): LegalAgentAction[] {
   const actions: LegalAgentAction[] = seat.board.battlefield
     .filter((card) => {
+      if (card.abilitiesStripped) return false;
       if (!isBasicLandFetchAbility(card)) return false;
       const requiresTap = basicLandFetchCostRequiresTap(card);
       // Rule 302.6: only applies when the cost actually includes {T} (Evolving Wilds) — Sakura-
       // Tribe Elder's plain sacrifice cost isn't restricted by being tapped or summoning sick.
       if (requiresTap && card.tapped) return false;
       if (requiresTap && card.typeLine.includes("Creature") && card.summoningSick && !hasHaste(card)) return false;
+      // Wayfarer's Bauble-style "{2}, {T}, Sacrifice ...: Search..." has a real generic-mana
+      // component on top of tap+sacrifice — Evolving Wilds' plain "{T}, Sacrifice ..." costs 0 here,
+      // so this is a no-op affordability check for that whole original card family.
+      const manaCost = basicLandFetchManaCost(card);
+      if (manaCost > 0 && !chooseManaSourcesForCost(seat, genericCostShim(manaCost), manaCost, card.id, session.seats).ok) return false;
       return getBasicLandFetchOptions(seat.library ?? []).length > 0;
     })
     .map((card) => ({
@@ -5625,6 +6264,7 @@ function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllowed: boo
     }));
 
   for (const card of seat.board.battlefield) {
+    if (card.abilitiesStripped) continue;
     parseGenericSacrificeAbilities(card.oracleText).forEach((ability, abilityIndex) => {
       if (!activateOnlyIfConditionMet(ability.clause, seat)) return;
       // Evolving Wilds/Terramorphic Expanse-style "search a basic land" abilities now also match
@@ -5642,7 +6282,11 @@ function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllowed: boo
       if (ability.costDiscard && seat.board.hand.length === 0) return;
       if (ability.sacrificeTarget === "creature" && !chooseSacrificeTargets(seat, ability.sacrificeTargetTypeFilter, ability.sacrificeCount)) return;
       if (ability.effect.kind === "search_library" && (seat.library?.length ?? 0) === 0) return;
-      const affordable = ability.costMana === 0 || chooseManaSourcesForCost(seat, genericCostShim(ability.costMana), ability.costMana).ok;
+      // Rule 601.2c-equivalent for an activated ability: don't offer "activate Cankerbloom" with
+      // nothing to destroy any more than legalMainPhaseActions offers casting a removal spell with
+      // no legal target (see hasResolvableRemovalTarget) — same underlying check, reused here.
+      if (ability.effect.kind === "removal" && !removalEffectHasLegalTarget(session, seat.id, card, ability.effect.effect)) return;
+      const affordable = ability.costMana === 0 || chooseManaSourcesForCost(seat, genericCostShim(ability.costMana), ability.costMana, undefined, session.seats).ok;
       if (!affordable) return;
       const targetNames =
         ability.sacrificeTarget === "self"
@@ -5662,6 +6306,7 @@ function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllowed: boo
   }
 
   for (const card of seat.board.battlefield) {
+    if (card.abilitiesStripped) continue;
     parseGenericTapAbilities(card.oracleText).forEach((ability, abilityIndex) => {
       if (!activateOnlyIfConditionMet(ability.clause, seat)) return;
       if (card.tapped) return;
@@ -5669,7 +6314,7 @@ function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllowed: boo
       // can't be tapped to pay a {T} cost the turn it entered without haste.
       if (card.typeLine.includes("Creature") && card.summoningSick && !hasHaste(card)) return;
       if (ability.costDiscard && seat.board.hand.length === 0) return;
-      const affordable = ability.costMana === 0 || chooseManaSourcesForCost(seat, genericCostShim(ability.costMana), ability.costMana).ok;
+      const affordable = ability.costMana === 0 || chooseManaSourcesForCost(seat, genericCostShim(ability.costMana), ability.costMana, undefined, session.seats).ok;
       if (!affordable) return;
       if (
         (ability.effect.kind === "counter_and_transform" || ability.effect.kind === "bounce_own") &&
@@ -5694,10 +6339,10 @@ function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllowed: boo
   // "{cost}: Untap ~." (Retrofitter Foundry's "{3}: Untap this artifact.") only ever does anything
   // useful while the permanent is actually tapped — no {T} in its own cost, so summoning sickness
   // (rule 302.6) doesn't apply here regardless of whether the source is a creature.
-  for (const card of seat.board.battlefield.filter((item) => item.tapped)) {
+  for (const card of seat.board.battlefield.filter((item) => item.tapped && !item.abilitiesStripped)) {
     parseSelfUntapAbilities(card.oracleText).forEach((ability, abilityIndex) => {
       if (!activateOnlyIfConditionMet(ability.clause, seat)) return;
-      const affordable = ability.costMana === 0 || chooseManaSourcesForCost(seat, genericCostShim(ability.costMana), ability.costMana).ok;
+      const affordable = ability.costMana === 0 || chooseManaSourcesForCost(seat, genericCostShim(ability.costMana), ability.costMana, undefined, session.seats).ok;
       if (!affordable) return;
       actions.push({
         id: `activate-self-untap:${card.id}:${abilityIndex}`,
@@ -5713,11 +6358,13 @@ function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllowed: boo
   }
 
   for (const card of seat.board.battlefield) {
+    if (card.abilitiesStripped) continue;
     parseGenericManaAbilities(card.oracleText).forEach((ability, abilityIndex) => {
       if (!activateOnlyIfConditionMet(ability.clause, seat)) return;
+      if (hasSorcerySpeedOnlyLimiter(ability.clause) && !sorcerySpeedAllowed) return;
       if (ability.costDiscard && seat.board.hand.length === 0) return;
       if (hasOnceEachTurnLimiter(ability.clause) && session.onceEachTurnEffectsUsed?.includes(`${session.turn}:${card.id}:generic_mana:${abilityIndex}`)) return;
-      if (!genericManaAbilityAffordable(seat, ability)) return;
+      if (!genericManaAbilityAffordable(seat, ability, session.seats)) return;
       const effect = parseGenericAbilityEffect(ability.effectText);
       if (!effect) return;
       if (!genericAbilityEffectHasLegalTarget(session, seat.id, card, effect)) return;
@@ -5735,7 +6382,7 @@ function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllowed: boo
   }
 
   for (const card of seat.board.battlefield.filter((item) => item.name === "Myriad Landscape" && !item.tapped)) {
-    if (!chooseManaSourcesForCost(seat, genericCostShim(2), 2, card.id).ok) continue;
+    if (!chooseManaSourcesForCost(seat, genericCostShim(2), 2, card.id, session.seats).ok) continue;
     if (chooseBestBasicLandPairForMyriad(seat).length !== 2) continue;
     actions.push({
       id: `activate-myriad:${card.id}`,
@@ -5754,7 +6401,7 @@ function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllowed: boo
     for (const card of seat.board.battlefield.filter((item) => isEquipment(item))) {
       const cost = equipCost(card.oracleText);
       if (cost === undefined) continue;
-      if (cost > 0 && !chooseManaSourcesForCost(seat, genericCostShim(cost), cost).ok) continue;
+      if (cost > 0 && !chooseManaSourcesForCost(seat, genericCostShim(cost), cost, undefined, session.seats).ok) continue;
       const target = chooseEquipTarget(seat, card);
       if (!target) continue;
       actions.push({
@@ -5786,6 +6433,18 @@ function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllowed: boo
     }
   }
 
+  // "Enchanted player can't activate abilities that aren't mana abilities or loyalty abilities."
+  // (Overwhelming Splendor). This engine doesn't expose land-tap-for-mana as a discrete
+  // activate_ability action (mana costs are paid automatically through chooseManaSourcesForCost),
+  // so no abilityKind produced above is a genuine rule-605.1 mana ability — the restriction
+  // therefore reduces, in this engine's model, to "only loyalty_ability actions remain legal."
+  const playerLocked = session.seats.some((lockSeat) =>
+    lockSeat.board.battlefield.some(
+      (card) => isAura(card) && card.attachedToSeatId === seat.id && restrictsNonManaNonLoyaltyAbilities(card.oracleText)
+    )
+  );
+  if (playerLocked) return actions.filter((action) => action.abilityKind === "loyalty_ability");
+
   return actions;
 }
 
@@ -5811,25 +6470,32 @@ function chooseEquipTarget(seat: PlayerSeat, equipment: VisibleCard): VisibleCar
   );
 }
 
-function resolveEquip(session: GameSession, seatId: string, cardId: string): GameSession {
+// humanPool: see payGenericSacrificeCost's own doc comment — same pool-first-then-auto-tap
+// preference. Returns undefined (rather than the unchanged session) when nothing could be done, so
+// the caller can tell "equip failed" apart from "equip succeeded, nothing to sync" the same way
+// payGenericSacrificeCost's undefined-vs-object return already does.
+function resolveEquip(session: GameSession, seatId: string, cardId: string, humanPool?: ManaPool): { session: GameSession; poolSpent?: ManaPool } | undefined {
   const seat = session.seats.find((item) => item.id === seatId);
   const card = seat?.board.battlefield.find((item) => item.id === cardId);
-  if (!seat || !card) return session;
+  if (!seat || !card) return undefined;
   const cost = equipCost(card.oracleText);
-  if (cost === undefined) return session;
+  if (cost === undefined) return undefined;
   const target = chooseEquipTarget(seat, card);
-  if (!target) return session;
-  const payment = cost > 0 ? chooseManaSourcesForCost(seat, genericCostShim(cost), cost) : undefined;
-  if (cost > 0 && !payment?.ok) return session;
+  if (!target) return undefined;
+  const costCard = genericCostShim(cost);
+  const poolPayment = cost > 0 && humanPool ? payCostFromPool(humanPool, costCard, cost) : undefined;
+  const payment = cost > 0 ? (poolPayment?.ok ? poolPayment : chooseManaSourcesForCost(seat, costCard, cost, undefined, session.seats)) : undefined;
+  if (cost > 0 && !payment?.ok) return undefined;
 
   let next = session;
-  if (payment?.ok) {
+  if (payment?.ok && !poolPayment?.ok) {
     next = { ...next, seats: next.seats.map((item) => (item.id === seatId ? spendManaSources(item, payment.sourceIds) : item)) };
   }
   const { timestamp, session: stampedNext } = nextTimestamp(next);
   next = stampedNext;
 
   return {
+    session: {
     ...next,
     seats: next.seats.map((item) =>
       item.id === seatId
@@ -5852,6 +6518,8 @@ function resolveEquip(session: GameSession, seatId: string, cardId: string): Gam
       },
       ...next.events
     ]
+    },
+    poolSpent: poolPayment?.ok ? poolPayment.pool : undefined
   };
 }
 
@@ -5920,16 +6588,25 @@ function chooseWorstHandCardToDiscard(seat: PlayerSeat): VisibleCard | undefined
 }
 
 // Pays a generic sacrifice ability's cost (mana + discard + sacrifice) without resolving its
-// effect — split out of resolveGenericSacrificeAbility so activateGenericSacrificeAbility's
-// search_library branch can pay the cost via setSession and then open the interactive
-// library-search choice itself (component state applySacrificeEffect, a pure module-level
-// function, has no access to).
+// effect — kept separate from applySacrificeEffect so activateGenericSacrificeAbility (the
+// component closure both the human's click and the agent dispatch loop funnel through) can pay
+// the cost first, sync the floating-pool React state if it was used, and only then either open the
+// interactive library-search choice (search_library effects) or resolve everything else via
+// applySacrificeEffect — pendingRuleChoice/setSeatManaPool are component state applySacrificeEffect,
+// a pure module-level function, has no access to.
+// humanPool: the human caller's floating mana pool (undefined for an agent seat, which never has
+// one) — preferred over auto-tapping untapped lands when it already covers the cost, so choosing
+// which specific lands to tap for this actually works, the same as casting a spell from hand
+// already does. Falls back to auto-tap when the pool doesn't cover it (or there isn't one), so a
+// human who hasn't pre-tapped still isn't stuck. poolSpent on the return value tells the caller
+// (a component closure, which alone can update the live manaPools React state) to sync it.
 function payGenericSacrificeCost(
   session: GameSession,
   seatId: string,
   cardId: string,
-  abilityIndex: number
-): { session: GameSession; ability: SacrificeAbility; card: VisibleCard } | undefined {
+  abilityIndex: number,
+  humanPool?: ManaPool
+): { session: GameSession; ability: SacrificeAbility; card: VisibleCard; poolSpent?: ManaPool } | undefined {
   const seat = session.seats.find((item) => item.id === seatId);
   const card = seat?.board.battlefield.find((item) => item.id === cardId);
   if (!seat || !card) return undefined;
@@ -5941,7 +6618,14 @@ function payGenericSacrificeCost(
   const discardCard = ability.costDiscard ? chooseWorstHandCardToDiscard(seat) : undefined;
   if (ability.costDiscard && !discardCard) return undefined;
 
-  const payment = ability.costMana > 0 ? chooseManaSourcesForCost(seat, genericCostShim(ability.costMana), ability.costMana) : undefined;
+  const costCard = genericCostShim(ability.costMana);
+  const poolPayment = ability.costMana > 0 && humanPool ? payCostFromPool(humanPool, costCard, ability.costMana) : undefined;
+  const payment =
+    ability.costMana > 0
+      ? poolPayment?.ok
+        ? poolPayment
+        : chooseManaSourcesForCost(seat, costCard, ability.costMana, undefined, session.seats)
+      : undefined;
   if (ability.costMana > 0 && !payment?.ok) return undefined;
 
   const sacrificeTargets =
@@ -5949,7 +6633,7 @@ function payGenericSacrificeCost(
   if (!sacrificeTargets || sacrificeTargets.length === 0) return undefined;
 
   let next = session;
-  if (payment?.ok) {
+  if (payment?.ok && !poolPayment?.ok) {
     next = {
       ...next,
       seats: next.seats.map((item) => (item.id === seatId ? spendManaSources(item, payment.sourceIds) : item))
@@ -5997,30 +6681,25 @@ function payGenericSacrificeCost(
     "Rules action"
   );
 
-  return { session: next, ability, card };
-}
-
-function resolveGenericSacrificeAbility(session: GameSession, seatId: string, cardId: string, abilityIndex: number): GameSession {
-  const paid = payGenericSacrificeCost(session, seatId, cardId, abilityIndex);
-  if (!paid) return session;
-  return applySacrificeEffect(paid.session, seatId, paid.card.id, paid.card.name, paid.ability.effect, paid.ability.clause);
+  return { session: next, ability, card, poolSpent: poolPayment?.ok ? poolPayment.pool : undefined };
 }
 
 function applySacrificeEffect(
   session: GameSession,
   seatId: string,
-  sourceCardId: string,
-  sourceCardName: string,
+  sourceCard: VisibleCard,
   effect: SacrificeAbility["effect"],
   clause: string
 ): GameSession {
+  const sourceCardId = sourceCard.id;
+  const sourceCardName = sourceCard.name;
   const seat = session.seats.find((item) => item.id === seatId);
   if (!seat) return session;
 
   // search_library never actually reaches this function: activateGenericSacrificeAbility detects
-  // it before ever calling resolveGenericSacrificeAbility and opens the interactive library-search
-  // choice instead (pendingRuleChoice is component state applySacrificeEffect can't reach). This
-  // branch only exists to keep the switch exhaustive for the type checker.
+  // it before ever calling applySacrificeEffect and opens the interactive library-search choice
+  // instead (pendingRuleChoice is component state applySacrificeEffect can't reach). This branch
+  // only exists to keep the switch exhaustive for the type checker.
   if (effect.kind === "search_library") return session;
 
   if (effect.kind === "create_tokens") {
@@ -6094,6 +6773,14 @@ function applySacrificeEffect(
     return transformPermanent(session, seatId, sourceCardId, sourceCardName, /\bthen untap it\b/i.test(clause));
   }
 
+  if (effect.kind === "removal") {
+    // sourceCard has already left the battlefield by the time this runs (payGenericSacrificeCost
+    // sacrifices it before the effect resolves) — passed through anyway since applyRemovalEffect
+    // only reads it for excluded-self/self-name checks, same as a normal spell's own source card
+    // is still readable off the stack after it's already been sacrificed as an additional cost.
+    return applyRemovalEffect(session, seatId, sourceCardName, sourceCard, effect.effect);
+  }
+
   // Scry/surveil auto-resolve deterministically for both agents and humans (no dedicated
   // interactive prompt wired up for this entry point yet, matching the auto-resolved mana/search
   // choices used elsewhere in this engine).
@@ -6145,16 +6832,19 @@ function transformPermanent(session: GameSession, seatId: string, cardId: string
   };
 }
 
-// Pays a generic tap ability's cost (mana + discard + tap) without resolving its effect — split
-// out of resolveGenericTapAbility for the same reason payGenericSacrificeCost is split out of
-// resolveGenericSacrificeAbility: activateGenericTapAbility's search_library branch needs to pay
-// the cost via setSession and then open the interactive library-search choice itself.
+// Pays a generic tap ability's cost (mana + discard + tap) without resolving its effect — kept
+// separate from applyGenericTapEffect for the same reason payGenericSacrificeCost is split from
+// applySacrificeEffect: activateGenericTapAbility's search_library branch needs to pay the cost,
+// sync the floating pool if used, and then open the interactive library-search choice itself.
+// humanPool: see payGenericSacrificeCost's own doc comment — same pool-first-then-auto-tap
+// preference, and the same poolSpent-on-the-return-value handoff back to the caller.
 function payGenericTapCost(
   session: GameSession,
   seatId: string,
   cardId: string,
-  abilityIndex: number
-): { session: GameSession; ability: GenericTapAbility; card: VisibleCard } | undefined {
+  abilityIndex: number,
+  humanPool?: ManaPool
+): { session: GameSession; ability: GenericTapAbility; card: VisibleCard; poolSpent?: ManaPool } | undefined {
   const seat = session.seats.find((item) => item.id === seatId);
   const card = seat?.board.battlefield.find((item) => item.id === cardId);
   if (!seat || !card || card.tapped) return undefined;
@@ -6166,11 +6856,18 @@ function payGenericTapCost(
   const discardCard = ability.costDiscard ? chooseWorstHandCardToDiscard(seat) : undefined;
   if (ability.costDiscard && !discardCard) return undefined;
 
-  const payment = ability.costMana > 0 ? chooseManaSourcesForCost(seat, genericCostShim(ability.costMana), ability.costMana) : undefined;
+  const costCard = genericCostShim(ability.costMana);
+  const poolPayment = ability.costMana > 0 && humanPool ? payCostFromPool(humanPool, costCard, ability.costMana) : undefined;
+  const payment =
+    ability.costMana > 0
+      ? poolPayment?.ok
+        ? poolPayment
+        : chooseManaSourcesForCost(seat, costCard, ability.costMana, undefined, session.seats)
+      : undefined;
   if (ability.costMana > 0 && !payment?.ok) return undefined;
 
   let next = session;
-  if (payment?.ok) {
+  if (payment?.ok && !poolPayment?.ok) {
     next = { ...next, seats: next.seats.map((item) => (item.id === seatId ? spendManaSources(item, payment.sourceIds) : item)) };
   }
   if (discardCard) {
@@ -6212,13 +6909,7 @@ function payGenericTapCost(
     )
   };
 
-  return { session: next, ability, card };
-}
-
-function resolveGenericTapAbility(session: GameSession, seatId: string, cardId: string, abilityIndex: number): GameSession {
-  const paid = payGenericTapCost(session, seatId, cardId, abilityIndex);
-  if (!paid) return session;
-  return applyGenericTapEffect(paid.session, seatId, cardId, paid.card.name, paid.ability.effect, paid.ability.clause);
+  return { session: next, ability, card, poolSpent: poolPayment?.ok ? poolPayment.pool : undefined };
 }
 
 // The effect half of a plain "{cost}: effect." activated ability (parseGenericManaAbilities'
@@ -6233,7 +6924,37 @@ type GenericAbilityEffect =
   | { kind: "pump"; effect: PumpEffect }
   | { kind: "search_library"; effect: SearchLibraryEffect }
   | { kind: "animate_enchantment" }
-  | { kind: "trigger"; effect: TriggerEffect };
+  | { kind: "trigger"; effect: TriggerEffect }
+  | { kind: "phase_out" }
+  | { kind: "transform_self" };
+
+// "Transform Heliod." (Heliod, the Radiant Dawn's own activated ability, naming itself rather than
+// "this creature") — reuses transformPermanent, the same flip-to-other-face logic
+// SacrificeEffect's own "transform_self" kind already applies for sacrifice-costed transformers
+// (Westvale Abbey). The "not target" exclusion keeps this from misreading an unrelated "Transform
+// target X" effect (transforming something else) as this shape.
+function parseTransformSelfEffect(effectText: string): boolean {
+  return /^transform\s+(?!target\b)/i.test(effectText);
+}
+
+// "Enchanted/equipped creature phases out." (Vanishing) — no other card in this engine's real-card
+// sample uses this shape, matched narrowly like parseEnchantmentAnimationEffect above rather than a
+// general "X phases out" grammar.
+function parsePhaseOutEffect(effectText: string): boolean {
+  return /\b(?:enchanted|equipped) creature phases out\b/i.test(effectText);
+}
+
+// "You may have this enchantment enter as a copy of an enchantment you control, except it has
+// '...'." (Estrid's Invocation) — a replacement effect on ETB, applied directly in playCardFromZone
+// rather than through the trigger/GenericAbilityEffect machinery those two functions feed (this
+// isn't a triggered ability with an effect to resolve later; it replaces how the permanent enters in
+// the first place). Narrow to this exact wording, same single-card scoping as the two functions
+// above.
+function parseEnterAsCopyEffect(oracleText: string): { extraAbilityText?: string } | undefined {
+  const match = oracleText.match(/\byou may have this enchantment enter as a copy of an enchantment you control(?:,?\s*except it has\s*"([^"]+)")?/i);
+  if (!match) return undefined;
+  return { extraAbilityText: match[1] };
+}
 
 // Zur, Eternal Schemer: "Target non-Aura enchantment becomes a creature. It's still an enchantment.
 // Its power and toughness are each equal to its mana value." No other card in this engine's real-card
@@ -6255,6 +6976,8 @@ function parseGenericAbilityEffect(effectText: string): GenericAbilityEffect | u
   const searchLibrary = parseSearchLibraryEffectText(effectText);
   if (searchLibrary) return { kind: "search_library", effect: searchLibrary };
   if (parseEnchantmentAnimationEffect(effectText)) return { kind: "animate_enchantment" };
+  if (parsePhaseOutEffect(effectText)) return { kind: "phase_out" };
+  if (parseTransformSelfEffect(effectText)) return { kind: "transform_self" };
   const zone = parseZoneEffect(effectText);
   if (zone) return { kind: "zone", effect: zone };
   const trigger = commonTriggerEffect(effectText, "clause");
@@ -6308,11 +7031,59 @@ function applyEnchantmentAnimation(session: GameSession, casterSeatId: string, s
   };
 }
 
+// "Enchanted/equipped creature phases out." (Vanishing). Rule 702.26 in full is "treated as though
+// it doesn't exist" — untargetable, can't attack/block, doesn't change zones, ignored by SBAs and
+// most triggers — which this engine only enforces at the highest-value points (canAttack/canBlock,
+// and chooseRemovalTarget so phasing genuinely dodges the removal spells this card is cast to dodge)
+// rather than threading a phasedOut check through every board-scanning function; it stays a legal
+// (if pointless) target for anthem/devotion-style counting and other targeted effects this codebase
+// doesn't route through those two chokepoints. Phases back in, untapped, at its controller's next
+// untap step (untapForSeat) — including a Shadow of the Second Sun-style bonus untap step, since
+// that's the same real phase.
+function applyPhaseOut(session: GameSession, casterSeatId: string, sourceCard: VisibleCard): GameSession {
+  const targetId = sourceCard.attachedToId;
+  if (!targetId) return session;
+  let targetName: string | undefined;
+  const next: GameSession = {
+    ...session,
+    seats: session.seats.map((seat) => ({
+      ...seat,
+      board: {
+        ...seat.board,
+        battlefield: seat.board.battlefield.map((card) => {
+          if (card.id !== targetId) return card;
+          targetName = card.name;
+          return { ...card, phasedOut: true };
+        })
+      }
+    }))
+  };
+  if (!targetName) return session;
+  return {
+    ...next,
+    events: [
+      {
+        id: crypto.randomUUID(),
+        at: new Date().toISOString(),
+        seatId: casterSeatId,
+        message: `${targetName} phases out from ${sourceCard.name}.`,
+        detail: "Rules action"
+      },
+      ...next.events
+    ]
+  };
+}
+
 function genericAbilityEffectHasLegalTarget(session: GameSession, casterSeatId: string, sourceCard: VisibleCard, effect: GenericAbilityEffect): boolean {
   if (effect.kind === "removal") return removalEffectHasLegalTarget(session, casterSeatId, sourceCard, effect.effect);
   if (effect.kind === "zone") return zoneEffectHasLegalTarget(session, casterSeatId, effect.effect);
   if (effect.kind === "pump") return choosePumpTarget(session, casterSeatId, effect.effect) !== undefined;
   if (effect.kind === "animate_enchantment") return chooseNonAuraEnchantmentTarget(session, casterSeatId) !== undefined;
+  if (effect.kind === "phase_out") {
+    const target = sourceCard.attachedToId ? findPermanentById(session, sourceCard.attachedToId) : undefined;
+    return target !== undefined && !target.phasedOut;
+  }
+  if (effect.kind === "transform_self") return Boolean(sourceCard.faces && sourceCard.faces.length === 2);
   if (effect.kind === "search_library") {
     const seat = session.seats.find((item) => item.id === casterSeatId);
     return (seat?.library?.length ?? 0) > 0;
@@ -6332,9 +7103,11 @@ function applyGenericAbilityEffect(session: GameSession, casterSeatId: string, s
     return target ? applyEnchantmentAnimation(session, casterSeatId, sourceCard.name, target) : session;
   }
   // search_library never actually reaches this function: activateGenericManaAbility detects it
-  // before ever calling resolveGenericManaAbility and opens the interactive library-search choice
+  // before ever calling applyGenericAbilityEffect and opens the interactive library-search choice
   // instead (pendingRuleChoice is component state this pure function can't reach).
   if (effect.kind === "search_library") return session;
+  if (effect.kind === "phase_out") return applyPhaseOut(session, casterSeatId, sourceCard);
+  if (effect.kind === "transform_self") return transformPermanent(session, casterSeatId, sourceCard.id, sourceCard.name, false);
   const syntheticTrigger: Extract<PendingAction, { type: "trigger" }> = {
     id: crypto.randomUUID(),
     type: "trigger",
@@ -6350,15 +7123,18 @@ function applyGenericAbilityEffect(session: GameSession, casterSeatId: string, s
 }
 
 // Pays a generic mana-cost ability's cost (mana + discard + once-each-turn marking) without
-// resolving its effect — split out of resolveGenericManaAbility for the same reason
-// payGenericSacrificeCost/payGenericTapCost are split out of their resolvers: a search_library
-// effect needs to open the interactive library-search choice, which this pure function can't do.
+// resolving its effect — kept separate from applyGenericAbilityEffect for the same reason
+// payGenericSacrificeCost/payGenericTapCost are: a search_library effect needs to open the
+// interactive library-search choice, which this pure function can't do.
+// humanPool: see payGenericSacrificeCost's own doc comment — same pool-first-then-auto-tap
+// preference, and the same poolSpent-on-the-return-value handoff back to the caller.
 function payGenericManaCost(
   session: GameSession,
   seatId: string,
   cardId: string,
-  abilityIndex: number
-): { session: GameSession; ability: GenericManaAbility; card: VisibleCard; effect: GenericAbilityEffect } | undefined {
+  abilityIndex: number,
+  humanPool?: ManaPool
+): { session: GameSession; ability: GenericManaAbility; card: VisibleCard; effect: GenericAbilityEffect; poolSpent?: ManaPool } | undefined {
   const seat = session.seats.find((item) => item.id === seatId);
   const card = seat?.board.battlefield.find((item) => item.id === cardId);
   if (!seat || !card) return undefined;
@@ -6380,14 +7156,21 @@ function payGenericManaCost(
   // same as costDiscard's "nothing to discard" check above.
   if (seat.life < ability.costLife) return undefined;
   const totalManaCost = manaValueFromManaCost(ability.costManaText);
-  const payment = totalManaCost > 0 ? chooseManaSourcesForCost(seat, genericManaAbilityCostShim(ability), totalManaCost) : undefined;
+  const costCard = genericManaAbilityCostShim(ability);
+  const poolPayment = totalManaCost > 0 && humanPool ? payCostFromPool(humanPool, costCard, totalManaCost) : undefined;
+  const payment =
+    totalManaCost > 0
+      ? poolPayment?.ok
+        ? poolPayment
+        : chooseManaSourcesForCost(seat, costCard, totalManaCost, undefined, session.seats)
+      : undefined;
   if (totalManaCost > 0 && !payment?.ok) return undefined;
 
   let next = session;
   if (limitedOnceEachTurn) {
     next = { ...next, onceEachTurnEffectsUsed: [...(next.onceEachTurnEffectsUsed ?? []), onceKey] };
   }
-  if (payment?.ok) {
+  if (payment?.ok && !poolPayment?.ok) {
     next = { ...next, seats: next.seats.map((item) => (item.id === seatId ? spendManaSources(item, payment.sourceIds) : item)) };
   }
   if (ability.costLife > 0) {
@@ -6434,47 +7217,49 @@ function payGenericManaCost(
     };
   }
 
-  return { session: next, ability, card, effect };
+  return { session: next, ability, card, effect, poolSpent: poolPayment?.ok ? poolPayment.pool : undefined };
 }
 
-function resolveGenericManaAbility(session: GameSession, seatId: string, cardId: string, abilityIndex: number): GameSession {
-  const paid = payGenericManaCost(session, seatId, cardId, abilityIndex);
-  if (!paid) return session;
-  return applyGenericAbilityEffect(paid.session, seatId, paid.card, paid.effect);
-}
-
-function resolveSelfUntapAbility(session: GameSession, seatId: string, cardId: string, abilityIndex: number): GameSession {
+// humanPool: see payGenericSacrificeCost's own doc comment — same pool-first-then-auto-tap
+// preference, and the same poolSpent-on-the-return-value handoff back to the caller.
+function resolveSelfUntapAbility(session: GameSession, seatId: string, cardId: string, abilityIndex: number, humanPool?: ManaPool): { session: GameSession; poolSpent?: ManaPool } {
   const seat = session.seats.find((item) => item.id === seatId);
   const card = seat?.board.battlefield.find((item) => item.id === cardId);
-  if (!seat || !card || !card.tapped) return session;
+  if (!seat || !card || !card.tapped) return { session };
   const ability = parseSelfUntapAbilities(card.oracleText)[abilityIndex];
-  if (!ability) return session;
-  if (!activateOnlyIfConditionMet(ability.clause, seat)) return session;
+  if (!ability) return { session };
+  if (!activateOnlyIfConditionMet(ability.clause, seat)) return { session };
 
-  const payment = ability.costMana > 0 ? chooseManaSourcesForCost(seat, genericCostShim(ability.costMana), ability.costMana) : undefined;
-  if (ability.costMana > 0 && !payment?.ok) return session;
+  const costCard = genericCostShim(ability.costMana);
+  const poolPayment = ability.costMana > 0 && humanPool ? payCostFromPool(humanPool, costCard, ability.costMana) : undefined;
+  const payment =
+    ability.costMana > 0 ? (poolPayment?.ok ? poolPayment : chooseManaSourcesForCost(seat, costCard, ability.costMana, undefined, session.seats)) : undefined;
+  if (ability.costMana > 0 && !payment?.ok) return { session };
 
   let next = session;
-  if (payment?.ok) {
+  if (payment?.ok && !poolPayment?.ok) {
     next = { ...next, seats: next.seats.map((item) => (item.id === seatId ? spendManaSources(item, payment.sourceIds) : item)) };
   }
   return {
-    ...next,
-    seats: next.seats.map((item) =>
-      item.id === seatId
-        ? { ...item, board: { ...item.board, battlefield: item.board.battlefield.map((c) => (c.id === cardId ? { ...c, tapped: false } : c)) } }
-        : item
-    ),
-    events: [
-      {
-        id: crypto.randomUUID(),
-        at: new Date().toISOString(),
-        seatId,
-        message: `${seat.name} activates ${card.name}: untaps it.`,
-        detail: "Rules action"
-      },
-      ...next.events
-    ]
+    session: {
+      ...next,
+      seats: next.seats.map((item) =>
+        item.id === seatId
+          ? { ...item, board: { ...item.board, battlefield: item.board.battlefield.map((c) => (c.id === cardId ? { ...c, tapped: false } : c)) } }
+          : item
+      ),
+      events: [
+        {
+          id: crypto.randomUUID(),
+          at: new Date().toISOString(),
+          seatId,
+          message: `${seat.name} activates ${card.name}: untaps it.`,
+          detail: "Rules action"
+        },
+        ...next.events
+      ]
+    },
+    poolSpent: poolPayment?.ok ? poolPayment.pool : undefined
   };
 }
 
@@ -6503,7 +7288,7 @@ function applyGenericTapEffect(
   if (!seat) return session;
 
   // search_library never actually reaches this function: activateGenericTapAbility detects it
-  // before ever calling resolveGenericTapAbility and opens the interactive library-search choice
+  // before ever calling applyGenericTapEffect and opens the interactive library-search choice
   // instead (pendingRuleChoice is component state applyGenericTapEffect can't reach). This branch
   // only exists to keep the switch exhaustive for the type checker.
   if (effect.kind === "search_library") return session;
@@ -6589,7 +7374,7 @@ function applyGenericTapEffect(
   };
 }
 
-function legalRoomUnlockActions(seat: PlayerSeat): LegalAgentAction[] {
+function legalRoomUnlockActions(seat: PlayerSeat, allSeats?: PlayerSeat[]): LegalAgentAction[] {
   const actions: LegalAgentAction[] = [];
   for (const card of seat.board.battlefield) {
     const doors = roomDoorFaces(card);
@@ -6599,8 +7384,8 @@ function legalRoomUnlockActions(seat: PlayerSeat): LegalAgentAction[] {
     const lockedIndex = unlocked[0] === 0 ? 1 : 0;
     const lockedDoor = doors[lockedIndex];
     const shim = cardWithFaceManaCost(card, lockedDoor.manaCost);
-    const totalCost = manaValueFromManaCost(lockedDoor.manaCost);
-    const payment = chooseManaSourcesForCost(seat, shim, totalCost);
+    const totalCost = Math.max(0, manaValueFromManaCost(lockedDoor.manaCost) - unlockCostReduction(seat));
+    const payment = chooseManaSourcesForCost(seat, shim, totalCost, undefined, allSeats);
     if (!payment.ok) continue;
     actions.push({
       id: `unlock-door:${card.id}`,
@@ -6643,6 +7428,29 @@ function checkStateBasedActions(session: GameSession): GameSession {
     if (!result.changed) break;
   }
   return current;
+}
+
+// "As long as you control five or more enchantments, each other non-Aura enchantment you control
+// is a creature in addition to its other types and has base power and base toughness each equal to
+// its mana value." (Starfield of Nyx) — narrow to this exact wording, same single-card scoping as
+// the other bespoke parsers in this file, rather than generalizing typeGrants.ts's unconditional
+// "X you control are Y in addition to other types" grammar to also handle a board-count condition.
+function hasStarfieldOfNyxEffect(oracleText: string): boolean {
+  return /\bas long as you control five or more enchantments, each other non-aura enchantment you control is a creature in addition to its other types and has base power and base toughness each equal to its mana value\b/i.test(
+    oracleText
+  );
+}
+
+// Live, board-state-driven check (not a stored/cached field) so both the type-grant pass and the
+// creature-characteristics pass below can independently ask "is this card Starfield-animated right
+// now" without one depending on the other's output from a prior state-based-action pass.
+function seatStarfieldAnimatesCard(seat: PlayerSeat, card: VisibleCard): boolean {
+  if (card.typeLine.includes("Aura") || card.grantedTypes?.includes("Aura")) return false;
+  if (!hasCardType(card, "Enchantment")) return false;
+  const hasSource = seat.board.battlefield.some((source) => source.id !== card.id && hasStarfieldOfNyxEffect(source.oracleText));
+  if (!hasSource) return false;
+  const enchantmentCount = seat.board.battlefield.filter((item) => hasCardType(item, "Enchantment")).length;
+  return enchantmentCount >= 5;
 }
 
 function findPermanentById(session: GameSession, cardId: string): VisibleCard | undefined {
@@ -6753,6 +7561,12 @@ function runStateBasedActionsPass(session: GameSession): { session: GameSession;
       .filter((card) => (isAura(card) || isEquipment(card)) && card.attachedToId)
       .map((card) => ({ ...card, controllerSeatId: seat.id }))
   );
+  // "Enchant player" Auras with a board-wide creature-lock effect (Overwhelming Splendor) — kept
+  // separate from allAttachments above since these target a seat (attachedToSeatId), not a single
+  // permanent (attachedToId), and apply to every creature that seat controls rather than one.
+  const allPlayerLockAuras = next.seats.flatMap((seat) =>
+    seat.board.battlefield.filter((card) => isAura(card) && card.attachedToSeatId && playerCreatureLockEffect(card.oracleText))
+  );
   const sameList = (a: string[] | undefined, b: string[] | undefined) => (a?.join(",") ?? "") === (b?.join(",") ?? "");
   next = {
     ...next,
@@ -6767,7 +7581,7 @@ function runStateBasedActionsPass(session: GameSession): { session: GameSession;
           // type-granted creature never got this pass's power/toughness/keyword computation at all —
           // it stayed a permanent 0/0 with no keywords, since layers 6/7a/7d below only ever ran for
           // permanents this check let through.
-          if (!hasCardType(card, "Creature")) return card;
+          if (!hasCardType(card, "Creature") && !seatStarfieldAnimatesCard(seat, card)) return card;
 
           // Layer 7a: characteristic-defining abilities establish this creature's own base P/T
           // from the current board (e.g. "power and toughness equal to the number of lands you
@@ -6800,13 +7614,32 @@ function runStateBasedActionsPass(session: GameSession): { session: GameSession;
             cdaToughness ??= card.manaValue;
           }
 
+          // Starfield of Nyx: "As long as you control five or more enchantments, each other non-
+          // Aura enchantment you control is a creature ... and has base power and base toughness
+          // each equal to its mana value." Same "power/toughness = own mana value" shape as
+          // animatedAsCreature above, but recomputed live off current board state every pass
+          // (seatStarfieldAnimatesCard) rather than a one-shot marker — this effect turns off again
+          // the instant the enchantment count drops below five, which animatedAsCreature's persist-
+          // until-zone-change semantics can't express.
+          if (seatStarfieldAnimatesCard(seat, card)) {
+            cdaPower ??= card.manaValue;
+            cdaToughness ??= card.manaValue;
+          }
+
           let power = 0;
           let toughness = 0;
           const keywordSet = new Set<string>();
           const protectionSet = new Set<string>();
           const setEffectCandidates: Array<{ timestamp: number; power: number; toughness: number }> = [];
+          // Layer 6: "Enchanted/equipped creature loses all abilities" (Utter Insignificance) or a
+          // board-wide "Creatures enchanted player controls lose all abilities" (Overwhelming
+          // Splendor, checked against allPlayerLockAuras below). Applied before layers 6/7 finish
+          // computing keywordSet/setEffectCandidates so hasKeyword's abilitiesStripped short-circuit
+          // is authoritative regardless of what a later grant/anthem would otherwise have added.
+          let losesAllAbilities = false;
           for (const attachment of allAttachments) {
             if (attachment.attachedToId !== card.id) continue;
+            if (attachmentStripsAllAbilities(attachment.oracleText)) losesAllAbilities = true;
             const bonus = attachedPowerToughnessBonus(attachment.oracleText);
             if (bonus) {
               power += bonus.power;
@@ -6824,6 +7657,13 @@ function runStateBasedActionsPass(session: GameSession): { session: GameSession;
                   : override;
               setEffectCandidates.push({ timestamp: attachment.attachTimestamp ?? 0, ...resolved });
             }
+          }
+          for (const lockAura of allPlayerLockAuras) {
+            if (lockAura.attachedToSeatId !== seat.id) continue;
+            const lock = playerCreatureLockEffect(lockAura.oracleText);
+            if (!lock) continue;
+            losesAllAbilities = true;
+            setEffectCandidates.push({ timestamp: lockAura.attachTimestamp ?? 0, ...lock });
           }
 
           // Layer 7d: a self-anthem ("~ gets +1/+1 for each creature card in your graveyard," Jarad,
@@ -6880,6 +7720,7 @@ function runStateBasedActionsPass(session: GameSession): { session: GameSession;
           const nextToughnessBonus = toughness || undefined;
           const nextKeywords = keywordSet.size > 0 ? Array.from(keywordSet).sort() : undefined;
           const nextProtection = protectionSet.size > 0 ? Array.from(protectionSet).sort() : undefined;
+          const nextAbilitiesStripped = losesAllAbilities || undefined;
           if (
             nextPowerBonus === card.attachmentPowerBonus &&
             nextToughnessBonus === card.attachmentToughnessBonus &&
@@ -6888,7 +7729,8 @@ function runStateBasedActionsPass(session: GameSession): { session: GameSession;
             cdaPower === card.cdaPower &&
             cdaToughness === card.cdaToughness &&
             winningSetEffect?.power === card.setPowerOverride &&
-            winningSetEffect?.toughness === card.setToughnessOverride
+            winningSetEffect?.toughness === card.setToughnessOverride &&
+            nextAbilitiesStripped === card.abilitiesStripped
           ) {
             return card;
           }
@@ -6902,7 +7744,8 @@ function runStateBasedActionsPass(session: GameSession): { session: GameSession;
             cdaPower,
             cdaToughness,
             setPowerOverride: winningSetEffect?.power,
-            setToughnessOverride: winningSetEffect?.toughness
+            setToughnessOverride: winningSetEffect?.toughness,
+            abilitiesStripped: nextAbilitiesStripped
           };
         })
       }
@@ -6928,6 +7771,10 @@ function runStateBasedActionsPass(session: GameSession): { session: GameSession;
             for (const grant of grantSources) {
               if (typeGrantAppliesTo(grant.granteeFilter, card)) grantedSet.add(grant.grantedType);
             }
+            // Starfield of Nyx's conditional "is a creature" grant — same board-state check the
+            // creature-characteristics pass above independently uses for its P/T, so combat/removal-
+            // targeting (which read grantedTypes via hasCardType, not the CDA fields) see it too.
+            if (seatStarfieldAnimatesCard(seat, card)) grantedSet.add("Creature");
             const nextGrantedTypes = grantedSet.size > 0 ? Array.from(grantedSet).sort() : undefined;
             if (sameList(nextGrantedTypes, card.grantedTypes)) return card;
             changed = true;
@@ -6991,9 +7838,26 @@ function runStateBasedActionsPass(session: GameSession): { session: GameSession;
 // effects, and attachment/typing state from its time on the battlefield don't carry over. Shared
 // between destroyCreatures and moveCardAcrossSeats.
 function resetForZoneChange<T extends VisibleCard>(card: T, zone: VisibleCard["zone"]): T {
+  // Rule 711.8a: a double-faced permanent leaving the battlefield always becomes/represents its
+  // front face again in the new zone, even if it was transformed (e.g. an Ormendahl bounced to
+  // hand goes back to being Westvale Abbey), so name/typeLine/etc. revert to faces[0] here too.
+  const frontFace = card.faces?.[0];
   return {
     ...card,
     zone,
+    ...(frontFace
+      ? {
+          name: frontFace.name,
+          typeLine: frontFace.typeLine,
+          oracleText: frontFace.oracleText,
+          manaCost: frontFace.manaCost,
+          power: frontFace.power,
+          toughness: frontFace.toughness,
+          loyalty: frontFace.loyalty,
+          imageUris: frontFace.imageUris ?? card.imageUris,
+          unlockedFaceIndices: [0]
+        }
+      : {}),
     tapped: false,
     attacking: false,
     attackTargetId: undefined,
@@ -7131,6 +7995,68 @@ function moveCardAcrossSeats(
   const card = handCard ?? battlefieldCard ?? graveyardCard ?? exileCard ?? libraryCard;
   if (!card) return { session };
   const sourceZone: CrossSeatZone = handCard ? "hand" : battlefieldCard ? "battlefield" : graveyardCard ? "graveyard" : exileCard ? "exile" : "library";
+
+  // Rule 903.9: "If a commander would be put into its owner's hand or library from anywhere, that
+  // player may put it into the command zone instead." The graveyard/exile half of this same
+  // replacement effect is already handled in moveCardBetweenVisibleZones; this covers the other
+  // half (bounce/tuck), which this function is the actual path for — reproduced live via
+  // applyRemovalEffect's "bounce" case calling this with destinationZone "hand": without this, an
+  // opponent's Boomerang-style bounce spell against a commander just put it in hand permanently,
+  // with no way back to the command zone, unlike every other zone it could have left from. No
+  // choice UI exists for the "may" here, so — matching the graveyard/exile precedent, which also
+  // redirects unconditionally rather than asking — this always takes the redirect, since sitting in
+  // the command zone (recastable, if pricier each time) is essentially always better for a
+  // Commander deck's commander than sitting in a 99-card library or a hand it can be discarded from.
+  if (card.commander && sourceZone === "battlefield" && (destinationZone === "hand" || destinationZone === "library")) {
+    const ownerSeatId = card.ownerSeatId ?? sourceSeatId;
+    const commanderTax = (card.commanderTax ?? 0) + 2;
+    const seats = session.seats.map((seat) => {
+      if (seat.id === sourceSeatId && seat.id === ownerSeatId) {
+        return {
+          ...seat,
+          board: {
+            ...seat.board,
+            commander: { ...card, zone: "command" as const, tapped: false, attacking: false, blocking: false, battlefieldPosition: undefined, commanderTax },
+            battlefield: seat.board.battlefield.filter((item) => item.id !== cardId)
+          },
+          zones: { ...seat.zones, battlefield: Math.max(0, seat.zones.battlefield - 1), command: seat.zones.command + 1 }
+        };
+      }
+      if (seat.id === sourceSeatId) {
+        return { ...seat, board: { ...seat.board, battlefield: seat.board.battlefield.filter((item) => item.id !== cardId) }, zones: { ...seat.zones, battlefield: Math.max(0, seat.zones.battlefield - 1) } };
+      }
+      if (seat.id === ownerSeatId) {
+        return {
+          ...seat,
+          board: { ...seat.board, commander: { ...card, zone: "command" as const, tapped: false, attacking: false, blocking: false, battlefieldPosition: undefined, commanderTax } },
+          zones: { ...seat.zones, command: seat.zones.command + 1 }
+        };
+      }
+      return seat;
+    });
+    // Every caller of this function adds its own "moved to hand/library" event after the fact
+    // (this function itself never touches session.events) — without logging the redirect here too,
+    // e.g. bounce's own "returns ~ to its owner's hand" message would be left standing as the only,
+    // now-inaccurate, description of what actually happened.
+    const ownerName = session.seats.find((seat) => seat.id === ownerSeatId)?.name ?? "its owner";
+    return {
+      session: {
+        ...session,
+        seats,
+        events: [
+          {
+            id: crypto.randomUUID(),
+            at: new Date().toISOString(),
+            seatId: ownerSeatId,
+            message: `${card.name} returns to ${ownerName}'s command zone instead. Commander tax is now +${commanderTax}.`,
+            detail: "Rules action"
+          },
+          ...session.events
+        ]
+      },
+      movedCard: { ...card, zone: "command", commanderTax }
+    };
+  }
 
   // The card's true owner never changes just because it changes zones or controllers — preserve
   // whatever it already was (falling back to the seat it's currently leaving, for a card that's
@@ -7411,6 +8337,7 @@ function chooseRemovalTarget(
       if (hasShroud(card)) continue;
       if (hasHexproof(card) && seat.id !== casterSeatId) continue;
       if (isProtectedFrom(card, sourceCard)) continue;
+      if (card.phasedOut) continue;
       candidates.push({ seatId: seat.id, card });
     }
   }
@@ -7537,6 +8464,8 @@ function removalEffectHasLegalTarget(session: GameSession, casterSeatId: string,
       return chooseRemovalTarget(session, casterSeatId, effect.targetType, sourceCard) !== undefined;
     case "damage":
       return chooseDamageTarget(session, casterSeatId, effect.amount === "X" ? 0 : effect.amount, effect.targetType, sourceCard) !== undefined;
+    case "mass_damage":
+      return true;
     case "modal":
       return effect.modes.some((mode) => removalEffectHasLegalTarget(session, casterSeatId, sourceCard, mode));
   }
@@ -7580,6 +8509,8 @@ function zoneEffectHasLegalTarget(session: GameSession, casterSeatId: string, ef
       return chooseRegrowTarget(session, casterSeatId, effect.targetType) !== undefined;
     case "gain_control":
       return chooseControlTarget(session, casterSeatId) !== undefined;
+    case "sacrifice_then_reanimate":
+      return chooseCreatureCardsFromOwnGraveyard(session, casterSeatId, effect.targetCount) !== undefined;
     case "mill":
     case "graveyard_to_library":
     case "exile_graveyard":
@@ -7667,7 +8598,7 @@ function payWardIfNeeded(session: GameSession, casterSeatId: string, targetCard:
   if (wardCost === undefined || wardCost <= 0) return { session, countered: false };
   const casterSeat = session.seats.find((seat) => seat.id === casterSeatId);
   if (!casterSeat) return { session, countered: false };
-  const payment = chooseManaSourcesForCost(casterSeat, genericCostShim(wardCost), wardCost);
+  const payment = chooseManaSourcesForCost(casterSeat, genericCostShim(wardCost), wardCost, undefined, session.seats);
   if (!payment.ok) {
     return {
       session: {
@@ -7705,18 +8636,67 @@ function payWardIfNeeded(session: GameSession, casterSeatId: string, targetCard:
   };
 }
 
+// "nontoken" (destroy_all/mass_damage's excludeType) is the one qualifier that can't be read off
+// typeLine at all — a token's typeLine looks identical to a nontoken permanent of the same type, so
+// it needs the separate `token` flag instead. Every other qualifier this codebase's real card pool
+// uses ("dragon," "artifact," "legendary," "land," ...) is a plain typeLine substring.
+function cardMatchesExcludedType(card: VisibleCard, excludeType: string | undefined): boolean {
+  if (!excludeType) return false;
+  if (excludeType === "token") return Boolean(card.token);
+  return card.typeLine.toLowerCase().includes(excludeType);
+}
+
+function cardMatchesExcludedColor(card: VisibleCard, excludedColors: string[]): boolean {
+  if (excludedColors.length === 0) return false;
+  return excludedColors.some((color) => card.colors.includes(PROTECTION_COLOR_CODE[color]));
+}
+
 function applyRemovalEffect(session: GameSession, casterSeatId: string, sourceName: string, source: VisibleCard, effect: RemovalEffect, chosenX?: number): GameSession {
   switch (effect.kind) {
     case "destroy_all": {
       const destructions: Array<{ seatId: string; cardId: string; message: string }> = [];
-      const typeMatches = (card: VisibleCard) =>
-        effect.targetType === "creature" ? card.typeLine.includes("Creature") : effect.targetType === "artifact" ? card.typeLine.includes("Artifact") : card.typeLine.includes("Enchantment");
+      const typeMatches = (card: VisibleCard) => {
+        const baseMatch =
+          effect.targetType === "creature" ? card.typeLine.includes("Creature") : effect.targetType === "artifact" ? card.typeLine.includes("Artifact") : card.typeLine.includes("Enchantment");
+        return baseMatch && !cardMatchesExcludedType(card, effect.excludeType) && !cardMatchesExcludedColor(card, effect.excludedColors);
+      };
       for (const seat of session.seats) {
         for (const card of seat.board.battlefield) {
           if (typeMatches(card)) destructions.push({ seatId: seat.id, cardId: card.id, message: `${card.name} is destroyed by ${sourceName}.` });
         }
       }
       return destroyCreatures(session, destructions, "Rules action");
+    }
+    case "mass_damage": {
+      const amount = effect.amount === "X" ? chosenX ?? 0 : effect.amount;
+      if (amount <= 0) return noLegalTargetEvent(session, casterSeatId, sourceName);
+      const targets: Array<{ seatId: string; cardId: string }> = [];
+      for (const seat of session.seats) {
+        if (effect.scope === "opponents" && seat.id === casterSeatId) continue;
+        for (const card of seat.board.battlefield) {
+          if (!card.typeLine.includes("Creature")) continue;
+          if (cardMatchesExcludedType(card, effect.excludeType)) continue;
+          targets.push({ seatId: seat.id, cardId: card.id });
+        }
+      }
+      if (targets.length === 0) return noLegalTargetEvent(session, casterSeatId, sourceName);
+      // No payWardIfNeeded here (unlike the single-"target creature" damage case below) — a mass
+      // effect like this never targets any individual creature (rule 601.2c doesn't apply), so ward
+      // — which only triggers on being targeted — never fires for it.
+      const damaged = targets.reduce((current, target) => dealDamageToCreature(current, sourceName, target.seatId, target.cardId, amount, source, casterSeatId), session);
+      return {
+        ...damaged,
+        events: [
+          {
+            id: crypto.randomUUID(),
+            at: new Date().toISOString(),
+            seatId: casterSeatId,
+            message: `${sourceName} deals ${amount} damage to each ${effect.excludeType ? `non-${effect.excludeType} ` : ""}creature${effect.scope === "opponents" ? " you don't control" : ""}.`,
+            detail: "Rules action"
+          },
+          ...damaged.events
+        ]
+      };
     }
     case "destroy_all_conditional": {
       const destructions: Array<{ seatId: string; cardId: string; message: string }> = [];
@@ -7822,6 +8802,19 @@ function chooseReanimationTarget(
     return candidates.reduce((a, b) => (b.card.manaValue > a.card.manaValue ? b : a));
   }
   return candidates.reduce((a, b) => (effectivePower(b.card) + effectiveToughness(b.card) > effectivePower(a.card) + effectiveToughness(a.card) ? b : a));
+}
+
+// Victimize's "choose N target creature cards in your graveyard" half — a MULTI-target pick, unlike
+// chooseReanimationTarget above (always exactly one card), so it needs its own selection: highest
+// combined power+toughness first, same "biggest is best" bias used everywhere else in this file.
+// Returns undefined if there aren't count legal creature-card targets, matching rule 601.2c: the
+// spell can't be cast at all without them (contrast the separate sacrifice half, which — per this
+// card's actual templating, not an additional cost — can legally fail and just do nothing instead).
+function chooseCreatureCardsFromOwnGraveyard(session: GameSession, casterSeatId: string, count: number): VisibleCard[] | undefined {
+  const seat = session.seats.find((item) => item.id === casterSeatId);
+  const candidates = (seat?.board.graveyard ?? []).filter((card) => card.typeLine.includes("Creature"));
+  if (candidates.length < count) return undefined;
+  return [...candidates].sort((a, b) => effectivePower(b) + effectiveToughness(b) - (effectivePower(a) + effectiveToughness(a))).slice(0, count);
 }
 
 // Regrow effects in this codebase's real-card sample are all self-graveyard-only (Regrowth,
@@ -8041,6 +9034,49 @@ function applyZoneEffect(session: GameSession, casterSeatId: string, sourceName:
         ]
       };
     }
+    case "sacrifice_then_reanimate": {
+      const casterSeat = session.seats.find((seat) => seat.id === casterSeatId);
+      const chosenCards = chooseCreatureCardsFromOwnGraveyard(session, casterSeatId, effect.targetCount);
+      if (!casterSeat || !chosenCards) return noLegalTargetEvent(session, casterSeatId, sourceName);
+      const sacrificeTargets = chooseSacrificeTargets(casterSeat, undefined, effect.sacrificeCount);
+      if (!sacrificeTargets) {
+        // Rule 608.2c: the sacrifice isn't an additional cost on this card's actual templating (see
+        // SacrificeThenReanimateEffect's own doc comment) — it's a resolution-time instruction the
+        // caster can simply fail to perform if they control no creature. "If you do" then never
+        // triggers, so the chosen graveyard cards just stay put; still a fully legal cast overall.
+        return {
+          ...session,
+          events: [
+            {
+              id: crypto.randomUUID(),
+              at: new Date().toISOString(),
+              seatId: casterSeatId,
+              message: `${sourceName}: ${casterSeat.name} has no creature to sacrifice, so nothing returns to the battlefield.`,
+              detail: "Rules action"
+            },
+            ...session.events
+          ]
+        };
+      }
+      const sacrificedSession = sacrificeTargets.reduce((acc, target) => moveCardBetweenVisibleZones(acc, casterSeatId, target.id, "graveyard"), session);
+      const returnedSession = chosenCards.reduce(
+        (acc, card) => moveCardAcrossSeats(acc, casterSeatId, card.id, casterSeatId, "battlefield", { tapped: effect.tapped }).session,
+        sacrificedSession
+      );
+      return {
+        ...returnedSession,
+        events: [
+          {
+            id: crypto.randomUUID(),
+            at: new Date().toISOString(),
+            seatId: casterSeatId,
+            message: `${sourceName}: ${casterSeat.name} sacrifices ${sacrificeTargets.map((card) => card.name).join(", ")} and returns ${chosenCards.map((card) => card.name).join(", ")} to the battlefield${effect.tapped ? " tapped" : ""}.`,
+            detail: "Rules action"
+          },
+          ...returnedSession.events
+        ]
+      };
+    }
     case "impulse_draw":
       return applyImpulseDraw(session, casterSeatId, sourceName, effect.amount, effect.untilEndOfNextTurn);
     case "steal_and_play":
@@ -8061,6 +9097,63 @@ function applyZoneEffect(session: GameSession, casterSeatId: string, sourceName:
 // chosenX isn't available and "x" is left as-is).
 function substituteX(text: string, chosenX: number): string {
   return text.replace(/\bx\b/gi, String(chosenX));
+}
+
+// "Put a number of +1/+1 counters equal to that spell's mana value on up to one target creature."
+// (Dusty Parlor) — the same "a dynamic amount spelled out in prose instead of abbreviated to X"
+// shape substituteX already resolves, just for a specific manaValue-sized counter count rather than
+// a general X. Only ever called with the just-cast spell's own manaValue (findCastTriggers is the
+// only context that knows what was cast), so "that spell's"/"its own"/"its" all resolve to the same
+// number here.
+function substituteManaValueCount(text: string, manaValue: number): string {
+  return text.replace(
+    /\ba number of ([a-z0-9+/-]+ )?counters?\s+equal to (?:that spell'?s|its own|its) mana value\b/gi,
+    (_, kind) => `${manaValue} ${kind ?? ""}counters`
+  );
+}
+
+// "You gain N life."/"You lose N life." as an EXTRA clause on a spell whose main effect is
+// something else entirely (Locthwain Scorn's "Target creature gets -3/-3 until end of turn. You
+// gain 2 life." — a very common real-card template pairing removal/pump with a flat life change) —
+// a plain substring search rather than an anchored match, since it only ever runs alongside
+// removalEffect/pumpEffect/massPumpEffect above (each of which already owns matching its own single
+// sentence) and just needs to notice this second, independent sentence anywhere in the same text.
+function parseSimpleLifeChange(text: string): { kind: "gain_life" | "lose_life"; amount: number } | undefined {
+  const lower = text.toLowerCase();
+  const gainMatch = lower.match(/\byou gain\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+life\b/);
+  if (gainMatch) {
+    const amount = numberWordToInt(gainMatch[1]);
+    if (amount) return { kind: "gain_life", amount };
+  }
+  const loseMatch = lower.match(/\byou lose\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+life\b/);
+  if (loseMatch) {
+    const amount = numberWordToInt(loseMatch[1]);
+    if (amount) return { kind: "lose_life", amount };
+  }
+  return undefined;
+}
+
+function applySimpleLifeChange(
+  session: GameSession,
+  casterSeatId: string,
+  sourceName: string,
+  effect: { kind: "gain_life" | "lose_life"; amount: number }
+): GameSession {
+  const delta = effect.kind === "gain_life" ? effect.amount : -effect.amount;
+  return {
+    ...session,
+    seats: session.seats.map((seat) => (seat.id === casterSeatId ? { ...seat, life: Math.max(0, seat.life + delta) } : seat)),
+    events: [
+      {
+        id: crypto.randomUUID(),
+        at: new Date().toISOString(),
+        seatId: casterSeatId,
+        message: `${session.seats.find((seat) => seat.id === casterSeatId)?.name ?? "Player"} ${delta > 0 ? "gains" : "loses"} ${Math.abs(delta)} life from ${sourceName}.`,
+        detail: "Rules action"
+      },
+      ...session.events
+    ]
+  };
 }
 
 interface PumpEffect {
@@ -8116,6 +9209,71 @@ function applyTargetedPumpEffect(session: GameSession, casterSeatId: string, sou
         at: new Date().toISOString(),
         seatId: casterSeatId,
         message: `${sourceCard.name} gives ${target.card.name} ${powerText}/${toughnessText} until end of turn.`,
+        detail: "Rules action"
+      },
+      ...session.events
+    ]
+  };
+}
+
+interface MassPumpEffect {
+  power: number;
+  toughness: number;
+  // Lowercased creature type excluded from the effect (Exude Toxin's "non-Dragon"), undefined for
+  // an unqualified "each creature."
+  excludeType?: string;
+  scope: "all" | "controlled" | "opponents";
+}
+
+// Board-wide sibling of parseTargetedPump's single-target shape: "Each [non-Type] creature[s] [you
+// control/an opponent controls] gets ±N/±N until end of turn." (Exude Toxin's -X/-X board wipe
+// mode once substituteX has resolved X, "Each creature you control gets +1/+1 until end of turn"
+// anthem-style tricks, ...) — previously entirely unmodeled, so a spell shaped like this (no single
+// "target creature" to find) silently did nothing.
+function parseMassPump(text: string): MassPumpEffect | undefined {
+  const match = text.match(/\beach (?:non-([a-z]+) )?creatures?(?: (you control)| (an? opponent controls))? gets? ([+-]\d+)\/([+-]\d+) until end of turn\b/i);
+  if (!match) return undefined;
+  return {
+    power: Number.parseInt(match[4], 10),
+    toughness: Number.parseInt(match[5], 10),
+    excludeType: match[1]?.toLowerCase(),
+    scope: match[2] ? "controlled" : match[3] ? "opponents" : "all"
+  };
+}
+
+function applyMassPumpEffect(session: GameSession, casterSeatId: string, sourceCardName: string, effect: MassPumpEffect): GameSession {
+  const qualifierText = effect.excludeType ? `non-${effect.excludeType} ` : "";
+  const powerText = `${effect.power >= 0 ? "+" : ""}${effect.power}`;
+  const toughnessText = `${effect.toughness >= 0 ? "+" : ""}${effect.toughness}`;
+  let affectedCount = 0;
+  const seats = session.seats.map((seat) => {
+    if (effect.scope === "controlled" && seat.id !== casterSeatId) return seat;
+    if (effect.scope === "opponents" && seat.id === casterSeatId) return seat;
+    return {
+      ...seat,
+      board: {
+        ...seat.board,
+        battlefield: seat.board.battlefield.map((card) => {
+          if (!card.typeLine.includes("Creature")) return card;
+          if (effect.excludeType && card.typeLine.toLowerCase().includes(effect.excludeType)) return card;
+          affectedCount += 1;
+          return { ...card, temporaryPowerBonus: (card.temporaryPowerBonus ?? 0) + effect.power, temporaryToughnessBonus: (card.temporaryToughnessBonus ?? 0) + effect.toughness };
+        })
+      }
+    };
+  });
+  return {
+    ...session,
+    seats,
+    events: [
+      {
+        id: crypto.randomUUID(),
+        at: new Date().toISOString(),
+        seatId: casterSeatId,
+        message:
+          affectedCount > 0
+            ? `${sourceCardName} gives each ${qualifierText}creature ${powerText}/${toughnessText} until end of turn.`
+            : `${sourceCardName} resolves with no ${qualifierText}creatures to affect.`,
         detail: "Rules action"
       },
       ...session.events
@@ -8300,7 +9458,7 @@ function applyCounterAccumulationEffect(session: GameSession, seatId: string, so
 // chooseRemovalTarget, etc.), so this puts back the highest-mana-value cards currently in hand: the
 // same "keep what's cheap and castable, cycle the rest" bias a player defaults to with no clearly
 // worse specific card to name.
-// Only used by the pure-function trigger-resolution path (resolveGenericManaAbility and friends,
+// Only used by the pure-function trigger-resolution path (applyGenericAbilityEffect and friends,
 // which can't reach pendingRuleChoice — see its own comment on the search_library effect for the
 // same constraint), where no interactive per-player choice is possible. The interactive path
 // (finishTriggerResolution's draw_then_put_back branch, covering loyalty/ETB/death/phase triggers —
@@ -8822,6 +9980,7 @@ function agentSeatSnapshot(seat: PlayerSeat, includeHand: boolean) {
 }
 
 function agentCardSnapshot(card: VisibleCard) {
+  const ruledEffectSummaries = cachedRuleSummariesForCard(card.oracleText);
   return {
     id: card.id,
     name: card.name,
@@ -8841,6 +10000,13 @@ function agentCardSnapshot(card: VisibleCard) {
     faces: card.faces?.map((face) => ({ name: face.name, typeLine: face.typeLine, manaCost: face.manaCost, oracleText: face.oracleText })),
     unlockedFaceIndices: card.unlockedFaceIndices,
     interpretedEffects: card.interpretedEffects,
+    // Plain-English summaries the rules advisor already worked out for this exact card text — from
+    // an earlier real consultation, this game or (via ruleWorkflowCache's localStorage persistence)
+    // an earlier one — so the agent's own decision-making gets a digest of what an ability actually
+    // does alongside the raw oracleText above, instead of having to re-derive it from scratch every
+    // single time purely from the raw text. Empty for a card nobody's triggered/cast yet; the very
+    // first real encounter of any given card still has to be read cold, same as before this existed.
+    ruledEffects: ruledEffectSummaries.length > 0 ? ruledEffectSummaries : undefined,
     attachedToId: card.attachedToId,
     grantedKeywords: card.grantedKeywords,
     grantedProtectionColors: card.grantedProtectionColors,
@@ -8944,32 +10110,56 @@ interface CastTriggerCondition {
   // caster, "opponent" only fires when the caster is a different seat, mirroring how real oracle
   // text is always written relative to whoever controls the triggered ability, not any fixed seat.
   relativity: "you" | "opponent";
-  firstSpellOnly: boolean;
-  spellTypeFilter?: "noncreature" | "instant_or_sorcery";
+  // "their first spell"/"their second spell"/etc — undefined means no ordinal restriction at all
+  // ("whenever you cast a spell,"). 1 for "first", 2 for "second", and so on.
+  requiredOrdinal?: number;
+  spellTypeFilter?: "noncreature" | "instant_or_sorcery" | "enchantment" | "artifact" | "creature" | "planeswalker" | "land";
   effectClause: string;
 }
 
+const ORDINAL_WORDS: Record<string, number> = { first: 1, second: 2, third: 3, fourth: 4, fifth: 5 };
+
 // "Whenever you cast a[n] [type] spell, ..." / "Whenever an opponent casts their first spell each
-// turn, ..." (Shark Typhoon, Murmuring Mystic, Mind's Dilation, ...) — a whole category of
-// triggered abilities keyed to a spell being cast, distinct from the phase-triggered and ETB/death
-// triggers this engine already models. "you"/"an opponent" is read relative to whichever seat
-// controls the permanent bearing this text (checked by the caller against the actual caster), not
-// hardcoded to any fixed player.
-const CAST_TRIGGER_PATTERN = /^whenever (you cast|an opponent casts) (a|an|your first|their first)\s*((?:noncreature|instant or sorcery)\s+)?spells?(?: each turn)?,\s*(.+)$/i;
+// turn, ..." / "Whenever an opponent casts their second spell each turn, ..." (Shark Typhoon,
+// Murmuring Mystic, Mind's Dilation, Monologue Tax, ...) — a whole category of triggered abilities
+// keyed to a spell being cast, distinct from the phase-triggered and ETB/death triggers this engine
+// already models. "you"/"an opponent" is read relative to whichever seat controls the permanent
+// bearing this text (checked by the caller against the actual caster), not hardcoded to any fixed
+// player. The type-word list isn't exhaustive of every possible card type, just every one actually
+// seen in this codebase's card pool so far (noncreature/instant-or-sorcery/enchantment/artifact/
+// creature/planeswalker/land) — declined rather than guessed at for anything else, same as every
+// other parser here.
+const CAST_TRIGGER_PATTERN =
+  /^whenever (you cast|an opponent casts) (?:an?|(?:your|their) (first|second|third|fourth|fifth))\s*((?:noncreature|instant or sorcery|enchantment|artifact|creature|planeswalker|land)\s+)?spells?(?: each turn)?,\s*(.+)$/i;
 
 function parseCastTriggerCondition(clause: string): CastTriggerCondition | undefined {
   const match = clause.match(CAST_TRIGGER_PATTERN);
   if (!match) return undefined;
   const relativity = /^you/i.test(match[1]) ? "you" : "opponent";
-  const firstSpellOnly = /first/i.test(match[2]);
+  const requiredOrdinal = match[2] ? ORDINAL_WORDS[match[2].toLowerCase()] : undefined;
   const typeWord = match[3]?.trim().toLowerCase();
-  const spellTypeFilter = typeWord === "noncreature" ? "noncreature" : typeWord === "instant or sorcery" ? "instant_or_sorcery" : undefined;
-  return { relativity, firstSpellOnly, spellTypeFilter, effectClause: match[4].trim() };
+  const spellTypeFilter =
+    typeWord === "noncreature" ||
+    typeWord === "enchantment" ||
+    typeWord === "artifact" ||
+    typeWord === "creature" ||
+    typeWord === "planeswalker" ||
+    typeWord === "land"
+      ? typeWord
+      : typeWord === "instant or sorcery"
+        ? "instant_or_sorcery"
+        : undefined;
+  return { relativity, requiredOrdinal, spellTypeFilter, effectClause: match[4].trim() };
 }
 
 function spellMatchesCastTriggerFilter(card: VisibleCard, filter: CastTriggerCondition["spellTypeFilter"]): boolean {
   if (filter === "noncreature") return !card.typeLine.includes("Creature");
   if (filter === "instant_or_sorcery") return card.typeLine.includes("Instant") || card.typeLine.includes("Sorcery");
+  if (filter === "enchantment") return card.typeLine.includes("Enchantment");
+  if (filter === "artifact") return card.typeLine.includes("Artifact");
+  if (filter === "creature") return card.typeLine.includes("Creature");
+  if (filter === "planeswalker") return card.typeLine.includes("Planeswalker");
+  if (filter === "land") return card.typeLine.includes("Land");
   return true;
 }
 
@@ -8985,7 +10175,7 @@ function findCastTriggers(
   session: GameSession,
   casterSeatId: string,
   castCard: VisibleCard,
-  isFirstSpellThisTurnForCaster: boolean
+  castOrdinalThisTurnForCaster: number
 ): Array<Extract<PendingAction, { type: "trigger" }>> {
   const triggers: Array<Extract<PendingAction, { type: "trigger" }>> = [];
 
@@ -8997,8 +10187,17 @@ function findCastTriggers(
         if (!condition) continue;
         if (condition.relativity === "you" && seat.id !== casterSeatId) continue;
         if (condition.relativity === "opponent" && seat.id === casterSeatId) continue;
-        if (condition.firstSpellOnly && !isFirstSpellThisTurnForCaster) continue;
+        if (condition.requiredOrdinal !== undefined && condition.requiredOrdinal !== castOrdinalThisTurnForCaster) continue;
         if (!spellMatchesCastTriggerFilter(castCard, condition.spellTypeFilter)) continue;
+        // "... unless that player pays {N}." (Mystic Remora, ...) is a tax-conditional effect this
+        // generic scan has no way to model — it would otherwise match the "draw a card" half via
+        // commonTriggerEffect below and silently drop the "unless" half, turning a conditional draw
+        // into an unconditional one. isMysticRemoraLike's own dedicated trigger-finder already owns
+        // this exact shape (see findTriggeredAbilityForSpell) with real tax semantics, so this scan
+        // defers to it instead of also matching the same clause — without this, every noncreature
+        // spell cast in front of a Mystic Remora-shaped card triggered it twice, once from each
+        // system, both silently ignoring the {4} tax.
+        if (/\bunless\b[^.]*\bpays?\b/i.test(condition.effectClause)) continue;
 
         if (isImpulseCastFreeEffectClause(condition.effectClause)) {
           triggers.push(
@@ -9010,8 +10209,14 @@ function findCastTriggers(
         // "X" in the effect text (Shark Typhoon's "create an X/X ... token, where X is that
         // spell's mana value") means the just-cast spell's own mana value, resolved here since only
         // this scan actually knows which spell was cast — commonTriggerEffect's parsers have no
-        // other way to learn it.
-        const effect = commonTriggerEffect(substituteX(condition.effectClause, castCard.manaValue), "clause");
+        // other way to learn it. "A number of ... counters equal to that spell's mana value" (Dusty
+        // Parlor) is the same idea spelled out in full instead of abbreviated to a bare "X" — resolved
+        // the same way, before the counter-count parser (which only understands a literal number
+        // word/digit) ever sees it.
+        const effect = commonTriggerEffect(
+          substituteManaValueCount(substituteX(condition.effectClause, castCard.manaValue), castCard.manaValue),
+          "clause"
+        );
         if (!effect) continue;
         triggers.push(makeCommonTrigger(casterSeatId, seat.id, source, effect, `${source.name} triggers because ${castCard.name} was cast.`));
       }
@@ -9064,6 +10269,21 @@ function enteredTriggerApplies(source: VisibleCard, sourceSeatId: string, entere
   const underYourControl = enteredSeatId === sourceSeatId;
   const isAnother = source.id !== enteredCard.id;
   const selfEntered = source.id === enteredCard.id;
+
+  // "Whenever this enchantment or another enchantment you control enters, ..." (Constellation,
+  // Eerie, and the same "self-or-sibling" shape on other keyword templates) — explicitly covers
+  // BOTH the source's own entry and any other matching permanent's. Checked before the self-only
+  // and generic "another X" checks below, since either of those on its own misreads this: the
+  // self-only check would (correctly) match the "this enchantment" half but then wrongly exclude
+  // every OTHER enchantment entering, and the generic loop's "another X" branch below would
+  // (correctly) match the "another enchantment" half but then wrongly exclude the source's own
+  // entry — reproduced live as Boon of the Spirit Realm's own Constellation trigger never firing
+  // off itself, only off a second enchantment entering afterward.
+  const selfOrAnotherMatch = text.match(/\b(?:when|whenever)\s+this\s+[a-z]+\s+or\s+another\s+([a-z]+)(?: you control)? enters\b/);
+  if (selfOrAnotherMatch) {
+    if (!cardHasWatchedType(enteredCard, selfOrAnotherMatch[1])) return false;
+    return text.includes("you control") ? underYourControl : true;
+  }
 
   // A self-referential clause ("when this creature/artifact/land/... enters") only ever applies to
   // the source's own entry — checked first and exclusively, so it can't also misfire off some
@@ -9213,10 +10433,23 @@ function commonTriggerEffect(oracleText: string, mode: "entered" | "died" | "cla
   // of "target creature or planeswalker" here (the trailing "or planeswalker" is left unconsumed by
   // the match, not specially recognized — this engine has no planeswalker-target picker yet, so that
   // half of the target pool is narrowed to creatures only rather than left completely unhandled).
+  // "on (another |up to one )?target creature" — Athreos, Shroud-Veiled's own real text is "put a
+  // coin counter on another target creature" (not "target creature or planeswalker" as an earlier
+  // pass here assumed) and Dusty Parlor's is "...on up to one target creature" — either qualifier
+  // sitting between "on " and "target creature" made the old anchored alternation miss both,
+  // silently dropping the whole trigger. The qualifier itself doesn't change who's a legal target
+  // (still resolved via chooseCounterTarget same as a bare "target creature"), so it's just skipped
+  // over rather than separately modeled.
+  // "this creature" isn't the only self-reference shape — Boon of the Spirit Realm's Constellation
+  // trigger puts its own blessing counter "on this enchantment," and other non-creature permanents
+  // use "this artifact"/"this permanent"/"this land" the same way (mirrors the same alternation
+  // transform_self's own parser already uses for "transform this X"). Without this, a self-counter
+  // clause on any permanent that isn't literally a creature never matched at all.
+  const selfReference = "this (?:creature|artifact|enchantment|permanent|land|planeswalker)";
   const counterPattern =
     mode === "entered"
-      ? /\bput (a|one|two|three|four|five|\d+) (\+1\/\+1|-1\/-1|[a-z]+) counters? on (this creature|that creature|it|target creature(?: you control)?)\b/
-      : /\bput (a|one|two|three|four|five|\d+) (\+1\/\+1|-1\/-1|[a-z]+) counters? on (this creature|target creature(?: you control)?)\b/;
+      ? new RegExp(`\\bput (a|one|two|three|four|five|\\d+) (\\+1\\/\\+1|-1\\/-1|[a-z]+) counters? on (${selfReference}|that creature|it|(?:another |up to one )?target creature(?: you control)?)\\b`)
+      : new RegExp(`\\bput (a|one|two|three|four|five|\\d+) (\\+1\\/\\+1|-1\\/-1|[a-z]+) counters? on (${selfReference}|(?:another |up to one )?target creature(?: you control)?)\\b`);
   const counterMatch = text.match(counterPattern);
   if (counterMatch) {
     const amount = numberWordToInt(counterMatch[1]);
@@ -9224,7 +10457,7 @@ function commonTriggerEffect(oracleText: string, mode: "entered" | "died" | "cla
       const counterKind = counterMatch[2];
       const rawScope = counterMatch[3];
       const scope =
-        rawScope === "this creature"
+        rawScope.startsWith("this ")
           ? "self"
           : rawScope === "that creature" || rawScope === "it"
             ? "context"
@@ -9247,6 +10480,25 @@ function commonTriggerEffect(oracleText: string, mode: "entered" | "died" | "cla
     return { kind: "copy_token", scope: copyMatch[1] === "it" || copyMatch[1] === "itself" ? "context" : "self", optional };
   }
 
+  // "[Each ][non-Type ]creature[s] [you control|your opponents control] get(s) +N/+N|-N/-N until end
+  // of turn" as a triggered-ability clause (Doomwake Giant's Constellation "creatures your
+  // opponents control get -1/-1 until end of turn") — the triggered-ability sibling of
+  // parseMassPump, which only ever matches a spell's "each creature..." phrasing and misses this
+  // "creatures your opponents control get..." shape.
+  const massPumpMatch = text.match(
+    /\b(?:each )?(?:non-([a-z]+) )?creatures?(?: (you control)| (your opponents control|an opponent controls))? gets? ([+-]\d+)\/([+-]\d+) until end of turn\b/
+  );
+  if (massPumpMatch) {
+    return {
+      kind: "mass_pump",
+      excludeType: massPumpMatch[1]?.toLowerCase(),
+      power: Number.parseInt(massPumpMatch[4], 10),
+      toughness: Number.parseInt(massPumpMatch[5], 10),
+      scope: massPumpMatch[2] ? "controlled" : massPumpMatch[3] ? "opponents" : "all",
+      optional
+    };
+  }
+
   return undefined;
 }
 
@@ -9255,6 +10507,14 @@ function commonTriggerEffect(oracleText: string, mode: "entered" | "died" | "cla
 // loyalty-ability-once-per-turn tracker.
 function hasOnceEachTurnLimiter(oracleText: string): boolean {
   return /\b(?:do this|activate(?: this ability)?) only once (?:each|per) turn\b/i.test(oracleText);
+}
+
+// "Activate only as a sorcery." (Heliod, the Radiant Dawn's transform ability, and the general rule
+// 602.3a templating for any activated ability restricted to sorcery speed) — same generic-limiter
+// shape as hasOnceEachTurnLimiter above, checked against legalActivatedAbilityActions' existing
+// sorcerySpeedAllowed parameter (already used for equip/loyalty) rather than adding a parallel gate.
+function hasSorcerySpeedOnlyLimiter(clause: string): boolean {
+  return /\bactivate only as a sorcery\b/i.test(clause);
 }
 
 function createTokensForSeat(session: GameSession, seatId: string, sourceCardId: string, specs: TokenSpec[]) {
@@ -9698,6 +10958,9 @@ function resolveTriggerEffect(session: GameSession, trigger: Extract<PendingActi
       ]
     };
   }
+  if (trigger.effect.kind === "mass_pump") {
+    return applyMassPumpEffect(session, trigger.controllerSeatId, trigger.sourceCardName, trigger.effect);
+  }
   if (trigger.effect.kind === "impulse_cast_free") {
     const impulseEffect = trigger.effect;
     const fromSeat = session.seats.find((seat) => seat.id === impulseEffect.fromSeatId);
@@ -9955,8 +11218,41 @@ function shouldConsultRulesAdvisor(event: string, card: VisibleCard) {
   // "enters," so without this it matched the "enters" keyword below on nearly every tapped land
   // played, wastefully consulting the advisor (and often landing on a pointless manual_review
   // prompt) for a card with nothing left for it to actually resolve.
-  const text = oracleClauses(card.oracleText)
-    .filter((clause) => !isActivatedAbilityClause(clause) && !/^[a-z][a-z',. -]* enters (?:the battlefield )?tapped\b/i.test(clause))
+  //
+  // For an ETB or death event specifically, scope to etbEffectText/deathEffectText — the exact same
+  // scoping requestRuleWorkflow's own deterministicRuleWorkflow applies via eventRelevantOracleText
+  // — rather than this function's own looser "just drop activated-ability clauses" filter. Without
+  // this, a clause genuinely irrelevant to THIS event (Skullclamp's "Whenever equipped creature
+  // dies, draw two cards." — a real trigger, just not an ETB one) still leaked its "whenever"/"dies"/
+  // "draw cards" keywords into the pre-check for a "spell_resolved_to_battlefield" consultation,
+  // triggering one anyway. The deterministic classifier then correctly found nothing (its own
+  // properly-scoped text was just "Equipped creature gets +1/-1.", matching no known shape) and fell
+  // through to Ollama — which, asked to classify a bare static-bonus line as some kind of workflow,
+  // hallucinated an unrelated explanation about death triggers and counters. Reproduced live.
+  const isEtbEvent = event === "land_played" || event === "spell_resolved_to_battlefield";
+  const isDeathEvent = event === "card_moved_to_graveyard";
+  // The "~ enters tapped" replacement clause has to be dropped from the ORIGINAL, still-per-line
+  // oracle text, before etbEffectText ever joins lines together — dropping it afterward (on the
+  // already-space-joined blob) let the prefix match consume an entire merged clause, silently
+  // swallowing a genuine second ETB trigger that happened to share a line with it once joined.
+  // Reproduced live: Temple of Deceit's "This land enters tapped.\nWhen this land enters, scry 1...."
+  // joins into one string, whose START still literally reads "this land enters tapped" — so the old
+  // post-join filter matched that as a prefix and threw away the whole clause, scry trigger
+  // included, and the land never actually scried. Filtering per original line first still correctly
+  // drops a land whose ENTIRE separate line is just the (possibly conditional, e.g. "...unless you
+  // control two or more basic lands") tapped clause, with nothing else on it.
+  const tappedConditionFilteredOracleText = isEtbEvent
+    ? oracleClauses(card.oracleText)
+        .filter((clause) => !/^[a-z][a-z',. -]* enters (?:the battlefield )?tapped\b/i.test(clause))
+        .join("\n")
+    : card.oracleText;
+  const scopedOracleText = isEtbEvent
+    ? etbEffectText(tappedConditionFilteredOracleText)
+    : isDeathEvent
+      ? deathEffectText(card.oracleText)
+      : card.oracleText;
+  const text = oracleClauses(scopedOracleText)
+    .filter((clause) => !isActivatedAbilityClause(clause))
     .join(" ")
     .toLowerCase();
   if (!text.trim()) return false;
@@ -10019,7 +11315,18 @@ function phaseTriggerTextMatches(text: string, phase: TurnPhase) {
   return false;
 }
 
+// Shadow of the Second Sun-style "enchant player" Auras live on their CASTER's battlefield, not
+// the enchanted player's — scans every seat's battlefield rather than just the enchanted seat's own.
+function hasExtraBeginningPhaseAura(session: GameSession, enchantedSeatId: string): boolean {
+  return session.seats.some((seat) =>
+    seat.board.battlefield.some((card) => isAura(card) && card.attachedToSeatId === enchantedSeatId && attachmentGrantsExtraBeginningPhase(card.oracleText))
+  );
+}
+
 function hasPhaseTrigger(card: VisibleCard, phase: TurnPhase) {
+  // A creature that's lost all abilities (abilitiesStripped) can't fire its own phase-triggered
+  // ability either — same suppression hasKeyword already applies to its keywords.
+  if (card.abilitiesStripped) return false;
   return mergeModalBulletClauses(oracleClauses(card.oracleText)).some(
     (clause) => !isActivatedAbilityClause(clause) && phaseTriggerTextMatches(clause.toLowerCase(), phase)
   );
@@ -10064,7 +11371,13 @@ function applyDeterministicPhaseTrigger(session: GameSession, seatId: string, so
   // the Rules Advisor instead, which can actually read and evaluate the condition, rather than
   // silently doing a partially-wrong deterministic thing. "You may" isn't caught by this — it's
   // already handled as an optional trigger, not a gating condition.
-  if (/^if\b/i.test(clauseText.replace(/^at the beginning of[^,]*,\s*/i, ""))) return undefined;
+  // The "at the beginning of..." phrase isn't always the very first thing in the clause — a keyword
+  // ability name can sit in front of it ("Lieutenant — At the beginning of combat on your turn, if
+  // you control your commander, ..."), so the strip can't be anchored to the start of the string:
+  // doing so left that leading "Lieutenant — " untouched, the whole replace a no-op, and the "if"
+  // check failing to match a string that still started with "Lieutenant" — reproduced live as Loyal
+  // Apprentice creating its Thopter every combat regardless of whether its commander was out.
+  if (/^if\b/i.test(clauseText.replace(/^.*?\bat the beginning of[^,]*,\s*/i, ""))) return undefined;
 
   const removalEffect = parseRemovalEffect(clauseText);
   if (removalEffect) return applyRemovalEffect(session, seatId, sourceCard.name, sourceCard, removalEffect);
@@ -10113,7 +11426,7 @@ function isStackAction(action: PendingAction): action is Extract<PendingAction, 
   return action.type === "spell" || action.type === "trigger";
 }
 
-function spellResolutionDestination(session: GameSession, action: Extract<PendingAction, { type: "spell" }>): "battlefield" | "graveyard" {
+function spellResolutionDestination(session: GameSession, action: Extract<PendingAction, { type: "spell" }>): "battlefield" | "graveyard" | "exile" | "library" {
   const actor = session.seats.find((seat) => seat.id === action.actorSeatId);
   const card =
     action.sourceZone === "command"
@@ -10122,7 +11435,22 @@ function spellResolutionDestination(session: GameSession, action: Extract<Pendin
         ? actor?.board.exile?.find((item) => item.id === action.cardId)
         : actor?.board.hand.find((item) => item.id === action.cardId);
   if (!card) return "graveyard";
-  return card.typeLine.includes("Instant") || card.typeLine.includes("Sorcery") ? "graveyard" : "battlefield";
+  // A two-faced card's own typeLine is the combined "Creature — Dragon // Sorcery — Omen" string,
+  // which contains "Sorcery" regardless of which face was actually cast — checking it directly here
+  // meant casting the CREATURE face of a card like Scavenger Regent still (accidentally, only
+  // "correctly" for the other face) sent it to the graveyard instead of the battlefield. Applying
+  // the chosen face first (same as findSpellSourceCard's own sourceCard derivation) makes this read
+  // whichever face was actually paid for.
+  const effectiveCard = applyChosenFaceToCard(card, action.faceIndex);
+  // Adventure (rule 715): casting the smaller spell half doesn't send the card to the graveyard —
+  // the rest of the card (its permanent half) is exiled instead, castable later for as long as it
+  // remains there (see playCardFromZone's "exile" branch, which stamps exiledPlayableBySeatId).
+  if (effectiveCard.typeLine.includes("Adventure")) return "exile";
+  // Omen (Tarkir: Dragonstorm): same "smaller spell half, rest of the card goes elsewhere" shape as
+  // Adventure, but shuffled into the owner's library instead of exiled — nothing carries over to
+  // let it be cast again later the way Adventure's exile does.
+  if (effectiveCard.typeLine.includes("Omen")) return "library";
+  return effectiveCard.typeLine.includes("Instant") || effectiveCard.typeLine.includes("Sorcery") ? "graveyard" : "battlefield";
 }
 
 function isLandCard(card: VisibleCard) {
@@ -10181,6 +11509,25 @@ function roomDoorFaces(card: VisibleCard): [CardFaceRecord, CardFaceRecord] | un
   const faces = twoSidedFaces(card);
   if (!faces) return undefined;
   return faces.every((face) => face.typeLine.includes("Room")) ? faces : undefined;
+}
+
+// Two faces that are each independently castable as their own spell — Adventure (Bonecrusher
+// Giant // Stomp) and Omen (Scavenger Regent // Exude Toxin) cards, where the "front" permanent
+// face and a smaller instant/sorcery back face both have their own real printed mana cost, unlike
+// modalDoubleFacedLandSplit's land+spell shape (where only one face is ever cast) or a transform
+// permanent's back face (empty manaCost, per modalDoubleFacedLandSplit's own comment — never
+// castable from hand at all). Without this, a Creature//Sorcery card like Scavenger Regent had no
+// way to be cast as its sorcery face specifically: it always resolved as the single fused,
+// combined-oracleText pseudo-card built from both faces mashed together, so the sorcery's own
+// effect text was never what actually ran.
+function independentlyCastableSpellFaces(card: VisibleCard): [CardFaceRecord, CardFaceRecord] | undefined {
+  const faces = twoSidedFaces(card);
+  if (!faces) return undefined;
+  const [first, second] = faces;
+  if (first.typeLine.includes("Land") || second.typeLine.includes("Land")) return undefined;
+  if (first.typeLine.includes("Room") || second.typeLine.includes("Room")) return undefined;
+  if (!first.manaCost || !second.manaCost) return undefined;
+  return faces;
 }
 
 function cardWithFaceManaCost(card: VisibleCard, manaCost: string | undefined): VisibleCard {
@@ -10248,10 +11595,10 @@ function genericManaAbilityCostShim(ability: GenericManaAbility): VisibleCard {
 }
 
 // Rule 118.4: a life-payment cost can't be paid if it would take the payer below 0 life.
-function genericManaAbilityAffordable(seat: PlayerSeat, ability: GenericManaAbility): boolean {
+function genericManaAbilityAffordable(seat: PlayerSeat, ability: GenericManaAbility, allSeats?: PlayerSeat[]): boolean {
   if (seat.life < ability.costLife) return false;
   const totalCost = manaValueFromManaCost(ability.costManaText);
-  return totalCost === 0 || chooseManaSourcesForCost(seat, genericManaAbilityCostShim(ability), totalCost).ok;
+  return totalCost === 0 || chooseManaSourcesForCost(seat, genericManaAbilityCostShim(ability), totalCost, undefined, allSeats).ok;
 }
 
 function attackTaxEffectsFor(defender: PlayerSeat, targetIsPlaneswalker: boolean): InterpretedEffect[] {
@@ -10355,6 +11702,25 @@ function handCardFaceOptions(
     });
   }
 
+  const spellFaces = independentlyCastableSpellFaces(card);
+  if (spellFaces) {
+    return spellFaces.map((face, index) => {
+      const shim = cardWithFaceManaCost(card, face.manaCost);
+      const baseCost = manaValueFromManaCost(face.manaCost);
+      const fixedCost = adjustedCastingCost(seat, shim, baseCost, "hand", activeSeatId, allSeats);
+      // Only the non-X portion needs to be payable to offer the option at all — paying X=0 is
+      // always a legal choice, same as every other X spell (maxAffordableX/chosenX pick the actual
+      // amount at cast time in playCard, not here).
+      const payment = payCostFromPool(manaPool, shim, fixedCost);
+      return {
+        faceIndex: index,
+        actionKind: "cast_spell" as const,
+        label: `Cast ${face.name} (${face.manaCost ?? "no cost"})`,
+        payable: payment.ok
+      };
+    });
+  }
+
   return undefined;
 }
 
@@ -10406,15 +11772,15 @@ function payCostFromPool(pool: ManaPool, card: VisibleCard, totalCost: number) {
   return { ok: true as const, sourceIds: [], pool: genericPool, spent: manaPoolDifference(pool, genericPool) };
 }
 
-function chooseManaSourcesForCost(seat: PlayerSeat, card: VisibleCard, totalCost: number, excludeCardId?: string) {
+function chooseManaSourcesForCost(seat: PlayerSeat, card: VisibleCard, totalCost: number, excludeCardId?: string, allSeats?: PlayerSeat[]) {
   const requirement = manaRequirementForCard(card, totalCost);
-  const sources = seat.board.battlefield.filter((source) => source.id !== excludeCardId && isAvailableManaSource(source, seat));
+  const sources = seat.board.battlefield.filter((source) => source.id !== excludeCardId && isAvailableManaSource(source, seat, allSeats));
   const chosen = new Set<string>();
   const pool = emptyManaPool();
 
   for (const color of ["W", "U", "B", "R", "G"] as ColoredMana[]) {
     for (let needed = requirement.colors[color]; needed > 0; needed -= 1) {
-      const source = sources.find((candidate) => !chosen.has(candidate.id) && manaChoicesForCard(candidate, seat).includes(color));
+      const source = sources.find((candidate) => !chosen.has(candidate.id) && manaChoicesForCard(candidate, seat, allSeats).includes(color));
       if (!source) return { ok: false as const, sourceIds: [...chosen], reason: `missing ${color} mana` };
       chosen.add(source.id);
       pool[color] += manaProducedBy(source, seat);
@@ -10425,7 +11791,7 @@ function chooseManaSourcesForCost(seat: PlayerSeat, card: VisibleCard, totalCost
     const source = sources.find((candidate) => !chosen.has(candidate.id));
     if (!source) return { ok: false as const, sourceIds: [...chosen], reason: `missing ${totalCost - manaPoolTotal(pool)} generic mana` };
     chosen.add(source.id);
-    const choices = manaChoicesForCard(source, seat);
+    const choices = manaChoicesForCard(source, seat, allSeats);
     const color = choices.includes("C") ? "C" : choices[0] ?? "C";
     pool[color] += manaProducedBy(source, seat);
   }
@@ -10477,21 +11843,93 @@ function formatManaPoolPayment(pool: ManaPool) {
 // selfConditionalCostReduction's) for the handful of callers that don't have every seat on hand —
 // safe-but-conservative there, never an exploit, since underestimating a discount can only ever
 // overcharge, not undercharge.
+// turn/onceEachTurnUsed are optional and only needed for One with the Multiverse's once-per-turn
+// free cast — playCard (the single real cast-commit path both human clicks and agent decisions
+// funnel through) passes the live session values so that check is accurate; the many other, purely
+// informational callers (legal-action listings, cost previews) can omit them, at the cost of that
+// one card's discount possibly showing as available a beat after it's actually been used that turn.
 function adjustedCastingCost(
   seat: PlayerSeat,
   card: VisibleCard,
   baseCost: number,
   sourceZone: "hand" | "command" | "exile",
   activeSeatId: string | undefined,
-  allSeats: PlayerSeat[] = [seat]
+  allSeats: PlayerSeat[] = [seat],
+  turn?: number,
+  onceEachTurnUsed?: string[]
 ) {
   // Mind's Dilation-style "you may cast that card without paying its mana cost" — the exile-play
   // permission itself already gates which zone/seat may cast it (see playCard's existing exile
   // checks); this only waives the cost on top of that, and only while actually casting from exile.
   if (sourceZone === "exile" && card.exiledPlayableFree) return 0;
+  // Omniscience: "You may cast spells from your hand without paying their mana costs." An
+  // unconditional standing permission (contrast Mind's Dilation's one-shot exile trigger above, or
+  // One with the Multiverse's once-per-turn version below — see hasOmniscienceFreeHandCast's own
+  // doc comment for why this card gets its own narrow check rather than a shared "free cast" grammar).
+  if (sourceZone === "hand" && hasOmniscienceFreeHandCast(seat)) return 0;
+  if (
+    sourceZone === "hand" &&
+    turn !== undefined &&
+    hasOnceEachTurnFreeHandCastPermission(seat) &&
+    !(onceEachTurnUsed ?? []).includes(onceEachTurnFreeCastKey(turn, seat.id))
+  ) {
+    return 0;
+  }
+  // Demon of Fate's Design: mana cost waived here (life is charged separately, at playCard's actual
+  // cast-commit site — see hasFateDesignLifeAltCost's own doc comment); only the once-per-turn
+  // budget and "this is an enchantment spell" are checked here.
+  if (
+    sourceZone === "hand" &&
+    turn !== undefined &&
+    card.typeLine.includes("Enchantment") &&
+    // Rule 118.4: can't pay more life than you currently have — falls through to the normal mana
+    // cost below when unaffordable, rather than offering an alt-cost the caster can't actually pay.
+    seat.life >= baseCost &&
+    hasFateDesignLifeAltCost(seat) &&
+    !(onceEachTurnUsed ?? []).includes(fateDesignLifeAltCostKey(turn, seat.id))
+  ) {
+    return 0;
+  }
   return Math.max(
     0,
     baseCost - pendingArtifactAffinityReduction(seat) - staticCostReduction(seat, card) - selfConditionalCostReduction(card, allSeats)
+  );
+}
+
+function onceEachTurnFreeCastKey(turn: number, seatId: string): string {
+  return `${turn}:${seatId}:once_each_turn_free_hand_cast`;
+}
+
+function fateDesignLifeAltCostKey(turn: number, seatId: string): string {
+  return `${turn}:${seatId}:fate_design_life_alt_cost`;
+}
+
+// "You may cast spells from your hand without paying their mana costs." (Omniscience) — matched
+// narrowly to this exact wording rather than a general "free cast" grammar, same single-card
+// scoping as parseEnchantmentAnimationEffect/parsePhaseOutEffect elsewhere in this file; One with
+// the Multiverse's similar-sounding permission is "once during each of your turns" (a limited,
+// per-turn version, tracked separately via onceEachTurnEffectsUsed rather than this unconditional
+// check) and is deliberately NOT matched here.
+function hasOmniscienceFreeHandCast(seat: PlayerSeat): boolean {
+  return seat.board.battlefield.some((card) => /\byou may cast spells from your hand without paying (?:their|its) mana costs?\b/i.test(card.oracleText));
+}
+
+// "Once during each of your turns, you may cast a spell from your hand or the top of your library
+// without paying its mana cost." (One with the Multiverse). Scoped to the hand half only — casting
+// from the top of the library isn't modeled (this engine has no "library top is a playable zone"
+// concept; see this card's playCard/adjustedCastingCost callers for where the hand half plugs in).
+function hasOnceEachTurnFreeHandCastPermission(seat: PlayerSeat): boolean {
+  return seat.board.battlefield.some((card) => /\bonce during each of your turns, you may cast a spell from your hand or the top of your library without paying its mana cost\b/i.test(card.oracleText));
+}
+
+// "Once during each of your turns, you may cast an enchantment spell by paying life equal to its
+// mana value rather than paying its mana cost." (Demon of Fate's Design) — an alternative cost, not
+// a discount: the mana cost is waived entirely (handled the same way as the once-per-turn permission
+// above, via adjustedCastingCost returning 0) but a real life cost equal to the spell's own mana
+// value is charged instead, at the same playCard call site that marks the once-key used.
+function hasFateDesignLifeAltCost(seat: PlayerSeat): boolean {
+  return seat.board.battlefield.some((card) =>
+    /\bonce during each of your turns, you may cast an enchantment spell by paying life equal to its mana value rather than paying its mana cost\b/i.test(card.oracleText)
   );
 }
 
@@ -10517,6 +11955,19 @@ function staticCostReduction(seat: PlayerSeat, card: VisibleCard): number {
   const commander = seat.board.commander;
   const commanderReduction = commander && /\beminence\b/i.test(commander.oracleText) ? parseGrantedCostReduction(commander, card) : 0;
   return commanderReduction + seat.board.battlefield.reduce((total, source) => total + parseGrantedCostReduction(source, card), 0);
+}
+
+// "Unlock costs you pay cost {1} less." (Inquisitive Glimmer, ...) — a differently-worded sibling
+// of staticCostReduction/parseGrantedCostReduction above (that one only ever matches "...spells...
+// cost {N} less to cast", nothing about unlocking a Room door), so it needed its own small parser
+// rather than trying to shoehorn "unlock" into the spell-cost regex.
+function unlockCostReduction(seat: PlayerSeat): number {
+  return seat.board.battlefield.reduce((total, source) => {
+    const match = source.oracleText.match(/unlock costs you pay cost \{(\d+)\} less\.?/i);
+    if (!match) return total;
+    const amount = Number.parseInt(match[1], 10);
+    return Number.isFinite(amount) && amount > 0 ? total + amount : total;
+  }, 0);
 }
 
 // "This spell costs {N} less to cast if there are [X] or more creatures on the battlefield."
@@ -10644,18 +12095,18 @@ function chooseManaSources(seat: PlayerSeat, requiredMana: number) {
 // it or searching. Delegating to manaChoicesForCard (which only returns colors it can actually find
 // real evidence for) makes this the same single source of truth instead of two independently
 // drifting "is this a mana source" checks.
-function isAvailableManaSource(card: VisibleCard, seat: PlayerSeat) {
-  return !card.tapped && manaChoicesForCard(card, seat).length > 0;
+function isAvailableManaSource(card: VisibleCard, seat: PlayerSeat, allSeats?: PlayerSeat[]) {
+  return !card.tapped && manaChoicesForCard(card, seat, allSeats).length > 0;
 }
 
-function summarizeAvailableMana(seat: PlayerSeat) {
-  const sources = seat.board.battlefield.filter((card) => isAvailableManaSource(card, seat));
+function summarizeAvailableMana(seat: PlayerSeat, allSeats?: PlayerSeat[]) {
+  const sources = seat.board.battlefield.filter((card) => isAvailableManaSource(card, seat, allSeats));
   const byColor = emptyManaPool();
   let total = 0;
   for (const source of sources) {
     const produced = manaProducedBy(source, seat);
     total += produced;
-    const choices = manaChoicesForCard(source, seat);
+    const choices = manaChoicesForCard(source, seat, allSeats);
     const color = choices.includes("C") ? "C" : choices[0];
     if (color) byColor[color] += produced;
   }
@@ -10782,19 +12233,37 @@ function conditionallyUnavailableColors(oracleText: string, seat: PlayerSeat): S
   return colors;
 }
 
-function manaChoicesForCard(card: VisibleCard, seat: PlayerSeat): ManaColor[] {
-  const raw = manaChoicesForCardRaw(card, seat);
+function manaChoicesForCard(card: VisibleCard, seat: PlayerSeat, allSeats?: PlayerSeat[]): ManaColor[] {
+  const raw = manaChoicesForCardRaw(card, seat, allSeats);
   const blocked = conditionallyUnavailableColors(card.oracleText, seat);
   return blocked.size > 0 ? raw.filter((color) => !blocked.has(color)) : raw;
 }
 
-function manaChoicesForCardRaw(card: VisibleCard, seat: PlayerSeat): ManaColor[] {
+// allSeats (every seat in the game, including this card's controller) is optional and only needed
+// for Exotic Orchard's board-state-dependent color set ("a land an opponent controls could
+// produce") — when the caller doesn't have it handy, this falls through to the old producedMana-
+// based behavior further down instead of guessing, so every un-migrated call site is unaffected.
+// Reflecting Pool needs no such threading since "a land you control" is already on `seat`.
+function manaChoicesForCardRaw(card: VisibleCard, seat: PlayerSeat, allSeats?: PlayerSeat[]): ManaColor[] {
   const chosenColorAbility = chosenColorManaAbility(card.oracleText);
   if (chosenColorAbility) {
     const colors: ManaColor[] = [];
     if (chosenColorAbility.fixedColor) colors.push(chosenColorAbility.fixedColor);
     if (card.chosenColor) colors.push(card.chosenColor as ManaColor);
     return normalizeManaColors(colors);
+  }
+
+  const name = card.name.toLowerCase();
+  // Reflecting Pool: "{T}: Add one mana of any type that a land you control could produce." — a
+  // dynamic ability keyed to the caster's own battlefield, not the unconditional "any color" that
+  // producedMana's static Scryfall approximation (all 5 colors, see below) would otherwise imply.
+  if (name === "reflecting pool") return producibleColorsFromLands(seat.board.battlefield, card.id);
+  // Exotic Orchard: "{T}: Add one mana of any color that a land an opponent controls could
+  // produce." — same dynamic shape as Reflecting Pool, but keyed to opponents' battlefields, which
+  // requires allSeats.
+  if (name === "exotic orchard" && allSeats) {
+    const opponentLands = allSeats.filter((other) => other.id !== seat.id).flatMap((other) => other.board.battlefield);
+    return producibleColorsFromLands(opponentLands, card.id);
   }
 
   const costly = costlyTapManaColors(card.oracleText);
@@ -10805,7 +12274,6 @@ function manaChoicesForCardRaw(card: VisibleCard, seat: PlayerSeat): ManaColor[]
   if (basicTypes.length > 0) return basicTypes.map(manaColorForBasicLand).filter((color): color is ManaColor => Boolean(color));
 
   const text = card.oracleText.toLowerCase();
-  const name = card.name.toLowerCase();
   if (name === "command tower" || text.includes("mana of any color in your commander's color identity") || text.includes("one mana of any color")) {
     return normalizeManaColors(seat.deck?.colors ?? seat.board.commander?.colorIdentity ?? ["C"]);
   }
@@ -10841,6 +12309,28 @@ function manaColorForBasicLand(type: string): ManaColor | undefined {
   if (type === "Forest") return "G";
   if (type === "Wastes") return "C";
   return undefined;
+}
+
+// The color(s) a single land could produce, used to answer "a land [you control/an opponent
+// controls] could produce" (Reflecting Pool, Exotic Orchard) without recursing into
+// manaChoicesForCard itself — basic land types first, falling back to the card's raw producedMana
+// (a nested Reflecting Pool/Exotic Orchard among the candidate lands still resolves to its own
+// static producedMana here rather than recursing, a rare-enough edge case to approximate this way).
+function producibleColorsForLand(card: VisibleCard): ManaColor[] {
+  const basicTypes = basicLandTypes(card);
+  if (basicTypes.length > 0) return basicTypes.map(manaColorForBasicLand).filter((color): color is ManaColor => Boolean(color));
+  return normalizeManaColors(card.producedMana ?? []);
+}
+
+// excludeId keeps a land from counting itself (Reflecting Pool doesn't see its own color via "a
+// land you control").
+function producibleColorsFromLands(lands: VisibleCard[], excludeId?: string): ManaColor[] {
+  const colors = new Set<ManaColor>();
+  for (const land of lands) {
+    if (land.id === excludeId) continue;
+    for (const color of producibleColorsForLand(land)) colors.add(color);
+  }
+  return Array.from(colors);
 }
 
 function entersBattlefieldTapped(card: VisibleCard, controller?: PlayerSeat) {
@@ -11303,7 +12793,7 @@ function playCardFromZone(
   cardId: string,
   message?: string,
   position?: { x: number; z: number },
-  destination: "battlefield" | "graveyard" = "battlefield",
+  destination: "battlefield" | "graveyard" | "exile" | "library" = "battlefield",
   manaSourceIds: string[] = [],
   sourceZone: "hand" | "command" | "exile" = "hand",
   faceIndex?: number
@@ -11323,26 +12813,89 @@ function playCardFromZone(
     playedName = card.name;
     const entersTapped = destination === "battlefield" && entersBattlefieldTapped(card, seat);
     enteredTapped = entersTapped;
-    const played: VisibleCard = {
+    // An Adventure card landing in exile, or an Omen card shuffled into the library, is still
+    // identified by whichever spell face was just cast (card.name/typeLine/etc. above reflect that
+    // face, via applyChosenFaceToCard) — but the card should read as the permanent it actually is
+    // (faces[0], by Scryfall's convention for Adventure/Omen cards) once it's off the stack: that's
+    // the only thing left castable from exile, and a card back in the library needs to show as
+    // itself (not as the spell that already resolved) the next time it's drawn. card.faces itself
+    // is untouched by applyChosenFaceToCard (only the top-level display fields are overwritten), so
+    // the front face is still there to read.
+    const revertsToFrontFace = destination === "exile" || destination === "library";
+    const frontFace = revertsToFrontFace ? card.faces?.[0] : undefined;
+    const enteredCard: VisibleCard = {
       ...card,
+      ...(frontFace
+        ? {
+            name: frontFace.name,
+            typeLine: frontFace.typeLine,
+            oracleText: frontFace.oracleText,
+            manaCost: frontFace.manaCost,
+            // Recomputed alongside manaCost above — every cost-check that reads a plain card
+            // object (respondWithCard's instant-speed path, most notably) uses card.manaValue
+            // directly rather than recomputing it from manaCost, so leaving the old combined-card
+            // manaValue in place here would silently misprice the exiled permanent face.
+            manaValue: manaValueFromManaCost(frontFace.manaCost),
+            power: frontFace.power,
+            toughness: frontFace.toughness,
+            loyalty: frontFace.loyalty,
+            imageUris: frontFace.imageUris ?? card.imageUris,
+            unlockedFaceIndices: [0]
+          }
+        : {}),
       zone: destination,
       tapped: entersTapped ? true : card.tapped,
       battlefieldPosition: destination === "battlefield" ? position : undefined,
       summoningSick: destination === "battlefield" && card.typeLine.includes("Creature") ? true : card.summoningSick,
       counters: destination === "battlefield" && isPlaneswalkerCard(card) ? withInitialLoyaltyCounters(card) : card.counters,
-      exiledPlayableBySeatId: undefined,
+      // Adventure (destination "exile"): the OTHER face is now exiled, castable indefinitely —
+      // exiledPlayableUntilTurn left undefined, same "for as long as it remains exiled" shape
+      // applyStealAndPlay already uses for Bribery-style effects (never swept by
+      // clearTemporaryBuffs, which only expires a turn-limited exiledPlayableUntilTurn).
+      exiledPlayableBySeatId: destination === "exile" ? seatId : undefined,
       exiledPlayableUntilTurn: undefined
     };
+    // Rule 707.2: "enters as a copy" is a replacement effect on the copiable values only (name,
+    // type line, oracle text, mana cost/value, colors, P/T) — everything else about enteredCard
+    // (id, zone, tapped state, ...) is untouched. seat.board.battlefield here is still the PRE-this-
+    // card board (this permanent hasn't been added to it yet), so it can't accidentally copy itself.
+    // "You may" is auto-accepted (this engine's standard "always take the beneficial choice" policy
+    // for unmodeled optional decisions) since entering with no copy target just leaves it a blank
+    // enchantment with no text, strictly worse in every real case.
+    const copyEffect = destination === "battlefield" ? parseEnterAsCopyEffect(enteredCard.oracleText) : undefined;
+    const copyTarget = copyEffect ? seat.board.battlefield.find((item) => item.typeLine.includes("Enchantment")) : undefined;
+    const played: VisibleCard = copyTarget
+      ? {
+          ...enteredCard,
+          name: copyTarget.name,
+          typeLine: copyTarget.typeLine,
+          oracleText: copyEffect?.extraAbilityText ? `${copyTarget.oracleText}\n${copyEffect.extraAbilityText}` : copyTarget.oracleText,
+          manaCost: copyTarget.manaCost,
+          manaValue: copyTarget.manaValue,
+          colors: copyTarget.colors,
+          colorIdentity: copyTarget.colorIdentity,
+          power: copyTarget.power,
+          toughness: copyTarget.toughness
+        }
+      : enteredCard;
     const spentSeat = spendManaSources(seat, manaSourceIds);
     const graveyard = spentSeat.board.graveyard ?? [];
+    const library = spentSeat.library ?? [];
+    const exile = spentSeat.board.exile ?? [];
     const commanderLeavesCommand = sourceZone === "command" && seat.board.commander?.id === cardId;
+    // Only relevant when a card is cast FROM exile and resolves somewhere other than back into
+    // exile (Adventure's spell half is always cast from hand, so this is really only exercised by
+    // an impulse-drawn/stolen card being cast normally) — kept distinct from the "entering exile"
+    // case below since both can't be true for the same resolution.
+    const leavesExileZone = sourceZone === "exile" && destination !== "exile";
     return {
       ...spentSeat,
+      library: destination === "library" ? [played, ...library] : spentSeat.library,
       board: {
         ...spentSeat.board,
         commander: commanderLeavesCommand ? undefined : spentSeat.board.commander,
         hand: sourceZone === "hand" ? spentSeat.board.hand.filter((item) => item.id !== cardId) : spentSeat.board.hand,
-        exile: sourceZone === "exile" ? (spentSeat.board.exile ?? []).filter((item) => item.id !== cardId) : spentSeat.board.exile,
+        exile: destination === "exile" ? [...exile.filter((item) => item.id !== cardId), played] : leavesExileZone ? exile.filter((item) => item.id !== cardId) : spentSeat.board.exile,
         battlefield: destination === "battlefield" ? [...spentSeat.board.battlefield, played] : spentSeat.board.battlefield,
         graveyard: destination === "graveyard" ? [...graveyard, played] : graveyard
       },
@@ -11352,7 +12905,8 @@ function playCardFromZone(
         command: Math.max(0, spentSeat.zones.command - (commanderLeavesCommand ? 1 : 0)),
         graveyard: spentSeat.zones.graveyard + (destination === "graveyard" ? 1 : 0),
         hand: sourceZone === "hand" ? Math.max(0, spentSeat.zones.hand - 1) : spentSeat.zones.hand,
-        exile: sourceZone === "exile" ? Math.max(0, spentSeat.zones.exile - 1) : spentSeat.zones.exile
+        exile: Math.max(0, spentSeat.zones.exile + (destination === "exile" && sourceZone !== "exile" ? 1 : 0) - (leavesExileZone ? 1 : 0)),
+        library: spentSeat.zones.library + (destination === "library" ? 1 : 0)
       }
     };
   });
@@ -11367,8 +12921,8 @@ function playCardFromZone(
         id: crypto.randomUUID(),
         at: new Date().toISOString(),
         seatId,
-        message: `${message ?? `${session.seats.find((seat) => seat.id === seatId)?.name ?? "Player"} plays ${playedName}.`}${enteredTapped ? " It enters tapped." : ""}`,
-        detail: destination === "graveyard" ? "Response" : undefined
+        message: `${message ?? `${session.seats.find((seat) => seat.id === seatId)?.name ?? "Player"} plays ${playedName}.`}${enteredTapped ? " It enters tapped." : ""}${destination === "exile" ? " It's exiled — you may cast the other half later." : destination === "library" ? " It's shuffled into its owner's library." : ""}`,
+        detail: destination === "graveyard" || destination === "exile" || destination === "library" ? "Response" : undefined
       },
       ...session.events
     ]
@@ -11520,7 +13074,7 @@ function canReceivePriorityForPendingAction(
     // instant was never even offered a priority window: they needed priority to tap mana, but only
     // got priority if mana was already tapped. chooseManaSourcesForCost simulates tapping directly
     // from the battlefield (same color-aware logic already used for agents), so check that too.
-    return payCostFromPool(pool, card, totalCost).ok || chooseManaSourcesForCost(seat, card, totalCost).ok;
+    return payCostFromPool(pool, card, totalCost).ok || chooseManaSourcesForCost(seat, card, totalCost, undefined, session.seats).ok;
   });
 }
 
@@ -11544,7 +13098,10 @@ function moveCardBetweenVisibleZones(session: GameSession, seatId: string, cardI
     if (source === destination) return seat;
 
     movedName = card.name;
-    if (card.commander && source === "battlefield" && (destination === "graveyard" || destination === "exile")) {
+    // Rule 903.9: the replacement also covers a commander that would go to hand (bounce), not just
+    // graveyard/exile — same unconditional-redirect precedent as those two (see moveCardAcrossSeats'
+    // matching comment for why "always redirect" instead of a real "may" choice).
+    if (card.commander && source === "battlefield" && (destination === "graveyard" || destination === "exile" || destination === "hand")) {
       commanderTax = (card.commanderTax ?? 0) + 2;
       return {
         ...seat,
@@ -11894,28 +13451,6 @@ function isBasicLandCard(card: VisibleCard) {
   return card.typeLine.includes("Basic Land") || ["Plains", "Island", "Swamp", "Mountain", "Forest", "Wastes"].includes(card.name);
 }
 
-function isBasicLandFetchAbility(card: VisibleCard) {
-  const text = card.oracleText.toLowerCase();
-  return (
-    text.includes("search your library for a basic land card") &&
-    (text.includes("put it onto the battlefield tapped") || text.includes("put that card onto the battlefield tapped")) &&
-    text.includes("sacrifice")
-  );
-}
-
-// Not every basic-land-fetch ability actually costs {T} — Sakura-Tribe Elder's is plain "Sacrifice
-// this creature:" with no tap at all (that's the whole point of the card: block, then still get
-// its ramp the same turn), unlike Evolving Wilds' "{T}, Sacrifice this land:". Gating on
-// card.tapped/summoning sickness unconditionally for every basic-land-fetch source — as if they all
-// cost {T} — wrongly blocked Sakura-Tribe Elder's ability the instant it was already tapped (e.g.
-// from blocking) or still summoning sick, neither of which rule 302.6 actually restricts when the
-// cost has no {T}/{Q} in it.
-function basicLandFetchCostRequiresTap(card: VisibleCard): boolean {
-  const clause = card.oracleText.split("\n").find((line) => /search your library for a basic land card/i.test(line));
-  const costPortion = clause?.split(":")[0] ?? "";
-  return /\{t\}/i.test(costPortion);
-}
-
 function basicLandTypes(card: VisibleCard) {
   return ["Plains", "Island", "Swamp", "Mountain", "Forest", "Wastes"].filter((type) => card.name === type || card.typeLine.includes(type));
 }
@@ -12082,7 +13617,7 @@ function moveLibraryCardToDestination(
   session: GameSession,
   seatId: string,
   cardId: string,
-  destination: "hand" | "battlefield" | "graveyard",
+  destination: "hand" | "battlefield" | "graveyard" | "library",
   tapped: boolean
 ): GameSession {
   let movedName = "";
@@ -12095,10 +13630,18 @@ function moveLibraryCardToDestination(
     const remainingLibrary = library.filter((item) => item.id !== cardId);
     const movedCard: VisibleCard = {
       ...card,
-      zone: destination,
+      zone: destination === "library" ? "library" : destination,
       tapped: destination === "battlefield" ? tapped || entersBattlefieldTapped(card, seat) : card.tapped,
       summoningSick: destination === "battlefield" && card.typeLine.includes("Creature") ? true : card.summoningSick
     };
+
+    // "library" (a tutor putting the found card on top instead of into hand/battlefield/graveyard,
+    // e.g. Mystical Tutor, Enlightened Tutor, Moon-Blessed Cleric) never leaves the library zone, so
+    // it goes back on top of remainingLibrary instead of into a board zone, and the library count
+    // doesn't change.
+    if (destination === "library") {
+      return { ...seat, library: [movedCard, ...remainingLibrary] };
+    }
 
     return {
       ...seat,
@@ -12128,7 +13671,10 @@ function moveLibraryCardToDestination(
         id: crypto.randomUUID(),
         at: new Date().toISOString(),
         seatId,
-        message: `${session.seats.find((seat) => seat.id === seatId)?.name ?? "Player"} searches their library for ${movedName} and puts it ${destination === "graveyard" ? "into" : "onto"} the ${destination}.`
+        message:
+          destination === "library"
+            ? `${session.seats.find((seat) => seat.id === seatId)?.name ?? "Player"} searches their library for ${movedName} and puts it on top.`
+            : `${session.seats.find((seat) => seat.id === seatId)?.name ?? "Player"} searches their library for ${movedName} and puts it ${destination === "graveyard" ? "into" : "onto"} the ${destination}.`
       },
       ...session.events
     ]
@@ -12139,26 +13685,32 @@ function createVisibleFromDeckCard(deckCard: { name: string; role?: string; card
   const name = deckCard.card?.name ?? deckCard.name;
   const role = deckCard.role ?? "spell";
   const isLand = role === "land" || ["Plains", "Island", "Swamp", "Mountain", "Forest", "Wastes"].includes(name);
-  const typeLine = deckCard.card?.typeLine;
+  // A multi-faced card's CardRecord.typeLine/oracleText is Scryfall's *combined* string across
+  // both faces (e.g. "Land // Legendary Creature — Demon" for Westvale Abbey // Ormendahl), never
+  // meant for gameplay checks. A permanent always starts as its front face (faces[0]), matching
+  // what transformPermanent later flips away from and what unlockedFaceIndices defaults to.
+  const frontFace = deckCard.card?.faces?.[0];
+  const typeLine = frontFace?.typeLine ?? deckCard.card?.typeLine;
   const fallbackTypeLine = fallbackTypeLineForCard(name, role, isLand);
   const isCreature = typeLine?.includes("Creature") ?? fallbackTypeLine.includes("Creature");
   return {
     id,
-    name,
+    name: frontFace?.name ?? name,
     typeLine: typeLine ?? fallbackTypeLine,
-    oracleText: deckCard.card?.oracleText ?? (isLand ? "Tap: Add mana." : `Mock ${role} card. Full rules text will come from card data lookup.`),
-    manaCost: deckCard.card?.manaCost,
+    oracleText: frontFace?.oracleText ?? deckCard.card?.oracleText ?? (isLand ? "Tap: Add mana." : `Mock ${role} card. Full rules text will come from card data lookup.`),
+    manaCost: frontFace?.manaCost ?? deckCard.card?.manaCost,
     manaValue: deckCard.card?.manaValue ?? fallbackManaValueForCard(name, role, isLand),
-    colors: deckCard.card?.colors ?? (isLand ? [] : colors.slice(0, 1)),
+    colors: frontFace?.colors ?? deckCard.card?.colors ?? (isLand ? [] : colors.slice(0, 1)),
     colorIdentity: deckCard.card?.colorIdentity ?? colors,
     producedMana: deckCard.card?.producedMana,
-    imageUris: deckCard.card?.imageUris,
+    imageUris: frontFace?.imageUris ?? deckCard.card?.imageUris,
     faces: deckCard.card?.faces,
+    unlockedFaceIndices: deckCard.card?.faces ? [0] : undefined,
     role,
     zone,
-    power: deckCard.card?.power ?? (isCreature ? "2" : undefined),
-    toughness: deckCard.card?.toughness ?? (isCreature ? "2" : undefined),
-    loyalty: deckCard.card?.loyalty
+    power: frontFace?.power ?? deckCard.card?.power ?? (isCreature ? "2" : undefined),
+    toughness: frontFace?.toughness ?? deckCard.card?.toughness ?? (isCreature ? "2" : undefined),
+    loyalty: frontFace?.loyalty ?? deckCard.card?.loyalty
   };
 }
 
