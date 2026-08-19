@@ -1,13 +1,7 @@
-1. Estrids Invocation did not work as intended
-2. Meren of clan nel toth needs to be looked at, it does not work as intended Sable just played it for 4 mana and then used it 5th last mana to equip skull clamp to it, but then some how gets to play Beast Whisperer that is a 4 mana creature when he also should not have 2 experience counters since those only can be added while Meren of clan nel toth is out on the battlefield 
-3.  Enhanced Surveillance does not work, it should look at when a player/agent gets to survail it should add two more cards to the amount the player gets to survail from the other source
-4. I used Greed to draw a card which should trigger Aminatou, Veil Piercer if it was an enchantment and its the first card I drew this turn I should be able to cast it for its miracle cost, I drew Overwhelming Splendor which should let me cast it for its miracle cost, and since miracle is like playing an instant spell or flash spell it should have let me cast it
-5. Sun Titan did not work as intended
-6. Veyra played Village Rites which seemed to have triggered twice for some reason, so the agent just drew 4 cards instead of 2
-7. Beast Whisperer died somehow when I played Doomwake Giant, Beast Whisperer had skull clamp attached to it meaning its life total was 2 and not 3 but Doomwake Giant should only have giving it -1 so it should have stayed alive
-8. When Beast Whisperer died Sable should have gotten another experience counter 
-9. Currently we are going counter clockwise in the turn order, we need to go clockwise instead
-10. can we add a "Action log" where we can track every card that is played by who so I can see what happened easier, instead of the "Agent Activity" log. What I want included is what card was played by who and also what triggers happened, so basically showing the stack history into this log. a complete log that covers the game. Later on we could maybe add so you can read that game log afterwards but make it into the game first
-11. Now the agents try and put the cards in their more specified places on the battlefield, but they still only put like 3-4 lands at the bottom then they start to pile them up, making it so some artifacts and enchanments are clipping through some of the lands, they have a lot more space than they use
-12. Archaeomancer's Map does not work as intended I only got to fetch one PLains card not two, the other ability of that triggers when an opponent plays a land did not trigger. 
-13. Still something not quite working with Myriad Landscape, I had 2 mana floating but couldnt trigger its ability 
+1. I returned Avenger of Zendikar from a graveyard using Virtue of Persistence, not sure if Avenger of Zendikar etb triggered correctly, does not take into account the amount of lands you have
+2. I played Timely Ward, but did not get to attach it to my creature of choice
+3. When playing Secret Arcade // Dusty Parlor I should get the choice of what room I want to unlock, I got to play this card for it miracle cost but it chosed Secret Arcade for me.
+4. Veyra and Sable seem to have switch places but not on the Life Counter UI
+5. When returning a creature with Virtue of Persistence the ETB does not trigger at all
+6. Omniscience does not let me cast spells for free
+7. When Omniscience entered I had Secret Arcade // Dusty Parlor fully unlocked but it did not trigger it letting me to add 10 +1/+1 to a creature of my choosing 

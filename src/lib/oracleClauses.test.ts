@@ -98,6 +98,19 @@ describe("isActivatedAbilityClause", () => {
     expect(isActivatedAbilityClause("Artifact creatures you control get +1/+1.")).toBe(false);
     expect(isActivatedAbilityClause("At the beginning of your end step, draw a card.")).toBe(false);
   });
+
+  it("does not mistake a Room door's own name-prefix for a cost divider (Secret Arcade // Dusty Parlor)", () => {
+    // Reproduced live: Dusty Parlor's cast trigger never fired even fully unlocked, because
+    // "Dusty Parlor: Whenever you cast an enchantment spell, ..." has no when/whenever before its
+    // own colon (the door name doesn't contain one), so it read exactly like an activated
+    // ability's "cost: effect" divider and got excluded from cast-trigger scanning entirely.
+    expect(
+      isActivatedAbilityClause("Dusty Parlor: Whenever you cast an enchantment spell, put a number of +1/+1 counters equal to that spell's mana value on up to one target creature.")
+    ).toBe(false);
+    expect(
+      isActivatedAbilityClause("Secret Arcade: Nonland permanents you control and permanent spells you control are enchantments in addition to their other types.")
+    ).toBe(false);
+  });
 });
 
 describe("phase-trigger clauses nested inside a loyalty ability", () => {

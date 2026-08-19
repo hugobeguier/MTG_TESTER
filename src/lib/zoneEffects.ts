@@ -130,9 +130,15 @@ export function parseZoneEffect(oracleText: string): ZoneEffect | undefined {
   // "creature" (e.g. Persist's "target nonlegendary creature card"), same qualifier-tolerance
   // gap fixed in removalSpells.ts's target-type patterns earlier this session. Not every reanimate
   // effect targets a creature card, though (Starfield of Nyx: "return target enchantment card from
-  // your graveyard to the battlefield") — captures the actual type word instead of assuming
-  // "creature" universally.
-  const reanimate = text.match(/\b(?:put|return) target (?:\w+ )?(creature|enchantment|artifact) card from (a|your) graveyard (?:onto|to) the battlefield\b/);
+  // your graveyard to the battlefield", Sun Titan: "return target permanent card ... from your
+  // graveyard to the battlefield") — captures the actual type word instead of assuming "creature"
+  // universally. "with mana value N or less" (Sun Titan) can sit between "card" and "from ... graveyard"
+  // — tolerated so the effect is recognized at all, same declared simplification as the regrow
+  // pattern's "that isn't a God" qualifier below: not separately enforced at the target-choosing call
+  // site (a too-expensive card could still, rarely, get picked).
+  const reanimate = text.match(
+    /\b(?:put|return) target (?:\w+ )?(creature|enchantment|artifact|permanent) cards?(?: with mana value \d+ or (?:less|greater))? from (a|your) graveyard (?:onto|to) the battlefield\b/
+  );
   if (reanimate) return { kind: "reanimate", targetType: reanimate[1] as RegrowTargetType, anyGraveyard: reanimate[2] === "a" };
 
   // "that isn't a God" (Heliod, the Radiant Dawn's own ETB: "return target enchantment card that

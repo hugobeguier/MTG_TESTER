@@ -104,6 +104,11 @@ export interface PlayerSeat {
   life: number;
   commanderDamage: Record<string, number>;
   poison?: number;
+  // A player-level reward counter (Meren of Clan Nel Toth's "you get an experience counter," and
+  // the same shape on several other commanders) — never removed once gained, unlike poison, and
+  // with no loss-condition threshold of its own; some commanders' own abilities scale off the count
+  // (Meren's end step reanimate is gated by it).
+  experienceCounters?: number;
   hasLost?: boolean;
   lossReason?: string;
   deck?: CommanderDeck;
@@ -154,6 +159,17 @@ export interface VisibleCard {
   interpretedEffects?: InterpretedEffect[];
   temporaryPowerBonus?: number;
   temporaryToughnessBonus?: number;
+  // "Creatures your opponents control lose all abilities and have base power and toughness N/N
+  // until end of turn." (Vedalken Humiliator's Metalcraft attack trigger, and the same board-wide
+  // temporary debuff shape on similar cards) — a REPLACEMENT of base P/T (layer 7b), not an
+  // additive bonus like temporaryPowerBonus/temporaryToughnessBonus above, and paired with losing
+  // all abilities for the same duration. Set directly on the affected cards (not derived from an
+  // attachment/lock-aura the way abilitiesStripped and the attachment-based P/T overrides are, since
+  // there's no permanent object representing this effect once it resolves), and cleared by
+  // clearTemporaryBuffs at the next turn change, same timing as temporaryPowerBonus.
+  temporaryBasePower?: number;
+  temporaryBaseToughness?: number;
+  temporaryAbilitiesStripped?: boolean;
   attachedToId?: string;
   // Set instead of attachedToId for an "Enchant player" Aura (Overwhelming Splendor, the Curse
   // cycle, ...) — this engine has no per-creature-permanent object for a player to attach to, so
@@ -321,6 +337,12 @@ export interface GameSession {
   // creature is already gone from the battlefield by then) — "whenever equipped/enchanted creature
   // dies" triggers need this snapshot rather than the (by-then-cleared) live attachedToId.
   pendingDeaths?: Array<{ seatId: string; card: VisibleCard; attachedSourceIds?: string[] }>;
+  // Same idea as pendingDeaths, for a permanent that enters the battlefield WITHOUT going through
+  // spell-cast resolution (which already queues its own ETB triggers directly) — reanimation
+  // (moveCardAcrossSeats), and a search/tutor landing on the battlefield (moveLibraryCardToDestination)
+  // are both pure functions with no access to the trigger-queueing machinery either. Reproduced live
+  // as Avenger of Zendikar returned via Virtue of Persistence never creating its Plant tokens.
+  pendingEntries?: Array<{ seatId: string; card: VisibleCard }>;
   // Dedup keys ("turn:sourceCardId:effectKind") for triggered effects restricted by a trailing
   // "Do this only once each turn" clause — resolveTriggerEffect() is a pure function with no
   // per-turn ref to check against, so the dedup state lives on the session itself instead.

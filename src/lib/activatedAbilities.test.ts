@@ -215,7 +215,8 @@ describe("parseSearchLibraryEffectText", () => {
       kind: "search_library",
       destination: "hand",
       tapped: false,
-      cardTypeFilter: undefined
+      cardTypeFilter: undefined,
+      count: 1
     });
   });
 
@@ -224,7 +225,8 @@ describe("parseSearchLibraryEffectText", () => {
       kind: "search_library",
       destination: "hand",
       tapped: false,
-      cardTypeFilter: "creature"
+      cardTypeFilter: "creature",
+      count: 1
     });
   });
 
@@ -233,7 +235,34 @@ describe("parseSearchLibraryEffectText", () => {
       kind: "search_library",
       destination: "battlefield",
       tapped: true,
-      cardTypeFilter: "basic land"
+      cardTypeFilter: "basic land",
+      count: 1
+    });
+  });
+
+  it("parses an 'up to N' count (Archaeomancer's Map)", () => {
+    expect(
+      parseSearchLibraryEffectText("search your library for up to two basic Plains cards, reveal them, put them into your hand, then shuffle.")
+    ).toEqual({
+      kind: "search_library",
+      destination: "hand",
+      tapped: false,
+      cardTypeFilter: "basic Plains",
+      count: 2
+    });
+  });
+
+  it("parses a search with a 'that share a land type' qualifier between the count and the put clause (Myriad Landscape)", () => {
+    expect(
+      parseSearchLibraryEffectText(
+        "search your library for up to two basic land cards that share a land type, put them onto the battlefield tapped, then shuffle."
+      )
+    ).toEqual({
+      kind: "search_library",
+      destination: "battlefield",
+      tapped: true,
+      cardTypeFilter: "basic land",
+      count: 2
     });
   });
 
@@ -254,7 +283,8 @@ describe("parseSearchLibraryEffectText", () => {
       kind: "search_library",
       destination: "library",
       tapped: false,
-      cardTypeFilter: "enchantment"
+      cardTypeFilter: "enchantment",
+      count: 1
     });
   });
 
@@ -263,7 +293,8 @@ describe("parseSearchLibraryEffectText", () => {
       kind: "search_library",
       destination: "library",
       tapped: false,
-      cardTypeFilter: undefined
+      cardTypeFilter: undefined,
+      count: 1
     });
   });
 });

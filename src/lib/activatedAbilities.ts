@@ -22,10 +22,37 @@ export interface SearchLibraryEffect {
   destination: "hand" | "battlefield" | "library";
   tapped: boolean;
   cardTypeFilter?: string;
+  // "up to N" (Archaeomancer's Map's "up to two basic Plains cards", ...) or a bare count word
+  // ("search your library for two basic land cards") — defaults to 1 for the far more common
+  // singular "a/an [type] card" shape. "up to" doesn't require finding the full count (a library
+  // with only 1 legible match still legally searches), unlike a bare count without "up to," but this
+  // parser doesn't distinguish the two at resolution time — the caller just finds up to `count`.
+  count: number;
 }
 
-const SEARCH_LIBRARY_PATTERN =
-  /^search your library for an? (?:([a-z][a-z ]*?)\s+)?cards?,?(?: reveal it,?)? put (?:it|that card|them) (into your hand|onto the battlefield(?: tapped)?),? then shuffle\.?/i;
+const COUNT_WORD = "(a|one|two|three|four|five|six|seven|eight|nine|ten|\\d+)";
+
+function parseCountWord(word: string | undefined): number {
+  if (!word) return 1;
+  const parsed = Number.parseInt(word, 10);
+  if (Number.isFinite(parsed)) return parsed;
+  return (
+    { a: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 } as Record<string, number>
+  )[word.toLowerCase()] ?? 1;
+}
+
+// "... cards that share a land type, put them ..." (Myriad Landscape, and the same shape on a
+// handful of other basic-land-pair fetches) — an extra qualifier clause sitting between "cards"
+// and "put" that the rest of the pattern has no room for on its own. Without this, the whole
+// pattern failed to match at all, which fed straight into parseSacrificeEffectText returning
+// undefined and parseGenericSacrificeAbilities silently dropping the ability altogether — reported
+// live as Myriad Landscape's sacrifice ability never being offered as a legal action even with
+// {2} floating to pay for it. The "share a land type" constraint on the pair itself isn't
+// separately enforced at resolution time (same simplification as every other cardTypeFilter here).
+const SEARCH_LIBRARY_PATTERN = new RegExp(
+  `^search your library for (?:up to ${COUNT_WORD}|an?)\\s+(?:([a-z][a-z ]*?)\\s+)?cards?(?:\\s+(?:that share|sharing) an? [a-z]+ type)?,?(?: reveal (?:it|them),?)? put (?:it|that card|them) (into your hand|onto the battlefield(?: tapped)?),? then shuffle\\.?`,
+  "i"
+);
 
 // "Search your library for a[n] [type] card, reveal it, then shuffle and put that card on top."
 // (Sterling Grove's sacrifice ability, Mystical Tutor-shaped effects on a permanent's own activated
@@ -37,14 +64,15 @@ const SEARCH_LIBRARY_TO_TOP_PATTERN =
 export function parseSearchLibraryEffectText(text: string): SearchLibraryEffect | undefined {
   const match = text.match(SEARCH_LIBRARY_PATTERN);
   if (match) {
-    const typeWord = match[1]?.trim();
+    const typeWord = match[2]?.trim();
     if (typeWord && /\bwith\b/i.test(typeWord)) return undefined;
-    const destinationText = match[2].toLowerCase();
+    const destinationText = match[3].toLowerCase();
     return {
       kind: "search_library",
       destination: destinationText.includes("battlefield") ? "battlefield" : "hand",
       tapped: destinationText.includes("tapped"),
-      cardTypeFilter: typeWord && !/^cards?$/i.test(typeWord) ? typeWord : undefined
+      cardTypeFilter: typeWord && !/^cards?$/i.test(typeWord) ? typeWord : undefined,
+      count: parseCountWord(match[1])
     };
   }
   const topMatch = text.match(SEARCH_LIBRARY_TO_TOP_PATTERN);
@@ -55,7 +83,8 @@ export function parseSearchLibraryEffectText(text: string): SearchLibraryEffect 
       kind: "search_library",
       destination: "library",
       tapped: false,
-      cardTypeFilter: typeWord && !/^cards?$/i.test(typeWord) ? typeWord : undefined
+      cardTypeFilter: typeWord && !/^cards?$/i.test(typeWord) ? typeWord : undefined,
+      count: 1
     };
   }
   return undefined;

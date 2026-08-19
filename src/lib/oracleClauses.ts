@@ -39,7 +39,22 @@ export function isActivatedAbilityClause(clause: string): boolean {
   // cost/effect divider.
   const colonIndex = clause.indexOf(":");
   if (colonIndex === -1) return false;
-  return !/\b(when|whenever|at the beginning)\b/i.test(clause.slice(0, colonIndex));
+  const preColon = clause.slice(0, colonIndex);
+  // "DoorName: Ability text." (Secret Arcade // Dusty Parlor and the same templating on every
+  // other Room card) prefixes EVERY door's ability — including a genuine triggered one like "Dusty
+  // Parlor: Whenever you cast an enchantment spell, ..." — with the door's own name before a
+  // colon, which otherwise reads exactly like an activated ability's "cost: effect" divider (the
+  // door name has no when/whenever/at-the-beginning of its own for the check below to catch).
+  // Reproduced live: Dusty Parlor's cast trigger never fired even fully unlocked, because this
+  // whole clause got misread as an uncosted activated ability and excluded from trigger scanning
+  // everywhere. A real cost always contains a mana symbol, a tap symbol, or a cost verb (tap/
+  // sacrifice/discard/pay/exile); a door name never does — so a short, all-capitalized, cost-free
+  // phrase before the colon is read as a label instead, and the same check re-runs against
+  // whatever follows it rather than stopping at the label's own colon.
+  const looksLikeCostFreeLabel =
+    /^[A-Z][a-zA-Z'-]*(?:\s+[A-Z][a-zA-Z'-]*){0,3}$/.test(preColon) && !/\{|\btap\b|\bsacrifice\b|\bdiscard\b|\bpay\b|\bexile\b/i.test(preColon);
+  if (looksLikeCostFreeLabel) return isActivatedAbilityClause(clause.slice(colonIndex + 1).trim());
+  return !/\b(when|whenever|at the beginning)\b/i.test(preColon);
 }
 
 export function isDeathTriggerClause(clause: string): boolean {
