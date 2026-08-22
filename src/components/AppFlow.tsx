@@ -2182,7 +2182,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         ? { ...applyCounterDelta(card, "stun", -1), summoningSick: false, attacking: false, blocking: false }
         : { ...card, tapped: false, summoningSick: false, attacking: false, blocking: false };
     };
-    return {
+    const untappedSession = {
       ...session,
       seats: session.seats.map((item) =>
         item.id === seatId
@@ -2198,6 +2198,9 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       ),
       events: [phaseEvent(seatId, `${seat?.name ?? "Player"} untaps their permanents.`), ...session.events]
     };
+    // "Untap all artifacts you control during each other player's untap step." (Unwinding Clock) —
+    // every OTHER seat's own untap step also untaps this seat's artifacts, not just this seat's own.
+    return applyUnwindingClockUntaps(untappedSession, seatId);
   }
 
   function declareAttack(session: GameSession, seatId: string, cardId: string | undefined, targetId: string | undefined): GameSession {
@@ -2800,6 +2803,14 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       const choosesCreatureType = hasChooseCreatureTypeEtb(playedFaceCard.oracleText);
       setSession((current) => {
         const playedSession = playCardFromZone(current, seatId, cardId, `${seat.name} plays ${playedName}.`, position, "battlefield", [], "hand", faceIndex);
+        // playCardFromZone returns the same session reference, untouched, when the card was already
+        // gone from hand (playCard re-entered for a land play already resolved — e.g. a duplicate
+        // dispatch of the same agent/human decision) — bail out here rather than falling through to
+        // the ETB-trigger scan below, which would otherwise re-detect the land that already entered
+        // and queue a second copy of its "a land entered" triggers (Archaeomancer's Map's land-raid
+        // ability) even though no second land actually entered. Reported live as that trigger firing
+        // twice off a single opponent land play.
+        if (playedSession === current) return current;
         const chosenTypeSession = choosesCreatureType ? applyChosenCreatureType(playedSession, seatId, cardId) : playedSession;
         const coloredSession = chooseColorEtb ? applyChosenColor(chosenTypeSession, seatId, cardId, chooseColorEtb.excludedColor) : chosenTypeSession;
         // Rule 714.2a: "As this Saga enters ... add a lore counter" — chapter I text (Urza's Saga's
@@ -7075,6 +7086,20 @@ function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllowed: boo
       if (activatedLoyaltyKeys.has(loyaltyTurnKey(seat.id, card.id, turn))) continue;
       parseLoyaltyAbilities(card.oracleText).forEach((ability, abilityIndex) => {
         if (ability.cost < 0 && loyaltyCounterCount(card) < Math.abs(ability.cost)) return;
+        // "The next spell you cast this turn has affinity for artifacts." (Saheeli, the Gifted's
+        // second +1) does nothing at all with no spell left in hand to cast this turn — same "don't
+        // offer a strictly pointless action" reasoning chooseEquipTarget already applies to a
+        // non-improving equip move, just for a loyalty ability instead. Without this, the ability
+        // still showed up as a legal action with nothing distinguishing it from a genuinely useful
+        // pick, and an agent activated it with an empty hand instead of its sibling +1 (which always
+        // makes a Servo token) — reported live, burning the planeswalker's one activation this turn
+        // for an effect that could never matter.
+        if (
+          /costs? \{1\} less to cast for each artifact you control|has affinity for artifacts/i.test(ability.text) &&
+          !seat.board.hand.some((handCard) => !handCard.typeLine.includes("Land"))
+        ) {
+          return;
+        }
         actions.push({
           id: `activate-loyalty:${card.id}:${abilityIndex}`,
           actionType: "activate_ability",
@@ -10922,6 +10947,55 @@ function findLandRaidTriggers(session: GameSession, enteringSeatId: string, ente
     }
   }
   return triggers;
+}
+
+// "Untap all artifacts you control during each other player's untap step." (Unwinding Clock) — not
+// a triggered ability at all (no "when"/"whenever"), so it doesn't belong in
+// findCommonTriggersForPermanentEntered/died's trigger-scan machinery; it's a standing effect that
+// extends WHO untaps during a given untap step, checked directly from untapForSeat below instead.
+// Previously had no implementation anywhere in the engine, so its controller's artifacts only ever
+// untapped on that controller's own untap step like normal, never during anyone else's.
+function hasUnwindingClockUntapAbility(card: { oracleText: string }): boolean {
+  return /\buntap all artifacts you control during each other player's untap step\b/i.test(card.oracleText);
+}
+
+// Called after a seat's own untap step already ran (untapForSeat) — untaps the artifacts of every
+// OTHER seat that controls an Unwinding Clock (or the same effect on any other permanent), since
+// this step is "each other player's" untap step from each Unwinding Clock controller's point of
+// view. The clock controller's own untap step is unaffected (their artifacts already untap
+// normally there, same as everything else they control) — only every seat that ISN'T the one whose
+// untap step this is can have a clock granting them a bonus untap here.
+function applyUnwindingClockUntaps(session: GameSession, activeUntapSeatId: string): GameSession {
+  let next = session;
+  for (const clockSeat of session.seats) {
+    if (clockSeat.id === activeUntapSeatId) continue;
+    if (!clockSeat.board.battlefield.some(hasUnwindingClockUntapAbility)) continue;
+    next = {
+      ...next,
+      seats: next.seats.map((item) =>
+        item.id === clockSeat.id
+          ? {
+              ...item,
+              board: {
+                ...item.board,
+                battlefield: item.board.battlefield.map((card) => (card.tapped && card.typeLine.includes("Artifact") ? { ...card, tapped: false } : card))
+              }
+            }
+          : item
+      ),
+      events: [
+        {
+          id: crypto.randomUUID(),
+          at: new Date().toISOString(),
+          seatId: clockSeat.id,
+          message: `Unwinding Clock untaps ${clockSeat.name}'s artifacts during ${session.seats.find((seat) => seat.id === activeUntapSeatId)?.name ?? "another player"}'s untap step.`,
+          detail: "Phase change"
+        },
+        ...next.events
+      ]
+    };
+  }
+  return next;
 }
 
 function findCommonTriggersForPermanentDied(

@@ -252,6 +252,25 @@ describe("parseSearchLibraryEffectText", () => {
     });
   });
 
+  it("parses an ETB-triggered search with its trigger condition still attached (Archaeomancer's Map, via etbEffectText)", () => {
+    // etbEffectText keeps a kept clause's full text, including its "When ~ enters," prefix — every
+    // other etbEffectText-fed parser matches with \b word boundaries so the prefix never mattered,
+    // but this parser's ^-anchored pattern needs to tolerate it explicitly, or an ETB-triggered
+    // search (as opposed to an activated-ability one, whose effect text is already isolated after
+    // its cost's colon) never matches at all.
+    expect(
+      parseSearchLibraryEffectText(
+        "When this artifact enters, search your library for up to two basic Plains cards, reveal them, put them into your hand, then shuffle."
+      )
+    ).toEqual({
+      kind: "search_library",
+      destination: "hand",
+      tapped: false,
+      cardTypeFilter: "basic Plains",
+      count: 2
+    });
+  });
+
   it("parses a search with a 'that share a land type' qualifier between the count and the put clause (Myriad Landscape)", () => {
     expect(
       parseSearchLibraryEffectText(

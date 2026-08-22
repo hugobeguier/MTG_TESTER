@@ -1,7 +1,8 @@
-1. I returned Avenger of Zendikar from a graveyard using Virtue of Persistence, not sure if Avenger of Zendikar etb triggered correctly, does not take into account the amount of lands you have
-2. I played Timely Ward, but did not get to attach it to my creature of choice
-3. When playing Secret Arcade // Dusty Parlor I should get the choice of what room I want to unlock, I got to play this card for it miracle cost but it chosed Secret Arcade for me.
-4. Veyra and Sable seem to have switch places but not on the Life Counter UI
-5. When returning a creature with Virtue of Persistence the ETB does not trigger at all
-6. Omniscience does not let me cast spells for free
-7. When Omniscience entered I had Secret Arcade // Dusty Parlor fully unlocked but it did not trigger it letting me to add 10 +1/+1 to a creature of my choosing 
+1. for some reason Sables hand is going to the right when I move the camera its moving for some reason
+2. I still wanted the life totals in the middle in a 4 by 4 box
+3. Archaeomancers Map still dont let me fetch two plains cards, it only gives me one card
+4. Veyra searches their library for Sakura-Tribe Elder and puts it onto the battlefield. then Solemn Simulacrum resolves. then Veyra casts Solemn Simulacrum using 4 mana. No available responses
+5. Malik just played Saheeli the giften and then activated her +1 loyalty ability, letting your next spell cast 1 less for each artifact, but did not have any spell to cast, there I would have created a servo token instead
+6. When an opponent plays a land Archaeomancers Map triggers twice for some reason
+7. Unwinding clock does not untap all the artifacts you control on every players upkeep
+8.

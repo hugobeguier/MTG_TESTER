@@ -411,6 +411,51 @@ h3 {
   top: 1rem;
 }
 
+/* Fixed via plain CSS centering, not projected from a 3D world position (see the removed
+   floating life panel this replaced) — that anchor drifted as the camera orbited because table
+   world-space center never reliably projected to the visual center of the four battlefields
+   under perspective. Screen-centered CSS placement has no such problem: it's always dead center
+   regardless of camera angle. Quadrant layout mirrors the table (row/col picked from each seat's
+   PLAYER_AREAS x/z sign) so each cell sits next to that player's own board. */
+.life-hud {
+  display: grid;
+  left: 50%;
+  padding: 0;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 4;
+}
+
+.life-hud-grid {
+  background: var(--accent);
+  display: grid;
+  gap: 2px;
+  grid-template-columns: repeat(2, 64px);
+  grid-template-rows: repeat(2, 64px);
+}
+
+.life-hud-cell {
+  align-items: center;
+  background: #0a0c09;
+  color: var(--text);
+  display: grid;
+  justify-items: center;
+  padding: 0.25rem;
+}
+
+.life-hud-cell strong {
+  color: var(--green);
+  font-size: 1.5rem;
+  line-height: 1;
+}
+
+.life-hud-cell span {
+  color: var(--muted);
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
 /* Positioned imperatively (left/top set every frame in ThreeGameTable's animate loop, projecting
    each agent's 3D name-label position to screen space) rather than via CSS placement — this box
    tracks that world position as the camera orbits/pans/zooms instead of sitting fixed on screen. */
@@ -610,6 +655,18 @@ h3 {
   gap: 0.75rem;
   justify-content: space-between;
   user-select: none;
+}
+
+.activity-panel-title {
+  align-items: baseline;
+  display: flex;
+  gap: 0.4rem;
+}
+
+.activity-panel-title small {
+  color: var(--muted);
+  font-size: 0.65rem;
+  text-transform: uppercase;
 }
 
 .activity-panel header button {

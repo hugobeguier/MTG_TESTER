@@ -497,8 +497,18 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
     // left uncorrected, their boxes draw on top of each other. Collect every visible anchor first,
     // then push overlapping ones apart left-to-right before writing any position to the DOM.
     const HAND_ANCHOR_MIN_GAP = 468 + 16;
-    const pendingHandAnchors: { el: HTMLElement; left: number; top: number }[] = [];
-    const updateAgentHandAnchors = () => {
+    // Malik (back-right) and Sable (front-right) share the same table x-coordinate (see
+    // PLAYER_AREAS), so their raw projected "left" values cross over repeatedly as the camera
+    // orbits. Sorting by that raw value every frame let the overlap push-apart above flip which
+    // seat it treats as "first", snapping the other one sideways by a full HAND_ANCHOR_MIN_GAP —
+    // reported live as "Sable's hand jumping right for no reason" whenever the camera moved.
+    // Sorting by each seat's fixed array index instead keeps a stable left-to-right order (Veyra,
+    // Malik, Sable) regardless of camera angle, so the push-apart never flip-flops, and lerping
+    // toward the target position below (rather than snapping straight to it) smooths out whatever
+    // real parallax motion remains.
+    const pendingHandAnchors: { el: HTMLElement; seatIndex: number; left: number; top: number }[] = [];
+    const handAnchorRenderPositions = new Map<HTMLElement, { left: number; top: number }>();
+    const updateAgentHandAnchors = (deltaSeconds: number) => {
       const currentSeats = propsRef.current.session.seats;
       const width = mount.clientWidth;
       const height = mount.clientHeight;
@@ -517,19 +527,25 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
         }
         pendingHandAnchors.push({
           el,
+          seatIndex: index,
           left: (projected.x * 0.5 + 0.5) * width,
           top: (-projected.y * 0.5 + 0.5) * height
         });
       });
-      pendingHandAnchors.sort((a, b) => a.left - b.left);
+      pendingHandAnchors.sort((a, b) => a.seatIndex - b.seatIndex);
       for (let i = 1; i < pendingHandAnchors.length; i += 1) {
         const minLeft = pendingHandAnchors[i - 1].left + HAND_ANCHOR_MIN_GAP;
         if (pendingHandAnchors[i].left < minLeft) pendingHandAnchors[i].left = minLeft;
       }
+      const smoothing = 1 - Math.exp(-10 * deltaSeconds);
       pendingHandAnchors.forEach(({ el, left, top }) => {
         el.style.display = "grid";
-        el.style.left = `${left}px`;
-        el.style.top = `${top}px`;
+        const previous = handAnchorRenderPositions.get(el) ?? { left, top };
+        const nextLeft = previous.left + (left - previous.left) * smoothing;
+        const nextTop = previous.top + (top - previous.top) * smoothing;
+        handAnchorRenderPositions.set(el, { left: nextLeft, top: nextTop });
+        el.style.left = `${nextLeft}px`;
+        el.style.top = `${nextTop}px`;
       });
     };
 
@@ -539,7 +555,7 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
       lastFrameTime = now;
       updateKeyboardMovement(deltaSeconds);
       updateCamera();
-      updateAgentHandAnchors();
+      updateAgentHandAnchors(deltaSeconds);
       renderer.render(scene, camera);
       frameRef.current = requestAnimationFrame(animate);
     };
@@ -928,6 +944,21 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
         <button type="button" onClick={() => setActivityOpen((current) => !current)}>Agent Activity</button>
         <button type="button" onClick={() => setActionLogOpen((current) => !current)}>Action Log</button>
       </div>
+      <div className="three-hud life-hud" aria-label="Life totals">
+        <div className="life-hud-grid">
+          {props.session.seats.map((seat, index) => {
+            const area = PLAYER_AREAS[index] ?? PLAYER_AREAS[0];
+            const row = area.z > 0 ? 2 : 1;
+            const col = area.x > 0 ? 2 : 1;
+            return (
+              <div className="life-hud-cell" key={seat.id} style={{ gridRow: row, gridColumn: col }}>
+                <strong>{seat.life}</strong>
+                <span>{seat.name}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
       {agentSeats.map((seat) => (
         <div
           className="agent-hand-anchor"
@@ -986,7 +1017,10 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
             onPointerUp={endActivityDrag}
             onPointerCancel={endActivityDrag}
           >
-            <strong>Agent Activity</strong>
+            <span className="activity-panel-title">
+              <strong>Agent Activity</strong>
+              <small>Newest first</small>
+            </span>
             <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => setActivityOpen(false)}>x</button>
           </header>
           <div className="activity-feed">
@@ -1004,12 +1038,19 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
             onPointerUp={endActionLogDrag}
             onPointerCancel={endActionLogDrag}
           >
-            <strong>Action Log</strong>
+            <span className="activity-panel-title">
+              <strong>Action Log</strong>
+              <small>Newest first</small>
+            </span>
             <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => setActionLogOpen(false)}>x</button>
           </header>
           {/* Newest first, matching session.events' own order (every addEvent call prepends) and
               Agent Activity's feed above — a reader watching live wants the newest line at the top
-              without having to scroll down to it. */}
+              without having to scroll down to it. This label exists because that ordering reads as
+              a plausible-but-wrong chronology otherwise: e.g. a spell's "resolves" line sits above
+              its own "casts ..." line, which looks like the permanent resolved before it was even
+              cast unless the reader knows to read bottom-up. Reported live as exactly that
+              confusion, over a real (and correctly ordered) cast-then-resolve sequence. */}
           <div className="activity-feed">
             {actionLogEvents.length === 0 ? (
               <p>No actions yet this game.</p>

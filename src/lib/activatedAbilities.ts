@@ -49,8 +49,19 @@ function parseCountWord(word: string | undefined): number {
 // live as Myriad Landscape's sacrifice ability never being offered as a legal action even with
 // {2} floating to pay for it. The "share a land type" constraint on the pair itself isn't
 // separately enforced at resolution time (same simplification as every other cardTypeFilter here).
+// Both patterns below tolerate an optional leading "When/Whenever ~ enters[ the battlefield],"
+// trigger condition (and an optional "you may") before the "search your library" clause itself —
+// this same parser is reused for an ETB-triggered search (Archaeomancer's Map's "When this
+// artifact enters, search your library for up to two basic Plains cards, ...") via
+// etbEffectText(oracleText) in AppFlow.tsx, which keeps the trigger-condition prefix on the clause
+// rather than stripping it (every other etbEffectText-fed parser matches with \b word boundaries
+// instead of a ^ anchor, so the prefix never mattered to them). Without this, the ^ anchor here
+// never matched an ETB-triggered search at all, silently falling through to the Ollama-backed
+// rules advisor for every one of them — reported live as Archaeomancer's Map only ever fetching a
+// single Plains regardless of its real "up to two" count.
+const TRIGGER_CONDITION_PREFIX = "(?:(?:when|whenever)\\b[^,]*,\\s*)?(?:you may\\s+)?";
 const SEARCH_LIBRARY_PATTERN = new RegExp(
-  `^search your library for (?:up to ${COUNT_WORD}|an?)\\s+(?:([a-z][a-z ]*?)\\s+)?cards?(?:\\s+(?:that share|sharing) an? [a-z]+ type)?,?(?: reveal (?:it|them),?)? put (?:it|that card|them) (into your hand|onto the battlefield(?: tapped)?),? then shuffle\\.?`,
+  `^${TRIGGER_CONDITION_PREFIX}search your library for (?:up to ${COUNT_WORD}|an?)\\s+(?:([a-z][a-z ]*?)\\s+)?cards?(?:\\s+(?:that share|sharing) an? [a-z]+ type)?,?(?: reveal (?:it|them),?)? put (?:it|that card|them) (into your hand|onto the battlefield(?: tapped)?),? then shuffle\\.?`,
   "i"
 );
 
@@ -58,8 +69,10 @@ const SEARCH_LIBRARY_PATTERN = new RegExp(
 // (Sterling Grove's sacrifice ability, Mystical Tutor-shaped effects on a permanent's own activated
 // ability) — same tutor shape as SEARCH_LIBRARY_PATTERN above but with "shuffle" before the "put"
 // clause and always landing on top of the library rather than hand/battlefield.
-const SEARCH_LIBRARY_TO_TOP_PATTERN =
-  /^search your library for an? (?:([a-z][a-z ]*?)\s+)?cards?,?(?: reveal it,?)? then shuffle and put (?:it|that card|them|the card) on top(?: of your library)?\.?/i;
+const SEARCH_LIBRARY_TO_TOP_PATTERN = new RegExp(
+  `^${TRIGGER_CONDITION_PREFIX}search your library for an? (?:([a-z][a-z ]*?)\\s+)?cards?,?(?: reveal it,?)? then shuffle and put (?:it|that card|them|the card) on top(?: of your library)?\\.?`,
+  "i"
+);
 
 export function parseSearchLibraryEffectText(text: string): SearchLibraryEffect | undefined {
   const match = text.match(SEARCH_LIBRARY_PATTERN);
