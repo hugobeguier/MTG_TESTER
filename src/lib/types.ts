@@ -170,6 +170,16 @@ export interface VisibleCard {
   temporaryBasePower?: number;
   temporaryBaseToughness?: number;
   temporaryAbilitiesStripped?: boolean;
+  // Man-land animation ("{cost}: Until end of turn, this land becomes a N/M ... creature ... It's
+  // still a land.") — deliberately its own flag rather than reusing animatedAsCreature (Zur/Starfield's
+  // "becomes a creature" marker): that one persists until the permanent changes zones, which is wrong
+  // for an until-end-of-turn effect, so it needs its own clearTemporaryBuffs-cleared lifetime instead.
+  temporaryAnimatedAsCreature?: boolean;
+  // Keywords granted by the same until-end-of-turn animation (flying, vigilance, ...) — distinct
+  // from grantedKeywords, which the static-ability recompute pass fully overwrites every pass from
+  // attachments/group grants alone; a keyword set directly here would be silently wiped on the next
+  // recompute rather than surviving until clearTemporaryBuffs. See its read site's own comment.
+  temporaryGrantedKeywords?: string[];
   attachedToId?: string;
   // Set instead of attachedToId for an "Enchant player" Aura (Overwhelming Splendor, the Curse
   // cycle, ...) — this engine has no per-creature-permanent object for a player to attach to, so
@@ -343,6 +353,20 @@ export interface GameSession {
   // are both pure functions with no access to the trigger-queueing machinery either. Reproduced live
   // as Avenger of Zendikar returned via Virtue of Persistence never creating its Plant tokens.
   pendingEntries?: Array<{ seatId: string; card: VisibleCard }>;
+  // Same idea again, for "whenever a creature you control deals combat damage to a player, ..."
+  // (Toski, Bearer of Secrets, ...) — applyCombatDamageToTarget (called from both the unblocked and
+  // the blocked-with-trample paths) is also a pure function with no access to the trigger-queueing
+  // machinery, and critically knows something the generic phase-trigger sweep never could: whether
+  // this specific creature's damage actually landed on a player this combat, as opposed to merely
+  // being on the battlefield during the combat damage step. Before this field existed, that whole
+  // clause shape was matched by the generic "combat damage step" phase trigger instead (it contains
+  // the substring "combat damage"), which fires unconditionally once per step regardless of whether
+  // the creature was blocked, unblocked-but-dealt-no-damage, or not attacking at all — reproduced
+  // live as Toski, Bearer of Secrets drawing a card off combat damage it dealt to a blocking
+  // creature, not a player. Only ever appended to for a player target (not a planeswalker — rule
+  // 120.3g explicitly excludes those from "deals combat damage to a player") and damageKind
+  // "combat" (not e.g. Lightning Bolt).
+  pendingCombatDamageToPlayer?: Array<{ seatId: string; card: VisibleCard }>;
   // Dedup keys ("turn:sourceCardId:effectKind") for triggered effects restricted by a trailing
   // "Do this only once each turn" clause — resolveTriggerEffect() is a pure function with no
   // per-turn ref to check against, so the dedup state lives on the session itself instead.
@@ -367,6 +391,14 @@ export interface GameSession {
   // (Mystic Remora's cumulative upkeep, other "at the beginning of your upkeep" cards, ...), not a
   // separate hand-rolled resolution path. Cleared once the inserted draw step hands off to end step.
   extraBeginningPhaseActive?: boolean;
+  // One-shot draws scheduled by a spell that already finished resolving and left the stack (Arcane
+  // Denial's "Its controller may draw up to two cards at the beginning of the next turn's upkeep.
+  // You draw a card at the beginning of the next turn's upkeep.") — there's no per-permanent
+  // ability to hang this off of (the spell itself is long gone to the graveyard by the time that
+  // upkeep arrives), so it's tracked here instead and applied by runPhaseActions the next time
+  // ANY seat's upkeep step begins (this is "the next turn's upkeep" overall, not each player's own
+  // next upkeep), then cleared regardless of whether the queue was empty.
+  pendingUpkeepDraws?: Array<{ seatId: string; amount: number; sourceName: string }>;
 }
 
 export interface AgentAction {

@@ -3,14 +3,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AgentAction, AgentReasoning, CardFaceRecord, CommanderDeck, EmblemState, GameEvent, GameSession, InterpretedEffect, PlayerSeat, VisibleCard } from "@/lib/types";
 import type { RuleWorkflow } from "@/lib/rulesAdvisor";
+import type { PrimitiveActionPlan, PrimitiveActionStep } from "@/lib/primitiveActionPlan";
 import { createDeckFromList } from "@/lib/deckParser";
 import { evaluateOpeningHand } from "@/lib/mulliganHeuristics";
 import { effectiveAttackTaxAmount, looksLikeAttackTaxCandidate } from "@/lib/staticEffects";
+import { isBoardWipeText } from "@/lib/actionScoring";
 import { counterCount, effectivePower, effectiveToughness } from "@/lib/counters";
 import {
   parseGenericManaAbilities,
   parseGenericSacrificeAbilities,
   parseGenericTapAbilities,
+  parseManlandAnimation,
   parseSearchLibraryEffectText,
   parseSelfUntapAbilities,
   type SacrificeAbility,
@@ -23,6 +26,7 @@ import {
 import {
   basicLandFetchCostRequiresTap,
   basicLandFetchManaCost,
+  combatDamageToPlayerEffectText,
   deathEffectText,
   etbEffectText,
   isActivatedAbilityClause,
@@ -44,7 +48,8 @@ import {
   counterSpellCanTarget,
   hasCantBeCountered,
   parseCounterImmunityGrant,
-  parseCounterSpellAbility
+  parseCounterSpellAbility,
+  parseDelayedUpkeepDraws
 } from "@/lib/counterSpells";
 import {
   attachedBasePowerToughness,
@@ -108,7 +113,9 @@ type TriggerEffect = (
   // arbitrary-named counter on a target creature (Athreos, Shroud-Veiled's "put a coin counter on
   // target creature or planeswalker", stun/shield counters elsewhere, ...); applyCounterDelta already
   // takes any string kind, this type just used to be narrower than what it actually resolves to.
-  | { kind: "add_counter"; counterKind: string; amount: number; scope: "self" | "context" | "target_creature" | "target_creature_you_control" }
+  // alsoTap: "tap up to one target creature and put a stun counter on it" (Fear of Sleep
+  // Paralysis's Eerie ability) — a compound tap-and-counter shape, not just a counter.
+  | { kind: "add_counter"; counterKind: string; amount: number; scope: "self" | "context" | "target_creature" | "target_creature_you_control"; alsoTap?: boolean }
   | { kind: "copy_token"; scope: "self" | "context" }
   | { kind: "draw_then_put_back"; drawAmount: number; putBackAmount: number }
   // Board-wide temporary pump/debuff off a triggered ability (Doomwake Giant's Constellation
@@ -144,6 +151,12 @@ type TriggerEffect = (
   // the trigger's own controller; this one always moves life for BOTH the controller (gain) and
   // some other player or players (loss) in the same resolution, which those can't express.
   | { kind: "drain"; amount: number; scope: "target_player" | "each_opponent" }
+  // "Return a land you control to its owner's hand." (Simic Growth Chamber and the rest of the
+  // karoo/bounce-land cycle: "This land enters tapped. When this land enters, return a land you
+  // control to its owner's hand.") — mandatory, and WHICH land is a real choice (routed through
+  // pendingRuleChoice the same way connive's discard and draw_then_put_back's put-back are), not
+  // something resolveTriggerEffect's pure-function path can decide on its own.
+  | { kind: "return_land_to_hand" }
 ) & { optional?: boolean };
 
 interface TokenSpec {
@@ -245,6 +258,14 @@ type PendingRuleChoice =
       // require finding the full count) instead of finalizing after the very first pick regardless
       // of maxChoices, which silently capped every multi-card search at exactly one card.
       chosenCardIds?: string[];
+      // "... put one onto the battlefield tapped and the other into your hand, ..." (Kodama's Reach,
+      // Cultivate, ...) — this whole choice shape otherwise assumes every picked card goes to the
+      // same `destination`, which can't express a split. When set, completeRuleChoice routes only
+      // the FIRST picked card to `destination` (tapped) and every remaining pick here instead
+      // (untapped) — a declared simplification of the real rule (a lone find, from searching for
+      // "up to two," lets the controller choose either destination for it; this always sends a
+      // single find to `destination`) rather than a whole second interactive sub-choice.
+      splitDestination?: "hand";
     }
   // "Put target creature card from A GRAVEYARD onto the battlefield under your control." (Virtue of
   // Persistence) — a real target choice across every player's graveyard, not just the controller's
@@ -348,6 +369,23 @@ type PendingRuleChoice =
       trigger: Extract<PendingAction, { type: "trigger" }>;
       remainingStack: PendingAction[];
     }
+  // The same "you may" concept as optional_trigger above, for a plan produced by the primitive-
+  // action fallback (consultPrimitiveActionPlanner) instead of the deterministic trigger queue —
+  // that path resolves synchronously with no PendingAction/trigger wrapping, so it can't reuse
+  // optional_trigger's trigger/remainingStack fields; it stores the steps to apply on accept
+  // directly instead. sourceCard is a plain snapshot (not re-looked-up live) since
+  // applyPrimitiveActionPlan only ever reads sourceCard.name and the choice is resolved within the
+  // same turn it was created, same as every other rule choice's use of an already-in-scope card.
+  | {
+      id: string;
+      kind: "optional_primitive_plan";
+      controllerSeatId: string;
+      sourceCardId: string;
+      sourceCardName: string;
+      prompt: string;
+      sourceCard: VisibleCard;
+      steps: PrimitiveActionStep[];
+    }
   | {
       id: string;
       kind: "discard_to_hand_size";
@@ -368,6 +406,31 @@ type PendingRuleChoice =
       // made. A plain cast spell's own "draw N, then put M back" (Brainstorm, ...) reaches this same
       // choice via applyRuleWorkflow instead, well after the spell itself already finished resolving
       // and priority already moved on, so it has neither of these and nothing left to resume.
+      trigger?: Extract<PendingAction, { type: "trigger" }>;
+      remainingStack?: PendingAction[];
+    }
+  | {
+      id: string;
+      kind: "connive_discard";
+      controllerSeatId: string;
+      sourceCardId: string;
+      sourceCardName: string;
+      prompt: string;
+      // "Connives twice" (rare, but real) resolves as two separate draw-then-discard iterations,
+      // not one discard of two cards — this counts how many MORE iterations follow the one this
+      // choice is currently resolving, so completeConniveDiscard knows whether to loop back into
+      // another draw + discard choice or resume the stack.
+      remainingAmount: number;
+      trigger?: Extract<PendingAction, { type: "trigger" }>;
+      remainingStack?: PendingAction[];
+    }
+  | {
+      id: string;
+      kind: "return_land_to_hand";
+      controllerSeatId: string;
+      sourceCardId: string;
+      sourceCardName: string;
+      prompt: string;
       trigger?: Extract<PendingAction, { type: "trigger" }>;
       remainingStack?: PendingAction[];
     }
@@ -439,7 +502,17 @@ interface LegalAgentAction {
   id: string;
   actionType: AgentAction["actionType"];
   cardId?: string;
-  abilityKind?: "basic_land_fetch" | "unlock_room_door" | "generic_sacrifice" | "generic_tap" | "self_untap" | "generic_mana" | "myriad_landscape" | "equip" | "loyalty_ability";
+  abilityKind?:
+    | "basic_land_fetch"
+    | "unlock_room_door"
+    | "generic_sacrifice"
+    | "generic_tap"
+    | "self_untap"
+    | "generic_mana"
+    | "myriad_landscape"
+    | "equip"
+    | "loyalty_ability"
+    | "animate_manland";
   abilityIndex?: number;
   faceIndex?: number;
   loyaltyCost?: number;
@@ -571,7 +644,7 @@ const TURN_PHASES = [
 // unbounded `await fetch(...)` from skipping the calling function's `finally` block, which is what
 // clears the "a decision is in flight" guard (agentDecisionRequests) that would otherwise lock a
 // phase out of ever being retried.
-const AGENT_REQUEST_TIMEOUT_MS = 25000;
+const AGENT_REQUEST_TIMEOUT_MS = 45000;
 
 // A RuleWorkflow classification is a pure function of (event, the card's own oracle text) —
 // deterministicRuleWorkflow only ever reads those two fields, and the Ollama fallback's
@@ -590,6 +663,12 @@ let ruleWorkflowCacheLoaded = false;
 function ruleWorkflowCacheKey(event: string, oracleText: string) {
   return `${event}::${oracleText}`;
 }
+
+// Sibling to ruleWorkflowCache above, same (event, oracleText) key shape, for the primitive-action
+// planner instead of the rule-workflow advisor — deliberately in-memory only for now (no
+// localStorage persistence, no prewarming) to keep this first pass small; ruleWorkflowCache's own
+// persistence/prewarm machinery is a reasonable follow-up once this fallback has real usage data.
+const primitiveActionPlanCache = new Map<string, PrimitiveActionPlan>();
 
 function loadRuleWorkflowCacheOnce() {
   if (ruleWorkflowCacheLoaded || typeof window === "undefined") return;
@@ -778,8 +857,37 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   // unlimited hand just by always ending their turn early instead of stepping through phases.
   // Cleared once the discard resolves and the turn is actually allowed to end.
   const pendingEndTurnAfterDiscard = useRef<string | undefined>(undefined);
+  // When resolveOrderedPhaseTriggers (multiple simultaneous phase triggers, ordered by the
+  // controller) hits one that needs its own interactive choice — cumulative upkeep pay/sacrifice,
+  // a real graveyard/battlefield target, or a scry/surveil window — it can only open ONE
+  // pendingRuleChoice/libraryLook at a time, so it stops there and stashes whatever triggers were
+  // still left in the chosen order here. Reproduced live as a seat with Debtors' Knell, Virtue of
+  // Persistence, and Aminatou, Veil Piercer all triggering the same upkeep only ever getting asked
+  // Aminatou's surveil choice — the two reanimation triggers were silently dropped (or auto-picked
+  // by the deterministic heuristic with no prompt at all) the moment the loop hit the first
+  // interactive one and returned. Every completion handler for those interactive choices calls
+  // resumePendingOrderedTriggers() once it's done, which continues this queue instead of just
+  // stopping after the first entry.
+  const pendingOrderedTriggerResume = useRef<
+    { seatId: string; triggers: Extract<PendingRuleChoice, { kind: "order_triggers" }>["triggers"] } | undefined
+  >(undefined);
+  // Reentrancy guard for playCard's non-land ("cast a spell") branch. playCard's own top-of-function
+  // guard (`if (pendingAction) return`) reads pendingAction from React state, which two synchronous
+  // calls to playCard in the same tick both see as whatever it was as of the LAST commit — neither
+  // call can see the other's in-flight dispatch, since setPendingAction/pushStackAction's effects on
+  // component state don't land until React actually re-renders. beginPendingAction, called from
+  // inside playCard, both increments spellsCastThisTurn (a ref, so this second call sees a fresh
+  // castOrdinal) and independently re-scans/re-queues every "whenever you cast..." trigger on the
+  // board (findCastTriggers) — so a same-tick duplicate dispatch queues that scan twice, with two
+  // real trigger actions landing on the stack from one actual cast. This ref is set the instant a
+  // cast is dispatched and cleared on a fresh macrotask (after React has had a chance to commit and
+  // make the real pendingAction guard effective again), closing that window without changing
+  // behavior for any two casts that aren't literally dispatched in the same tick. Reproduced live as
+  // Beast Whisperer and Guardian Project each drawing/triggering twice for a single creature cast.
+  const castDispatchInFlight = useRef(false);
   const processedDeathBatchRef = useRef<GameSession["pendingDeaths"]>(undefined);
   const processedEntryBatchRef = useRef<GameSession["pendingEntries"]>(undefined);
+  const processedCombatDamageToPlayerBatchRef = useRef<GameSession["pendingCombatDamageToPlayer"]>(undefined);
   // Card ids already offered (or auto-resolved) the "move to the command zone instead?" choice —
   // a commander that's declined the move (or an agent's auto-accepted one) stays in the graveyard
   // still flagged commander: true, so without this the detection effect below would re-offer the
@@ -1022,6 +1130,19 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     }
   }, [session.pendingEntries, pendingAction]);
 
+  // Same shape again, for pendingCombatDamageToPlayer — see that field's own comment on GameSession
+  // for the bug this fixes (Toski, Bearer of Secrets drawing off damage dealt to a blocking
+  // creature, since the generic phase-trigger sweep had no way to check the actual damage target).
+  useEffect(() => {
+    if (pendingAction) return;
+    const hits = session.pendingCombatDamageToPlayer;
+    if (!hits || hits.length === 0 || hits === processedCombatDamageToPlayerBatchRef.current) return;
+    processedCombatDamageToPlayerBatchRef.current = hits;
+    const damageTriggers = hits.flatMap((hit) => findCombatDamageToPlayerTriggers(session, hit.seatId, hit.card));
+    setSession((current) => (current.pendingCombatDamageToPlayer === hits ? { ...current, pendingCombatDamageToPlayer: undefined } : current));
+    if (damageTriggers.length > 0) queueCommonTriggers(damageTriggers);
+  }, [session.pendingCombatDamageToPlayer, pendingAction]);
+
   // Rule 903.9a: a commander that would go to the graveyard may be put into the command zone
   // instead, owner's choice — destroyCreatures/moveCardBetweenVisibleZones no longer auto-redirect
   // it there (see their own comments), so it just sits in the graveyard, still flagged
@@ -1135,7 +1256,12 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     if (!TURN_PHASES.includes(session.phase as TurnPhase)) return;
     const activeSeat = session.seats.find((seat) => seat.id === activeSeatId);
     if (!activeSeat) return;
-    const key = `${session.turn}:${activeSeat.id}:${session.phase}`;
+    // extraBeginningPhaseActive is part of the key because Shadow of the Second Sun replays
+    // untap/upkeep/draw a second time within the SAME turn number — without it, the second
+    // upkeep step collided with the first upkeep step's already-used key and silently never
+    // fired again (reported live: the extra upkeep never triggered Aminatou, Veil Piercer's
+    // surveil 2).
+    const key = `${session.turn}:${activeSeat.id}:${session.phase}:${session.extraBeginningPhaseActive ?? false}`;
     if (phaseTriggersChecked.current.has(key)) return;
     phaseTriggersChecked.current.add(key);
     const triggers = phaseTriggeredCards(activeSeat, session.phase as TurnPhase);
@@ -1207,6 +1333,24 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       orderedTriggers: []
     });
   }, [mode, gameStage, pendingAction, libraryLook, pendingRuleChoice, session.phase, session.turn, session.seats, activeSeatId]);
+
+  // Picks continueOrderedPhaseTriggers's queue back up once whatever interactive choice it stopped
+  // on (a reanimation/counter target, a cumulative-upkeep pay-or-sacrifice, or a scry/surveil
+  // window) has actually closed — gated on pendingRuleChoice/libraryLook both being clear so this
+  // never fires while that choice is still open, and driven by an effect (rather than called
+  // directly from each choice's completion handler) specifically so it reads the session this
+  // render actually committed instead of the stale pre-choice session those handlers closed over,
+  // which would otherwise race their own setSession call and silently revert it. Reproduced live as
+  // a seat with Debtors' Knell, Virtue of Persistence, and Aminatou, Veil Piercer all triggering the
+  // same upkeep only ever getting asked Aminatou's surveil choice, with the other two reanimation
+  // triggers silently dropped.
+  useEffect(() => {
+    if (pendingRuleChoice || libraryLook) return;
+    const resume = pendingOrderedTriggerResume.current;
+    if (!resume) return;
+    pendingOrderedTriggerResume.current = undefined;
+    continueOrderedPhaseTriggers(resume.seatId, resume.triggers);
+  }, [session, pendingRuleChoice, libraryLook]);
 
   // Rule 514.1/514.2 (cleanup step): the active player discards down to their maximum hand size
   // (7, unless something on the board says otherwise). Modeled as a pendingRuleChoice, same as
@@ -1327,6 +1471,19 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
 
   async function requestAgentDecision(seat: PlayerSeat, purpose: string, legalActions: LegalAgentAction[], sessionOverride?: GameSession) {
     if (legalActions.length === 0) return undefined;
+    // No judgment call to make when there's exactly one legal option — skip the LLM round trip
+    // entirely rather than spending a model call on a forced play (e.g. only pass_priority is legal).
+    if (legalActions.length === 1) {
+      const only = legalActions[0];
+      return {
+        actionType: only.actionType,
+        legalActionId: only.id,
+        targetIds: only.targetIds,
+        cardId: only.cardId,
+        reason: "Only legal action available.",
+        fallbackAction: only.actionType === "end_turn" ? "end_turn" : "pass_priority"
+      } satisfies AgentAction;
+    }
     const activeSession = sessionOverride ?? session;
     const response = await fetch("/api/agents/action", {
       method: "POST",
@@ -1437,6 +1594,13 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
 
   async function decideAgentPriorityAction(seat: PlayerSeat, actionOnStack: PendingAction, requestKey: string) {
     try {
+      // Cheap pre-filter before the full decision call (Phase 5a item 3) — canReceivePriorityForPendingAction
+      // already confirmed this seat has a genuine instant-speed option, so skipping here isn't "nothing
+      // to do," it's "nothing about this specific event gives a reason to consider that option."
+      if (isPendingActionLikelyIrrelevantToSeat(seat, actionOnStack, session)) {
+        passPriority();
+        return;
+      }
       const legalActions = legalPriorityActions(seat, actionOnStack, activeSeatId, session);
       const action = await requestAgentDecision(seat, "priority_response", legalActions);
       const legal = legalActions.find((item) => item.id === action?.legalActionId) ?? fallbackLegalAction(legalActions);
@@ -1554,6 +1718,10 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     }
     if (action.actionType === "activate_ability" && action.cardId && action.abilityKind === "equip") {
       setSession((current) => resolveEquip(current, seat.id, action.cardId!)?.session ?? current);
+      return;
+    }
+    if (action.actionType === "activate_ability" && action.cardId && action.abilityKind === "animate_manland") {
+      activateManlandAnimation(seat.id, action.cardId);
       return;
     }
     if (action.actionType === "activate_ability" && action.cardId && action.abilityKind === "loyalty_ability" && action.loyaltyCost !== undefined) {
@@ -2109,6 +2277,10 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       return untapForSeat(session, seatId);
     }
 
+    if (phase === "upkeep step") {
+      session = resolvePendingUpkeepDraws(session);
+    }
+
     if (phase === "draw step") {
       const drawnSession = drawForSeat(session, seatId, `${seat.name} draws for turn.`);
       return advanceUrzaSagaLoreCounters(drawnSession, seatId);
@@ -2123,6 +2295,23 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     }
 
     return session;
+  }
+
+  // Arcane Denial's "at the beginning of the next turn's upkeep" delayed draws (see
+  // GameSession.pendingUpkeepDraws and parseDelayedUpkeepDraws) — "the next turn's upkeep" means
+  // the very next upkeep step that begins, whoever's turn it is, not each scheduled seat's own next
+  // upkeep. So this drains the WHOLE queue the first time any upkeep step is reached, rather than
+  // filtering by the seat whose upkeep this is.
+  function resolvePendingUpkeepDraws(session: GameSession): GameSession {
+    const pending = session.pendingUpkeepDraws;
+    if (!pending || pending.length === 0) return session;
+    let next: GameSession = { ...session, pendingUpkeepDraws: [] };
+    for (const entry of pending) {
+      const seat = next.seats.find((item) => item.id === entry.seatId);
+      if (!seat) continue;
+      next = drawMultipleForSeat(next, entry.seatId, entry.amount, `${entry.sourceName} resolves. ${seat.name} draws ${entry.amount === 1 ? "a card" : `${entry.amount} cards`}.`);
+    }
+    return next;
   }
 
   // Rule 714.2a's "after your draw step" half (the "as this Saga enters" half is applied where the
@@ -2176,11 +2365,24 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     // untapping happens — simplified here to just untapping it along with everything else rather
     // than separately restoring its exact pre-phase-out tapped status, which this engine doesn't
     // track (see phasedOut's doc comment on VisibleCard).
+    // "Stun counters can't be removed from permanents your opponents control." (Fear of Sleep
+    // Paralysis) overrides rule 701.44b above for whichever seat it's aimed at: normally a stun
+    // counter just costs one untap step before wearing off, but this locks it in place — the
+    // permanent stays tapped and stunned indefinitely until Fear of Sleep Paralysis itself leaves
+    // the battlefield (this check re-runs fresh every untap step, so it stops applying the moment
+    // that happens). Reported live as stun counters this seat received always still wearing off
+    // after one turn regardless.
+    const opponentStunLockActive = session.seats.some(
+      (other) => other.id !== seatId && other.board.battlefield.some((card) => /stun counters can'?t be removed from permanents your opponents control/i.test(card.oracleText))
+    );
     const untapOrRemoveStun = (card: VisibleCard): VisibleCard => {
       if (card.phasedOut) return { ...card, phasedOut: false, tapped: false, summoningSick: false, attacking: false, blocking: false };
-      return counterCount(card, "stun") > 0
-        ? { ...applyCounterDelta(card, "stun", -1), summoningSick: false, attacking: false, blocking: false }
-        : { ...card, tapped: false, summoningSick: false, attacking: false, blocking: false };
+      if (counterCount(card, "stun") > 0) {
+        return opponentStunLockActive
+          ? { ...card, summoningSick: false, attacking: false, blocking: false }
+          : { ...applyCounterDelta(card, "stun", -1), summoningSick: false, attacking: false, blocking: false };
+      }
+      return { ...card, tapped: false, summoningSick: false, attacking: false, blocking: false };
     };
     const untappedSession = {
       ...session,
@@ -2198,9 +2400,10 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       ),
       events: [phaseEvent(seatId, `${seat?.name ?? "Player"} untaps their permanents.`), ...session.events]
     };
-    // "Untap all artifacts you control during each other player's untap step." (Unwinding Clock) —
-    // every OTHER seat's own untap step also untaps this seat's artifacts, not just this seat's own.
-    return applyUnwindingClockUntaps(untappedSession, seatId);
+    // "Untap all artifacts/permanents you control during each other player's untap step." (Unwinding
+    // Clock, Seedborn Muse) — every OTHER seat's own untap step also untaps this seat's stuff, not
+    // just this seat's own.
+    return applyExtraUntapEffects(untappedSession, seatId);
   }
 
   function declareAttack(session: GameSession, seatId: string, cardId: string | undefined, targetId: string | undefined): GameSession {
@@ -2742,7 +2945,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   }
 
   function playCard(seatId: string, cardId: string, position?: { x: number; z: number }, sourceZone: "hand" | "command" | "exile" = "hand", faceIndex?: number) {
-    if (pendingAction) return;
+    if (pendingAction || castDispatchInFlight.current) return;
     const seat = session.seats.find((item) => item.id === seatId);
     const card =
       sourceZone === "command"
@@ -2783,6 +2986,14 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       return;
     }
 
+    // Set the instant this call has committed to actually playing/casting the card (every guard
+    // above has passed), cleared on a fresh macrotask — see castDispatchInFlight's own comment for
+    // why this can't just rely on the pendingAction state guard at the top of this function.
+    castDispatchInFlight.current = true;
+    window.setTimeout(() => {
+      castDispatchInFlight.current = false;
+    }, 0);
+
     if (playingAsLand) {
       if (sourceZone !== "hand") return;
       if (hasPlayedLandThisTurn(seatId, session.turn)) {
@@ -2801,15 +3012,25 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       // then for the human specifically follow up with a real choice modal pre-loaded with that pick.
       const chooseColorEtb = parseChooseColorEtb(playedFaceCard.oracleText);
       const choosesCreatureType = hasChooseCreatureTypeEtb(playedFaceCard.oracleText);
+      // Captured out of the setSession updater below rather than queued from inside it — React 18
+      // StrictMode's dev-mode double-invocation of functional setState updaters (intended to catch
+      // exactly this: an updater that isn't a pure function of its input) was calling
+      // queueCommonTriggers TWICE for a single land play, since both invocations start from the same
+      // `current` and both compute a genuinely-changed session (the guard below only catches a
+      // separate symptom — a real re-dispatch of an already-resolved land play, where the second
+      // invocation's playedSession === current). Reported live as Archaeomancer's Map's land-raid
+      // trigger firing twice per land entering. queueCommonTriggers is now called once, after
+      // setSession returns, using whichever invocation's triggers were captured last — since both
+      // invocations compute the same triggers from the same `current`, which one "wins" doesn't matter.
+      let capturedTriggers: Array<Extract<PendingAction, { type: "trigger" }>> = [];
       setSession((current) => {
         const playedSession = playCardFromZone(current, seatId, cardId, `${seat.name} plays ${playedName}.`, position, "battlefield", [], "hand", faceIndex);
         // playCardFromZone returns the same session reference, untouched, when the card was already
         // gone from hand (playCard re-entered for a land play already resolved — e.g. a duplicate
         // dispatch of the same agent/human decision) — bail out here rather than falling through to
         // the ETB-trigger scan below, which would otherwise re-detect the land that already entered
-        // and queue a second copy of its "a land entered" triggers (Archaeomancer's Map's land-raid
-        // ability) even though no second land actually entered. Reported live as that trigger firing
-        // twice off a single opponent land play.
+        // and queue a second copy of its "a land entered" triggers even though no second land
+        // actually entered.
         if (playedSession === current) return current;
         const chosenTypeSession = choosesCreatureType ? applyChosenCreatureType(playedSession, seatId, cardId) : playedSession;
         const coloredSession = chooseColorEtb ? applyChosenColor(chosenTypeSession, seatId, cardId, chooseColorEtb.excludedColor) : chosenTypeSession;
@@ -2825,15 +3046,15 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         // "land_played" event once this already covers it, so the two don't double up.
         const zoneEffect = parseZoneEffect(etbEffectText(playedFaceCard.oracleText));
         const zoneResolvedSession = zoneEffect ? applyZoneEffect(nextSession, seatId, playedName, zoneEffect) : nextSession;
-        const triggers = [
+        capturedTriggers = [
           ...findCommonTriggersForPermanentEntered(zoneResolvedSession, seatId, card),
           ...findLandRaidTriggers(zoneResolvedSession, seatId, card)
         ];
-        if (triggers.length > 0) {
-          window.setTimeout(() => queueCommonTriggers(triggers), 0);
-        }
         return zoneResolvedSession;
       });
+      if (capturedTriggers.length > 0) {
+        window.setTimeout(() => queueCommonTriggers(capturedTriggers), 0);
+      }
       if (seat.kind === "human") {
         if (choosesCreatureType) {
           window.setTimeout(
@@ -2865,7 +3086,14 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
           );
         }
       }
-      void consultRulesAdvisor("land_played", seatId, card);
+      // Same "don't double up" reasoning as parseZoneEffect's own guard just above — a land ETB
+      // clause commonTriggerEffect already owns deterministically (return_land_to_hand, draw_cards,
+      // scry_cards, ...) has nowhere useful left for the rules advisor to add, and asking it anyway
+      // risks a confusing extra manual_review prompt (or a wasted/hallucinated LLM call for an
+      // agent) on top of the already-correct deterministic resolution.
+      if (commonTriggerEffect(playedFaceCard.oracleText, "entered", undefined, seat) === undefined) {
+        void consultRulesAdvisor("land_played", seatId, card);
+      }
       void consultStaticEffectInterpreter(seatId, card);
       setSelectedHandCardId(undefined);
       return;
@@ -3176,6 +3404,18 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     const seat = session.seats.find((item) => item.id === seatId);
     const humanPool = seat?.kind === "human" ? poolForSeat(seatId) : undefined;
     const resolved = resolveEquip(session, seatId, cardId, humanPool);
+    if (!resolved) return;
+    if (resolved.poolSpent) {
+      setSeatManaPool(seatId, resolved.poolSpent);
+      clearManaContributions(seatId);
+    }
+    setSession(() => resolved.session);
+  }
+
+  function activateManlandAnimation(seatId: string, cardId: string) {
+    const seat = session.seats.find((item) => item.id === seatId);
+    const humanPool = seat?.kind === "human" ? poolForSeat(seatId) : undefined;
+    const resolved = resolveManlandAnimation(session, seatId, cardId, humanPool);
     if (!resolved) return;
     if (resolved.poolSpent) {
       setSeatManaPool(seatId, resolved.poolSpent);
@@ -3536,16 +3776,20 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       const controllerSeat = session.seats.find((seat) => seat.id === trigger.controllerSeatId);
       const seatName = controllerSeat?.name ?? "Player";
       const { drawAmount, putBackAmount } = trigger.effect;
-      let postDrawHandSize = 0;
-      setSession((current) => {
-        const drawnSession =
-          drawAmount > 0
-            ? drawMultipleForSeat(current, trigger.controllerSeatId, drawAmount, `${seatName} draws ${drawAmount} from ${trigger.sourceCardName}.`)
-            : current;
-        postDrawHandSize = drawnSession.seats.find((seat) => seat.id === trigger.controllerSeatId)?.board.hand.length ?? 0;
-        checkMiracleAfterDraw(current, drawnSession);
-        return drawnSession;
-      });
+      // Computed synchronously against `session` here, NOT by writing into a captured variable from
+      // inside the setSession updater (as this used to) — setSession's updater doesn't run
+      // synchronously, so requiredCount was always computed against postDrawHandSize's untouched
+      // initial value of 0, making `if (requiredCount > 0)` false every time and silently skipping
+      // the put-back choice for every permanent-triggered draw_then_put_back (Aminatou, the
+      // Fateshifter's +1, ...). Same fix already applied to applyRuleWorkflow's cast-spell copy of
+      // this same logic (Brainstorm, Brainsurge, ...) — this trigger-based twin just hadn't gotten it.
+      const drawnSession =
+        drawAmount > 0
+          ? drawMultipleForSeat(session, trigger.controllerSeatId, drawAmount, `${seatName} draws ${drawAmount} from ${trigger.sourceCardName}.`)
+          : session;
+      const postDrawHandSize = drawnSession.seats.find((seat) => seat.id === trigger.controllerSeatId)?.board.hand.length ?? 0;
+      checkMiracleAfterDraw(session, drawnSession);
+      setSession(() => drawnSession);
       const requiredCount = Math.min(putBackAmount, postDrawHandSize);
       if (requiredCount > 0) {
         setPendingRuleChoice({
@@ -3556,6 +3800,39 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
           sourceCardName: trigger.sourceCardName,
           prompt: `${seatName} must put ${requiredCount} card${requiredCount === 1 ? "" : "s"} from hand on top of their library.`,
           requiredCount,
+          trigger,
+          remainingStack
+        });
+        return;
+      }
+    } else if (accepted && trigger.effect.kind === "connive") {
+      // "Draw a card, then discard a card" (Ledger Shredder, ...) needs a real choice of WHICH
+      // card to discard — resolveTriggerEffect is a pure function with no access to
+      // pendingRuleChoice, so it always auto-picked via chooseWorstHandCardToDiscard for both
+      // agents AND the human, reported live as "Ledger Shredder ... not letting me choose a card
+      // to discard." Same shape as draw_then_put_back just above: the draw itself isn't a choice,
+      // so it happens immediately; only which card gets discarded (and therefore whether it's the
+      // nonland that earns the +1/+1 counter) routes through pendingRuleChoice.
+      startConniveIteration(trigger, remainingStack, trigger.effect.amount, session);
+      return;
+    } else if (accepted && trigger.effect.kind === "return_land_to_hand") {
+      // Karoo/bounce lands (Simic Growth Chamber, ...): mandatory, but WHICH land is a real choice
+      // — resolveTriggerEffect is a pure function with no access to pendingRuleChoice, so this
+      // always needs the same real-prompt-for-a-human/deterministic-pick-for-an-agent split as
+      // connive's discard and draw_then_put_back's put-back above. No lands to return can't
+      // actually happen (the karoo land itself is already on the battlefield by the time this
+      // trigger fires, so it's always at least one legal target), but the check falls through to
+      // the shared resume logic below rather than assuming otherwise.
+      const controllerSeat = session.seats.find((seat) => seat.id === trigger.controllerSeatId);
+      const hasLand = controllerSeat?.board.battlefield.some((permanent) => permanent.typeLine.includes("Land"));
+      if (hasLand) {
+        setPendingRuleChoice({
+          id: crypto.randomUUID(),
+          kind: "return_land_to_hand",
+          controllerSeatId: trigger.controllerSeatId,
+          sourceCardId: trigger.sourceCardId,
+          sourceCardName: trigger.sourceCardName,
+          prompt: `${controllerSeat?.name ?? "Player"} must return a land they control to its owner's hand.`,
           trigger,
           remainingStack
         });
@@ -3588,18 +3865,39 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     }
   }
 
+  // Handles both optional_trigger (the deterministic trigger queue's own "you may") and
+  // optional_primitive_plan (the LLM-fallback path's equivalent, offered by
+  // offerOptionalPrimitivePlan) — they share the same OptionalTriggerModal/view kind in
+  // ThreeGameTable.tsx (ruleChoiceView projects both to "optional_trigger"), so the accept/decline
+  // handlers bound to that modal need to resolve whichever underlying choice is actually pending.
   function acceptOptionalTrigger() {
     const choice = pendingRuleChoice;
-    if (!choice || choice.kind !== "optional_trigger") return;
-    setPendingRuleChoice(undefined);
-    finishTriggerResolution(choice.trigger, choice.remainingStack, true);
+    if (!choice) return;
+    if (choice.kind === "optional_trigger") {
+      setPendingRuleChoice(undefined);
+      finishTriggerResolution(choice.trigger, choice.remainingStack, true);
+      return;
+    }
+    if (choice.kind === "optional_primitive_plan") {
+      setPendingRuleChoice(undefined);
+      setSession((current) => applyPrimitiveActionPlan(current, choice.controllerSeatId, choice.sourceCard, choice.steps));
+      addEvent(`${choice.sourceCardName}: ${choice.prompt.replace(/ Do you want to\?$/, "")}.`, choice.controllerSeatId, "Rules advisor (primitive plan)");
+    }
   }
 
   function declineOptionalTrigger() {
     const choice = pendingRuleChoice;
-    if (!choice || choice.kind !== "optional_trigger") return;
-    setPendingRuleChoice(undefined);
-    finishTriggerResolution(choice.trigger, choice.remainingStack, false);
+    if (!choice) return;
+    if (choice.kind === "optional_trigger") {
+      setPendingRuleChoice(undefined);
+      finishTriggerResolution(choice.trigger, choice.remainingStack, false);
+      return;
+    }
+    if (choice.kind === "optional_primitive_plan") {
+      setPendingRuleChoice(undefined);
+      const seatName = session.seats.find((seat) => seat.id === choice.controllerSeatId)?.name ?? "Player";
+      addEvent(`${seatName} declines ${choice.sourceCardName}'s optional effect.`, choice.controllerSeatId, "Rules advisor (primitive plan)");
+    }
   }
 
   // Shared completion for the "put cards on top of library" choice (finishTriggerResolution's
@@ -3629,6 +3927,93 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     } else {
       resumeTopStackAction(choice.remainingStack ?? []);
     }
+  }
+
+  function resumeAfterTriggerChoice(trigger: Extract<PendingAction, { type: "trigger" }>, remainingStack: PendingAction[]) {
+    if (trigger.parentAction) {
+      window.setTimeout(() => resumeStackAction(trigger.parentAction!), 0);
+    } else {
+      resumeTopStackAction(remainingStack);
+    }
+  }
+
+  // Draws one card for a single connive iteration, then opens a real "choose which card to
+  // discard" choice — or, if there's nothing left in hand to discard, moves straight on to
+  // whatever's left (another iteration for a rare "connives twice," or resuming the stack).
+  // Takes the session to draw from explicitly (rather than reading the component's `session` state)
+  // so a same-tick recursive call (the empty-hand skip below) operates on the just-drawn state
+  // instead of a stale pre-draw snapshot — setSession's updater doesn't run synchronously, so a
+  // second read of `session` immediately after the first draw would still see the old hand.
+  function startConniveIteration(
+    trigger: Extract<PendingAction, { type: "trigger" }>,
+    remainingStack: PendingAction[],
+    iterationsLeft: number,
+    fromSession: GameSession
+  ) {
+    if (iterationsLeft <= 0) {
+      setSession(() => fromSession);
+      resumeAfterTriggerChoice(trigger, remainingStack);
+      return;
+    }
+    const controllerSeat = fromSession.seats.find((seat) => seat.id === trigger.controllerSeatId);
+    const seatName = controllerSeat?.name ?? "Player";
+    const drawnSession = drawForSeat(fromSession, trigger.controllerSeatId, `${trigger.sourceCardName} connives: ${seatName} draws a card.`);
+    checkMiracleAfterDraw(fromSession, drawnSession);
+    const postDrawHandSize = drawnSession.seats.find((seat) => seat.id === trigger.controllerSeatId)?.board.hand.length ?? 0;
+    if (postDrawHandSize === 0) {
+      startConniveIteration(trigger, remainingStack, iterationsLeft - 1, drawnSession);
+      return;
+    }
+    setSession(() => drawnSession);
+    setPendingRuleChoice({
+      id: crypto.randomUUID(),
+      kind: "connive_discard",
+      controllerSeatId: trigger.controllerSeatId,
+      sourceCardId: trigger.sourceCardId,
+      sourceCardName: trigger.sourceCardName,
+      prompt: `${seatName} connives: choose a card to discard.`,
+      remainingAmount: iterationsLeft - 1,
+      trigger,
+      remainingStack
+    });
+  }
+
+  // Shared completion for the connive discard choice — called from both the human's modal confirm
+  // and resolveAgentRuleChoice's deterministic pick (chooseWorstHandCardToDiscard), same split as
+  // completePutCardsOnLibrary above.
+  function completeConniveDiscard(cardIds: string[]) {
+    const choice = pendingRuleChoice;
+    if (!choice || choice.kind !== "connive_discard") return;
+    setPendingRuleChoice(undefined);
+    const discardId = cardIds[0];
+    const trigger = choice.trigger;
+    const remainingStack = choice.remainingStack ?? [];
+    if (!discardId) {
+      if (trigger) startConniveIteration(trigger, remainingStack, choice.remainingAmount, session);
+      return;
+    }
+    const discardedSession = applyConniveDiscard(session, choice.controllerSeatId, choice.sourceCardId, choice.sourceCardName, discardId);
+    if (choice.remainingAmount > 0 && trigger) {
+      startConniveIteration(trigger, remainingStack, choice.remainingAmount, discardedSession);
+      return;
+    }
+    setSession(() => discardedSession);
+    if (trigger) resumeAfterTriggerChoice(trigger, remainingStack);
+  }
+
+  // Shared completion for the karoo/bounce-land choice — called from both the human's modal confirm
+  // and resolveAgentRuleChoice's deterministic pick (chooseLandToReturn), same split as
+  // completeConniveDiscard/completePutCardsOnLibrary above.
+  function completeReturnLandToHand(cardIds: string[]) {
+    const choice = pendingRuleChoice;
+    if (!choice || choice.kind !== "return_land_to_hand") return;
+    setPendingRuleChoice(undefined);
+    const landId = cardIds[0];
+    if (landId) {
+      setSession((current) => moveCardBetweenVisibleZones(current, choice.controllerSeatId, landId, "hand"));
+    }
+    const trigger = choice.trigger;
+    if (trigger) resumeAfterTriggerChoice(trigger, choice.remainingStack ?? []);
   }
 
   function resolvePendingAction(action: PendingAction) {
@@ -3719,6 +4104,21 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
           );
           if (sourceCard) void consultRulesAdvisor("spell_resolved_to_graveyard", action.actorSeatId, sourceCard);
 
+          // Arcane Denial's delayed draws are unconditional parts of ITS resolution, separate from
+          // whether the counter itself actually landed (e.g. a "can't be countered" target still
+          // lets these fire) — scheduled regardless of the isCountered branch below.
+          const delayedDraws = sourceCard ? parseDelayedUpkeepDraws(sourceCard.oracleText) : undefined;
+          if (delayedDraws) {
+            const scheduled: NonNullable<GameSession["pendingUpkeepDraws"]> = [...(next.pendingUpkeepDraws ?? [])];
+            if (delayedDraws.targetControllerDraws) {
+              scheduled.push({ seatId: counterTargetAction.actorSeatId, amount: delayedDraws.targetControllerDraws, sourceName: action.cardName });
+            }
+            if (delayedDraws.casterDraws) {
+              scheduled.push({ seatId: action.actorSeatId, amount: delayedDraws.casterDraws, sourceName: action.cardName });
+            }
+            next = { ...next, pendingUpkeepDraws: scheduled };
+          }
+
           if (isCountered) {
             const targetCurrentSeat = next.seats.find((seat) => seat.id === counterTargetAction.actorSeatId);
             const targetCard =
@@ -3798,6 +4198,15 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         action.sourceZone ?? "hand",
         action.faceIndex
       );
+      // playCardFromZone returns the same session reference, untouched, when the card was already
+      // gone from its source zone (this spell already resolved — e.g. this very updater function
+      // being invoked a second time for the same resolution, which React may do in development; see
+      // the identical guard on the land-play path above for the confirmed mechanism and the bug it
+      // fixed there). Bail out here too rather than falling through to the ETB-trigger scan below,
+      // which would otherwise re-detect the permanent that already entered and queue a second copy
+      // of its ETB/cast triggers even though nothing new actually happened — reported live as Beast
+      // Whisperer and Guardian Project each drawing/triggering twice off a single creature cast.
+      if (playedSession === current) return current;
       // Estrid's Invocation: "enter as a copy of an enchantment you control" is a replacement effect
       // playCardFromZone itself applies (see its own comment) — but every ETB-effect check from here
       // down (tokenSpecs, zoneEffect, removalEffect, pumpEffect, massPumpEffect, simpleLifeEffect,
@@ -3849,14 +4258,23 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
               colorsAmongPermanentsControlled(colorCounterSeat, sourceCard.id)
             )
           : multikickerCounterSession;
+      // Storage lands (Gemstone Mine, Dark Depths, the Vivid cycle, Tendo Ice Bridge, ...): a fixed,
+      // printed ETB counter count unrelated to anything the caster chose or the board state —
+      // see entersWithFixedCounterKind's own comment.
+      const fixedCounterEntry = sourceCard && destination === "battlefield" ? entersWithFixedCounterKind(sourceCard.oracleText) : undefined;
+      const fixedCounterSession = fixedCounterEntry
+        ? applyEntersWithCounterKind(colorCounterSession, action.actorSeatId, sourceCard!.id, fixedCounterEntry.kind, fixedCounterEntry.count)
+        : colorCounterSession;
       const exploreTimes = sourceCard && destination === "battlefield" ? exploreCount(sourceCard.oracleText) : undefined;
-      const exploredSession = exploreTimes ? resolveExplore(colorCounterSession, action.actorSeatId, sourceCard!.id, exploreTimes) : colorCounterSession;
+      const exploredSession = exploreTimes ? resolveExplore(fixedCounterSession, action.actorSeatId, sourceCard!.id, exploreTimes) : fixedCounterSession;
       // Generic destroy/exile/direct-damage spells (Murder, Lightning Bolt, ...) — applies
       // regardless of where the spell itself ends up, since instants/sorceries resolve to the
       // graveyard while their effect still needs to happen.
       const removalEffect = sourceCard ? parseRemovalEffect(etbEffectText(sourceCard.oracleText)) : undefined;
       const removalResolvedSession =
-        removalEffect && sourceCard ? applyRemovalEffect(exploredSession, action.actorSeatId, sourceCard.name, sourceCard, removalEffect, action.chosenX) : exploredSession;
+        removalEffect && sourceCard
+          ? applyPrimitiveAction(exploredSession, action.actorSeatId, sourceCard, { kind: "removal", effect: removalEffect, chosenX: action.chosenX })
+          : exploredSession;
       // "Choose one/two —" cards are fully owned by removalEffect above (if a removal-shaped mode
       // exists) or genericModalEffect below (otherwise) — the whole-text zoneEffect scan a few
       // lines down has no awareness of modal headers at all and would otherwise misfire on any
@@ -3880,6 +4298,12 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       // and, like those, scoped to a non-modal card's own etbEffectText.
       const searchLibraryEffect =
         sourceCard && !isModalCard && destination === "battlefield" ? parseSearchLibraryEffectText(etbEffectText(sourceCard.oracleText)) : undefined;
+      // "Each player exiles all creature cards from their graveyard, then sacrifices all creatures
+      // they control, then puts all cards they exiled this way onto the battlefield." (Living Death)
+      // — unrestricted by destination, same as removalEffect/zoneEffect above (it's a sorcery,
+      // resolving to the graveyard, not a permanent's own ETB).
+      const isLivingDeath = sourceCard && !isModalCard && isLivingDeathEffect(etbEffectText(sourceCard.oracleText));
+      const livingDeathResolvedSession = isLivingDeath && sourceCard ? applyLivingDeathEffect(zoneResolvedSession, sourceCard.name) : zoneResolvedSession;
       // "Each player sacrifices a creature or planeswalker of their choice. Each player who can't
       // discards a card." (Plaguecrafter) — see applyEachPlayerSacrificeEffect's own doc comment for
       // why this needs a bespoke shape instead of any existing TriggerEffect kind.
@@ -3887,8 +4311,8 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         sourceCard && !isModalCard && destination === "battlefield" ? parseEachPlayerSacrificeEffect(etbEffectText(sourceCard.oracleText)) : undefined;
       const eachPlayerSacrificeResolvedSession =
         eachPlayerSacrificeEffect && sourceCard
-          ? applyEachPlayerSacrificeEffect(zoneResolvedSession, sourceCard.name, eachPlayerSacrificeEffect)
-          : zoneResolvedSession;
+          ? applyEachPlayerSacrificeEffect(livingDeathResolvedSession, sourceCard.name, eachPlayerSacrificeEffect)
+          : livingDeathResolvedSession;
       // "Target creature gets +N/+N or -N/-N until end of turn." (Giant Growth, Afflict, ...) — a
       // plain (non-modal) single-mode pump/debuff spell; X is substituted from the spell's own
       // chosenX first, same as every other X-aware effect here. Modal pump modes (Profane Command's
@@ -3908,6 +4332,15 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
           : undefined;
       const massPumpResolvedSession =
         massPumpEffect && sourceCard ? applyMassPumpEffect(pumpResolvedSession, action.actorSeatId, sourceCard.name, massPumpEffect) : pumpResolvedSession;
+      // "Return all creatures to their owners' hands." (Evacuation, and the same unqualified
+      // mass-bounce wording on a few other cards) — previously entirely unmodeled (no TriggerEffect/
+      // ZoneEffect kind covers "every creature on the battlefield goes to hand"), so a spell shaped
+      // like this silently did nothing at all. Reported live as "Evacuation did not return all
+      // creatures to their owners hands." Unrestricted by destination, same "applies regardless of
+      // the spell's own destination" reasoning as removal/zone/pump above.
+      const massBounceEffect = sourceCard && !isModalCard ? parseMassBounceEffect(etbEffectText(sourceCard.oracleText)) : undefined;
+      const massBounceResolvedSession =
+        massBounceEffect && sourceCard ? applyMassBounceEffect(massPumpResolvedSession, action.actorSeatId, sourceCard.name, massBounceEffect) : massPumpResolvedSession;
       // "Target creature gets -3/-3 until end of turn. You gain 2 life." (Locthwain Scorn, and the
       // same "removal/pump plus a flat life change" template on plenty of other real cards) — a
       // second, independent clause on the same spell that removalEffect/pumpEffect/massPumpEffect
@@ -3917,7 +4350,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       // "applies regardless of the spell's own destination" reasoning as removal/zone/pump.
       const simpleLifeEffect = sourceCard && !isModalCard ? parseSimpleLifeChange(etbEffectText(sourceCard.oracleText)) : undefined;
       const simpleLifeResolvedSession =
-        simpleLifeEffect && sourceCard ? applySimpleLifeChange(massPumpResolvedSession, action.actorSeatId, sourceCard.name, simpleLifeEffect) : massPumpResolvedSession;
+        simpleLifeEffect && sourceCard ? applySimpleLifeChange(massBounceResolvedSession, action.actorSeatId, sourceCard.name, simpleLifeEffect) : massBounceResolvedSession;
       // "Draw two cards." (Village Rites, and the same shape on plenty of other instants/sorceries)
       // — same "independent clause, own pass" reasoning as simpleLifeEffect above, but scoped to
       // NON-battlefield destinations only: a permanent's own ETB "draw a card" trigger is already
@@ -4066,6 +4499,8 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
           (isModalCard && (removalEffect !== undefined || genericModalEffect !== undefined)) ||
           pumpEffect !== undefined ||
           simpleDrawEffect !== undefined ||
+          isLivingDeath ||
+          massBounceEffect ||
           grantsExtraTurn(sourceCard.oracleText);
         if (!ownEtbAlreadyHandled) {
           void consultRulesAdvisor(destination === "battlefield" ? "spell_resolved_to_battlefield" : "spell_resolved_to_graveyard", action.actorSeatId, sourceCard);
@@ -4121,7 +4556,25 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
 
   async function consultRulesAdvisor(event: string, seatId: string, sourceCard: VisibleCard) {
     const seat = session.seats.find((item) => item.id === seatId);
-    if (!seat || !shouldConsultRulesAdvisor(event, sourceCard)) return;
+    if (!seat) return;
+    // A card with no oracle text at all (a plain vanilla creature — Alpine Grizzly, Balduvian
+    // Bears, ...) has nothing on it for either advisor to interpret; the engine's core systems
+    // (P/T, mana cost, combat, zone changes) already fully handle it without any LLM call. Same
+    // "vanilla = trim(oracleText) === ''" definition cardDb.ts's bulk parser uses to skip these
+    // cards offline — this is that same skip applied at the live call site, rather than relying on
+    // the incidental fact that every vanilla card shares the same (event, "") primitiveActionPlanCache
+    // key and so happens to only cost one real Ollama call per event type per session.
+    if (!sourceCard.oracleText.trim()) return;
+    // shouldConsultRulesAdvisor's keyword pre-gate exists to avoid wasting a consultation on text
+    // with nothing for the RuleWorkflow vocabulary (draw/scry/search/...) to resolve — but that
+    // gate returning false doesn't mean the card has NO effect, just that this narrower advisor
+    // doesn't cover it (e.g. its keyword list has no "destroy" at all). Route those to the broader
+    // primitive-action planner instead of silently doing nothing, same as this function's own
+    // fallback-of-last-resort role for the shapes it DOES recognize.
+    if (!shouldConsultRulesAdvisor(event, sourceCard)) {
+      void consultPrimitiveActionPlanner(event, seatId, sourceCard);
+      return;
+    }
 
     // A classification is a pure function of (event, this card's own oracle text) — see
     // ruleWorkflowCache's own comment — so a prior real consultation for the exact same shape
@@ -4171,6 +4624,85 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     }
   }
 
+  // The primitive-action fallback: consultRulesAdvisor's own narrower RuleWorkflow vocabulary (draw/
+  // scry/surveil/search) has no shape for "destroy target X," "sacrifice a permanent," "put counters
+  // on this," etc. — this is the broader, closed-primitive-vocabulary fallback for everything else,
+  // called only when consultRulesAdvisor's own gate has already given up on a card (see its own call
+  // site). Same shape as consultRulesAdvisor itself: cache check, fetch, apply, degrade safely on
+  // failure — reuses ruleWorkflowCacheKey's (event, oracleText) key convention against the sibling
+  // primitiveActionPlanCache rather than inventing a new key scheme.
+  async function consultPrimitiveActionPlanner(event: string, seatId: string, sourceCard: VisibleCard) {
+    const seat = session.seats.find((item) => item.id === seatId);
+    if (!seat) return;
+
+    const cacheKey = ruleWorkflowCacheKey(event, sourceCard.oracleText);
+    const cached = primitiveActionPlanCache.get(cacheKey);
+    if (cached) {
+      if (!cached.declined && cached.steps.length > 0 && isBoardConditionMet(cached.condition ?? "", seat)) {
+        if (cached.optional) {
+          offerOptionalPrimitivePlan(seatId, sourceCard, cached.steps, cached.summary);
+        } else {
+          setSession((current) => applyPrimitiveActionPlan(current, seatId, sourceCard, cached.steps));
+        }
+      }
+      return;
+    }
+
+    setRulesAdvisorPending((count) => count + 1);
+    try {
+      const response = await fetch("/api/rules/primitive-plan", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        signal: AbortSignal.timeout(AGENT_REQUEST_TIMEOUT_MS),
+        body: JSON.stringify({
+          cardName: sourceCard.name,
+          oracleText: sourceCard.oracleText,
+          actorName: seat.name,
+          battlefieldSummary: seat.board.battlefield.map((card) => `${card.name} (${card.typeLine})`),
+          handSummary: seat.board.hand.map((card) => card.name),
+          graveyardSummary: (seat.board.graveyard ?? []).map((card) => card.name),
+          event
+        })
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const result = (await response.json()) as { source: "ollama" | "fallback" | "cache"; plan: PrimitiveActionPlan };
+      primitiveActionPlanCache.set(cacheKey, result.plan);
+      if (!result.plan.declined && result.plan.steps.length > 0 && isBoardConditionMet(result.plan.condition ?? "", seat)) {
+        if (result.plan.optional) {
+          offerOptionalPrimitivePlan(seatId, sourceCard, result.plan.steps, result.plan.summary);
+        } else {
+          setSession((current) => applyPrimitiveActionPlan(current, seatId, sourceCard, result.plan.steps));
+          addEvent(`${sourceCard.name}: ${result.plan.summary || "resolved via the primitive-action fallback"}.`, seatId, "Rules advisor (primitive plan)");
+        }
+      }
+    } catch (error) {
+      addEvent(
+        `Primitive-action planner could not resolve ${sourceCard.name}: ${error instanceof Error ? error.message : "unknown error"}.`,
+        seatId,
+        "Rules advisor"
+      );
+    } finally {
+      setRulesAdvisorPending((count) => Math.max(0, count - 1));
+    }
+  }
+
+  // Opens the same optional_trigger-shaped accept/decline prompt the deterministic trigger path
+  // already has (see beginTriggerResolution's own doc comment) for a primitive-action plan whose
+  // oracle text said "you may" — called from both of consultPrimitiveActionPlanner's branches
+  // (client-cache hit and live fetch) instead of applying the plan immediately.
+  function offerOptionalPrimitivePlan(seatId: string, sourceCard: VisibleCard, steps: PrimitiveActionStep[], summary: string) {
+    setPendingRuleChoice({
+      id: crypto.randomUUID(),
+      kind: "optional_primitive_plan",
+      controllerSeatId: seatId,
+      sourceCardId: sourceCard.id,
+      sourceCardName: sourceCard.name,
+      prompt: `${summary || `${sourceCard.name}'s effect`}. Do you want to?`,
+      sourceCard,
+      steps
+    });
+  }
+
   function applyRuleWorkflow(seatId: string, sourceCard: VisibleCard, workflow: RuleWorkflow, source: "deterministic" | "ollama" | "fallback" | "cached") {
     if (workflow.workflow === "none") return;
 
@@ -4201,6 +4733,23 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       } else {
         addEvent(`${seat.name} has no valid basic land pair to find for ${sourceCard.name}.`, seatId, "Rules advisor");
       }
+      return;
+    }
+
+    if (workflow.workflow === "search_basic_lands_split_battlefield_hand") {
+      setPendingRuleChoice({
+        id: crypto.randomUUID(),
+        kind: "choose_card_from_library",
+        controllerSeatId: seatId,
+        sourceCardId: workflow.sourceCardId ?? sourceCard.id,
+        sourceCardName: sourceCard.name,
+        prompt: workflow.summary || `Search your library for ${sourceCard.name}.`,
+        destination: "battlefield",
+        tapped: true,
+        maxChoices: Math.max(1, workflow.maxChoices || 2),
+        allowedCardFilter: workflow.allowedCardFilter,
+        splitDestination: "hand"
+      });
       return;
     }
 
@@ -4247,19 +4796,22 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
 
     if (workflow.workflow === "draw_then_put_back") {
       // Same shape as finishTriggerResolution's draw_then_put_back branch (a permanent's triggered
-      // "draw N, then put M back," e.g. Aminatou's +1) but for a cast spell (Brainstorm, ...) —
-      // the draw itself isn't a choice, so it happens immediately; only which cards go back is a
-      // real decision, routed through the same put_cards_on_library choice (a real prompt for a
+      // "draw N, then put M back," e.g. Aminatou's +1) but for a cast spell (Brainstorm, Brainsurge,
+      // ...) — the draw itself isn't a choice, so it happens immediately; only which cards go back
+      // is a real decision, routed through the same put_cards_on_library choice (a real prompt for a
       // human, resolveAgentRuleChoice's highest-mana-value-first pick for an agent).
+      // postDrawHandSize is computed synchronously against `session` here, NOT by writing into a
+      // captured variable from inside the setSession updater below (as this used to) — setSession's
+      // updater doesn't run synchronously, so requiredCount was always computed against
+      // postDrawHandSize's untouched initial value of 0, making `if (requiredCount > 0)` false every
+      // time: the draw itself worked, but the "then put N back" choice never opened for ANY
+      // draw_then_put_back spell, reported live as "Brainsurge does not work."
       const drawAmount = Math.max(1, workflow.maxChoices || 1);
       const putBackAmount = workflow.putBackAmount ?? 0;
-      let postDrawHandSize = 0;
-      setSession((current) => {
-        const drawnSession = drawMultipleForSeat(current, seatId, drawAmount, `${seat.name} draws ${drawAmount} from ${sourceCard.name}.`);
-        postDrawHandSize = drawnSession.seats.find((item) => item.id === seatId)?.board.hand.length ?? 0;
-        checkMiracleAfterDraw(current, drawnSession);
-        return drawnSession;
-      });
+      const drawnSession = drawMultipleForSeat(session, seatId, drawAmount, `${seat.name} draws ${drawAmount} from ${sourceCard.name}.`);
+      const postDrawHandSize = drawnSession.seats.find((item) => item.id === seatId)?.board.hand.length ?? 0;
+      checkMiracleAfterDraw(session, drawnSession);
+      setSession(() => drawnSession);
       const requiredCount = Math.min(putBackAmount, postDrawHandSize);
       if (requiredCount > 0) {
         setPendingRuleChoice({
@@ -4997,7 +5549,16 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   function completeRuleChoice(choice: PendingRuleChoice, cardIds: string[]) {
     if (choice.kind === "choose_card_from_library") {
       const selectedIds = cardIds.slice(0, choice.maxChoices);
-      setSession((current) => selectedIds.reduce((next, cardId) => moveLibraryCardToDestination(next, choice.controllerSeatId, cardId, choice.destination, Boolean(choice.tapped)), current));
+      const splitDestination = choice.splitDestination;
+      setSession((current) =>
+        selectedIds.reduce(
+          (next, cardId, index) =>
+            splitDestination && index > 0
+              ? moveLibraryCardToDestination(next, choice.controllerSeatId, cardId, splitDestination, false)
+              : moveLibraryCardToDestination(next, choice.controllerSeatId, cardId, choice.destination, Boolean(choice.tapped)),
+          current
+        )
+      );
       setPendingRuleChoice(undefined);
       return;
     }
@@ -5063,27 +5624,83 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     const seat = session.seats.find((item) => item.id === seatId);
     if (!seat) return;
     addEvent(`${seat.name} orders ${session.phase} triggers: ${triggers.map((trigger) => trigger.sourceCardName).join(" -> ")}.`, seatId, "Rules advisor");
+    continueOrderedPhaseTriggers(seatId, triggers);
+  }
+
+  function continueOrderedPhaseTriggers(seatId: string, triggers: Array<{ sourceCardId: string; sourceCardName: string; text: string }>) {
+    const seat = session.seats.find((item) => item.id === seatId);
+    if (!seat) return;
     const phase = TURN_PHASES.includes(session.phase as TurnPhase) ? (session.phase as TurnPhase) : undefined;
     // Threaded sequentially so, e.g., two deterministically-resolved reanimation triggers in the
     // chosen order each see the board state left by the one before them — same "same class of
     // bug, single fix point" reasoning as applyDeterministicPhaseTrigger's own comment.
     let workingSession = session;
-    for (const trigger of triggers) {
+    for (let i = 0; i < triggers.length; i += 1) {
+      const trigger = triggers[i];
       const card = workingSession.seats.find((item) => item.id === seatId)?.board.battlefield.find((item) => item.id === trigger.sourceCardId);
       if (!card) continue;
+      const remaining = triggers.slice(i + 1);
+
       // Cumulative upkeep needs an actual pay-or-sacrifice decision (see openCumulativeUpkeepChoice)
       // rather than a deterministic session transform or an Ollama classification — only one
-      // pendingRuleChoice can be open at a time, so this commits whatever's been resolved so far and
-      // stops here; any remaining ordered triggers this same upkeep simply don't get a chance to fire
-      // this pass (better than the previous behavior, where a cumulative-upkeep trigger anywhere in
-      // the order silently never got a real decision at all).
+      // pendingRuleChoice can be open at a time, so this commits whatever's been resolved so far,
+      // stashes whatever's still left in pendingOrderedTriggerResume, and stops here; payCumulativeUpkeep
+      // / sacrificeRuleChoiceSource call resumePendingOrderedTriggers once the player answers, which
+      // picks the queue back up instead of silently dropping it (the previous behavior).
       if (phase === "upkeep step" && isCumulativeUpkeepCard(card)) {
         if (workingSession !== session) setSession(workingSession);
+        pendingOrderedTriggerResume.current = remaining.length > 0 ? { seatId, triggers: remaining } : undefined;
         openCumulativeUpkeepChoice(seatId, card);
         return;
       }
+
+      // Same reasoning (and the same resume mechanism) as the single-trigger dispatch effect above
+      // for isReanimateFromAnyGraveyardPhaseTrigger / targetCreatureCounterPhaseTrigger — without
+      // this, a human controller's second (or third) simultaneous reanimation/counter trigger this
+      // upkeep skipped straight to applyDeterministicPhaseTrigger's auto-pick heuristic with no
+      // prompt at all, reported live as "I only got to choose the surveil, not which creatures
+      // entered the battlefield" when Debtors' Knell, Virtue of Persistence, and Aminatou, Veil
+      // Piercer all triggered on the same upkeep.
+      if (phase && seat.kind === "human" && isReanimateFromAnyGraveyardPhaseTrigger(card, phase)) {
+        if (workingSession !== session) setSession(workingSession);
+        pendingOrderedTriggerResume.current = remaining.length > 0 ? { seatId, triggers: remaining } : undefined;
+        setPendingRuleChoice({
+          id: crypto.randomUUID(),
+          kind: "choose_creature_from_graveyards",
+          controllerSeatId: seatId,
+          sourceCardId: card.id,
+          sourceCardName: card.name,
+          prompt: `${card.name}: choose a creature card in any graveyard to return to the battlefield under your control.`
+        });
+        return;
+      }
+      const targetCounterEffect = phase ? targetCreatureCounterPhaseTrigger(card, phase) : undefined;
+      if (phase && seat.kind === "human" && targetCounterEffect) {
+        if (workingSession !== session) setSession(workingSession);
+        pendingOrderedTriggerResume.current = remaining.length > 0 ? { seatId, triggers: remaining } : undefined;
+        setPendingRuleChoice({
+          id: crypto.randomUUID(),
+          kind: "choose_creature_on_battlefield",
+          controllerSeatId: seatId,
+          sourceCardId: card.id,
+          sourceCardName: card.name,
+          prompt: `${card.name}: choose a creature to put ${targetCounterEffect.amount > 1 ? `${targetCounterEffect.amount} ` : "a"} ${targetCounterEffect.counterKind} counter${targetCounterEffect.amount > 1 ? "s" : ""} on.`,
+          counterKind: targetCounterEffect.counterKind,
+          amount: targetCounterEffect.amount,
+          restrictToYourControl: targetCounterEffect.scope === "target_creature_you_control"
+        });
+        return;
+      }
+
       if (phase && resolvePhaseScryOrSurveil(seatId, card, phase)) {
         if (workingSession !== session) setSession(workingSession);
+        if (seat.kind === "human") {
+          pendingOrderedTriggerResume.current = remaining.length > 0 ? { seatId, triggers: remaining } : undefined;
+        }
+        // The agent path resolves via its own separate functional setSession update
+        // (resolveAgentLibraryLookWorkflow), not via workingSession — stopping the loop here (rather
+        // than continuing and later overwriting that update with this function's own stale
+        // workingSession) keeps that update intact, same as before this function grew a resume queue.
         return;
       }
       const resolved = phase ? applyDeterministicPhaseTrigger(workingSession, seatId, card, phase) : undefined;
@@ -5212,6 +5829,14 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       finishTriggerResolution(choice.trigger, choice.remainingStack, true);
       return;
     }
+    if (choice.kind === "optional_primitive_plan") {
+      // Same accept-by-default heuristic as optional_trigger just above, for the LLM-fallback
+      // path's equivalent "you may" choice.
+      setPendingRuleChoice(undefined);
+      setSession((current) => applyPrimitiveActionPlan(current, choice.controllerSeatId, choice.sourceCard, choice.steps));
+      addEvent(`${seat.name}: ${choice.prompt.replace(/ Do you want to\?$/, "")}.`, seat.id, "Rules advisor (primitive plan)");
+      return;
+    }
     if (choice.kind === "discard_to_hand_size") {
       // Same "highest mana value first" heuristic chooseWorstHandCardToDiscard already uses for
       // discard-cost activated abilities, generalized to pick N cards instead of just one.
@@ -5235,6 +5860,16 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         hand = hand.filter((card) => card.id !== worst.id);
       }
       completePutCardsOnLibrary(putBackIds);
+      return;
+    }
+    if (choice.kind === "connive_discard") {
+      const worst = chooseWorstHandCardToDiscard(seat);
+      completeConniveDiscard(worst ? [worst.id] : []);
+      return;
+    }
+    if (choice.kind === "return_land_to_hand") {
+      const land = chooseLandToReturn(seat, choice.sourceCardId);
+      completeReturnLandToHand(land ? [land.id] : []);
       return;
     }
     if (choice.kind === "manual_review") {
@@ -5639,6 +6274,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         onActivateSelfUntap={activateSelfUntapAbility}
         onActivateGenericMana={activateGenericManaAbility}
         onActivateEquip={activateEquip}
+        onActivateManlandAnimation={activateManlandAnimation}
         onChangeLife={changeLife}
         onScry={(count) => startLibraryLook("scry", count)}
         onSurveil={(count) => startLibraryLook("surveil", count)}
@@ -5652,6 +6288,8 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         onDeclineCommanderZoneChoice={declineCommanderZoneChoice}
         onCompleteDiscardChoice={completeDiscardChoice}
         onCompletePutCardsOnLibrary={completePutCardsOnLibrary}
+        onCompleteConniveDiscard={completeConniveDiscard}
+        onCompleteReturnLandToHand={completeReturnLandToHand}
         onChooseCreatureType={chooseCreatureTypeChoice}
         onChooseColor={chooseColorChoice}
         onChooseGraveyardReanimationTarget={chooseGraveyardReanimationTarget}
@@ -5953,12 +6591,18 @@ function createCommanderCard(deck: CommanderDeck, existing?: VisibleCard): Visib
   };
 }
 
+// hasCardType, not a bare typeLine check: a permanent that's a creature only via a granted type
+// (Starfield of Nyx's enchantments, the enchantment-animation feature, man-land animation, ...)
+// has that on grantedTypes, not its own printed typeLine, which never changes. A bare typeLine
+// check meant none of those could ever attack or block despite genuinely being creatures —
+// reported live via this session's man-land audit (Celestial Colonnade correctly became a 4/4 but
+// still couldn't attack with it).
 function canAttack(card: VisibleCard) {
-  return card.typeLine.includes("Creature") && !card.tapped && !card.phasedOut && (!card.summoningSick || hasHaste(card)) && !card.attacking && !hasDefender(card);
+  return hasCardType(card, "Creature") && !card.tapped && !card.phasedOut && (!card.summoningSick || hasHaste(card)) && !card.attacking && !hasDefender(card);
 }
 
 function canBlock(card: VisibleCard, attacker?: VisibleCard) {
-  if (!card.typeLine.includes("Creature") || card.tapped || card.phasedOut || card.blocking) return false;
+  if (!hasCardType(card, "Creature") || card.tapped || card.phasedOut || card.blocking) return false;
   if (attacker && hasFlying(attacker) && !hasFlying(card) && !hasReach(card)) return false;
   if (attacker && isProtectedFrom(attacker, card)) return false;
   // Rule 702.111b: menace requires the attacker be blocked by two or more creatures, assigned
@@ -6124,6 +6768,20 @@ function applyLoreCounterEtb(session: GameSession, seatId: string, cardId: strin
   };
 }
 
+// Same session-level wrapper shape as applyLoreCounterEtb just above, generalized to any counter
+// kind/amount on any one battlefield permanent — used by applyPrimitiveAction's put_counters case
+// rather than duplicating this map-over-battlefield pattern a third time.
+function applyCounterDeltaAtSession(session: GameSession, seatId: string, cardId: string, kind: string, delta: number): GameSession {
+  return {
+    ...session,
+    seats: session.seats.map((seat) =>
+      seat.id === seatId
+        ? { ...seat, board: { ...seat.board, battlefield: seat.board.battlefield.map((card) => (card.id === cardId ? applyCounterDelta(card, kind, delta) : card)) } }
+        : seat
+    )
+  };
+}
+
 function isPlaneswalkerCard(card: VisibleCard) {
   return card.typeLine.includes("Planeswalker");
 }
@@ -6158,10 +6816,17 @@ type AuraAttachResult =
 function chooseAuraAttachTarget(session: GameSession, casterSeatId: string, oracleText: string): AuraAttachResult {
   const restriction = enchantRestriction(oracleText);
   if (restriction === "player") {
+    // Shadow of the Second Sun is the one printed "Enchant player" exception to the "always a
+    // hoser, never self-targeted" assumption below — its extra untap/upkeep/draw is a benefit to
+    // whoever it's on, so casting it on anyone but yourself would be pointless. Reported live: cast
+    // on an opponent by the general "pick a target" logic below, the caster's own postcombat main
+    // phase never matched hasExtraBeginningPhaseAura(session, activeSeat.id) (attachedToSeatId
+    // pointed at the wrong seat), so the extra phase never fired for the player who actually wanted it.
+    if (attachmentGrantsExtraBeginningPhase(oracleText)) return { kind: "attach_player", seatId: casterSeatId };
     // "Enchant player" (Overwhelming Splendor, the Curse cycle, ...) is overwhelmingly a hoser
-    // aimed at an opponent rather than the caster's own player — no known printed example
-    // benefits from being self-targeted — so pick the opponent who looks like the biggest threat
-    // (highest life total), mirroring chooseRemovalTarget's "biggest threat" tie-break below.
+    // aimed at an opponent rather than the caster's own player — so pick the opponent who looks
+    // like the biggest threat (highest life total), mirroring chooseRemovalTarget's "biggest
+    // threat" tie-break below.
     const opponents = session.seats.filter((seat) => seat.id !== casterSeatId && !seat.hasLost);
     if (opponents.length === 0) return { kind: "no_target" };
     const best = opponents.reduce((a, b) => (b.life > a.life ? b : a));
@@ -6268,6 +6933,29 @@ function grantsExtraTurn(oracleText: string): boolean {
 
 function entersWithXCounters(oracleText: string): boolean {
   return /\benters?(?: the battlefield)? with x \+1\/\+1 counters? on (?:it|this (?:creature|artifact|permanent))\b/i.test(oracleText);
+}
+
+// "This land enters [tapped] with N <kind> counter(s) on it." (Gemstone Mine's three mining
+// counters, Dark Depths' ten ice counters, the Vivid land cycle's two charge counters, Tendo Ice
+// Bridge's one charge counter, ...) — a FIXED, printed count (not the X-cost/per-kicked/per-color
+// shapes above), previously entirely unmodeled: every "storage land" entered with zero counters, so
+// its own "remove a counter: add mana" ability could never legally find one to remove. Excludes
+// +1/+1 and -1/-1 (owned by entersWithXCounters/entersWithCounterPerColorControlled/multikicker's
+// charge-counter case above, which have their own non-printed-count logic) to avoid double-handling
+// the same clause two different ways. Two negative lookaheads guard against reading a qualified
+// clause as if it were an unconditional flat count: "for each" (Everflowing Chalice's "a charge
+// counter on it for each time it was kicked" — its literal "a ... counter" prefix would otherwise
+// match here too, and — running after entersWithChargeCounterPerKick's own correct X-based
+// placement in the ETB pipeline — silently clobber it back down to 1 regardless of kicks) and a
+// trailing "if" condition (Myojin of Seeing Winds' "with a divinity counter on it IF you cast it
+// from your hand," Indominus Rex, Alpha's "with a flying counter on it IF a card discarded this way
+// has flying" — unconditionally placing either counter regardless of whether the real condition was
+// met would be a genuine rules error, not just an approximation, so both are declined outright).
+function entersWithFixedCounterKind(oracleText: string): { kind: string; count: number } | undefined {
+  const match = oracleText.match(/\benters?(?: the battlefield)?(?: tapped)? with (a|one|two|three|four|five|six|seven|eight|nine|ten|\d+) ([a-z]+) counters? on it\b(?! for each| if\b)/i);
+  if (!match) return undefined;
+  const count = numberWordToInt(match[1]);
+  return count ? { kind: match[2].toLowerCase(), count } : undefined;
 }
 
 // "Ramos, Dragon Engine enters the battlefield with a +1/+1 counter on it for each color among
@@ -6760,7 +7448,9 @@ function clearTemporaryBuffs(session: GameSession): GameSession {
             ? { ...card, temporaryPowerBonus: undefined, temporaryToughnessBonus: undefined }
             : card.temporaryBasePower !== undefined || card.temporaryBaseToughness !== undefined || card.temporaryAbilitiesStripped
               ? { ...card, temporaryBasePower: undefined, temporaryBaseToughness: undefined, temporaryAbilitiesStripped: undefined }
-              : card
+              : card.temporaryAnimatedAsCreature || card.temporaryGrantedKeywords
+                ? { ...card, temporaryAnimatedAsCreature: undefined, temporaryGrantedKeywords: undefined }
+                : card
         )
       }
     }))
@@ -6852,6 +7542,35 @@ function spellIsImmuneToCounters(session: GameSession, targetCard: VisibleCard, 
     const scope = parseCounterImmunityGrant(source.oracleText);
     return scope !== undefined && counterImmunityScopeMatches(scope, targetCard.typeLine);
   });
+}
+
+// Phase 5a's other auto-pass gate — canReceivePriorityForPendingAction already guarantees this seat
+// has SOME legal instant-speed response before decideAgentPriorityAction is ever called, so "has an
+// option" is never in question here; this is the narrower "is it worth spending an LLM call to
+// weigh that option" check. Deliberately conservative: only returns true when there's a clear reason
+// nothing about the pending action could concern this seat, never when unsure — an agent silently
+// missing a real response is a worse failure than one extra Ollama call. Doesn't attempt "would this
+// kill my creature" (no structured per-target data reaches this dispatch layer, only oracle text and
+// a message string) — "mentions target at all" already covers that case conservatively, since a
+// removal/damage spell that could kill a creature always says "target" somewhere in its text.
+function isPendingActionLikelyIrrelevantToSeat(seat: PlayerSeat, pendingAction: PendingAction, session: GameSession): boolean {
+  // The actor's own spell/trigger gets its own required-pass handling elsewhere (rule 117.3b —
+  // caster responds to their own action first); never second-guess that path here.
+  if (pendingAction.actorSeatId === seat.id) return false;
+  if (pendingAction.type === "trigger" && pendingAction.controllerSeatId === seat.id) return false;
+
+  const oracleText = pendingActionSourceCard(session, pendingAction)?.oracleText ?? "";
+  if (!oracleText) return false;
+  if (isBoardWipeText(oracleText)) return false;
+  const text = oracleText.toLowerCase();
+  // A mass effect with no literal "target" (Blasphemous Act-style "all creatures", Wrath-adjacent
+  // "each player" clauses not already caught by isBoardWipeText) still touches this seat's board.
+  if (/\beach (player|opponent|creature)\b/.test(text) || /\ball (creatures|players|permanents)\b/.test(text)) return false;
+  // Anything with an explicit target could plausibly hit this seat, their permanents, or something
+  // they care about — don't try to resolve who it actually targets here, just don't skip.
+  if (/\btarget\b/.test(text)) return false;
+
+  return true;
 }
 
 function legalPriorityActions(seat: PlayerSeat, pendingAction: PendingAction, activeSeatId: string | undefined, session: GameSession): LegalAgentAction[] {
@@ -6947,6 +7666,9 @@ function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllowed: boo
       // artifacts) have no such restriction.
       if (ability.costTap && card.typeLine.includes("Creature") && card.summoningSick && !hasHaste(card)) return;
       if (ability.costDiscard && seat.board.hand.length === 0) return;
+      // Rule 119.4: a life payment (Arid Mesa and the rest of the fetch-land cycle's "Pay 1 life"
+      // cost, ...) can only be made if the player's life total is at least that much.
+      if (ability.costLife > 0 && seat.life < ability.costLife) return;
       if (ability.sacrificeTarget === "creature" && !chooseSacrificeTargets(seat, ability.sacrificeTargetTypeFilter, ability.sacrificeCount)) return;
       if (ability.effect.kind === "search_library" && (seat.library?.length ?? 0) === 0) return;
       // Rule 601.2c-equivalent for an activated ability: don't offer "activate Cankerbloom" with
@@ -7059,6 +7781,25 @@ function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllowed: boo
       targetIds: [],
       label: `activate ${card.name}`,
       detail: `{2}, {T}, Sacrifice ${card.name}: search your library for up to two basic land cards that share a land type, put them onto the battlefield tapped, then shuffle.`
+    });
+  }
+
+  // Man-land animation has no {T} in its own cost (Celestial Colonnade, Mishra's Factory, ...),
+  // so unlike every other ability in this function it's legal at instant speed, not gated by
+  // sorcerySpeedAllowed. Excludes an already-animated-this-turn land: reactivating would just
+  // re-apply the exact same until-end-of-turn state for no benefit.
+  for (const card of seat.board.battlefield.filter((item) => !item.temporaryAnimatedAsCreature)) {
+    const animation = parseManlandAnimation(card.oracleText);
+    if (!animation) continue;
+    if (animation.cost > 0 && !chooseManaSourcesForCost(seat, genericCostShim(animation.cost), animation.cost, card.id, session.seats).ok) continue;
+    actions.push({
+      id: `activate-manland:${card.id}`,
+      actionType: "activate_ability",
+      abilityKind: "animate_manland",
+      cardId: card.id,
+      targetIds: [],
+      label: `activate ${card.name} (become a creature)`,
+      detail: `Until end of turn, ${card.name} becomes a ${animation.power}/${animation.toughness} creature${animation.keywords ? ` with ${animation.keywords.join(", ")}` : ""}. It's still a land.`
     });
   }
 
@@ -7216,6 +7957,62 @@ function resolveEquip(session: GameSession, seatId: string, cardId: string, huma
   };
 }
 
+// humanPool: same pool-first-then-auto-tap preference as resolveEquip/payGenericSacrificeCost.
+function resolveManlandAnimation(session: GameSession, seatId: string, cardId: string, humanPool?: ManaPool): { session: GameSession; poolSpent?: ManaPool } | undefined {
+  const seat = session.seats.find((item) => item.id === seatId);
+  const card = seat?.board.battlefield.find((item) => item.id === cardId);
+  if (!seat || !card) return undefined;
+  const animation = parseManlandAnimation(card.oracleText);
+  if (!animation) return undefined;
+  const costCard = genericCostShim(animation.cost);
+  const poolPayment = animation.cost > 0 && humanPool ? payCostFromPool(humanPool, costCard, animation.cost) : undefined;
+  const payment = animation.cost > 0 ? (poolPayment?.ok ? poolPayment : chooseManaSourcesForCost(seat, costCard, animation.cost, undefined, session.seats)) : undefined;
+  if (animation.cost > 0 && !payment?.ok) return undefined;
+
+  let next = session;
+  if (payment?.ok && !poolPayment?.ok) {
+    next = { ...next, seats: next.seats.map((item) => (item.id === seatId ? spendManaSources(item, payment.sourceIds) : item)) };
+  }
+
+  return {
+    session: {
+      ...next,
+      seats: next.seats.map((item) =>
+        item.id === seatId
+          ? {
+              ...item,
+              board: {
+                ...item.board,
+                battlefield: item.board.battlefield.map((permanent) =>
+                  permanent.id === cardId
+                    ? {
+                        ...permanent,
+                        temporaryAnimatedAsCreature: true,
+                        temporaryBasePower: animation.power,
+                        temporaryBaseToughness: animation.toughness,
+                        temporaryGrantedKeywords: animation.keywords
+                      }
+                    : permanent
+                )
+              }
+            }
+          : item
+      ),
+      events: [
+        {
+          id: crypto.randomUUID(),
+          at: new Date().toISOString(),
+          seatId,
+          message: `${seat.name} activates ${card.name}: it becomes a ${animation.power}/${animation.toughness} creature until end of turn.`,
+          detail: "Rules action"
+        },
+        ...next.events
+      ]
+    },
+    poolSpent: poolPayment?.ok ? poolPayment.pool : undefined
+  };
+}
+
 // No dedicated "choose a permanent" UI exists yet (matching how Myriad Landscape/basic-land-fetch
 // already auto-resolve their choices), so this deterministically picks the least costly creature
 // to lose: prefer a token over a real card, then the lowest combined power+toughness.
@@ -7310,6 +8107,18 @@ function chooseWorstHandCardToDiscard(seat: PlayerSeat): VisibleCard | undefined
   return seat.board.hand.reduce((worst, card) => (card.manaValue > worst.manaValue ? card : worst));
 }
 
+// Karoo/bounce lands' mandatory "return a land you control" — bouncing the karoo land itself (a
+// legal but pointless choice, always available since it's already on the battlefield by the time
+// this fires) defeats the entire point of the card, so this prefers any OTHER land, and among those
+// a basic land specifically: cheapest to just replay next turn, versus giving up a nonbasic utility
+// land's other abilities for a turn. Falls back to the karoo land itself only when it's the
+// controller's sole land (an edge case, not the common path).
+function chooseLandToReturn(seat: PlayerSeat, excludeId: string): VisibleCard | undefined {
+  const lands = seat.board.battlefield.filter((card) => card.typeLine.includes("Land"));
+  const others = lands.filter((card) => card.id !== excludeId);
+  return others.find((card) => basicLandTypes(card).length > 0) ?? others[0] ?? lands.find((card) => card.id === excludeId);
+}
+
 // Pays a generic sacrifice ability's cost (mana + discard + sacrifice) without resolving its
 // effect — kept separate from applySacrificeEffect so activateGenericSacrificeAbility (the
 // component closure both the human's click and the agent dispatch loop funnel through) can pay
@@ -7340,6 +8149,10 @@ function payGenericSacrificeCost(
 
   const discardCard = ability.costDiscard ? chooseWorstHandCardToDiscard(seat) : undefined;
   if (ability.costDiscard && !discardCard) return undefined;
+  // Rule 119.4: a life payment can only be made if the player's life total is at least that much
+  // (Arid Mesa and the rest of the fetch-land cycle's "Pay 1 life" cost, ...) — without this gate a
+  // seat at 0 life could still activate a life-cost ability.
+  if (ability.costLife > 0 && seat.life < ability.costLife) return undefined;
 
   const costCard = genericCostShim(ability.costMana);
   const poolPayment = ability.costMana > 0 && humanPool ? payCostFromPool(humanPool, costCard, ability.costMana) : undefined;
@@ -7360,6 +8173,13 @@ function payGenericSacrificeCost(
     next = {
       ...next,
       seats: next.seats.map((item) => (item.id === seatId ? spendManaSources(item, payment.sourceIds) : item))
+    };
+  }
+
+  if (ability.costLife > 0) {
+    next = {
+      ...next,
+      seats: next.seats.map((item) => (item.id === seatId ? { ...item, life: item.life - ability.costLife } : item))
     };
   }
 
@@ -7501,7 +8321,7 @@ function applySacrificeEffect(
     // sacrifices it before the effect resolves) — passed through anyway since applyRemovalEffect
     // only reads it for excluded-self/self-name checks, same as a normal spell's own source card
     // is still readable off the stack after it's already been sacrificed as an additional cost.
-    return applyRemovalEffect(session, seatId, sourceCardName, sourceCard, effect.effect);
+    return applyPrimitiveAction(session, seatId, sourceCard, { kind: "removal", effect: effect.effect });
   }
 
   // Scry/surveil auto-resolve deterministically for both agents and humans (no dedicated
@@ -7819,9 +8639,9 @@ function genericAbilityEffectHasLegalTarget(session: GameSession, casterSeatId: 
 }
 
 function applyGenericAbilityEffect(session: GameSession, casterSeatId: string, sourceCard: VisibleCard, effect: GenericAbilityEffect): GameSession {
-  if (effect.kind === "removal") return applyRemovalEffect(session, casterSeatId, sourceCard.name, sourceCard, effect.effect);
-  if (effect.kind === "zone") return applyZoneEffect(session, casterSeatId, sourceCard.name, effect.effect);
-  if (effect.kind === "pump") return applyTargetedPumpEffect(session, casterSeatId, sourceCard, effect.effect);
+  if (effect.kind === "removal") return applyPrimitiveAction(session, casterSeatId, sourceCard, { kind: "removal", effect: effect.effect });
+  if (effect.kind === "zone") return applyPrimitiveAction(session, casterSeatId, sourceCard, { kind: "zone", effect: effect.effect });
+  if (effect.kind === "pump") return applyPrimitiveAction(session, casterSeatId, sourceCard, { kind: "pump_target", effect: effect.effect });
   if (effect.kind === "animate_enchantment") {
     const target = chooseNonAuraEnchantmentTarget(session, casterSeatId);
     return target ? applyEnchantmentAnimation(session, casterSeatId, sourceCard.name, target) : session;
@@ -8353,6 +9173,10 @@ function runStateBasedActionsPass(session: GameSession): { session: GameSession;
           let power = 0;
           let toughness = 0;
           const keywordSet = new Set<string>();
+          // Man-land animation's granted keywords (flying, vigilance, ...) — see
+          // temporaryGrantedKeywords's own comment for why this needs its own field rather than
+          // writing into grantedKeywords directly, which this whole pass fully overwrites below.
+          for (const keyword of card.temporaryGrantedKeywords ?? []) keywordSet.add(keyword);
           const protectionSet = new Set<string>();
           const setEffectCandidates: Array<{ timestamp: number; power: number; toughness: number }> = [];
           // Layer 6: "Enchanted/equipped creature loses all abilities" (Utter Insignificance) or a
@@ -8509,6 +9333,10 @@ function runStateBasedActionsPass(session: GameSession): { session: GameSession;
             // creature-characteristics pass above independently uses for its P/T, so combat/removal-
             // targeting (which read grantedTypes via hasCardType, not the CDA fields) see it too.
             if (seatStarfieldAnimatesCard(seat, card)) grantedSet.add("Creature");
+            // Man-land animation — same "this pass fully overwrites grantedTypes, so a one-shot
+            // direct set would be wiped on the next recompute" reasoning as temporaryGrantedKeywords
+            // above, needing its own persisted-until-clearTemporaryBuffs flag instead.
+            if (card.temporaryAnimatedAsCreature) grantedSet.add("Creature");
             const nextGrantedTypes = grantedSet.size > 0 ? Array.from(grantedSet).sort() : undefined;
             if (sameList(nextGrantedTypes, card.grantedTypes)) return card;
             changed = true;
@@ -8967,6 +9795,15 @@ function applyCombatDamageToTarget(
   }
 
   const isInfect = Boolean(source && hasInfect(source));
+  // "Whenever a creature you control deals combat damage to a player, ..." (Toski, Bearer of
+  // Secrets, ...) — recorded here, not matched as a generic phase trigger, specifically because this
+  // is the one place that actually knows the damage landed on a player (as opposed to a planeswalker
+  // or another creature) rather than merely that it's currently the combat damage step. See
+  // pendingCombatDamageToPlayer's own comment for the bug this fixes.
+  const combatDamageToPlayerEntry =
+    damageKind === "combat" && source && sourceControllerSeatId && source.typeLine.includes("Creature")
+      ? [{ seatId: sourceControllerSeatId, card: source }]
+      : [];
   return {
     ...base,
     seats: base.seats.map((seat) =>
@@ -8984,6 +9821,7 @@ function applyCombatDamageToTarget(
           }
         : seat
     ),
+    pendingCombatDamageToPlayer: [...(base.pendingCombatDamageToPlayer ?? []), ...combatDamageToPlayerEntry],
     events: [
       {
         id: crypto.randomUUID(),
@@ -9086,7 +9924,8 @@ function chooseRemovalTarget(
   targetType: RemovalTargetType,
   sourceCard: VisibleCard,
   excludedColors: string[] = [],
-  artifactsExcluded: boolean = false
+  artifactsExcluded: boolean = false,
+  basicsExcluded: boolean = false
 ): { seatId: string; card: VisibleCard } | undefined {
   const excludedColorCodes = excludedColors.map((color) => PROTECTION_COLOR_CODE[color]).filter(Boolean);
   const candidates: Array<{ seatId: string; card: VisibleCard }> = [];
@@ -9094,6 +9933,7 @@ function chooseRemovalTarget(
     for (const card of seat.board.battlefield) {
       if (!matchesTargetType(card, targetType)) continue;
       if (artifactsExcluded && card.typeLine.includes("Artifact")) continue;
+      if (basicsExcluded && card.typeLine.includes("Basic")) continue;
       if (excludedColorCodes.length > 0 && card.colors.some((color) => excludedColorCodes.includes(color))) continue;
       // Rule 601.2c/702.11c/702.12b: hexproof/shroud/protection all make a permanent an illegal
       // target, not just a bad one — hexproof only blocks opponents, shroud and protection block
@@ -9114,6 +9954,68 @@ function chooseRemovalTarget(
   const unwardedPool = pool.filter((entry) => cardWardAmount(entry.card.oracleText) === undefined);
   const finalPool = unwardedPool.length > 0 ? unwardedPool : pool;
   return finalPool.reduce((a, b) => (effectivePower(b.card) + effectiveToughness(b.card) > effectivePower(a.card) + effectiveToughness(a.card) ? b : a));
+}
+
+// "Tap/untap target X" as a spell's/ability's OWN effect (not an activated ability's own cost —
+// that's a payment, handled entirely separately by payGenericTapCost etc.). Reuses
+// chooseRemovalTarget's own per-card eligibility rules (shroud/hexproof/protection/phasedOut all
+// make a permanent an illegal target the same way regardless of what the effect does), but with its
+// own targeting bias: tap prefers an OPPONENT's biggest currently-untapped creature (removing a
+// blocker/attacker, the same disruptive intent chooseRemovalTarget already assumes for real
+// removal); untap prefers the CASTER's OWN biggest currently-tapped permanent (almost always
+// self-beneficial — extra mana, a surprise blocker). Both fall back to the full candidate pool
+// (ignoring the tapped-state/own-vs-opponent preference in turn) rather than refusing outright, the
+// same graceful-degradation shape chooseRemovalTarget/chooseCounterTarget already use.
+function chooseTapUntapTarget(
+  session: GameSession,
+  casterSeatId: string,
+  targetType: RemovalTargetType,
+  sourceCard: VisibleCard,
+  tapping: boolean
+): { seatId: string; card: VisibleCard } | undefined {
+  const candidates: Array<{ seatId: string; card: VisibleCard }> = [];
+  for (const seat of session.seats) {
+    for (const card of seat.board.battlefield) {
+      if (!matchesTargetType(card, targetType)) continue;
+      if (hasShroud(card)) continue;
+      if (hasHexproof(card) && seat.id !== casterSeatId) continue;
+      if (isProtectedFrom(card, sourceCard)) continue;
+      if (card.phasedOut) continue;
+      candidates.push({ seatId: seat.id, card });
+    }
+  }
+  if (candidates.length === 0) return undefined;
+
+  const usefulPool = candidates.filter((entry) => entry.card.tapped !== tapping);
+  const stateFiltered = usefulPool.length > 0 ? usefulPool : candidates;
+  const preferredPool = stateFiltered.filter((entry) => (tapping ? entry.seatId !== casterSeatId : entry.seatId === casterSeatId));
+  const pool = preferredPool.length > 0 ? preferredPool : stateFiltered;
+  return pool.reduce((a, b) => (effectivePower(b.card) + effectiveToughness(b.card) > effectivePower(a.card) + effectiveToughness(a.card) ? b : a));
+}
+
+function applyTapUntapPrimitive(session: GameSession, casterSeatId: string, sourceCard: VisibleCard, targetType: RemovalTargetType, tapping: boolean): GameSession {
+  const target = chooseTapUntapTarget(session, casterSeatId, targetType, sourceCard, tapping);
+  if (!target) return noLegalTargetEvent(session, casterSeatId, sourceCard.name);
+  const warded = payWardIfNeeded(session, casterSeatId, target.card, sourceCard.name);
+  if (warded.countered) return warded.session;
+  return {
+    ...warded.session,
+    seats: warded.session.seats.map((seat) =>
+      seat.id === target.seatId
+        ? { ...seat, board: { ...seat.board, battlefield: seat.board.battlefield.map((card) => (card.id === target.card.id ? { ...card, tapped: tapping } : card)) } }
+        : seat
+    ),
+    events: [
+      {
+        id: crypto.randomUUID(),
+        at: new Date().toISOString(),
+        seatId: casterSeatId,
+        message: `${sourceCard.name} ${tapping ? "taps" : "untaps"} ${target.card.name}.`,
+        detail: "Rules action"
+      },
+      ...warded.session.events
+    ]
+  };
 }
 
 // Same deterministic-heuristic targeting as chooseRemovalTarget, applied to a triggered ability's
@@ -9222,7 +10124,7 @@ function removalEffectHasLegalTarget(session: GameSession, casterSeatId: string,
     case "destroy_all_conditional":
       return true;
     case "destroy":
-      return chooseRemovalTarget(session, casterSeatId, effect.targetType, sourceCard, effect.excludedColors, effect.artifactsExcluded) !== undefined;
+      return chooseRemovalTarget(session, casterSeatId, effect.targetType, sourceCard, effect.excludedColors, effect.artifactsExcluded, effect.basicsExcluded) !== undefined;
     case "exile":
     case "bounce":
       return chooseRemovalTarget(session, casterSeatId, effect.targetType, sourceCard) !== undefined;
@@ -9484,7 +10386,7 @@ function applyRemovalEffect(session: GameSession, casterSeatId: string, sourceNa
       return chosenModes.reduce((current, mode) => applyRemovalEffect(current, casterSeatId, sourceName, source, mode, chosenX), session);
     }
     case "destroy": {
-      const target = chooseRemovalTarget(session, casterSeatId, effect.targetType, source, effect.excludedColors, effect.artifactsExcluded);
+      const target = chooseRemovalTarget(session, casterSeatId, effect.targetType, source, effect.excludedColors, effect.artifactsExcluded, effect.basicsExcluded);
       if (!target) return noLegalTargetEvent(session, casterSeatId, sourceName);
       const warded = payWardIfNeeded(session, casterSeatId, target.card, sourceName);
       if (warded.countered) return warded.session;
@@ -9932,6 +10834,103 @@ function parseSimpleDrawEffect(text: string): { amount: number } | undefined {
   return amount ? { amount } : undefined;
 }
 
+// The two-sided "target player loses N life, you gain N life" (Blood Artist) / "each opponent
+// loses N, you gain N" (Zulaport Cutthroat, Cruel Celebrant) shape. Extracted out of
+// resolveTriggerEffect's own inline "drain" TriggerEffect handling (still called from there
+// unchanged below) so applyPrimitiveAction's new "drain" PrimitiveAction case can reuse the exact
+// same execution instead of re-deriving it for the LLM-fallback path.
+function applyDrainEffect(session: GameSession, casterSeatId: string, sourceName: string, amount: number, scope: "target_player" | "each_opponent", verb = "resolves"): GameSession {
+  const seatName = session.seats.find((seat) => seat.id === casterSeatId)?.name ?? "Player";
+  const opponents = session.seats.filter((seat) => seat.id !== casterSeatId && !seat.hasLost);
+  // "target player" (Blood Artist) — no interactive targeting for this shape any more than removal
+  // spells have one; prefers the biggest threat (highest life), same bias chooseAuraAttachTarget's
+  // "Enchant player" branch already uses for the same "no real choice UI, pick a sensible default"
+  // reason. "each opponent" (Zulaport Cutthroat, Cruel Celebrant) hits everyone at once instead.
+  const losers = scope === "each_opponent" ? opponents : opponents.length > 0 ? [opponents.reduce((a, b) => (b.life > a.life ? b : a))] : [];
+  // Both scopes build losers from `opponents` above, so the controller can never also be in
+  // loserIds — gain and loss never land on the same seat.
+  const loserIds = new Set(losers.map((seat) => seat.id));
+  const nextSeats = session.seats.map((seat) => {
+    if (seat.id === casterSeatId) return { ...seat, life: seat.life + amount };
+    if (loserIds.has(seat.id)) return { ...seat, life: Math.max(0, seat.life - amount) };
+    return seat;
+  });
+  const loserNames = losers.map((seat) => seat.name).join(", ") || "no one (no legal target)";
+  return {
+    ...session,
+    seats: nextSeats,
+    events: [
+      {
+        id: crypto.randomUUID(),
+        at: new Date().toISOString(),
+        seatId: casterSeatId,
+        message: `${sourceName} ${verb}. ${seatName} gains ${amount} life; ${loserNames} loses ${amount} life.`
+      },
+      ...session.events
+    ]
+  };
+}
+
+// "target player discards N cards" (target_player)/"each opponent discards" (each_opponent)/"you
+// discard" (you)/"each player discards" (each_player) — mirrors applyDrainEffect's own scope
+// handling (target_player prefers the biggest threat, same bias chooseAuraAttachTarget's "Enchant
+// player" branch uses), just moving cards to the graveyard instead of moving life totals. Card
+// selection per seat reuses chooseWorstHandCardToDiscard's existing "give up the priciest card"
+// heuristic (already used for a seat forced to discard by its own choice) rather than a new one.
+function applyDiscardEffect(
+  session: GameSession,
+  casterSeatId: string,
+  sourceName: string,
+  amount: number,
+  scope: "you" | "target_player" | "each_opponent" | "each_player",
+  verb = "resolves"
+): GameSession {
+  const opponents = session.seats.filter((seat) => seat.id !== casterSeatId && !seat.hasLost);
+  const casterSeat = session.seats.find((seat) => seat.id === casterSeatId);
+  const targets =
+    scope === "you"
+      ? casterSeat
+        ? [casterSeat]
+        : []
+      : scope === "each_player"
+        ? session.seats.filter((seat) => !seat.hasLost)
+        : scope === "each_opponent"
+          ? opponents
+          : opponents.length > 0
+            ? [opponents.reduce((a, b) => (b.life > a.life ? b : a))]
+            : [];
+  if (targets.length === 0) return noLegalTargetEvent(session, casterSeatId, sourceName);
+
+  let nextSession = session;
+  const discardedBySeat = new Map<string, string[]>();
+  for (const target of targets) {
+    const discarded: string[] = [];
+    for (let i = 0; i < amount; i += 1) {
+      const seat = nextSession.seats.find((item) => item.id === target.id);
+      const card = seat ? chooseWorstHandCardToDiscard(seat) : undefined;
+      if (!seat || !card) break;
+      nextSession = moveCardBetweenVisibleZones(nextSession, seat.id, card.id, "graveyard");
+      discarded.push(card.name);
+    }
+    if (discarded.length > 0) discardedBySeat.set(target.id, discarded);
+  }
+  if (discardedBySeat.size === 0) return noLegalTargetEvent(nextSession, casterSeatId, sourceName);
+
+  const summary = Array.from(discardedBySeat.entries())
+    .map(([seatId, cards]) => {
+      const seatName = session.seats.find((item) => item.id === seatId)?.name ?? "Player";
+      return `${seatName} discards ${cards.join(", ")}`;
+    })
+    .join("; ");
+  return {
+    ...nextSession,
+    events: [
+      { id: crypto.randomUUID(), at: new Date().toISOString(), seatId: casterSeatId, message: `${sourceName} ${verb}. ${summary}.`, detail: "Rules action" },
+      ...nextSession.events
+    ]
+  };
+}
+
 function applySimpleLifeChange(
   session: GameSession,
   casterSeatId: string,
@@ -10078,6 +11077,318 @@ function applyMassPumpEffect(session: GameSession, casterSeatId: string, sourceC
       ...session.events
     ]
   };
+}
+
+// "Return all creatures to their owners' hands." (Evacuation, and the same unqualified mass-bounce
+// wording on a few other cards) — previously entirely unmodeled: no TriggerEffect/ZoneEffect kind
+// covers "every creature on the battlefield goes to hand," so a spell shaped like this silently did
+// nothing at all. Reported live as "Evacuation did not return all creatures to their owners hands."
+// Deliberately narrow to this exact unqualified wording — a card that bounces only SOME creatures
+// (Whelming Wave's power-4-or-greater restriction, Cyclonic Rift's "don't control," ...) needs its
+// own scoped parser and isn't this shape.
+// "Return all nonland permanents to their owners' hands." (Devastation Tide) — the same unmodeled
+// mass-bounce shape as Evacuation above, just a wider target pool (every permanent, not only
+// creatures). Reported live as Devastation Tide doing nothing at all: the old regex only matched
+// the literal word "creatures", so this text never matched, and even if it had,
+// applyMassBounceEffect's own battlefield filter was hardcoded to creatures only.
+function parseMassBounceEffect(text: string): "creatures" | "nonland_permanents" | undefined {
+  if (/\breturn all creatures to their owners'? hands?\b/i.test(text)) return "creatures";
+  if (/\breturn all nonland permanents to their owners'? hands?\b/i.test(text)) return "nonland_permanents";
+  return undefined;
+}
+
+function applyMassBounceEffect(session: GameSession, casterSeatId: string, sourceCardName: string, scope: "creatures" | "nonland_permanents" = "creatures"): GameSession {
+  const targets = session.seats.flatMap((seat) =>
+    seat.board.battlefield
+      .filter((card) => (scope === "nonland_permanents" ? !isLandCard(card) : card.typeLine.includes("Creature")))
+      .map((card) => ({ seatId: seat.id, cardId: card.id }))
+  );
+  // Reuses the single-card mover (rather than moving every hand array by hand) so a bounced
+  // commander still gets its own 903.9a command-zone replacement instead of unconditionally
+  // landing in hand — the same reason completeRuleChoice's discard_to_hand_size branch reduces
+  // over moveCardBetweenVisibleZones one card at a time instead of bulk-splicing arrays.
+  const bouncedSession = targets.reduce((next, target) => moveCardBetweenVisibleZones(next, target.seatId, target.cardId, "hand"), session);
+  const targetNoun = scope === "nonland_permanents" ? "nonland permanents" : "creatures";
+  return {
+    ...bouncedSession,
+    events: [
+      {
+        id: crypto.randomUUID(),
+        at: new Date().toISOString(),
+        seatId: casterSeatId,
+        message:
+          targets.length > 0
+            ? `${sourceCardName} returns all ${targetNoun} to their owners' hands.`
+            : `${sourceCardName} resolves with no ${targetNoun} to return.`,
+        detail: "Rules action"
+      },
+      ...bouncedSession.events
+    ]
+  };
+}
+
+// A card's effect, reduced to one of a small, closed set of composable primitive verbs — step 1 of
+// unifying this file's per-effect-family dispatchers (removalEffect/zoneEffect/pump/mass-pump/mass-
+// bounce/tokens/counters/draw, each currently applied through its own separate call site) behind
+// ONE shared entry point, so a future source (an LLM fallback for card text none of the deterministic
+// parsers below recognize, the way rulesAdvisor.ts already does for the narrower draw/scry/search
+// case) has a single, closed, already-tested vocabulary to target instead of freeform reasoning.
+// Deliberately PURE PLUMBING: every case here forwards to the exact function this file's own
+// deterministic parsers already call today (applyRemovalEffect, applyZoneEffect, ...) — no new
+// resolution logic, no behavior change, just one shared dispatcher instead of a dozen scattered
+// `if (effect.kind === ...)` call sites.
+//
+// Deliberately excludes verbs this file has no standalone (non-queue-coupled) function for yet:
+// - Most of TriggerEffect's remaining vocabulary (add_counter with a "target_creature" scope,
+//   connive, copy_token, impulse_cast_free, ...) is real and already implemented, but only inside
+//   resolveTriggerEffect, which is coupled to the triggered-ability queue (PendingAction shape,
+//   chainCount loop guard) rather than a standalone (session, action) => session function. Folding
+//   those in cleanly is a follow-up, not plumbing onto an existing pure function the way every case
+//   below is. ("drain" WAS in that category — applyDrainEffect above pulled it out into a
+//   standalone function precisely so it could join this list.)
+// - "Sacrifice a permanent" as a SPELL's own effect (as opposed to an activated ability's own cost,
+//   which payGenericSacrificeCost already owns) had no existing function to forward to at all — a
+//   genuinely new primitive (applySacrificePrimitive below), not an existing one plumbed in.
+//   "Tap/untap target permanent" as a spell's own effect was the same kind of gap; see
+//   chooseTapUntapTarget/applyTapUntapPrimitive below for the same treatment.
+export type PrimitiveAction =
+  | { kind: "removal"; effect: RemovalEffect; chosenX?: number }
+  | { kind: "zone"; effect: ZoneEffect; chosenX?: number }
+  | { kind: "draw_cards"; amount: number }
+  | { kind: "draw_then_put_back"; drawAmount: number; putBackAmount: number }
+  | { kind: "life_change"; effect: { kind: "gain_life" | "lose_life"; amount: number } }
+  | { kind: "drain"; amount: number; scope: "target_player" | "each_opponent" }
+  // "discard" the same way "drain" already models "target player loses life, you gain life" — the
+  // "who discards" scope reuses drain's/mill's own target_player-picks-highest-life-opponent
+  // convention (applyDiscardEffect below), just for hands instead of libraries/life totals.
+  | { kind: "discard"; amount: number; scope: "you" | "target_player" | "each_opponent" | "each_player" }
+  // "Tap/untap target permanent" as a SPELL's/ability's own effect — genuinely new (see the comment
+  // above this union), now built via chooseTapUntapTarget/applyTapUntapPrimitive below rather than
+  // left unimplemented.
+  | { kind: "tap_target" | "untap_target"; targetType: RemovalTargetType }
+  | { kind: "pump_target"; effect: PumpEffect }
+  | { kind: "mass_pump"; effect: MassPumpEffect }
+  | { kind: "mass_bounce" }
+  | { kind: "create_tokens"; specs: TokenSpec[] }
+  | { kind: "put_counters_on_self"; counterKind: string; amount: number }
+  // "Sacrifice a creature." (edict-style, e.g. cast as your own cost/effect rather than an
+  // opponent's) / "Sacrifice this permanent." — no existing standalone applier before this; reuses
+  // choosePlaguecrafterSacrifice's "least costly to lose" targeting heuristic (already used for
+  // applyEachPlayerSacrificeEffect) for the two non-self scopes, and destroyCreatures for the actual
+  // move so death triggers fire correctly, same as every other sacrifice path in this file.
+  | { kind: "sacrifice_permanent"; scope: "self" | "creature_you_control" | "permanent_you_control" }
+  // Unifies moving a KNOWN card between hand/graveyard/exile/library-top — deliberately excludes
+  // "battlefield" on either end (a card entering/leaving the battlefield is what the "removal"/"zone"
+  // primitive kinds already own; folding it in here too would create two competing ways to express
+  // the same move). "library_top" is only reachable FROM "hand" (applyPutCardsOnLibrary's own
+  // scope); anything else between hand/graveyard/exile goes through moveCardBetweenVisibleZones,
+  // which already looks the card up wherever it currently sits.
+  | { kind: "move_card_zone"; from: "hand" | "graveyard"; to: "hand" | "graveyard" | "exile" | "library_top"; filter: "worst" | "best" | "any"; count: number };
+
+function applyPrimitiveAction(session: GameSession, casterSeatId: string, sourceCard: VisibleCard, action: PrimitiveAction): GameSession {
+  const seatName = session.seats.find((seat) => seat.id === casterSeatId)?.name ?? "Player";
+  switch (action.kind) {
+    case "removal":
+      return applyRemovalEffect(session, casterSeatId, sourceCard.name, sourceCard, action.effect, action.chosenX);
+    case "zone":
+      return applyZoneEffect(session, casterSeatId, sourceCard.name, action.effect, action.chosenX);
+    case "draw_cards":
+      return drawMultipleForSeat(session, casterSeatId, action.amount, `${sourceCard.name} resolves. ${seatName} draws ${action.amount} card${action.amount === 1 ? "" : "s"}.`);
+    case "draw_then_put_back":
+      return applyDrawXThenPutBack(session, casterSeatId, sourceCard.name, action.drawAmount, action.putBackAmount);
+    case "life_change":
+      return applySimpleLifeChange(session, casterSeatId, sourceCard.name, action.effect);
+    case "drain":
+      return applyDrainEffect(session, casterSeatId, sourceCard.name, action.amount, action.scope);
+    case "discard":
+      return applyDiscardEffect(session, casterSeatId, sourceCard.name, action.amount, action.scope);
+    case "tap_target":
+      return applyTapUntapPrimitive(session, casterSeatId, sourceCard, action.targetType, true);
+    case "untap_target":
+      return applyTapUntapPrimitive(session, casterSeatId, sourceCard, action.targetType, false);
+    case "pump_target":
+      return applyTargetedPumpEffect(session, casterSeatId, sourceCard, action.effect);
+    case "mass_pump":
+      return applyMassPumpEffect(session, casterSeatId, sourceCard.name, action.effect);
+    case "mass_bounce":
+      return applyMassBounceEffect(session, casterSeatId, sourceCard.name);
+    case "create_tokens":
+      return createTokensForSeat(session, casterSeatId, sourceCard.id, action.specs).session;
+    case "put_counters_on_self":
+      return applyCounterDeltaAtSession(session, casterSeatId, sourceCard.id, action.counterKind, action.amount);
+    case "sacrifice_permanent":
+      return applySacrificePrimitive(session, casterSeatId, sourceCard, action.scope);
+    case "move_card_zone":
+      return applyMoveCardZonePrimitive(session, casterSeatId, sourceCard.name, action);
+  }
+}
+
+function applySacrificePrimitive(session: GameSession, casterSeatId: string, sourceCard: VisibleCard, scope: "self" | "creature_you_control" | "permanent_you_control"): GameSession {
+  const seat = session.seats.find((item) => item.id === casterSeatId);
+  if (!seat) return session;
+  const target =
+    scope === "self" ? seat.board.battlefield.find((card) => card.id === sourceCard.id) : choosePlaguecrafterSacrifice(seat, scope === "creature_you_control" ? "creature" : "permanent");
+  if (!target) return session;
+  return destroyCreatures(session, [{ seatId: casterSeatId, cardId: target.id, message: `${seat.name} sacrifices ${target.name} to ${sourceCard.name}.` }], "Rules action");
+}
+
+// Selects `count` cards from `from` (hand/graveyard), biased by `filter` — "worst" sorts by
+// descending mana value (the same "give up the priciest, hardest-to-recast card" convention
+// chooseWorstHandCardToDiscard and applyDrawXThenPutBack already use elsewhere in this file),
+// "best" the reverse, "any" takes them in their existing order.
+function selectCardsForPrimitiveMove(seat: PlayerSeat, from: "hand" | "graveyard", filter: "worst" | "best" | "any", count: number): VisibleCard[] {
+  const pool = from === "hand" ? seat.board.hand : (seat.board.graveyard ?? []);
+  const ordered = filter === "any" ? pool : [...pool].sort((a, b) => (filter === "worst" ? b.manaValue - a.manaValue : a.manaValue - b.manaValue));
+  return ordered.slice(0, Math.max(0, count));
+}
+
+function applyMoveCardZonePrimitive(
+  session: GameSession,
+  casterSeatId: string,
+  sourceCardName: string,
+  action: Extract<PrimitiveAction, { kind: "move_card_zone" }>
+): GameSession {
+  const seat = session.seats.find((item) => item.id === casterSeatId);
+  if (!seat) return session;
+  const selected = selectCardsForPrimitiveMove(seat, action.from, action.filter, action.count);
+  if (selected.length === 0) return session;
+  if (action.to === "library_top") {
+    // Only reachable from hand (applyPutCardsOnLibrary's own scope) — the LLM-facing schema
+    // enforces this too, but declining rather than guessing keeps this pure function honest even
+    // if a caller somehow slips a graveyard-sourced request through.
+    if (action.from !== "hand") return session;
+    return applyPutCardsOnLibrary(session, casterSeatId, sourceCardName, selected.map((card) => card.id));
+  }
+  return selected.reduce((current, card) => moveCardBetweenVisibleZones(current, casterSeatId, card.id, action.to as "hand" | "graveyard" | "exile"), session);
+}
+
+// Safe fallback for a target-type string that either wasn't supplied or fell outside
+// RemovalTargetType's own vocabulary (e.g. the LLM-facing schema's bare "planeswalker", which
+// RemovalTargetType only ever expresses combined with creature/artifact — see removalSpells.ts) —
+// "creature" is the single most common real target of a removal-shaped effect, so it's the least
+// surprising default rather than refusing the whole step outright.
+function toRemovalTargetType(targetType?: string): RemovalTargetType {
+  switch (targetType) {
+    case "creature":
+    case "artifact":
+    case "enchantment":
+    case "permanent":
+    case "land":
+    case "nonland_permanent":
+      return targetType;
+    case "planeswalker":
+      return "creature_or_planeswalker";
+    default:
+      return "creature";
+  }
+}
+
+function toRegrowTargetType(targetType?: string): RegrowTargetType {
+  switch (targetType) {
+    case "card":
+    case "permanent":
+    case "creature":
+    case "land":
+    case "enchantment":
+    case "artifact":
+      return targetType;
+    default:
+      return "creature";
+  }
+}
+
+// Translates one flat, LLM-facing PrimitiveActionStep (src/lib/primitiveActionPlan.ts) into this
+// file's own richer, nested PrimitiveAction — the one place that gap is bridged, so every other
+// consumer of PrimitiveAction (applyPrimitiveAction itself, the deterministic parsers already
+// wired into it) stays untouched. Returns undefined for a step whose required fields are missing
+// (a small model omitting a field it was supposed to fill in) — declined rather than guessed at,
+// same convention as every deterministic parser in this file.
+function mapPrimitiveActionStep(step: PrimitiveActionStep): PrimitiveAction | undefined {
+  switch (step.kind) {
+    case "destroy_target":
+      return { kind: "removal", effect: { kind: "destroy", targetType: toRemovalTargetType(step.targetType), excludedColors: [], artifactsExcluded: false, basicsExcluded: false } };
+    case "destroy_all": {
+      const targetType = step.targetType === "artifact" || step.targetType === "enchantment" ? step.targetType : "creature";
+      return { kind: "removal", effect: { kind: "destroy_all", targetType, excludedColors: [] } };
+    }
+    case "exile_target":
+      return { kind: "removal", effect: { kind: "exile", targetType: toRemovalTargetType(step.targetType) } };
+    case "bounce_target":
+      return { kind: "removal", effect: { kind: "bounce", targetType: toRemovalTargetType(step.targetType) } };
+    case "reanimate":
+      return { kind: "zone", effect: { kind: "reanimate", anyGraveyard: step.anyGraveyard ?? false, targetType: toRegrowTargetType(step.regrowTargetType) } };
+    case "mill":
+      return step.amount ? { kind: "zone", effect: { kind: "mill", amount: step.amount, scope: step.millScope ?? "you" } } : undefined;
+    case "draw_cards":
+      return step.amount ? { kind: "draw_cards", amount: step.amount } : undefined;
+    case "drain":
+      return step.amount ? { kind: "drain", amount: step.amount, scope: step.drainScope ?? "target_player" } : undefined;
+    case "damage_target":
+      return step.amount ? { kind: "removal", effect: { kind: "damage", targetType: step.damageTargetType ?? "creature", amount: step.amount } } : undefined;
+    case "discard":
+      return step.amount ? { kind: "discard", amount: step.amount, scope: step.discardScope ?? "target_player" } : undefined;
+    case "tap_target":
+      return { kind: "tap_target", targetType: toRemovalTargetType(step.targetType) };
+    case "untap_target":
+      return { kind: "untap_target", targetType: toRemovalTargetType(step.targetType) };
+    case "life_change":
+      return step.lifeDelta
+        ? { kind: "life_change", effect: step.lifeDelta > 0 ? { kind: "gain_life", amount: step.lifeDelta } : { kind: "lose_life", amount: -step.lifeDelta } }
+        : undefined;
+    case "pump_target":
+      return step.power !== undefined && step.toughness !== undefined ? { kind: "pump_target", effect: { power: step.power, toughness: step.toughness } } : undefined;
+    case "mass_pump":
+      return step.power !== undefined && step.toughness !== undefined
+        ? { kind: "mass_pump", effect: { power: step.power, toughness: step.toughness, scope: step.massPumpScope ?? "all" } }
+        : undefined;
+    case "mass_bounce":
+      return { kind: "mass_bounce" };
+    case "create_tokens":
+      return step.tokenCount && step.tokenName
+        ? {
+            kind: "create_tokens",
+            specs: [
+              {
+                count: step.tokenCount,
+                name: step.tokenName,
+                colors: step.tokenColors ?? [],
+                typeLine: step.tokenTypeLine ?? "Creature",
+                power: step.tokenPower !== undefined ? String(step.tokenPower) : undefined,
+                toughness: step.tokenToughness !== undefined ? String(step.tokenToughness) : undefined,
+                oracleText: "",
+                role: "token"
+              }
+            ]
+          }
+        : undefined;
+    case "put_counters_on_self":
+      return step.counterKind && step.amount ? { kind: "put_counters_on_self", counterKind: step.counterKind, amount: step.amount } : undefined;
+    case "sacrifice_permanent":
+      return { kind: "sacrifice_permanent", scope: step.sacrificeScope ?? "self" };
+    case "move_card_zone":
+      return step.moveFrom && step.moveTo
+        ? { kind: "move_card_zone", from: step.moveFrom, to: step.moveTo, filter: step.moveFilter ?? "worst", count: step.moveCount ?? 1 }
+        : undefined;
+  }
+}
+
+// Folds a whole LLM-produced plan over applyPrimitiveAction one step at a time — steps that fail to
+// map (mapPrimitiveActionStep returning undefined) are simply skipped rather than aborting the rest
+// of the plan, so a model getting one step wrong doesn't also cost the steps it got right.
+function applyPrimitiveActionPlan(session: GameSession, seatId: string, sourceCard: VisibleCard, steps: PrimitiveActionStep[]): GameSession {
+  // "drain" already moves the caster's own life for a Blood Artist-style effect — the prompt tells
+  // the model never to also emit a life_change step for that same gain, but a small local model
+  // doesn't reliably follow that (reproduced live: Blood Artist parsed as drain + a redundant
+  // life_change lifeDelta=1, which would double the caster's gain if both ran). Dropping any
+  // positive life_change step whenever a drain step is present is a deterministic backstop for
+  // that specific double-count, not a prompt-only fix — cheaper and more certain than trying to
+  // make the model perfectly reliable here.
+  const hasDrainStep = steps.some((step) => step.kind === "drain");
+  const dedupedSteps = hasDrainStep ? steps.filter((step) => !(step.kind === "life_change" && (step.lifeDelta ?? 0) > 0)) : steps;
+  return dedupedSteps.reduce((current, step) => {
+    const action = mapPrimitiveActionStep(step);
+    return action ? applyPrimitiveAction(current, seatId, sourceCard, action) : current;
+  }, session);
 }
 
 type GenericModalMode = { kind: "trigger"; effect: TriggerEffect } | { kind: "zone"; effect: ZoneEffect } | { kind: "pump"; effect: PumpEffect };
@@ -10307,6 +11618,49 @@ function applyPutCardsOnLibrary(session: GameSession, seatId: string, sourceName
         detail: "Rules action"
       },
       ...session.events
+    ]
+  };
+}
+
+// The "then discard a card" half of connive (Ledger Shredder, ...) — the draw already happened by
+// the time this runs (see finishTriggerResolution's connive branch/startConniveIteration); this
+// just moves the chosen card to the graveyard and, if it wasn't a land, puts a +1/+1 counter on the
+// connived source. Mirrors resolveTriggerEffect's own connive case, which stays as the deterministic
+// (chooseWorstHandCardToDiscard) fallback for pure-function callers that have no pendingRuleChoice
+// to route an interactive pick through.
+function applyConniveDiscard(session: GameSession, seatId: string, sourceCardId: string, sourceCardName: string, discardCardId: string): GameSession {
+  const seat = session.seats.find((item) => item.id === seatId);
+  const discardCard = seat?.board.hand.find((card) => card.id === discardCardId);
+  if (!seat || !discardCard) return session;
+  const isNonland = !discardCard.typeLine.includes("Land");
+  const seatName = seat.name;
+  const discardedSession = moveCardBetweenVisibleZones(session, seatId, discardCardId, "graveyard");
+  const countedSession = isNonland
+    ? {
+        ...discardedSession,
+        seats: discardedSession.seats.map((item) =>
+          item.id === seatId
+            ? {
+                ...item,
+                board: {
+                  ...item.board,
+                  battlefield: item.board.battlefield.map((card) => (card.id === sourceCardId ? applyCounterDelta(card, "+1/+1", 1) : card))
+                }
+              }
+            : item
+        )
+      }
+    : discardedSession;
+  return {
+    ...countedSession,
+    events: [
+      {
+        id: crypto.randomUUID(),
+        at: new Date().toISOString(),
+        seatId,
+        message: `${sourceCardName} connives: ${seatName} discards ${discardCard.name}${isNonland ? `, putting a +1/+1 counter on ${sourceCardName}` : ""}.`
+      },
+      ...countedSession.events
     ]
   };
 }
@@ -10923,13 +12277,13 @@ function parseMetalcraftAttackDebuff(oracleText: string): { power: number; tough
 // in a real game are ordinary land drops. This previously required "you may pay {1}. If you do, put
 // ... tapped" — text this card has never actually had — so the trigger never matched at all,
 // reported live as it silently never firing even with more lands than the opponent.
-function isArchaeomancersMapLandRaidTrigger(oracleText: string): boolean {
+export function isArchaeomancersMapLandRaidTrigger(oracleText: string): boolean {
   return /\bwhenever a land an opponent controls enters, if that player controls more lands than you, you may put a land card from your hand onto the battlefield\b/i.test(
     oracleText
   );
 }
 
-function findLandRaidTriggers(session: GameSession, enteringSeatId: string, enteredCard: VisibleCard): Array<Extract<PendingAction, { type: "trigger" }>> {
+export function findLandRaidTriggers(session: GameSession, enteringSeatId: string, enteredCard: VisibleCard): Array<Extract<PendingAction, { type: "trigger" }>> {
   if (!enteredCard.typeLine.includes("Land")) return [];
   const enteringSeat = session.seats.find((seat) => seat.id === enteringSeatId);
   if (!enteringSeat) return [];
@@ -10949,36 +12303,49 @@ function findLandRaidTriggers(session: GameSession, enteringSeatId: string, ente
   return triggers;
 }
 
-// "Untap all artifacts you control during each other player's untap step." (Unwinding Clock) — not
+// "Untap all artifacts you control during each other player's untap step." (Unwinding Clock) /
+// "Untap all permanents you control during each other player's untap step." (Seedborn Muse) — not
 // a triggered ability at all (no "when"/"whenever"), so it doesn't belong in
 // findCommonTriggersForPermanentEntered/died's trigger-scan machinery; it's a standing effect that
 // extends WHO untaps during a given untap step, checked directly from untapForSeat below instead.
-// Previously had no implementation anywhere in the engine, so its controller's artifacts only ever
-// untapped on that controller's own untap step like normal, never during anyone else's.
-function hasUnwindingClockUntapAbility(card: { oracleText: string }): boolean {
-  return /\buntap all artifacts you control during each other player's untap step\b/i.test(card.oracleText);
+// Previously had no implementation anywhere in the engine for either wording, so a controller's
+// artifacts/permanents only ever untapped on their own untap step like normal, never during anyone
+// else's — reported live as both Unwinding Clock and, separately, Seedborn Muse "not working."
+function extraUntapAbilityScope(card: { oracleText: string }): "artifacts" | "permanents" | undefined {
+  if (/\buntap all artifacts you control during each other player's untap step\b/i.test(card.oracleText)) return "artifacts";
+  if (/\buntap all permanents you control during each other player's untap step\b/i.test(card.oracleText)) return "permanents";
+  return undefined;
 }
 
-// Called after a seat's own untap step already ran (untapForSeat) — untaps the artifacts of every
-// OTHER seat that controls an Unwinding Clock (or the same effect on any other permanent), since
-// this step is "each other player's" untap step from each Unwinding Clock controller's point of
-// view. The clock controller's own untap step is unaffected (their artifacts already untap
-// normally there, same as everything else they control) — only every seat that ISN'T the one whose
-// untap step this is can have a clock granting them a bonus untap here.
-function applyUnwindingClockUntaps(session: GameSession, activeUntapSeatId: string): GameSession {
+// Called after a seat's own untap step already ran (untapForSeat) — untaps the artifacts/permanents
+// of every OTHER seat that controls an Unwinding Clock or Seedborn Muse (or the same effect on any
+// other permanent), since this step is "each other player's" untap step from each such controller's
+// point of view. Each source's own controller is unaffected by their own copy (their stuff already
+// untaps normally on their own untap step) — only every seat that ISN'T the one whose untap step
+// this is can have a source granting them a bonus untap here. A seat with more than one qualifying
+// source (unlikely, but not prevented) is scoped to the broadest one found ("permanents" beats
+// "artifacts") rather than applying each separately, which would be indistinguishable in outcome
+// anyway once "permanents" has already untapped everything.
+function applyExtraUntapEffects(session: GameSession, activeUntapSeatId: string): GameSession {
   let next = session;
-  for (const clockSeat of session.seats) {
-    if (clockSeat.id === activeUntapSeatId) continue;
-    if (!clockSeat.board.battlefield.some(hasUnwindingClockUntapAbility)) continue;
+  for (const sourceSeat of session.seats) {
+    if (sourceSeat.id === activeUntapSeatId) continue;
+    const scopes = sourceSeat.board.battlefield.map(extraUntapAbilityScope).filter((scope): scope is "artifacts" | "permanents" => scope !== undefined);
+    if (scopes.length === 0) continue;
+    const scope = scopes.includes("permanents") ? "permanents" : "artifacts";
+    const sourceName = scope === "permanents" ? "Seedborn Muse" : "Unwinding Clock";
     next = {
       ...next,
       seats: next.seats.map((item) =>
-        item.id === clockSeat.id
+        item.id === sourceSeat.id
           ? {
               ...item,
               board: {
                 ...item.board,
-                battlefield: item.board.battlefield.map((card) => (card.tapped && card.typeLine.includes("Artifact") ? { ...card, tapped: false } : card))
+                commander: scope === "permanents" && item.board.commander?.tapped ? { ...item.board.commander, tapped: false } : item.board.commander,
+                battlefield: item.board.battlefield.map((card) =>
+                  card.tapped && (scope === "permanents" || card.typeLine.includes("Artifact")) ? { ...card, tapped: false } : card
+                )
               }
             }
           : item
@@ -10987,8 +12354,8 @@ function applyUnwindingClockUntaps(session: GameSession, activeUntapSeatId: stri
         {
           id: crypto.randomUUID(),
           at: new Date().toISOString(),
-          seatId: clockSeat.id,
-          message: `Unwinding Clock untaps ${clockSeat.name}'s artifacts during ${session.seats.find((seat) => seat.id === activeUntapSeatId)?.name ?? "another player"}'s untap step.`,
+          seatId: sourceSeat.id,
+          message: `${sourceName} untaps ${sourceSeat.name}'s ${scope} during ${session.seats.find((seat) => seat.id === activeUntapSeatId)?.name ?? "another player"}'s untap step.`,
           detail: "Phase change"
         },
         ...next.events
@@ -11017,6 +12384,24 @@ function findCommonTriggersForPermanentDied(
     }
   }
 
+  return triggers;
+}
+
+// "Whenever a creature you control deals combat damage to a player, ..." (Toski, Bearer of
+// Secrets, ...) — scoped to just dealingSeatId's own battlefield since every real instance of this
+// template is self-relative ("a creature YOU control"), unlike findCommonTriggersForPermanentDied's
+// all-seats scan. See pendingCombatDamageToPlayer's own comment on GameSession for why this can't
+// just be a generic phase trigger.
+function findCombatDamageToPlayerTriggers(session: GameSession, dealingSeatId: string, dealingCard: VisibleCard): Array<Extract<PendingAction, { type: "trigger" }>> {
+  if (!hasCardType(dealingCard, "Creature")) return [];
+  const seat = session.seats.find((item) => item.id === dealingSeatId);
+  if (!seat) return [];
+  const triggers: Array<Extract<PendingAction, { type: "trigger" }>> = [];
+  for (const source of seat.board.battlefield) {
+    const effect = commonTriggerEffect(source.oracleText, "combat_damage_to_player");
+    if (!effect) continue;
+    triggers.push(makeCommonTrigger(dealingSeatId, seat.id, source, effect, `${source.name} triggers because ${dealingCard.name} dealt combat damage to a player.`));
+  }
   return triggers;
 }
 
@@ -11080,11 +12465,16 @@ function spellMatchesCastTriggerFilter(card: VisibleCard, filter: CastTriggerCon
 }
 
 // "Exile the top card of [that player]'s library. Until end of turn, you may cast that card
-// without paying its mana cost if it's a nonland card." (Mind's Dilation) — cross-seat and
+// without paying its mana cost if it's a nonland card." (an imperative-mood impulse-draw card) /
+// "...that player exiles the top card of their library. If it's a nonland card, you may cast it
+// without paying its mana cost." (Mind's Dilation's own third-person phrasing, since it's "that
+// player" — the opponent whose spell triggered it — doing the exiling, not "you") — cross-seat and
 // cost-waiving in a way no generic TriggerEffect models (see the "impulse_cast_free" kind's own
 // comment), so it's detected as its own bespoke shape rather than folded into the generic parsers.
+// "exiles?" tolerates both verb conjugations; matching only the imperative "exile" left Mind's
+// Dilation's trigger never recognized at all, reported live as it "not triggering."
 function isImpulseCastFreeEffectClause(clause: string): boolean {
-  return /\bexile the top card of (their|your) library\b/i.test(clause) && /\bwithout paying its mana cost\b/i.test(clause) && /\bnonland\b/i.test(clause);
+  return /\bexiles? the top card of (their|your) library\b/i.test(clause) && /\bwithout paying its mana cost\b/i.test(clause) && /\bnonland\b/i.test(clause);
 }
 
 function findCastTriggers(
@@ -11313,11 +12703,18 @@ function deathTriggerApplies(source: VisibleCard, sourceSeatId: string, deadCard
 // way) as a side effect of fixing its ETB misclassification.
 function commonTriggerEffect(
   oracleText: string,
-  mode: "entered" | "died" | "clause",
+  mode: "entered" | "died" | "combat_damage_to_player" | "clause",
   dynamicCounterCount?: number,
   controllerSeat?: PlayerSeat
 ): TriggerEffect | undefined {
-  const relevantText = mode === "died" ? deathEffectText(oracleText) : mode === "clause" ? oracleText : etbEffectText(oracleText);
+  const relevantText =
+    mode === "died"
+      ? deathEffectText(oracleText)
+      : mode === "combat_damage_to_player"
+        ? combatDamageToPlayerEffectText(oracleText)
+        : mode === "clause"
+          ? oracleText
+          : etbEffectText(oracleText);
   const text = relevantText.toLowerCase();
   // A single text-wide "you may" check rather than per-match position tracking — good enough for
   // this engine's one-effect-per-clause parsing (see the module comment on TriggerEffect); a card
@@ -11349,6 +12746,12 @@ function commonTriggerEffect(
   // silently dropping the discard/counter half.
   const conniveMatch = text.match(/\b(?:this creature|it) connives?(?:\s+(twice))?\b/);
   if (conniveMatch) return { kind: "connive", amount: conniveMatch[1] ? 2 : 1, optional };
+
+  // Karoo/bounce lands (Simic Growth Chamber, ...): "return a land you control to its owner's
+  // hand." Previously entirely unmodeled — the land still correctly entered tapped (a separate,
+  // already-handled replacement effect), but this ETB trigger just silently did nothing, turning
+  // what should be a 1-for-1 tempo trade into a pure land-count gain.
+  if (/\breturn a land you control to its owner'?s hand\b/.test(text)) return { kind: "return_land_to_hand", optional };
 
   const gainLife = text.match(/\byou gain\s+(x|\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+life\b/);
   if (gainLife) {
@@ -11408,6 +12811,23 @@ function commonTriggerEffect(
   // use "this artifact"/"this permanent"/"this land" the same way (mirrors the same alternation
   // transform_self's own parser already uses for "transform this X"). Without this, a self-counter
   // clause on any permanent that isn't literally a creature never matched at all.
+  // "Tap up to one target creature and put a stun counter on it." (Fear of Sleep Paralysis's Eerie
+  // ability) — checked before the generic counterPattern below, which would otherwise match "...
+  // counter on it" and misread "it" via the "context" scope (meaning "the entering permanent," e.g.
+  // Cathars' Crusade's "put a +1/+1 counter on it" referring to the creature that just entered).
+  // Here "it" instead refers back to "target creature" named earlier in the SAME clause — an
+  // unrelated, separately-chosen target, not the trigger's own entering permanent. Reported live as
+  // the counter landing on the entering enchantment/itself instead of a real target creature, with
+  // the tap half silently dropped entirely (no other kind here models tapping AND countering the
+  // same permanent in one clause).
+  const tapAndCounterMatch = text.match(
+    /\btap up to one target creature and put (a|one|two|three|four|five|\d+) ([a-z]+) counters? on it\b/
+  );
+  if (tapAndCounterMatch) {
+    const amount = numberWordToInt(tapAndCounterMatch[1]);
+    if (amount) return { kind: "add_counter", counterKind: tapAndCounterMatch[2], amount, scope: "target_creature", alsoTap: true, optional: true };
+  }
+
   const selfReference = "this (?:creature|artifact|enchantment|permanent|land|planeswalker)";
   const counterPattern =
     mode === "entered"
@@ -11825,40 +13245,7 @@ function resolveTriggerEffect(session: GameSession, trigger: Extract<PendingActi
     };
   }
   if (trigger.effect.kind === "drain") {
-    const amount = trigger.effect.amount;
-    const opponents = session.seats.filter((seat) => seat.id !== trigger.controllerSeatId && !seat.hasLost);
-    // "target player" (Blood Artist) — no interactive targeting for this shape any more than removal
-    // spells have one; prefers the biggest threat (highest life), same bias chooseAuraAttachTarget's
-    // "Enchant player" branch already uses for the same "no real choice UI, pick a sensible default"
-    // reason. "each opponent" (Zulaport Cutthroat, Cruel Celebrant) hits everyone at once instead.
-    const losers =
-      trigger.effect.scope === "each_opponent"
-        ? opponents
-        : opponents.length > 0
-          ? [opponents.reduce((a, b) => (b.life > a.life ? b : a))]
-          : [];
-    // Both scopes build losers from `opponents` (session.seats minus the controller) above, so the
-    // controller can never also be in loserIds — gain and loss never land on the same seat.
-    const loserIds = new Set(losers.map((seat) => seat.id));
-    const nextSeats = session.seats.map((seat) => {
-      if (seat.id === trigger.controllerSeatId) return { ...seat, life: seat.life + amount };
-      if (loserIds.has(seat.id)) return { ...seat, life: Math.max(0, seat.life - amount) };
-      return seat;
-    });
-    const loserNames = losers.map((seat) => seat.name).join(", ") || "no one (no legal target)";
-    return {
-      ...session,
-      seats: nextSeats,
-      events: [
-        {
-          id: crypto.randomUUID(),
-          at: new Date().toISOString(),
-          seatId: trigger.controllerSeatId,
-          message: `${trigger.sourceCardName} trigger resolves. ${seatName} gains ${amount} life; ${loserNames} loses ${amount} life.`
-        },
-        ...session.events
-      ]
-    };
+    return applyDrainEffect(session, trigger.controllerSeatId, trigger.sourceCardName, trigger.effect.amount, trigger.effect.scope, "trigger resolves");
   }
   if (trigger.effect.kind === "connive") {
     let next = session;
@@ -11977,7 +13364,7 @@ function resolveTriggerEffect(session: GameSession, trigger: Extract<PendingActi
     };
   }
   if (trigger.effect.kind === "add_counter") {
-    const { counterKind, amount, scope } = trigger.effect;
+    const { counterKind, amount, scope, alsoTap } = trigger.effect;
     // "self" looks up the trigger source itself; "context" looks up the permanent "it"/"that
     // creature" referred to (the entering permanent — not always the source, e.g. Cathars'
     // Crusade watches OTHER creatures enter). Neither is a chosen target, so both search the
@@ -12013,7 +13400,15 @@ function resolveTriggerEffect(session: GameSession, trigger: Extract<PendingActi
       ...session,
       seats: session.seats.map((seat) =>
         seat.id === target.seatId
-          ? { ...seat, board: { ...seat.board, battlefield: seat.board.battlefield.map((card) => (card.id === target.card.id ? applyCounterDelta(card, counterKind, amount) : card)) } }
+          ? {
+              ...seat,
+              board: {
+                ...seat.board,
+                battlefield: seat.board.battlefield.map((card) =>
+                  card.id === target.card.id ? { ...applyCounterDelta(card, counterKind, amount), tapped: alsoTap ? true : card.tapped } : card
+                )
+              }
+            }
           : seat
       ),
       events: [
@@ -12021,7 +13416,7 @@ function resolveTriggerEffect(session: GameSession, trigger: Extract<PendingActi
           id: crypto.randomUUID(),
           at: new Date().toISOString(),
           seatId: trigger.controllerSeatId,
-          message: `${trigger.sourceCardName} trigger resolves. ${target.card.name} gets ${amount === 1 ? "a" : amount} ${counterKind} counter${amount === 1 ? "" : "s"}.`
+          message: `${trigger.sourceCardName} trigger resolves. ${target.card.name}${alsoTap ? " is tapped and" : ""} gets ${amount === 1 ? "a" : amount} ${counterKind} counter${amount === 1 ? "" : "s"}.`
         },
         ...session.events
       ]
@@ -12252,7 +13647,12 @@ function ruleChoiceView(
         doorFaces: doors ? ([doors[0].name, doors[1].name] as [string, string]) : undefined
       };
     }
-    if (choice.kind === "optional_trigger") {
+    if (choice.kind === "optional_trigger" || choice.kind === "optional_primitive_plan") {
+      // Both project to the same "optional_trigger" view kind — ThreeGameTable.tsx's
+      // OptionalTriggerModal only ever reads sourceCardName/prompt, and AppFlow.tsx's
+      // acceptOptionalTrigger/declineOptionalTrigger (bound to that modal's onAccept/onDecline)
+      // already branch internally on the real pendingRuleChoice.kind, so reusing the exact same
+      // modal needs no new UI component.
       return {
         kind: "optional_trigger" as const,
         sourceCardName: choice.sourceCardName,
@@ -12281,6 +13681,22 @@ function ruleChoiceView(
         prompt: choice.prompt,
         hand: humanSeat.board.hand,
         requiredCount: choice.requiredCount
+      };
+    }
+    if (choice.kind === "connive_discard") {
+      return {
+        kind: "connive_discard" as const,
+        sourceCardName: choice.sourceCardName,
+        prompt: choice.prompt,
+        hand: humanSeat.board.hand
+      };
+    }
+    if (choice.kind === "return_land_to_hand") {
+      return {
+        kind: "return_land_to_hand" as const,
+        sourceCardName: choice.sourceCardName,
+        prompt: choice.prompt,
+        lands: humanSeat.board.battlefield.filter((card) => card.typeLine.includes("Land"))
       };
     }
     if (choice.kind === "choose_creature_type") {
@@ -12466,6 +13882,16 @@ function shouldConsultRulesAdvisor(event: string, card: VisibleCard) {
     .join(" ")
     .toLowerCase();
   if (!text.trim()) return false;
+  // "draw a card"/"draw cards" as fixed substrings miss any numbered draw ("draw three cards," a
+  // number word or digit sitting between "draw" and "card(s)") — which is exactly Brainstorm's
+  // "Draw three cards, then put two cards from your hand on top of your library in any order.": no
+  // entry below matched it, so shouldConsultRulesAdvisor returned false and consultRulesAdvisor was
+  // never even called, silently dropping both the draw and the put-back (parseSimpleDrawEffect
+  // deliberately declines this exact "draw N, then put M back" shape so the rules advisor's
+  // draw_then_put_back workflow can own it — see that function's own comment — but nothing reaches
+  // that workflow if this gate blocks the call first). Reported live as "Brainstorm still does not
+  // work." A bare regex test for the word "draw" covers every numbered/unnumbered phrasing at once.
+  if (/\bdraw\b/.test(text)) return true;
   return [
     "when ",
     "whenever ",
@@ -12473,8 +13899,6 @@ function shouldConsultRulesAdvisor(event: string, card: VisibleCard) {
     "enters",
     "dies",
     "search your library",
-    "draw a card",
-    "draw cards",
     "create ",
     "return ",
     "exile ",
@@ -12525,7 +13949,22 @@ function phaseTriggerTextMatches(text: string, phase: TurnPhase) {
     return (text.includes("whenever") && (text.includes(" attacks") || text.includes("a creature attacks"))) && !parseMetalcraftAttackDebuff(text);
   }
   if (phase === "declare blockers step") return text.includes("whenever") && (text.includes(" blocks") || text.includes("becomes blocked"));
-  if (phase === "combat damage step") return text.includes("combat damage") || text.includes("whenever a creature dies") || text.includes("whenever another creature dies");
+  // "Whenever a creature you control deals combat damage to a player, ..." (Toski, Bearer of
+  // Secrets, and the same standard templating on plenty of other cards) is excluded here even
+  // though it contains "combat damage" — this generic sweep only knows "it's currently the combat
+  // damage step," not whether THIS card's controller actually had a creature connect with a player
+  // this combat (as opposed to being blocked, dealing damage only to a creature or planeswalker, or
+  // not attacking at all), so matching it here fired the trigger unconditionally every combat damage
+  // step regardless. applyCombatDamageToTarget records the real event onto
+  // pendingCombatDamageToPlayer instead (see its own comment), drained by a dedicated effect that
+  // checks the actual damage recipient.
+  if (phase === "combat damage step") {
+    return (
+      (text.includes("combat damage") && !text.includes("deals combat damage to a player")) ||
+      text.includes("whenever a creature dies") ||
+      text.includes("whenever another creature dies")
+    );
+  }
   if (phase === "end of combat step") return text.includes("at end of combat") || text.includes("at the end of combat") || text.includes("until end of combat");
   if (phase === "postcombat main phase") return text.includes("at the beginning of your postcombat main phase") || text.includes("second main phase");
   if (phase === "end step") return text.includes("at the beginning of your end step") || text.includes("at the beginning of each end step");
@@ -12620,7 +14059,7 @@ function applyDeterministicPhaseTrigger(session: GameSession, seatId: string, so
   if (/^if\b/i.test(clauseText.replace(/^.*?\bat the beginning of[^,]*,\s*/i, ""))) return undefined;
 
   const removalEffect = parseRemovalEffect(clauseText);
-  if (removalEffect) return applyRemovalEffect(session, seatId, sourceCard.name, sourceCard, removalEffect);
+  if (removalEffect) return applyPrimitiveAction(session, seatId, sourceCard, { kind: "removal", effect: removalEffect });
 
   // Checked before the generic modal fallback below: a "put a counter on self / cash in once you
   // have enough of them" choose-one (Idol of Oblivion, ...) parses as zero generic modes (see
@@ -12713,6 +14152,53 @@ function applyEachPlayerSacrificeEffect(
         ...next.events
       ]
     };
+  }
+  return next;
+}
+
+// "Each player exiles all creature cards from their graveyard, then sacrifices all creatures they
+// control, then puts all cards they exiled this way onto the battlefield." (Living Death) — no
+// existing effect kind models this "snapshot state, act on everyone, then reanimate exactly what
+// was snapshotted" three-step combo (closest is applyEachPlayerSacrificeEffect's "everyone does
+// this to themselves" shape just above, but that's a single step with no ordering dependency),
+// so it's its own bespoke shape, applied unconditionally to every seat, like that one. Previously
+// unhandled by any deterministic parser, reported live as "Living Death did not work."
+function isLivingDeathEffect(text: string): boolean {
+  return /\beach player exiles all creature cards from their graveyard,\s*then sacrifices all creatures they control,\s*then puts all cards they exiled this way onto the battlefield\b/i.test(
+    text
+  );
+}
+
+function applyLivingDeathEffect(session: GameSession, sourceCardName: string): GameSession {
+  // Step 1: snapshot and exile each player's own graveyard creatures FIRST, before anything else
+  // moves — the creatures that die in step 2 must land in the graveyard as normal (this same spell
+  // doesn't bring those back too), only what was already in the graveyard when Living Death resolved.
+  let next = session;
+  const exiledIdsBySeat = new Map<string, string[]>();
+  for (const seat of session.seats) {
+    const creatureCardIds = (seat.board.graveyard ?? []).filter((card) => card.typeLine.includes("Creature")).map((card) => card.id);
+    if (creatureCardIds.length === 0) continue;
+    exiledIdsBySeat.set(seat.id, creatureCardIds);
+    for (const cardId of creatureCardIds) {
+      next = moveCardBetweenVisibleZones(next, seat.id, cardId, "exile");
+    }
+  }
+
+  // Step 2: each player sacrifices every creature they control.
+  const destructions: Array<{ seatId: string; cardId: string; message: string }> = [];
+  for (const seat of next.seats) {
+    for (const card of seat.board.battlefield) {
+      if (card.typeLine.includes("Creature")) destructions.push({ seatId: seat.id, cardId: card.id, message: `${seat.name} sacrifices ${card.name} to ${sourceCardName}.` });
+    }
+  }
+  next = destroyCreatures(next, destructions, "Rules action");
+
+  // Step 3: each player puts all the cards THEY exiled this way (step 1's snapshot, not anything
+  // else that might separately reach exile in between) onto the battlefield under their own control.
+  for (const [seatId, cardIds] of exiledIdsBySeat) {
+    for (const cardId of cardIds) {
+      next = moveCardAcrossSeats(next, seatId, cardId, seatId, "battlefield").session;
+    }
   }
   return next;
 }
@@ -13535,7 +15021,24 @@ function chosenColorManaAbility(oracleText: string): { fixedColor?: ManaColor } 
 function activateOnlyIfConditionMet(clause: string, seat: PlayerSeat): boolean {
   const conditionMatch = clause.match(/\bactivate (?:this ability )?only if (.+?)\.?\s*$/i);
   if (!conditionMatch) return true;
-  const condition = conditionMatch[1].toLowerCase().trim();
+  return isBoardConditionMet(conditionMatch[1], seat);
+}
+
+// The board-state-phrase matcher activateOnlyIfConditionMet's "activate only if X" gate has always
+// used, pulled out standalone so consultPrimitiveActionPlanner (AppFlow.tsx's primitive-plan apply
+// path) can evaluate the SAME vocabulary against a card-parser-extracted "if X"/"only if X" clause
+// (cardParser.ts's Ability.condition / primitiveActionPlan.ts's new PrimitiveActionPlan.condition)
+// before applying a plan's steps — rather than the old behavior of ignoring any captured condition
+// text and applying the effect unconditionally regardless of whether it was actually met.
+function isBoardConditionMet(conditionRaw: string, seat: PlayerSeat): boolean {
+  const condition = conditionRaw
+    .toLowerCase()
+    .trim()
+    .replace(/^(?:if|only if)\s+/, "")
+    .replace(/\.$/, "");
+  // Empty means "no condition was captured at all" — always met, same as activateOnlyIfConditionMet
+  // returning true when its own "activate only if" regex doesn't match anything in the clause.
+  if (!condition) return true;
 
   // "You control a commander" means on the battlefield specifically — a commander still sitting in
   // the command zone (seat.board.commander, not yet cast) doesn't count as controlled, only an
@@ -13613,13 +15116,36 @@ function manaChoicesForCardRaw(card: VisibleCard, seat: PlayerSeat, allSeats?: P
   // Reflecting Pool: "{T}: Add one mana of any type that a land you control could produce." — a
   // dynamic ability keyed to the caster's own battlefield, not the unconditional "any color" that
   // producedMana's static Scryfall approximation (all 5 colors, see below) would otherwise imply.
-  if (name === "reflecting pool") return producibleColorsFromLands(seat.board.battlefield, card.id);
+  // Filtered to actual Land permanents: without this, a mana rock's own producedMana (Arcane
+  // Signet's "any color in your commander's color identity," ...) counted as evidence that "a land
+  // you control could produce" that color, letting Reflecting Pool tap for colors none of the
+  // caster's actual lands could make. Reported live as Reflecting Pool letting Sable cast a green
+  // creature with no green-producing land on the battlefield.
+  if (name === "reflecting pool") return producibleColorsFromLands(seat.board.battlefield.filter((permanent) => permanent.typeLine.includes("Land")), card.id);
   // Exotic Orchard: "{T}: Add one mana of any color that a land an opponent controls could
   // produce." — same dynamic shape as Reflecting Pool, but keyed to opponents' battlefields, which
-  // requires allSeats.
-  if (name === "exotic orchard" && allSeats) {
-    const opponentLands = allSeats.filter((other) => other.id !== seat.id).flatMap((other) => other.board.battlefield);
+  // requires allSeats. Same Land-only filter as Reflecting Pool above, for the same reason.
+  // Fellwar Stone shares Exotic Orchard's exact "a land an opponent controls could produce"
+  // template but on an artifact rather than a land — matched by TEXT here (not just Exotic
+  // Orchard's name) so any card printed with this wording gets the same dynamic treatment,
+  // including this one, which had no special-case at all before.
+  const preText = card.oracleText.toLowerCase();
+  if ((name === "exotic orchard" || preText.includes("any color that a land an opponent controls could produce")) && allSeats) {
+    const opponentLands = allSeats
+      .filter((other) => other.id !== seat.id)
+      .flatMap((other) => other.board.battlefield)
+      .filter((permanent) => permanent.typeLine.includes("Land"));
     return producibleColorsFromLands(opponentLands, card.id);
+  }
+  // Command Tower, Arcane Signet, and anything else printed with this exact template — checked by
+  // TEXT (not name) and, crucially, BEFORE the generic producedMana check below: Scryfall's static
+  // producedMana approximation for cards worded this way lists all 5 colors unconditionally (it has
+  // no way to know a commander's actual identity), so the generic check below always returned every
+  // color regardless of the caster's actual commander — a mono-red Command Tower tapping for green
+  // was never caught because the correct commander-identity handling used to sit AFTER that early
+  // return, unreachable. Reported live via this same session's Reflecting Pool audit.
+  if (preText.includes("your commander's color identity")) {
+    return normalizeManaColors(seat.deck?.colors ?? seat.board.commander?.colorIdentity ?? ["C"]);
   }
 
   const costly = costlyTapManaColors(card.oracleText);
@@ -13630,11 +15156,7 @@ function manaChoicesForCardRaw(card: VisibleCard, seat: PlayerSeat, allSeats?: P
   if (basicTypes.length > 0) return basicTypes.map(manaColorForBasicLand).filter((color): color is ManaColor => Boolean(color));
 
   const text = card.oracleText.toLowerCase();
-  if (name === "command tower" || text.includes("mana of any color in your commander's color identity") || text.includes("one mana of any color")) {
-    return normalizeManaColors(seat.deck?.colors ?? seat.board.commander?.colorIdentity ?? ["C"]);
-  }
   if (name === "arcane sanctum") return ["W", "U", "B"];
-  if (name === "arcane signet") return normalizeManaColors(seat.deck?.colors ?? seat.board.commander?.colorIdentity ?? ["C"]);
   if (name.includes("talisman of dominance")) return ["C", "U", "B"];
   if (name.includes("talisman of hierarchy")) return ["C", "W", "B"];
   if (name.includes("talisman of progress")) return ["C", "W", "U"];
@@ -13689,8 +15211,32 @@ function producibleColorsFromLands(lands: VisibleCard[], excludeId?: string): Ma
   return Array.from(colors);
 }
 
+// "Shockland" replacement effect (Steam Vents, Blood Crypt, and the same template on the newer
+// pay-life MDFC lands): the CONTROLLER chooses, at the moment it enters, whether to pay life for an
+// untapped land or take it tapped for free — a real choice, not an unconditional "enters tapped"
+// like a check/fast/slow land. Without this, the generic `/\benters tapped\b/` catch-all below still
+// matched the "...if you don't, it enters tapped" clause (the literal substring is right there),
+// so every shockland always entered tapped with the life-payment option silently unavailable —
+// removing the entire reason these lands exist. Deliberately keyed off the exact replacement-effect
+// wording rather than card names: any land templated this way (Ravnica shocks, the pay-life MDFC
+// lands, future ones) is covered without a name list to maintain.
+function shocklandPayLifeAmount(oracleText: string): number | undefined {
+  const match = oracleText.toLowerCase().match(/as this land enters,? you may pay (\d+) life\.\s*if you don.t,? it enters tapped\b/);
+  return match ? Number.parseInt(match[1], 10) : undefined;
+}
+
+// No interactive prompt (yet) for either seat — paying life for the tempo of an untapped land is
+// correct in the vast majority of real games (Commander's 40 starting life gives a lot of room), so
+// this defaults to paying unless the controller is already in real danger, rather than always taking
+// the free tapped land and just as silently defeating the card's purpose the other way.
+const SHOCKLAND_MINIMUM_SAFE_LIFE = 10;
+
 function entersBattlefieldTapped(card: VisibleCard, controller?: PlayerSeat) {
   const text = card.oracleText.toLowerCase();
+  const shockCost = shocklandPayLifeAmount(text);
+  if (shockCost !== undefined) {
+    return Boolean(controller) && (controller!.life ?? 40) <= SHOCKLAND_MINIMUM_SAFE_LIFE;
+  }
   const checkLandMatch = text.match(/enters (?:the battlefield )?tapped unless you control an? ([a-z]+) or an? ([a-z]+)/);
   if (checkLandMatch) {
     const types = [checkLandMatch[1], checkLandMatch[2]].map(capitalizeWord);
@@ -13698,6 +15244,16 @@ function entersBattlefieldTapped(card: VisibleCard, controller?: PlayerSeat) {
   }
   if (text.includes("enters tapped unless you control two or more basic lands")) {
     return !controller || controller.board.battlefield.filter((permanent) => basicLandTypes(permanent).length > 0).length < 2;
+  }
+  // Fastlands ("...unless you control two or FEWER other lands", Blackcleave Cliffs, ...) and
+  // slowlands ("...two or MORE other lands", Deserted Beach, ...) — heavily played efficient duals
+  // with no handling at all before this: the generic `/\benters tapped\b/` catch-all below matched
+  // the literal "enters tapped unless..." prefix unconditionally, so both cycles always entered
+  // tapped regardless of board state, including turn-1 fastlands that should have come in untapped.
+  const otherLandsMatch = text.match(/enters (?:the battlefield )?tapped unless you control two or (fewer|more) other lands\b/);
+  if (otherLandsMatch) {
+    const otherLandCount = controller ? controller.board.battlefield.filter((permanent) => permanent.typeLine.includes("Land")).length : 0;
+    return otherLandsMatch[1] === "fewer" ? otherLandCount > 2 : otherLandCount < 2;
   }
   return (
     /\benters tapped\b/.test(text) ||
@@ -13773,11 +15329,40 @@ function scalingManaAmount(card: VisibleCard, seat: PlayerSeat): number | undefi
   return undefined;
 }
 
+// Flat multi-mana "Add {X}{X}" (or word-quantified "Add two/three mana of...") sources — without
+// this, every mana source except a hardcoded "Sol Ring" produced exactly 1, so Ancient Tomb,
+// Eldrazi Temple, every karoo/bounce land (Azorius Chancery, ...), and filter lands (Cascade
+// Bluffs, ...) were all undercounted by half. Takes the MAX across every "Add ..." clause on the
+// card rather than the specific ability actually activated (this codebase doesn't track which of a
+// card's several mana abilities a given tap used, the same approximation costlyTapManaColors and
+// painlandDamageAmount already make) — deliberately biased toward the sacrifice/restricted-mana
+// ability's higher count when a card has one, since isSacrificeManaSource already treats any use of
+// such a card as the sacrifice ability regardless of which line was meant.
+function manaAmountFromAddClause(oracleText: string): number | undefined {
+  // Strip parenthetical reminder text first — Fire Nation Palace's firebending keyword reminder
+  // ("Whenever it attacks, add {R}{R}{R}{R}. This mana lasts until end of combat.") isn't a tap
+  // ability at all, but without this its 4 symbols still won the max and overcounted every tap.
+  const text = oracleText.toLowerCase().replace(/\([^)]*\)/g, "");
+  const wordMatch = text.match(/\badd (one|two|three) mana\b/);
+  if (wordMatch) {
+    const words: Record<string, number> = { one: 1, two: 2, three: 3 };
+    return words[wordMatch[1]];
+  }
+  let maxSymbols = 0;
+  for (const clause of text.match(/\badd\b[^.]*\./g) ?? []) {
+    // Modal/filter clauses ("Add {U}{U}, {U}{R}, or {R}{R}.") list every branch at the same count,
+    // so the first branch is representative regardless of which color combination is chosen.
+    const firstBranch = clause.split(/,| or /)[0];
+    const symbolCount = (firstBranch.match(/\{[^}]+\}/g) ?? []).length;
+    if (symbolCount > maxSymbols) maxSymbols = symbolCount;
+  }
+  return maxSymbols > 0 ? maxSymbols : undefined;
+}
+
 function manaProducedBy(card: VisibleCard, seat: PlayerSeat) {
-  if (card.name === "Sol Ring") return 2;
   const scaling = scalingManaAmount(card, seat);
   if (scaling !== undefined) return scaling;
-  return 1;
+  return manaAmountFromAddClause(card.oracleText) ?? 1;
 }
 
 function selectedManaTotal(seat: PlayerSeat, sourceIds: string[]) {
@@ -13805,31 +15390,93 @@ function isSacrificeManaSource(card: VisibleCard): boolean {
   return /\{t\}[^.\n]*?sacrifice[^.\n]*?:\s*add\b/i.test(card.oracleText);
 }
 
+// Painlands (Adarkar Wastes, Ancient Tomb, the "Threshold" cycle — Barbarian Ring, ...) and City of
+// Brass: "This land deals N damage to you" (or City of Brass's "Whenever this land becomes tapped,
+// it deals N damage to you") tied to tapping it for mana. Roughly half this family (Ancient Tomb,
+// City of Brass, the single-ability Threshold lands) has no free alternative at all, so this is
+// exact for those; the classic dual-ability painlands (Yavimaya Coast, ...) also print a separate
+// free "{T}: Add {C}." line this doesn't distinguish from the costly colored one — chooseManaSourcesForCost
+// doesn't track which specific ability a source was tapped through (only that it was used), so
+// there's no cheap way to tell them apart without restructuring mana payment across every call
+// site. Applying the damage on every use is a known, deliberate over-application for that half of
+// the cycle (matching how a real player mostly taps these for their colored option anyway, since
+// that's the entire reason to run one over a basic land) rather than the status quo of never
+// applying it at all.
+function painlandDamageAmount(oracleText: string): number | undefined {
+  const match = oracleText.match(/(?:this land deals|it deals) (\d+) damage to you\b/i);
+  return match ? Number.parseInt(match[1], 10) : undefined;
+}
+
+// Storage lands' "{T}, Remove a/an <kind> counter from this land: Add ..." mana ability (Gemstone
+// Mine's mining counters, Tendo Ice Bridge/Mirrodin's Core/the Vivid cycle's charge counters, ...)
+// — the counter kind that ability consumes ONE of per activation. Deliberately only the fixed
+// "a/an" shape (not "remove X counters," Calciform Pools/Fountain of Cho's variable-count cousin,
+// which scales the mana produced rather than always spending exactly one and isn't modeled here).
+function manaAbilityCounterRemovalKind(oracleText: string): string | undefined {
+  const match = oracleText.toLowerCase().match(/\{t\}[^:\n]*?,\s*remove an? ([a-z]+) counter from (?:this [a-z]+|it)\s*:[^.\n]*?\badd\b/);
+  return match ? match[1] : undefined;
+}
+
+// "If there are no <kind> counters on this land, sacrifice it." (Gemstone Mine, and the rest of the
+// storage-land cycle sharing this exact template) — checked after spendManaSources decrements a
+// matching counter below. Deliberately declines when the sacrifice is followed by an "If you do,
+// create ..." token payoff (Dark Depths' real templating, "When Dark Depths has no ice counters on
+// it, sacrifice it. If you do, create Marit Lage, ...") that this parser has no way to also
+// construct: sacrificing the land without ever creating its payoff token would be a strict downgrade
+// from today's status quo (an unlimited, never-depleting mana source) rather than a fix, so it's
+// safer to leave that one card's depletion trigger unimplemented than to apply half of it.
+function depletionSacrificeCounterKind(oracleText: string): string | undefined {
+  const text = oracleText.toLowerCase();
+  const plainMatch = text.match(/\bif there are no ([a-z]+) counters on (?:this [a-z]+|it),?\s*sacrifice it\./);
+  if (plainMatch) return plainMatch[1];
+  const triggeredMatch = text.match(/\b(?:when|whenever) [^.]+ has no ([a-z]+) counters on it,\s*sacrifice it\.(\s*if you do,[^.]*\.)?/);
+  if (triggeredMatch && !triggeredMatch[2]) return triggeredMatch[1];
+  return undefined;
+}
+
 // Spends the chosen mana sources: taps ordinary sources, and sacrifices ones whose mana ability
 // requires it (tokens cease to exist; real cards go to the graveyard as a "new object" per the
-// zone-change rule, same as destroyCreatures/moveCardBetweenVisibleZones).
+// zone-change rule, same as destroyCreatures/moveCardBetweenVisibleZones). Also charges any spent
+// painland's life cost — see painlandDamageAmount's own comment on why this is an approximation for
+// half the family, not an exact simulation.
 function spendManaSources(seat: PlayerSeat, sourceIds: string[]): PlayerSeat {
   if (sourceIds.length === 0) return seat;
   const sourceSet = new Set(sourceIds);
   const kept: VisibleCard[] = [];
   const sacrificed: VisibleCard[] = [];
+  let painDamage = 0;
   for (const card of seat.board.battlefield) {
     if (!sourceSet.has(card.id)) {
       kept.push(card);
       continue;
     }
+    painDamage += painlandDamageAmount(card.oracleText) ?? 0;
     if (isSacrificeManaSource(card)) {
       sacrificed.push(card);
-    } else {
-      kept.push({ ...card, tapped: true });
+      continue;
     }
+    const removalKind = manaAbilityCounterRemovalKind(card.oracleText);
+    const removableCounter = removalKind ? card.counters?.find((counter) => counter.kind === removalKind) : undefined;
+    if (removalKind && removableCounter && removableCounter.count > 0) {
+      const remainingCount = removableCounter.count - 1;
+      const updatedCounters = (card.counters ?? []).map((counter) => (counter.kind === removalKind ? { ...counter, count: remainingCount } : counter)).filter((counter) => counter.count > 0);
+      if (remainingCount === 0 && depletionSacrificeCounterKind(card.oracleText) === removalKind) {
+        sacrificed.push({ ...card, counters: updatedCounters });
+      } else {
+        kept.push({ ...card, tapped: true, counters: updatedCounters });
+      }
+      continue;
+    }
+    kept.push({ ...card, tapped: true });
   }
+  const life = painDamage > 0 ? Math.max(0, seat.life - painDamage) : seat.life;
   if (sacrificed.length === 0) {
-    return { ...seat, board: { ...seat.board, battlefield: kept } };
+    return { ...seat, life, board: { ...seat.board, battlefield: kept } };
   }
   const toGraveyard = sacrificed.filter((card) => !card.token);
   return {
     ...seat,
+    life,
     board: {
       ...seat.board,
       battlefield: kept,
@@ -14156,6 +15803,7 @@ function playCardFromZone(
 ): GameSession {
   let playedName = "";
   let enteredTapped = false;
+  let shockLifePaid = 0;
   const seats = session.seats.map((seat) => {
     if (seat.id !== seatId) return seat;
     const sourceCard =
@@ -14169,6 +15817,12 @@ function playCardFromZone(
     playedName = card.name;
     const entersTapped = destination === "battlefield" && entersBattlefieldTapped(card, seat);
     enteredTapped = entersTapped;
+    // Shockland-style "pay life for untapped" replacement — entersBattlefieldTapped already decided
+    // whether that life was worth paying; this is just the other half of that same choice, actually
+    // charging it when the land enters untapped as a result.
+    const shockCost = destination === "battlefield" ? shocklandPayLifeAmount(card.oracleText) : undefined;
+    const lifePaidForUntapped = shockCost !== undefined && !entersTapped ? shockCost : 0;
+    shockLifePaid = lifePaidForUntapped;
     // An Adventure card landing in exile, or an Omen card shuffled into the library, is still
     // identified by whichever spell face was just cast (card.name/typeLine/etc. above reflect that
     // face, via applyChosenFaceToCard) — but the card should read as the permanent it actually is
@@ -14246,6 +15900,7 @@ function playCardFromZone(
     const leavesExileZone = sourceZone === "exile" && destination !== "exile";
     return {
       ...spentSeat,
+      life: lifePaidForUntapped > 0 ? Math.max(0, spentSeat.life - lifePaidForUntapped) : spentSeat.life,
       library: destination === "library" ? [played, ...library] : spentSeat.library,
       board: {
         ...spentSeat.board,
@@ -14277,7 +15932,7 @@ function playCardFromZone(
         id: crypto.randomUUID(),
         at: new Date().toISOString(),
         seatId,
-        message: `${message ?? `${session.seats.find((seat) => seat.id === seatId)?.name ?? "Player"} plays ${playedName}.`}${enteredTapped ? " It enters tapped." : ""}${destination === "exile" ? " It's exiled — you may cast the other half later." : destination === "library" ? " It's shuffled into its owner's library." : ""}`,
+        message: `${message ?? `${session.seats.find((seat) => seat.id === seatId)?.name ?? "Player"} plays ${playedName}.`}${enteredTapped ? " It enters tapped." : shockLifePaid > 0 ? ` Pays ${shockLifePaid} life for it to enter untapped.` : ""}${destination === "exile" ? " It's exiled — you may cast the other half later." : destination === "library" ? " It's shuffled into its owner's library." : ""}`,
         detail: destination === "graveyard" || destination === "exile" || destination === "library" ? "Response" : undefined
       },
       ...session.events
@@ -14397,6 +16052,14 @@ function canReceivePriorityForPendingAction(
   }
   const pool = manaPools[seat.id] ?? emptyManaPool();
   const pendingSpellTarget = action.type === "spell" ? findSpellSourceCard(session, action) : undefined;
+  // A human whose only legal instant-speed response is an activated ability on a battlefield
+  // permanent (not a card in hand) previously never had a priority window opened for them at all —
+  // this loop only ever checked seat.board.hand, so e.g. a usable instant-speed sacrifice ability
+  // was silently unreachable via priority even though the agent side of this same function already
+  // covered it (legalPriorityActions, which the agent branch above delegates to, already includes
+  // legalActivatedAbilityActions). sorcerySpeedAllowed=false/EMPTY_LOYALTY_KEYS matches exactly how
+  // legalPriorityActions calls it for the instant-speed-only case.
+  if (legalActivatedAbilityActions(seat, false, session.turn, EMPTY_LOYALTY_KEYS, session).length > 0) return true;
   return seat.board.hand.some((card) => {
     if (!canCastAtInstantSpeed(card)) return false;
     // A type-restricted counterspell ("counter target creature/noncreature/commander spell") isn't
