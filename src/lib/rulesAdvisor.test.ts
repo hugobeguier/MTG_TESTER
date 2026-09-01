@@ -63,6 +63,19 @@ describe("deterministicRuleWorkflow", () => {
     expect(workflow?.workflow).toBe("manual_review");
   });
 
+  it("chooses search_basic_lands_split_battlefield_hand for Kodama's Reach instead of misreading it as a hand-only search", () => {
+    const kodamasReach = card({
+      id: "kodamas-reach-1",
+      name: "Kodama's Reach",
+      oracleText: "Search your library for up to two basic land cards, reveal those cards, put one onto the battlefield tapped and the other into your hand, then shuffle."
+    });
+    const workflow = deterministicRuleWorkflow(input(kodamasReach));
+    expect(workflow?.workflow).toBe("search_basic_lands_split_battlefield_hand");
+    expect(workflow?.maxChoices).toBe(2);
+    expect(workflow?.destination).toBe("battlefield");
+    expect(workflow?.tapped).toBe(true);
+  });
+
   it("chooses look_at_top_cards for a look-only effect with no reorder or draw text", () => {
     const peek = card({ id: "peek-1", name: "Peek Effect", oracleText: "Look at the top four cards of target opponent's library." });
     const workflow = deterministicRuleWorkflow(input(peek));
@@ -151,6 +164,30 @@ describe("deterministicRuleWorkflow", () => {
     const workflow = deterministicRuleWorkflow(input(moonBlessedCleric, "spell_resolved_to_battlefield"));
     expect(workflow?.workflow).toBe("search_library_to_library");
     expect(workflow?.destination).toBe("library");
+    expect(workflow?.allowedCardFilter).toBe("enchantment");
+  });
+
+  it("extracts the actual named type ('forest') for a single-type land tutor instead of the generic placeholder (Three Visits)", () => {
+    const threeVisits = card({
+      id: "three-visits-1",
+      name: "Three Visits",
+      typeLine: "Sorcery",
+      oracleText: "Search your library for a Forest card, put it onto the battlefield, then shuffle."
+    });
+    const workflow = deterministicRuleWorkflow(input(threeVisits));
+    expect(workflow?.workflow).toBe("search_library_to_battlefield");
+    expect(workflow?.allowedCardFilter).toBe("forest");
+  });
+
+  it("falls back to the generic placeholder when no real type is named (Entomb)", () => {
+    const entomb = card({
+      id: "entomb-2",
+      name: "Entomb",
+      typeLine: "Instant",
+      oracleText: "Search your library for a card, put that card into your graveyard, then shuffle."
+    });
+    const workflow = deterministicRuleWorkflow(input(entomb));
+    expect(workflow?.allowedCardFilter).toBe("cards matching the source effect");
   });
 
   it("chooses search_library_to_library for a tutor-to-top-of-library spell, not manual review (Mystical Tutor)", () => {

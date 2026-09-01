@@ -1,8 +1,6 @@
-1. for some reason Sables hand is going to the right when I move the camera its moving for some reason
-2. I still wanted the life totals in the middle in a 4 by 4 box
-3. Archaeomancers Map still dont let me fetch two plains cards, it only gives me one card
-4. Veyra searches their library for Sakura-Tribe Elder and puts it onto the battlefield. then Solemn Simulacrum resolves. then Veyra casts Solemn Simulacrum using 4 mana. No available responses
-5. Malik just played Saheeli the giften and then activated her +1 loyalty ability, letting your next spell cast 1 less for each artifact, but did not have any spell to cast, there I would have created a servo token instead
-6. When an opponent plays a land Archaeomancers Map triggers twice for some reason
-7. Unwinding clock does not untap all the artifacts you control on every players upkeep
-8.
+1. Sable just played Three Visits and fetched Elvish Mystic from its library, it got to have the subtype "Forest" having green mana in its mana value
+2. Also he tapped Elvish Mystic even though it does not have haste same thing happened with Llanowar Elves, played it and tapped it for mana the same turn. seems like summoning sickness isnt quite working
+
+
+
+

@@ -20,6 +20,7 @@ export const RuleWorkflowSchema = z.object({
   workflow: z.enum([
     "none",
     "search_basic_lands_shared_type_to_battlefield_tapped",
+    "search_basic_lands_split_battlefield_hand",
     "search_library_to_hand",
     "search_library_to_battlefield",
     "search_library_to_graveyard",
@@ -267,6 +268,29 @@ export function deterministicRuleWorkflow(input: RuleAdvisorInput): RuleWorkflow
     };
   }
 
+  // "Search your library for up to two basic land cards, reveal those cards, put one onto the
+  // battlefield tapped and the other into your hand, then shuffle." (Kodama's Reach, Cultivate,
+  // Migration Path, ...) — checked before the to-hand/to-battlefield branches below since this
+  // template's text contains BOTH "hand" and "battlefield," and "hand" is checked first there
+  // (scopedText.includes("hand") matches, since the clause literally contains "into your hand"),
+  // which used to classify this whole shape as search_library_to_hand: fetching only ONE land
+  // (maxChoices 1, ignoring the real "two") and putting it straight into hand, silently dropping
+  // the tapped-battlefield half entirely. Reproduced live as "Kodama's Reach does not work
+  // correctly."
+  if (scopedText.includes("search your library") && scopedText.includes("put one onto the battlefield") && scopedText.includes("the other into your hand")) {
+    return {
+      workflow: "search_basic_lands_split_battlefield_hand",
+      summary: `${input.sourceCard.name} can search for up to two basic lands, putting one onto the battlefield tapped and the other into hand.`,
+      sourceCardId: input.sourceCard.id,
+      maxChoices: 2,
+      allowedCardFilter: "basic land cards",
+      destination: "battlefield",
+      tapped: true,
+      requiresHumanChoice: true,
+      warnings: []
+    };
+  }
+
   // "Search your library for a card, put that card into your graveyard, then shuffle." (Entomb,
   // Buried Alive, ...) — checked before the to-hand/to-battlefield branches below since those two
   // would otherwise never match this shape anyway (neither "hand" nor "battlefield" appears), but
@@ -278,7 +302,7 @@ export function deterministicRuleWorkflow(input: RuleAdvisorInput): RuleWorkflow
       summary: `${input.sourceCard.name} can search the library for a card and put it into the graveyard.`,
       sourceCardId: input.sourceCard.id,
       maxChoices: 1,
-      allowedCardFilter: "cards matching the source effect",
+      allowedCardFilter: extractSearchedCardType(scopedText) ?? "cards matching the source effect",
       destination: "graveyard",
       requiresHumanChoice: true,
       warnings: ["Exact card restrictions may need manual review."]
@@ -291,7 +315,7 @@ export function deterministicRuleWorkflow(input: RuleAdvisorInput): RuleWorkflow
       summary: `${input.sourceCard.name} can search the library for a card and put it into hand.`,
       sourceCardId: input.sourceCard.id,
       maxChoices: 1,
-      allowedCardFilter: "cards matching the source effect",
+      allowedCardFilter: extractSearchedCardType(scopedText) ?? "cards matching the source effect",
       destination: "hand",
       requiresHumanChoice: true,
       warnings: ["Exact card restrictions may need manual review."]
@@ -308,7 +332,7 @@ export function deterministicRuleWorkflow(input: RuleAdvisorInput): RuleWorkflow
       summary: `${input.sourceCard.name} can search the library and put a card onto the battlefield.`,
       sourceCardId: input.sourceCard.id,
       maxChoices: 1,
-      allowedCardFilter: "cards matching the source effect",
+      allowedCardFilter: extractSearchedCardType(scopedText) ?? "cards matching the source effect",
       destination: "battlefield",
       tapped: scopedText.includes("tapped"),
       requiresHumanChoice: true,
@@ -327,7 +351,7 @@ export function deterministicRuleWorkflow(input: RuleAdvisorInput): RuleWorkflow
       summary: `${input.sourceCard.name} can search the library for a card and put it on top of the library.`,
       sourceCardId: input.sourceCard.id,
       maxChoices: 1,
-      allowedCardFilter: "cards matching the source effect",
+      allowedCardFilter: extractSearchedCardType(scopedText) ?? "cards matching the source effect",
       destination: "library",
       requiresHumanChoice: true,
       warnings: ["Exact card restrictions may need manual review."]
@@ -375,6 +399,26 @@ function extractDrawCount(text: string) {
   return undefined;
 }
 
+// "Search your library for a Forest card" / "search your library for a creature card" / "search your
+// library for a Mountain or Island card" (Three Visits and every other single-card tutor templated
+// this exact way) — extracts the actual named type so chooseAgentLibraryCardForRuleChoice
+// (AppFlow.tsx) can match it against real cards' type lines instead of falling back to its generic
+// "prefer a creature" default. Requires an article ("a"/"an") directly before the captured phrase —
+// a bare "search your library for a card" (Entomb, Buried Alive, ...) has no real type to extract,
+// and matching too loosely there (e.g. capturing just "a") would make every card in the library
+// match, silently making tutor choice non-deterministic in a new way instead of correctly falling
+// through to the generic placeholder. Only ever used for the generic-destination workflows below —
+// the dedicated "two basic lands" branches above already carry their own correct hardcoded filter.
+// Reported live as Three Visits (a plain "search for a Forest card" ramp spell) finding Elvish Mystic
+// instead of a Forest: this workflow's own allowedCardFilter was the generic
+// "cards matching the source effect" placeholder, which chooseAgentLibraryCardForRuleChoice's type
+// matcher can't match against any real card, so it fell through to preferring a creature — the
+// single most common thing to find in a Commander deck's library — over an actual Forest.
+function extractSearchedCardType(text: string): string | undefined {
+  const match = text.match(/\bsearch (?:your|their) library for (?:up to \w+ )?an? ([a-z][a-z '-]*?) cards?\b/);
+  return match ? match[1].trim() : undefined;
+}
+
 function extractLookAtTopCount(text: string) {
   const match = text.match(/\blook at the top\s+(x|one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+cards?\b/);
   return match ? numberWordToInt(match[1]) : undefined;
@@ -412,7 +456,7 @@ export async function requestRuleWorkflow(input: RuleAdvisorInput, baseUrl = pro
     sourceCard: { ...input.sourceCard, oracleText: eventRelevantOracleText(input.event, input.sourceCard.oracleText) }
   };
 
-  const model = process.env.OLLAMA_RULES_MODEL ?? process.env.OLLAMA_MODEL ?? "llama3.2";
+  const model = process.env.OLLAMA_RULES_MODEL ?? process.env.OLLAMA_MODEL ?? "qwen2.5:7b-instruct-q5_K_M";
   const response = await ollamaFetch(`${baseUrl}/api/chat`, {
     method: "POST",
     headers: { "content-type": "application/json" },
