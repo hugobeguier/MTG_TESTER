@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AgentAction, AgentReasoning, CardFaceRecord, CommanderDeck, EmblemState, GameEvent, GameSession, InterpretedEffect, PlayerSeat, VisibleCard } from "@/lib/types";
 import { eventRelevantOracleText, type RuleWorkflow } from "@/lib/rulesAdvisor";
 import type { PrimitiveActionPlan, PrimitiveActionStep } from "@/lib/primitiveActionPlan";
-import { createDeckFromList } from "@/lib/deckParser";
 import { evaluateOpeningHand } from "@/lib/mulliganHeuristics";
 import { effectiveAttackTaxAmount, looksLikeAttackTaxCandidate } from "@/lib/staticEffects";
 import { isBoardWipeText } from "@/lib/actionScoring";
@@ -4485,11 +4484,18 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       // parser already exists for activated-ability search effects (parseGenericAbilityEffect); an
       // ETB-triggered one never went through any deterministic path at all before, falling straight
       // to the Ollama-backed rules advisor for every single one, with no guarantee it actually
-      // requests the card's own printed count. Only battlefield-bound (a search is only ever an ETB
-      // clause on a permanent, never a spell's own destination the way removal/zone effects can be),
-      // and, like those, scoped to a non-modal card's own etbEffectText.
+      // requests the card's own printed count. Originally also restricted to destination ===
+      // "battlefield" on the theory that a search is only ever an ETB clause on a permanent, never a
+      // spell's own destination — but plenty of sorceries (Three Visits, Nature's Lore, Rampant
+      // Growth, ...) ARE nothing but this exact clause as their whole effect, resolving to the
+      // graveyard like any other sorcery while the search still needs to happen. Gating on
+      // destination made those fall all the way through with searchLibraryEffect permanently
+      // undefined, silently doing nothing on resolution — reported live as "Three Visits resolves"
+      // (mana spent, event logged) with no Forest ever actually fetched. Applies "regardless of
+      // where the spell itself ends up," the same reasoning removalEffect/zoneEffect above already
+      // use, scoped only to a non-modal card's own etbEffectText.
       const searchLibraryEffect =
-        sourceCard && !isModalCard && destination === "battlefield" ? parseSearchLibraryEffectText(etbEffectText(sourceCard.oracleText)) : undefined;
+        sourceCard && !isModalCard ? parseSearchLibraryEffectText(etbEffectText(sourceCard.oracleText)) : undefined;
       // "Each player exiles all creature cards from their graveyard, then sacrifices all creatures
       // they control, then puts all cards they exiled this way onto the battlefield." (Living Death)
       // — unrestricted by destination, same as removalEffect/zoneEffect above (it's a sorcery,
@@ -4668,8 +4674,12 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
             (commonTriggerEffect(sourceCard.oracleText, "entered", undefined, resolvedSession.seats.find((seat) => seat.id === action.actorSeatId)) !== undefined ||
               hasChooseCreatureTypeEtb(sourceCard.oracleText) ||
               chooseColorEtb !== undefined ||
-              searchLibraryEffect !== undefined ||
               eachPlayerSacrificeEffect !== undefined)) ||
+          // searchLibraryEffect is no longer battlefield-only (see its own computation above), so
+          // it has to sit outside the destination-gated group here too — a graveyard-destination
+          // tutor sorcery already has this deterministically handled the moment it's recognized,
+          // same as removalEffect/zoneEffect below.
+          searchLibraryEffect !== undefined ||
           removalEffect !== undefined ||
           genericModalEffect !== undefined ||
           zoneEffect !== undefined ||
@@ -4696,14 +4706,29 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       if (simpleDrawEffect) checkMiracleAfterDraw(current, resolvedSession);
       return resolvedSession;
     });
-    if (capturedTriggers.length > 0) {
-      window.setTimeout(() => queueCommonTriggers(capturedTriggers), 0);
-    } else if (!resumeTopStackAction(remainingStack)) {
-      setPrioritySeatId(action.actorSeatId);
-    }
-    if (capturedHumanPrompt) {
-      const prompt = capturedHumanPrompt;
-      window.setTimeout(() => {
+    // Every capturedX variable above is only ever assigned inside the setSession updater just
+    // above, then read here, synchronously, on the very next line. That relies on the updater
+    // having actually run by the time this line executes — true when setSession is the only state
+    // update in flight, but resolvePendingAction always calls setPendingAction/setPriorityPasses
+    // first, and this whole function itself is invoked from a bare window.setTimeout (see
+    // beginPendingAction's "no responses required" auto-resolve, and every other call site),
+    // outside any React event handler. React 18's automatic batching defers the updater itself
+    // in exactly that shape — confirmed live with a call-id-tagged trace: this function's own
+    // post-setSession line ran and read every capturedX variable at its stale initial value
+    // BEFORE the updater (tagged with the same call id) ever executed, for every single spell
+    // whose resolution didn't already have some other pending interactive choice open. Kodama's
+    // Reach/Cultivate's consultRulesAdvisor call (capturedAdvisorCall) and Three Visits/Nature's
+    // Lore's search-library prompt (capturedHumanPrompt) both went through this exact path and
+    // both silently no-opped — reported live as "resolves, mana spent, nothing happens." Deferring
+    // this whole block by one more macrotask lets the already-scheduled updater run first.
+    window.setTimeout(() => {
+      if (capturedTriggers.length > 0) {
+        queueCommonTriggers(capturedTriggers);
+      } else if (!resumeTopStackAction(remainingStack)) {
+        setPrioritySeatId(action.actorSeatId);
+      }
+      if (capturedHumanPrompt) {
+        const prompt = capturedHumanPrompt;
         if (prompt.kind === "choose_creature_type") {
           setPendingRuleChoice({
             id: crypto.randomUUID(),
@@ -4737,16 +4762,16 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
             allowedCardFilter: prompt.allowedCardFilter
           });
         }
-      }, 0);
-    }
-    if (capturedAdvisorCall) {
-      const advisorCall = capturedAdvisorCall;
-      void consultRulesAdvisor(advisorCall.event, advisorCall.seatId, advisorCall.sourceCard);
-    }
-    if (capturedStaticInterpreterCall) {
-      const staticCall = capturedStaticInterpreterCall;
-      void consultStaticEffectInterpreter(staticCall.seatId, staticCall.card);
-    }
+      }
+      if (capturedAdvisorCall) {
+        const advisorCall = capturedAdvisorCall;
+        void consultRulesAdvisor(advisorCall.event, advisorCall.seatId, advisorCall.sourceCard);
+      }
+      if (capturedStaticInterpreterCall) {
+        const staticCall = capturedStaticInterpreterCall;
+        void consultStaticEffectInterpreter(staticCall.seatId, staticCall.card);
+      }
+    }, 0);
   }
 
   function addEvent(message: string, seatId?: string, detail?: string) {
@@ -6725,26 +6750,30 @@ function formatDeckList(deck: CommanderDeck) {
   return [`Commander: ${commander}`, ...cards.map((card) => `${card.count} ${card.name}`)].join("\n");
 }
 
-function validateConfigsForPlay(configs: SeatConfig[]) {
+export function validateConfigsForPlay(configs: SeatConfig[]) {
   let ready = true;
   const nextConfigs = configs.map((config) => {
-    const deck =
-      config.deck ??
-      (config.mode === "decklist"
-        ? createDeckFromList({
-            owner: config.name,
-            commander: config.commander,
-            deckList: config.deckList,
-            colors: inferColors(config.commander)
-          })
-        : undefined);
+    // Never rebuild a decklist-mode seat's deck here as a fallback: createDeckFromList without a
+    // `catalog` (loadCardCatalog() reads the local card data file — a server-only concern this
+    // client-side function has no access to) silently enriches nothing, so every non-basic-land
+    // card in the deck falls back to createVisibleFromDeckCard's "Mock <role> card. Full rules
+    // text will come from card data lookup." placeholder — with fake stats guessed from the deck's
+    // color identity and no real oracle text at all. Worse, that placeholder deck still came back
+    // fully "legal": unknownErrors (the only check that would have caught missing card data) is
+    // itself gated behind `input.catalog` in createDeckFromList, so a mock deck sailed through
+    // validation silently and the game started anyway. A seat only ever gets a legitimately
+    // enriched config.deck via buildDeck's own /api/decks/build round trip (the one place that
+    // actually has the catalog); if that never ran, treat it the same as "no deck built yet"
+    // instead of silently substituting a broken one. Reported live as Kodama's Reach, Cultivate,
+    // and Three Visits each doing nothing when cast — every one of them, and everything else in
+    // the affected deck, had been mock cards with no real rules text the whole game.
+    const deck = config.deck;
     const errors = deck?.validation.errors ?? ["Build or validate this deck before pressing Play."];
 
     if (!deck || errors.length > 0 || !deck.validation.legal) {
       ready = false;
       return {
         ...config,
-        deck: deck ?? config.deck,
         status: "error" as DeckBuildStatus,
         message: errors[0] ?? "Deck is not legal for Commander."
       };
@@ -6752,7 +6781,6 @@ function validateConfigsForPlay(configs: SeatConfig[]) {
 
     return {
       ...config,
-      deck: config.deck ?? deck,
       status: "ready" as DeckBuildStatus,
       message: "Deck passed Commander validation."
     };

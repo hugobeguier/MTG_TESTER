@@ -251,6 +251,25 @@ describe("parseSearchLibraryEffectText", () => {
     });
   });
 
+  // Three Visits/Nature's Lore-shaped sorceries: a plain, untapped battlefield destination — the
+  // whole card IS this one clause, not an ETB trigger on a permanent that stays around. AppFlow.tsx
+  // used to only ever call this parser when the CASTER's own spell resolved to the battlefield
+  // (destination === "battlefield"), on the assumption that a search is always an ETB clause on a
+  // permanent — but these sorceries resolve to the graveyard like any other sorcery while their
+  // search still has to happen, so that gate left searchLibraryEffect permanently undefined for
+  // them and the spell silently did nothing. Reported live as "Three Visits resolves" (mana spent,
+  // event logged) with no Forest ever fetched. The parser itself was already correct; this locks in
+  // that it recognizes the shape, now that the caller no longer gates on the spell's own destination.
+  it("parses an untapped battlefield tutor (Three Visits/Nature's Lore)", () => {
+    expect(parseSearchLibraryEffectText("Search your library for a Forest card, put it onto the battlefield, then shuffle.")).toEqual({
+      kind: "search_library",
+      destination: "battlefield",
+      tapped: false,
+      cardTypeFilter: "Forest",
+      count: 1
+    });
+  });
+
   it("parses an 'up to N' count (Archaeomancer's Map)", () => {
     expect(
       parseSearchLibraryEffectText("search your library for up to two basic Plains cards, reveal them, put them into your hand, then shuffle.")
