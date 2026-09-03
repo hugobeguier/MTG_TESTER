@@ -161,6 +161,10 @@ type PendingActionView =
       cardName: string;
       cardTypeLine?: string;
       message: string;
+      // Live lookup of the actual card (see AppFlow.tsx's withPendingActionSourceCard) — lets the
+      // stack HUD render real card art instead of just the name/type-line strings above. Can be
+      // missing if the card already left the zone this was derived from (fizzled counterspell, ...).
+      sourceCard?: VisibleCard;
     }
   | {
       id: string;
@@ -170,6 +174,7 @@ type PendingActionView =
       sourceCardName: string;
       triggerKind: "common";
       message: string;
+      sourceCard?: VisibleCard;
     };
 
 type RuleChoiceView =
@@ -1124,6 +1129,9 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
         <div className="three-hud bottom-right">
           <div className="hud-card-detail stack-detail">
             <strong>{props.pendingAction.type === "spell" ? "Stack" : props.pendingAction.type === "trigger" ? "Trigger" : "Phase Change"}</strong>
+            {props.pendingAction.type !== "phase" && props.pendingAction.sourceCard ? (
+              <VisualCard card={props.pendingAction.sourceCard} compact />
+            ) : null}
             <p>{props.pendingAction.message}</p>
             {props.pendingAction.type === "spell" && props.pendingAction.cardTypeLine ? (
               <p className="stack-type-line">{props.pendingAction.cardTypeLine}</p>
@@ -1134,8 +1142,14 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
                 {stackTopFirst.map((action, index) => (
                   <div className="stack-item" key={action.id}>
                     <small>{index === 0 ? "Resolving next" : "Below"}</small>
-                    <strong>{action.type === "spell" ? action.cardName : action.type === "trigger" ? `${action.sourceCardName} trigger` : "Phase change"}</strong>
-                    {action.type === "spell" && action.cardTypeLine ? <small>{action.cardTypeLine}</small> : null}
+                    {action.type !== "phase" && action.sourceCard ? (
+                      <VisualCard card={action.sourceCard} compact />
+                    ) : (
+                      <>
+                        <strong>{action.type === "spell" ? action.cardName : action.type === "trigger" ? `${action.sourceCardName} trigger` : "Phase change"}</strong>
+                        {action.type === "spell" && action.cardTypeLine ? <small>{action.cardTypeLine}</small> : null}
+                      </>
+                    )}
                   </div>
                 ))}
               </div>

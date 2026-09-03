@@ -969,6 +969,12 @@ h3 {
   line-height: 1.25;
 }
 
+.stack-detail .visual-card.is-compact,
+.stack-item .visual-card.is-compact {
+  justify-self: start;
+  width: 144px;
+}
+
 .activity-feed {
   display: grid;
   gap: 0.45rem;

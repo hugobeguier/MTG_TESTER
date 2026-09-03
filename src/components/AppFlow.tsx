@@ -3093,6 +3093,11 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       // then for the human specifically follow up with a real choice modal pre-loaded with that pick.
       const chooseColorEtb = parseChooseColorEtb(playedFaceCard.oracleText);
       const choosesCreatureType = hasChooseCreatureTypeEtb(playedFaceCard.oracleText);
+      // Hoisted above setSession (and reused both inside the updater and in the consultRulesAdvisor
+      // guard below) since it's a pure function of the played card's own oracle text — computing it
+      // twice from two different scopes let it silently drift out of sync with the "don't double up"
+      // guard, see that guard's own comment.
+      const zoneEffect = parseZoneEffect(etbEffectText(playedFaceCard.oracleText));
       // Captured out of the setSession updater below rather than queued from inside it — React 18
       // StrictMode's dev-mode double-invocation of functional setState updaters (intended to catch
       // exactly this: an updater that isn't a pure function of its input) was calling
@@ -3125,7 +3130,6 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         // target player's graveyard," ...) had nowhere deterministic to resolve, and fell straight
         // to consultRulesAdvisor for every single one. shouldConsultRulesAdvisor now declines the
         // "land_played" event once this already covers it, so the two don't double up.
-        const zoneEffect = parseZoneEffect(etbEffectText(playedFaceCard.oracleText));
         const zoneResolvedSession = zoneEffect ? applyZoneEffect(nextSession, seatId, playedName, zoneEffect) : nextSession;
         capturedTriggers = [
           ...findCommonTriggersForPermanentEntered(zoneResolvedSession, seatId, card),
@@ -3168,11 +3172,18 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         }
       }
       // Same "don't double up" reasoning as parseZoneEffect's own guard just above — a land ETB
-      // clause commonTriggerEffect already owns deterministically (return_land_to_hand, draw_cards,
-      // scry_cards, ...) has nowhere useful left for the rules advisor to add, and asking it anyway
-      // risks a confusing extra manual_review prompt (or a wasted/hallucinated LLM call for an
-      // agent) on top of the already-correct deterministic resolution.
-      if (commonTriggerEffect(playedFaceCard.oracleText, "entered", undefined, seat) === undefined) {
+      // clause commonTriggerEffect OR parseZoneEffect already owns deterministically
+      // (return_land_to_hand, draw_cards, scry_cards, exile_graveyard, ...) has nowhere useful left
+      // for the rules advisor to add, and asking it anyway risks a confusing extra manual_review
+      // prompt or a wasted/hallucinated LLM call on top of the already-correct deterministic
+      // resolution. The zoneEffect half of this was missing entirely: shouldConsultRulesAdvisor
+      // itself declines "land_played" once parseZoneEffect recognizes the card (see its own guard),
+      // but consultRulesAdvisor falls through to the broader consultPrimitiveActionPlanner whenever
+      // shouldConsultRulesAdvisor declines — so Bojuka Bog's already-correctly-resolved graveyard
+      // exile was ALSO handed to that LLM fallback with no reason left to interpret, which
+      // hallucinated a battlefield-creature exile instead. Reproduced live: Bojuka Bog exiled a
+      // live Blood Artist off the battlefield instead of an empty/opposing graveyard.
+      if (commonTriggerEffect(playedFaceCard.oracleText, "entered", undefined, seat) === undefined && !zoneEffect) {
         void consultRulesAdvisor("land_played", seatId, card);
       }
       void consultStaticEffectInterpreter(seatId, card);
@@ -6409,8 +6420,8 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         mulliganReturnRequired={Math.max(0, humanSeat.board.hand.length - openingHandKeepSize(mulligans[humanSeat.id] ?? 0))}
         session={{ ...session, activePlayerId: activeSeatId }}
         prioritySeatId={prioritySeatId}
-        pendingAction={pendingAction}
-        stackActions={stackActions}
+        pendingAction={pendingAction ? withPendingActionSourceCard(session, pendingAction) : undefined}
+        stackActions={stackActions.map((action) => withPendingActionSourceCard(session, action))}
         agentThinking={agentThinking}
         agentReasoning={agentReasoning}
         manaPool={poolForSeat(humanSeat.id)}
@@ -12343,6 +12354,14 @@ function pendingActionSourceCard(session: GameSession, action: PendingAction): V
     return seat?.board.battlefield.find((card) => card.id === action.sourceCardId);
   }
   return undefined;
+}
+
+// UI-only view of a PendingAction that also carries the live source card, so the stack HUD can
+// render real card art (VisualCard) instead of just a name string. Never stored in state — derived
+// fresh every render from pendingActionSourceCard so it can't go stale if the card's zone/counters
+// change while it sits on the stack.
+function withPendingActionSourceCard(session: GameSession, action: PendingAction): PendingAction & { sourceCard?: VisibleCard } {
+  return { ...action, sourceCard: pendingActionSourceCard(session, action) };
 }
 
 function pendingActionSummary(session: GameSession, action: PendingAction) {
