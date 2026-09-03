@@ -365,7 +365,7 @@ export function deterministicRuleWorkflow(input: RuleAdvisorInput): RuleWorkflow
 // death event. Everything else (an instant/sorcery resolving, a loyalty ability's own text, a
 // phase trigger already isolated by its caller, ...) keeps using the full oracle text, since
 // there's no single later-gated clause to strip out of those.
-function eventRelevantOracleText(event: string, oracleText: string): string {
+export function eventRelevantOracleText(event: string, oracleText: string): string {
   if (event === "land_played" || event === "spell_resolved_to_battlefield") return etbEffectText(oracleText);
   if (event === "card_moved_to_graveyard") return deathEffectText(oracleText);
   return oracleText;

@@ -101,6 +101,17 @@ describe("parseGenericSacrificeAbilities", () => {
     });
   });
 
+  it("parses a Fog-shaped combat-damage-prevention sacrifice (Spore Frog)", () => {
+    const abilities = parseGenericSacrificeAbilities("Sacrifice this creature: Prevent all combat damage that would be dealt this turn.");
+    expect(abilities).toHaveLength(1);
+    expect(abilities[0]).toMatchObject({ sacrificeTarget: "self", effect: { kind: "prevent_combat_damage" } });
+  });
+
+  it("also accepts the real printed 'dealt to you this turn' phrasing, not just this card data's own 'dealt this turn'", () => {
+    const abilities = parseGenericSacrificeAbilities("Sacrifice this creature: Prevent all combat damage that would be dealt to you this turn.");
+    expect(abilities[0]).toMatchObject({ effect: { kind: "prevent_combat_damage" } });
+  });
+
   it("defaults sacrificeCount to 1 for the ordinary singular shapes", () => {
     const abilities = parseGenericSacrificeAbilities("Sacrifice a creature: Scry 1.");
     expect(abilities[0].sacrificeCount).toBe(1);

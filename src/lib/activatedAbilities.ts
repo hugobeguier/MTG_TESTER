@@ -113,6 +113,12 @@ export type SacrificeEffect =
   // (transformPermanent in AppFlow.tsx), not carried here, since it's a trailing modifier on the
   // same sentence rather than a distinct effect shape.
   | { kind: "transform_self" }
+  // "Sacrifice this creature: Prevent all combat damage that would be dealt this turn." (Spore
+  // Frog, and the same Fog-shaped sacrifice ability on similar cards) — previously entirely
+  // unmodeled: no SacrificeEffect kind covered damage prevention at all, so this clause silently
+  // failed to parse and the whole ability never appeared as an activatable option. Reported live as
+  // "how do I activate Spore Frog's sacrifice ability" — there was no button to click.
+  | { kind: "prevent_combat_damage" }
   // "{T}, Sacrifice this creature: Choose one — Destroy target artifact. Destroy target
   // enchantment. ..." (Cankerbloom, and any other sacrifice ability whose effect is a destroy/
   // exile/damage/bounce shape, modal or not) — reuses removalSpells.ts's own parser/executor
@@ -435,6 +441,12 @@ function parseSacrificeEffectText(text: string): SacrificeEffect | undefined {
   if (/\bcreate\b[^.]*\btokens?\b/.test(lower)) return { kind: "create_tokens" };
 
   if (/^transform this (?:land|permanent|artifact|creature|enchantment)\b/.test(lower)) return { kind: "transform_self" };
+
+  // "Prevent all combat damage that would be dealt this turn." (Spore Frog) / the real printed
+  // "...that would be dealt to you this turn." — this codebase's own card data drops the "to you"
+  // qualifier (see this SacrificeEffect kind's own doc comment), so both phrasings are accepted
+  // rather than only matching the exact stored text.
+  if (/\bprevent all combat damage that would be dealt(?: to you)? this turn\b/.test(lower)) return { kind: "prevent_combat_damage" };
 
   const searchLibrary = parseSearchLibraryEffectText(lower);
   if (searchLibrary) return searchLibrary;

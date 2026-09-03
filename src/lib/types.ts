@@ -376,6 +376,12 @@ export interface GameSession {
   // restriction is per-object, not per-player, so each fresh copy can trigger again) gets stopped
   // instead of looping forever. Self-resets when the turn number changes.
   triggerChainGuard?: { turn: number; count: number };
+  // Rule 702.8/119.7a-adjacent: "Prevent all combat damage that would be dealt this turn." (Spore
+  // Frog, and any other Fog-shaped sacrifice ability) — same self-resetting-by-turn-number
+  // convention as triggerChainGuard above rather than a separate cleanup step at end of turn:
+  // resolveCombatDamage checks this against the CURRENT session.turn, so it's automatically inert
+  // again once the turn actually changes, with nothing needing to clear it explicitly.
+  combatDamagePrevented?: { turn: number };
   // Rule 500.7: "Take an extra turn after this one." (Temporal Mastery, Time Warp, ...) — a FIFO
   // queue of seatIds, consumed one entry per turn-change instead of the normal rotation. Queuing
   // rather than mutating activePlayerId/turn order directly means the two turn-change call sites

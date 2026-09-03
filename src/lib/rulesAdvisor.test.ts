@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deterministicRuleWorkflow, type RuleAdvisorInput } from "./rulesAdvisor";
+import { deterministicRuleWorkflow, eventRelevantOracleText, type RuleAdvisorInput } from "./rulesAdvisor";
 import type { VisibleCard } from "./types";
 
 function card(overrides: Partial<VisibleCard> & Pick<VisibleCard, "id" | "name" | "oracleText">): VisibleCard {
@@ -212,5 +212,26 @@ describe("deterministicRuleWorkflow", () => {
     const workflow = deterministicRuleWorkflow(input(contentiousPlan, "spell_resolved_to_graveyard"));
     expect(workflow?.workflow).toBe("proliferate");
     expect(workflow?.requiresHumanChoice).toBe(false);
+  });
+});
+
+describe("eventRelevantOracleText", () => {
+  it("strips a card's activated ability entirely for a death event when it has no real death trigger (Cankerbloom)", () => {
+    const cankerbloom =
+      "{1}, Sacrifice this creature: Choose one —\n• Destroy target artifact.\n• Destroy target enchantment.\n• Proliferate. (Choose any number of permanents and/or players, then give each another counter of each kind already there.)";
+    // Reported live: sacrificing Cankerbloom to pay its own activation cost handed this whole
+    // clause to the primitive-action-plan LLM fallback as if it were the effect of Cankerbloom's
+    // OWN death, which hallucinated an extra destroy + an unrelated sacrifice on top of the real,
+    // correctly-resolved activated-ability effect. Scoping this to "" for a death event is what
+    // lets consultPrimitiveActionPlanner decline outright instead of asking the LLM about it.
+    expect(eventRelevantOracleText("card_moved_to_graveyard", cankerbloom)).toBe("");
+  });
+
+  it("still keeps a genuine death trigger on a card that also has an unrelated activated ability (Hangarback Walker)", () => {
+    const hangarbackWalker =
+      "Hangarback Walker enters the battlefield with X +1/+1 counters on it.\n{2}, {T}: Create a 1/1 colorless Thopter artifact creature token with flying.\nWhen Hangarback Walker dies, create a 1/1 colorless Thopter artifact creature token with flying for each +1/+1 counter on Hangarback Walker.";
+    expect(eventRelevantOracleText("card_moved_to_graveyard", hangarbackWalker)).toBe(
+      "When Hangarback Walker dies, create a 1/1 colorless Thopter artifact creature token with flying for each +1/+1 counter on Hangarback Walker."
+    );
   });
 });

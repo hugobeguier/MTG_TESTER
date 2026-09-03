@@ -7,7 +7,8 @@ describe("parseRemovalEffect — destroy", () => {
       kind: "destroy",
       targetType: "creature",
       excludedColors: [],
-      artifactsExcluded: false
+      artifactsExcluded: false,
+      basicsExcluded: false
     });
   });
 
@@ -16,7 +17,8 @@ describe("parseRemovalEffect — destroy", () => {
       kind: "destroy",
       targetType: "creature",
       excludedColors: ["black"],
-      artifactsExcluded: false
+      artifactsExcluded: false,
+      basicsExcluded: false
     });
   });
 
@@ -25,7 +27,30 @@ describe("parseRemovalEffect — destroy", () => {
       kind: "destroy",
       targetType: "creature",
       excludedColors: ["black"],
-      artifactsExcluded: true
+      artifactsExcluded: true,
+      basicsExcluded: false
+    });
+  });
+
+  it("parses land destruction with the nonbasic qualifier (Wasteland)", () => {
+    expect(parseRemovalEffect("Destroy target nonbasic land.")).toEqual({
+      kind: "destroy",
+      targetType: "land",
+      excludedColors: [],
+      artifactsExcluded: false,
+      basicsExcluded: true
+    });
+  });
+
+  it("parses unqualified land destruction, ignoring the basic-land-search follow-up (Ghost Quarter)", () => {
+    expect(
+      parseRemovalEffect("Destroy target land. Its controller may search their library for a basic land card, put it onto the battlefield, then shuffle.")
+    ).toEqual({
+      kind: "destroy",
+      targetType: "land",
+      excludedColors: [],
+      artifactsExcluded: false,
+      basicsExcluded: false
     });
   });
 
@@ -33,6 +58,13 @@ describe("parseRemovalEffect — destroy", () => {
     expect(parseRemovalEffect("Destroy target artifact, creature, or planeswalker.")).toMatchObject({
       kind: "destroy",
       targetType: "artifact_creature_or_planeswalker"
+    });
+  });
+
+  it("parses 'destroy target artifact or enchantment' as its own combined type, not artifact-only (Reclamation Sage)", () => {
+    expect(parseRemovalEffect("When this creature enters, you may destroy target artifact or enchantment.")).toMatchObject({
+      kind: "destroy",
+      targetType: "artifact_or_enchantment"
     });
   });
 
@@ -208,7 +240,8 @@ describe("parseRemovalEffect — exile", () => {
       kind: "destroy",
       targetType: "artifact",
       excludedColors: [],
-      artifactsExcluded: false
+      artifactsExcluded: false,
+      basicsExcluded: false
     });
     expect(parseRemovalEffect("Exile another target creature.")).toEqual({ kind: "exile", targetType: "creature" });
   });
@@ -280,5 +313,11 @@ describe("matchesTargetType", () => {
     expect(matchesTargetType({ typeLine: "Land" }, "nonland_permanent")).toBe(false);
     expect(matchesTargetType({ typeLine: "Artifact" }, "nonland_permanent")).toBe(true);
     expect(matchesTargetType({ typeLine: "Planeswalker" }, "creature_or_planeswalker")).toBe(true);
+  });
+
+  it("matches either half of artifact_or_enchantment, not just artifacts (Reclamation Sage)", () => {
+    expect(matchesTargetType({ typeLine: "Artifact" }, "artifact_or_enchantment")).toBe(true);
+    expect(matchesTargetType({ typeLine: "Enchantment" }, "artifact_or_enchantment")).toBe(true);
+    expect(matchesTargetType({ typeLine: "Creature — Bear" }, "artifact_or_enchantment")).toBe(false);
   });
 });

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AgentAction, AgentReasoning, CardFaceRecord, CommanderDeck, EmblemState, GameEvent, GameSession, InterpretedEffect, PlayerSeat, VisibleCard } from "@/lib/types";
-import type { RuleWorkflow } from "@/lib/rulesAdvisor";
+import { eventRelevantOracleText, type RuleWorkflow } from "@/lib/rulesAdvisor";
 import type { PrimitiveActionPlan, PrimitiveActionStep } from "@/lib/primitiveActionPlan";
 import { createDeckFromList } from "@/lib/deckParser";
 import { evaluateOpeningHand } from "@/lib/mulliganHeuristics";
@@ -656,7 +656,15 @@ const AGENT_REQUEST_TIMEOUT_MS = 45000;
 // Ollama round-trip, and to let agentCardSnapshot surface a plain-English "what this does" summary
 // to the playing agent's own decision-making instead of it having to re-guess from raw oracle text
 // alone every single time (see consultRulesAdvisor/agentCardSnapshot below).
-const RULE_WORKFLOW_CACHE_STORAGE_KEY = "mtg-rule-workflow-cache-v1";
+// Bump this suffix whenever deterministicRuleWorkflow's classification logic changes — a stale
+// localStorage entry keyed by (event, oracleText) permanently shadows any later code fix for that
+// exact card, since the cache is checked BEFORE the classifier ever runs again. Reproduced live:
+// Kodama's Reach was misclassified once (an earlier bug, since fixed in deterministicRuleWorkflow),
+// which cached a wrong/incomplete workflow under this key — the classifier fix alone did nothing
+// for that browser afterward, since every later cast just replayed the stale cached value (in this
+// case as silently as workflow "none"/no-op) instead of ever reclassifying. Bumped to v2 here to
+// flush every entry accumulated before this and the last several rules-engine classification fixes.
+const RULE_WORKFLOW_CACHE_STORAGE_KEY = "mtg-rule-workflow-cache-v2";
 const ruleWorkflowCache = new Map<string, RuleWorkflow>();
 let ruleWorkflowCacheLoaded = false;
 
@@ -893,7 +901,14 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   // make the real pendingAction guard effective again), closing that window without changing
   // behavior for any two casts that aren't literally dispatched in the same tick. Reproduced live as
   // Beast Whisperer and Guardian Project each drawing/triggering twice for a single creature cast.
-  const castDispatchInFlight = useRef(false);
+  // Timestamp (not a plain boolean) so the guard below can self-heal if the macrotask reset is ever
+  // dropped — e.g. a backgrounded/throttled tab delaying window.setTimeout(fn, 0) far longer than
+  // intended. A boolean stuck true has no recovery path: every future playCard call silently no-ops
+  // forever (the guard below returns before ever calling addEvent), which is indistinguishable from
+  // "this card doesn't work" with zero diagnostic trail. Reported live as Kodama's Reach appearing to
+  // do nothing when cast — traced to this exact guard, not anything about the card itself.
+  const castDispatchInFlight = useRef<number | null>(null);
+  const CAST_DISPATCH_STALE_MS = 500;
   const processedDeathBatchRef = useRef<GameSession["pendingDeaths"]>(undefined);
   const processedEntryBatchRef = useRef<GameSession["pendingEntries"]>(undefined);
   const processedCombatDamageToPlayerBatchRef = useRef<GameSession["pendingCombatDamageToPlayer"]>(undefined);
@@ -2854,6 +2869,16 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   function resolveCombatDamage(session: GameSession, attackerId: string): GameSession {
     const attacker = session.seats.find((seat) => seat.id === attackerId);
     if (!attacker) return session;
+    // Rule 702.8-adjacent Fog effect (Spore Frog's "Prevent all combat damage that would be dealt
+    // this turn.", see applySacrificeEffect's "prevent_combat_damage" case) — self-resets once the
+    // turn actually changes (see combatDamagePrevented's own doc comment on GameSession), so this
+    // check alone is enough without a separate end-of-turn cleanup step.
+    if (session.combatDamagePrevented?.turn === session.turn) {
+      return {
+        ...session,
+        events: [phaseEvent(attackerId, "All combat damage is prevented this turn."), ...session.events]
+      };
+    }
     const attackingCardIds = attacker.board.battlefield.filter((card) => card.attacking).map((card) => card.id);
     if (attackingCardIds.length === 0) {
       return {
@@ -3026,7 +3051,18 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   }
 
   function playCard(seatId: string, cardId: string, position?: { x: number; z: number }, sourceZone: "hand" | "command" | "exile" = "hand", faceIndex?: number) {
-    if (pendingAction || castDispatchInFlight.current) return;
+    if (pendingAction) return;
+    if (castDispatchInFlight.current !== null) {
+      // A genuine same-tick re-dispatch (the case this guard exists for) is always well under this
+      // threshold — anything older means the macrotask reset simply never ran, so treat it as stale
+      // and let this call through instead of silently blocking every cast for the rest of the
+      // session. Logged either way so a blocked attempt is never invisible again.
+      const age = Date.now() - castDispatchInFlight.current;
+      if (age < CAST_DISPATCH_STALE_MS) {
+        addEvent(`A card is already being played; try again in a moment.`, seatId, "Timing");
+        return;
+      }
+    }
     const seat = session.seats.find((item) => item.id === seatId);
     const card =
       sourceZone === "command"
@@ -3070,9 +3106,9 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     // Set the instant this call has committed to actually playing/casting the card (every guard
     // above has passed), cleared on a fresh macrotask — see castDispatchInFlight's own comment for
     // why this can't just rely on the pendingAction state guard at the top of this function.
-    castDispatchInFlight.current = true;
+    castDispatchInFlight.current = Date.now();
     window.setTimeout(() => {
-      castDispatchInFlight.current = false;
+      castDispatchInFlight.current = null;
     }, 0);
 
     if (playingAsLand) {
@@ -4827,6 +4863,10 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   async function consultPrimitiveActionPlanner(event: string, seatId: string, sourceCard: VisibleCard) {
     const seat = session.seats.find((item) => item.id === seatId);
     if (!seat) return;
+    // Nothing left once scoped to this event (e.g. a creature whose entire oracle text is an
+    // activated ability, with no separate "when this dies"/"enters" clause of its own) — decline
+    // outright rather than asking the LLM to interpret an empty prompt.
+    if (!eventRelevantOracleText(event, sourceCard.oracleText).trim()) return;
 
     const cacheKey = ruleWorkflowCacheKey(event, sourceCard.oracleText);
     const cached = primitiveActionPlanCache.get(cacheKey);
@@ -4849,7 +4889,16 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         signal: AbortSignal.timeout(AGENT_REQUEST_TIMEOUT_MS),
         body: JSON.stringify({
           cardName: sourceCard.name,
-          oracleText: sourceCard.oracleText,
+          // Scoped the same way requestRuleWorkflow's own Ollama call already is — unlike that
+          // sibling, this fallback used to send the card's full, unscoped oracle text regardless of
+          // event, so a creature with an activated ability but no real death trigger (Cankerbloom's
+          // "{1}, Sacrifice this creature: Choose one — Destroy target artifact. ...", no "when this
+          // dies" clause at all) had its cost-gated ability text handed to the LLM as if it were the
+          // effect of THIS card_moved_to_graveyard event — with nothing telling it that text belongs
+          // to a different, unrelated event. Reported live: sacrificing Cankerbloom to pay its own
+          // activation cost caused its death to ALSO destroy an extra artifact and sacrifice an
+          // unrelated permanent, on top of the real (correctly resolved) activated-ability effect.
+          oracleText: eventRelevantOracleText(event, sourceCard.oracleText),
           actorName: seat.name,
           battlefieldSummary: seat.board.battlefield.map((card) => `${card.name} (${card.typeLine})`),
           handSummary: seat.board.hand.map((card) => card.name),
@@ -8464,7 +8513,7 @@ export function payGenericSacrificeCost(
   return { session: next, ability, card, poolSpent: poolPayment?.ok ? poolPayment.pool : undefined };
 }
 
-function applySacrificeEffect(
+export function applySacrificeEffect(
   session: GameSession,
   seatId: string,
   sourceCard: VisibleCard,
@@ -8551,6 +8600,23 @@ function applySacrificeEffect(
 
   if (effect.kind === "transform_self") {
     return transformPermanent(session, seatId, sourceCardId, sourceCardName, /\bthen untap it\b/i.test(clause));
+  }
+
+  if (effect.kind === "prevent_combat_damage") {
+    return {
+      ...session,
+      combatDamagePrevented: { turn: session.turn },
+      events: [
+        {
+          id: crypto.randomUUID(),
+          at: new Date().toISOString(),
+          seatId,
+          message: `${seat.name} sacrifices ${sourceCardName}; all combat damage is prevented this turn.`,
+          detail: "Rules action"
+        },
+        ...session.events
+      ]
+    };
   }
 
   if (effect.kind === "removal") {
@@ -14680,20 +14746,36 @@ function twoSidedFaces(card: VisibleCard): [CardFaceRecord, CardFaceRecord] | un
   return [card.faces[0], card.faces[1]];
 }
 
-function modalDoubleFacedLandSplit(card: VisibleCard): { spellFace: CardFaceRecord; spellIndex: number; landFace: CardFaceRecord; landIndex: number } | undefined {
+// Scryfall's own convention for a transform back face: it always opens with this exact
+// parenthetical reminder ("(Transforms from Storm the Vault.)", "(Transforms from Azor's
+// Gateway.)", ...), never present on a genuine modal DFC's own back face (Zendikar Rising's
+// "land // spell" cycle, the Pathway/battle lands, ...), which just states its own rules text
+// directly. This is the only reliable signal available at runtime: this app's card data never
+// stores Scryfall's own `layout` field (transform vs modal_dfc), only face shapes.
+function isTransformBackFace(face: CardFaceRecord): boolean {
+  return /^\(transforms from /i.test(face.oracleText.trim());
+}
+
+export function modalDoubleFacedLandSplit(card: VisibleCard): { spellFace: CardFaceRecord; spellIndex: number; landFace: CardFaceRecord; landIndex: number } | undefined {
   const faces = twoSidedFaces(card);
   if (!faces) return undefined;
   const [first, second] = faces;
-  // A transform card's back face (Westvale Abbey -> Ormendahl, Profane Prince; any other
-  // permanent that flips into something else via an in-play ability) is never castable from hand
-  // — Scryfall represents that by leaving its manaCost empty, unlike a genuine modal DFC land
-  // (Zendikar Rising-style "land // spell") whose spell face always carries a real printed cost.
-  // Without this check, a transform land's non-land back face was indistinguishable from a real
-  // "play this land, or cast this spell instead" choice and got offered as castable for {0}.
-  if (!first.typeLine.includes("Land") && second.typeLine.includes("Land") && first.manaCost) {
+  // A transform card's back face (Westvale Abbey -> Ormendahl, Profane Prince; Storm the Vault ->
+  // Vault of Catlacan; any other permanent that flips into something else via an in-play ability)
+  // is never castable from hand — Scryfall represents that by leaving its manaCost empty, unlike a
+  // genuine modal DFC land (Zendikar Rising-style "land // spell") whose spell face always carries
+  // a real printed cost. That alone only distinguishes a transform card whose back face is the
+  // NON-land side (Westvale Abbey): a transform card whose back face IS a land (Storm the Vault,
+  // Azor's Gateway, Arguel's Blood Fast, ...) has the exact same shape as a real modal DFC land
+  // from this manaCost check's perspective (front has a real cost, back — being a land — never
+  // does either way), so isTransformBackFace's reminder-text check is what actually tells them
+  // apart. Without it, "cast the land side" was offered for a transform permanent whose back face
+  // can only ever be reached by transforming, never played from hand at all. Reported live for
+  // Storm the Vault // Vault of Catlacan.
+  if (!first.typeLine.includes("Land") && second.typeLine.includes("Land") && first.manaCost && !isTransformBackFace(second)) {
     return { spellFace: first, spellIndex: 0, landFace: second, landIndex: 1 };
   }
-  if (first.typeLine.includes("Land") && !second.typeLine.includes("Land") && second.manaCost) {
+  if (first.typeLine.includes("Land") && !second.typeLine.includes("Land") && second.manaCost && !isTransformBackFace(first)) {
     return { spellFace: second, spellIndex: 1, landFace: first, landIndex: 0 };
   }
   return undefined;

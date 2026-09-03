@@ -10,16 +10,23 @@ export type RemovalTargetType =
   | "creature"
   | "creature_or_planeswalker"
   | "artifact_creature_or_planeswalker"
+  | "artifact_or_enchantment"
   | "artifact"
   | "enchantment"
   | "permanent"
-  | "nonland_permanent";
+  | "nonland_permanent"
+  | "land";
 
 export interface DestroyEffect {
   kind: "destroy";
   targetType: RemovalTargetType;
   excludedColors: string[];
   artifactsExcluded: boolean;
+  // "Destroy target NONBASIC land" (Wasteland, Field of Ruin, Tectonic Edge, ...) — the land-
+  // destruction cycle's near-universal qualifier, tracked the same way artifactsExcluded already
+  // is for "target nonartifact creature" rather than folding it into excludedColors (basic-ness
+  // isn't a color).
+  basicsExcluded: boolean;
 }
 
 export interface DestroyAllEffect {
@@ -99,9 +106,17 @@ const TARGET_TYPE_PATTERNS: Array<{ pattern: RegExp; type: RemovalTargetType }> 
   { pattern: new RegExp(`target ${QUALIFIER}creature or planeswalker`), type: "creature_or_planeswalker" },
   { pattern: /target nonland permanent/, type: "nonland_permanent" },
   { pattern: new RegExp(`target ${QUALIFIER}permanent`), type: "permanent" },
+  // "Destroy target artifact or enchantment." (Reclamation Sage, Krosan Grip, ...) — checked before
+  // the standalone "artifact" pattern below, which otherwise matches this clause's own "target
+  // artifact" prefix first and silently drops the "or enchantment" alternative, restricting the
+  // real target pool (and every downstream user of it: chooseRemovalTarget's auto-pick, targeting.ts's
+  // legalTargets) to artifacts only. Reported live as Reclamation Sage always removing an artifact
+  // with no way to ever hit an enchantment instead.
+  { pattern: new RegExp(`target ${QUALIFIER}artifact or ${QUALIFIER}enchantment\\b`), type: "artifact_or_enchantment" },
   { pattern: new RegExp(`target ${QUALIFIER}artifact\\b`), type: "artifact" },
   { pattern: new RegExp(`target ${QUALIFIER}enchantment\\b`), type: "enchantment" },
-  { pattern: new RegExp(`target ${QUALIFIER}creature\\b`), type: "creature" }
+  { pattern: new RegExp(`target ${QUALIFIER}creature\\b`), type: "creature" },
+  { pattern: new RegExp(`target ${QUALIFIER}land\\b`), type: "land" }
 ];
 
 function matchTargetType(clause: string): RemovalTargetType | undefined {
@@ -148,7 +163,8 @@ function parseDestroy(text: string): DestroyEffect | DestroyAllEffect | DestroyA
     kind: "destroy",
     targetType,
     excludedColors: COLORS.filter((color) => clause.includes(`non${color}`)),
-    artifactsExcluded: clause.includes("nonartifact")
+    artifactsExcluded: clause.includes("nonartifact"),
+    basicsExcluded: clause.includes("nonbasic")
   };
 }
 
@@ -259,6 +275,8 @@ export function matchesTargetType(card: { typeLine: string; grantedTypes?: strin
       return has("Creature") || has("Planeswalker");
     case "artifact_creature_or_planeswalker":
       return has("Artifact") || has("Creature") || has("Planeswalker");
+    case "artifact_or_enchantment":
+      return has("Artifact") || has("Enchantment");
     case "artifact":
       return has("Artifact");
     case "enchantment":
@@ -267,5 +285,7 @@ export function matchesTargetType(card: { typeLine: string; grantedTypes?: strin
       return true;
     case "nonland_permanent":
       return !card.typeLine.includes("Land");
+    case "land":
+      return has("Land");
   }
 }
