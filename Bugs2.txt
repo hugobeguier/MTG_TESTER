@@ -2,6 +2,6 @@
 2. Also he tapped Elvish Mystic even though it does not have haste same thing happened with Llanowar Elves, played it and tapped it for mana the same turn. seems like summoning sickness isnt quite working
 3. Kodama's Reach did not let me fetch two basic lands and put one tapped on the battlefield and one in my hand
 4. When Reclamation Sage it did not let me choose target artifact or enchantment, why did this automaticly remove target artifact/enchantment?
-5. 
+5. Seems like Sakura-Tribe Elder lets you put an artifact card, it should only give the respons window for lands not artifacts 
 
 

@@ -60,6 +60,30 @@ describe("payGenericSacrificeCost — self-tap exclusion", () => {
   });
 });
 
+describe("payGenericSacrificeCost — taps the source (High Market/Viscera Seer's own {T} cost)", () => {
+  const HIGH_MARKET_ORACLE_TEXT = "{T}, Sacrifice a creature: You gain 1 life.";
+
+  it("taps the source when its cost includes {T}, alongside the sacrifice", () => {
+    const market = card({ id: "market", name: "High Market", typeLine: "Land", oracleText: HIGH_MARKET_ORACLE_TEXT });
+    const bear = card({ id: "bear", name: "Grizzly Bears", typeLine: "Creature — Bear" });
+    const s = session([seat({ id: "caster", name: "Me", kind: "human", board: { hand: [], battlefield: [market, bear] } })]);
+    const result = payGenericSacrificeCost(s, "caster", "market", 0);
+    expect(result).toBeDefined();
+    const marketAfter = result!.session.seats[0].board.battlefield.find((c) => c.id === "market");
+    expect(marketAfter?.tapped).toBe(true);
+  });
+
+  it("does not tap the source when its cost has no {T} at all (e.g. a plain 'Sacrifice a creature: ...')", () => {
+    const altar = card({ id: "altar", name: "Untapped Sacrifice Outlet", typeLine: "Artifact", oracleText: "Sacrifice a creature: Draw a card." });
+    const bear = card({ id: "bear", name: "Grizzly Bears", typeLine: "Creature — Bear" });
+    const s = session([seat({ id: "caster", name: "Me", kind: "human", board: { hand: [], battlefield: [altar, bear] } })]);
+    const result = payGenericSacrificeCost(s, "caster", "altar", 0);
+    expect(result).toBeDefined();
+    const altarAfter = result!.session.seats[0].board.battlefield.find((c) => c.id === "altar");
+    expect(altarAfter?.tapped).toBeFalsy();
+  });
+});
+
 describe("payGenericTapCost — self-tap exclusion", () => {
   const TAP_ABILITY_ORACLE_TEXT = "{T}: Add {C}.\n{1}, {T}: Create a 1/1 white Soldier creature token.";
 

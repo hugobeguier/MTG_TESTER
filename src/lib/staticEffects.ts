@@ -58,7 +58,7 @@ export async function requestAttackTaxInterpretation(
   oracleText: string,
   baseUrl = process.env.OLLAMA_BASE_URL ?? "http://localhost:11434"
 ): Promise<InterpretedEffect | undefined> {
-  const model = process.env.OLLAMA_RULES_MODEL ?? process.env.OLLAMA_MODEL ?? "llama3.2";
+  const model = process.env.OLLAMA_RULES_MODEL ?? process.env.OLLAMA_MODEL ?? "qwen2.5:7b-instruct-q5_K_M";
   const response = await fetch(`${baseUrl}/api/chat`, {
     method: "POST",
     headers: { "content-type": "application/json" },

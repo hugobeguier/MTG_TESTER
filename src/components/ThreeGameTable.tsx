@@ -15,8 +15,11 @@ import {
   type SelfUntapAbility
 } from "@/lib/activatedAbilities";
 import { equipCost, isEquipment } from "@/lib/attachments";
+import { parseManlandAnimation } from "@/lib/activatedAbilities";
 import { hasKeyword as hasOracleKeyword } from "@/lib/keywords";
 import { isBasicLandFetchAbility } from "@/lib/oracleClauses";
+import { DEFAULT_STOP_SETTINGS, stopKey, TURN_PHASES, type PriorityStopSettings } from "@/lib/priorityStops";
+import { VisualCard } from "./VisualCard";
 
 type ManaColor = "W" | "U" | "B" | "R" | "G" | "C";
 type ManaPool = Record<ManaColor, number>;
@@ -76,8 +79,17 @@ interface ThreeGameTableProps {
   onSearchLibraryCardToHand?: (cardId: string) => void;
   onFinishLibrarySearch?: () => void;
   onChooseGraveyardReanimationTarget?: (seatId: string, cardId: string) => void;
+  onChooseSacrificeCostTarget?: (seatId: string, cardId: string) => void;
+  onChooseModalOption?: (index: number) => void;
+  onChooseEffectTarget?: (target: { kind: "card"; seatId: string; cardId: string } | { kind: "player"; seatId: string }) => void;
+  onDeclineEffectTarget?: () => void;
+  onConfirmProliferateTargets?: (cardIds: string[], playerSeatIds: string[]) => void;
   onChooseBattlefieldCreatureTarget?: (seatId: string, cardId: string) => void;
   onChooseAuraRetarget?: (seatId: string, cardId: string) => void;
+  // Cancel is handled generically by the existing onCloseLibrarySearch/cancelRuleChoice path (see
+  // the targeting banner JSX) — no cost has been paid yet when this choice is open, so cancelling
+  // is always free, same as every other non-choose_effect_target board-targeting choice.
+  onChooseEquipTarget?: (cardId: string) => void;
   onChooseNextTrigger?: (sourceCardId: string) => void;
   onAcceptMiracle?: (faceIndex?: number) => void;
   onDeclineMiracle?: () => void;
@@ -87,8 +99,11 @@ interface ThreeGameTableProps {
   onDeclineCommanderZoneChoice?: () => void;
   onCompleteDiscardChoice?: (cardIds: string[]) => void;
   onCompletePutCardsOnLibrary?: (cardIds: string[]) => void;
+  onCompleteConniveDiscard?: (cardIds: string[]) => void;
+  onCompleteReturnLandToHand?: (cardIds: string[]) => void;
   onChooseCreatureType?: (creatureType: string) => void;
   onChooseColor?: (color: ManaColor) => void;
+  onConfirmAttackTriggerManaColors?: (distribution: Partial<Record<Exclude<ManaColor, "C">, number>>) => void;
   onCloseMyriadSearch?: () => void;
   onCompleteMyriadSearch?: (cardIds: string[]) => void;
   onCloseUrzaSagaSearch?: () => void;
@@ -99,6 +114,7 @@ interface ThreeGameTableProps {
   onMoveCardToExile?: (seatId: string, cardId: string) => void;
   onMoveCardToHand?: (seatId: string, cardId: string) => void;
   onMoveBattlefieldCard?: (seatId: string, cardId: string, position: { x: number; z: number }) => void;
+  onTapForMana?: (seatId: string, cardId: string) => void;
   onChangeCounter?: (seatId: string, cardId: string, kind: string, delta: number) => void;
   onActivateLoyalty?: (seatId: string, cardId: string, loyaltyCost: number, abilityText: string) => void;
   onCastCommander?: (seatId: string, position?: { x: number; z: number }) => void;
@@ -109,9 +125,8 @@ interface ThreeGameTableProps {
   onActivateSelfUntap?: (seatId: string, cardId: string, abilityIndex: number) => void;
   onActivateGenericMana?: (seatId: string, cardId: string, abilityIndex: number) => void;
   onActivateEquip?: (seatId: string, cardId: string) => void;
+  onActivateManlandAnimation?: (seatId: string, cardId: string) => void;
   onChangeLife?: (seatId: string, delta: number) => void;
-  onScry?: (count: number) => void;
-  onSurveil?: (count: number) => void;
   onKeepLibraryLookCardOnTop?: (cardId: string) => void;
   onOrderLibraryLookCardOnTop?: (cardId: string) => void;
   onPutLibraryLookCardOnBottom?: (cardId: string) => void;
@@ -145,6 +160,14 @@ interface ThreeGameTableProps {
   onPassBlocks?: () => void;
   onPayCumulativeUpkeep?: () => void;
   onSacrificeRuleSource?: () => void;
+  priorityStopSettings?: PriorityStopSettings;
+  onTogglePhaseStop?: (phase: string, seatIndex: number) => void;
+  onToggleStopOnStackResponse?: () => void;
+  onToggleStopOnAttacked?: () => void;
+  onToggleStopOnTargeted?: () => void;
+  onToggleFullControl?: () => void;
+  holdPriorityOnce?: boolean;
+  onStopNext?: () => void;
 }
 
 type PendingActionView =
@@ -197,6 +220,10 @@ type RuleChoiceView =
       sourceCardName: string;
       prompt: string;
       cards: Array<{ card: VisibleCard; seatId: string; seatName: string }>;
+      // Meren of Clan Nel Toth's own conditional destination (battlefield if affordable, hand
+      // otherwise) makes the plain "Return to Battlefield" label actively wrong for that shape —
+      // varies per card the same way choose_creature_on_battlefield's own actionLabel already does.
+      actionLabel: string;
     }
   | {
       kind: "choose_creature_on_battlefield";
@@ -209,7 +236,52 @@ type RuleChoiceView =
       actionLabel: string;
     }
   | {
+      kind: "choose_creature_to_sacrifice";
+      sourceCardName: string;
+      prompt: string;
+      cards: Array<{ card: VisibleCard; seatId: string; seatName: string }>;
+      actionLabel: string;
+    }
+  | {
+      kind: "choose_modal_option";
+      sourceCardName: string;
+      prompt: string;
+      options: Array<{ index: number; label: string }>;
+    }
+  // The general "this effect says target and you control it" choice — see AppFlow.tsx's
+  // choose_effect_target PendingRuleChoice for the full rationale. zone picks which UI this renders
+  // as: "battlefield" uses the board-click ring highlight (see BoardTargetingChoice/
+  // asBoardTargetingChoice below), "graveyard" reuses TargetPickerModal's card-art list, "player"
+  // uses a small button-per-player modal — cards/players is populated for whichever zone applies,
+  // empty for the other.
+  | {
+      kind: "choose_effect_target";
+      sourceCardName: string;
+      prompt: string;
+      optional: boolean;
+      zone: "battlefield" | "graveyard" | "player";
+      cards: Array<{ card: VisibleCard; seatId: string; seatName: string }>;
+      players: Array<{ seatId: string; seatName: string }>;
+    }
+  | {
+      kind: "choose_proliferate_targets";
+      sourceCardName: string;
+      prompt: string;
+      cards: Array<{ card: VisibleCard; seatId: string; seatName: string }>;
+      players: Array<{ seatId: string; seatName: string; countersLabel: string }>;
+    }
+  | {
       kind: "choose_aura_attach_target";
+      sourceCardName: string;
+      prompt: string;
+      cards: Array<{ card: VisibleCard; seatId: string; seatName: string }>;
+      actionLabel: string;
+    }
+  // Equip's real target choice — see AppFlow.tsx's choose_equip_target PendingRuleChoice. Always a
+  // "creature you control" pool (no opponent half, unlike choose_aura_attach_target), rendered with
+  // the same board-click ring highlight as a battlefield-zone choose_effect_target.
+  | {
+      kind: "choose_equip_target";
       sourceCardName: string;
       prompt: string;
       cards: Array<{ card: VisibleCard; seatId: string; seatName: string }>;
@@ -263,6 +335,18 @@ type RuleChoiceView =
       requiredCount: number;
     }
   | {
+      kind: "connive_discard";
+      sourceCardName: string;
+      prompt: string;
+      hand: VisibleCard[];
+    }
+  | {
+      kind: "return_land_to_hand";
+      sourceCardName: string;
+      prompt: string;
+      lands: VisibleCard[];
+    }
+  | {
       kind: "choose_creature_type";
       sourceCardName: string;
       prompt: string;
@@ -274,6 +358,12 @@ type RuleChoiceView =
       prompt: string;
       currentChoice?: string;
       excludedColor?: string;
+    }
+  | {
+      kind: "distribute_attack_trigger_mana";
+      sourceCardName: string;
+      prompt: string;
+      amount: number;
     };
 
 interface BlockChoiceView {
@@ -307,7 +397,28 @@ interface ZoneUserData {
   zone: TableZone;
 }
 
-type InteractionUserData = CardUserData | ZoneUserData;
+interface PlayerUserData {
+  kind: "player";
+  seatId: string;
+}
+
+type InteractionUserData = CardUserData | ZoneUserData | PlayerUserData;
+
+// Rule choices whose legal targets already live on the battlefield (Athreos-style battlefield
+// counter placement, the Aura post-hoc attach retarget, and a choose_effect_target whose spec.zone
+// is "battlefield" — a plain destroy/exile/bounce/damage-to-creature effect) — these are answered
+// by clicking the board directly instead of a text-list modal. choose_creature_from_graveyards (and
+// a choose_effect_target whose zone is "graveyard") has no battlefield presence (graveyards aren't
+// rendered per-card in the 3D scene), so those keep a modal — see TargetPickerModal.
+type BoardTargetingChoice =
+  | Extract<RuleChoiceView, { kind: "choose_creature_on_battlefield" | "choose_aura_attach_target" | "choose_equip_target" }>
+  | Extract<RuleChoiceView, { kind: "choose_effect_target" }>;
+
+function asBoardTargetingChoice(choice: RuleChoiceView | undefined): BoardTargetingChoice | undefined {
+  if (choice?.kind === "choose_creature_on_battlefield" || choice?.kind === "choose_aura_attach_target" || choice?.kind === "choose_equip_target") return choice;
+  if (choice?.kind === "choose_effect_target" && choice.zone === "battlefield") return choice;
+  return undefined;
+}
 
 // Sized to give each player's battlefield rectangle (see PLAYER_AREAS) real room before permanents
 // start crowding, plus a side strip outside each rectangle for the non-battlefield zones (see
@@ -347,6 +458,7 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const dynamicGroupRef = useRef<THREE.Group | null>(null);
+  const targetHighlightGroupRef = useRef<THREE.Group | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const cardMeshesRef = useRef<THREE.Object3D[]>([]);
   const frameRef = useRef<number | undefined>(undefined);
@@ -367,6 +479,16 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
   const [draggingHandCardId, setDraggingHandCardId] = useState<string | undefined>();
   const [draggingZone, setDraggingZone] = useState<DraggedZone | undefined>();
   const [zoneView, setZoneView] = useState<{ seatId: string; zone: TableZone } | undefined>();
+  // Toggles the 3D life-total plates (addLifeTotalPlate) between life totals and commander damage
+  // taken — a button flips this, and it's threaded into rebuildDynamicScene the same way
+  // selectedCardId already is, since both need a full scene rebuild to actually change what's drawn
+  // on those plates.
+  const [showCommanderDamage, setShowCommanderDamage] = useState(false);
+  // The agent-hand-anchor panels below render every AI seat's actual hand face-up as a debug/
+  // observer view (see that block's own aria-label) — not something a real opponent could see.
+  // Purely a DOM-visibility toggle (unlike showCommanderDamage above), so it doesn't need to touch
+  // rebuildDynamicScene or trigger a scene rebuild at all.
+  const [showAgentHands, setShowAgentHands] = useState(true);
   const [activityOpen, setActivityOpen] = useState(false);
   const [activityPosition, setActivityPosition] = useState({ x: 24, y: 144 });
   const [activityDragOffset, setActivityDragOffset] = useState<{ x: number; y: number } | undefined>();
@@ -376,6 +498,42 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
   // top of each other.
   const [actionLogOpen, setActionLogOpen] = useState(false);
   const [actionLogPosition, setActionLogPosition] = useState({ x: 400, y: 144 });
+  const [priorityStopsOpen, setPriorityStopsOpen] = useState(false);
+  // Now that most priority windows auto-pass instead of stopping the human (see priorityStops.ts),
+  // props.pendingAction often goes from set to undefined within the same tick an agent's decision
+  // resolves — the stack HUD below used to key directly off props.pendingAction, so a spell an agent
+  // cast with nothing to respond to flashed by faster than a human could read it. This mirrors the
+  // last live pendingAction/stackActions for a minimum visible duration instead, only replacing it
+  // early when a NEW action actually arrives (never extending an old one past a new one).
+  const STACK_HUD_MIN_VISIBLE_MS = 4000;
+  const [displayedAction, setDisplayedAction] = useState<PendingActionView | undefined>(props.pendingAction);
+  const [displayedStack, setDisplayedStack] = useState<PendingActionView[]>(props.stackActions ?? []);
+  const stackHudHideTimer = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (props.pendingAction) {
+      if (stackHudHideTimer.current !== undefined) {
+        window.clearTimeout(stackHudHideTimer.current);
+        stackHudHideTimer.current = undefined;
+      }
+      setDisplayedAction(props.pendingAction);
+      setDisplayedStack(props.stackActions ?? []);
+      return;
+    }
+    if (displayedAction && stackHudHideTimer.current === undefined) {
+      stackHudHideTimer.current = window.setTimeout(() => {
+        setDisplayedAction(undefined);
+        setDisplayedStack([]);
+        stackHudHideTimer.current = undefined;
+      }, STACK_HUD_MIN_VISIBLE_MS);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.pendingAction, props.stackActions]);
+  useEffect(
+    () => () => {
+      if (stackHudHideTimer.current !== undefined) window.clearTimeout(stackHudHideTimer.current);
+    },
+    []
+  );
   const [actionLogDragOffset, setActionLogDragOffset] = useState<{ x: number; y: number } | undefined>();
   const [reasoningSeatId, setReasoningSeatId] = useState<string | undefined>();
   const human = props.session.seats.find((seat) => seat.kind === "human") ?? props.session.seats[0];
@@ -395,12 +553,18 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
     (event) => event.detail !== "Mana" && event.detail !== "Rules advisor" && event.detail !== "Timing" && event.detail !== "Phase change"
   );
   const prioritySeat = props.session.seats.find((seat) => seat.id === props.prioritySeatId);
+  const humanSeatIndex = Math.max(0, props.session.seats.findIndex((seat) => seat.id === human.id));
   const humanHasPriority = props.prioritySeatId === human.id;
   const humanIsActive = props.session.activePlayerId === human.id;
-  const stackTopFirst = [...(props.stackActions ?? [])].reverse();
+  const stackTopFirst = [...displayedStack].reverse();
   const mulliganSelectedCount = props.mulliganReturnCardIds?.length ?? 0;
   const mulliganRequired = props.mulliganReturnRequired ?? 0;
   const tableRenderKey = useMemo(() => buildTableRenderKey(props.session, props.selectedCardId), [props.session, props.selectedCardId]);
+  const boardTargetingChoice = asBoardTargetingChoice(props.ruleChoice);
+  // A plain string rather than the choice object itself, since ruleChoiceView derives a fresh
+  // object every render — using the object as a dependency would rebuild the highlight rings every
+  // render instead of only when the actual legal-target set changes.
+  const boardTargetingKey = boardTargetingChoice ? `${boardTargetingChoice.kind}:${boardTargetingChoice.cards.map((entry) => entry.card.id).join(",")}` : "";
 
   propsRef.current = props;
 
@@ -434,6 +598,14 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
     dropGhost.add(dropGhostFill, dropGhostOutline);
     scene.add(dropGhost);
     dropGhostRef.current = dropGhost;
+
+    // Legal-target rings for the active board-targeting choice (see asBoardTargetingChoice) — a
+    // sibling of dynamicGroup, not a child of it, so rebuildDynamicScene's group.clear() (called on
+    // every session change) can't wipe it out from under an in-progress choice; rebuilt by its own
+    // effect below instead, keyed on both the scene and the choice's legal-target set.
+    const targetHighlightGroup = new THREE.Group();
+    scene.add(targetHighlightGroup);
+    targetHighlightGroupRef.current = targetHighlightGroup;
 
     const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
     cameraRef.current = camera;
@@ -493,8 +665,11 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
 
     // Anchors each agent's hand overlay (a real DOM box, so it can have a real scrollbar) to that
     // agent's name-label position in the 3D scene, re-projected to screen space every frame so it
-    // tracks camera orbit/pan/zoom instead of sitting fixed on the screen regardless of where the
-    // table actually is.
+    // sits next to that player's own board as the camera orbits/pans/zooms — restored after a fully
+    // static per-corner layout was tried instead (it stopped the drift but lost the actual
+    // board-relative placement, reported live as "the hands should be by each player's board like
+    // before"). The heavy smoothing below is specifically to tame the front-row/near-camera parallax
+    // that made the original version feel like it was drifting.
     const projected = new THREE.Vector3();
     // Hand panels are a fixed 468px wide (see .agent-hand-anchor in globals.css). Perspective
     // foreshortens seats that sit far from the camera, so two agents' name-label anchors can
@@ -542,7 +717,27 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
         const minLeft = pendingHandAnchors[i - 1].left + HAND_ANCHOR_MIN_GAP;
         if (pendingHandAnchors[i].left < minLeft) pendingHandAnchors[i].left = minLeft;
       }
-      const smoothing = 1 - Math.exp(-10 * deltaSeconds);
+      // The push-apart above only ever pushes further RIGHT to resolve an overlap — nothing pulled
+      // a box back once that push (or the raw projection itself, for a front-row seat like Sable
+      // whose anchor point sits close to the camera and near a screen edge) carried it past the
+      // viewport's own right or top edge. `left`/`top` mark the box's bottom-CENTER (see
+      // .agent-hand-anchor's translate(-50%, -100%)), so half its 468px width must stay clear of
+      // both edges, and its full height must stay clear of the top edge. Reported live as Sable's
+      // hand box hanging half off the right side of the screen while Veyra/Malik's stayed in view.
+      const HAND_ANCHOR_HALF_WIDTH = 234;
+      const HAND_ANCHOR_EDGE_MARGIN = 8;
+      const HAND_ANCHOR_MIN_TOP = 150;
+      for (const anchor of pendingHandAnchors) {
+        anchor.left = Math.min(Math.max(anchor.left, HAND_ANCHOR_HALF_WIDTH + HAND_ANCHOR_EDGE_MARGIN), width - HAND_ANCHOR_HALF_WIDTH - HAND_ANCHOR_EDGE_MARGIN);
+        anchor.top = Math.max(anchor.top, HAND_ANCHOR_MIN_TOP);
+      }
+      // A much lower time-constant than a typical UI lerp (10 was the original value, before this
+      // restoration) — front-row seats swing through a wide screen-space arc per degree of camera
+      // orbit (basic motion parallax; see the comment above this function), and that raw swing read
+      // as "drift"/"jumping" even once the ordering flip-flop was fixed. 3 makes the box glide well
+      // behind the target position instead of chasing it exactly, trading a little responsiveness
+      // for a lot less perceived jitter.
+      const smoothing = 1 - Math.exp(-3 * deltaSeconds);
       pendingHandAnchors.forEach(({ el, left, top }) => {
         el.style.display = "grid";
         const previous = handAnchorRenderPositions.get(el) ?? { left, top };
@@ -576,6 +771,26 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
     const pickCard = (event: PointerEvent) => {
       const hit = raycastCard(event);
       const data = hit?.object.userData as Partial<InteractionUserData> | undefined;
+
+      // While a board-targeting choice is open, every click is consumed by targeting — a legal hit
+      // resolves the choice, an illegal one (or empty space) is simply ignored, rather than opening
+      // the card inspector underneath. Cancel is a separate explicit button (see the targeting
+      // banner in the JSX below), not a click-elsewhere gesture, since the camera pan/orbit already
+      // uses empty-space drags.
+      const targeting = asBoardTargetingChoice(propsRef.current.ruleChoice);
+      if (targeting) {
+        if (data?.kind === "card" && data.card) {
+          const entry = targeting.cards.find((candidate) => candidate.card.id === data.card!.id);
+          if (entry) {
+            if (targeting.kind === "choose_creature_on_battlefield") propsRef.current.onChooseBattlefieldCreatureTarget?.(entry.seatId, entry.card.id);
+            else if (targeting.kind === "choose_aura_attach_target") propsRef.current.onChooseAuraRetarget?.(entry.seatId, entry.card.id);
+            else if (targeting.kind === "choose_equip_target") propsRef.current.onChooseEquipTarget?.(entry.card.id);
+            else propsRef.current.onChooseEffectTarget?.({ kind: "card", seatId: entry.seatId, cardId: entry.card.id });
+          }
+        }
+        return;
+      }
+
       if (data?.kind === "card" && data.card) {
         propsRef.current.onInspectCard?.(data.card);
         return;
@@ -588,6 +803,15 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
     const updateHoveredCard = (event: PointerEvent) => {
       const hit = raycastCard(event);
       const data = hit?.object.userData as Partial<InteractionUserData> | undefined;
+
+      const targeting = asBoardTargetingChoice(propsRef.current.ruleChoice);
+      if (targeting) {
+        hoveredCardRef.current = undefined;
+        const isLegalTarget = data?.kind === "card" && data.card && targeting.cards.some((candidate) => candidate.card.id === data.card!.id);
+        renderer.domElement.style.cursor = isLegalTarget ? "crosshair" : "not-allowed";
+        return;
+      }
+
       hoveredCardRef.current = data?.kind === "card" && data.card && data.seatId && data.location ? (data as CardUserData) : undefined;
       const hovered = hoveredCardRef.current;
       renderer.domElement.style.cursor = hovered?.location === "battlefield" && hovered.seatId === propsRef.current.session.seats.find((seat) => seat.kind === "human")?.id ? "grab" : hovered || data?.kind === "zone" ? "pointer" : "";
@@ -615,8 +839,9 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
       updateHoveredCard(event);
       const hovered = hoveredCardRef.current;
       const humanId = propsRef.current.session.seats.find((seat) => seat.kind === "human")?.id;
+      const targeting = asBoardTargetingChoice(propsRef.current.ruleChoice);
       draggedBattlefieldCardRef.current =
-        event.button === 0 && !event.shiftKey && hovered?.location === "battlefield" && hovered.seatId === humanId ? hovered : undefined;
+        !targeting && event.button === 0 && !event.shiftKey && hovered?.location === "battlefield" && hovered.seatId === humanId ? hovered : undefined;
       if (draggedBattlefieldCardRef.current) {
         renderer.domElement.style.cursor = "grabbing";
       }
@@ -754,8 +979,33 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
   }, []);
 
   useEffect(() => {
-    rebuildDynamicScene(dynamicGroupRef.current, propsRef.current.session, propsRef.current.selectedCardId, cardMeshesRef);
-  }, [tableRenderKey]);
+    rebuildDynamicScene(dynamicGroupRef.current, propsRef.current.session, propsRef.current.selectedCardId, cardMeshesRef, showCommanderDamage);
+  }, [tableRenderKey, showCommanderDamage]);
+
+  // Legal-target ring meshes for the active board-targeting choice — runs after the scene rebuild
+  // effect above (React fires same-commit effects in declaration order) so cardMeshesRef already
+  // reflects the current session by the time this reads it. Kept as its own effect, and the group
+  // itself kept outside dynamicGroup (see its creation in the mount effect), so opening/closing a
+  // targeting choice doesn't force a full board rebuild.
+  useEffect(() => {
+    const group = targetHighlightGroupRef.current;
+    if (!group) return;
+    while (group.children.length > 0) group.remove(group.children[0]);
+    if (!boardTargetingChoice) return;
+    const legalCardIds = new Set(boardTargetingChoice.cards.map((entry) => entry.card.id));
+    for (const mesh of cardMeshesRef.current) {
+      const data = mesh.userData as Partial<InteractionUserData>;
+      if (data.kind !== "card" || !data.card || !legalCardIds.has(data.card.id)) continue;
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(0.42, 0.5, 32),
+        new THREE.MeshBasicMaterial({ color: "#f4c95d", transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false })
+      );
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.copy((mesh as THREE.Mesh).position);
+      ring.position.y += 0.02;
+      group.add(ring);
+    }
+  }, [tableRenderKey, boardTargetingKey]);
 
   const activeName = useMemo(
     () => props.session.seats.find((seat) => seat.id === props.session.activePlayerId)?.name ?? "Active player",
@@ -948,23 +1198,25 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
       <div className="three-hud top-right">
         <button type="button" onClick={() => setActivityOpen((current) => !current)}>Agent Activity</button>
         <button type="button" onClick={() => setActionLogOpen((current) => !current)}>Action Log</button>
+        <button type="button" onClick={() => setPriorityStopsOpen(true)}>Stops</button>
+        <button
+          type="button"
+          className={showCommanderDamage ? "is-active" : undefined}
+          onClick={() => setShowCommanderDamage((current) => !current)}
+          aria-pressed={showCommanderDamage}
+        >
+          {showCommanderDamage ? "Show Life Totals" : "Show Commander Damage"}
+        </button>
+        <button
+          type="button"
+          className={showAgentHands ? "is-active" : undefined}
+          onClick={() => setShowAgentHands((current) => !current)}
+          aria-pressed={showAgentHands}
+        >
+          {showAgentHands ? "Hide Agent Hands" : "Show Agent Hands"}
+        </button>
       </div>
-      <div className="three-hud life-hud" aria-label="Life totals">
-        <div className="life-hud-grid">
-          {props.session.seats.map((seat, index) => {
-            const area = PLAYER_AREAS[index] ?? PLAYER_AREAS[0];
-            const row = area.z > 0 ? 2 : 1;
-            const col = area.x > 0 ? 2 : 1;
-            return (
-              <div className="life-hud-cell" key={seat.id} style={{ gridRow: row, gridColumn: col }}>
-                <strong>{seat.life}</strong>
-                <span>{seat.name}</span>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-      {agentSeats.map((seat) => (
+      {showAgentHands && agentSeats.map((seat) => (
         <div
           className="agent-hand-anchor"
           key={seat.id}
@@ -1089,8 +1341,6 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
             <button type="button" onClick={() => props.onDrawCard?.(human.id)}>Draw</button>
             <button type="button" onClick={() => props.onShuffleLibrary?.(human.id)}>Shuffle</button>
             <button type="button" onClick={props.onOpenLibrarySearch}>Search Library</button>
-            <button type="button" onClick={() => props.onScry?.(1)}>Scry 1</button>
-            <button type="button" onClick={() => props.onSurveil?.(2)}>Surveil 2</button>
             <div className="life-adjuster" aria-label="Life total controls">
               <button type="button" onClick={() => props.onChangeLife?.(human.id, -1)}>-</button>
               <strong>{human.life}</strong>
@@ -1112,7 +1362,26 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
                 Play Selected
               </button>
             )}
-            <button type="button" disabled={Boolean(props.pendingAction) || !humanIsActive} onClick={props.onAdvanceTurn}>Advance Phase</button>
+            <button
+              type="button"
+              className={props.priorityStopSettings?.fullControl ? "is-active" : undefined}
+              aria-pressed={props.priorityStopSettings?.fullControl}
+              onClick={props.onToggleFullControl}
+            >
+              Full Control
+            </button>
+            <button
+              type="button"
+              className={props.holdPriorityOnce ? "is-active" : undefined}
+              aria-pressed={props.holdPriorityOnce}
+              disabled={props.holdPriorityOnce}
+              onClick={props.onStopNext}
+            >
+              Stop Next
+            </button>
+            <button type="button" disabled={Boolean(props.pendingAction) || !humanIsActive} onClick={props.onAdvanceTurn}>
+              {humanIsActive && !props.pendingAction ? "Continue" : "Advance Phase"}
+            </button>
             <button type="button" disabled={Boolean(props.pendingAction) || !humanIsActive} onClick={props.onEndTurn}>End Turn</button>
             <button type="button" disabled={!props.pendingAction || !humanHasPriority} onClick={props.onRespond}>Review Response</button>
             <button type="button" disabled={!props.pendingAction || !humanHasPriority || !props.selectedCardCanRespond} onClick={props.onRespondWithSelectedCard}>
@@ -1125,16 +1394,16 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
           </div>
         )}
       </div>
-      {props.pendingAction ? (
+      {displayedAction ? (
         <div className="three-hud bottom-right">
           <div className="hud-card-detail stack-detail">
-            <strong>{props.pendingAction.type === "spell" ? "Stack" : props.pendingAction.type === "trigger" ? "Trigger" : "Phase Change"}</strong>
-            {props.pendingAction.type !== "phase" && props.pendingAction.sourceCard ? (
-              <VisualCard card={props.pendingAction.sourceCard} compact />
+            <strong>{displayedAction.type === "spell" ? "Stack" : displayedAction.type === "trigger" ? "Trigger" : "Phase Change"}</strong>
+            {displayedAction.type !== "phase" && displayedAction.sourceCard ? (
+              <VisualCard card={displayedAction.sourceCard} compact />
             ) : null}
-            <p>{props.pendingAction.message}</p>
-            {props.pendingAction.type === "spell" && props.pendingAction.cardTypeLine ? (
-              <p className="stack-type-line">{props.pendingAction.cardTypeLine}</p>
+            <p>{displayedAction.message}</p>
+            {displayedAction.type === "spell" && displayedAction.cardTypeLine ? (
+              <p className="stack-type-line">{displayedAction.cardTypeLine}</p>
             ) : null}
             {stackTopFirst.length > 0 ? (
               <div className="stack-list" aria-label="Current stack">
@@ -1154,7 +1423,13 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
                 ))}
               </div>
             ) : null}
-            <span>{humanHasPriority ? "You have priority." : `${prioritySeat?.name ?? "An agent"} has priority.`}</span>
+            {/* Only shown while props.pendingAction is genuinely still live — once the panel is just
+                lingering after auto-resolving (see the display-persistence effect above), priority
+                has typically already moved elsewhere, and repeating a stale "X has priority" line
+                here would be actively misleading rather than merely uninformative. */}
+            {props.pendingAction ? (
+              <span>{humanHasPriority ? "You have priority." : `${prioritySeat?.name ?? "An agent"} has priority.`}</span>
+            ) : null}
           </div>
         </div>
       ) : null}
@@ -1233,6 +1508,29 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
               ? () => props.onActivateEquip?.(inspectedOwner.seat.id, props.inspectedCard!.id)
               : undefined
           }
+          onActivateManlandAnimation={
+            inspectedOwner?.seat.kind === "human" &&
+            inspectedOwner.zone === "battlefield" &&
+            !props.inspectedCard.temporaryAnimatedAsCreature &&
+            parseManlandAnimation(props.inspectedCard.oracleText) !== undefined
+              ? () => props.onActivateManlandAnimation?.(inspectedOwner.seat.id, props.inspectedCard!.id)
+              : undefined
+          }
+          // A plain "{T}: Add ..." button for a permanent that ALSO has some other ability the
+          // inspector is shown for (Mind Stone's sacrifice-draw, a generic tap ability, ...) — real
+          // legality (including board-state-dependent producers like Reflecting Pool/Exotic Orchard)
+          // is re-checked and enforced by AppFlow's tapPermanentForMana itself, so this is only a
+          // display heuristic (producedMana + a literal "{T}:" clause) for whether to show the
+          // button at all; a false positive here just no-ops on click rather than acting illegally.
+          onTapForMana={
+            inspectedOwner?.seat.kind === "human" &&
+            inspectedOwner.zone === "battlefield" &&
+            !props.inspectedCard.tapped &&
+            (props.inspectedCard.producedMana?.length ?? 0) > 0 &&
+            /\{t\}\s*:/i.test(props.inspectedCard.oracleText)
+              ? () => props.onTapForMana?.(inspectedOwner.seat.id, props.inspectedCard!.id)
+              : undefined
+          }
           attackTargets={
             inspectedOwner?.seat.kind === "human" && inspectedOwner.zone === "battlefield" && props.humanAttackTargets && props.humanAttackTargets.length > 0
               ? props.humanAttackTargets
@@ -1253,7 +1551,7 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
             (props.inspectedCard.exiledPlayableUntilTurn === undefined || props.session.turn <= props.inspectedCard.exiledPlayableUntilTurn) &&
             // If a response window is open, only an instant/flash card is actually castable —
             // main-phase casting (no pendingAction) has no such restriction.
-            (!props.pendingAction || canCastAtInstantSpeed(props.inspectedCard))
+            (!props.pendingAction || canCastAtInstantSpeed(props.inspectedCard, seatHasFlashGrant(inspectedOwner.seat)))
               ? () => props.onCastFromExile?.(inspectedOwner.seat.id, props.inspectedCard!.id)
               : undefined
           }
@@ -1311,40 +1609,87 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
         />
       ) : null}
       {props.ruleChoice?.kind === "choose_creature_from_graveyards" ? (
-        <CreatureTargetModal
+        <TargetPickerModal
           cards={props.ruleChoice.cards}
           prompt={props.ruleChoice.prompt}
           sourceCardName={props.ruleChoice.sourceCardName}
-          zoneLabel="graveyard"
-          actionLabel="Return to Battlefield"
+          actionLabel={props.ruleChoice.actionLabel}
           emptyLabel="No creature cards in any graveyard."
           onClose={props.onCloseLibrarySearch}
           onChoose={props.onChooseGraveyardReanimationTarget}
         />
       ) : null}
-      {props.ruleChoice?.kind === "choose_creature_on_battlefield" ? (
-        <CreatureTargetModal
+      {props.ruleChoice?.kind === "choose_creature_to_sacrifice" ? (
+        <TargetPickerModal
           cards={props.ruleChoice.cards}
           prompt={props.ruleChoice.prompt}
           sourceCardName={props.ruleChoice.sourceCardName}
-          zoneLabel="battlefield"
           actionLabel={props.ruleChoice.actionLabel}
-          emptyLabel="No legal creature target."
+          emptyLabel="No legal creature to sacrifice."
           onClose={props.onCloseLibrarySearch}
-          onChoose={props.onChooseBattlefieldCreatureTarget}
+          onChoose={props.onChooseSacrificeCostTarget}
         />
       ) : null}
-      {props.ruleChoice?.kind === "choose_aura_attach_target" ? (
-        <CreatureTargetModal
+      {props.ruleChoice?.kind === "choose_modal_option" ? (
+        <ModalOptionModal
+          prompt={props.ruleChoice.prompt}
+          sourceCardName={props.ruleChoice.sourceCardName}
+          options={props.ruleChoice.options}
+          onChoose={props.onChooseModalOption}
+        />
+      ) : null}
+      {props.ruleChoice?.kind === "choose_effect_target" && props.ruleChoice.zone === "graveyard" ? (
+        // An optional ("you may") graveyard-zone effect (Eternal Witness's real wording) can be
+        // closed/declined via the same X/backdrop every other cancelable modal uses; this phase
+        // never produces a MANDATORY graveyard-zone choose_effect_target (see targetSpecs.ts), so
+        // this is always safe to wire to Decline rather than the generic cancelRuleChoice.
+        <TargetPickerModal
           cards={props.ruleChoice.cards}
           prompt={props.ruleChoice.prompt}
           sourceCardName={props.ruleChoice.sourceCardName}
-          zoneLabel="battlefield"
-          actionLabel={props.ruleChoice.actionLabel}
-          emptyLabel="No legal creature target."
-          onClose={props.onCloseLibrarySearch}
-          onChoose={props.onChooseAuraRetarget}
+          actionLabel="Choose"
+          emptyLabel="No legal target."
+          onClose={props.onDeclineEffectTarget}
+          onChoose={(seatId, cardId) => props.onChooseEffectTarget?.({ kind: "card", seatId, cardId })}
         />
+      ) : null}
+      {props.ruleChoice?.kind === "choose_effect_target" && props.ruleChoice.zone === "player" ? (
+        <PlayerTargetModal
+          prompt={props.ruleChoice.prompt}
+          sourceCardName={props.ruleChoice.sourceCardName}
+          players={props.ruleChoice.players}
+          onChoose={(seatId) => props.onChooseEffectTarget?.({ kind: "player", seatId })}
+        />
+      ) : null}
+      {props.ruleChoice?.kind === "choose_proliferate_targets" ? (
+        <ProliferateModal
+          prompt={props.ruleChoice.prompt}
+          sourceCardName={props.ruleChoice.sourceCardName}
+          cards={props.ruleChoice.cards}
+          players={props.ruleChoice.players}
+          onClose={props.onCloseLibrarySearch}
+          onConfirm={props.onConfirmProliferateTargets}
+        />
+      ) : null}
+      {boardTargetingChoice ? (
+        // choose_creature_on_battlefield, choose_aura_attach_target, and a battlefield-zone
+        // choose_effect_target are answered by clicking a highlighted card directly on the board
+        // (see asBoardTargetingChoice/pickCard) rather than a modal — this banner is just the
+        // prompt + a cancel/decline affordance, the board stays visible and interactive underneath
+        // it. A MANDATORY choose_effect_target (rule 601.2c: a legal target exists, so one must be
+        // chosen — this banner only ever opens once maybeRequestTarget already confirmed one does)
+        // gets no button at all, forcing a real click instead of silently dropping the effect;
+        // Decline only ever appears for an optional ("you may") one.
+        <div className="targeting-banner" role="status" aria-live="polite">
+          <span>{boardTargetingChoice.sourceCardName}</span>
+          <strong>{boardTargetingChoice.prompt}</strong>
+          {boardTargetingChoice.cards.length === 0 ? <p>No legal target.</p> : null}
+          {boardTargetingChoice.kind !== "choose_effect_target" ? (
+            <button type="button" onClick={props.onCloseLibrarySearch}>Cancel</button>
+          ) : boardTargetingChoice.optional ? (
+            <button type="button" onClick={props.onDeclineEffectTarget}>Decline</button>
+          ) : null}
+        </div>
       ) : null}
       {props.ruleChoice?.kind === "manual_review" ? (
         <ManualRuleChoiceModal
@@ -1372,11 +1717,20 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
       {props.ruleChoice?.kind === "put_cards_on_library" ? (
         <PutCardsOnLibraryModal choice={props.ruleChoice} onConfirm={props.onCompletePutCardsOnLibrary} />
       ) : null}
+      {props.ruleChoice?.kind === "connive_discard" ? (
+        <ConniveDiscardModal choice={props.ruleChoice} onConfirm={props.onCompleteConniveDiscard} />
+      ) : null}
+      {props.ruleChoice?.kind === "return_land_to_hand" ? (
+        <ReturnLandToHandModal choice={props.ruleChoice} onConfirm={props.onCompleteReturnLandToHand} />
+      ) : null}
       {props.ruleChoice?.kind === "choose_creature_type" ? (
         <ChooseCreatureTypeModal choice={props.ruleChoice} onChoose={props.onChooseCreatureType} />
       ) : null}
       {props.ruleChoice?.kind === "choose_color" ? (
         <ChooseColorModal choice={props.ruleChoice} onChoose={props.onChooseColor} />
+      ) : null}
+      {props.ruleChoice?.kind === "distribute_attack_trigger_mana" ? (
+        <DistributeManaModal choice={props.ruleChoice} onConfirm={props.onConfirmAttackTriggerManaColors} />
       ) : null}
       {props.blockChoice ? (
         <BlockChoiceModal
@@ -1428,6 +1782,17 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
             props.onCastFromExile?.(zoneView.seatId, cardId);
             setZoneView(undefined);
           }}
+        />
+      ) : null}
+      {priorityStopsOpen ? (
+        <PriorityStopsModal
+          settings={props.priorityStopSettings ?? DEFAULT_STOP_SETTINGS}
+          seats={props.session.seats}
+          onClose={() => setPriorityStopsOpen(false)}
+          onTogglePhaseStop={props.onTogglePhaseStop}
+          onToggleStopOnStackResponse={props.onToggleStopOnStackResponse}
+          onToggleStopOnAttacked={props.onToggleStopOnAttacked}
+          onToggleStopOnTargeted={props.onToggleStopOnTargeted}
         />
       ) : null}
       <div className="three-hand-panel" aria-label="Your hand">
@@ -1508,6 +1873,8 @@ function CardInspector({
   genericManaAbilities,
   onActivateGenericMana,
   onActivateEquip,
+  onActivateManlandAnimation,
+  onTapForMana,
   attackTargets,
   onDeclareAttack,
   onCastCommander,
@@ -1533,6 +1900,8 @@ function CardInspector({
   genericManaAbilities?: GenericManaAbility[];
   onActivateGenericMana?: (abilityIndex: number) => void;
   onActivateEquip?: () => void;
+  onActivateManlandAnimation?: () => void;
+  onTapForMana?: () => void;
   attackTargets?: Array<{ targetId: string; label: string }>;
   onDeclareAttack?: (targetId: string) => void;
   onCastCommander?: () => void;
@@ -1589,9 +1958,19 @@ function CardInspector({
               Unlock Other Door
             </button>
           ) : null}
+          {onTapForMana ? (
+            <button className="inspector-action" type="button" onClick={onTapForMana}>
+              Tap for Mana
+            </button>
+          ) : null}
           {onActivateEquip ? (
             <button className="inspector-action" type="button" onClick={onActivateEquip}>
               Equip {card.name}
+            </button>
+          ) : null}
+          {onActivateManlandAnimation ? (
+            <button className="inspector-action" type="button" onClick={onActivateManlandAnimation}>
+              Become a creature
             </button>
           ) : null}
           {sacrificeAbilities && sacrificeAbilities.length > 0 ? (
@@ -1994,11 +2373,15 @@ function LibrarySearchModal({
 // Shared by both graveyard-sourced (Virtue of Persistence's "creature card from a graveyard") and
 // battlefield-sourced (Athreos's "another target creature") target choices — same list-and-pick
 // shape either way, just a different pool, zone label, and action-button wording.
-function CreatureTargetModal({
+// Card-art target picker for choices whose legal pool has no battlefield presence to click
+// directly (graveyards and libraries aren't rendered per-card in the 3D scene — see
+// asBoardTargetingChoice's comment). Reuses VisualCard (previously only wired to the legacy 2D
+// board) instead of a plain name-and-button list, so the player can actually read the card they're
+// picking the same way they can on the board.
+function TargetPickerModal({
   cards,
   prompt,
   sourceCardName,
-  zoneLabel,
   actionLabel,
   emptyLabel,
   onClose,
@@ -2007,39 +2390,175 @@ function CreatureTargetModal({
   cards: Array<{ card: VisibleCard; seatId: string; seatName: string }>;
   prompt?: string;
   sourceCardName?: string;
-  zoneLabel: string;
   actionLabel: string;
   emptyLabel: string;
   onClose?: () => void;
   onChoose?: (seatId: string, cardId: string) => void;
 }) {
   return (
-    <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label={`Choose a creature ${zoneLabel}`} onClick={onClose}>
+    <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label={sourceCardName ?? "Choose a target"} onClick={onClose}>
       <article className="library-search-modal" onClick={(event) => event.stopPropagation()}>
-        <button className="card-inspector-close" type="button" onClick={onClose} aria-label="Close creature target choice">
+        <button className="card-inspector-close" type="button" onClick={onClose} aria-label="Close target choice">
           x
         </button>
         <header>
-          <p className="eyebrow">{sourceCardName ?? "Choose a creature"}</p>
-          <h2>Choose a Creature</h2>
+          <p className="eyebrow">{sourceCardName ?? "Choose a target"}</p>
+          <h2>Choose a Target</h2>
           {prompt ? <p>{prompt}</p> : null}
         </header>
-        <div className="library-search-results">
+        <div className="target-picker-row">
           {cards.length === 0 ? <p>{emptyLabel}</p> : null}
           {cards.map(({ card, seatId, seatName }) => (
-            <article className="library-search-card" key={card.id}>
-              <div>
-                <strong>{card.name}</strong>
-                <span>
-                  {card.typeLine} — {seatName}&apos;s {zoneLabel}
-                </span>
-              </div>
+            <div className="target-picker-entry" key={card.id}>
+              <VisualCard card={card} compact onClick={() => onChoose?.(seatId, card.id)} />
+              <span>{seatName}</span>
               <button type="button" onClick={() => onChoose?.(seatId, card.id)}>
                 {actionLabel}
               </button>
-            </article>
+            </div>
           ))}
         </div>
+      </article>
+    </div>
+  );
+}
+
+// "Choose one —" mode picker (Cankerbloom's Destroy Artifact / Destroy Enchantment / Proliferate,
+// and any other modal removal-shaped ability) — one button per currently-legal mode, same
+// .card-inspector-backdrop + panel pattern as ManualRuleChoiceModal below.
+function ModalOptionModal({
+  prompt,
+  sourceCardName,
+  options,
+  onChoose
+}: {
+  prompt?: string;
+  sourceCardName?: string;
+  options: Array<{ index: number; label: string }>;
+  onChoose?: (index: number) => void;
+}) {
+  return (
+    <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label={sourceCardName ?? "Choose one"}>
+      <article className="mana-choice-modal" onClick={(event) => event.stopPropagation()}>
+        <header>
+          <p className="eyebrow">{sourceCardName ?? "Choose one"}</p>
+          <h2>Choose One</h2>
+          {prompt ? <p>{prompt}</p> : null}
+        </header>
+        <div className="modal-actions">
+          {options.map((option) => (
+            <button key={option.index} className="inspector-action" type="button" onClick={() => onChoose?.(option.index)}>
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </article>
+    </div>
+  );
+}
+
+// A single-target-player choice (choose_effect_target with spec.zone "player" — currently just a
+// direct-damage spell's "target player" mode) — one button per legal player, same
+// .card-inspector-backdrop + panel pattern as ModalOptionModal just above.
+function PlayerTargetModal({
+  prompt,
+  sourceCardName,
+  players,
+  onChoose
+}: {
+  prompt?: string;
+  sourceCardName?: string;
+  players: Array<{ seatId: string; seatName: string }>;
+  onChoose?: (seatId: string) => void;
+}) {
+  return (
+    <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label={sourceCardName ?? "Choose a target"}>
+      <article className="mana-choice-modal" onClick={(event) => event.stopPropagation()}>
+        <header>
+          <p className="eyebrow">{sourceCardName ?? "Choose a target"}</p>
+          <h2>Choose a Target</h2>
+          {prompt ? <p>{prompt}</p> : null}
+        </header>
+        <div className="modal-actions">
+          {players.map((player) => (
+            <button key={player.seatId} className="inspector-action" type="button" onClick={() => onChoose?.(player.seatId)}>
+              {player.seatName}
+            </button>
+          ))}
+        </div>
+      </article>
+    </div>
+  );
+}
+
+// "Choose any number of permanents and/or players that have a counter on them" (real Proliferate,
+// rule 121.9) — unlike TargetPickerModal's single-click-to-choose interaction, this accumulates a
+// selection (checkboxes) and applies it all at once via a Confirm button; choosing zero of anything
+// is legal ("any number" includes none), so Confirm is never disabled.
+function ProliferateModal({
+  prompt,
+  sourceCardName,
+  cards,
+  players,
+  onClose,
+  onConfirm
+}: {
+  prompt?: string;
+  sourceCardName?: string;
+  cards: Array<{ card: VisibleCard; seatId: string; seatName: string }>;
+  players: Array<{ seatId: string; seatName: string; countersLabel: string }>;
+  onClose?: () => void;
+  onConfirm?: (cardIds: string[], playerSeatIds: string[]) => void;
+}) {
+  const [selectedCardIds, setSelectedCardIds] = useState<Set<string>>(new Set());
+  const [selectedPlayerIds, setSelectedPlayerIds] = useState<Set<string>>(new Set());
+  const toggleCard = (cardId: string) =>
+    setSelectedCardIds((current) => {
+      const next = new Set(current);
+      if (next.has(cardId)) next.delete(cardId);
+      else next.add(cardId);
+      return next;
+    });
+  const togglePlayer = (seatId: string) =>
+    setSelectedPlayerIds((current) => {
+      const next = new Set(current);
+      if (next.has(seatId)) next.delete(seatId);
+      else next.add(seatId);
+      return next;
+    });
+  return (
+    <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label={sourceCardName ?? "Proliferate"} onClick={onClose}>
+      <article className="library-look-modal" onClick={(event) => event.stopPropagation()}>
+        <button className="card-inspector-close" type="button" onClick={onClose} aria-label="Close proliferate choice">
+          x
+        </button>
+        <header>
+          <p className="eyebrow">{sourceCardName ?? "Proliferate"}</p>
+          <h2>Proliferate</h2>
+          {prompt ? <p>{prompt}</p> : null}
+        </header>
+        {players.length > 0 ? (
+          <div className="modal-actions" aria-label="Players with counters">
+            {players.map((player) => (
+              <label key={player.seatId} className="inspector-action">
+                <input type="checkbox" checked={selectedPlayerIds.has(player.seatId)} onChange={() => togglePlayer(player.seatId)} />
+                {player.seatName} ({player.countersLabel})
+              </label>
+            ))}
+          </div>
+        ) : null}
+        <div className="target-picker-row">
+          {cards.length === 0 && players.length === 0 ? <p>No permanents or players have a counter.</p> : null}
+          {cards.map(({ card, seatName }) => (
+            <div className="target-picker-entry" key={card.id}>
+              <VisualCard card={card} compact selected={selectedCardIds.has(card.id)} onClick={() => toggleCard(card.id)} />
+              <span>{seatName}</span>
+            </div>
+          ))}
+        </div>
+        <button type="button" onClick={() => onConfirm?.([...selectedCardIds], [...selectedPlayerIds])}>
+          Proliferate Selected ({selectedCardIds.size + selectedPlayerIds.size})
+        </button>
       </article>
     </div>
   );
@@ -2078,6 +2597,85 @@ function ManualRuleChoiceModal({
           </div>
         ) : null}
         <button type="button" onClick={onClose}>Acknowledge</button>
+      </article>
+    </div>
+  );
+}
+
+function PriorityStopsModal({
+  settings,
+  seats,
+  onClose,
+  onTogglePhaseStop,
+  onToggleStopOnStackResponse,
+  onToggleStopOnAttacked,
+  onToggleStopOnTargeted
+}: {
+  settings: PriorityStopSettings;
+  seats: PlayerSeat[];
+  onClose?: () => void;
+  onTogglePhaseStop?: (phase: string, seatIndex: number) => void;
+  onToggleStopOnStackResponse?: () => void;
+  onToggleStopOnAttacked?: () => void;
+  onToggleStopOnTargeted?: () => void;
+}) {
+  return (
+    <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label="Priority stops" onClick={onClose}>
+      <article className="library-look-modal priority-stops-modal" onClick={(event) => event.stopPropagation()}>
+        <button className="card-inspector-close" type="button" onClick={onClose} aria-label="Close priority stops">
+          x
+        </button>
+        <header>
+          <p className="eyebrow">Priority</p>
+          <h2>Priority Stops</h2>
+        </header>
+        <p>Tick a phase to always get priority there. Everything else auto-passes unless you have a real response to something.</p>
+        <div className="priority-stops-grid-wrap">
+          <table className="priority-stops-grid">
+            <thead>
+              <tr>
+                <th scope="col">Phase</th>
+                {seats.map((seat) => (
+                  <th scope="col" key={seat.id}>
+                    {seat.kind === "human" ? "My turn" : seat.name}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {TURN_PHASES.map((phase) => (
+                <tr key={phase}>
+                  <th scope="row">{phase}</th>
+                  {seats.map((seat, seatIndex) => (
+                    <td key={seat.id}>
+                      <input
+                        type="checkbox"
+                        aria-label={`Stop at ${phase} on ${seat.kind === "human" ? "my turn" : `${seat.name}'s turn`}`}
+                        checked={Boolean(settings.phaseStops[stopKey(phase, seatIndex)])}
+                        onChange={() => onTogglePhaseStop?.(phase, seatIndex)}
+                      />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="priority-stops-toggles">
+          <label>
+            <input type="checkbox" checked={settings.stopOnStackResponse} onChange={onToggleStopOnStackResponse} />
+            Stop when I have a response to something on the stack
+          </label>
+          <label>
+            <input type="checkbox" checked={settings.stopOnAttacked} onChange={onToggleStopOnAttacked} />
+            Stop when I&apos;m attacked
+          </label>
+          <label>
+            <input type="checkbox" checked={settings.stopOnTargeted} onChange={onToggleStopOnTargeted} />
+            Stop when I or my permanents are targeted
+          </label>
+        </div>
+        <button type="button" onClick={onClose}>Done</button>
       </article>
     </div>
   );
@@ -2355,6 +2953,92 @@ function PutCardsOnLibraryModal({
   );
 }
 
+function ConniveDiscardModal({
+  choice,
+  onConfirm
+}: {
+  choice: Extract<RuleChoiceView, { kind: "connive_discard" }>;
+  onConfirm?: (cardIds: string[]) => void;
+}) {
+  const [selected, setSelected] = useState<string | undefined>(undefined);
+
+  // No backdrop-dismiss: connive's discard is a mandatory part of resolving the source ability,
+  // not an optional review — same reasoning as PutCardsOnLibraryModal/DiscardToHandSizeModal.
+  return (
+    <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label={`${choice.sourceCardName} connives`}>
+      <article className="mana-choice-modal" onClick={(event) => event.stopPropagation()}>
+        <header>
+          <p className="eyebrow">{choice.sourceCardName}</p>
+          <h2>Connive: choose a card to discard</h2>
+        </header>
+        <p>{choice.prompt}</p>
+        <div className="modal-actions discard-hand-list">
+          {choice.hand.map((card) => (
+            <button
+              key={card.id}
+              type="button"
+              className="inspector-action"
+              aria-pressed={selected === card.id}
+              onClick={() => setSelected(card.id)}
+            >
+              {selected === card.id ? "✓ " : ""}
+              {card.name}
+            </button>
+          ))}
+        </div>
+        <div className="modal-actions">
+          <button className="inspector-action" type="button" disabled={!selected} onClick={() => onConfirm?.(selected ? [selected] : [])}>
+            Discard
+          </button>
+        </div>
+      </article>
+    </div>
+  );
+}
+
+function ReturnLandToHandModal({
+  choice,
+  onConfirm
+}: {
+  choice: Extract<RuleChoiceView, { kind: "return_land_to_hand" }>;
+  onConfirm?: (cardIds: string[]) => void;
+}) {
+  const [selected, setSelected] = useState<string | undefined>(undefined);
+
+  // No backdrop-dismiss: this bounce is a mandatory part of resolving the source land, not an
+  // optional review — same reasoning as ConniveDiscardModal.
+  return (
+    <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label={`${choice.sourceCardName}: return a land`}>
+      <article className="mana-choice-modal" onClick={(event) => event.stopPropagation()}>
+        <header>
+          <p className="eyebrow">{choice.sourceCardName}</p>
+          <h2>Return a land to your hand</h2>
+        </header>
+        <p>{choice.prompt}</p>
+        <div className="modal-actions discard-hand-list">
+          {choice.lands.map((card) => (
+            <button
+              key={card.id}
+              type="button"
+              className="inspector-action"
+              aria-pressed={selected === card.id}
+              onClick={() => setSelected(card.id)}
+            >
+              {selected === card.id ? "✓ " : ""}
+              {card.name}
+            </button>
+          ))}
+        </div>
+        <div className="modal-actions">
+          <button className="inspector-action" type="button" disabled={!selected} onClick={() => onConfirm?.(selected ? [selected] : [])}>
+            Return to hand
+          </button>
+        </div>
+      </article>
+    </div>
+  );
+}
+
 function ChooseCreatureTypeModal({
   choice,
   onChoose
@@ -2441,6 +3125,66 @@ function ChooseColorModal({
               {MANA_COLOR_LABELS[color]}
             </button>
           ))}
+        </div>
+      </article>
+    </div>
+  );
+}
+
+// Klauth, Unrivaled Ancient's "add X mana in any combination of colors" — a running-total, tap-to-
+// add-one-per-color picker (unlike ChooseColorModal's pick-exactly-one), since the whole point is a
+// free split across as many colors as the player wants. No cancel/decline — this is a mandatory
+// trigger with a fixed X, not a "may" effect (see the targeting banner's own mandatory-gets-no-
+// button convention for choose_effect_target).
+type DistributableColor = Exclude<ManaColor, "C">;
+const DISTRIBUTABLE_COLORS = MANA_COLORS as DistributableColor[];
+
+function DistributeManaModal({
+  choice,
+  onConfirm
+}: {
+  choice: Extract<RuleChoiceView, { kind: "distribute_attack_trigger_mana" }>;
+  onConfirm?: (distribution: Partial<Record<DistributableColor, number>>) => void;
+}) {
+  const [distribution, setDistribution] = useState<Partial<Record<DistributableColor, number>>>({});
+  const total = DISTRIBUTABLE_COLORS.reduce((sum, color) => sum + (distribution[color] ?? 0), 0);
+  const remaining = choice.amount - total;
+
+  const add = (color: DistributableColor) => {
+    if (remaining <= 0) return;
+    setDistribution((current) => ({ ...current, [color]: (current[color] ?? 0) + 1 }));
+  };
+  const subtract = (color: DistributableColor) => {
+    setDistribution((current) => (current[color] ? { ...current, [color]: current[color]! - 1 } : current));
+  };
+
+  return (
+    <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label="Distribute mana">
+      <article className="mana-choice-modal" onClick={(event) => event.stopPropagation()}>
+        <header>
+          <p className="eyebrow">{choice.sourceCardName}</p>
+          <h2>Distribute {choice.amount} mana</h2>
+        </header>
+        <p>{choice.prompt}</p>
+        <p>{remaining} remaining</p>
+        <div className="modal-actions">
+          {DISTRIBUTABLE_COLORS.map((color) => (
+            <button key={color} type="button" className="inspector-action" onClick={() => add(color)} disabled={remaining <= 0}>
+              +1 {MANA_COLOR_LABELS[color]} ({distribution[color] ?? 0})
+            </button>
+          ))}
+        </div>
+        <div className="modal-actions">
+          {DISTRIBUTABLE_COLORS.filter((color) => distribution[color]).map((color) => (
+            <button key={color} type="button" className="inspector-action" onClick={() => subtract(color)}>
+              -1 {MANA_COLOR_LABELS[color]}
+            </button>
+          ))}
+        </div>
+        <div className="modal-actions">
+          <button type="button" className="inspector-action" disabled={remaining !== 0} onClick={() => onConfirm?.(distribution)}>
+            Confirm
+          </button>
         </div>
       </article>
     </div>
@@ -2659,9 +3403,18 @@ function formatLoyaltyCost(cost: number) {
 
 // Mirrors AppFlow.tsx's canCastAtInstantSpeed — used only to decide whether to show a "Cast from
 // Exile" button during an open response window (a sorcery sitting in exile still isn't castable
-// there, only an instant/flash card is).
-function canCastAtInstantSpeed(card: VisibleCard) {
-  return card.typeLine.includes("Instant") || /\bflash\b/i.test(card.oracleText);
+// there, only an instant/flash card is). flashGranted mirrors AppFlow's seatHasFlashGrant (a
+// battlefield Vedalken Orrery/Leyline of Anticipation) — without it this button would stay hidden
+// for a card AppFlow's own respondWithCard would actually allow.
+function canCastAtInstantSpeed(card: VisibleCard, flashGranted = false) {
+  return card.typeLine.includes("Instant") || /\bflash\b/i.test(card.oracleText) || flashGranted;
+}
+
+function seatHasFlashGrant(seat: PlayerSeat | undefined) {
+  if (!seat) return false;
+  return seat.board.battlefield.some(
+    (card) => /as though (it|they) had flash/i.test(card.oracleText) || /any time you could cast an instant/i.test(card.oracleText)
+  );
 }
 
 function FallbackLargeCard({ card }: { card: VisibleCard }) {
@@ -2787,7 +3540,7 @@ function ZoneViewerModal({
     zone === "exile" &&
     card.exiledPlayableBySeatId === seat.id &&
     (card.exiledPlayableUntilTurn === undefined || turn <= card.exiledPlayableUntilTurn) &&
-    (!hasOpenResponseWindow || canCastAtInstantSpeed(card));
+    (!hasOpenResponseWindow || canCastAtInstantSpeed(card, seatHasFlashGrant(seat)));
 
   return (
     <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label={`${seat?.name ?? "Player"} ${title}`} onClick={onClose}>
@@ -2867,7 +3620,8 @@ function rebuildDynamicScene(
   group: THREE.Group | null,
   session: GameSession,
   selectedCardId: string | undefined,
-  cardMeshesRef: MutableRefObject<THREE.Object3D[]>
+  cardMeshesRef: MutableRefObject<THREE.Object3D[]>,
+  showCommanderDamage: boolean
 ) {
   if (!group) return;
   group.clear();
@@ -2888,26 +3642,50 @@ function rebuildDynamicScene(
       addCard(group, seat.board.commander, seat.id, "command", commanderSlot.x, commanderSlot.z, area.rot, selectedCardId, cardMeshesRef);
     }
 
-    seat.board.battlefield.forEach((card) => {
+    // Two passes so an attached Equipment can be tucked against its creature instead of getting its
+    // own independent grid slot (Auras are left alone — scoped to Equipment only, per the original
+    // report). First pass resolves/renders everything else and records where each landed; second
+    // pass looks up its target's resolved spot and renders the Equipment at a small fixed offset
+    // from it instead. Applies uniformly through this same shared function for every seat, so an
+    // agent's equipped creatures get the same treatment automatically. Falls back to the normal
+    // independent slot if the target's position wasn't found (shouldn't happen — attachedToId is
+    // already cleared once its target leaves the battlefield).
+    const resolvedBattlefieldPositions = new Map<string, { x: number; z: number }>();
+    const attachedEquipmentByTarget = new Map<string, VisibleCard[]>();
+    const unattachedCards: VisibleCard[] = [];
+    for (const card of seat.board.battlefield) {
+      if (isEquipment(card) && card.attachedToId) {
+        const siblings = attachedEquipmentByTarget.get(card.attachedToId) ?? [];
+        siblings.push(card);
+        attachedEquipmentByTarget.set(card.attachedToId, siblings);
+      } else {
+        unattachedCards.push(card);
+      }
+    }
+
+    unattachedCards.forEach((card) => {
       const point = card.battlefieldPosition ?? defaultBattlefieldPosition(area, card, seat.board.battlefield);
+      resolvedBattlefieldPositions.set(card.id, point);
       addCard(group, card, seat.id, "battlefield", point.x, point.z, area.rot, selectedCardId, cardMeshesRef);
     });
 
-    // Outside the battlefield rectangle's own near edge rather than inside it, so it doesn't eat
-    // into permanent placement room — see the module comment on TABLE_WIDTH/TABLE_DEPTH. The life
-    // total plate sits one step further out still, so the two don't overlap.
-    const handLabelZ = area.rot === 0 ? area.maxZ + 0.9 : area.minZ - 0.9;
-    addTextPlane(group, `Hand ${seat.zones.hand}`, area.x, handLabelZ, area.rot, 0.34);
-    // Real flat labels on the table itself (like the Deck/Grave/Exile pile labels above), not a
-    // floating screen-space overlay — that overlay's anchor point (the table's world-space center)
-    // didn't reliably land at the visual center of the four battlefields under a perspective camera,
-    // and drifted around as the camera moved. A per-seat label anchored to that seat's own area has
-    // no such problem: it's always exactly where that player's own board is, at any camera angle.
-    const lifeLabelZ = area.rot === 0 ? area.maxZ + 1.35 : area.minZ - 1.35;
-    // Same size as the Deck/Grave/Exile pile labels above (0.42) rather than the smaller Hand
-    // label (0.34) — life total is the single most important thing to read at a glance, worth the
-    // extra size.
-    addTextPlane(group, `Life ${seat.life}`, area.x, lifeLabelZ, area.rot, 0.42);
+    attachedEquipmentByTarget.forEach((equipmentCards, targetId) => {
+      const targetPoint = resolvedBattlefieldPositions.get(targetId);
+      equipmentCards.forEach((card, siblingIndex) => {
+        const point = targetPoint
+          ? { x: targetPoint.x + 0.15 + siblingIndex * 0.12, z: targetPoint.z + 0.14 }
+          : card.battlefieldPosition ?? defaultBattlefieldPosition(area, card, seat.board.battlefield);
+        addCard(group, card, seat.id, "battlefield", point.x, point.z, area.rot, selectedCardId, cardMeshesRef);
+      });
+    });
+
+    // Life total (plus hand count) as a small 3D plate near the table's center, in this seat's own
+    // quadrant direction — explicitly requested as "a 3D object like the card counter for the
+    // library, graveyard and exile pile" (addLifeTotalPlate's own comment covers the tradeoff this
+    // reintroduces relative to a screen-space overlay). A full-width per-seat plate on the table
+    // surface was tried and removed once already for a similar "bothered by the camera" report; kept
+    // small and clustered at center this time to keep any perspective skew as minor as possible.
+    addLifeTotalPlate(group, seat, area.x > 0 ? 0.38 : -0.38, area.z > 0 ? 0.27 : -0.27, showCommanderDamage, cardMeshesRef);
   });
 }
 
@@ -3317,6 +4095,93 @@ function addTextPlane(group: THREE.Group, text: string, x: number, z: number, ro
   mesh.rotation.z = rot;
   mesh.position.set(x, 0.1, z);
   group.add(mesh);
+}
+
+// The single number that actually matters for rule 704.5j (a player loses if they've taken 21+
+// combat damage from the same commander): the largest amount recorded against any one source in
+// commanderDamage, not the sum across sources (that could hide someone sitting at 20 from one
+// commander and 3 from another — neither individually lethal — behind a scarier-looking total).
+function maxCommanderDamage(seat: PlayerSeat): number {
+  const amounts = Object.values(seat.commanderDamage);
+  return amounts.length > 0 ? Math.max(...amounts) : 0;
+}
+
+// One player's life total (or, toggled via the Commander Damage button, the worst commander damage
+// they've taken from any single source) as a real 3D plate lying flat on the table, next to Deck/
+// Grave/Exile's own pile labels rather than a screen-space DOM overlay — explicitly requested this
+// way ("I want it to be a 3D object like the card counter for the library, graveyard and exile
+// pile"), after a screen-anchored version (immune to camera movement, but never quite lined up with
+// the board the way a real 3D object does) went back and forth several times. Worth flagging even
+// though this is the version that shipped: unlike a Deck/Grave/Exile label, which sits right next to
+// the actual pile it's tagging, this doesn't tag a physical object — the exact tradeoff called out
+// where the old per-seat hand/life plates were removed from this same loop (see the comment on this
+// function's caller): a flat table-surface mesh reads fine face-on but foreshortens/skews at other
+// camera angles, unlike a screen-space overlay. Sized (and, via the caller's x/z offsets, spaced) so
+// adjacent plates never overlap regardless of camera angle: all four sit flat at the same Y with
+// non-overlapping x/z footprints, which a perspective projection can't turn into an overlap no
+// matter where the camera is — see the caller for the actual footprint math.
+function addLifeTotalPlate(
+  group: THREE.Group,
+  seat: PlayerSeat,
+  x: number,
+  z: number,
+  showCommanderDamage: boolean,
+  cardMeshesRef: MutableRefObject<THREE.Object3D[]>
+) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 220;
+  canvas.height = 150;
+  const context = canvas.getContext("2d");
+  if (!context) return;
+  context.fillStyle = "rgba(10,12,9,0.92)";
+  roundRect(context, 0, 0, canvas.width, canvas.height, 16);
+  context.fill();
+  context.strokeStyle = "rgba(215,179,90,0.55)";
+  context.lineWidth = 3;
+  context.stroke();
+  context.textAlign = "center";
+  context.fillStyle = showCommanderDamage ? "#d96d5f" : "#73b47a";
+  context.font = "bold 58px Arial";
+  context.fillText(String(showCommanderDamage ? maxCommanderDamage(seat) : seat.life), canvas.width / 2, 72);
+  context.fillStyle = "#f2f0e8";
+  context.font = "bold 18px Arial";
+  context.fillText(seat.name.toUpperCase(), canvas.width / 2, 104);
+  context.fillStyle = "#b8b7ad";
+  context.font = "16px Arial";
+  context.fillText(showCommanderDamage ? "Cmdr Dmg" : `Hand ${seat.zones.hand}`, canvas.width / 2, 130);
+  // Experience counters (Meren of Clan Nel Toth, ...) are a PLAYER-level counter with no permanent
+  // to sit on and — unlike +1/+1 or age counters — can never be removed, so once a player has any
+  // they hold that count for the rest of the game. Nothing on the board displayed this at all
+  // before, even though it silently gated things like Meren's own reanimation mana-value cap;
+  // reported live as wanting to actually see whose commander has handed out how many. A small
+  // corner badge, shown only when the count is nonzero, keeps it out of the way for the far more
+  // common case of a deck that never grants any.
+  const experienceCounters = seat.experienceCounters ?? 0;
+  if (experienceCounters > 0) {
+    context.fillStyle = "rgba(122,74,184,0.92)";
+    roundRect(context, canvas.width - 62, 8, 54, 28, 8);
+    context.fill();
+    context.fillStyle = "#f2f0e8";
+    context.font = "bold 16px Arial";
+    context.fillText(`XP ${experienceCounters}`, canvas.width - 35, 27);
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  // 0.72 wide, not the 0.92 an earlier version used — at the x/z offsets the caller places these four
+  // plates on (±0.38/±0.27), 0.92-wide plates overlapped their neighbors by a real, measurable margin
+  // (visible in life3.jpg as the plates' corners overlapping instead of meeting edge-to-edge); 0.72
+  // leaves a small gap on every side at those same offsets instead.
+  const planeWidth = 0.72;
+  const planeHeight = (planeWidth * canvas.height) / canvas.width;
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(planeWidth, planeHeight),
+    new THREE.MeshBasicMaterial({ map: texture, transparent: true, side: THREE.DoubleSide })
+  );
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.position.set(x, 0.12, z);
+  mesh.userData = { kind: "player", seatId: seat.id } satisfies PlayerUserData;
+  group.add(mesh);
+  cardMeshesRef.current.push(mesh);
 }
 
 function roundRect(context: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number) {

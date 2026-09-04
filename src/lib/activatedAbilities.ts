@@ -130,6 +130,10 @@ export interface SacrificeAbility {
   costMana: number;
   costTap: boolean;
   costDiscard: boolean;
+  // "Pay 1 life" as part of the activation cost (Arid Mesa and the rest of the Onslaught/Zendikar
+  // fetch land cycle: "{T}, Pay 1 life, Sacrifice this land: Search your library for a [type]
+  // card..."). 0 when the ability has no life cost.
+  costLife: number;
   sacrificeTarget: "self" | "creature";
   // Set when the sacrificed permanent must be a specific creature type (Retrofitter Foundry's
   // "Sacrifice a Servo"/"Sacrifice a Thopter", not just "sacrifice a creature") — undefined means
@@ -178,8 +182,15 @@ function numberWordToInt(value: string | undefined): number | undefined {
 // motivating case — without the merge, the header line has no effect text at all, and the bullet
 // lines don't start with "sacrifice", so the whole ability silently vanished, letting whatever
 // resolved it downstream apply the destroy effect without ever charging the sacrifice cost).
+// "pay N life" is a repeatable cost-prefix component alongside {...} symbols and "discard a card" —
+// Arid Mesa and the rest of the Onslaught/Zendikar fetch land cycle ("{T}, Pay 1 life, Sacrifice
+// this land: Search your library for a [type] card...") otherwise never matched here at all: the
+// cost prefix's repeat group had no alternative for "Pay 1 life,", so it stopped consuming right
+// after "{T}, " and then required the literal word "sacrifice" to appear immediately next, which it
+// doesn't — the whole clause silently failed to match, and every real fetch land had no activated
+// ability recognized at all (not offered as a legal action, no interactive search, nothing).
 const SACRIFICE_CLAUSE_PATTERN =
-  /^((?:(?:\{[^}]+\}|discard a card)\s*,?\s*)*)sacrifice\s+(this\s+[a-z]+|an?\s+creature|(?:a|one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+creatures|an?\s+(?!permanents?\b|lands?\b|cards?\b|artifacts?\b|enchantments?\b|planeswalkers?\b|tokens?\b)[a-z]+)\s*:\s*([\s\S]+?)\.?\s*$/i;
+  /^((?:(?:\{[^}]+\}|discard a card|pay \d+ life)\s*,?\s*)*)sacrifice\s+(this\s+[a-z]+|an?\s+creature|(?:a|one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+creatures|an?\s+(?!permanents?\b|lands?\b|cards?\b|artifacts?\b|enchantments?\b|planeswalkers?\b|tokens?\b)[a-z]+)\s*:\s*([\s\S]+?)\.?\s*$/i;
 
 const SACRIFICE_COUNT_PATTERN = /^(a|one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+creatures$/i;
 
@@ -199,6 +210,8 @@ export function parseGenericSacrificeAbilities(oracleText: string): SacrificeAbi
     const costDiscard = /discard a card/i.test(costPrefix);
     const manaSymbols = costPrefix.match(/\{(\d+)\}/g) ?? [];
     const costMana = manaSymbols.reduce((total, symbol) => total + (Number.parseInt(symbol.replace(/[{}]/g, ""), 10) || 0), 0);
+    const costLifeMatch = costPrefix.match(/pay (\d+) life/i);
+    const costLife = costLifeMatch ? Number.parseInt(costLifeMatch[1], 10) : 0;
     const sacrificeTarget: "self" | "creature" = /^this\b/i.test(targetPhrase) ? "self" : "creature";
     const countMatch = targetPhrase.match(SACRIFICE_COUNT_PATTERN);
     const sacrificeCount = countMatch ? numberWordToInt(countMatch[1]) ?? 1 : 1;
@@ -208,7 +221,7 @@ export function parseGenericSacrificeAbilities(oracleText: string): SacrificeAbi
     const effect = parseSacrificeEffectText(effectText);
     if (!effect) continue;
 
-    abilities.push({ costMana, costTap, costDiscard, sacrificeTarget, sacrificeTargetTypeFilter, sacrificeCount, effect, clause });
+    abilities.push({ costMana, costTap, costDiscard, costLife, sacrificeTarget, sacrificeTargetTypeFilter, sacrificeCount, effect, clause });
   }
 
   return abilities;
@@ -349,6 +362,71 @@ export function parseSelfUntapAbilities(oracleText: string): SelfUntapAbility[] 
   }
 
   return abilities;
+}
+
+export interface ManlandAnimation {
+  cost: number;
+  power: number;
+  toughness: number;
+  keywords?: string[];
+}
+
+const MANLAND_KEYWORD_VOCAB = [
+  "flying",
+  "vigilance",
+  "deathtouch",
+  "lifelink",
+  "reach",
+  "trample",
+  "haste",
+  "menace",
+  "first strike",
+  "double strike",
+  "indestructible",
+  "hexproof",
+  "defender"
+];
+
+// Man-lands (Celestial Colonnade, Mishra's Factory, and the rest of the "creaturelands" family):
+// "{cost}: [Until end of turn,] this land becomes a N/M ... creature[ with KEYWORDS]. It's still a
+// land." — previously entirely unmodeled, so these could never attack, block, or be targeted as a
+// creature at all; just a land forever. Deliberately declines a card whose granted ability is a
+// whole new activated/triggered ability in quotes (Lavaclaw Reaches' "{X}: This creature gets
+// +X/+0...", ...) rather than trying to model an arbitrary granted ability — grants P/T and any
+// plain keyword from the vocabulary above, drops the rest, same "decline past a certain complexity"
+// convention as this file's other generic parsers. Also declines a conditional/counter-based shape
+// (Crawling Barrens' "you may have it become a 0/0 ... creature", Great Hall of the Biblioplex's
+// "If this land isn't a creature, it becomes...") — neither is expressible as a flat cost/P&T pair.
+// Exported (unlike this file's other parsers, which AppFlow.tsx alone consumes) because
+// ThreeGameTable.tsx's card-inspector modal also needs it, to decide whether to show the animate
+// button at all — the same reason equipCost/isEquipment are exported from attachments.ts.
+export function parseManlandAnimation(oracleText: string): ManlandAnimation | undefined {
+  for (const line of oracleText.split("\n")) {
+    const match = line
+      .toLowerCase()
+      .match(
+        /^([^:]+):\s*(?:until end of turn,\s*)?this land becomes an?\s+(\d+)\/(\d+)\s+[a-z '-]*?creature\b(?:\s+with\s+("[^"]*"|[^".]+))?.*?it'?s still a land\b/
+      );
+    if (!match) continue;
+    const manaSymbols = match[1].match(/\{([^}]+)\}/g) ?? [];
+    const cost = manaSymbols.reduce((total, symbol) => {
+      const inner = symbol.replace(/[{}]/g, "");
+      const asNumber = Number.parseInt(inner, 10);
+      return total + (Number.isFinite(asNumber) ? asNumber : 1);
+    }, 0);
+    const withClause = match[4]?.trim();
+    const keywords =
+      withClause && !withClause.startsWith('"')
+        ? MANLAND_KEYWORD_VOCAB.filter((keyword) => new RegExp(`\\b${keyword}\\b`, "i").test(withClause))
+        : undefined;
+    return {
+      cost,
+      power: Number.parseInt(match[2], 10),
+      toughness: Number.parseInt(match[3], 10),
+      keywords: keywords && keywords.length > 0 ? keywords : undefined
+    };
+  }
+  return undefined;
 }
 
 // Plain "{cost}[, Discard a card][, Pay N life]: effect." activated abilities — no {T}, no

@@ -207,6 +207,32 @@ describe("parseRemovalEffect — modal", () => {
       )
     ).toBeUndefined();
   });
+
+  // Regression: Proliferate used to be entirely unmodeled, so this whole card's third mode was
+  // silently dropped (2 modes instead of 3) — reported live as Cankerbloom never offering Proliferate
+  // as a choice at all, not just auto-picking a destroy mode over it.
+  it("keeps a Proliferate mode alongside real removal modes, tolerating its reminder text (Cankerbloom)", () => {
+    const result = parseRemovalEffect(
+      "Choose one —\n• Destroy target artifact.\n• Destroy target enchantment.\n• Proliferate. (Choose any number of permanents and/or players, then give each another counter of each kind already there.)"
+    );
+    expect(result).toEqual({
+      kind: "modal",
+      chooseCount: 1,
+      modes: [
+        { kind: "destroy", targetType: "artifact", excludedColors: [], artifactsExcluded: false, basicsExcluded: false },
+        { kind: "destroy", targetType: "enchantment", excludedColors: [], artifactsExcluded: false, basicsExcluded: false },
+        { kind: "proliferate" }
+      ]
+    });
+  });
+
+  it("does not mistake 'Proliferate twice.'/'Proliferate X times.' for the plain single-Proliferate shape", () => {
+    expect(parseRemovalEffect("Choose one —\n• Destroy target artifact.\n• Proliferate twice.")).toEqual({
+      kind: "modal",
+      chooseCount: 1,
+      modes: [{ kind: "destroy", targetType: "artifact", excludedColors: [], artifactsExcluded: false, basicsExcluded: false }]
+    });
+  });
 });
 
 describe("parseRemovalEffect — variable (X) damage", () => {

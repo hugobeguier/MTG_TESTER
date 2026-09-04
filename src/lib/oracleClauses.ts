@@ -61,6 +61,15 @@ export function isDeathTriggerClause(clause: string): boolean {
   return /\b(when|whenever)\b[^.]{0,80}\bdies\b/i.test(clause);
 }
 
+// "Whenever a creature you control deals combat damage to a player, ..." (Toski, Bearer of
+// Secrets, and the same standard templating on plenty of other cards) — isolated the same way
+// isDeathTriggerClause isolates a "dies" clause, so this specific event-driven trigger can be
+// parsed from just its own sentence instead of a whole card's oracle text (which might otherwise
+// contain an unrelated clause that happens to match some other commonTriggerEffect pattern first).
+export function isCombatDamageToPlayerClause(clause: string): boolean {
+  return /\b(when|whenever)\b[^.]{0,80}\bdeals combat damage to a player\b/i.test(clause);
+}
+
 // Real oracle text templates every phase-triggered ability ("at the beginning of your upkeep/draw
 // step/end step/...", "at the beginning of combat", "at the beginning of each opponent's upkeep")
 // with this exact phrase — an ETB trigger always uses "when"/"whenever ~ enters" instead, never
@@ -127,6 +136,14 @@ export function parseAdditionalSacrificeCost(oracleText: string): { count: numbe
 export function deathEffectText(oracleText: string): string {
   return oracleClauses(oracleText)
     .filter((clause) => isDeathTriggerClause(clause))
+    .join(" ");
+}
+
+// Same idea, isolating just the "deals combat damage to a player" clause(s) — see
+// isCombatDamageToPlayerClause's own comment.
+export function combatDamageToPlayerEffectText(oracleText: string): string {
+  return oracleClauses(oracleText)
+    .filter((clause) => isCombatDamageToPlayerClause(clause))
     .join(" ");
 }
 
@@ -217,6 +234,30 @@ export function basicLandFetchCostRequiresTap(card: { oracleText: string }): boo
   const clause = card.oracleText.split("\n").find((line) => /search your library for a basic land card/i.test(line));
   const costPortion = clause?.split(":")[0] ?? "";
   return /\{t\}/i.test(costPortion);
+}
+
+// Blightsteel Colossus / Emrakul, the Aeons Torn-style graveyard replacement: "If ~ would be put
+// into a graveyard from anywhere, reveal ~ and shuffle it into its owner's library instead." This
+// is a replacement effect (rule 614), not a triggered ability — the card never actually sits in a
+// graveyard at all; the move is redirected before it happens. The bounded [\s\S]{0,80}? skips over
+// the card's own name (which appears a second time mid-clause, e.g. "reveal Blightsteel Colossus
+// and") without hardcoding it, so this recognizes any card printed with the same template.
+export function hasGraveyardShuffleReplacement(oracleText: string): boolean {
+  return /would be put into a graveyard from anywhere,\s*reveal\b[\s\S]{0,80}?\band shuffle it into its owner'?s library instead\b/i.test(
+    oracleText
+  );
+}
+
+// "Whenever ~ attacks, add X mana in any combination of colors, where X is the total power of
+// attacking creatures. Spend this mana only to cast spells. Until end of turn, you don't lose this
+// mana as steps and phases end." (Klauth, Unrivaled Ancient — verified via the card data; not a mana
+// ability at all despite the "add mana" wording, since it's triggered off an event and uses the
+// stack, rule 605.1a). The bounded [\s\S]{0,40}? skips over the card's own name between "whenever"
+// and "attacks," without hardcoding it, so this recognizes any card printed with the same template.
+export function isAttackTriggerAddManaClause(oracleText: string): boolean {
+  return /\bwhenever\b[\s\S]{0,40}?\battacks,\s*add x mana in any combination of colors,\s*where x is the total power of attacking creatures\.\s*spend this mana only to cast spells\.\s*until end of turn,\s*you don'?t lose this mana as steps and phases end\.?/i.test(
+    oracleText
+  );
 }
 
 // Evolving Wilds/Terramorphic Expanse cost only {T}, Sacrifice (no generic mana at all), which is

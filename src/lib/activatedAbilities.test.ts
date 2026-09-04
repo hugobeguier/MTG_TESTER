@@ -3,9 +3,43 @@ import {
   parseGenericManaAbilities,
   parseGenericSacrificeAbilities,
   parseGenericTapAbilities,
+  parseManlandAnimation,
   parseSearchLibraryEffectText,
   parseSelfUntapAbilities
 } from "./activatedAbilities";
+
+describe("parseManlandAnimation", () => {
+  it("parses a keyword-granting creatureland (Celestial Colonnade)", () => {
+    const oracleText =
+      "This land enters tapped.\n{T}: Add {W} or {U}.\n{3}{W}{U}: Until end of turn, this land becomes a 4/4 white and blue Elemental creature with flying and vigilance. It's still a land.";
+    expect(parseManlandAnimation(oracleText)).toEqual({ cost: 5, power: 4, toughness: 4, keywords: ["flying", "vigilance"] });
+  });
+
+  it("parses the older Blinkmoth Nexus templating (trailing 'until end of turn' inside the with-clause)", () => {
+    const oracleText = "{T}: Add {C}.\n{1}: This land becomes a 1/1 Blinkmoth artifact creature with flying until end of turn. It's still a land.";
+    expect(parseManlandAnimation(oracleText)).toEqual({ cost: 1, power: 1, toughness: 1, keywords: ["flying"] });
+  });
+
+  it("parses a hyphenated creature type with no granted keyword (Mishra's Factory)", () => {
+    const oracleText = "{T}: Add {C}.\n{1}: This land becomes a 2/2 Assembly-Worker artifact creature until end of turn. It's still a land.";
+    expect(parseManlandAnimation(oracleText)).toEqual({ cost: 1, power: 2, toughness: 2, keywords: undefined });
+  });
+
+  it("grants P/T but declines a quoted granted ability (Lavaclaw Reaches)", () => {
+    const oracleText =
+      'This land enters tapped.\n{T}: Add {B} or {R}.\n{1}{B}{R}: Until end of turn, this land becomes a 2/2 black and red Elemental creature with "{X}: This creature gets +X/+0 until end of turn." It\'s still a land.';
+    expect(parseManlandAnimation(oracleText)).toEqual({ cost: 3, power: 2, toughness: 2, keywords: undefined });
+  });
+
+  it("declines a conditional/counter-based animation it can't express as a flat cost (Crawling Barrens)", () => {
+    const oracleText = "{T}: Add {C}.\n{4}: Put two +1/+1 counters on this land. Then you may have it become a 0/0 Elemental creature until end of turn. It's still a land.";
+    expect(parseManlandAnimation(oracleText)).toBeUndefined();
+  });
+
+  it("returns undefined for a plain land with no animation ability", () => {
+    expect(parseManlandAnimation("{T}: Add {W}.")).toBeUndefined();
+  });
+});
 
 describe("parseGenericSacrificeAbilities", () => {
   it("parses Viscera Seer's sacrifice-a-creature-for-scry ability, ignoring trailing reminder text", () => {
@@ -14,6 +48,19 @@ describe("parseGenericSacrificeAbilities", () => {
     );
     expect(abilities).toHaveLength(1);
     expect(abilities[0]).toMatchObject({ costMana: 0, costTap: false, sacrificeTarget: "creature", effect: { kind: "scry", amount: 1 } });
+  });
+
+  it("parses a real fetch land's pay-life-then-sacrifice cost (Arid Mesa)", () => {
+    const abilities = parseGenericSacrificeAbilities(
+      "{T}, Pay 1 life, Sacrifice this land: Search your library for a Mountain or Plains card, put it onto the battlefield, then shuffle."
+    );
+    expect(abilities).toHaveLength(1);
+    expect(abilities[0]).toMatchObject({
+      costTap: true,
+      costLife: 1,
+      sacrificeTarget: "self",
+      effect: { kind: "search_library", destination: "battlefield", cardTypeFilter: "mountain or plains" }
+    });
   });
 
   it("parses Carrion Feeder's self-buff sacrifice ability from its second oracle-text line", () => {
@@ -37,6 +84,7 @@ describe("parseGenericSacrificeAbilities", () => {
         costMana: 2,
         costTap: true,
         costDiscard: false,
+        costLife: 0,
         sacrificeTarget: "self",
         sacrificeCount: 1,
         effect: { kind: "gain_life", amount: 3 },
@@ -57,6 +105,18 @@ describe("parseGenericSacrificeAbilities", () => {
   it("parses Blood token's discard-as-a-cost ability alongside its mana/tap cost", () => {
     const abilities = parseGenericSacrificeAbilities("{1}, {T}, Discard a card, Sacrifice this artifact: Draw a card.");
     expect(abilities[0]).toMatchObject({ costMana: 1, costTap: true, costDiscard: true, sacrificeTarget: "self", effect: { kind: "draw_cards", amount: 1 } });
+  });
+
+  // Mind Stone's SECOND ability (alongside its own separate "{T}: Add {C}." mana ability) — costTap
+  // being true here is exactly what AppFlow.tsx's isSimpleManaSourcePermanent/toggleTapCard use to
+  // recognize this card isn't "just a mana rock" and route a click/hotkey to the card inspector
+  // instead of blind-tapping it for mana. Reported live: clicking (or right-clicking, or pressing the
+  // "T" hotkey on) Mind Stone always just tapped it for {C}, with no way to ever reach this ability —
+  // caused by a UI dispatch check that special-cased only Myriad Landscape by name instead of
+  // detecting any card with a second {T}-costed ability generically.
+  it("parses Mind Stone's real oracle text sacrifice ability with costTap true", () => {
+    const abilities = parseGenericSacrificeAbilities("{1}, {T}, Sacrifice this artifact: Draw a card.");
+    expect(abilities[0]).toMatchObject({ costMana: 1, costTap: true, costDiscard: false, sacrificeTarget: "self", effect: { kind: "draw_cards", amount: 1 } });
   });
 
   it("parses a specific-creature-type sacrifice cost (Retrofitter Foundry's 'Sacrifice a Servo'), capturing the type filter", () => {
@@ -137,7 +197,7 @@ describe("parseGenericSacrificeAbilities", () => {
     ).toHaveLength(0);
   });
 
-  it("parses Cankerbloom's real modal destroy ability, merging its 'Choose one —' header with its bullet modes", () => {
+  it("parses Cankerbloom's real modal ability, merging its 'Choose one —' header with all three bullet modes including Proliferate", () => {
     const [ability] = parseGenericSacrificeAbilities(
       "{1}, Sacrifice this creature: Choose one —\n• Destroy target artifact.\n• Destroy target enchantment.\n• Proliferate."
     );
@@ -152,7 +212,8 @@ describe("parseGenericSacrificeAbilities", () => {
           chooseCount: 1,
           modes: [
             { kind: "destroy", targetType: "artifact" },
-            { kind: "destroy", targetType: "enchantment" }
+            { kind: "destroy", targetType: "enchantment" },
+            { kind: "proliferate" }
           ]
         }
       }

@@ -7,9 +7,14 @@ import type { AgentAction, DeckCard } from "./types";
 // turn forever (see requestAgentAction's callers in AppFlow.tsx: without a timeout, a hung fetch
 // skips the finally block that clears the "decision in flight" guard, permanently locking that
 // phase — no error is ever thrown, so nothing else can recover it).
-export const OLLAMA_TIMEOUT_MS = Number(process.env.OLLAMA_TIMEOUT_MS ?? 20000);
+export const OLLAMA_TIMEOUT_MS = Number(process.env.OLLAMA_TIMEOUT_MS ?? 40000);
 export const OLLAMA_DECK_TIMEOUT_MS = Number(process.env.OLLAMA_DECK_TIMEOUT_MS ?? 60000);
 export const OLLAMA_PING_TIMEOUT_MS = Number(process.env.OLLAMA_PING_TIMEOUT_MS ?? 5000);
+// Whole-card parsing (cardParser.ts) asks the model to enumerate every ability on a card and emit
+// a full step array per ability, not just resolve one already-scoped clause — meaningfully more
+// output tokens than a single primitive-plan call, so it gets its own, longer budget rather than
+// reusing OLLAMA_TIMEOUT_MS and false-triggering on slow-but-working multi-ability cards.
+export const OLLAMA_CARD_PARSE_TIMEOUT_MS = Number(process.env.OLLAMA_CARD_PARSE_TIMEOUT_MS ?? 90000);
 
 // AbortSignal.timeout(ms) makes the fetch reject with a normal DOMException("TimeoutError") on
 // expiry — that's a regular thrown error, so it flows straight into whatever catch/fallback logic
@@ -104,7 +109,7 @@ export async function requestAgentAction(input: {
   requireDeliberation?: boolean;
 }): Promise<AgentAction> {
   const baseUrl = input.baseUrl ?? process.env.OLLAMA_BASE_URL ?? "http://localhost:11434";
-  const model = input.model ?? process.env.OLLAMA_MODEL ?? "llama3.2";
+  const model = input.model ?? process.env.OLLAMA_MODEL ?? "qwen2.5:7b-instruct-q5_K_M";
   const response = await ollamaFetch(
     `${baseUrl}/api/chat`,
     {
@@ -128,7 +133,7 @@ export async function requestAgentAction(input: {
             deliberation: { type: "string" },
             fallbackAction: { type: "string", enum: ["pass_priority", "end_turn"] }
           },
-          required: ["actionType", "targetIds", "reason", "fallbackAction"]
+          required: ["actionType", "legalActionId", "targetIds", "reason", "fallbackAction"]
         },
         messages: [
           { role: "system", content: input.system },
@@ -167,7 +172,7 @@ export async function requestCommanderDeck(input: {
   knowledge?: string;
 }): Promise<{ commander: string; colors: string[]; cards: DeckCard[]; notes?: string }> {
   const baseUrl = input.baseUrl ?? process.env.OLLAMA_BASE_URL ?? "http://localhost:11434";
-  const model = input.model ?? process.env.OLLAMA_MODEL ?? "llama3.2";
+  const model = input.model ?? process.env.OLLAMA_MODEL ?? "qwen2.5:7b-instruct-q5_K_M";
   const response = await ollamaFetch(`${baseUrl}/api/chat`, {
     method: "POST",
     headers: { "content-type": "application/json" },

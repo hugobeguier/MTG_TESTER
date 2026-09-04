@@ -6,3 +6,7 @@ coverage
 .env.local
 *.log
 data/*.json
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm

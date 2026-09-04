@@ -86,6 +86,21 @@ export interface BounceEffect {
   targetType: RemovalTargetType;
 }
 
+// "Proliferate." (rule 121.9: choose any number of permanents and/or players, each already having
+// at least one counter, then give each one more of every counter kind it already has) — not
+// remotely a removal effect on its own, but modeled as a sibling RemovalEffect variant anyway (see
+// ModalEffect's own doc comment) so a modal ability that mixes it with real removal modes
+// (Cankerbloom's "Choose one — Destroy target artifact. Destroy target enchantment. Proliferate.")
+// can represent all of its modes in the one array parseModal already builds, instead of needing a
+// second, parallel modal-effect system just for this one keyword. Previously unmodeled entirely: no
+// RemovalEffect (or any other effect kind) recognized this word at all, so it silently vanished from
+// every modal ability's mode list — a real blanket resolveProliferate() already existed in
+// AppFlow.tsx, but nothing in the deterministic parsing pipeline could ever reach it from an
+// activated ability. Reported live as Cankerbloom's Proliferate mode simply not existing as a choice.
+export interface ProliferateEffect {
+  kind: "proliferate";
+}
+
 // "Choose one/two — • mode. • mode. ..." where each mode independently matches one of the shapes
 // above. Modes this parser can't recognize (card draw, pumps, life totals, ...) are simply absent
 // from `modes` — a modal spell where NO mode is removal-shaped parses to undefined entirely (see
@@ -96,7 +111,16 @@ export interface ModalEffect {
   modes: Exclude<RemovalEffect, ModalEffect>[];
 }
 
-export type RemovalEffect = DestroyEffect | DestroyAllEffect | DestroyAllConditionalEffect | ExileEffect | DamageEffect | MassDamageEffect | BounceEffect | ModalEffect;
+export type RemovalEffect =
+  | DestroyEffect
+  | DestroyAllEffect
+  | DestroyAllConditionalEffect
+  | ExileEffect
+  | DamageEffect
+  | MassDamageEffect
+  | BounceEffect
+  | ProliferateEffect
+  | ModalEffect;
 
 // "target [nonX, nonY] <type>" — restrictions like "target nonartifact, nonblack creature" sit
 // between "target" and the type noun, so every pattern needs to tolerate them.
@@ -241,8 +265,18 @@ function parseBounce(text: string): BounceEffect | undefined {
   return { kind: "bounce", targetType };
 }
 
+// Scoped to the plain "Proliferate." sentence only (its reminder text, when present, is tolerated
+// as a trailing parenthetical) — real variants like "Proliferate twice." (Contagion Engine) or
+// "Proliferate X times." (Expansion Algorithm) exist in the card pool but aren't modeled here;
+// resolveProliferate (AppFlow.tsx) has no repeat-count parameter to give them yet, so they'd need
+// that extended too. Anchored start-to-end so "Proliferate twice."/"Proliferate X times." don't
+// also match this narrower shape.
+function parseProliferate(text: string): ProliferateEffect | undefined {
+  return /^proliferate\.?(\s*\(.*\))?\s*$/i.test(text.trim()) ? { kind: "proliferate" } : undefined;
+}
+
 function parseSingleRemovalEffect(text: string): Exclude<RemovalEffect, ModalEffect> | undefined {
-  return parseDestroy(text) ?? parseExile(text) ?? parseDamage(text) ?? parseMassDamage(text) ?? parseBounce(text);
+  return parseDestroy(text) ?? parseExile(text) ?? parseDamage(text) ?? parseMassDamage(text) ?? parseBounce(text) ?? parseProliferate(text);
 }
 
 // "Choose one/two —\n• mode.\n• mode. ..." (Boros Charm, Austere Command, ...). Each bullet is

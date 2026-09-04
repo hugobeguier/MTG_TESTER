@@ -53,7 +53,7 @@ ollama list
 Run this once:
 
 ```powershell
-ollama pull llama3.2
+ollama pull qwen2.5:7b-instruct-q5_K_M
 ```
 
 ## 5. Create the MTG agent models
@@ -75,7 +75,7 @@ ollama list
 You should see:
 
 ```text
-llama3.2:latest
+qwen2.5:7b-instruct-q5_K_M
 mtg-veyra:latest
 mtg-malik:latest
 mtg-sable:latest
@@ -104,8 +104,8 @@ The app defaults to Ollama at `http://localhost:11434` and uses agent-specific m
 
 ```powershell
 $env:OLLAMA_BASE_URL = "http://localhost:11434"
-$env:OLLAMA_MODEL = "llama3.2"
-$env:OLLAMA_RULES_MODEL = "llama3.2"
+$env:OLLAMA_MODEL = "qwen2.5:7b-instruct-q5_K_M"
+$env:OLLAMA_RULES_MODEL = "qwen2.5:7b-instruct-q5_K_M"
 npm.cmd run dev -- --hostname 127.0.0.1 --port 3001
 ```
 
@@ -152,7 +152,7 @@ Keep that terminal open. Then use a second terminal:
 
 ```powershell
 cd D:\MTG-AI
-ollama pull llama3.2
+ollama pull qwen2.5:7b-instruct-q5_K_M
 ollama create mtg-veyra -f .\ollama\veyra.Modelfile
 ollama create mtg-malik -f .\ollama\malik.Modelfile
 ollama create mtg-sable -f .\ollama\sable.Modelfile

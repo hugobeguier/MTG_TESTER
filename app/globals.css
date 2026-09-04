@@ -411,54 +411,19 @@ h3 {
   top: 1rem;
 }
 
-/* Fixed via plain CSS centering, not projected from a 3D world position (see the removed
-   floating life panel this replaced) — that anchor drifted as the camera orbited because table
-   world-space center never reliably projected to the visual center of the four battlefields
-   under perspective. Screen-centered CSS placement has no such problem: it's always dead center
-   regardless of camera angle. Quadrant layout mirrors the table (row/col picked from each seat's
-   PLAYER_AREAS x/z sign) so each cell sits next to that player's own board. */
-.life-hud {
-  display: grid;
-  left: 50%;
-  padding: 0;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  z-index: 4;
-}
-
-.life-hud-grid {
-  background: var(--accent);
-  display: grid;
-  gap: 2px;
-  grid-template-columns: repeat(2, 64px);
-  grid-template-rows: repeat(2, 64px);
-}
-
-.life-hud-cell {
-  align-items: center;
-  background: #0a0c09;
-  color: var(--text);
-  display: grid;
-  justify-items: center;
-  padding: 0.25rem;
-}
-
-.life-hud-cell strong {
-  color: var(--green);
-  font-size: 1.5rem;
-  line-height: 1;
-}
-
-.life-hud-cell span {
-  color: var(--muted);
-  font-size: 0.6rem;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
+/* Life totals moved to a real 3D plate on the table itself (see addLifeTotalPlate in
+   ThreeGameTable.tsx) — explicitly requested as "a 3D object like the card counter for the
+   library, graveyard and exile pile" after a screen-space overlay (in any of plain-CSS-fixed,
+   live-projected-with-smoothing, or live-projected-zero-lag form) never quite matched wanting it to
+   behave exactly like those pile labels. No DOM/CSS counterpart exists for it any more. */
 
 /* Positioned imperatively (left/top set every frame in ThreeGameTable's animate loop, projecting
    each agent's 3D name-label position to screen space) rather than via CSS placement — this box
-   tracks that world position as the camera orbits/pans/zooms instead of sitting fixed on screen. */
+   tracks that world position as the camera orbits/pans/zooms, so it sits next to that player's own
+   board instead of a fixed screen spot. A fully static per-corner layout was tried instead (see the
+   updateAgentHandAnchors comment for the sequence of attempts) but lost the actual board-relative
+   placement, reported live as "the hands should be by each player's board like before" — restored
+   to this projected version with heavier smoothing instead. */
 .agent-hand-anchor {
   backdrop-filter: blur(10px);
   background: rgba(20, 24, 18, 0.9);
@@ -824,6 +789,19 @@ h3 {
   padding: 0.55rem 0.75rem;
 }
 
+.three-hud button.is-active {
+  background: var(--red);
+  border-color: var(--red);
+}
+
+/* Full Control / Stop Next — a gold "armed" look (matches .three-hand-card.selected) rather than
+   the red toggle above, since these aren't a show/hide display toggle but an active override of
+   the normal priority-stop policy. */
+.hud-actions button.is-active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(244, 201, 93, 0.5);
+}
+
 .life-adjuster {
   align-items: center;
   display: grid;
@@ -852,7 +830,7 @@ h3 {
 .mana-choice-button {
   border: 1px solid rgba(242, 240, 232, 0.2);
   border-radius: 999px;
-  color: #10130f;
+  color: #000;
   font-weight: 800;
   text-align: center;
 }
@@ -1240,6 +1218,52 @@ h3 {
   margin: 0.25rem 2.5rem 0 0;
 }
 
+.priority-stops-modal h2 {
+  font-size: 1.5rem;
+  margin: 0.25rem 2.5rem 0 0;
+}
+
+.priority-stops-grid-wrap {
+  overflow-x: auto;
+}
+
+.priority-stops-grid {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.priority-stops-grid th,
+.priority-stops-grid td {
+  border-bottom: 1px solid rgba(242, 240, 232, 0.1);
+  padding: 0.35rem 0.6rem;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.priority-stops-grid th[scope="col"] {
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+}
+
+.priority-stops-grid th[scope="row"] {
+  color: #eee9d8;
+  font-weight: 400;
+  text-align: left;
+  text-transform: capitalize;
+}
+
+.priority-stops-toggles {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.priority-stops-toggles label {
+  align-items: center;
+  display: flex;
+  gap: 0.5rem;
+}
+
 .library-look-row {
   display: flex;
   gap: 0.8rem;
@@ -1284,6 +1308,59 @@ h3 {
 
 .library-look-actions button {
   padding: 0.55rem;
+}
+
+.targeting-banner {
+  background: rgba(10, 12, 10, 0.92);
+  border: 1px solid rgba(244, 201, 93, 0.75);
+  border-radius: 8px;
+  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.36);
+  color: var(--text);
+  display: grid;
+  gap: 0.35rem;
+  left: 50%;
+  max-width: min(520px, calc(100vw - 32px));
+  padding: 0.9rem 1rem;
+  position: absolute;
+  text-align: center;
+  top: 1rem;
+  transform: translateX(-50%);
+  z-index: 7;
+}
+
+.targeting-banner span {
+  color: var(--accent);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+}
+
+.targeting-banner button {
+  justify-self: center;
+  padding: 0.4rem 1.1rem;
+}
+
+.target-picker-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  max-height: 520px;
+  overflow-y: auto;
+  padding-bottom: 0.35rem;
+}
+
+.target-picker-entry {
+  display: grid;
+  gap: 0.4rem;
+  justify-items: center;
+}
+
+.target-picker-entry span {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.target-picker-entry button {
+  padding: 0.45rem 0.9rem;
 }
 
 .opponent-row {
@@ -1556,8 +1633,13 @@ h3 {
 }
 
 .visual-card.is-compact {
+  cursor: pointer;
   flex-basis: 144px;
   min-height: 198px;
+}
+
+.visual-card.is-compact:focus {
+  outline: 2px solid var(--accent);
 }
 
 .visual-card.is-tabletop {

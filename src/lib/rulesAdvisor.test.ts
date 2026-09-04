@@ -154,6 +154,22 @@ describe("deterministicRuleWorkflow", () => {
     expect(workflow?.destination).toBe("graveyard");
   });
 
+  // Regression: maxChoices used to be hardcoded to 1 for every search_library_to_graveyard card,
+  // right for Entomb (searches for exactly one) but silently wrong for Buried Alive's real "up to
+  // three" — reported live as Buried Alive only ever letting the human pick one creature.
+  it("extracts the real count and card type for a plural tutor-to-graveyard spell (Buried Alive)", () => {
+    const buriedAlive = card({
+      id: "buried-alive-1",
+      name: "Buried Alive",
+      typeLine: "Sorcery",
+      oracleText: "Search your library for up to three creature cards, put them into your graveyard, then shuffle."
+    });
+    const workflow = deterministicRuleWorkflow(input(buriedAlive));
+    expect(workflow?.workflow).toBe("search_library_to_graveyard");
+    expect(workflow?.maxChoices).toBe(3);
+    expect(workflow?.allowedCardFilter).toBe("creature");
+  });
+
   it("chooses search_library_to_library for a tutor-to-top-of-library ETB trigger (Moon-Blessed Cleric)", () => {
     const moonBlessedCleric = card({
       id: "moon-blessed-cleric-1",

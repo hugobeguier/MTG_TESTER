@@ -54,6 +54,7 @@ export interface ScoringContext {
     poison?: number;
     commanderDamage?: Record<string, number>;
     battlefield?: CardLike[];
+    availableMana?: { total?: number };
   }>;
   stack?: Array<{ id?: string; cardName?: string; oracleText?: string }>;
   // The item currently awaiting a response (as opposed to `stack`, which holds everything already
@@ -170,6 +171,35 @@ function scoreRampEarly(action: ScorableAction, context: ScoringContext, delta: 
   }
 }
 
+const OPEN_MANA_SWEEPER_TELL_THRESHOLD = 3;
+const OPEN_MANA_SWEEPER_TELL_MAX_BOARD = 1;
+
+// "Don't overextend a hand onto the board when an opponent's untapped mana with little to no board
+// reads as a held sweeper or counterspell" (gameplay-heuristics.md's own worked example, almost
+// word for word) — a local model was observed reasoning purely about board development and never
+// engaging with this signal even with the doc spelling it out, so this backs the prompt with a real
+// deterministic nudge instead of relying entirely on the model noticing it unprompted, the same
+// "score signal plus prompt reinforcement" combination that fixed the equivalent lethal-attack gap
+// (see scoreLethalAttack). Deliberately scoped to creature-adding spells — the shape the worked
+// example itself uses — and to "meaningful" open mana on a near-empty board: 1-2 untapped mana on an
+// early turn is unremarkable, and an opponent who already committed to their own board reads very
+// differently than one sitting empty waiting. This is a signal, not proof, so it's a nudge, not a
+// hard veto — a real reason to develop anyway (see the core prior on being behind) can still
+// outweigh it. Sized to actually flip cast_spell's +3 baseline below pass_priority's 0 rather than
+// merely cancel it to a tie: a tie left the model's own (occasionally incoherent) tie-breaking
+// reasoning in charge, observed live concluding "this reads as a held sweeper... therefore casting
+// is the safer play" — a real score gap gives the prompt's directive something to actually bite on.
+function scoreOverextendIntoOpenMana(action: ScorableAction, context: ScoringContext, delta: (amount: number, reason: string) => void) {
+  if (action.actionType !== "cast_spell" && action.actionType !== "cast_commander") return;
+  if (action.role !== "creature") return;
+  const wary = (context.opponents ?? []).find(
+    (opponent) =>
+      (opponent.availableMana?.total ?? 0) >= OPEN_MANA_SWEEPER_TELL_THRESHOLD && (opponent.battlefield?.length ?? 0) <= OPEN_MANA_SWEEPER_TELL_MAX_BOARD
+  );
+  if (!wary) return;
+  delta(-4, `${wary.name ?? "an opponent"}'s open mana with little to no board reads as a held sweeper or counterspell — overcommitting into it risks a blowout`);
+}
+
 function scoreRemovalTargeting(action: ScorableAction, context: ScoringContext, delta: (amount: number, reason: string) => void) {
   if (action.actionType !== "cast_spell" || action.role !== "removal") return;
   const targetId = action.targetIds[0];
@@ -239,6 +269,33 @@ function scoreAttackProfitability(action: ScorableAction, context: ScoringContex
 // candidate target against the *other* opponents (not you) gives a real multiplayer signal instead:
 // attack whoever's weakest (easiest to close out) or whoever's biggest (an imminent-winner threat),
 // matching gameplay-heuristics.md's "prioritize players with imminent wins" guidance.
+// "Would this attack, if it connects, take the target player's life to 0 or below?" — a strictly
+// bigger deal than merely being the lowest-life opponent (scoreAttackTargetSelection just below):
+// that only signals "an easier kill eventually," this signals "ends their game outright, this turn."
+// Without a DETERMINISTIC signal for this, nothing distinguished a genuinely lethal attack from a
+// merely-good one, and a local model doing broader multiplayer-politics reasoning ("who's the
+// biggest threat") was observed skipping a free kill entirely — it never even checked the simple
+// power-vs-life arithmetic before reasoning about board state. Scoped to a direct attack on a player
+// (targetIds resolves straight to an opponent's seat id) — an attack on a planeswalker resolves
+// through the same targetIds shape but deals its damage to loyalty, not life, so it's deliberately
+// excluded here rather than mistaken for lethal. Worded as "if it connects" rather than asserting
+// certainty: a defender can still block during declare_blockers, which scoreAttackProfitability
+// separately scores — the two signals compound correctly (a lethal attack with no legal blockers
+// scores highest of all, exactly as it should).
+function scoreLethalAttack(action: ScorableAction, context: ScoringContext, delta: (amount: number, reason: string) => void) {
+  if (action.actionType !== "attack") return;
+  const targetId = action.targetIds[0];
+  const targetOpponent = (context.opponents ?? []).find((opponent) => opponent.id === targetId);
+  if (!targetOpponent) return;
+  const attacker = findCard(context.you?.battlefield, action.cardId);
+  const attackerPower = parseNum(attacker?.power);
+  const targetLife = targetOpponent.life;
+  if (attackerPower === undefined || attackerPower <= 0 || targetLife === undefined || targetLife <= 0) return;
+  if (attackerPower >= targetLife) {
+    delta(6, `would be lethal to ${targetOpponent.name ?? "this opponent"} if it connects (${attackerPower} damage vs ${targetLife} life)`);
+  }
+}
+
 function scoreAttackTargetSelection(action: ScorableAction, context: ScoringContext, delta: (amount: number, reason: string) => void) {
   if (action.actionType !== "attack") return;
   const targetId = action.targetIds[0];
@@ -509,7 +566,7 @@ const BOARD_WIPE_PATTERNS = [
   /\beach player sacrifices\b.{0,20}\bcreatures?\b/
 ];
 
-function isBoardWipeText(oracleText: string): boolean {
+export function isBoardWipeText(oracleText: string): boolean {
   const text = oracleText.toLowerCase();
   return BOARD_WIPE_PATTERNS.some((pattern) => pattern.test(text));
 }
@@ -560,8 +617,10 @@ export function scoreLegalAction(action: ScorableAction, context: ScoringContext
 
   scoreLandsBeforeSpells(action, delta);
   scoreRampEarly(action, context, delta);
+  scoreOverextendIntoOpenMana(action, context, delta);
   scoreRemovalTargeting(action, context, delta);
   scoreAttackProfitability(action, context, delta);
+  scoreLethalAttack(action, context, delta);
   scoreAttackTargetSelection(action, context, delta);
   scoreBlockDecision(action, context, delta);
   scoreHoldInstants(action, context, delta);

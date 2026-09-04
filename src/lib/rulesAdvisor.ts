@@ -291,17 +291,23 @@ export function deterministicRuleWorkflow(input: RuleAdvisorInput): RuleWorkflow
     };
   }
 
-  // "Search your library for a card, put that card into your graveyard, then shuffle." (Entomb,
-  // Buried Alive, ...) — checked before the to-hand/to-battlefield branches below since those two
-  // would otherwise never match this shape anyway (neither "hand" nor "battlefield" appears), but
-  // ordering it first keeps the graveyard-destination intent unambiguous if a future card's text
-  // happens to mention more than one zone.
+  // "Search your library for a card, put that card into your graveyard, then shuffle." (Entomb) /
+  // "Search your library for up to three creature cards, put them into your graveyard, then
+  // shuffle." (Buried Alive) — checked before the to-hand/to-battlefield branches below since those
+  // two would otherwise never match this shape anyway (neither "hand" nor "battlefield" appears),
+  // but ordering it first keeps the graveyard-destination intent unambiguous if a future card's text
+  // happens to mention more than one zone. maxChoices used to be hardcoded to 1 (right for Entomb,
+  // silently wrong for Buried Alive and anything else with an "up to N" count) — extracted the same
+  // way extractKeywordCount/extractDrawCount already pull a count out of nearby text, rather than
+  // assuming every card in this shape searches for exactly one card. Reported live: Buried Alive only
+  // ever let the human choose one creature to put in the graveyard, never the real "up to three."
+  const graveyardSearchCountMatch = scopedText.match(/search your library for (?:up to )?(a|one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s/);
   if (scopedText.includes("search your library") && scopedText.includes("put") && scopedText.includes("graveyard")) {
     return {
       workflow: "search_library_to_graveyard",
-      summary: `${input.sourceCard.name} can search the library for a card and put it into the graveyard.`,
+      summary: `${input.sourceCard.name} can search the library for up to ${numberWordToInt(graveyardSearchCountMatch?.[1]) ?? 1} card(s) and put them into the graveyard.`,
       sourceCardId: input.sourceCard.id,
-      maxChoices: 1,
+      maxChoices: numberWordToInt(graveyardSearchCountMatch?.[1]) ?? 1,
       allowedCardFilter: extractSearchedCardType(scopedText) ?? "cards matching the source effect",
       destination: "graveyard",
       requiresHumanChoice: true,
@@ -415,8 +421,19 @@ function extractDrawCount(text: string) {
 // matcher can't match against any real card, so it fell through to preferring a creature — the
 // single most common thing to find in a Commander deck's library — over an actual Forest.
 function extractSearchedCardType(text: string): string | undefined {
-  const match = text.match(/\bsearch (?:your|their) library for (?:up to \w+ )?an? ([a-z][a-z '-]*?) cards?\b/);
-  return match ? match[1].trim() : undefined;
+  // Two separate alternatives rather than one pattern with an optional article: a plural "up to N"
+  // search names its type directly with no article at all ("for up to three creature cards", Buried
+  // Alive), while a singular search always has one ("for a Forest card"). Simply making the article
+  // optional in one shared pattern let the capture group swallow the bare article itself as if it
+  // were a real type name whenever no type was named at all ("for a card" -> captured "a" instead of
+  // correctly matching nothing) — this keeps the singular branch's original semantics exactly (still
+  // correctly returns undefined for a plain "a card"/"a creature" with no named type) while adding
+  // the plural branch Buried Alive needs. Reported live as Buried Alive falling back to the generic
+  // "cards matching the source effect" placeholder, losing the "creature" restriction entirely.
+  const pluralMatch = text.match(/\bsearch (?:your|their) library for up to \w+ ([a-z][a-z '-]*?) cards?\b/);
+  if (pluralMatch) return pluralMatch[1].trim();
+  const singularMatch = text.match(/\bsearch (?:your|their) library for an? ([a-z][a-z '-]*?) cards?\b/);
+  return singularMatch ? singularMatch[1].trim() : undefined;
 }
 
 function extractLookAtTopCount(text: string) {

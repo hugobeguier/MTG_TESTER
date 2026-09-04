@@ -2,10 +2,14 @@ import { describe, expect, it } from "vitest";
 import {
   basicLandFetchCostRequiresTap,
   basicLandFetchManaCost,
+  combatDamageToPlayerEffectText,
   deathEffectText,
   etbEffectText,
+  hasGraveyardShuffleReplacement,
   isActivatedAbilityClause,
+  isAttackTriggerAddManaClause,
   isBasicLandFetchAbility,
+  isCombatDamageToPlayerClause,
   isNonEtbWheneverClause,
   mergeModalBulletClauses,
   oracleClauses,
@@ -13,6 +17,61 @@ import {
   parseEmblemGrant,
   parseModalHeader
 } from "./oracleClauses";
+
+describe("hasGraveyardShuffleReplacement", () => {
+  it("recognizes Blightsteel Colossus's real oracle text", () => {
+    expect(
+      hasGraveyardShuffleReplacement(
+        "Trample, infect, indestructible\nIf Blightsteel Colossus would be put into a graveyard from anywhere, reveal Blightsteel Colossus and shuffle it into its owner's library instead."
+      )
+    ).toBe(true);
+  });
+
+  it("recognizes Darksteel Colossus and Progenitus (same template, different names)", () => {
+    expect(
+      hasGraveyardShuffleReplacement(
+        "Trample\nIndestructible\nIf Darksteel Colossus would be put into a graveyard from anywhere, reveal Darksteel Colossus and shuffle it into its owner's library instead."
+      )
+    ).toBe(true);
+    expect(
+      hasGraveyardShuffleReplacement(
+        "Protection from everything\nIf Progenitus would be put into a graveyard from anywhere, reveal Progenitus and shuffle it into its owner's library instead."
+      )
+    ).toBe(true);
+  });
+
+  it("does not match Emrakul, the Aeons Torn's differently-worded graveyard trigger", () => {
+    // Emrakul is a triggered ability that shuffles its owner's whole graveyard into their library,
+    // not a replacement effect that shuffles just itself — a real, different template.
+    expect(
+      hasGraveyardShuffleReplacement(
+        "This spell can't be countered. When you cast this spell, take an extra turn after this one. Flying, protection from spells that are one or more colors, annihilator 6. When Emrakul is put into a graveyard from anywhere, its owner shuffles their graveyard into their library."
+      )
+    ).toBe(false);
+  });
+
+  it("does not match an unrelated card", () => {
+    expect(hasGraveyardShuffleReplacement("Flying\nWhen this creature dies, draw a card.")).toBe(false);
+  });
+});
+
+describe("isAttackTriggerAddManaClause", () => {
+  it("recognizes Klauth, Unrivaled Ancient's real oracle text", () => {
+    expect(
+      isAttackTriggerAddManaClause(
+        "Flying, haste\nWhenever Klauth attacks, add X mana in any combination of colors, where X is the total power of attacking creatures. Spend this mana only to cast spells. Until end of turn, you don't lose this mana as steps and phases end."
+      )
+    ).toBe(true);
+  });
+
+  it("does not match a plain tap-for-mana ability", () => {
+    expect(isAttackTriggerAddManaClause("{T}: Add one mana of any color.")).toBe(false);
+  });
+
+  it("does not match a differently-worded attack trigger", () => {
+    expect(isAttackTriggerAddManaClause("Whenever this creature attacks, create a 1/1 white Bird creature token with flying.")).toBe(false);
+  });
+});
 
 describe("isBasicLandFetchAbility / basicLandFetchCostRequiresTap / basicLandFetchManaCost", () => {
   it("recognizes Wayfarer's Bauble, including its 'put that card' phrasing and its {2} generic mana cost", () => {
@@ -132,6 +191,24 @@ describe("phase-trigger clauses nested inside a loyalty ability", () => {
 
   it("deathEffectText finds nothing since none of Tezzeret's clauses are death triggers", () => {
     expect(deathEffectText(tezzeretOracleText)).toBe("");
+  });
+});
+
+describe("isCombatDamageToPlayerClause / combatDamageToPlayerEffectText", () => {
+  const toskiOracleText = [
+    "This spell can't be countered.",
+    "Indestructible",
+    "Toski attacks each combat if able.",
+    "Whenever a creature you control deals combat damage to a player, draw a card."
+  ].join("\n");
+
+  it("isolates Toski's combat-damage clause from its other keyword lines", () => {
+    expect(combatDamageToPlayerEffectText(toskiOracleText)).toBe("Whenever a creature you control deals combat damage to a player, draw a card.");
+  });
+
+  it("does not treat Indestructible or the attack-each-combat clause as a combat-damage trigger", () => {
+    expect(isCombatDamageToPlayerClause("Indestructible")).toBe(false);
+    expect(isCombatDamageToPlayerClause("Toski attacks each combat if able.")).toBe(false);
   });
 });
 

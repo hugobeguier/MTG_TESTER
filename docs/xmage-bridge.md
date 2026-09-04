@@ -16,5 +16,5 @@ Environment:
 ```text
 XMAGE_BRIDGE_URL=http://localhost:8088
 OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=llama3.2
+OLLAMA_MODEL=qwen2.5:7b-instruct-q5_K_M
 ```
