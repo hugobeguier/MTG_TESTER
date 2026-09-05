@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { VisibleCard } from "./types";
-import { deathEffectText, etbEffectText } from "./oracleClauses";
+import { cardsLeaveGraveyardEffectText, deathEffectText, etbEffectText } from "./oracleClauses";
 import { ollamaFetch, OLLAMA_TIMEOUT_MS } from "./ollama";
 
 const DestinationSchema = z.preprocess((value) => {
@@ -24,12 +24,14 @@ export const RuleWorkflowSchema = z.object({
     "search_library_to_hand",
     "search_library_to_battlefield",
     "search_library_to_graveyard",
+    "search_library_to_hand_or_graveyard",
     "search_library_to_library",
     "draw_cards",
     "draw_then_put_back",
     "scry_cards",
     "surveil_cards",
     "look_at_top_cards",
+    "look_at_top_cards_reveal_type_to_hand",
     "reorder_top_cards",
     "move_card_between_zones",
     "proliferate",
@@ -54,6 +56,12 @@ export const RuleWorkflowSchema = z.object({
   putBackAmount: z.number().int().min(0).max(20).optional(),
   allowedCardFilter: z.string().optional(),
   destination: DestinationSchema,
+  // "... put it into your hand or graveyard, then shuffle." (Dina's Guidance) — the found card's
+  // actual zone is the CONTROLLER'S choice, not a single fixed destination the way every other
+  // search workflow above assumes. destination above stays populated with a sensible default
+  // ("hand") so every existing consumer that only reads `destination` keeps working unchanged; a
+  // consumer that wants to offer the real choice reads this instead.
+  destinationChoices: z.array(z.enum(["hand", "graveyard"])).optional(),
   tapped: z.boolean().optional(),
   requiresHumanChoice: z.boolean().default(true),
   warnings: z.array(z.string()).default([])
@@ -188,6 +196,30 @@ export function deterministicRuleWorkflow(input: RuleAdvisorInput): RuleWorkflow
   // Checked before the plain draw count below: a card that both reorders its top cards and
   // later says "draw a card" (e.g. Ponder) must not be short-circuited into just drawing.
   const lookCount = extractLookAtTopCount(scopedText);
+  // "Look at the top four cards of your library. You may reveal a creature card from among them
+  // and put it into your hand. Put the rest on the bottom of your library in any order." (Growing
+  // Rites of Itlimoc) — checked before both the reorder-to-top and generic look_at_top_cards
+  // branches below: this real template is neither of those. "the rest go back on top" (reorder,
+  // Ponder-style) and "look at N, one card of ANY type to hand, rest back on top" (the generic
+  // look_at_top_cards fallback, Diabolic Vision-shaped) are both real but different templates —
+  // Growing Rites' own "rest to the BOTTOM" and "only a creature card" restriction match neither,
+  // so it was silently falling into the generic fallback with no type restriction enforced and the
+  // wrong destination for the leftover cards.
+  const revealTypeToHandBottomRest = scopedText.match(
+    /\byou may reveal an? ([a-z][a-z ]*?) cards? from among them and put it into your hand\.\s*put the rest on the bottom of your library in any order\b/
+  );
+  if (lookCount && revealTypeToHandBottomRest) {
+    return {
+      workflow: "look_at_top_cards_reveal_type_to_hand",
+      summary: `${input.sourceCard.name} instructs ${input.actorName} to look at the top ${lookCount} cards, reveal a ${revealTypeToHandBottomRest[1]} card to hand, and put the rest on the bottom.`,
+      sourceCardId: input.sourceCard.id,
+      maxChoices: lookCount,
+      allowedCardFilter: revealTypeToHandBottomRest[1],
+      requiresHumanChoice: true,
+      warnings: []
+    };
+  }
+
   if (lookCount && (scopedText.includes("put them back in any order") || scopedText.includes("put those cards back in any order"))) {
     return {
       workflow: "reorder_top_cards",
@@ -301,6 +333,28 @@ export function deterministicRuleWorkflow(input: RuleAdvisorInput): RuleWorkflow
   // way extractKeywordCount/extractDrawCount already pull a count out of nearby text, rather than
   // assuming every card in this shape searches for exactly one card. Reported live: Buried Alive only
   // ever let the human choose one creature to put in the graveyard, never the real "up to three."
+  // "Search your library for a creature card, reveal it, put it into your hand or graveyard, then
+  // shuffle." (Dina's Guidance) — checked BEFORE the graveyard/hand branches below, which would
+  // otherwise misclassify this as a fixed single-destination search (whichever of "graveyard"/"hand"
+  // scopedText.includes hits first — previously always "graveyard," discarding the "or hand" half
+  // entirely). This card names both zones because the CONTROLLER CHOOSES between them, not because
+  // one of them is the actual destination — matched against the real printed template rather than a
+  // loose "mentions both zones" test, same narrow-scoping convention as every other parser here.
+  // Reported live: Dina's Guidance only ever offered the graveyard, never hand.
+  if (/\bput (?:it|that card|them) into your (?:hand or graveyard|graveyard or hand)\b/.test(scopedText)) {
+    return {
+      workflow: "search_library_to_hand_or_graveyard",
+      summary: `${input.sourceCard.name} can search the library for a card and put it into hand or graveyard.`,
+      sourceCardId: input.sourceCard.id,
+      maxChoices: 1,
+      allowedCardFilter: extractSearchedCardType(scopedText) ?? "cards matching the source effect",
+      destination: "hand",
+      destinationChoices: ["hand", "graveyard"],
+      requiresHumanChoice: true,
+      warnings: []
+    };
+  }
+
   const graveyardSearchCountMatch = scopedText.match(/search your library for (?:up to )?(a|one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s/);
   if (scopedText.includes("search your library") && scopedText.includes("put") && scopedText.includes("graveyard")) {
     return {
@@ -374,6 +428,7 @@ export function deterministicRuleWorkflow(input: RuleAdvisorInput): RuleWorkflow
 export function eventRelevantOracleText(event: string, oracleText: string): string {
   if (event === "land_played" || event === "spell_resolved_to_battlefield") return etbEffectText(oracleText);
   if (event === "card_moved_to_graveyard") return deathEffectText(oracleText);
+  if (event === "cards_left_graveyard") return cardsLeaveGraveyardEffectText(oracleText);
   return oracleText;
 }
 

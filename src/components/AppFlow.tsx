@@ -1,7 +1,24 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { AgentAction, AgentReasoning, CardFaceRecord, CommanderDeck, EmblemState, GameEvent, GameSession, InterpretedEffect, PlayerSeat, VisibleCard } from "@/lib/types";
+import type {
+  AgentAction,
+  AgentReasoning,
+  CardFaceRecord,
+  ColoredMana,
+  CommanderDeck,
+  EmblemState,
+  GameEvent,
+  GameSession,
+  InterpretedEffect,
+  ManaColor,
+  ManaContribution,
+  ManaPool,
+  PlayerSeat,
+  RestrictedManaBatch,
+  VisibleCard
+} from "@/lib/types";
+import { deserializeTurnCounters, isCleanSaveStop, SAVE_FORMAT_VERSION, serializeTurnCounters, type GameSnapshot, type SavedGameSummary } from "@/lib/saveGame";
 import { eventRelevantOracleText, type RuleWorkflow } from "@/lib/rulesAdvisor";
 import type { PrimitiveActionPlan, PrimitiveActionStep } from "@/lib/primitiveActionPlan";
 import { evaluateOpeningHand } from "@/lib/mulliganHeuristics";
@@ -25,6 +42,7 @@ import {
 import {
   basicLandFetchCostRequiresTap,
   basicLandFetchManaCost,
+  cardsLeaveGraveyardEffectText,
   combatDamageToPlayerEffectText,
   deathEffectText,
   etbEffectText,
@@ -76,6 +94,7 @@ import {
   parseDevotionCda,
   parseGroupAnthemBoost,
   parseGroupKeywordGrant,
+  parseGroupManaAbilityGrant,
   parseSelfAnthemBoost,
   permanentMatchesQualifier,
   pickChosenColor,
@@ -95,23 +114,13 @@ type DeckInputMode = "commander" | "decklist";
 type DeckBuildStatus = "empty" | "building" | "ready" | "error";
 type GameStage = "mulligan" | "playing";
 type TurnPhase = (typeof TURN_PHASES)[number];
-type LibraryLookMode = "scry" | "surveil" | "reorder" | "choose_one" | "vault_look";
-type ManaColor = "W" | "U" | "B" | "R" | "G" | "C";
-type ColoredMana = Exclude<ManaColor, "C">;
-type ManaPool = Record<ManaColor, number>;
-// Klauth, Unrivaled Ancient's "add X mana in any combination of colors ... spend this mana only to
-// cast spells ... you don't lose this mana as steps and phases end" — two real exceptions to how
-// mana normally works here, deliberately its own parallel structure rather than a field bolted onto
-// ManaPool, so every existing ManaPool consumer (payment/cost logic, the mana-pool UI) is untouched
-// by default and only the sites that need to opt into restricted mana do (see payCastingCost below).
-// clearAllManaPools/clearManaPool never touch this, so a batch survives every phase/step change on
-// its own; it's only ever cleared explicitly, at the cleanup step of the turn it was created.
-interface RestrictedManaBatch {
-  id: string;
-  sourceCardName: string;
-  remaining: ManaPool;
-  restriction: "cast_spells_only";
-}
+// "choose_one_bottom" (Growing Rites of Itlimoc: "look at the top N, reveal a [type] card to
+// hand, the rest to the BOTTOM in any order") is its own mode distinct from "choose_one" (Diabolic
+// Vision: any card, rest back on TOP) — same look-then-pick shape, different destination for the
+// leftover cards and a real type restriction on the pick.
+type LibraryLookMode = "scry" | "surveil" | "reorder" | "choose_one" | "choose_one_bottom" | "vault_look";
+// ManaColor/ColoredMana/ManaPool/ManaContribution/RestrictedManaBatch moved to src/lib/types.ts so a
+// saved-game snapshot (src/lib/saveGame.ts) can reference them without a component -> lib import.
 // A shared `optional` field on every variant (via intersection, not repeated per-branch) — set
 // when the source text says "you may" for this effect, so the resolution step can ask the
 // controller (human via a real prompt, agent via a deterministic accept-by-default heuristic —
@@ -132,7 +141,19 @@ type TriggerEffect = (
   // takes any string kind, this type just used to be narrower than what it actually resolves to.
   // alsoTap: "tap up to one target creature and put a stun counter on it" (Fear of Sleep
   // Paralysis's Eerie ability) — a compound tap-and-counter shape, not just a counter.
-  | { kind: "add_counter"; counterKind: string; amount: number; scope: "self" | "context" | "target_creature" | "target_creature_you_control"; alsoTap?: boolean }
+  // "each_matching_you_control": "... put a +1/+1 counter on each Plant you control." (Insidious
+  // Roots, following its own "create a 0/1 green Plant creature token" — see the shared `then` field
+  // below) — a board-wide counter, unlike the single-permanent target_creature(_you_control) scopes,
+  // resolved via the same permanentMatchesQualifier every static group-grant already uses (matcher
+  // e.g. "plant"), against the trigger's own controller's battlefield.
+  | {
+      kind: "add_counter";
+      counterKind: string;
+      amount: number;
+      scope: "self" | "context" | "target_creature" | "target_creature_you_control" | "each_matching_you_control";
+      alsoTap?: boolean;
+      matcher?: string;
+    }
   | { kind: "copy_token"; scope: "self" | "context" }
   | { kind: "draw_then_put_back"; drawAmount: number; putBackAmount: number }
   // Board-wide temporary pump/debuff off a triggered ability (Doomwake Giant's Constellation
@@ -181,7 +202,15 @@ type TriggerEffect = (
   // pendingRuleChoice the same way connive's discard and draw_then_put_back's put-back are), not
   // something resolveTriggerEffect's pure-function path can decide on its own.
   | { kind: "return_land_to_hand" }
-) & { optional?: boolean };
+) & {
+  optional?: boolean;
+  // "Create a 0/1 green Plant creature token, then put a +1/+1 counter on each Plant you control."
+  // (Insidious Roots) — a narrow, single compound field rather than a general sequence/list of
+  // effects, matching how add_counter's own alsoTap flag already models a compound tap-and-counter
+  // shape instead of introducing a whole second effect-chaining concept. Applied by one recursive
+  // call at the end of resolveTriggerEffect once the primary effect has resolved.
+  then?: TriggerEffect;
+};
 
 interface TokenSpec {
   count: number;
@@ -245,6 +274,9 @@ interface LibraryLookState {
   cards: VisibleCard[];
   remaining: number;
   orderedCards?: VisibleCard[];
+  // "choose_one_bottom" only: restricts which looked-at card may actually be sent to hand (Growing
+  // Rites of Itlimoc's "a creature card") — undefined for every other mode, which allow any card.
+  allowedCardFilter?: string;
 }
 
 interface MyriadSearchState {
@@ -295,6 +327,16 @@ type PendingRuleChoice =
       // "up to two," lets the controller choose either destination for it; this always sends a
       // single find to `destination`) rather than a whole second interactive sub-choice.
       splitDestination?: "hand";
+      // "... put it into your hand or graveyard, then shuffle." (Dina's Guidance) — unlike
+      // splitDestination above (which routes different PICKS to different zones), this is a real
+      // per-pick CHOICE of zone: the same card can go to either. When set, the picker offers both
+      // actions per card and chooseRuleLibraryCard/completeRuleChoice route to whichever the
+      // controller actually chose instead of always using `destination`.
+      destinationChoices?: Array<"hand" | "graveyard">;
+      // Keyed by cardId — the actual per-pick zone the controller chose via destinationChoices
+      // above, for however many cards have already been picked in this (possibly multi-pick)
+      // search. Consulted before splitDestination/destination in completeRuleChoice.
+      chosenDestinations?: Record<string, "hand" | "graveyard">;
     }
   // "Put target creature card from A GRAVEYARD onto the battlefield under your control." (Virtue of
   // Persistence) — a real target choice across every player's graveyard, not just the controller's
@@ -634,12 +676,6 @@ interface ManaChoiceState {
   cardName: string;
   location: "battlefield" | "command";
   choices: ManaColor[];
-}
-
-interface ManaContribution {
-  cardId: string;
-  color: ManaColor;
-  amount: number;
 }
 
 interface OllamaStatus {
@@ -1043,6 +1079,23 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   const [manaChoice, setManaChoice] = useState<ManaChoiceState | undefined>();
   const [setupMessage, setSetupMessage] = useState<string | undefined>();
   const [configs, setConfigs] = useState<SeatConfig[]>(() => createInitialConfigs(initialSession.seats));
+  // Saved-game list for the setup screen's Load panel — refetched whenever the setup screen becomes
+  // visible (a save/delete made from elsewhere in this same session, or in another tab, should show
+  // up without a full page reload).
+  const [savedGames, setSavedGames] = useState<SavedGameSummary[]>([]);
+  useEffect(() => {
+    if (mode !== "setup") return;
+    let cancelled = false;
+    fetch("/api/saves")
+      .then((response) => (response.ok ? response.json() : []))
+      .then((list: SavedGameSummary[]) => {
+        if (!cancelled) setSavedGames(list);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [mode]);
   // startGame is async (it awaits an Ollama mulligan decision per agent seat, which can take
   // several seconds each) with nothing else gating re-entry — playBlockedByBuild only reflects
   // per-seat deck-build status, not "a game is currently being started." Without this, clicking
@@ -1133,6 +1186,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   const processedDeathBatchRef = useRef<GameSession["pendingDeaths"]>(undefined);
   const processedEntryBatchRef = useRef<GameSession["pendingEntries"]>(undefined);
   const processedCombatDamageToPlayerBatchRef = useRef<GameSession["pendingCombatDamageToPlayer"]>(undefined);
+  const processedGraveyardDepartureBatchRef = useRef<GameSession["pendingGraveyardDepartures"]>(undefined);
   // Card ids already offered (or auto-resolved) the "move to the command zone instead?" choice —
   // a commander that's declined the move (or an agent's auto-accepted one) stays in the graveyard
   // still flagged commander: true, so without this the detection effect below would re-offer the
@@ -1517,6 +1571,30 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     setSession((current) => (current.pendingCombatDamageToPlayer === hits ? { ...current, pendingCombatDamageToPlayer: undefined } : current));
     if (damageTriggers.length > 0) queueCommonTriggers(damageTriggers);
   }, [session.pendingCombatDamageToPlayer, pendingAction]);
+
+  // Same shape again, for pendingGraveyardDepartures — see that field's own comment on GameSession
+  // for the bug this fixes (Willow Geist, Insidious Roots: "whenever one or more cards leave your
+  // graveyard, ..." had no event to fire off of at all before this field existed).
+  useEffect(() => {
+    if (pendingAction) return;
+    const departures = session.pendingGraveyardDepartures;
+    if (!departures || departures.length === 0 || departures === processedGraveyardDepartureBatchRef.current) return;
+    processedGraveyardDepartureBatchRef.current = departures;
+    const departureTriggers = departures.flatMap((departure) => findCardsLeftGraveyardTriggers(session, departure.seatId));
+    setSession((current) => (current.pendingGraveyardDepartures === departures ? { ...current, pendingGraveyardDepartures: undefined } : current));
+    if (departureTriggers.length > 0) queueCommonTriggers(departureTriggers);
+    // Same "let the rules advisor handle whatever the deterministic common-trigger system doesn't
+    // own" fallback as the pendingDeaths/pendingEntries effects' own, for a departure clause the
+    // parser recognizes as present but can't resolve into a known effect shape.
+    for (const departure of departures) {
+      const seat = session.seats.find((item) => item.id === departure.seatId);
+      for (const source of seat?.board.battlefield ?? []) {
+        if (cardsLeaveGraveyardEffectText(source.oracleText) && commonTriggerEffect(source.oracleText, "cards_left_graveyard") === undefined) {
+          void consultRulesAdvisor("cards_left_graveyard", departure.seatId, source);
+        }
+      }
+    }
+  }, [session.pendingGraveyardDepartures, pendingAction]);
 
   // Rule 903.9a: a commander that would go to the graveyard may be put into the command zone
   // instead, owner's choice — destroyCreatures/moveCardBetweenVisibleZones no longer auto-redirect
@@ -2471,6 +2549,167 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     setMode("game");
   }
 
+  // Whether Save is currently allowed, and why not if it isn't — every transient/in-flight value
+  // this checks is provably empty when it returns ok, so buildSaveSnapshot below never has to
+  // serialize PendingAction, the stack, an open choice modal, or an in-flight agent LLM call.
+  function currentCleanSaveStopStatus() {
+    return isCleanSaveStop({
+      mode,
+      gameStage,
+      sessionStatus: session.status,
+      hasPendingAction: Boolean(pendingAction),
+      stackActionCount: stackActions.length,
+      hasOpenModal: Boolean(
+        libraryLook ||
+          manualLibrarySearch ||
+          pendingRuleChoice ||
+          blockChoice ||
+          myriadSearch ||
+          myriadTapChoice ||
+          urzaSagaSearch ||
+          basicLandFetchSearch ||
+          manaChoice ||
+          inspectedCard ||
+          selectedHandCardId ||
+          selectedBlockerIds.length > 0 ||
+          mulliganReturnCardIds.length > 0
+      ),
+      pendingDeathsCount: session.pendingDeaths?.length ?? 0,
+      pendingEntriesCount: session.pendingEntries?.length ?? 0,
+      pendingCombatDamageToPlayerCount: session.pendingCombatDamageToPlayer?.length ?? 0,
+      pendingGraveyardDeparturesCount: session.pendingGraveyardDepartures?.length ?? 0,
+      anyAgentThinking: Object.values(agentThinking).some(Boolean),
+      prioritySeatId,
+      humanSeatId: humanSeat.id
+    });
+  }
+
+  function buildSaveSnapshot(): GameSnapshot {
+    return {
+      formatVersion: SAVE_FORMAT_VERSION,
+      savedAt: new Date().toISOString(),
+      session,
+      activeSeatId,
+      prioritySeatId,
+      gameStage,
+      holdPriorityOnce,
+      priorityPasses,
+      mulligans,
+      keptHands,
+      manaPools,
+      manaContributions,
+      restrictedManaBatches,
+      turnCounters: serializeTurnCounters({
+        landPlaysThisTurn: landPlaysThisTurn.current,
+        spellsCastThisTurn: spellsCastThisTurn.current,
+        firstDrawThisTurn: firstDrawThisTurn.current,
+        loyaltyActivationsThisTurn: loyaltyActivationsThisTurn.current,
+        phaseTriggersChecked: phaseTriggersChecked.current,
+        cleanupDiscardChecked: cleanupDiscardChecked.current,
+        cleanupRestrictedManaChecked: cleanupRestrictedManaChecked.current,
+        agentMainActions: agentMainActions.current,
+        commanderZoneChoiceAsked: commanderZoneChoiceAsked.current,
+        auraRetargetAsked: auraRetargetAsked.current
+      })
+    };
+  }
+
+  async function saveGameNow() {
+    const status = currentCleanSaveStopStatus();
+    if (!status.ok) return;
+    const activeSeatName = session.seats.find((seat) => seat.id === activeSeatId)?.name ?? "Unknown";
+    const name = `Turn ${session.turn} — ${activeSeatName}`;
+    try {
+      const response = await fetch("/api/saves", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name, snapshot: buildSaveSnapshot() })
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      addEvent(`Saved "${name}".`, undefined, "Rules action");
+    } catch (error) {
+      addEvent(`Failed to save the game: ${error instanceof Error ? error.message : "unknown error"}.`, undefined, "Rules action");
+    }
+  }
+
+  // The mirror image of startGameInner's own tail above — restores every piece of state that tail
+  // resets, then hands off to the game screen exactly the way starting a fresh game does. No page
+  // reload, so there's no SSR/hydration path to get wrong.
+  function applySnapshot(snapshot: GameSnapshot) {
+    if (snapshot.formatVersion !== SAVE_FORMAT_VERSION) {
+      setSetupMessage(`This save is from an incompatible version (format ${snapshot.formatVersion}, this build expects ${SAVE_FORMAT_VERSION}) and can't be loaded.`);
+      return;
+    }
+    setSession(snapshot.session);
+    setActiveSeatId(snapshot.activeSeatId ?? snapshot.session.seats[1]?.id ?? snapshot.session.seats[0].id);
+    setPrioritySeatId(snapshot.prioritySeatId ?? snapshot.session.seats[1]?.id ?? snapshot.session.seats[0].id);
+    setGameStage(snapshot.gameStage);
+    setHoldPriorityOnce(snapshot.holdPriorityOnce);
+    setPriorityPasses(snapshot.priorityPasses);
+    setMulligans(snapshot.mulligans);
+    setKeptHands(snapshot.keptHands);
+    setManaPools(snapshot.manaPools);
+    setManaContributions(snapshot.manaContributions);
+    setRestrictedManaBatches(snapshot.restrictedManaBatches);
+    const counters = deserializeTurnCounters(snapshot.turnCounters);
+    landPlaysThisTurn.current = counters.landPlaysThisTurn;
+    spellsCastThisTurn.current = counters.spellsCastThisTurn;
+    firstDrawThisTurn.current = counters.firstDrawThisTurn;
+    loyaltyActivationsThisTurn.current = counters.loyaltyActivationsThisTurn;
+    phaseTriggersChecked.current = counters.phaseTriggersChecked;
+    cleanupDiscardChecked.current = counters.cleanupDiscardChecked;
+    cleanupRestrictedManaChecked.current = counters.cleanupRestrictedManaChecked;
+    agentMainActions.current = counters.agentMainActions;
+    commanderZoneChoiceAsked.current = counters.commanderZoneChoiceAsked;
+    auraRetargetAsked.current = counters.auraRetargetAsked;
+    agentDecisionRequests.current = new Set();
+    // Every one of these is guaranteed empty by the clean-stop gate at save time — cleared here too
+    // since this game object (React state, not the snapshot) may still be carrying stale values from
+    // whatever was on screen just before Load was clicked.
+    setMulliganReturnCardIds([]);
+    setLibraryLook(undefined);
+    setManualLibrarySearch(undefined);
+    setPendingRuleChoice(undefined);
+    setBlockChoice(undefined);
+    setSelectedBlockerIds([]);
+    setMyriadSearch(undefined);
+    setMyriadTapChoice(undefined);
+    setUrzaSagaSearch(undefined);
+    setBasicLandFetchSearch(undefined);
+    setPendingAction(undefined);
+    replaceStackActions([]);
+    setManaChoice(undefined);
+    setSelectedHandCardId(undefined);
+    setInspectedCard(undefined);
+    setAgentThinking({});
+    setAgentReasoning({});
+    setConfigs(createInitialConfigs(snapshot.session.seats));
+    setSetupMessage(undefined);
+    setMode("game");
+  }
+
+  async function loadSavedGame(id: string) {
+    try {
+      const response = await fetch(`/api/saves/${id}`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const snapshot: GameSnapshot = await response.json();
+      applySnapshot(snapshot);
+    } catch (error) {
+      setSetupMessage(`Failed to load save: ${error instanceof Error ? error.message : "unknown error"}.`);
+    }
+  }
+
+  async function deleteSavedGameEntry(id: string) {
+    setSavedGames((current) => current.filter((item) => item.id !== id));
+    try {
+      await fetch(`/api/saves/${id}`, { method: "DELETE" });
+    } catch {
+      // Best-effort — the row already dropped from view; a failed DELETE just leaves a stale row
+      // server-side until the next successful one, no different from any other fire-and-forget
+      // cleanup in this file.
+    }
+  }
+
   async function resolveAgentMulligansWithLLM(seats: PlayerSeat[]) {
     const mulliganCounts: Record<string, number> = {};
     const kept: Record<string, boolean> = {};
@@ -3376,14 +3615,23 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     // Rule 702.8-adjacent Fog effect (Spore Frog's "Prevent all combat damage that would be dealt
     // this turn.", see applySacrificeEffect's "prevent_combat_damage" case) — self-resets once the
     // turn actually changes (see combatDamagePrevented's own doc comment on GameSession), so this
-    // check alone is enough without a separate end-of-turn cleanup step.
-    if (session.combatDamagePrevented?.turn === session.turn) {
+    // check alone is enough without a separate end-of-turn cleanup step. No exceptType: identical
+    // to the original all-or-nothing behavior, skip this attacking seat's whole damage assignment.
+    const preventedThisTurn = session.combatDamagePrevented?.turn === session.turn;
+    const exceptType = session.combatDamagePrevented?.exceptType;
+    if (preventedThisTurn && !exceptType) {
       return {
         ...session,
         events: [phaseEvent(attackerId, "All combat damage is prevented this turn."), ...session.events]
       };
     }
-    const attackingCardIds = attacker.board.battlefield.filter((card) => card.attacking).map((card) => card.id);
+    // "Prevent all combat damage that would be dealt this turn by non-Spider creatures." — an
+    // exceptType exempts matching attackers from the block above instead of skipping every
+    // attacker outright, so Arachnogenesis's own freshly-created Spiders can still deal damage.
+    const attackingCardIds = attacker.board.battlefield
+      .filter((card) => card.attacking)
+      .filter((card) => !preventedThisTurn || (exceptType !== undefined && card.typeLine.includes(exceptType)))
+      .map((card) => card.id);
     if (attackingCardIds.length === 0) {
       return {
         ...session,
@@ -5142,7 +5390,14 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       // Only the entering permanent's own ETB-effect text counts here — a "dies" trigger or an
       // activated ability elsewhere in the same oracle text (e.g. Hangarback Walker's death
       // trigger) must not be read as something that happens immediately on resolution.
-      const tokenSpecs = sourceCard ? parseCreateTokenSpecs(etbEffectText(sourceCard.oracleText)) : [];
+      // action.chosenX threaded through for "Create twice X ... tokens" (Pest Infestation) — the
+      // same chosenX the removal effect further below resolves its own "destroy up to X" against.
+      // countCreaturesAttackingSeat threaded through for "Create X ... tokens, where X is the
+      // number of creatures attacking you" (Arachnogenesis) — a board-state count, unrelated to
+      // chosenX (this card has no {X} in its cost at all).
+      const tokenSpecs = sourceCard
+        ? parseCreateTokenSpecs(etbEffectText(sourceCard.oracleText), undefined, undefined, action.chosenX, countCreaturesAttackingSeat(playedSession, action.actorSeatId))
+        : [];
       // Beast Within ("its controller creates..."), Generous Gift ("its owner creates..."), and any
       // future card sharing this "destroy target permanent, the affected player creates a
       // consolation token" template: the token belongs to whoever controlled/owned the DESTROYED
@@ -5186,10 +5441,34 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
             : playedSession;
       const tokenCreation = sourceCard && tokenSpecs.length > 0 ? createTokensForSeat(baseResolvedSession, tokenRecipientSeatId, sourceCard.id, tokenSpecs) : undefined;
       const tokenResolvedSession = tokenCreation?.session ?? baseResolvedSession;
+      // "Prevent all combat damage that would be dealt this turn[ by non-X creatures]." — reachable
+      // here from a directly cast spell (Arachnogenesis, and any other Fog effect printed as an
+      // instant/sorcery rather than an activated sacrifice ability like Spore Frog, whose own
+      // separate applySacrificeEffect case is untouched). Applies regardless of the spell's own
+      // destination, same reasoning as removalEffect/zoneEffect below.
+      const combatDamagePreventionMatch = sourceCard
+        ? etbEffectText(sourceCard.oracleText).match(/\bprevent all combat damage that would be dealt this turn(?: by non-([a-z]+) creatures)?\b/i)
+        : null;
+      const combatPreventionSession = combatDamagePreventionMatch
+        ? {
+            ...tokenResolvedSession,
+            combatDamagePrevented: { turn: tokenResolvedSession.turn, exceptType: combatDamagePreventionMatch[1] ? capitalizeWord(combatDamagePreventionMatch[1]) : undefined },
+            events: [
+              {
+                id: crypto.randomUUID(),
+                at: new Date().toISOString(),
+                seatId: action.actorSeatId,
+                message: `${action.cardName}: all combat damage is prevented this turn${combatDamagePreventionMatch[1] ? ` except from ${capitalizeWord(combatDamagePreventionMatch[1])} creatures` : ""}.`,
+                detail: "Rules action"
+              },
+              ...tokenResolvedSession.events
+            ]
+          }
+        : tokenResolvedSession;
       const xCounterSession =
         sourceCard && destination === "battlefield" && action.chosenX && entersWithXCounters(sourceCard.oracleText)
-          ? applyEntersWithXCounters(tokenResolvedSession, action.actorSeatId, sourceCard.id, action.chosenX)
-          : tokenResolvedSession;
+          ? applyEntersWithXCounters(combatPreventionSession, action.actorSeatId, sourceCard.id, action.chosenX)
+          : combatPreventionSession;
       // Multikicker's charge-counter cycle (Everflowing Chalice, ...) reuses chosenX for "times
       // kicked" (see parseMultikickerCost) — same shape as the +1/+1-counter case above, just a
       // different counter kind and not restricted to creatures.
@@ -5790,6 +6069,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       workflow.workflow === "search_library_to_hand" ||
       workflow.workflow === "search_library_to_battlefield" ||
       workflow.workflow === "search_library_to_graveyard" ||
+      workflow.workflow === "search_library_to_hand_or_graveyard" ||
       workflow.workflow === "search_library_to_library"
     ) {
       const destination: "hand" | "battlefield" | "graveyard" | "library" =
@@ -5810,6 +6090,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         sourceCardName: sourceCard.name,
         prompt: workflow.summary || `Search your library for ${sourceCard.name}.`,
         destination,
+        destinationChoices: workflow.destinationChoices,
         tapped: workflow.tapped,
         maxChoices: Math.max(1, workflow.maxChoices || 1),
         allowedCardFilter: workflow.allowedCardFilter
@@ -5860,7 +6141,13 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       return;
     }
 
-    if (workflow.workflow === "scry_cards" || workflow.workflow === "surveil_cards" || workflow.workflow === "look_at_top_cards" || workflow.workflow === "reorder_top_cards") {
+    if (
+      workflow.workflow === "scry_cards" ||
+      workflow.workflow === "surveil_cards" ||
+      workflow.workflow === "look_at_top_cards" ||
+      workflow.workflow === "look_at_top_cards_reveal_type_to_hand" ||
+      workflow.workflow === "reorder_top_cards"
+    ) {
       const baseCount = Math.max(1, workflow.maxChoices || 1);
       // Enhanced Surveillance's "additional two cards each time you surveil" — see
       // surveilBonusForSeat's own doc comment; doesn't apply to scry or the other workflows here.
@@ -5870,8 +6157,11 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         // "look_at_top_cards" (Diabolic Vision: "look at the top N, put one into hand and the rest
         // on top in any order") needs its own mode — it used to be folded into "scry", which only
         // ever loaded a single card and offered top/bottom choices, neither of which lets a card
-        // actually reach hand. "reorder_top_cards" (Ponder-style: put them all back, no hand pick)
-        // keeps using plain "reorder".
+        // actually reach hand. "look_at_top_cards_reveal_type_to_hand" (Growing Rites of Itlimoc:
+        // same look-then-pick shape, but only a card matching allowedCardFilter may go to hand, and
+        // the rest go to the BOTTOM, not back on top) is its own mode for that same reason.
+        // "reorder_top_cards" (Ponder-style: put them all back, no hand pick) keeps using plain
+        // "reorder".
         const humanMode: LibraryLookMode =
           lookWorkflow === "surveil_cards"
             ? "surveil"
@@ -5879,11 +6169,13 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
               ? "reorder"
               : lookWorkflow === "look_at_top_cards"
                 ? "choose_one"
-                : "scry";
-        startLibraryLook(humanMode, count);
+                : lookWorkflow === "look_at_top_cards_reveal_type_to_hand"
+                  ? "choose_one_bottom"
+                  : "scry";
+        startLibraryLook(humanMode, count, workflow.allowedCardFilter);
         return;
       }
-      setSession((current) => resolveAgentLibraryLookWorkflow(current, seatId, sourceCard.name, lookWorkflow, count));
+      setSession((current) => resolveAgentLibraryLookWorkflow(current, seatId, sourceCard.name, lookWorkflow, count, workflow.allowedCardFilter));
       return;
     }
 
@@ -6325,7 +6617,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     setUrzaSagaSearch(undefined);
   }
 
-  function startLibraryLook(mode: LibraryLookMode, count: number) {
+  function startLibraryLook(mode: LibraryLookMode, count: number, allowedCardFilter?: string) {
     // setLibraryLook must not be called from inside setSession's updater (React may invoke that
     // updater more than once, and other setState calls inside it are unreliable) — computed against
     // the current session directly instead, mirroring every other modal-opening call in this file.
@@ -6334,13 +6626,15 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     // object was still correct), while the actual look-window state silently never stuck.
     const seat = session.seats.find((item) => item.id === humanSeat.id);
     const cards = (seat?.library ?? []).slice(0, mode === "scry" ? 1 : count);
-    setLibraryLook({ seatId: humanSeat.id, mode, cards, remaining: count, orderedCards: mode === "reorder" ? [] : undefined });
+    setLibraryLook({ seatId: humanSeat.id, mode, cards, remaining: count, orderedCards: mode === "reorder" ? [] : undefined, allowedCardFilter });
     addEvent(
       mode === "scry"
         ? `${humanSeat.name} starts scry ${count}.`
         : mode === "reorder"
           ? `${humanSeat.name} looks at the top ${cards.length} card${cards.length === 1 ? "" : "s"} and will put them back in any order.`
-          : `${humanSeat.name} looks at the top ${cards.length} card${cards.length === 1 ? "" : "s"} to ${mode}.`,
+          : mode === "choose_one_bottom"
+            ? `${humanSeat.name} looks at the top ${cards.length} card${cards.length === 1 ? "" : "s"}, may reveal a ${allowedCardFilter ?? "matching"} card to hand, and will put the rest on the bottom.`
+            : `${humanSeat.name} looks at the top ${cards.length} card${cards.length === 1 ? "" : "s"} to ${mode}.`,
       humanSeat.id
     );
   }
@@ -6430,18 +6724,22 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     );
   }
 
-  function chooseRuleLibraryCard(cardId: string) {
+  // destination: the per-pick zone override for Dina's Guidance-style choose_card_from_library
+  // choices (see PendingRuleChoice.destinationChoices/chosenDestinations) — undefined for every
+  // ordinary single-destination search, which just falls back to `choice.destination` as before.
+  function chooseRuleLibraryCard(cardId: string, destination?: "hand" | "graveyard") {
     const choice = pendingRuleChoice;
     if (!choice || choice.kind !== "choose_card_from_library") return;
     const chosenCardIds = [...(choice.chosenCardIds ?? []), cardId];
+    const chosenDestinations = destination ? { ...(choice.chosenDestinations ?? {}), [cardId]: destination } : choice.chosenDestinations;
     if (chosenCardIds.length >= choice.maxChoices) {
-      completeRuleChoice(choice, chosenCardIds);
+      completeRuleChoice({ ...choice, chosenDestinations }, chosenCardIds);
       return;
     }
     // "Up to N" (Archaeomancer's Map's "up to two basic Plains cards," ...) — keep the search open
     // for further picks instead of finalizing after the first one, which used to cap every
     // multi-card search at exactly one card regardless of maxChoices.
-    setPendingRuleChoice({ ...choice, chosenCardIds });
+    setPendingRuleChoice({ ...choice, chosenCardIds, chosenDestinations });
   }
 
   // Finalizes an in-progress multi-pick library search early — legal for "up to N" (never for a
@@ -6778,13 +7076,16 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       const selectedIds = cardIds.slice(0, choice.maxChoices);
       const splitDestination = choice.splitDestination;
       setSession((current) =>
-        selectedIds.reduce(
-          (next, cardId, index) =>
-            splitDestination && index > 0
-              ? moveLibraryCardToDestination(next, choice.controllerSeatId, cardId, splitDestination, false)
-              : moveLibraryCardToDestination(next, choice.controllerSeatId, cardId, choice.destination, Boolean(choice.tapped)),
-          current
-        )
+        selectedIds.reduce((next, cardId, index) => {
+          // Dina's Guidance-style per-pick choice (see PendingRuleChoice.destinationChoices) wins
+          // over both the split-destination convention and the plain single destination below —
+          // the controller explicitly chose this card's zone, so nothing else should override it.
+          const chosenDestination = choice.chosenDestinations?.[cardId];
+          if (chosenDestination) return moveLibraryCardToDestination(next, choice.controllerSeatId, cardId, chosenDestination, false);
+          return splitDestination && index > 0
+            ? moveLibraryCardToDestination(next, choice.controllerSeatId, cardId, splitDestination, false)
+            : moveLibraryCardToDestination(next, choice.controllerSeatId, cardId, choice.destination, Boolean(choice.tapped));
+        }, current)
       );
       setPendingRuleChoice(undefined);
       return;
@@ -7271,18 +7572,43 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   // any order") is a two-phase interaction: this handles phase one (send exactly one looked-at card
   // to hand), then hands off to the existing "reorder" mode/orderLibraryLookCardOnTop for phase two
   // (choosing what order the rest go back in) — reusing that flow rather than duplicating it.
+  // "choose_one_bottom" (Growing Rites of Itlimoc) is a ONE-phase variant instead: allowedCardFilter
+  // restricts which card this even accepts (enforced here, not just in the UI, so a stale click
+  // can't bypass it), and the rest go straight to the bottom with no reorder phase at all — bottom-
+  // of-library order is practically unobservable, so there's no real second choice to make.
   function sendLibraryLookCardToHand(cardId: string) {
     const activeLook = libraryLook;
-    if (!activeLook || activeLook.mode !== "choose_one") return;
+    if (!activeLook || (activeLook.mode !== "choose_one" && activeLook.mode !== "choose_one_bottom")) return;
     const card = activeLook.cards.find((item) => item.id === cardId);
     if (!card) return;
+    const filter = activeLook.allowedCardFilter?.toLowerCase();
+    if (filter && !card.typeLine.toLowerCase().includes(filter)) return;
     setSession((current) => moveLibraryCardToDestination(current, activeLook.seatId, cardId, "hand", false));
     const remainingCards = activeLook.cards.filter((item) => item.id !== cardId);
+    if (activeLook.mode === "choose_one_bottom") {
+      setSession((current) => putLookedAtCardsOnBottom(current, activeLook.seatId, remainingCards));
+      setLibraryLook(undefined);
+      return;
+    }
     if (remainingCards.length === 0) {
       setLibraryLook(undefined);
       return;
     }
     setLibraryLook({ seatId: activeLook.seatId, mode: "reorder", cards: remainingCards, remaining: remainingCards.length, orderedCards: [] });
+  }
+
+  // Closing the library-look window (the X button, or clicking the backdrop) for every other mode
+  // just abandons the look with the library untouched — a real, if incidental, existing affordance.
+  // "choose_one_bottom" (Growing Rites of Itlimoc) is different: ONLY the creature reveal is
+  // optional ("you may") — "put the rest on the bottom" is mandatory regardless, so declining the
+  // reveal must still send every looked-at card to the bottom rather than leaving them stuck
+  // wherever they physically sit in the library, same "close must still resolve the mandatory half"
+  // fix already applied to Urza's Saga's own search modal.
+  function closeLibraryLook() {
+    if (libraryLook?.mode === "choose_one_bottom") {
+      setSession((current) => putLookedAtCardsOnBottom(current, libraryLook.seatId, libraryLook.cards));
+    }
+    setLibraryLook(undefined);
   }
 
   // A permanent whose only function is producing mana (a land or a mana rock, not a creature and
@@ -7482,6 +7808,32 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
               {gameStarting ? "Starting..." : "PLAY"}
             </button>
           </div>
+          {savedGames.length > 0 ? (
+            <div className="saved-games-panel">
+              <h3>Saved games</h3>
+              <ul>
+                {savedGames.map((save) => (
+                  <li key={save.id} className="saved-games-row">
+                    <div>
+                      <strong>{save.name}</strong>
+                      <span>
+                        {save.summary} · saved {new Date(save.savedAt).toLocaleString()}
+                        {save.formatVersion !== SAVE_FORMAT_VERSION ? " · incompatible save" : ""}
+                      </span>
+                    </div>
+                    <div className="saved-games-row-actions">
+                      <button type="button" disabled={save.formatVersion !== SAVE_FORMAT_VERSION} onClick={() => loadSavedGame(save.id)}>
+                        Load
+                      </button>
+                      <button type="button" onClick={() => deleteSavedGameEntry(save.id)}>
+                        Delete
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
           <div className="setup-grid">
             {configs.map((config) => (
               <DeckSetupPanel config={config} key={config.seatId} onBuild={buildDeck} onUpdate={updateConfig} />
@@ -7496,6 +7848,15 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     <main className="app-shell game-shell">
       <button className="game-back-button" type="button" onClick={() => setMode("setup")} aria-label="Back to setup">
         ×
+      </button>
+      <button
+        className="game-save-button"
+        type="button"
+        onClick={saveGameNow}
+        disabled={!currentCleanSaveStopStatus().ok}
+        title={currentCleanSaveStopStatus().reason ?? "Save this game"}
+      >
+        Save
       </button>
       <ThreeGameTable
         gameStage={gameStage}
@@ -7606,9 +7967,9 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
           if (pendingRuleChoice?.controllerSeatId === humanSeat.id) cancelRuleChoice();
         }}
         onChooseNextTrigger={chooseNextUpkeepTrigger}
-        onSearchLibraryCardToHand={(cardId) => {
+        onSearchLibraryCardToHand={(cardId, destination) => {
           if (pendingRuleChoice?.controllerSeatId === humanSeat.id) {
-            chooseRuleLibraryCard(cardId);
+            chooseRuleLibraryCard(cardId, destination);
             return;
           }
           searchLibraryCardToHand(cardId);
@@ -7627,7 +7988,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         onSendLibraryLookCardToHand={sendLibraryLookCardToHand}
         onRepeatVaultLook={repeatLimDulVault}
         onKeepVaultLookCards={keepLimDulVaultCards}
-        onCloseLibraryLook={() => setLibraryLook(undefined)}
+        onCloseLibraryLook={closeLibraryLook}
         onSelectHandCard={(card) => setSelectedHandCardId((current) => (current === card.id ? undefined : card.id))}
         onToggleTapCard={toggleTapCard}
         onChooseMana={(color) => manaChoice && tapForMana(manaChoice.seatId, manaChoice.cardId, manaChoice.location, color)}
@@ -8024,6 +8385,21 @@ function resolveAttackTarget(session: GameSession, targetId: string | undefined)
     if (planeswalker) return { seat: candidate, planeswalker };
   }
   return undefined;
+}
+
+// "...where X is the number of creatures attacking you." (Arachnogenesis) — counts only attackers
+// whose target IS the named seat itself (the player), not a planeswalker that seat controls (real
+// wording says "attacking you," not "attacking you or a planeswalker you control").
+export function countCreaturesAttackingSeat(session: GameSession, seatId: string): number {
+  let count = 0;
+  for (const seat of session.seats) {
+    for (const card of seat.board.battlefield) {
+      if (!card.attacking) continue;
+      const target = resolveAttackTarget(session, card.attackTargetId);
+      if (target && target.seat.id === seatId && !target.planeswalker) count += 1;
+    }
+  }
+  return count;
 }
 
 function markAttackDecided(session: GameSession, seatId: string, cardId: string): GameSession {
@@ -10660,6 +11036,22 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
             }
           }
 
+          // Same shape as the keyword-grant scan just above, but for a granted ACTIVATED mana
+          // ability (Insidious Roots' "Creature tokens you control have '{T}: Add one mana of any
+          // color.'") — kept in its own field (grantedManaAbilityText) rather than merged into
+          // keywordSet, since there's no existing "set of granted abilities" concept to fold a raw
+          // ability string into. The first matching grant wins; no real card grants more than one.
+          let manaAbilityGrantText: string | undefined;
+          for (const grantSource of seat.board.battlefield) {
+            if (manaAbilityGrantText) break;
+            for (const grant of parseGroupManaAbilityGrant(grantSource.oracleText)) {
+              if (grant.excludeSelf && grantSource.id === card.id) continue;
+              if (!permanentMatchesQualifier(card, grant.matcher)) continue;
+              manaAbilityGrantText = grant.abilityText;
+              break;
+            }
+          }
+
           // Layer 7d (group anthem): "[Other] [Qualifier] you control get +N/+N[ for each ...]."
           // (Boon of the Spirit Realm's blessing-counter anthem, plain flat group pumps, ...) — the
           // group counterpart to parseSelfAnthemBoost above, evaluated the same live-off-board way.
@@ -10692,6 +11084,7 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
             nextToughnessBonus === card.attachmentToughnessBonus &&
             sameList(nextKeywords, card.grantedKeywords) &&
             sameList(nextProtection, card.grantedProtectionColors) &&
+            manaAbilityGrantText === card.grantedManaAbilityText &&
             cdaPower === card.cdaPower &&
             cdaToughness === card.cdaToughness &&
             winningSetEffect?.power === card.setPowerOverride &&
@@ -10707,6 +11100,7 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
             attachmentToughnessBonus: nextToughnessBonus,
             grantedKeywords: nextKeywords,
             grantedProtectionColors: nextProtection,
+            grantedManaAbilityText: manaAbilityGrantText,
             cdaPower,
             cdaToughness,
             setPowerOverride: winningSetEffect?.power,
@@ -10842,6 +11236,7 @@ function resetForZoneChange<T extends VisibleCard>(card: T, zone: VisibleCard["z
     attachmentToughnessBonus: undefined,
     grantedKeywords: undefined,
     grantedProtectionColors: undefined,
+    grantedManaAbilityText: undefined,
     grantedTypes: undefined,
     attachTimestamp: undefined,
     cdaPower: undefined,
@@ -10980,6 +11375,10 @@ function moveCommanderToCommandZone(session: GameSession, seatId: string, cardId
           }
         : item
     ),
+    // "Whenever one or more cards leave your graveyard, ..." (Willow Geist, Insidious Roots) — the
+    // graveyard's OWNER is seatId here (this function never crosses seats), matching every other
+    // recording site's "departure belongs to whoever's graveyard it was" rule.
+    pendingGraveyardDepartures: [...(session.pendingGraveyardDepartures ?? []), { seatId, cards: [card] }],
     events: [
       {
         id: crypto.randomUUID(),
@@ -11002,7 +11401,7 @@ type CrossSeatZone = "hand" | "battlefield" | "graveyard" | "exile" | "library";
 // Always a full "new object" reset (rule 400.7), since this is always an actual zone change —
 // contrast with changeControlWithinBattlefield below, which is NOT a zone change and must NOT
 // reset the object.
-function moveCardAcrossSeats(
+export function moveCardAcrossSeats(
   session: GameSession,
   sourceSeatId: string,
   cardId: string,
@@ -11150,7 +11549,14 @@ function moveCardAcrossSeats(
     destinationZone === "battlefield"
       ? [...(session.pendingEntries ?? []), { seatId: destinationSeatId, card: movedCard }]
       : session.pendingEntries;
-  return { session: { ...session, seats, pendingEntries }, movedCard };
+  // "Whenever one or more cards leave your graveyard, ..." (Willow Geist, Insidious Roots) — the
+  // departure belongs to sourceSeatId (the graveyard's owner), NOT destinationSeatId — an opponent's
+  // Reanimate pulling a creature out of YOUR graveyard triggers YOUR Willow Geist, not theirs.
+  const pendingGraveyardDepartures =
+    sourceZone === "graveyard"
+      ? [...(session.pendingGraveyardDepartures ?? []), { seatId: sourceSeatId, cards: [card] }]
+      : session.pendingGraveyardDepartures;
+  return { session: { ...session, seats, pendingEntries, pendingGraveyardDepartures }, movedCard };
 }
 
 // A control change (Threaten/Mind Control-style) is NOT a zone change (rule 400.7 only triggers on
@@ -11563,6 +11969,8 @@ function describeRemovalMode(mode: Exclude<RemovalEffect, { kind: "modal" }>): s
   switch (mode.kind) {
     case "destroy":
       return `Destroy target ${describeRemovalTargetType(mode.targetType)}.`;
+    case "destroy_up_to_x":
+      return `Destroy up to X target ${describeRemovalTargetType(mode.targetType)}.`;
     case "destroy_all":
       return `Destroy all ${mode.excludeType ? `non-${mode.excludeType} ` : ""}${mode.targetType}s.`;
     case "destroy_all_conditional":
@@ -11591,6 +11999,10 @@ function removalEffectHasLegalTarget(session: GameSession, casterSeatId: string,
       return true;
     case "destroy":
       return chooseRemovalTarget(session, casterSeatId, effect.targetType, sourceCard, effect.excludedColors, effect.artifactsExcluded, effect.basicsExcluded) !== undefined;
+    // Rule 601.2c: "up to X" never requires a legal target — choosing zero is always legal, same
+    // reasoning as proliferate's "choose any number" just below.
+    case "destroy_up_to_x":
+      return true;
     case "exile":
     case "bounce":
       return chooseRemovalTarget(session, casterSeatId, effect.targetType, sourceCard) !== undefined;
@@ -11649,6 +12061,7 @@ function zoneEffectHasLegalTarget(session: GameSession, casterSeatId: string, ef
     case "sacrifice_then_reanimate":
       return chooseCreatureCardsFromOwnGraveyard(session, casterSeatId, effect.targetCount) !== undefined;
     case "mill":
+    case "put_land_from_graveyard_on_top":
     case "graveyard_to_library":
     case "exile_graveyard":
     case "impulse_draw":
@@ -11887,6 +12300,51 @@ export function applyRemovalEffect(
       if (chosenModes.length === 0) return noLegalTargetEvent(session, casterSeatId, sourceName);
       return chosenModes.reduce((current, mode) => applyRemovalEffect(current, casterSeatId, sourceName, source, mode, chosenX), session);
     }
+    // "Destroy up to X target artifacts and/or enchantments." (Pest Infestation) — rule 601.2c: "up
+    // to X" never requires a legal target at all (see removalEffectHasLegalTarget's own "true"
+    // return for this case), so X = 0 or a board with nothing to destroy both legally resolve as a
+    // no-op rather than a failed cast. No dedicated interactive multi-select UI exists for this yet
+    // (removalEffectTargetSpec returns undefined for this kind, so the human never gets intercepted
+    // into choose_effect_target for it — same declared-simplification boundary this file already
+    // accepts for destroy_all/mass_damage/proliferate/scry/surveil, applied uniformly to every seat
+    // kind rather than half-building a new multi-target picker for one card): picks up to `chosenX`
+    // targets one at a time via chooseRemovalTarget's existing biggest-first heuristic, each pick
+    // naturally excluding whatever the previous pick already destroyed since `current` is threaded
+    // through the loop.
+    case "destroy_up_to_x": {
+      const totalTargets = Math.max(0, chosenX ?? 0);
+      if (totalTargets === 0) return session;
+      let current = session;
+      let destroyedAny = false;
+      for (let picked = 0; picked < totalTargets; picked += 1) {
+        const target = chooseRemovalTarget(current, casterSeatId, effect.targetType, source);
+        if (!target) break;
+        const warded = payWardIfNeeded(current, casterSeatId, target.card, sourceName);
+        if (warded.countered) {
+          current = warded.session;
+          continue;
+        }
+        if (hasIndestructible(target.card)) {
+          current = {
+            ...warded.session,
+            events: [
+              {
+                id: crypto.randomUUID(),
+                at: new Date().toISOString(),
+                seatId: casterSeatId,
+                message: `${target.card.name} is indestructible; ${sourceName} fails to destroy it.`,
+                detail: "Rules action"
+              },
+              ...warded.session.events
+            ]
+          };
+          continue;
+        }
+        current = destroyCreatures(warded.session, [{ seatId: target.seatId, cardId: target.card.id, message: `${target.card.name} is destroyed by ${sourceName}.` }], "Rules action");
+        destroyedAny = true;
+      }
+      return destroyedAny ? current : noLegalTargetEvent(current, casterSeatId, sourceName);
+    }
     case "destroy": {
       const target =
         resolvePreChosenBattlefieldTarget(session, preChosenTarget) ??
@@ -11981,6 +12439,9 @@ function matchesReanimateTargetType(card: VisibleCard, targetType: RegrowTargetT
   // creatures; this used to fall through to the "creature" default below and wrongly restrict Sun
   // Titan to creature cards only.
   if (targetType === "permanent") return !card.typeLine.includes("Instant") && !card.typeLine.includes("Sorcery");
+  // Fathomless descent (Squirming Emergence, ...): "target nonland permanent card" — same as
+  // "permanent" above, further excluding lands.
+  if (targetType === "nonland_permanent") return !card.typeLine.includes("Instant") && !card.typeLine.includes("Sorcery") && !card.typeLine.includes("Land");
   return card.typeLine.includes("Creature");
 }
 
@@ -11995,13 +12456,19 @@ function chooseReanimationTarget(
   session: GameSession,
   casterSeatId: string,
   anyGraveyard: boolean,
-  targetType: RegrowTargetType = "creature"
+  targetType: RegrowTargetType = "creature",
+  // Fathomless descent's dynamic ceiling ("...with mana value less than or equal to the number of
+  // permanent cards in your graveyard") — computed by the caller (applyZoneEffect's "reanimate"
+  // case) from actual board state at resolution time, not guessed at here.
+  maxManaValue?: number
 ): { seatId: string; card: VisibleCard } | undefined {
   const candidates: Array<{ seatId: string; card: VisibleCard }> = [];
   for (const seat of session.seats) {
     if (!anyGraveyard && seat.id !== casterSeatId) continue;
     for (const card of seat.board.graveyard ?? []) {
-      if (matchesReanimateTargetType(card, targetType)) candidates.push({ seatId: seat.id, card });
+      if (!matchesReanimateTargetType(card, targetType)) continue;
+      if (maxManaValue !== undefined && card.manaValue > maxManaValue) continue;
+      candidates.push({ seatId: seat.id, card });
     }
   }
   if (candidates.length === 0) return undefined;
@@ -12115,6 +12582,9 @@ function applyGraveyardToLibrary(session: GameSession, seatId: string, sourceNam
         ? { ...item, library: shuffled, board: { ...item.board, graveyard: [] }, zones: { ...item.zones, library: item.zones.library + graveyard.length, graveyard: 0 } }
         : item
     ),
+    // "Whenever one or more cards leave your graveyard, ..." — one entry for the whole shuffled-back
+    // graveyard, not one per card (already guaranteed non-empty by the guard above).
+    pendingGraveyardDepartures: [...(session.pendingGraveyardDepartures ?? []), { seatId, cards: graveyard }],
     events: [
       {
         id: crypto.randomUUID(),
@@ -12128,7 +12598,7 @@ function applyGraveyardToLibrary(session: GameSession, seatId: string, sourceNam
   };
 }
 
-function applyGraveyardExile(session: GameSession, seatId: string, sourceName: string): GameSession {
+export function applyGraveyardExile(session: GameSession, seatId: string, sourceName: string): GameSession {
   const seat = session.seats.find((item) => item.id === seatId);
   const graveyard = seat?.board.graveyard ?? [];
   if (!seat || graveyard.length === 0) return session;
@@ -12144,6 +12614,9 @@ function applyGraveyardExile(session: GameSession, seatId: string, sourceName: s
           }
         : item
     ),
+    // "Whenever one or more cards leave your graveyard, ..." — one entry for the whole exiled
+    // graveyard, not one per card (already guaranteed non-empty by the guard above).
+    pendingGraveyardDepartures: [...(session.pendingGraveyardDepartures ?? []), { seatId, cards: graveyard }],
     events: [
       {
         id: crypto.randomUUID(),
@@ -12181,10 +12654,19 @@ function resolvePreChosenGraveyardTarget(session: GameSession, casterSeatId: str
   return seat?.board.graveyard?.find((item) => item.id === preChosenTarget.cardId);
 }
 
-function applyZoneEffect(session: GameSession, casterSeatId: string, sourceName: string, effect: ZoneEffect, chosenX?: number, preChosenTarget?: ChosenTarget): GameSession {
+export function applyZoneEffect(session: GameSession, casterSeatId: string, sourceName: string, effect: ZoneEffect, chosenX?: number, preChosenTarget?: ChosenTarget): GameSession {
   switch (effect.kind) {
     case "reanimate": {
-      const target = chooseReanimationTarget(session, casterSeatId, effect.anyGraveyard, effect.targetType);
+      // Fathomless descent's dynamic ceiling: "the number of permanent cards in your graveyard" —
+      // same "permanent card" definition matchesReanimateTargetType's own "permanent" branch uses
+      // (not Instant, not Sorcery), counted at resolution time against the caster's own graveyard.
+      const maxManaValue =
+        effect.manaValueCeiling === "graveyard_permanent_count"
+          ? (session.seats.find((seat) => seat.id === casterSeatId)?.board.graveyard ?? []).filter(
+              (card) => !card.typeLine.includes("Instant") && !card.typeLine.includes("Sorcery")
+            ).length
+          : undefined;
+      const target = chooseReanimationTarget(session, casterSeatId, effect.anyGraveyard, effect.targetType, maxManaValue);
       if (!target) return noLegalTargetEvent(session, casterSeatId, sourceName);
       const { session: reanimatedSession } = moveCardAcrossSeats(session, target.seatId, target.card.id, casterSeatId, "battlefield");
       return {
@@ -12230,8 +12712,39 @@ function applyZoneEffect(session: GameSession, casterSeatId: string, sourceName:
             : effect.scope === "each_opponent"
               ? session.seats.filter((seat) => seat.id !== casterSeatId).map((seat) => seat.id)
               : session.seats.map((seat) => seat.id);
-      return seatIds.reduce((next, seatId) => applyMill(next, seatId, sourceName, effect.amount), session);
+      const milled = seatIds.reduce((next, seatId) => applyMill(next, seatId, sourceName, effect.amount), session);
+      if (effect.then?.kind !== "put_land_from_graveyard_on_top") return milled;
+      // "You may put a land card from your graveyard on top of your library." (Glowspore Shaman) —
+      // always beneficial (filtering a land toward your next draw), so auto-accepted for every seat
+      // kind, the same "take the beneficial optional action" default this engine already applies to
+      // other optional zone effects. No dedicated interactive "which land" picker exists yet (same
+      // declared simplification chooseReanimationTarget's own deterministic pick already accepts) —
+      // ties broken by highest mana value, mirroring chooseRegrowTarget's own non-creature tie-break.
+      const casterSeat = milled.seats.find((seat) => seat.id === casterSeatId);
+      const landCards = (casterSeat?.board.graveyard ?? []).filter((card) => card.typeLine.includes("Land"));
+      if (landCards.length === 0) return milled;
+      const chosenLand = landCards.reduce((a, b) => (b.manaValue > a.manaValue ? b : a));
+      const { session: filteredSession } = moveCardAcrossSeats(milled, casterSeatId, chosenLand.id, casterSeatId, "library");
+      return {
+        ...filteredSession,
+        events: [
+          {
+            id: crypto.randomUUID(),
+            at: new Date().toISOString(),
+            seatId: casterSeatId,
+            message: `${sourceName} puts ${chosenLand.name} from the graveyard on top of the library.`,
+            detail: "Rules action"
+          },
+          ...filteredSession.events
+        ]
+      };
     }
+    case "put_land_from_graveyard_on_top":
+      // Never reached as a top-level effect — only ever attached as MillEffect.then and applied
+      // inline by the "mill" case above (see its own comment). Kept as its own switch case purely
+      // so the exhaustiveness check above (zoneEffectHasLegalTarget) and this one stay in sync with
+      // the ZoneEffect union; if this ever WAS reached directly, doing nothing is the safe default.
+      return session;
     case "graveyard_to_library": {
       const seatId =
         effect.scope === "you" ? casterSeatId : session.seats.find((seat) => seat.id !== casterSeatId && (seat.board.graveyard ?? []).length > 0)?.id ?? casterSeatId;
@@ -13998,6 +14511,21 @@ function findCombatDamageToPlayerTriggers(session: GameSession, dealingSeatId: s
   return triggers;
 }
 
+// "Whenever one or more cards leave your graveyard, ..." (Willow Geist, Insidious Roots) — scans
+// only the GRAVEYARD OWNER'S OWN battlefield (the text says "your graveyard," so the watching
+// permanent's controller must be the graveyard's own owner, not whoever caused the departure).
+export function findCardsLeftGraveyardTriggers(session: GameSession, graveyardSeatId: string): Array<Extract<PendingAction, { type: "trigger" }>> {
+  const seat = session.seats.find((item) => item.id === graveyardSeatId);
+  if (!seat) return [];
+  const triggers: Array<Extract<PendingAction, { type: "trigger" }>> = [];
+  for (const source of seat.board.battlefield) {
+    const effect = commonTriggerEffect(source.oracleText, "cards_left_graveyard");
+    if (!effect) continue;
+    triggers.push(makeCommonTrigger(graveyardSeatId, seat.id, source, effect, `${source.name} triggers because one or more cards left ${seat.name}'s graveyard.`));
+  }
+  return triggers;
+}
+
 interface CastTriggerCondition {
   // Relative to the permanent's own controller — "you" only fires when its controller is the
   // caster, "opponent" only fires when the caster is a different seat, "any" (Ledger Shredder's
@@ -14294,9 +14822,9 @@ function deathTriggerApplies(source: VisibleCard, sourceSeatId: string, deadCard
 // the trigger stops firing at all, which is exactly what broke Soaring Lightbringer's real "whenever
 // it attacks" trigger (and any modal mode/loyalty ability/generic ability effect shaped the same
 // way) as a side effect of fixing its ETB misclassification.
-function commonTriggerEffect(
+export function commonTriggerEffect(
   oracleText: string,
-  mode: "entered" | "died" | "combat_damage_to_player" | "clause",
+  mode: "entered" | "died" | "combat_damage_to_player" | "cards_left_graveyard" | "clause",
   dynamicCounterCount?: number,
   controllerSeat?: PlayerSeat
 ): TriggerEffect | undefined {
@@ -14305,16 +14833,30 @@ function commonTriggerEffect(
       ? deathEffectText(oracleText)
       : mode === "combat_damage_to_player"
         ? combatDamageToPlayerEffectText(oracleText)
-        : mode === "clause"
-          ? oracleText
-          : etbEffectText(oracleText);
+        : mode === "cards_left_graveyard"
+          ? cardsLeaveGraveyardEffectText(oracleText)
+          : mode === "clause"
+            ? oracleText
+            : etbEffectText(oracleText);
   const text = relevantText.toLowerCase();
   // A single text-wide "you may" check rather than per-match position tracking — good enough for
   // this engine's one-effect-per-clause parsing (see the module comment on TriggerEffect); a card
   // with multiple clauses where only one is optional would be mis-flagged, a declared simplification.
   const optional = /\byou may\b/.test(text) || undefined;
   const tokenSpecs = parseCreateTokenSpecs(relevantText, dynamicCounterCount, controllerSeat);
-  if (tokenSpecs.length > 0) return { kind: "create_tokens", tokens: tokenSpecs, optional };
+  if (tokenSpecs.length > 0) {
+    // "..., then put a +1/+1 counter on each Plant you control." (Insidious Roots, following its own
+    // "create a 0/1 green Plant creature token") — a second, board-wide effect chained onto the
+    // token creation with "then," which this function would otherwise silently drop by returning
+    // the create_tokens effect immediately. See TriggerEffect's shared `then` field.
+    const thenCounterMatch = text.match(/\bthen put (a|one|two|three|four|five|\d+) (\+1\/\+1|-1\/-1|[a-z]+) counters? on each ([a-z][a-z ]*?) you control\b/);
+    const thenAmount = thenCounterMatch ? numberWordToInt(thenCounterMatch[1]) : undefined;
+    const then: TriggerEffect | undefined =
+      thenCounterMatch && thenAmount
+        ? { kind: "add_counter", counterKind: thenCounterMatch[2], amount: thenAmount, scope: "each_matching_you_control", matcher: thenCounterMatch[3].trim() }
+        : undefined;
+    return { kind: "create_tokens", tokens: tokenSpecs, optional, then };
+  }
 
   // "Target player loses N life and you gain N life." (Blood Artist) / "Each opponent loses N life
   // and you gain N life." (Zulaport Cutthroat, Cruel Celebrant) — checked before the plain gainLife
@@ -14593,7 +15135,18 @@ function createCopyTokenForSeat(session: GameSession, seatId: string, source: Vi
   return { session: nextSession, token };
 }
 
-function parseCreateTokenSpecs(oracleText: string, dynamicCounterCount?: number, controllerSeat?: PlayerSeat): TokenSpec[] {
+export function parseCreateTokenSpecs(
+  oracleText: string,
+  dynamicCounterCount?: number,
+  controllerSeat?: PlayerSeat,
+  chosenX?: number,
+  // "Create X 1/2 green Spider creature tokens with reach, where X is the number of creatures
+  // attacking you." (Arachnogenesis) — a board-state count unrelated to any {X} the caster paid
+  // (this card has no {X} in its cost at all), so it needs its own parameter rather than reusing
+  // chosenX. Supplied by the caller, which has the full session (countCreaturesAttackingSeat); this
+  // function only ever sees one controllerSeat, not the other seats' attackers.
+  attackersTargetingCount?: number
+): TokenSpec[] {
   const specs: TokenSpec[] = [];
   const normalized = oracleText.replace(/\s+/g, " ");
   const predefined = [
@@ -14611,8 +15164,20 @@ function parseCreateTokenSpecs(oracleText: string, dynamicCounterCount?: number,
     }
   }
 
+  // "Create twice X 1/1 black and green Pest creature tokens ..." (Pest Infestation) — "twice x" is
+  // a count phrasing no other card in this codebase's real data uses, so it gets its own literal
+  // alternative here rather than a general "N times X" grammar; resolved against chosenX below the
+  // same "not guessed at here" way DamageEffect.amount's own "X" already is. Bare "x" (Arachnogenesis:
+  // "Create X ... tokens, where X is the number of creatures attacking you") is a separate dynamic
+  // basis, resolved against attackersTargetingCount instead — see the "where x is..." check below.
   const creaturePattern =
-    /create\s+(a|an|one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+((?:\d+\/\d+\s+)?(?:(?:white|blue|black|red|green|colorless|multicolored)\s+)*(?:[A-Z][a-zA-Z'-]*\s+){0,4}creature tokens?(?: with [^.]+)?)/gi;
+    /create\s+(a|an|one|two|three|four|five|six|seven|eight|nine|ten|twice x|x|\d+)\s+((?:\d+\/\d+\s+)?(?:(?:white|blue|black|red|green|colorless|multicolored)\s+)*(?:[A-Z][a-zA-Z'-]*\s+){0,4}creature tokens?(?: with [^.]+)?)/gi;
+  // "...with reach, where X is the number of creatures attacking you." (Arachnogenesis) — this
+  // clause sits INSIDE the "with [ability]" tail creaturePattern's own capture already grabs (unlike
+  // forEachControlledPattern's basis below, which trails AFTER the match entirely on cards with no
+  // "with ability" tail), so it has to be detected and stripped out of `description` itself rather
+  // than checked against the text following the match.
+  const whereXAttackersPattern = /,?\s*where x is the number of creatures attacking you\b\.?/i;
   const dynamicCounterCountPattern = /for each\s+(?:\+1\/\+1\s+)?counter\s+on\s+(?:this creature|it|this permanent|this artifact)\b/i;
   // "... creature token for each land you control." (Avenger of Zendikar, and the same "one token
   // per permanent-type-you-control" shape on similar cards) — a dynamic count that trails AFTER
@@ -14621,7 +15186,12 @@ function parseCreateTokenSpecs(oracleText: string, dynamicCounterCount?: number,
   // count, always creating exactly one token regardless of how many lands were actually controlled.
   const forEachControlledPattern = /^\s*for each ([a-z]+) you control\b/i;
   for (const match of normalized.matchAll(creaturePattern)) {
-    const description = match[2].trim();
+    const rawDescription = match[2].trim();
+    const whereXAttackersMatch = whereXAttackersPattern.test(rawDescription);
+    // Stripped before parseCreatureTokenDescription ever sees it below — otherwise "where X is the
+    // number of creatures attacking you" would be misread as part of the token's own granted-ability
+    // text (it's the trailing half of the same "with reach, where X is..." clause).
+    const description = whereXAttackersMatch ? rawDescription.replace(whereXAttackersPattern, "").trim() : rawDescription;
     const matchEnd = (match.index ?? 0) + match[0].length;
     const forEachControlledMatch = normalized.slice(matchEnd, matchEnd + 60).match(forEachControlledPattern);
     // "For each 1 damage prevented this way, create a ... token" (Inkshield, ...) — a dynamic count
@@ -14645,6 +15215,17 @@ function parseCreateTokenSpecs(oracleText: string, dynamicCounterCount?: number,
       // a seat for that check to mean anything for this shape.
       if (!controllerSeat) continue;
       count = controllerSeat.board.battlefield.filter((card) => card.typeLine.toLowerCase().includes(forEachControlledMatch[1].toLowerCase())).length;
+    } else if (match[1].toLowerCase() === "twice x") {
+      // Same "decline what we can't count, don't guess" convention as forEachControlledMatch just
+      // above — without a real chosenX for this cast, defaulting to some fixed number would be a
+      // guess, not a resolution.
+      if (chosenX === undefined) continue;
+      count = chosenX * 2;
+    } else if (whereXAttackersMatch) {
+      // Arachnogenesis: "where X is the number of creatures attacking you" — same "decline rather
+      // than guess" convention as the other dynamic bases here, without a real attackersTargetingCount.
+      if (attackersTargetingCount === undefined) continue;
+      count = attackersTargetingCount;
     } else {
       count = dynamicCounterCount !== undefined && dynamicCounterCountPattern.test(description) ? dynamicCounterCount : (numberWordToInt(match[1]) ?? 1);
     }
@@ -14808,7 +15389,17 @@ function surveilBonusForSeat(seat: PlayerSeat): number {
 // low enough to stop fast. Same "guard counter" pattern as checkStateBasedActions' pass limit.
 const MAX_TRIGGER_RESOLUTIONS_PER_TURN = 400;
 
-function resolveTriggerEffect(session: GameSession, trigger: Extract<PendingAction, { type: "trigger" }>): GameSession {
+// Applies trigger.effect.then (Insidious Roots' "create a token, then put a +1/+1 counter on each
+// Plant you control") as a second, recursively-resolved trigger against whatever session the
+// primary effect left behind — the outer entry point every call site actually uses.
+// resolveTriggerEffectOnce below (the original body of this function) resolves exactly one effect.
+export function resolveTriggerEffect(session: GameSession, trigger: Extract<PendingAction, { type: "trigger" }>): GameSession {
+  const resolved = resolveTriggerEffectOnce(session, trigger);
+  if (!trigger.effect.then) return resolved;
+  return resolveTriggerEffect(resolved, { ...trigger, id: crypto.randomUUID(), effect: trigger.effect.then, message: "" });
+}
+
+function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<PendingAction, { type: "trigger" }>): GameSession {
   const chainCount = (session.triggerChainGuard?.turn === session.turn ? session.triggerChainGuard.count : 0) + 1;
   session = { ...session, triggerChainGuard: { turn: session.turn, count: chainCount } };
   if (chainCount > MAX_TRIGGER_RESOLUTIONS_PER_TURN) {
@@ -14976,7 +15567,55 @@ function resolveTriggerEffect(session: GameSession, trigger: Extract<PendingActi
     };
   }
   if (trigger.effect.kind === "add_counter") {
-    const { counterKind, amount, scope, alsoTap } = trigger.effect;
+    const { counterKind, amount, scope, alsoTap, matcher } = trigger.effect;
+    // "each_matching_you_control": "... put a +1/+1 counter on each Plant you control." (Insidious
+    // Roots) — board-wide, not a single chosen/looked-up target like every other scope below, so it
+    // gets its own branch entirely: every permanent on the controller's own battlefield matching
+    // `matcher` (via the same permanentMatchesQualifier every static group-grant already uses) gets
+    // the counter, including ones from earlier triggers this same turn.
+    if (scope === "each_matching_you_control") {
+      const controllerSeat = session.seats.find((seat) => seat.id === trigger.controllerSeatId);
+      const matchingCards = controllerSeat?.board.battlefield.filter((card) => permanentMatchesQualifier(card, matcher ?? "")) ?? [];
+      if (!controllerSeat || matchingCards.length === 0) {
+        return {
+          ...session,
+          events: [
+            {
+              id: crypto.randomUUID(),
+              at: new Date().toISOString(),
+              seatId: trigger.controllerSeatId,
+              message: `${trigger.sourceCardName} trigger finds no matching permanent and has no effect.`
+            },
+            ...session.events
+          ]
+        };
+      }
+      return {
+        ...session,
+        seats: session.seats.map((seat) =>
+          seat.id === trigger.controllerSeatId
+            ? {
+                ...seat,
+                board: {
+                  ...seat.board,
+                  battlefield: seat.board.battlefield.map((card) =>
+                    permanentMatchesQualifier(card, matcher ?? "") ? applyCounterDelta(card, counterKind, amount) : card
+                  )
+                }
+              }
+            : seat
+        ),
+        events: [
+          {
+            id: crypto.randomUUID(),
+            at: new Date().toISOString(),
+            seatId: trigger.controllerSeatId,
+            message: `${trigger.sourceCardName} trigger resolves. Each ${matcher ?? "matching permanent"} ${controllerSeat.name} controls gets ${amount === 1 ? "a" : amount} ${counterKind} counter${amount === 1 ? "" : "s"}.`
+          },
+          ...session.events
+        ]
+      };
+    }
     // "self" looks up the trigger source itself; "context" looks up the permanent "it"/"that
     // creature" referred to (the entering permanent — not always the source, e.g. Cathars'
     // Crusade watches OTHER creatures enter). Neither is a chosen target, so both search the
@@ -15189,6 +15828,7 @@ function ruleChoiceView(
         prompt: choice.prompt,
         cards: (humanSeat.library ?? []).filter((card) => !chosenCardIds.has(card.id)),
         destination: choice.destination,
+        destinationChoices: choice.destinationChoices,
         allowedCardFilter: choice.allowedCardFilter,
         maxChoices: choice.maxChoices,
         chosenCount: chosenCardIds.size
@@ -15768,25 +16408,42 @@ function targetCreatureCounterPhaseTrigger(
 // search/scry/draw workflow classifier — which has no concept of reanimation at all. An optional
 // ("you may") phase trigger resolves as yes here rather than getting a real prompt, matching phase
 // triggers' existing no-stack model (they had no chance to decline before this change either).
-function applyDeterministicPhaseTrigger(session: GameSession, seatId: string, sourceCard: VisibleCard, phase: TurnPhase): GameSession | undefined {
+export function applyDeterministicPhaseTrigger(session: GameSession, seatId: string, sourceCard: VisibleCard, phase: TurnPhase): GameSession | undefined {
   const clauseText = phaseEffectText(sourceCard.oracleText, phase);
   if (!clauseText.trim()) return undefined;
 
   // "At the beginning of your upkeep, if you control no Thopters other than this creature, return
   // this creature to its owner's hand and create five ... tokens" (Thopter Assembly, ...) — none of
-  // the parsers below understand a leading "if ~," condition gating the whole effect, so without
-  // this guard they'd confidently apply the effect (here: create the tokens) every single time the
-  // phase comes around regardless of whether the condition is actually met. Declining routes it to
-  // the Rules Advisor instead, which can actually read and evaluate the condition, rather than
-  // silently doing a partially-wrong deterministic thing. "You may" isn't caught by this — it's
-  // already handled as an optional trigger, not a gating condition.
+  // the parsers below understand a leading "if ~," condition gating the whole effect on their own,
+  // so isRecognizedBoardCondition/isBoardConditionMet (the same evaluator "activate only if X"
+  // already uses for activated abilities) is checked here first instead of letting them blindly
+  // apply the effect every time the phase comes around. An UNRECOGNIZED condition still declines to
+  // the Rules Advisor exactly as before (this engine has no evaluator for it at all); a recognized
+  // one that's genuinely false resolves as a real, silent no-op instead of a decline; a recognized
+  // one that's true falls through to the effect parsers below exactly as an unconditioned trigger
+  // would. "You may" isn't caught by this — it's already handled as an optional trigger, not a
+  // gating condition.
   // The "at the beginning of..." phrase isn't always the very first thing in the clause — a keyword
   // ability name can sit in front of it ("Lieutenant — At the beginning of combat on your turn, if
   // you control your commander, ..."), so the strip can't be anchored to the start of the string:
   // doing so left that leading "Lieutenant — " untouched, the whole replace a no-op, and the "if"
   // check failing to match a string that still started with "Lieutenant" — reproduced live as Loyal
   // Apprentice creating its Thopter every combat regardless of whether its commander was out.
-  if (/^if\b/i.test(clauseText.replace(/^.*?\bat the beginning of[^,]*,\s*/i, ""))) return undefined;
+  const ifConditionMatch = clauseText.replace(/^.*?\bat the beginning of[^,]*,\s*/i, "").match(/^if\s+(.+?),/i);
+  if (ifConditionMatch) {
+    if (!isRecognizedBoardCondition(ifConditionMatch[1])) return undefined;
+    const conditionSeat = session.seats.find((item) => item.id === seatId);
+    if (!conditionSeat || !isBoardConditionMet(ifConditionMatch[1], conditionSeat)) return session;
+  }
+
+  // "At the beginning of your end step, if you control four or more creatures, transform Growing
+  // Rites of Itlimoc." (Growing Rites of Itlimoc, Storm the Vault, and the rest of the Ixalan "boon"
+  // cycle) — reuses transformPermanent, the same flip-to-other-face logic the activated-ability
+  // "transform_self" kind (parseTransformSelfEffect) already applies, just not anchored to the start
+  // of the string here: that parser expects an already-isolated effect text with no cost/condition
+  // prefix, but clauseText still carries its own "at the beginning of..., if ..." preamble (now
+  // confirmed true, if there was one, by the check just above).
+  if (/\btransform\s+(?!target\b)/i.test(clauseText)) return transformPermanent(session, seatId, sourceCard.id, sourceCard.name, false);
 
   const removalEffect = parseRemovalEffect(clauseText);
   if (removalEffect) return applyPrimitiveAction(session, seatId, sourceCard, { kind: "removal", effect: removalEffect });
@@ -16861,25 +17518,46 @@ function summarizeAvailableMana(seat: PlayerSeat, allSeats?: PlayerSeat[]) {
 // {B}{B}." shape — but that missed Ashnod's Altar's real cost, "Sacrifice a creature: Add {C}{C}."
 // with no {T} at all, which was being treated as a free colorless source exactly like Phyrexian
 // Tower's own bug (sacrifice a creature for mana without ever actually sacrificing anything).
-function costlyTapManaColors(oracleText: string): Set<string> {
+// Splits a card's own "Add ..." clauses into the ones payable with just {T} ("free") versus ones
+// whose cost includes something extra — sacrifice/pay/discard/an additional mana symbol ("costly").
+// Shared by costlyTapManaColors (which color a plain tap can produce) and manaAmountFromAddClause
+// (how much a plain tap produces) below, since both need the exact same "was this clause's cost
+// more than just tapping it" classification and previously computed it independently — only one of
+// them correctly. Phyrexian Tower's "{T}, Sacrifice a creature: Add {B}{B}." (alongside its own
+// separate, genuinely free "{T}: Add {C}.") is the motivating shape for costly; Arena of Glory's
+// "{T}: Add {R}." alongside "{R}, {T}, Exert this land: Add {R}{R}." is the motivating shape for why
+// AMOUNT needs the same split, not just color (see manaAmountFromAddClause's own comment).
+function splitManaClausesByCost(oracleText: string): { free: string[]; costly: string[] } {
   const clauses = oracleText.split("\n").map((line) => line.trim()).filter(Boolean);
-  const costly = new Set<string>();
-  const free = new Set<string>();
+  const free: string[] = [];
+  const costly: string[] = [];
   for (const clause of clauses) {
     const costMatch = clause.match(/^([^:]+):/);
     if (!costMatch) continue;
     const costText = costMatch[1].toLowerCase();
     const hasExtraCost = /\bsacrifice\b|\bpay\b|\bdiscard\b|\{[0-9wubrgc]+\}/.test(costText.replace(/\{t\}/g, ""));
-    const target = hasExtraCost ? costly : free;
-    for (const match of clause.matchAll(/add \{([wubrgc])\}/gi)) target.add(match[1].toUpperCase());
+    (hasExtraCost ? costly : free).push(clause);
+  }
+  return { free, costly };
+}
+
+export function costlyTapManaColors(oracleText: string): Set<string> {
+  const { free, costly } = splitManaClausesByCost(oracleText);
+  const costlyColors = new Set<string>();
+  const freeColors = new Set<string>();
+  for (const clause of costly) {
+    for (const match of clause.matchAll(/add \{([wubrgc])\}/gi)) costlyColors.add(match[1].toUpperCase());
+  }
+  for (const clause of free) {
+    for (const match of clause.matchAll(/add \{([wubrgc])\}/gi)) freeColors.add(match[1].toUpperCase());
   }
   // A color is only actually unavailable "for free" if EVERY clause that produces it carries an
   // extra cost. Sunken Palace has both a plain "{T}: Add {U}." and a separate, genuinely costly
   // "{1}{U}, {T}, Exile seven cards from your graveyard: Add {U}. ..." alternative — before this,
   // finding blue in the costly clause blacklisted blue entirely, silencing the land's ordinary free
   // tap ability along with the real exploit this function exists to close.
-  for (const color of free) costly.delete(color);
-  return costly;
+  for (const color of freeColors) costlyColors.delete(color);
+  return costlyColors;
 }
 
 // "{T}: Add {X} or one mana of the chosen color." (the Thriving cycle, the Gate cycle) or the
@@ -16964,6 +17642,30 @@ function isBoardConditionMet(conditionRaw: string, seat: PlayerSeat): boolean {
   return false;
 }
 
+// Whether isBoardConditionMet actually has a real evaluator for this condition text, as opposed to
+// falling through to its own final "return false" — which means "unrecognized," NOT "recognized and
+// false." applyDeterministicPhaseTrigger's own "if X, [effect]" gate needs this distinction: a
+// phase-triggered condition it can genuinely evaluate should resolve to a real no-op when false, but
+// one it can't recognize at all must still decline to the Rules Advisor exactly as before, not
+// silently resolve as "condition not met." Mirrors isBoardConditionMet's own pattern list so the two
+// can't drift out of sync — deliberately NOT reusing isBoardConditionMet's boolean return itself
+// (which conflates both cases into false).
+export function isRecognizedBoardCondition(conditionRaw: string): boolean {
+  const condition = conditionRaw
+    .toLowerCase()
+    .trim()
+    .replace(/^(?:if|only if)\s+/, "")
+    .replace(/\.$/, "");
+  if (!condition) return true;
+  if (condition === "you control a commander" || condition === "you control your commander") return true;
+  if (/^you control (\d+|two|three|four|five|six|seven|eight|nine|ten) or more lands$/.test(condition)) return true;
+  if (/^you control (\d+|two|three|four|five|six|seven|eight|nine|ten) or more ([a-z]+)$/.test(condition)) return true;
+  if (/^you control an? ([a-z]+) or an? ([a-z]+)$/.test(condition)) return true;
+  if (condition === "this land entered this turn or if you control a basic land") return true;
+  if (/^you control an? ([a-z]+)$/.test(condition)) return true;
+  return false;
+}
+
 // Colors a mana ability could otherwise produce, but whose ONLY producing clause(s) carry an
 // "Activate only if" condition that isn't currently met — checked as a final filter over whatever
 // manaChoicesForCardRaw already found, rather than threading condition-awareness through every one
@@ -16984,7 +17686,7 @@ function conditionallyUnavailableColors(oracleText: string, seat: PlayerSeat): S
   return colors;
 }
 
-function manaChoicesForCard(card: VisibleCard, seat: PlayerSeat, allSeats?: PlayerSeat[]): ManaColor[] {
+export function manaChoicesForCard(card: VisibleCard, seat: PlayerSeat, allSeats?: PlayerSeat[]): ManaColor[] {
   const raw = manaChoicesForCardRaw(card, seat, allSeats);
   const blocked = conditionallyUnavailableColors(card.oracleText, seat);
   return blocked.size > 0 ? raw.filter((color) => !blocked.has(color)) : raw;
@@ -16995,8 +17697,17 @@ function manaChoicesForCard(card: VisibleCard, seat: PlayerSeat, allSeats?: Play
 // produce") — when the caller doesn't have it handy, this falls through to the old producedMana-
 // based behavior further down instead of guessing, so every un-migrated call site is unaffected.
 // Reflecting Pool needs no such threading since "a land you control" is already on `seat`.
+// Insidious Roots: "Creature tokens you control have '{T}: Add one mana of any color.'" — every
+// mana-ability parser below reads a card's own oracleText directly, which never includes a mana
+// ability granted by a SEPARATE permanent's static text. This is the one choke point that appends
+// grantedManaAbilityText (set by the state-based-action recompute pass, see parseGroupManaAbilityGrant)
+// onto the real oracleText, so those parsers see the granted line without needing to be rewritten.
+function effectiveManaOracleText(card: VisibleCard): string {
+  return card.grantedManaAbilityText ? `${card.oracleText}\n${card.grantedManaAbilityText}` : card.oracleText;
+}
+
 function manaChoicesForCardRaw(card: VisibleCard, seat: PlayerSeat, allSeats?: PlayerSeat[]): ManaColor[] {
-  const chosenColorAbility = chosenColorManaAbility(card.oracleText);
+  const chosenColorAbility = chosenColorManaAbility(effectiveManaOracleText(card));
   if (chosenColorAbility) {
     const colors: ManaColor[] = [];
     if (chosenColorAbility.fixedColor) colors.push(chosenColorAbility.fixedColor);
@@ -17021,7 +17732,7 @@ function manaChoicesForCardRaw(card: VisibleCard, seat: PlayerSeat, allSeats?: P
   // template but on an artifact rather than a land — matched by TEXT here (not just Exotic
   // Orchard's name) so any card printed with this wording gets the same dynamic treatment,
   // including this one, which had no special-case at all before.
-  const preText = card.oracleText.toLowerCase();
+  const preText = effectiveManaOracleText(card).toLowerCase();
   if ((name === "exotic orchard" || preText.includes("any color that a land an opponent controls could produce")) && allSeats) {
     const opponentLands = allSeats
       .filter((other) => other.id !== seat.id)
@@ -17040,14 +17751,14 @@ function manaChoicesForCardRaw(card: VisibleCard, seat: PlayerSeat, allSeats?: P
     return normalizeManaColors(seat.deck?.colors ?? seat.board.commander?.colorIdentity ?? ["C"]);
   }
 
-  const costly = costlyTapManaColors(card.oracleText);
+  const costly = costlyTapManaColors(effectiveManaOracleText(card));
   const produced = normalizeManaColors(card.producedMana ?? []).filter((color) => !costly.has(color));
   if (produced.length > 0) return produced;
 
   const basicTypes = basicLandTypes(card);
   if (basicTypes.length > 0) return basicTypes.map(manaColorForBasicLand).filter((color): color is ManaColor => Boolean(color));
 
-  const text = card.oracleText.toLowerCase();
+  const text = effectiveManaOracleText(card).toLowerCase();
   if (name === "arcane sanctum") return ["W", "U", "B"];
   if (name.includes("talisman of dominance")) return ["C", "U", "B"];
   if (name.includes("talisman of hierarchy")) return ["C", "W", "B"];
@@ -17057,6 +17768,16 @@ function manaChoicesForCardRaw(card: VisibleCard, seat: PlayerSeat, allSeats?: P
 
   const addedColors = [...text.matchAll(/add \{([wubrgc])\}/gi)].map((match) => match[1].toUpperCase()).filter((color) => !costly.has(color));
   if (addedColors.length > 0) return normalizeManaColors(addedColors);
+
+  // "Add one mana of any color." (Treasure tokens, Insidious Roots' granted ability, ...) — an
+  // unrestricted 5-color choice, distinct from the narrower "chosen color" (locked in once, handled
+  // above via chosenColorManaAbility) and "your commander's color identity" (handled above via the
+  // preText check) shapes. Checked before the generic isManaRock colorless-only fallback below,
+  // which would otherwise undercount this to "C" only — the whole point of this wording is choosing
+  // any of the five, not being stuck at colorless. The commander's-color-identity variant contains
+  // this same substring but is intercepted by its own earlier check first, so reaching here means
+  // it's genuinely unrestricted.
+  if (/\badd one mana of any color\b/i.test(text)) return normalizeManaColors(["W", "U", "B", "R", "G"]);
 
   // isManaRock only (not isLandCard): a mana rock's own regex requires actual "{T}: ... add ..."
   // text as positive evidence, but plenty of real lands (Evolving Wilds, Terramorphic Expanse, Maze
@@ -17224,17 +17945,29 @@ function scalingManaAmount(card: VisibleCard, seat: PlayerSeat): number | undefi
 // Flat multi-mana "Add {X}{X}" (or word-quantified "Add two/three mana of...") sources — without
 // this, every mana source except a hardcoded "Sol Ring" produced exactly 1, so Ancient Tomb,
 // Eldrazi Temple, every karoo/bounce land (Azorius Chancery, ...), and filter lands (Cascade
-// Bluffs, ...) were all undercounted by half. Takes the MAX across every "Add ..." clause on the
-// card rather than the specific ability actually activated (this codebase doesn't track which of a
-// card's several mana abilities a given tap used, the same approximation costlyTapManaColors and
-// painlandDamageAmount already make) — deliberately biased toward the sacrifice/restricted-mana
-// ability's higher count when a card has one, since isSacrificeManaSource already treats any use of
-// such a card as the sacrifice ability regardless of which line was meant.
-function manaAmountFromAddClause(oracleText: string): number | undefined {
+// Bluffs, ...) were all undercounted by half. Takes the MAX symbol count across a card's relevant
+// "Add ..." clause(s) (see the free/costly split just below) rather than the specific ability
+// actually activated — this codebase doesn't track which of a card's several mana abilities a given
+// tap used, the same approximation costlyTapManaColors and painlandDamageAmount already make.
+export function manaAmountFromAddClause(oracleText: string): number | undefined {
+  // Prefer clauses payable with just {T} over costlier ones on the same card — Arena of Glory's
+  // "{T}: Add {R}." (free, produces 1) alongside "{R}, {T}, Exert this land: Add {R}{R}." (costs
+  // {R} and exerting, nets +1) used to take the MAX symbol count across EVERY "Add ..." clause on
+  // the card regardless of which ability a plain tap actually exercises, crediting Arena of Glory
+  // with 2 red for a tap that only ever pays for the free ability's 1. Reported live as an agent
+  // affording a 5-drop off what should have been 3 real mana. This exact same shape (a free ability
+  // alongside a separate, genuinely costlier one) also affected Phyrexian Tower ("{T}: Add {C}."
+  // alongside "{T}, Sacrifice a creature: Add {B}{B}."), previously always overcounted to 2 even for
+  // its plain free tap — this fix corrects that card too, not just Arena of Glory, since it was the
+  // same bug under a different name. Falls back to the costly clauses only when there's no free one
+  // at all (Ashnod's Altar's ONLY way to produce mana — "Sacrifice a creature: Add {C}{C}." — already
+  // has an extra cost, so 2 is still the right number for it, unchanged from before this split).
+  const { free, costly } = splitManaClausesByCost(oracleText);
+  const relevantClauses = free.length > 0 ? free : costly;
   // Strip parenthetical reminder text first — Fire Nation Palace's firebending keyword reminder
   // ("Whenever it attacks, add {R}{R}{R}{R}. This mana lasts until end of combat.") isn't a tap
   // ability at all, but without this its 4 symbols still won the max and overcounted every tap.
-  const text = oracleText.toLowerCase().replace(/\([^)]*\)/g, "");
+  const text = relevantClauses.join("\n").toLowerCase().replace(/\([^)]*\)/g, "");
   const wordMatch = text.match(/\badd (one|two|three) mana\b/);
   if (wordMatch) {
     const words: Record<string, number> = { one: 1, two: 2, three: 3 };
@@ -17251,10 +17984,10 @@ function manaAmountFromAddClause(oracleText: string): number | undefined {
   return maxSymbols > 0 ? maxSymbols : undefined;
 }
 
-function manaProducedBy(card: VisibleCard, seat: PlayerSeat) {
+export function manaProducedBy(card: VisibleCard, seat: PlayerSeat) {
   const scaling = scalingManaAmount(card, seat);
   if (scaling !== undefined) return scaling;
-  return manaAmountFromAddClause(card.oracleText) ?? 1;
+  return manaAmountFromAddClause(effectiveManaOracleText(card)) ?? 1;
 }
 
 function selectedManaTotal(seat: PlayerSeat, sourceIds: string[]) {
@@ -17279,7 +18012,7 @@ function cannotPayMessage(seat: PlayerSeat, card: VisibleCard, availableMana: nu
 // check matched on that unrelated sentence and sacrificed Mind Stone the moment it was tapped for
 // ordinary mana, even via its non-sacrifice ability.
 function isSacrificeManaSource(card: VisibleCard): boolean {
-  return /\{t\}[^.\n]*?sacrifice[^.\n]*?:\s*add\b/i.test(card.oracleText);
+  return /\{t\}[^.\n]*?sacrifice[^.\n]*?:\s*add\b/i.test(effectiveManaOracleText(card));
 }
 
 // Painlands (Adarkar Wastes, Ancient Tomb, the "Threshold" cycle — Barbarian Ring, ...) and City of
@@ -17615,15 +18348,59 @@ function addLibraryLookEvent(session: GameSession, seatId: string, message: stri
   };
 }
 
-function resolveAgentLibraryLookWorkflow(
+export function resolveAgentLibraryLookWorkflow(
   session: GameSession,
   seatId: string,
   sourceCardName: string,
-  workflow: "scry_cards" | "surveil_cards" | "look_at_top_cards" | "reorder_top_cards",
-  count: number
+  workflow: "scry_cards" | "surveil_cards" | "look_at_top_cards" | "look_at_top_cards_reveal_type_to_hand" | "reorder_top_cards",
+  count: number,
+  allowedCardFilter?: string
 ): GameSession {
   const seat = session.seats.find((item) => item.id === seatId);
   const seatName = seat?.name ?? "Agent";
+
+  // "look_at_top_cards_reveal_type_to_hand" (Growing Rites of Itlimoc: look at N, may reveal a
+  // card matching allowedCardFilter to hand, the rest to the bottom) — rule 701.19b: a restricted
+  // search that finds no legal match fails to find, it does NOT fall back to some other card; the
+  // whole batch goes to the bottom with nothing taken, same as chooseAgentLibraryCardForRuleChoice's
+  // own "no card matches, don't guess" behavior for a graveyard/library search elsewhere.
+  if (workflow === "look_at_top_cards_reveal_type_to_hand") {
+    const cards = (seat?.library ?? []).slice(0, count);
+    if (cards.length === 0) {
+      return {
+        ...session,
+        events: [
+          {
+            id: crypto.randomUUID(),
+            at: new Date().toISOString(),
+            seatId,
+            message: `${seatName} resolves ${sourceCardName}, but the library is empty.`
+          },
+          ...session.events
+        ]
+      };
+    }
+    const filter = allowedCardFilter?.toLowerCase();
+    const eligible = filter ? cards.filter((card) => card.typeLine.toLowerCase().includes(filter)) : cards;
+    const chosen = eligible.length > 0 ? eligible.reduce((best, card) => (card.manaValue > best.manaValue ? card : best)) : undefined;
+    const rest = cards.filter((card) => card.id !== chosen?.id);
+    const withChosenInHand = chosen ? moveLibraryCardToDestination(session, seatId, chosen.id, "hand", false) : session;
+    const finalSession = putLookedAtCardsOnBottom(withChosenInHand, seatId, rest);
+    return {
+      ...finalSession,
+      events: [
+        {
+          id: crypto.randomUUID(),
+          at: new Date().toISOString(),
+          seatId,
+          message: chosen
+            ? `${seatName} resolves ${sourceCardName}: looks at the top ${cards.length}, puts ${chosen.name} into hand, and puts the rest on the bottom.`
+            : `${seatName} resolves ${sourceCardName}: looks at the top ${cards.length}, finds no ${allowedCardFilter ?? "matching"} card, and puts them all on the bottom.`
+        },
+        ...finalSession.events
+      ]
+    };
+  }
 
   // scry/surveil/reorder have no modeled agent choice, so leaving the top of the library exactly
   // as it is is already a legal resolution (choosing to keep every card on top, in the same order,
@@ -18149,6 +18926,7 @@ export function moveCardBetweenVisibleZones(session: GameSession, seatId: string
     attachmentToughnessBonus: undefined,
     grantedKeywords: undefined,
     grantedProtectionColors: undefined,
+    grantedManaAbilityText: undefined,
     grantedTypes: undefined,
     attachTimestamp: undefined,
     cdaPower: undefined,
@@ -18227,6 +19005,11 @@ export function moveCardBetweenVisibleZones(session: GameSession, seatId: string
   return {
     ...session,
     seats,
+    // "Whenever one or more cards leave your graveyard, ..." — the departure belongs to the
+    // graveyard's own seat (this function's `seatId`, the controller param), which for a
+    // graveyard-sourced move IS whoever's board.graveyard array the card actually left.
+    pendingGraveyardDepartures:
+      source === "graveyard" ? [...(session.pendingGraveyardDepartures ?? []), { seatId, cards: [card] }] : session.pendingGraveyardDepartures,
     events: [
       {
         id: crypto.randomUUID(),
@@ -18629,7 +19412,38 @@ function reorderTopLibraryCards(session: GameSession, seatId: string, orderedCar
   };
 }
 
-function moveLibraryCardToDestination(
+// "Put the rest on the bottom of your library in any order." (Growing Rites of Itlimoc) — mirrors
+// reorderTopLibraryCards above, but appends to the END of the library array instead of the front.
+// No dedicated interactive reordering step for the bottom half (unlike the top-return "reorder"
+// mode) — the bottom of a real library is functionally unobservable in practice, so preserving the
+// cards' existing relative order is a fine, low-stakes default rather than a real missing choice.
+export function putLookedAtCardsOnBottom(session: GameSession, seatId: string, cards: VisibleCard[]): GameSession {
+  if (cards.length === 0) return session;
+  const cardIds = new Set(cards.map((card) => card.id));
+  const seatName = session.seats.find((seat) => seat.id === seatId)?.name ?? "Player";
+  return {
+    ...session,
+    seats: session.seats.map((seat) =>
+      seat.id === seatId
+        ? {
+            ...seat,
+            library: [...(seat.library ?? []).filter((card) => !cardIds.has(card.id)), ...cards.map((card) => ({ ...card, zone: "library" as const }))]
+          }
+        : seat
+    ),
+    events: [
+      {
+        id: crypto.randomUUID(),
+        at: new Date().toISOString(),
+        seatId,
+        message: `${seatName} puts ${cards.length} looked-at card${cards.length === 1 ? "" : "s"} on the bottom of the library.`
+      },
+      ...session.events
+    ]
+  };
+}
+
+export function moveLibraryCardToDestination(
   session: GameSession,
   seatId: string,
   cardId: string,

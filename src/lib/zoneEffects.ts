@@ -5,13 +5,23 @@
 // (fractional mill like "mills half their library", conditional reveal-based mill, Aura-based
 // reanimation like Animate Dead, "return ... unless" clauses) are declined rather than guessed at.
 
-export type RegrowTargetType = "card" | "permanent" | "creature" | "land" | "enchantment" | "artifact";
+// "nonland_permanent": Fathomless descent's own "target nonland permanent card" restriction — the
+// existing "permanent" value already includes lands (matchesReanimateTargetType's own "not Instant,
+// not Sorcery" definition), so a genuinely land-excluding permanent type needs its own value.
+export type RegrowTargetType = "card" | "permanent" | "nonland_permanent" | "creature" | "land" | "enchantment" | "artifact";
 
 export interface ReanimateEffect {
   kind: "reanimate";
   // "a graveyard" (any player's) vs "your graveyard" (self only) — Reanimate vs Persist.
   anyGraveyard: boolean;
   targetType: RegrowTargetType;
+  // "Fathomless descent" cycle (Squirming Emergence, ...): "...with mana value less than or equal
+  // to the number of permanent cards in your graveyard" — a ceiling computed from board state at
+  // resolution time, not a fixed printed number like Sun Titan's "mana value 3 or less" (which this
+  // effect doesn't model as a field at all — that restriction is parsed out of the text today but
+  // never actually captured or enforced, a separate pre-existing gap this doesn't touch). Only this
+  // one dynamic basis is modeled; a literal number ceiling is declined rather than guessed at here.
+  manaValueCeiling?: "graveyard_permanent_count";
 }
 
 export interface RegrowEffect {
@@ -25,6 +35,18 @@ export interface MillEffect {
   kind: "mill";
   amount: number;
   scope: MillScope;
+  // "Mill three cards. You may put a land card from your graveyard on top of your library."
+  // (Glowspore Shaman, and the same "mill, then maybe filter a land to the top" ETB shape on
+  // similar cards) — a second effect chained onto the mill with "then," the same narrow
+  // single-field-rather-than-a-general-sequence choice this codebase's TriggerEffect.then already
+  // made for an analogous compound trigger shape (Insidious Roots).
+  then?: ZoneEffect;
+}
+
+// "You may put a land card from your graveyard on top of your library." (Glowspore Shaman) — a
+// destination this engine had never modeled before: RegrowEffect only ever returns a card to hand.
+export interface PutLandFromGraveyardOnTopEffect {
+  kind: "put_land_from_graveyard_on_top";
 }
 
 export type GraveyardToLibraryScope = "you" | "target_player";
@@ -94,6 +116,7 @@ export type ZoneEffect =
   | ReanimateEffect
   | RegrowEffect
   | MillEffect
+  | PutLandFromGraveyardOnTopEffect
   | GraveyardToLibraryEffect
   | ExileGraveyardEffect
   | SacrificeThenReanimateEffect
@@ -136,6 +159,22 @@ export function parseZoneEffect(oracleText: string): ZoneEffect | undefined {
   // — tolerated so the effect is recognized at all, same declared simplification as the regrow
   // pattern's "that isn't a God" qualifier below: not separately enforced at the target-choosing call
   // site (a too-expensive card could still, rarely, get picked).
+  // "Fathomless descent — Return to the battlefield target nonland permanent card in your
+  // graveyard with mana value less than or equal to the number of permanent cards in your
+  // graveyard." (Squirming Emergence, and the whole real ability-word cycle sharing this exact
+  // payoff sentence) — reversed word order from the plain reanimate pattern just below ("return TO
+  // THE BATTLEFIELD target... card IN YOUR graveyard" vs "return target... card FROM your graveyard
+  // TO THE BATTLEFIELD"), and a DYNAMIC mana-value ceiling (computed from board state, not a fixed
+  // printed number) — neither shape the plain pattern below recognizes. Checked first since its
+  // wording never overlaps with the plain pattern's.
+  const fathomlessDescent = text.match(
+    /\breturn to the battlefield target (nonland permanent|permanent|creature|artifact|enchantment) cards? in your graveyard with mana value less than or equal to the number of permanent cards in your graveyard\b/
+  );
+  if (fathomlessDescent) {
+    const targetType: RegrowTargetType = fathomlessDescent[1] === "nonland permanent" ? "nonland_permanent" : (fathomlessDescent[1] as RegrowTargetType);
+    return { kind: "reanimate", anyGraveyard: false, targetType, manaValueCeiling: "graveyard_permanent_count" };
+  }
+
   const reanimate = text.match(
     /\b(?:put|return) target (?:\w+ )?(creature|enchantment|artifact|permanent) cards?(?: with mana value \d+ or (?:less|greater))? from (a|your) graveyard (?:onto|to) the battlefield\b/
   );
@@ -172,25 +211,44 @@ export function parseZoneEffect(oracleText: string): ZoneEffect | undefined {
   }
 
   const millAmountPattern = "(a|one|two|three|four|five|six|seven|eight|nine|ten|\\d+)";
+  // "You may put a land card from your graveyard on top of your library." (Glowspore Shaman, and
+  // the same "mill, then maybe filter a land to the top" ETB shape on similar cards) — computed
+  // once up front and attached to whichever mill branch below actually matches; harmless undefined
+  // for the four scoped branches, which never co-occur with this text in this codebase's real card
+  // pool today.
+  const landToTop: PutLandFromGraveyardOnTopEffect | undefined = /\byou may put a land card from your graveyard on top of your library\b/.test(
+    text
+  )
+    ? { kind: "put_land_from_graveyard_on_top" }
+    : undefined;
   const millYou = text.match(new RegExp(`\\byou mill ${millAmountPattern} cards?\\b`));
   if (millYou) {
     const amount = numberWordToInt(millYou[1]);
-    if (amount) return { kind: "mill", amount, scope: "you" };
+    if (amount) return { kind: "mill", amount, scope: "you", then: landToTop };
   }
   const millTarget = text.match(new RegExp(`\\btarget player mills ${millAmountPattern} cards?\\b`));
   if (millTarget) {
     const amount = numberWordToInt(millTarget[1]);
-    if (amount) return { kind: "mill", amount, scope: "target_player" };
+    if (amount) return { kind: "mill", amount, scope: "target_player", then: landToTop };
   }
   const millOpponent = text.match(new RegExp(`\\beach opponent mills ${millAmountPattern} cards?\\b`));
   if (millOpponent) {
     const amount = numberWordToInt(millOpponent[1]);
-    if (amount) return { kind: "mill", amount, scope: "each_opponent" };
+    if (amount) return { kind: "mill", amount, scope: "each_opponent", then: landToTop };
   }
   const millEach = text.match(new RegExp(`\\beach player mills ${millAmountPattern} cards?\\b`));
   if (millEach) {
     const amount = numberWordToInt(millEach[1]);
-    if (amount) return { kind: "mill", amount, scope: "each_player" };
+    if (amount) return { kind: "mill", amount, scope: "each_player", then: landToTop };
+  }
+  // Bare imperative "Mill N cards." (no "you"/"target player"/"each opponent"/"each player" subject
+  // — Glowspore Shaman: "mill three cards", a very common ETB-trigger phrasing distinct from the
+  // older "you mill N cards" template above) — checked last so it never shadows a more specific
+  // match; always self-mill in this codebase's real card pool.
+  const millBare = text.match(new RegExp(`\\bmill ${millAmountPattern} cards?\\b`));
+  if (millBare) {
+    const amount = numberWordToInt(millBare[1]);
+    if (amount) return { kind: "mill", amount, scope: "you", then: landToTop };
   }
 
   if (/\bshuffle your graveyard into your library\b/.test(text)) return { kind: "graveyard_to_library", scope: "you" };

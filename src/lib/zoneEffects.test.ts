@@ -33,6 +33,22 @@ describe("parseZoneEffect — reanimate", () => {
       )
     ).toBeUndefined();
   });
+
+  it("parses a fixed printed mana-value ceiling, unaffected by the Fathomless descent pattern (Sun Titan)", () => {
+    expect(parseZoneEffect("Whenever Sun Titan enters or attacks, you may return target permanent card with mana value 3 or less from your graveyard to the battlefield.")).toEqual({
+      kind: "reanimate",
+      anyGraveyard: false,
+      targetType: "permanent"
+    });
+  });
+
+  it("parses the reversed-word-order, dynamic-ceiling Fathomless descent template (Squirming Emergence)", () => {
+    expect(
+      parseZoneEffect(
+        "Fathomless descent — Return to the battlefield target nonland permanent card in your graveyard with mana value less than or equal to the number of permanent cards in your graveyard."
+      )
+    ).toEqual({ kind: "reanimate", anyGraveyard: false, targetType: "nonland_permanent", manaValueCeiling: "graveyard_permanent_count" });
+  });
 });
 
 describe("parseZoneEffect — sacrifice_then_reanimate", () => {
@@ -95,6 +111,20 @@ describe("parseZoneEffect — mill", () => {
         "Each opponent reveals cards from the top of their library until they reveal X land cards, then puts all cards revealed this way into their graveyard. X can't be 0."
       )
     ).toBeUndefined();
+  });
+
+  it("parses the bare imperative 'Mill N cards' with its land-to-top follow-up (Glowspore Shaman)", () => {
+    expect(
+      parseZoneEffect("When this creature enters, mill three cards. You may put a land card from your graveyard on top of your library.")
+    ).toEqual({ kind: "mill", amount: 3, scope: "you", then: { kind: "put_land_from_graveyard_on_top" } });
+  });
+
+  it("parses a bare imperative mill with no follow-up sentence", () => {
+    expect(parseZoneEffect("Mill two cards.")).toEqual({ kind: "mill", amount: 2, scope: "you", then: undefined });
+  });
+
+  it("still parses the older 'you mill N cards' template with no follow-up (regression guard)", () => {
+    expect(parseZoneEffect("You mill three cards.")).toEqual({ kind: "mill", amount: 3, scope: "you", then: undefined });
   });
 });
 

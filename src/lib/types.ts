@@ -10,6 +10,32 @@ export type ZoneName =
 
 export type AgentName = "Veyra" | "Malik" | "Sable";
 
+export type ManaColor = "W" | "U" | "B" | "R" | "G" | "C";
+export type ColoredMana = Exclude<ManaColor, "C">;
+export type ManaPool = Record<ManaColor, number>;
+
+export interface ManaContribution {
+  cardId: string;
+  color: ManaColor;
+  amount: number;
+}
+
+// Klauth, Unrivaled Ancient's "add X mana in any combination of colors ... spend this mana only to
+// cast spells ... you don't lose this mana as steps and phases end" — two real exceptions to how
+// mana normally works here, deliberately its own parallel structure rather than a field bolted onto
+// ManaPool, so every existing ManaPool consumer (payment/cost logic, the mana-pool UI) is untouched
+// by default and only the sites that need to opt into restricted mana do (see payCastingCost in
+// AppFlow.tsx). clearAllManaPools/clearManaPool never touch this, so a batch survives every phase/
+// step change on its own; it's only ever cleared explicitly, at the cleanup step of the turn it was
+// created. Moved here (from AppFlow.tsx) alongside ManaPool/ManaContribution so a saved-game
+// snapshot (src/lib/saveGame.ts) can reference all four without a component -> lib import.
+export interface RestrictedManaBatch {
+  id: string;
+  sourceCardName: string;
+  remaining: ManaPool;
+  restriction: "cast_spells_only";
+}
+
 export interface CardRecord {
   id: string;
   oracleId?: string;
@@ -189,6 +215,13 @@ export interface VisibleCard {
   attachmentToughnessBonus?: number;
   grantedKeywords?: string[];
   grantedProtectionColors?: string[];
+  // "Creature tokens you control have '{T}: Add one mana of any color.'" (Insidious Roots) — a
+  // granted ACTIVATED ability's raw text (not a keyword grantedKeywords can express), recomputed
+  // every state-based-action pass from current board state exactly like grantedKeywords is. Kept in
+  // its own field rather than folded into oracleText: every mana-ability parser reads card.oracleText
+  // directly in many places, so appending here at the source (via effectiveManaOracleText) is the one
+  // choke point instead of rewriting each of them.
+  grantedManaAbilityText?: string;
   // "Enchanted/equipped creature loses all abilities" (Utter Insignificance), or "Creatures
   // enchanted player controls lose all abilities" (Overwhelming Splendor) — recomputed every
   // state-based-action pass from current attachments, same pattern as grantedKeywords. hasKeyword()
@@ -381,7 +414,11 @@ export interface GameSession {
   // convention as triggerChainGuard above rather than a separate cleanup step at end of turn:
   // resolveCombatDamage checks this against the CURRENT session.turn, so it's automatically inert
   // again once the turn actually changes, with nothing needing to clear it explicitly.
-  combatDamagePrevented?: { turn: number };
+  // exceptType: "...by non-Spider creatures." (Arachnogenesis) — an exclusion from the prevention,
+  // not a further restriction of it: creatures whose typeLine includes this type still deal combat
+  // damage normally, while everyone else's is blocked. undefined keeps Spore Frog's original
+  // all-or-nothing behavior unchanged.
+  combatDamagePrevented?: { turn: number; exceptType?: string };
   // Rule 500.7: "Take an extra turn after this one." (Temporal Mastery, Time Warp, ...) — a FIFO
   // queue of seatIds, consumed one entry per turn-change instead of the normal rotation. Queuing
   // rather than mutating activePlayerId/turn order directly means the two turn-change call sites
@@ -405,6 +442,15 @@ export interface GameSession {
   // ANY seat's upkeep step begins (this is "the next turn's upkeep" overall, not each player's own
   // next upkeep), then cleared regardless of whether the queue was empty.
   pendingUpkeepDraws?: Array<{ seatId: string; amount: number; sourceName: string }>;
+  // Rule 603.2/700.4-adjacent: "Whenever one or more cards leave your graveyard, ..." (Willow Geist,
+  // Insidious Roots) — same "pure transformer notices something happened but has no access to the
+  // trigger-queueing machinery" shape as pendingDeaths/pendingEntries/pendingCombatDamageToPlayer
+  // above, batched by EVENT rather than by card: "one or more" fires once per event no matter how
+  // many cards left in that one event (a graveyard-exile effect emptying a 12-card graveyard is one
+  // trigger, not twelve), so cards is an array on a single queue entry rather than one entry per
+  // card. seatId is the graveyard's OWNER (the "your" in the text), which is not always the seat
+  // that gained/moved the card (e.g. an opponent's Reanimate targeting your graveyard).
+  pendingGraveyardDepartures?: Array<{ seatId: string; cards: VisibleCard[] }>;
 }
 
 export interface AgentAction {

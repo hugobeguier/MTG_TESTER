@@ -29,6 +29,15 @@ export interface DestroyEffect {
   basicsExcluded: boolean;
 }
 
+// "Destroy up to X target artifacts and/or enchantments." (Pest Infestation) — a variable, MULTI-
+// target destroy, distinct from DestroyEffect above (which is always exactly one target). X is
+// resolved against the caster's actual chosenX at the call site, same "not guessed at here"
+// precedent DamageEffect.amount's own "X" already sets for this codebase.
+export interface DestroyUpToXEffect {
+  kind: "destroy_up_to_x";
+  targetType: RemovalTargetType;
+}
+
 export interface DestroyAllEffect {
   kind: "destroy_all";
   targetType: "creature" | "artifact" | "enchantment";
@@ -115,6 +124,7 @@ export type RemovalEffect =
   | DestroyEffect
   | DestroyAllEffect
   | DestroyAllConditionalEffect
+  | DestroyUpToXEffect
   | ExileEffect
   | DamageEffect
   | MassDamageEffect
@@ -137,6 +147,11 @@ const TARGET_TYPE_PATTERNS: Array<{ pattern: RegExp; type: RemovalTargetType }> 
   // legalTargets) to artifacts only. Reported live as Reclamation Sage always removing an artifact
   // with no way to ever hit an enchantment instead.
   { pattern: new RegExp(`target ${QUALIFIER}artifact or ${QUALIFIER}enchantment\\b`), type: "artifact_or_enchantment" },
+  // "Destroy up to X target artifacts and/or enchantments." (Pest Infestation) — the plural,
+  // "and/or"-worded variant real multi-target "up to X" spells use (rule 601.2c), distinct from the
+  // singular "artifact or enchantment" template a single-target spell prints. Checked alongside it
+  // since neither pattern can match the other's exact wording.
+  { pattern: new RegExp(`target ${QUALIFIER}artifacts and/or ${QUALIFIER}enchantments\\b`), type: "artifact_or_enchantment" },
   { pattern: new RegExp(`target ${QUALIFIER}artifact\\b`), type: "artifact" },
   { pattern: new RegExp(`target ${QUALIFIER}enchantment\\b`), type: "enchantment" },
   { pattern: new RegExp(`target ${QUALIFIER}creature\\b`), type: "creature" },
@@ -152,7 +167,7 @@ function matchTargetType(clause: string): RemovalTargetType | undefined {
 
 const COLORS = ["white", "blue", "black", "red", "green"];
 
-function parseDestroy(text: string): DestroyEffect | DestroyAllEffect | DestroyAllConditionalEffect | undefined {
+function parseDestroy(text: string): DestroyEffect | DestroyAllEffect | DestroyAllConditionalEffect | DestroyUpToXEffect | undefined {
   // Negative lookahead excludes "destroy all creatures with mana value 3 or less" (Austere
   // Command) from matching as an unconditional wipe — it used to, since "destroy all creatures"
   // is a literal substring of that conditional clause, which meant a "choose two" modal wipe with
@@ -178,6 +193,16 @@ function parseDestroy(text: string): DestroyEffect | DestroyAllEffect | DestroyA
       comparison: conditional[2] === "less" ? "or_less" : "or_greater"
     };
   }
+  // "Destroy up to X target artifacts and/or enchantments." (Pest Infestation) — checked before the
+  // single-target clause below, which requires "destroy (another )?target" with nothing in
+  // between and so never matches this shape anyway (the "up to X " sits between "destroy" and
+  // "target"); this card previously had NO matching branch at all, silently doing nothing.
+  const upToXMatch = text.match(/\bdestroy up to x target ([^.]+)\./);
+  if (upToXMatch) {
+    const targetType = matchTargetType(upToXMatch[0]);
+    if (targetType) return { kind: "destroy_up_to_x", targetType };
+  }
+
   const clauseMatch = text.match(/\bdestroy (?:another )?target [^.]+\./);
   if (!clauseMatch) return undefined;
   const clause = clauseMatch[0];

@@ -8,6 +8,7 @@ import {
   parseDevotionCda,
   parseGroupAnthemBoost,
   parseGroupKeywordGrant,
+  parseGroupManaAbilityGrant,
   parseSelfAnthemBoost,
   permanentMatchesQualifier,
   pickChosenColor,
@@ -86,6 +87,24 @@ describe("parseGroupKeywordGrant", () => {
 
   it("returns an empty array for a card with no group keyword grant", () => {
     expect(parseGroupKeywordGrant("Flying, vigilance.\nWhenever this creature attacks, draw a card.")).toEqual([]);
+  });
+});
+
+describe("parseGroupManaAbilityGrant", () => {
+  it("extracts a granted mana ability from Insidious Roots' full text", () => {
+    expect(
+      parseGroupManaAbilityGrant(
+        'Creature tokens you control have "{T}: Add one mana of any color."\nWhenever one or more creature cards leave your graveyard, create a 0/1 green Plant creature token, then put a +1/+1 counter on each Plant you control.'
+      )
+    ).toEqual([{ matcher: "Creature tokens", excludeSelf: false, abilityText: "{T}: Add one mana of any color." }]);
+  });
+
+  it("does not pick up a keyword grant with no quotes (Dragons you control have indestructible)", () => {
+    expect(parseGroupManaAbilityGrant("Dragons you control have indestructible.")).toEqual([]);
+  });
+
+  it("does not pick up a quoted grant that isn't a mana ability", () => {
+    expect(parseGroupManaAbilityGrant('Creatures you control have "{T}: Draw a card."')).toEqual([]);
   });
 });
 

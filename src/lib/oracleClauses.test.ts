@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   basicLandFetchCostRequiresTap,
   basicLandFetchManaCost,
+  cardsLeaveGraveyardEffectText,
   combatDamageToPlayerEffectText,
   deathEffectText,
   etbEffectText,
@@ -9,6 +10,7 @@ import {
   isActivatedAbilityClause,
   isAttackTriggerAddManaClause,
   isBasicLandFetchAbility,
+  isCardsLeaveGraveyardClause,
   isCombatDamageToPlayerClause,
   isNonEtbWheneverClause,
   mergeModalBulletClauses,
@@ -209,6 +211,33 @@ describe("isCombatDamageToPlayerClause / combatDamageToPlayerEffectText", () => 
   it("does not treat Indestructible or the attack-each-combat clause as a combat-damage trigger", () => {
     expect(isCombatDamageToPlayerClause("Indestructible")).toBe(false);
     expect(isCombatDamageToPlayerClause("Toski attacks each combat if able.")).toBe(false);
+  });
+});
+
+describe("isCardsLeaveGraveyardClause / cardsLeaveGraveyardEffectText", () => {
+  const willowGeistOracleText =
+    "Trample\nWhenever one or more cards leave your graveyard, put a +1/+1 counter on this creature.\nWhen this creature dies, you gain life equal to its power.";
+  const insidiousRootsOracleText =
+    'Creature tokens you control have "{T}: Add one mana of any color."\nWhenever one or more creature cards leave your graveyard, create a 0/1 green Plant creature token, then put a +1/+1 counter on each Plant you control.';
+
+  it("isolates Willow Geist's departure clause from its trample and dies clauses", () => {
+    expect(cardsLeaveGraveyardEffectText(willowGeistOracleText)).toBe("Whenever one or more cards leave your graveyard, put a +1/+1 counter on this creature.");
+  });
+
+  it("isolates Insidious Roots' departure clause from its unrelated static mana-grant line", () => {
+    expect(cardsLeaveGraveyardEffectText(insidiousRootsOracleText)).toBe(
+      "Whenever one or more creature cards leave your graveyard, create a 0/1 green Plant creature token, then put a +1/+1 counter on each Plant you control."
+    );
+  });
+
+  it("does not treat trample or the granted mana ability as a departure trigger", () => {
+    expect(isCardsLeaveGraveyardClause("Trample")).toBe(false);
+    expect(isCardsLeaveGraveyardClause('Creature tokens you control have "{T}: Add one mana of any color."')).toBe(false);
+  });
+
+  it("etbEffectText still excludes the departure clause on both cards (regression guard)", () => {
+    expect(etbEffectText(willowGeistOracleText)).not.toMatch(/leave your graveyard/i);
+    expect(etbEffectText(insidiousRootsOracleText)).not.toMatch(/leave your graveyard/i);
   });
 });
 

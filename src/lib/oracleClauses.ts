@@ -147,6 +147,21 @@ export function combatDamageToPlayerEffectText(oracleText: string): string {
     .join(" ");
 }
 
+// "Whenever one or more cards leave your graveyard, ..." (Willow Geist) / "...creature cards leave
+// your graveyard, ..." (Insidious Roots) — same isolation shape as isCombatDamageToPlayerClause just
+// above, so this event-driven trigger is parsed from just its own sentence instead of a whole card's
+// oracle text (Willow Geist also has an unrelated trample keyword line and its own "when this
+// creature dies" clause; Insidious Roots has an unrelated static mana-grant line).
+export function isCardsLeaveGraveyardClause(clause: string): boolean {
+  return /\b(when|whenever)\b[^.]{0,80}\bcards? leave your graveyard\b/i.test(clause);
+}
+
+export function cardsLeaveGraveyardEffectText(oracleText: string): string {
+  return oracleClauses(oracleText)
+    .filter((clause) => isCardsLeaveGraveyardClause(clause))
+    .join(" ");
+}
+
 // A "Choose one/two/three —" header and its bullet-point modes are printed as separate "\n"-
 // separated lines in this card data's convention, same as any other pair of independent abilities
 // — so a plain oracleClauses() split leaves them as unrelated entries: the header line contains

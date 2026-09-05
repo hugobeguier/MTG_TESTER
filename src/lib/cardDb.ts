@@ -50,6 +50,22 @@ export function getCardDb(): Database.Database {
       error TEXT,
       parsed_at TEXT NOT NULL
     );
+
+    -- A saved-game snapshot (src/lib/saveGame.ts's GameSnapshot), taken only at a "clean stop" (see
+    -- isCleanSaveStop) so it never needs to serialize in-flight stack/modal state. The scalar
+    -- columns below exist so the setup screen's saved-games list is a cheap query; the state column
+    -- is the whole snapshot as JSON, only ever read in full when actually loading a save.
+    CREATE TABLE IF NOT EXISTS saved_games (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      format_version INTEGER NOT NULL,
+      turn INTEGER NOT NULL,
+      phase TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      saved_at TEXT NOT NULL,
+      state TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_saved_games_saved_at ON saved_games(saved_at DESC);
   `);
 
   // First open: seed the cards table from the existing JSON catalog cardCatalog.ts already loads,

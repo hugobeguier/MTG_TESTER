@@ -309,3 +309,29 @@ export function parseGroupKeywordGrant(oracleText: string): GroupKeywordGrant[] 
   }
   return grants;
 }
+
+export interface GroupManaAbilityGrant {
+  matcher: string;
+  excludeSelf: boolean;
+  abilityText: string;
+}
+
+// "Creature tokens you control have '{T}: Add one mana of any color.'" (Insidious Roots) — same
+// clause shape as parseGroupKeywordGrant just above, but for a granted ACTIVATED ability instead of
+// a keyword: rule 604.3 requires a granted ability's actual rules text to be printed in quotes,
+// which is exactly the signal that distinguishes this shape from the keyword-grant one (that
+// parser's own [a-z, ]+ capture could never match text containing {, }, or : anyway) — the two
+// never need to disambiguate against each other. NOT lowercased (unlike parseGroupKeywordGrant):
+// the captured ability text needs to keep its real casing/punctuation ("{T}: Add ...") so every
+// existing mana-ability parser (which all expect real oracle-text formatting) can read it unchanged
+// once it's copied onto a matching permanent — see effectiveManaOracleText.
+export function parseGroupManaAbilityGrant(oracleText: string): GroupManaAbilityGrant[] {
+  const grants: GroupManaAbilityGrant[] = [];
+  for (const rawClause of oracleText.split("\n")) {
+    const match = rawClause.trim().match(/^(other\s+)?([A-Za-z][A-Za-z ]*?)\s+(?:you control\s+)?have\s+"([^"]+)"\.?$/i);
+    if (!match) continue;
+    if (!/\{t\}[^"]*:\s*add\b/i.test(match[3])) continue;
+    grants.push({ matcher: match[2].trim(), excludeSelf: Boolean(match[1]), abilityText: match[3] });
+  }
+  return grants;
+}

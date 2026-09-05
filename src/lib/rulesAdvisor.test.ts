@@ -82,6 +82,36 @@ describe("deterministicRuleWorkflow", () => {
     expect(workflow?.workflow).toBe("look_at_top_cards");
   });
 
+  it("still chooses look_at_top_cards for Diabolic Vision's real 'rest go back on top, any card' shape (regression guard)", () => {
+    const diabolicVision = card({
+      id: "diabolic-vision-1",
+      name: "Diabolic Vision",
+      typeLine: "Sorcery",
+      oracleText: "Look at the top five cards of your library. Put one of them into your hand and the rest on top of your library in any order."
+    });
+    const workflow = deterministicRuleWorkflow(input(diabolicVision));
+    expect(workflow?.workflow).toBe("look_at_top_cards");
+  });
+
+  // Reported live: Growing Rites of Itlimoc let a LAND be taken to hand (its real text restricts
+  // the pick to a creature card) and never sent the other three looked-at cards to the bottom of
+  // the library at all — both because it was being misclassified as the Diabolic-Vision-shaped
+  // look_at_top_cards workflow above, which has neither a type restriction nor a "rest to bottom"
+  // destination.
+  it("chooses look_at_top_cards_reveal_type_to_hand for Growing Rites of Itlimoc's real 'reveal a creature, rest to bottom' shape", () => {
+    const growingRites = card({
+      id: "growing-rites-1",
+      name: "Growing Rites of Itlimoc",
+      typeLine: "Legendary Enchantment",
+      oracleText:
+        "When Growing Rites of Itlimoc enters, look at the top four cards of your library. You may reveal a creature card from among them and put it into your hand. Put the rest on the bottom of your library in any order."
+    });
+    const workflow = deterministicRuleWorkflow(input(growingRites, "spell_resolved_to_battlefield"));
+    expect(workflow?.workflow).toBe("look_at_top_cards_reveal_type_to_hand");
+    expect(workflow?.maxChoices).toBe(4);
+    expect(workflow?.allowedCardFilter).toBe("creature");
+  });
+
   it("returns no workflow for a check land whose text is only the tapped condition and a mana ability (Isolated Chapel)", () => {
     const isolatedChapel = card({
       id: "isolated-chapel-1",
@@ -168,6 +198,22 @@ describe("deterministicRuleWorkflow", () => {
     expect(workflow?.workflow).toBe("search_library_to_graveyard");
     expect(workflow?.maxChoices).toBe(3);
     expect(workflow?.allowedCardFilter).toBe("creature");
+  });
+
+  // Reported live: Dina's Guidance only ever offered the graveyard, never hand — the graveyard
+  // branch above matched first purely because its text contains "graveyard" too, discarding the "or
+  // hand" half of the real card entirely.
+  it("chooses search_library_to_hand_or_graveyard for a real choice-of-destination tutor (Dina's Guidance)", () => {
+    const dinasGuidance = card({
+      id: "dinas-guidance-1",
+      name: "Dina's Guidance",
+      typeLine: "Instant",
+      oracleText: "Search your library for a creature card, reveal it, put it into your hand or graveyard, then shuffle."
+    });
+    const workflow = deterministicRuleWorkflow(input(dinasGuidance));
+    expect(workflow?.workflow).toBe("search_library_to_hand_or_graveyard");
+    expect(workflow?.allowedCardFilter).toBe("creature");
+    expect(workflow?.destinationChoices).toEqual(["hand", "graveyard"]);
   });
 
   it("chooses search_library_to_library for a tutor-to-top-of-library ETB trigger (Moon-Blessed Cleric)", () => {

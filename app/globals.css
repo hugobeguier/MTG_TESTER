@@ -98,6 +98,81 @@ textarea {
   color: var(--accent);
 }
 
+.game-save-button {
+  align-items: center;
+  background: rgba(20, 24, 18, 0.86);
+  border: 1px solid rgba(242, 240, 232, 0.2);
+  border-radius: 999px;
+  color: var(--text);
+  display: flex;
+  font-size: 0.85rem;
+  height: 40px;
+  justify-content: center;
+  line-height: 1;
+  padding: 0 1rem;
+  position: absolute;
+  right: 4rem;
+  top: 1rem;
+  z-index: 10;
+}
+
+.game-save-button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.game-save-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.saved-games-panel {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  margin-bottom: 1rem;
+  padding: 1rem;
+}
+
+.saved-games-panel h3 {
+  margin: 0 0 0.6rem;
+}
+
+.saved-games-panel ul {
+  display: grid;
+  gap: 0.5rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.saved-games-row {
+  align-items: center;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 0.6rem 0.85rem;
+}
+
+.saved-games-row div:first-child {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.saved-games-row span {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.saved-games-row-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
 .topbar,
 .game-table,
 .workbench,
@@ -1211,6 +1286,12 @@ h3 {
 
 .library-search-card button {
   padding: 0.55rem 0.75rem;
+}
+
+.library-search-destination-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
 }
 
 .library-look-modal h2 {

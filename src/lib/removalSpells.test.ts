@@ -68,6 +68,24 @@ describe("parseRemovalEffect — destroy", () => {
     });
   });
 
+  it("parses a variable, multi-target destroy (Pest Infestation), not the single-target shape", () => {
+    expect(
+      parseRemovalEffect(
+        'Destroy up to X target artifacts and/or enchantments. Create twice X 1/1 black and green Pest creature tokens with "When this token dies, you gain 1 life."'
+      )
+    ).toEqual({ kind: "destroy_up_to_x", targetType: "artifact_or_enchantment" });
+  });
+
+  it("still parses a plain single-target destroy unaffected by the destroy_up_to_x addition (regression guard)", () => {
+    expect(parseRemovalEffect("Destroy target creature.")).toEqual({
+      kind: "destroy",
+      targetType: "creature",
+      excludedColors: [],
+      artifactsExcluded: false,
+      basicsExcluded: false
+    });
+  });
+
   it("parses destroy target permanent, ignoring a token-creation follow-up (Beast Within)", () => {
     expect(parseRemovalEffect("Destroy target permanent. Its controller creates a 3/3 green Beast creature token.")).toMatchObject({
       kind: "destroy",

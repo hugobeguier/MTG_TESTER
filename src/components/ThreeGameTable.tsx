@@ -76,7 +76,7 @@ interface ThreeGameTableProps {
   onShuffleLibrary?: (seatId: string) => void;
   onOpenLibrarySearch?: () => void;
   onCloseLibrarySearch?: () => void;
-  onSearchLibraryCardToHand?: (cardId: string) => void;
+  onSearchLibraryCardToHand?: (cardId: string, destination?: "hand" | "graveyard") => void;
   onFinishLibrarySearch?: () => void;
   onChooseGraveyardReanimationTarget?: (seatId: string, cardId: string) => void;
   onChooseSacrificeCostTarget?: (seatId: string, cardId: string) => void;
@@ -207,6 +207,10 @@ type RuleChoiceView =
       prompt: string;
       cards: VisibleCard[];
       destination: "hand" | "battlefield" | "graveyard" | "library";
+      // "... put it into your hand or graveyard, then shuffle." (Dina's Guidance) — when set,
+      // LibrarySearchModal offers one action button per zone listed here instead of a single
+      // destination-based button, and onChoose is called with whichever the controller picked.
+      destinationChoices?: Array<"hand" | "graveyard">;
       allowedCardFilter?: string;
       // "Up to N"/"N" (Archaeomancer's Map's "up to two basic Plains cards," ...) — cards above
       // already excludes anything counted in chosenCount, so LibrarySearchModal can show "X of Y
@@ -375,10 +379,13 @@ interface BlockChoiceView {
 
 interface LibraryLookState {
   seatId: string;
-  mode: "scry" | "surveil" | "reorder" | "choose_one" | "vault_look";
+  mode: "scry" | "surveil" | "reorder" | "choose_one" | "choose_one_bottom" | "vault_look";
   cards: VisibleCard[];
   remaining: number;
   orderedCards?: VisibleCard[];
+  // "choose_one_bottom" only (Growing Rites of Itlimoc's "a creature card") — restricts which card
+  // the "To Hand" action is actually offered for.
+  allowedCardFilter?: string;
 }
 
 type DraggedZone = "hand" | "graveyard" | "exile";
@@ -1598,6 +1605,7 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
         <LibrarySearchModal
           cards={props.ruleChoice.cards}
           destination={props.ruleChoice.destination}
+          destinationChoices={props.ruleChoice.destinationChoices}
           prompt={props.ruleChoice.prompt}
           sourceCardName={props.ruleChoice.sourceCardName}
           allowedCardFilter={props.ruleChoice.allowedCardFilter}
@@ -2224,7 +2232,7 @@ function LibraryLookModal({
               ? `Scry ${look.remaining}`
               : look.mode === "reorder"
                 ? "Choose Order"
-                : look.mode === "choose_one"
+                : look.mode === "choose_one" || look.mode === "choose_one_bottom"
                   ? `Top ${look.cards.length}`
                   : look.mode === "vault_look"
                     ? `Top ${look.cards.length}`
@@ -2237,9 +2245,11 @@ function LibraryLookModal({
                 ? "Place the cards back in any order you like — the last one you place ends up on top of your library."
                 : look.mode === "choose_one"
                   ? "Choose one card to put into your hand. The rest go back on top — you'll then order them."
-                  : look.mode === "vault_look"
-                    ? "Pay 1 life to put these on the bottom and look at the next 5, as many times as you like — or keep these and choose the order to put them back on top."
-                    : "Choose Top to keep this card and finish scrying, or Bottom to look at the next card."}
+                  : look.mode === "choose_one_bottom"
+                    ? `You may reveal a ${look.allowedCardFilter ?? "matching"} card to put into your hand. The rest go to the bottom of your library.`
+                    : look.mode === "vault_look"
+                      ? "Pay 1 life to put these on the bottom and look at the next 5, as many times as you like — or keep these and choose the order to put them back on top."
+                      : "Choose Top to keep this card and finish scrying, or Bottom to look at the next card."}
           </p>
           {look.mode === "reorder" && look.orderedCards?.length ? (
             <span>Chosen: {look.orderedCards.map((card) => card.name).join(" -> ")}</span>
@@ -2270,6 +2280,14 @@ function LibraryLookModal({
                     <button type="button" onClick={() => onOrderTop?.(card.id)}>Place Next</button>
                   ) : look.mode === "choose_one" ? (
                     <button type="button" onClick={() => onToHand?.(card.id)}>To Hand</button>
+                  ) : look.mode === "choose_one_bottom" ? (
+                    // Growing Rites of Itlimoc's real restriction ("a creature card") enforced here
+                    // too, not just in the resolver — a non-matching card gets no action at all.
+                    look.allowedCardFilter && !card.typeLine.toLowerCase().includes(look.allowedCardFilter.toLowerCase()) ? (
+                      <span>Doesn't match ({look.allowedCardFilter})</span>
+                    ) : (
+                      <button type="button" onClick={() => onToHand?.(card.id)}>To Hand</button>
+                    )
                   ) : (
                     <button type="button" onClick={() => onKeepTop?.(card.id)}>Top</button>
                   )}
@@ -2288,6 +2306,7 @@ function LibraryLookModal({
 function LibrarySearchModal({
   cards,
   destination,
+  destinationChoices,
   prompt,
   sourceCardName,
   allowedCardFilter,
@@ -2299,13 +2318,16 @@ function LibrarySearchModal({
 }: {
   cards: VisibleCard[];
   destination: "hand" | "battlefield" | "graveyard" | "library";
+  // "... put it into your hand or graveyard, then shuffle." (Dina's Guidance) — when set, each card
+  // gets one action button per listed zone instead of a single destination-based button.
+  destinationChoices?: Array<"hand" | "graveyard">;
   prompt?: string;
   sourceCardName?: string;
   allowedCardFilter?: string;
   maxChoices?: number;
   chosenCount?: number;
   onClose?: () => void;
-  onChoose?: (cardId: string) => void;
+  onChoose?: (cardId: string, destination?: "hand" | "graveyard") => void;
   onFinish?: () => void;
 }) {
   const [query, setQuery] = useState("");
@@ -2349,15 +2371,25 @@ function LibrarySearchModal({
                 <strong>{card.name}</strong>
                 <span>{card.typeLine}</span>
               </div>
-              <button type="button" onClick={() => onChoose?.(card.id)}>
-                {destination === "battlefield"
-                  ? "To Battlefield"
-                  : destination === "graveyard"
-                    ? "To Graveyard"
-                    : destination === "library"
-                      ? "To Top of Library"
-                      : "To Hand"}
-              </button>
+              {destinationChoices?.length ? (
+                <div className="library-search-destination-choices">
+                  {destinationChoices.map((choice) => (
+                    <button key={choice} type="button" onClick={() => onChoose?.(card.id, choice)}>
+                      {choice === "graveyard" ? "To Graveyard" : "To Hand"}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <button type="button" onClick={() => onChoose?.(card.id)}>
+                  {destination === "battlefield"
+                    ? "To Battlefield"
+                    : destination === "graveyard"
+                      ? "To Graveyard"
+                      : destination === "library"
+                        ? "To Top of Library"
+                        : "To Hand"}
+                </button>
+              )}
             </article>
           ))}
         </div>
