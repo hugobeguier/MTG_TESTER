@@ -1,4 +1,4 @@
-import type { PlayerSeat, VisibleCard } from "./types";
+import type { DeckArchetype, PlayerSeat, VisibleCard } from "./types";
 
 export interface OpeningHandEvaluation {
   keep: boolean;
@@ -17,12 +17,37 @@ const BASIC_LAND_COLORS: Record<string, ManaColor> = {
   Wastes: "C"
 };
 
-const IDEAL_MIN_LANDS = 2;
 const IDEAL_MAX_LANDS = 4;
-const ACCEPTABLE_MAX_LANDS = 5;
 const MIN_TOTAL_SOURCES = 3;
 const CHEAP_RAMP_MAX_MANA_VALUE = 2;
 const MAX_CHEAP_RAMP_BONUS = 2;
+
+// How far out the curve check looks. Commander games are slower than 1v1, but a hand that can't do
+// anything through its first two land drops after the initial one is still a real risk of getting
+// run over before it does anything — hence turns 3 AND 4 specifically, per the user's own framing
+// of "ramp/lands for 3-4 rounds, and do I have a play turn 3-4."
+const CURVE_TURNS = [3, 4] as const;
+const CURVE_BOTH_TURNS_BONUS = 2;
+const CURVE_ONE_TURN_BONUS = 1;
+const CURVE_NO_PLAYS_PENALTY = -2;
+
+const MAX_DRAW_BONUS = 2;
+const MAX_INTERACTION_BONUS = 1;
+
+// Archetype-specific emphasis, layered on top of the same land/ramp/curve/draw/interaction scoring
+// every hand gets — the foundation (lands, mana colors) never changes per archetype, since mana
+// matters equally regardless of game plan, but how much curve/draw/interaction matter does: aggro
+// leans on curving out with cheap threats, control leans on early interaction, and combo leans on
+// card selection/ramp to assemble its pieces (this engine has no dedicated combo-piece tag, so the
+// existing draw+ramp "advantage" signal doubles as the closest proxy for "setup pieces"). midrange
+// (the default for any deck without a clearly dominant plan) leaves every weight at 1, i.e. today's
+// unweighted behavior.
+const ARCHETYPE_WEIGHTS: Record<DeckArchetype, { curve: number; draw: number; interaction: number }> = {
+  aggro: { curve: 1.5, draw: 0.5, interaction: 0.5 },
+  control: { curve: 0.75, draw: 1, interaction: 2 },
+  combo: { curve: 0.5, draw: 1.5, interaction: 0.75 },
+  midrange: { curve: 1, draw: 1, interaction: 1 }
+};
 
 function isLand(card: VisibleCard) {
   return card.role === "land" || card.typeLine.includes("Land");
@@ -30,6 +55,17 @@ function isLand(card: VisibleCard) {
 
 function isRamp(card: VisibleCard) {
   return card.role === "ramp";
+}
+
+function isDraw(card: VisibleCard) {
+  return card.role === "draw";
+}
+
+// Covers both removal and counterspells — deckRepair.ts' curated "removal" package already lumps
+// counterspells (Counterspell, Arcane Denial, Negate, ...) in with hard removal, so a card's role
+// on a hand card carries the same grouping here.
+function isInteraction(card: VisibleCard) {
+  return card.role === "removal";
 }
 
 function producedColors(card: VisibleCard): Set<ManaColor> {
@@ -56,8 +92,19 @@ function missingCommanderColors(hand: VisibleCard[], colorIdentity: string[]): s
   return colorIdentity.filter((color) => !covered.has(color as ManaColor));
 }
 
-function countEarlyPlays(hand: VisibleCard[]) {
-  return hand.filter((card) => !isLand(card) && card.manaValue >= 1 && card.manaValue <= 3).length;
+// Rough mana projection, not a full turn-by-turn simulator: assumes one land drop per turn (capped
+// by however many lands are actually in hand) plus any ramp in hand that would plausibly be online
+// by that turn. A ramp piece costing X mana is assumed cast on turn X at the earliest and (mana dorks
+// being summoning sick, sorcery-speed ramp spells' lands entering tapped, ...) starts paying off the
+// turn after — so by turn T, ramp with mana value <= T-1 counts as already producing.
+function projectedManaOnTurn(landCount: number, ramp: VisibleCard[], turn: number): number {
+  const landsInPlay = Math.min(landCount, turn);
+  const onlineRamp = ramp.filter((card) => card.manaValue <= turn - 1).length;
+  return landsInPlay + onlineRamp;
+}
+
+function hasPlayOnTurn(hand: VisibleCard[], projectedMana: number): boolean {
+  return hand.some((card) => !isLand(card) && card.manaValue >= 1 && card.manaValue <= projectedMana);
 }
 
 export function evaluateOpeningHand(seat: PlayerSeat): OpeningHandEvaluation {
@@ -68,20 +115,31 @@ export function evaluateOpeningHand(seat: PlayerSeat): OpeningHandEvaluation {
   const expensiveRampCount = ramp.length - cheapRamp.length;
   const totalSources = lands.length + ramp.length;
 
+  const archetype = seat.deck?.archetype ?? "midrange";
+  const weights = ARCHETYPE_WEIGHTS[archetype];
+
   const reasons: string[] = [];
   let score = 0;
+  // 0, 1, 6, or 7 lands in an opening 7 are each treated as an almost-automatic mulligan (standard
+  // mulligan advice, e.g. nerdleagues.com's "when should you mulligan" guide) — a much steeper
+  // penalty than the merely-risky 2-lands-shy-of-ideal or 5-lands-flood-prone bands below it, and
+  // 0/7 additionally force the keep to false outright (see forceMulligan) since no combination of
+  // draw/ramp/removal bonuses elsewhere in this function should be able to out-vote "no lands at
+  // all" or "the entire hand is lands."
+  let forceMulligan = false;
 
-  if (lands.length < IDEAL_MIN_LANDS) {
-    score -= 3;
-    reasons.push(`only ${lands.length} land${lands.length === 1 ? "" : "s"} in hand`);
+  if (lands.length === 0 || lands.length === 7) {
+    score -= 6;
+    forceMulligan = true;
+    reasons.push(`${lands.length} lands — an automatic mulligan`);
+  } else if (lands.length === 1 || lands.length === 6) {
+    score -= 4;
+    reasons.push(`${lands.length} lands — very risky, close to an automatic mulligan`);
   } else if (lands.length <= IDEAL_MAX_LANDS) {
     score += 2;
     reasons.push(`${lands.length} lands is an ideal count`);
-  } else if (lands.length <= ACCEPTABLE_MAX_LANDS) {
-    reasons.push(`${lands.length} lands is acceptable but flood-prone`);
   } else {
-    score -= 3;
-    reasons.push(`${lands.length} lands risks flooding`);
+    reasons.push(`${lands.length} lands is acceptable but flood-prone`);
   }
 
   if (totalSources < MIN_TOTAL_SOURCES) {
@@ -97,13 +155,50 @@ export function evaluateOpeningHand(seat: PlayerSeat): OpeningHandEvaluation {
     reasons.push(`${expensiveRampCount} higher-cost ramp piece${expensiveRampCount === 1 ? "" : "s"} (less impactful early)`);
   }
 
-  const earlyPlays = countEarlyPlays(hand);
-  if (earlyPlays === 0) {
-    score -= 1;
-    reasons.push("no 1-3 mana value plays in hand");
+  // Priority #1 (alongside the land/ramp counts above): can this hand actually do something on
+  // turns 3 and 4, once its own lands/ramp are accounted for, rather than just counting any 1-3
+  // mana value card in isolation. Weighted harder for aggro (curving out IS the game plan) and
+  // softer for combo (a combo hand can be patient about board development).
+  const turnsWithPlays = CURVE_TURNS.filter((turn) => hasPlayOnTurn(hand, projectedManaOnTurn(lands.length, ramp, turn)));
+  let curveBonus: number;
+  let curveReason: string;
+  if (turnsWithPlays.length === CURVE_TURNS.length) {
+    curveBonus = CURVE_BOTH_TURNS_BONUS;
+    curveReason = "has a play on curve for both turn 3 and turn 4";
+  } else if (turnsWithPlays.length > 0) {
+    curveBonus = CURVE_ONE_TURN_BONUS;
+    curveReason = `has a play on curve for turn ${turnsWithPlays[0]} only`;
   } else {
-    score += 1;
-    reasons.push(`${earlyPlays} early play${earlyPlays === 1 ? "" : "s"} (1-3 mana value)`);
+    curveBonus = CURVE_NO_PLAYS_PENALTY;
+    curveReason = "no plays on curve through turn 4 — hand risks sitting idle early";
+  }
+  score += Math.round(curveBonus * weights.curve);
+  reasons.push(weights.curve === 1 ? curveReason : `${curveReason} (weighted for ${archetype})`);
+
+  // Priority #2: card draw/advantage, so the hand doesn't run out of gas even once lands are fine.
+  // Weighted up for combo (draw doubles as the closest proxy for finding its setup pieces) and down
+  // for aggro (an aggro hand wants to be spending mana on threats, not digging).
+  const draw = hand.filter(isDraw);
+  if (draw.length > 0) {
+    const drawBonus = Math.round(Math.min(draw.length, MAX_DRAW_BONUS) * weights.draw);
+    score += drawBonus;
+    reasons.push(
+      `${draw.length} card draw/advantage spell${draw.length === 1 ? "" : "s"}${weights.draw === 1 ? "" : ` (weighted for ${archetype})`}`
+    );
+  }
+
+  // Priority #3: interaction (removal/counterspells) and general board development — weighted below
+  // both mana and card draw for most archetypes, since a hand that curves out and draws cards can
+  // find these later. Control flips this: early interaction is exactly what a control hand needs.
+  const interaction = hand.filter(isInteraction);
+  if (interaction.length > 0) {
+    const interactionBonus = Math.round(Math.min(interaction.length, MAX_INTERACTION_BONUS) * weights.interaction);
+    score += interactionBonus;
+    reasons.push(
+      `${interaction.length} removal/counterspell${interaction.length === 1 ? "" : "s"} for interaction${
+        weights.interaction === 1 ? "" : ` (weighted for ${archetype})`
+      }`
+    );
   }
 
   const commanderColors = seat.board.commander?.colorIdentity ?? [];
@@ -116,9 +211,13 @@ export function evaluateOpeningHand(seat: PlayerSeat): OpeningHandEvaluation {
     reasons.push("hand covers all commander colors");
   }
 
-  return { keep: score >= 0, score, reasons };
+  return { keep: !forceMulligan && score >= 0, score, reasons };
 }
 
 export function agentKeepsHand(seat: PlayerSeat) {
   return evaluateOpeningHand(seat).keep;
+}
+
+export function handHasLand(hand: VisibleCard[]): boolean {
+  return hand.some(isLand);
 }

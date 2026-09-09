@@ -19,7 +19,7 @@ import type {
   VisibleCard
 } from "@/lib/types";
 import { deserializeTurnCounters, isCleanSaveStop, SAVE_FORMAT_VERSION, serializeTurnCounters, type GameSnapshot, type SavedGameSummary } from "@/lib/saveGame";
-import { eventRelevantOracleText, type RuleWorkflow } from "@/lib/rulesAdvisor";
+import { deterministicRuleWorkflow, eventRelevantOracleText, type RuleWorkflow } from "@/lib/rulesAdvisor";
 import type { PrimitiveActionPlan, PrimitiveActionStep } from "@/lib/primitiveActionPlan";
 import { evaluateOpeningHand } from "@/lib/mulliganHeuristics";
 import { effectiveAttackTaxAmount, looksLikeAttackTaxCandidate } from "@/lib/staticEffects";
@@ -1128,6 +1128,13 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   // decision so the badge stays clickable after the fact. Keyed by seat.id.
   const [agentThinking, setAgentThinking] = useState<Record<string, boolean>>({});
   const [agentReasoning, setAgentReasoning] = useState<Record<string, AgentReasoning>>({});
+  // A one-shot relay baton for an agent's stated short-term plan (AgentAction.manaPlan, e.g. "holding
+  // up 2 mana for a counterspell") — not UI-facing, so a ref like landPlaysThisTurn/spellsCastThisTurn
+  // below rather than useState. requestAgentDecision reads and clears a seat's entry right before its
+  // next real decision (surfacing it exactly once as context.previousStatedPlan), then re-populates it
+  // from that decision's own manaPlan if the agent restates one — see requestAgentDecision for why a
+  // forced single-legal-action step must not touch this.
+  const agentStatedPlans = useRef<Record<string, string>>({});
   const landPlaysThisTurn = useRef<Set<string>>(new Set());
   // How many spells each seat has cast this turn (key: "${turn}:${seatId}") — feeds the "their
   // first spell each turn" condition cast-triggers can have (Mind's Dilation, ...); never cleaned
@@ -2057,6 +2064,13 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       } satisfies AgentAction;
     }
     const activeSession = sessionOverride ?? session;
+    // Surface whatever this seat said it planned to do at its last real decision (e.g. "holding up 2
+    // mana for a counterspell"), then clear it — a one-shot relay baton, not a persistent flag. If the
+    // agent still wants to hold the plan for the decision after this one, it restates manaPlan below
+    // and the baton carries forward again; otherwise it silently lapses. See the field's declaration
+    // for why a forced single-legal-action step above must not reach this.
+    const previousStatedPlan = agentStatedPlans.current[seat.id];
+    delete agentStatedPlans.current[seat.id];
     const response = await fetch("/api/agents/action", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -2072,7 +2086,8 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
           turn: activeSession.turn,
           pendingAction: pendingAction ? pendingActionSummary(activeSession, pendingAction) : undefined,
           stack: stackActions.map((item) => pendingActionSummary(activeSession, item)),
-          heuristicHint: purpose === "opening_hand_mulligan" ? evaluateOpeningHand(seat) : undefined
+          heuristicHint: purpose === "opening_hand_mulligan" ? evaluateOpeningHand(seat) : undefined,
+          previousStatedPlan: previousStatedPlan || undefined
         }),
         legalActions
       })
@@ -2084,6 +2099,9 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     };
     if (result.message && result.source !== "ollama") {
       addEvent(`${seat.name} agent decision fallback: ${result.message}`, seat.id, "Agent decision");
+    }
+    if (result.action?.manaPlan) {
+      agentStatedPlans.current[seat.id] = result.action.manaPlan;
     }
     return result.action;
   }
@@ -2724,7 +2742,11 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
 
       let nextSeat = seat;
       let count = 0;
-      while (count < 3) {
+      while (count < MULLIGAN_HARD_CAP) {
+        // Past the soft cap, stop grinding down to a tiny hand unless there's still no land to
+        // show for it — a 4-card hand is already a real handicap, and it's rarely worth going
+        // lower just to smooth the curve further. Landless is the one case worth pushing past it.
+        if (count >= MULLIGAN_SOFT_CAP && nextSeat.board.hand.some(isLandCard)) break;
         const actions: LegalAgentAction[] = [
           { id: "keep-hand", actionType: "keep_hand", targetIds: [], label: `keep ${openingHandKeepSize(count)}` },
           { id: "mulligan", actionType: "mulligan", targetIds: [], label: "take a mulligan" }
@@ -5871,6 +5893,37 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       return;
     }
 
+    const advisorInput = {
+      event,
+      actorName: seat.name,
+      sourceCard,
+      battlefield: seat.board.battlefield,
+      hand: seat.board.hand,
+      graveyard: seat.board.graveyard ?? [],
+      exile: seat.board.exile ?? [],
+      libraryPreview: (seat.library ?? []).slice(0, 12).map((card) => ({
+        id: card.id,
+        name: card.name,
+        typeLine: card.typeLine,
+        oracleText: card.oracleText
+      }))
+    };
+
+    // Re-run the (free, pure) deterministic classifier before ever trusting a cached answer for this
+    // shape — a cached entry only ever came from a genuine Ollama call (see saveRuleWorkflowCache's
+    // own call site below), so if this exact card has since gained real deterministic coverage, that
+    // fix must win over a stale pre-fix Ollama answer, not be silently shadowed by it forever.
+    // Reproduced live: Cultivate fetching only one land because an earlier Ollama misclassification
+    // (from before deterministicRuleWorkflow covered this shape — see its own
+    // search_basic_lands_split_battlefield_hand branch) was still sitting in this browser's
+    // localStorage-backed ruleWorkflowCache and short-circuited the request below entirely, so the
+    // now-fixed deterministic classifier never got a chance to run again for this card.
+    const deterministic = deterministicRuleWorkflow(advisorInput);
+    if (deterministic) {
+      applyRuleWorkflow(seatId, sourceCard, deterministic, "deterministic");
+      return;
+    }
+
     // A classification is a pure function of (event, this card's own oracle text) — see
     // ruleWorkflowCache's own comment — so a prior real consultation for the exact same shape
     // (this game or, thanks to loadRuleWorkflowCacheOnce, an earlier one) can be reused outright,
@@ -5888,21 +5941,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         method: "POST",
         headers: { "content-type": "application/json" },
         signal: AbortSignal.timeout(AGENT_REQUEST_TIMEOUT_MS),
-        body: JSON.stringify({
-          event,
-          actorName: seat.name,
-          sourceCard,
-          battlefield: seat.board.battlefield,
-          hand: seat.board.hand,
-          graveyard: seat.board.graveyard ?? [],
-          exile: seat.board.exile ?? [],
-          libraryPreview: (seat.library ?? []).slice(0, 12).map((card) => ({
-            id: card.id,
-            name: card.name,
-            typeLine: card.typeLine,
-            oracleText: card.oracleText
-          }))
-        })
+        body: JSON.stringify(advisorInput)
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const result = (await response.json()) as { source: "deterministic" | "ollama" | "fallback"; workflow: RuleWorkflow };
@@ -14219,6 +14258,9 @@ function agentSeatSnapshot(seat: PlayerSeat, includeHand: boolean) {
     poison: seat.poison ?? 0,
     availableMana: summarizeAvailableMana(seat),
     commander: seat.board.commander ? agentCardSnapshot(seat.board.commander) : undefined,
+    // Only for the deciding seat's own view ("you"), not an opponent's — this is the agent's own
+    // deck's game plan (see bracketPolicy.ts' buildDeckGamePlan), not intelligence about others.
+    gamePlan: includeHand ? seat.deck?.gamePlan : undefined,
     hand: includeHand ? seat.board.hand.map(agentCardSnapshot) : { count: seat.board.hand.length },
     battlefield: seat.board.battlefield.map(agentCardSnapshot),
     graveyard: (seat.board.graveyard ?? []).slice(-8).map(agentCardSnapshot),
@@ -18182,7 +18224,8 @@ function resolveAgentMulligans(seats: PlayerSeat[]) {
     if (seat.kind !== "agent") return seat;
     let nextSeat = seat;
     let count = 0;
-    while (!agentKeepsHand(nextSeat) && count < 3) {
+    while (!agentKeepsHand(nextSeat) && count < MULLIGAN_HARD_CAP) {
+      if (count >= MULLIGAN_SOFT_CAP && nextSeat.board.hand.some(isLandCard)) break;
       count += 1;
       nextSeat = withOpeningHand(nextSeat, 7, count);
     }
@@ -18204,6 +18247,14 @@ function resolveAgentMulligans(seats: PlayerSeat[]) {
 function agentKeepsHand(seat: PlayerSeat) {
   return evaluateOpeningHand(seat).keep;
 }
+
+// The user's own stated preference: a 4-card hand (mulligan count 4, see openingHandKeepSize below)
+// is as far down as it's worth going for a normal bad hand — beyond that the card disadvantage
+// outweighs any improvement in quality. MULLIGAN_HARD_CAP is the one exception: a hand that still
+// has no land at all past the soft cap is unplayable regardless, so it's worth pushing further,
+// up to this absolute safety valve so a persistently landless shuffle can't loop forever.
+const MULLIGAN_SOFT_CAP = 4;
+const MULLIGAN_HARD_CAP = 6;
 
 // This table's house rule: the first mulligan is a free "friendly mulligan" (fresh 7, no cards
 // bottomed), and the standard London mulligan (rule 103.5, bottom one card per mulligan) only kicks

@@ -74,4 +74,30 @@ describe("parseDeckList", () => {
     expect(deck.cards[0].role).not.toBe("land");
     expect(deck.cards[0].role).toBe("draw");
   });
+
+  it("populates archetype and gamePlan alongside score", () => {
+    const deck = createDeckFromList({
+      owner: "test",
+      commander: "Meren of Clan Nel Toth",
+      deckList: "1 Meren of Clan Nel Toth\n1 Sol Ring\n98 Forest"
+    });
+
+    expect(deck.archetype).toBeDefined();
+    expect(deck.gamePlan).toBeDefined();
+    expect(deck.gamePlan?.length).toBeGreaterThan(0);
+  });
+});
+
+describe("createDeckFromCards", () => {
+  it("populates archetype and gamePlan alongside score", () => {
+    const deck = createDeckFromCards({
+      owner: "test",
+      commander: "Meren of Clan Nel Toth",
+      cards: [{ name: "Sol Ring", count: 1, role: "ramp" }]
+    });
+
+    expect(deck.archetype).toBeDefined();
+    expect(deck.gamePlan).toBeDefined();
+    expect(deck.gamePlan?.length).toBeGreaterThan(0);
+  });
 });

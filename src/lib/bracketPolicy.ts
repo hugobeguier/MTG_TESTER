@@ -1,4 +1,4 @@
-import type { CardRecord, CommanderDeck, DeckValidationReport } from "./types";
+import type { CardRecord, CommanderDeck, DeckArchetype, DeckValidationReport } from "./types";
 
 const BASIC_LANDS = new Set([
   "Plains",
@@ -213,6 +213,107 @@ export function scoreDeck(deck: Pick<CommanderDeck, "cards" | "validation">) {
 
 function isBasicLand(card: CommanderDeck["cards"][number]) {
   return BASIC_LANDS.has(card.name) || card.card?.typeLine.includes("Basic Land") === true;
+}
+
+// The leading ratio must beat the runner-up by at least this multiple to count as a real signal
+// rather than noise from an otherwise-balanced 100-card pile — without it, decks that are only
+// marginally more removal-heavy than draw-heavy (or vice versa) would get force-sorted into a
+// archetype they don't really commit to.
+const ARCHETYPE_DOMINANCE_MARGIN = 1.2;
+// A board-presence-heavy deck whose creatures/threats average above this mana value reads as "big
+// stuff," not "aggro" — aggro specifically means it's trying to win fast and cheap.
+const AGGRO_AVG_MANA_VALUE_CEILING = 3.5;
+
+function nonlandCardsOf(deck: Pick<CommanderDeck, "cards">) {
+  return deck.cards.filter((card) => card.role !== "land" && card.role !== "commander" && !isBasicLand(card));
+}
+
+function countByRole(cards: CommanderDeck["cards"], roles: string[]) {
+  return cards.filter((card) => roles.includes(card.role ?? "")).reduce((sum, card) => sum + card.count, 0);
+}
+
+// Classifies a deck's game plan from its already-tagged card roles (see deckParser.ts'
+// inferRoleFromRecord/inferRole and deckRepair.ts' CURATED_PACKAGES, the source of every role a
+// card in `cards` can carry) rather than any new per-card data. Deliberately coarse: "combo" here
+// really means "light on board presence, heavy on ramp/card selection" — a genuine proxy given this
+// engine has no dedicated combo-piece tag, not a claim that specific combo pieces were detected.
+export function inferDeckArchetype(deck: Pick<CommanderDeck, "cards">): DeckArchetype {
+  const nonland = nonlandCardsOf(deck);
+  const nonlandTotal = nonland.reduce((sum, card) => sum + card.count, 0);
+  if (nonlandTotal === 0) return "midrange";
+
+  const boardPresenceRatio = countByRole(nonland, ["creature", "threat"]) / nonlandTotal;
+  const interactionRatio = countByRole(nonland, ["removal", "wipe"]) / nonlandTotal;
+  const advantageRatio = countByRole(nonland, ["draw", "ramp"]) / nonlandTotal;
+
+  const ranked = (
+    [
+      { archetype: "aggro", ratio: boardPresenceRatio },
+      { archetype: "control", ratio: interactionRatio },
+      { archetype: "combo", ratio: advantageRatio }
+    ] satisfies Array<{ archetype: DeckArchetype; ratio: number }>
+  ).sort((a, b) => b.ratio - a.ratio);
+
+  const [leader, runnerUp] = ranked;
+  if (leader.ratio === 0 || leader.ratio < runnerUp.ratio * ARCHETYPE_DOMINANCE_MARGIN) return "midrange";
+
+  if (leader.archetype === "aggro") {
+    const manaValues = nonland
+      .filter((card) => card.role === "creature" || card.role === "threat")
+      .map((card) => card.card?.manaValue)
+      .filter((value): value is number => value !== undefined);
+    const avgManaValue = manaValues.length > 0 ? manaValues.reduce((sum, value) => sum + value, 0) / manaValues.length : undefined;
+    if (avgManaValue !== undefined && avgManaValue > AGGRO_AVG_MANA_VALUE_CEILING) return "midrange";
+  }
+
+  return leader.archetype;
+}
+
+// Individual role categories worth naming in a game plan summary — a finer grain than the three
+// combined ratios inferDeckArchetype sorts on above, since "leans on ramp and card draw" is a more
+// concrete, actionable reminder than the archetype label alone.
+const GAME_PLAN_ROLE_LABELS: Record<string, string> = {
+  ramp: "ramp",
+  draw: "card draw",
+  removal: "removal",
+  wipe: "board wipes",
+  protection: "protection",
+  threat: "threats",
+  creature: "creatures"
+};
+
+const ARCHETYPE_LABEL: Record<DeckArchetype, string> = {
+  aggro: "an aggro deck",
+  control: "a control deck",
+  combo: "a combo deck",
+  midrange: "a midrange deck"
+};
+
+const ARCHETYPE_TACTICAL_LINE: Record<DeckArchetype, string> = {
+  aggro: "Curve out with cheap threats and keep the pressure on before the table stabilizes.",
+  control: "Hold up interaction, answer the biggest threat, and look to win in the late game.",
+  combo: "Use ramp and card selection to assemble the plan, then protect it once it's found.",
+  midrange: "Develop the board and answer threats as they come, rather than racing toward one plan."
+};
+
+// Composes a short, deterministic strategy summary for a deck at build time (see deckParser.ts'
+// createDeckFromList/createDeckFromCards) — no new LLM call, so it works identically for every deck
+// build path and stays stable/testable. Deliberately doesn't repeat the commander's own oracle text
+// (agentSeatSnapshot in AppFlow.tsx already sends that separately); this is the strategic summary
+// layered on top of it, so e.g. Saheeli's actual cost-reduction ability is read from one place and
+// "this deck leans on ramp and threats" from another.
+export function buildDeckGamePlan(deck: Pick<CommanderDeck, "cards">, archetype: DeckArchetype): string {
+  const nonland = nonlandCardsOf(deck);
+  const leaningOn = Object.entries(GAME_PLAN_ROLE_LABELS)
+    .map(([role, label]) => ({ label, count: countByRole(nonland, [role]) }))
+    .filter((entry) => entry.count > 0)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 2)
+    .map((entry) => entry.label)
+    .join(" and ");
+
+  const summary = leaningOn ? `This is ${ARCHETYPE_LABEL[archetype]} leaning on ${leaningOn}.` : `This is ${ARCHETYPE_LABEL[archetype]}.`;
+  return `${summary} ${ARCHETYPE_TACTICAL_LINE[archetype]}`;
 }
 
 function isGameChanger(name: string, card?: CardRecord) {

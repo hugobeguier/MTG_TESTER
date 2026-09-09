@@ -88,6 +88,13 @@ export interface DeckCard {
   card?: CardRecord;
 }
 
+// A deck's game plan, inferred once from its final card composition at build time (see
+// bracketPolicy.ts' inferDeckArchetype) and stored here rather than recomputed on demand, so every
+// consumer (mulligan scoring, future play-pattern heuristics, ...) agrees on the same answer for a
+// given deck. "midrange" is the default/catch-all for a deck with no single dominant game plan —
+// most Commander goodstuff piles land here, not in one of the other three.
+export type DeckArchetype = "aggro" | "control" | "combo" | "midrange";
+
 export interface CommanderDeck {
   id: string;
   name: string;
@@ -100,6 +107,13 @@ export interface CommanderDeck {
   createdAt: string;
   validation: DeckValidationReport;
   score: DeckScore;
+  archetype?: DeckArchetype;
+  // A short, deterministic strategy summary (archetype + which role categories the deck leans on +
+  // one tactical line), composed once at build time by bracketPolicy.ts' buildDeckGamePlan and
+  // handed to an agent's own decisions (see AppFlow.tsx's agentSeatSnapshot) so it has a standing
+  // reminder of its own game plan instead of re-deriving one from scratch every decision. Doesn't
+  // repeat the commander's oracle text — that's already sent separately as commander.oracleText.
+  gamePlan?: string;
 }
 
 export interface DeckValidationReport {

@@ -452,9 +452,7 @@ function scoreBlockDecision(action: ScorableAction, context: ScoringContext, del
   }
 }
 
-const IDEAL_MIN_LANDS = 2;
 const IDEAL_MAX_LANDS = 4;
-const ACCEPTABLE_MAX_LANDS = 5;
 const MIN_TOTAL_MANA_SOURCES = 3;
 
 function isLandLike(card: CardLike): boolean {
@@ -465,24 +463,64 @@ function isRampLike(card: CardLike): boolean {
   return card.role === "ramp";
 }
 
+function isDrawLike(card: CardLike): boolean {
+  return card.role === "draw";
+}
+
+// Covers both removal and counterspells — see the matching comment in mulliganHeuristics.ts.
+function isInteractionLike(card: CardLike): boolean {
+  return card.role === "removal";
+}
+
+const CURVE_TURNS = [3, 4] as const;
+const CURVE_BOTH_TURNS_BONUS = 2;
+const CURVE_ONE_TURN_BONUS = 1;
+const CURVE_NO_PLAYS_PENALTY = -2;
+const MAX_DRAW_BONUS = 2;
+const MAX_INTERACTION_BONUS = 1;
+
+// Mirrors mulliganHeuristics.ts' projectedManaOnTurn — see its comment for the assumptions.
+function projectedManaOnTurn(landCount: number, ramp: CardLike[], turn: number): number {
+  const landsInPlay = Math.min(landCount, turn);
+  const onlineRamp = ramp.filter((card) => (card.manaValue ?? 0) <= turn - 1).length;
+  return landsInPlay + onlineRamp;
+}
+
+function hasPlayOnTurn(hand: CardLike[], projectedMana: number): boolean {
+  return hand.some((card) => !isLandLike(card) && (card.manaValue ?? 0) >= 1 && (card.manaValue ?? 0) <= projectedMana);
+}
+
 // A slimmed-down version of src/lib/mulliganHeuristics.ts' evaluateOpeningHand, reimplemented
 // against this module's CardLike/ScoringContext shape rather than the full VisibleCard/PlayerSeat
 // types that function needs — this module crosses the API boundary (it's what the /api/agents/action
 // route falls back to when Ollama is unreachable) and only ever sees the JSON snapshot sent over
 // the wire. Deliberately narrower: no color-identity coverage check, since producedMana/
-// colorIdentity aren't part of that snapshot today. Land/early-play thresholds match the fuller
-// heuristic so the two don't disagree on the same hand.
+// colorIdentity aren't part of that snapshot today. Land/curve/draw/interaction weights match the
+// fuller heuristic so the two don't disagree on the same hand.
 function openingHandScore(hand: CardLike[]): number {
   const lands = hand.filter(isLandLike);
   const ramp = hand.filter(isRampLike);
   const totalSources = lands.length + ramp.length;
   let score = 0;
-  if (lands.length < IDEAL_MIN_LANDS) score -= 3;
+  // Mirrors mulliganHeuristics.ts' land bands: 0/7 and 1/6 lands are each treated as steeply worse
+  // than the merely-risky/flood-prone middle ground, since standard mulligan advice calls those
+  // counts an almost-automatic mulligan regardless of what else is in the hand.
+  if (lands.length === 0 || lands.length === 7) score -= 6;
+  else if (lands.length === 1 || lands.length === 6) score -= 4;
   else if (lands.length <= IDEAL_MAX_LANDS) score += 2;
-  else if (lands.length > ACCEPTABLE_MAX_LANDS) score -= 3;
   if (totalSources < MIN_TOTAL_MANA_SOURCES) score -= 2;
-  const earlyPlays = hand.filter((card) => !isLandLike(card) && (card.manaValue ?? 0) >= 1 && (card.manaValue ?? 0) <= 3).length;
-  score += earlyPlays > 0 ? 1 : -1;
+
+  const turnsWithPlays = CURVE_TURNS.filter((turn) => hasPlayOnTurn(hand, projectedManaOnTurn(lands.length, ramp, turn)));
+  if (turnsWithPlays.length === CURVE_TURNS.length) score += CURVE_BOTH_TURNS_BONUS;
+  else if (turnsWithPlays.length > 0) score += CURVE_ONE_TURN_BONUS;
+  else score += CURVE_NO_PLAYS_PENALTY;
+
+  const drawCount = hand.filter(isDrawLike).length;
+  score += Math.min(drawCount, MAX_DRAW_BONUS);
+
+  const interactionCount = hand.filter(isInteractionLike).length;
+  score += Math.min(interactionCount, MAX_INTERACTION_BONUS);
+
   return score;
 }
 

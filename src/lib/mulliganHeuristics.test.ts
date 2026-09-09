@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { evaluateOpeningHand } from "./mulliganHeuristics";
-import type { PlayerSeat, VisibleCard } from "./types";
+import type { CommanderDeck, DeckArchetype, PlayerSeat, VisibleCard } from "./types";
 
 let cardCounter = 0;
 
@@ -21,7 +21,7 @@ function land(name: string, producedMana: string[] = []): VisibleCard {
   return card({ name, role: "land", typeLine: "Basic Land", manaValue: 0, producedMana });
 }
 
-function seatWithHand(hand: VisibleCard[], commanderColorIdentity?: string[]): PlayerSeat {
+function seatWithHand(hand: VisibleCard[], commanderColorIdentity?: string[], archetype?: DeckArchetype): PlayerSeat {
   return {
     id: "seat-1",
     name: "Test Agent",
@@ -29,6 +29,7 @@ function seatWithHand(hand: VisibleCard[], commanderColorIdentity?: string[]): P
     life: 40,
     commanderDamage: {},
     zones: { library: 0, hand: hand.length, battlefield: 0, graveyard: 0, exile: 0, command: commanderColorIdentity ? 1 : 0 },
+    deck: archetype ? ({ archetype } as CommanderDeck) : undefined,
     board: {
       hand,
       battlefield: [],
@@ -122,5 +123,75 @@ describe("evaluateOpeningHand", () => {
     const cheap = evaluateOpeningHand(seatWithHand(cheapRampHand));
     const expensive = evaluateOpeningHand(seatWithHand(expensiveRampHand));
     expect(cheap.score).toBeGreaterThan(expensive.score);
+  });
+
+  it("mulligans a hand with an acceptable land count but no plays through turn 4", () => {
+    const hand = [
+      land("Forest"),
+      land("Forest"),
+      card({ name: "Big Spell A", role: "creature", manaValue: 6 }),
+      card({ name: "Big Spell B", role: "creature", manaValue: 7 }),
+      card({ name: "Big Spell C", role: "creature", manaValue: 8 })
+    ];
+    const result = evaluateOpeningHand(seatWithHand(hand));
+    expect(result.keep).toBe(false);
+    expect(result.reasons.join(" ")).toContain("no plays on curve");
+  });
+
+  it("weighs card draw above pure removal/counterspell interaction", () => {
+    const manaBase = [land("Forest"), land("Forest"), land("Forest"), card({ name: "Ramp", role: "ramp", manaValue: 1 })];
+    const drawHand = [...manaBase, card({ name: "Draw A", role: "draw", manaValue: 2 }), card({ name: "Draw B", role: "draw", manaValue: 2 })];
+    const removalHand = [...manaBase, card({ name: "Removal A", role: "removal", manaValue: 2 }), card({ name: "Removal B", role: "removal", manaValue: 2 })];
+    const draw = evaluateOpeningHand(seatWithHand(drawHand));
+    const removal = evaluateOpeningHand(seatWithHand(removalHand));
+    expect(draw.score).toBeGreaterThan(removal.score);
+  });
+
+  it("forces a mulligan on zero lands even when the rest of the hand is stacked with bonuses", () => {
+    const hand = [
+      card({ name: "Ramp A", role: "ramp", manaValue: 1 }),
+      card({ name: "Ramp B", role: "ramp", manaValue: 1 }),
+      card({ name: "Draw A", role: "draw", manaValue: 1 }),
+      card({ name: "Draw B", role: "draw", manaValue: 1 }),
+      card({ name: "Removal A", role: "removal", manaValue: 1 }),
+      card({ name: "Removal B", role: "removal", manaValue: 1 }),
+      card({ name: "Removal C", role: "removal", manaValue: 1 })
+    ];
+    const result = evaluateOpeningHand(seatWithHand(hand));
+    expect(result.keep).toBe(false);
+  });
+
+  it("forces a mulligan on an all-land seven-card hand", () => {
+    const hand = [land("Forest"), land("Forest"), land("Forest"), land("Forest"), land("Forest"), land("Forest"), land("Forest")];
+    const result = evaluateOpeningHand(seatWithHand(hand));
+    expect(result.keep).toBe(false);
+  });
+
+  it("scores interaction higher for a control deck than the unweighted default", () => {
+    const hand = [
+      land("Forest"),
+      land("Forest"),
+      land("Forest"),
+      card({ name: "Ramp", role: "ramp", manaValue: 1 }),
+      card({ name: "Removal A", role: "removal", manaValue: 2 }),
+      card({ name: "Removal B", role: "removal", manaValue: 2 })
+    ];
+    const midrange = evaluateOpeningHand(seatWithHand(hand, undefined, "midrange"));
+    const control = evaluateOpeningHand(seatWithHand(hand, undefined, "control"));
+    expect(control.score).toBeGreaterThan(midrange.score);
+  });
+
+  it("scores card draw higher for a combo deck than the unweighted default", () => {
+    const hand = [
+      land("Forest"),
+      land("Forest"),
+      land("Forest"),
+      land("Forest"),
+      card({ name: "Draw A", role: "draw", manaValue: 4 }),
+      card({ name: "Draw B", role: "draw", manaValue: 4 })
+    ];
+    const midrange = evaluateOpeningHand(seatWithHand(hand, undefined, "midrange"));
+    const combo = evaluateOpeningHand(seatWithHand(hand, undefined, "combo"));
+    expect(combo.score).toBeGreaterThan(midrange.score);
   });
 });

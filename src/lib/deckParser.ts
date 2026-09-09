@@ -1,5 +1,5 @@
 import type { CardRecord, CommanderDeck, DeckCard } from "./types";
-import { scoreDeck, validateBracketThreeDeck } from "./bracketPolicy";
+import { buildDeckGamePlan, inferDeckArchetype, scoreDeck, validateBracketThreeDeck } from "./bracketPolicy";
 
 export interface ParsedDeckList {
   commander?: string;
@@ -98,6 +98,8 @@ export function createDeckFromList(input: {
   };
   deck.validation.legal = deck.validation.errors.length === 0;
   deck.score = scoreDeck(deck);
+  deck.archetype = inferDeckArchetype(deck);
+  deck.gamePlan = buildDeckGamePlan(deck, deck.archetype);
   return deck;
 }
 
@@ -137,6 +139,8 @@ export function createDeckFromCards(input: {
     }
   };
   deck.score = scoreDeck(deck);
+  deck.archetype = inferDeckArchetype(deck);
+  deck.gamePlan = buildDeckGamePlan(deck, deck.archetype);
   return deck;
 }
 
