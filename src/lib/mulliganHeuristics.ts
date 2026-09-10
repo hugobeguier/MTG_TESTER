@@ -34,6 +34,15 @@ const CURVE_NO_PLAYS_PENALTY = -2;
 const MAX_DRAW_BONUS = 2;
 const MAX_INTERACTION_BONUS = 1;
 
+// A 3-5 color commander has to actually find each of those colors, not just enough total mana —
+// missing one is both much more likely and much more costly than in a 1-2 color deck, so it costs
+// more here too. Reported live: Veyra (The Ur-Dragon, WUBRG) kept a 2-land Island/Plains hand with
+// a green ramp creature it could never cast — a flat per-color penalty wasn't steep enough to flag
+// that as the real problem it was.
+const HIGH_COLOR_IDENTITY_THRESHOLD = 3;
+const MISSING_COLOR_PENALTY = 1;
+const MISSING_COLOR_PENALTY_HIGH_COLOR_IDENTITY = 2;
+
 // Archetype-specific emphasis, layered on top of the same land/ramp/curve/draw/interaction scoring
 // every hand gets — the foundation (lands, mana colors) never changes per archetype, since mana
 // matters equally regardless of game plan, but how much curve/draw/interaction matter does: aggro
@@ -82,14 +91,28 @@ function producedColors(card: VisibleCard): Set<ManaColor> {
   return colors;
 }
 
-function missingCommanderColors(hand: VisibleCard[], colorIdentity: string[]): string[] {
-  if (colorIdentity.length === 0) return [];
+// Every color this hand's own lands/ramp can produce — shared by the commander color-coverage check
+// and the curve check below, so "can I eventually cast my commander" and "can I actually cast the
+// cards in my hand" agree on the same answer instead of two separately-maintained computations.
+function handProducedColors(hand: VisibleCard[]): Set<ManaColor> {
   const covered = new Set<ManaColor>();
   for (const card of hand) {
     if (!isLand(card) && !isRamp(card)) continue;
     for (const color of producedColors(card)) covered.add(color);
   }
-  return colorIdentity.filter((color) => !covered.has(color as ManaColor));
+  return covered;
+}
+
+function missingCommanderColors(handColors: Set<ManaColor>, colorIdentity: string[]): string[] {
+  if (colorIdentity.length === 0) return [];
+  return colorIdentity.filter((color) => !handColors.has(color as ManaColor));
+}
+
+// A card with no colors of its own (an artifact, a colorless spell) is always castable color-wise;
+// otherwise every one of its colors has to be among what this hand's own lands/ramp can produce.
+function isCastableWithColors(card: VisibleCard, availableColors: Set<ManaColor>): boolean {
+  if (!card.colors || card.colors.length === 0) return true;
+  return card.colors.every((color) => availableColors.has(color.toUpperCase() as ManaColor));
 }
 
 // Rough mana projection, not a full turn-by-turn simulator: assumes one land drop per turn (capped
@@ -103,8 +126,13 @@ function projectedManaOnTurn(landCount: number, ramp: VisibleCard[], turn: numbe
   return landsInPlay + onlineRamp;
 }
 
-function hasPlayOnTurn(hand: VisibleCard[], projectedMana: number): boolean {
-  return hand.some((card) => !isLand(card) && card.manaValue >= 1 && card.manaValue <= projectedMana);
+// A card only counts as "a play" if this hand can actually pay its color requirements, not just its
+// generic cost — a cheap card sitting uncastable for lack of the right color is not a play at all.
+// Reported live: a green ramp creature counted as covering turn 3/4 in a hand with no green source.
+function hasPlayOnTurn(hand: VisibleCard[], projectedMana: number, availableColors: Set<ManaColor>): boolean {
+  return hand.some(
+    (card) => !isLand(card) && card.manaValue >= 1 && card.manaValue <= projectedMana && isCastableWithColors(card, availableColors)
+  );
 }
 
 export function evaluateOpeningHand(seat: PlayerSeat): OpeningHandEvaluation {
@@ -117,6 +145,7 @@ export function evaluateOpeningHand(seat: PlayerSeat): OpeningHandEvaluation {
 
   const archetype = seat.deck?.archetype ?? "midrange";
   const weights = ARCHETYPE_WEIGHTS[archetype];
+  const availableColors = handProducedColors(hand);
 
   const reasons: string[] = [];
   let score = 0;
@@ -159,7 +188,7 @@ export function evaluateOpeningHand(seat: PlayerSeat): OpeningHandEvaluation {
   // turns 3 and 4, once its own lands/ramp are accounted for, rather than just counting any 1-3
   // mana value card in isolation. Weighted harder for aggro (curving out IS the game plan) and
   // softer for combo (a combo hand can be patient about board development).
-  const turnsWithPlays = CURVE_TURNS.filter((turn) => hasPlayOnTurn(hand, projectedManaOnTurn(lands.length, ramp, turn)));
+  const turnsWithPlays = CURVE_TURNS.filter((turn) => hasPlayOnTurn(hand, projectedManaOnTurn(lands.length, ramp, turn), availableColors));
   let curveBonus: number;
   let curveReason: string;
   if (turnsWithPlays.length === CURVE_TURNS.length) {
@@ -202,10 +231,16 @@ export function evaluateOpeningHand(seat: PlayerSeat): OpeningHandEvaluation {
   }
 
   const commanderColors = seat.board.commander?.colorIdentity ?? [];
-  const missingColors = missingCommanderColors(hand, commanderColors);
+  const missingColors = missingCommanderColors(availableColors, commanderColors);
   if (missingColors.length > 0) {
-    score -= missingColors.length;
-    reasons.push(`missing a mana source for commander color${missingColors.length === 1 ? "" : "s"} ${missingColors.join("")}`);
+    const isHighColorIdentity = commanderColors.length >= HIGH_COLOR_IDENTITY_THRESHOLD;
+    const penaltyPerColor = isHighColorIdentity ? MISSING_COLOR_PENALTY_HIGH_COLOR_IDENTITY : MISSING_COLOR_PENALTY;
+    score -= missingColors.length * penaltyPerColor;
+    reasons.push(
+      `missing a mana source for commander color${missingColors.length === 1 ? "" : "s"} ${missingColors.join("")}${
+        isHighColorIdentity ? ` (a ${commanderColors.length}-color manabase needs this more)` : ""
+      }`
+    );
   } else if (commanderColors.length > 0) {
     score += 1;
     reasons.push("hand covers all commander colors");

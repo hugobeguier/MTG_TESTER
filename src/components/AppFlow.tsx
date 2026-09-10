@@ -202,6 +202,13 @@ type TriggerEffect = (
   // pendingRuleChoice the same way connive's discard and draw_then_put_back's put-back are), not
   // something resolveTriggerEffect's pure-function path can decide on its own.
   | { kind: "return_land_to_hand" }
+  // "Exile another target permanent you own, then return it to the battlefield under your
+  // control." (Aminatou, the Fateshifter's -1) — WHICH permanent is a real choice, same
+  // pendingRuleChoice detour as return_land_to_hand just above; resolution (moveCardAcrossSeats
+  // battlefield-to-battlefield, same seat) is what actually gives the permanent a fresh object
+  // identity (rule 400.7) — summoning sickness resets, counters/attachments fall off — and lets any
+  // "when this enters" ability on it fire again, the same as any other permanent entering.
+  | { kind: "blink" }
 ) & {
   optional?: boolean;
   // "Create a 0/1 green Plant creature token, then put a +1/+1 counter on each Plant you control."
@@ -277,6 +284,11 @@ interface LibraryLookState {
   // "choose_one_bottom" only: restricts which looked-at card may actually be sent to hand (Growing
   // Rites of Itlimoc's "a creature card") — undefined for every other mode, which allow any card.
   allowedCardFilter?: string;
+  // "reorder" only, set solely by the direct reorder_top_cards workflow (Ponder's "...then draw a
+  // card.") — how many cards to draw once the reorder itself completes. Left unset by every other
+  // path that reuses "reorder" mode (the "choose_one" two-phase hand-off, Lim-Dûl's Vault's loop),
+  // which have no trailing draw of their own.
+  drawCountAfter?: number;
 }
 
 interface MyriadSearchState {
@@ -584,6 +596,11 @@ type PendingRuleChoice =
       controllerSeatId: string;
       prompt: string;
       requiredDiscards: number;
+      // Set when this same "choose N cards to discard" picker is reused for a trigger other than
+      // the real cleanup-step hand-size rule (e.g. Plaguecrafter's "if a player can't, they discard
+      // a card instead") — lets the modal header and event-log message name the actual source
+      // instead of defaulting to "hand size" wording that would be wrong for those cases.
+      sourceCardName?: string;
     }
   | {
       id: string;
@@ -620,6 +637,17 @@ type PendingRuleChoice =
       id: string;
       kind: "return_land_to_hand";
       controllerSeatId: string;
+      sourceCardId: string;
+      sourceCardName: string;
+      prompt: string;
+      trigger?: Extract<PendingAction, { type: "trigger" }>;
+      remainingStack?: PendingAction[];
+    }
+  | {
+      id: string;
+      kind: "choose_permanent_to_blink";
+      controllerSeatId: string;
+      // Excluded from its own target list — "ANOTHER target permanent you own."
       sourceCardId: string;
       sourceCardName: string;
       prompt: string;
@@ -2401,7 +2429,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
 
   function agentRespondWithCard(seat: PlayerSeat, cardId: string, sourceZone: "hand" | "exile" = "hand") {
     if (!pendingAction) return;
-    const card = sourceZone === "exile" ? seat.board.exile?.find((item) => item.id === cardId) : seat.board.hand.find((item) => item.id === cardId);
+    const card = sourceZone === "exile" ? findExiledCardAnySeat(session, cardId) : seat.board.hand.find((item) => item.id === cardId);
     // canCastAtInstantSpeed applies identically regardless of source — an exiled sorcery still
     // can't be flashed in, only an exiled instant/flash card can. flashGranted mirrors
     // legalPriorityActions' own check (a battlefield Vedalken Orrery/Leyline of Anticipation), so an
@@ -2770,7 +2798,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         id: crypto.randomUUID(),
         at: new Date().toISOString(),
         seatId: seat.id,
-        message: count === 0 ? `${seat.name} kept 7.` : `${seat.name} mulliganed and kept ${openingHandKeepSize(count)}.`,
+        message: describeMulliganOutcome(seat.name, count),
         detail: "Agent decision"
       });
       resolvedSeats.push(nextSeat);
@@ -3796,7 +3824,9 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
           sourceCardId: firstDrawn.id,
           sourceCardName: firstDrawn.name,
           prompt: `${firstDrawn.name} has miracle. Cast it for its miracle cost, or it stays in hand at full cost.`,
-          miracleCost: nativeMiracleCost
+          // A static reducer (Inquisitive Glimmer, ...) stacks with the printed miracle cost too —
+          // same floor rule 601.2f applies here, see miracleCostFor's own comment.
+          miracleCost: Math.max(coloredPipCount(firstDrawn), nativeMiracleCost - staticCostReduction(nextSeat, firstDrawn))
         });
         return;
       }
@@ -3811,7 +3841,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         sourceCardId: firstDrawn.id,
         sourceCardName: firstDrawn.name,
         prompt: `${granter.name} grants miracle. Cast ${firstDrawn.name} for its miracle cost, or it stays in hand at full cost.`,
-        miracleCost: miracleCostFor(firstDrawn)
+        miracleCost: miracleCostFor(nextSeat, firstDrawn)
       });
       return;
     }
@@ -3862,7 +3892,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       sourceZone === "command"
         ? seat?.board.commander
         : sourceZone === "exile"
-          ? seat?.board.exile?.find((item) => item.id === cardId)
+          ? findExiledCardAnySeat(session, cardId)
           : seat?.board.hand.find((item) => item.id === cardId);
     if (!seat || !card) return;
 
@@ -4675,7 +4705,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   // response, only an exiled instant/flash card is.
   function respondWithCard(cardId: string, sourceZone: "hand" | "exile") {
     if (!pendingAction || prioritySeatId !== humanSeat.id) return;
-    const card = sourceZone === "exile" ? humanSeat.board.exile?.find((item) => item.id === cardId) : humanSeat.board.hand.find((item) => item.id === cardId);
+    const card = sourceZone === "exile" ? findExiledCardAnySeat(session, cardId) : humanSeat.board.hand.find((item) => item.id === cardId);
     if (!card) return;
     if (
       sourceZone === "exile" &&
@@ -4876,6 +4906,28 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         });
         return;
       }
+    } else if (accepted && trigger.effect.kind === "blink") {
+      // Aminatou, the Fateshifter's -1: WHICH permanent is a real choice, same shape as
+      // return_land_to_hand just above. Unlike a karoo land (always guaranteed a legal target),
+      // "another permanent" can genuinely have none — if this planeswalker is the controller's
+      // only permanent, the ability just does nothing, matching real rules for a targeted ability
+      // that finds no legal target once it resolves.
+      const controllerSeat = session.seats.find((seat) => seat.id === trigger.controllerSeatId);
+      const hasOtherPermanent = controllerSeat?.board.battlefield.some((permanent) => permanent.id !== trigger.sourceCardId);
+      if (hasOtherPermanent) {
+        setPendingRuleChoice({
+          id: crypto.randomUUID(),
+          kind: "choose_permanent_to_blink",
+          controllerSeatId: trigger.controllerSeatId,
+          sourceCardId: trigger.sourceCardId,
+          sourceCardName: trigger.sourceCardName,
+          prompt: `${controllerSeat?.name ?? "Player"} must choose another permanent they own to exile and return to the battlefield.`,
+          trigger,
+          remainingStack
+        });
+        return;
+      }
+      addEvent(`${trigger.sourceCardName} finds no other permanent to blink and has no effect.`, trigger.controllerSeatId, "Rules action");
     } else if (accepted) {
       setSession((current) => {
         const next = resolveTriggerEffect(current, trigger);
@@ -5052,6 +5104,43 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     }
     const trigger = choice.trigger;
     if (trigger) resumeAfterTriggerChoice(trigger, choice.remainingStack ?? []);
+  }
+
+  function completeChoosePermanentToBlink(cardIds: string[]) {
+    const choice = pendingRuleChoice;
+    if (!choice || choice.kind !== "choose_permanent_to_blink") return;
+    setPendingRuleChoice(undefined);
+    const targetId = cardIds[0];
+    // Any ETB triggers the blinked permanent's return causes (its own "when this enters," and any
+    // OTHER permanent watching for one) — captured here (not queued via queueCommonTriggers, which
+    // would race resumeAfterTriggerChoice's own pendingAction update below) and appended to the
+    // resumed stack instead, so they resolve next, same LIFO ordering as any other trigger caused
+    // by resolving another one. Same captured-variable pattern as playCard's land-ETB scan: setSession's
+    // updater may run twice under StrictMode, but both invocations compute the same triggers from
+    // the same `current`, so which one "wins" doesn't matter.
+    let capturedTriggers: Array<Extract<PendingAction, { type: "trigger" }>> = [];
+    if (targetId) {
+      setSession((current) => {
+        const { session: blinkedSession, movedCard } = moveCardAcrossSeats(current, choice.controllerSeatId, targetId, choice.controllerSeatId, "battlefield");
+        if (!movedCard) return current;
+        capturedTriggers = findCommonTriggersForPermanentEntered(blinkedSession, choice.controllerSeatId, movedCard);
+        return {
+          ...blinkedSession,
+          events: [
+            {
+              id: crypto.randomUUID(),
+              at: new Date().toISOString(),
+              seatId: choice.controllerSeatId,
+              message: `${choice.sourceCardName} exiles ${movedCard.name}, then returns it to the battlefield under its controller's control.`,
+              detail: "Rules action"
+            },
+            ...blinkedSession.events
+          ]
+        };
+      });
+    }
+    const trigger = choice.trigger;
+    if (trigger) resumeAfterTriggerChoice(trigger, [...(choice.remainingStack ?? []), ...capturedTriggers]);
   }
 
   function resolvePendingAction(action: PendingAction) {
@@ -5565,15 +5654,30 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       // resolving to the graveyard, not a permanent's own ETB).
       const isLivingDeath = sourceCard && !isModalCard && isLivingDeathEffect(etbEffectText(sourceCard.oracleText));
       const livingDeathResolvedSession = isLivingDeath && sourceCard ? applyLivingDeathEffect(zoneResolvedSession, sourceCard.name) : zoneResolvedSession;
-      // "Each player sacrifices a creature or planeswalker of their choice. Each player who can't
-      // discards a card." (Plaguecrafter) — see applyEachPlayerSacrificeEffect's own doc comment for
-      // why this needs a bespoke shape instead of any existing TriggerEffect kind.
+      // "Each player sacrifices a creature or planeswalker of their choice. If a player can't,
+      // they discard a card instead." (Plaguecrafter) — see applyEachPlayerSacrificeEffect's own
+      // doc comment for why this needs a bespoke shape instead of any existing TriggerEffect kind.
       const eachPlayerSacrificeEffect =
         sourceCard && !isModalCard && destination === "battlefield" ? parseEachPlayerSacrificeEffect(etbEffectText(sourceCard.oracleText)) : undefined;
-      const eachPlayerSacrificeResolvedSession =
-        eachPlayerSacrificeEffect && sourceCard
-          ? applyEachPlayerSacrificeEffect(livingDeathResolvedSession, sourceCard.name, eachPlayerSacrificeEffect)
-          : livingDeathResolvedSession;
+      const eachPlayerSacrificeApplied =
+        eachPlayerSacrificeEffect && sourceCard ? applyEachPlayerSacrificeEffect(livingDeathResolvedSession, sourceCard.name, eachPlayerSacrificeEffect) : undefined;
+      const eachPlayerSacrificeResolvedSession = eachPlayerSacrificeApplied?.session ?? livingDeathResolvedSession;
+      // A human player who had nothing to sacrifice chooses their own discard instead of getting
+      // silently auto-resolved by heuristic (see applyEachPlayerSacrificeEffect's
+      // humanDiscardNeededSeatId) — reuses discard_to_hand_size's picker UI/kind with an explicit
+      // sourceCardName so its header and event-log message read correctly for this trigger instead
+      // of "to hand size." Safe to call setPendingRuleChoice here mid-pipeline: it's an independent
+      // state slice from session, and React batches both updates from this synchronous handler.
+      if (eachPlayerSacrificeApplied?.humanDiscardNeededSeatId && sourceCard) {
+        setPendingRuleChoice({
+          id: crypto.randomUUID(),
+          kind: "discard_to_hand_size",
+          controllerSeatId: eachPlayerSacrificeApplied.humanDiscardNeededSeatId,
+          sourceCardName: sourceCard.name,
+          prompt: `${sourceCard.name}: you have no creature or planeswalker to sacrifice — choose a card to discard instead.`,
+          requiredDiscards: 1
+        });
+      }
       // "Target creature gets +N/+N or -N/-N until end of turn." (Giant Growth, Afflict, ...) — a
       // plain (non-modal) single-mode pump/debuff spell; X is substituted from the spell's own
       // chosenX first, same as every other X-aware effect here. Modal pump modes (Profane Command's
@@ -6211,10 +6315,20 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
                 : lookWorkflow === "look_at_top_cards_reveal_type_to_hand"
                   ? "choose_one_bottom"
                   : "scry";
-        startLibraryLook(humanMode, count, workflow.allowedCardFilter);
+        startLibraryLook(humanMode, count, workflow.allowedCardFilter, lookWorkflow === "reorder_top_cards" ? workflow.drawCountAfter : undefined);
         return;
       }
-      setSession((current) => resolveAgentLibraryLookWorkflow(current, seatId, sourceCard.name, lookWorkflow, count, workflow.allowedCardFilter));
+      setSession((current) =>
+        resolveAgentLibraryLookWorkflow(
+          current,
+          seatId,
+          sourceCard.name,
+          lookWorkflow,
+          count,
+          workflow.allowedCardFilter,
+          lookWorkflow === "reorder_top_cards" ? workflow.drawCountAfter : undefined
+        )
+      );
       return;
     }
 
@@ -6656,7 +6770,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     setUrzaSagaSearch(undefined);
   }
 
-  function startLibraryLook(mode: LibraryLookMode, count: number, allowedCardFilter?: string) {
+  function startLibraryLook(mode: LibraryLookMode, count: number, allowedCardFilter?: string, drawCountAfter?: number) {
     // setLibraryLook must not be called from inside setSession's updater (React may invoke that
     // updater more than once, and other setState calls inside it are unreliable) — computed against
     // the current session directly instead, mirroring every other modal-opening call in this file.
@@ -6665,7 +6779,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     // object was still correct), while the actual look-window state silently never stuck.
     const seat = session.seats.find((item) => item.id === humanSeat.id);
     const cards = (seat?.library ?? []).slice(0, mode === "scry" ? 1 : count);
-    setLibraryLook({ seatId: humanSeat.id, mode, cards, remaining: count, orderedCards: mode === "reorder" ? [] : undefined, allowedCardFilter });
+    setLibraryLook({ seatId: humanSeat.id, mode, cards, remaining: count, orderedCards: mode === "reorder" ? [] : undefined, allowedCardFilter, drawCountAfter });
     addEvent(
       mode === "scry"
         ? `${humanSeat.name} starts scry ${count}.`
@@ -7150,7 +7264,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         return endTurnAfter ? resolveEndTurn(discarded, choice.controllerSeatId) : discarded;
       });
       addEvent(
-        `${seat?.name ?? "Player"} discards ${discardIds.length} card${discardIds.length === 1 ? "" : "s"} to hand size.`,
+        `${seat?.name ?? "Player"} discards ${discardIds.length} card${discardIds.length === 1 ? "" : "s"}${choice.sourceCardName ? ` to ${choice.sourceCardName}.` : " to hand size."}`,
         choice.controllerSeatId,
         "Rules action"
       );
@@ -7454,6 +7568,11 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       completeReturnLandToHand(land ? [land.id] : []);
       return;
     }
+    if (choice.kind === "choose_permanent_to_blink") {
+      const target = choosePermanentToBlink(seat, choice.sourceCardId);
+      completeChoosePermanentToBlink(target ? [target.id] : []);
+      return;
+    }
     if (choice.kind === "manual_review") {
       const source = seat.board.battlefield.find((card) => card.id === choice.sourceCardId);
       // Cumulative upkeep previously had no agent-specific handling at all — it fell all the way
@@ -7603,7 +7722,15 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     // placing cards back one at a time stacks each new one ON TOP of the ones already placed, so
     // the card clicked LAST is the one that ends up on top (drawn next) — reported live as the
     // opposite of that happening, with the first card clicked landing on top instead.
-    setSession((current) => reorderTopLibraryCards(current, activeLook.seatId, [...orderedCards].reverse()));
+    const drawCountAfter = activeLook.drawCountAfter;
+    setSession((current) => {
+      const reordered = reorderTopLibraryCards(current, activeLook.seatId, [...orderedCards].reverse());
+      if (!drawCountAfter) return reordered;
+      // Ponder's own "...then draw a card." half — see LibraryLookState.drawCountAfter's doc
+      // comment for why this is the only "reorder" completion that draws afterward.
+      const seatName = reordered.seats.find((seat) => seat.id === activeLook.seatId)?.name ?? "Player";
+      return drawMultipleForSeat(reordered, activeLook.seatId, drawCountAfter, `${seatName} draws ${drawCountAfter === 1 ? "a card" : `${drawCountAfter} cards`}.`);
+    });
     setLibraryLook(undefined);
   }
 
@@ -7979,6 +8106,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         onCompletePutCardsOnLibrary={completePutCardsOnLibrary}
         onCompleteConniveDiscard={completeConniveDiscard}
         onCompleteReturnLandToHand={completeReturnLandToHand}
+        onCompleteChoosePermanentToBlink={completeChoosePermanentToBlink}
         onChooseCreatureType={chooseCreatureTypeChoice}
         onChooseColor={chooseColorChoice}
         onConfirmAttackTriggerManaColors={confirmAttackTriggerManaColors}
@@ -9036,8 +9164,11 @@ function legalMainPhaseActions(
   // Cards exiled by an impulse-draw/steal-and-play effect (see zoneEffects.ts), or by casting an
   // Adventure card's spell half (see spellResolutionDestination's "exile" branch), that this seat
   // is currently permitted to cast — land-plays from exile aren't offered (a deliberate scope
-  // limit, see playCard's playingAsLand branch, which only ever removes from hand).
-  for (const card of seat.board.exile ?? []) {
+  // limit, see playCard's playingAsLand branch, which only ever removes from hand). Scanned across
+  // every seat's exile, not just this one's own: a card exiled by an effect like Mind's Dilation's
+  // physically sits in its OWNER's exile, which can be a different seat than the one permitted to
+  // cast it (see playCardFromZone's own cross-seat handling).
+  for (const card of session.seats.flatMap((s) => s.board.exile ?? [])) {
     if (card.exiledPlayableBySeatId !== seat.id || isLandCard(card)) continue;
     if (card.exiledPlayableUntilTurn !== undefined && turn > card.exiledPlayableUntilTurn) continue;
     // An Adventure/Omen-shaped card in exile can only be cast as its OTHER (permanent) face from
@@ -9298,10 +9429,14 @@ function legalPriorityActions(seat: PlayerSeat, pendingAction: PendingAction, ac
   // Instant-speed responses can come from hand OR from an exile pile the seat currently has play
   // permission for (impulse-draw/steal-and-play — see zoneEffects.ts) — gated by the exact same
   // canCastAtInstantSpeed check either way, so an exiled sorcery still isn't offered as a response,
-  // only an exiled instant/flash card is.
+  // only an exiled instant/flash card is. Scanned across every seat's exile, not just this one's
+  // own: a card exiled by an effect like Mind's Dilation's physically sits in its OWNER's exile,
+  // which can be a different seat than the one permitted to cast it (see playCardFromZone's own
+  // cross-seat handling).
   const respondableCards: Array<{ card: VisibleCard; sourceZone: "exile" | undefined }> = [
     ...seat.board.hand.map((card) => ({ card, sourceZone: undefined })),
-    ...(seat.board.exile ?? [])
+    ...session.seats
+      .flatMap((s) => s.board.exile ?? [])
       .filter((card) => card.exiledPlayableBySeatId === seat.id && (card.exiledPlayableUntilTurn === undefined || session.turn <= card.exiledPlayableUntilTurn))
       .map((card) => ({ card, sourceZone: "exile" as const }))
   ];
@@ -9869,6 +10004,17 @@ function chooseLandToReturn(seat: PlayerSeat, excludeId: string): VisibleCard | 
   const lands = seat.board.battlefield.filter((card) => card.typeLine.includes("Land"));
   const others = lands.filter((card) => card.id !== excludeId);
   return others.find((card) => basicLandTypes(card).length > 0) ?? others[0] ?? lands.find((card) => card.id === excludeId);
+}
+
+// Prefers a permanent with its own "when/whenever this enters" ability, since that's the whole
+// point of blinking something (Aminatou, the Fateshifter's -1, ...) — falls back to any other
+// permanent when nothing on the board has one, and only ever falls back to the source itself
+// defensively (finishTriggerResolution already only offers this choice when a real other-permanent
+// target exists).
+function choosePermanentToBlink(seat: PlayerSeat, excludeId: string): VisibleCard | undefined {
+  const others = seat.board.battlefield.filter((card) => card.id !== excludeId);
+  const withEtb = others.find((card) => etbEffectText(card.oracleText).trim().length > 0);
+  return withEtb ?? others[0] ?? seat.board.battlefield.find((card) => card.id === excludeId);
 }
 
 // Pays a generic sacrifice ability's cost (mana + discard + sacrifice) without resolving its
@@ -10823,6 +10969,19 @@ function seatStarfieldAnimatesCard(seat: PlayerSeat, card: VisibleCard): boolean
 function findPermanentById(session: GameSession, cardId: string): VisibleCard | undefined {
   for (const seat of session.seats) {
     const card = seat.board.battlefield.find((item) => item.id === cardId);
+    if (card) return card;
+  }
+  return undefined;
+}
+
+// A card exiled by an effect like Mind's Dilation's physically sits in its OWNER's exile zone, not
+// necessarily the seat granted permission to cast it (see the impulse_cast_free trigger resolution
+// and playCardFromZone's own cross-seat handling) — so "is this card in exile and can this seat
+// currently cast it" has to search every seat's exile, not just the seat's own. Callers still check
+// exiledPlayableBySeatId/exiledPlayableUntilTurn themselves; this only finds the card.
+function findExiledCardAnySeat(session: GameSession, cardId: string): VisibleCard | undefined {
+  for (const seat of session.seats) {
+    const card = seat.board.exile?.find((item) => item.id === cardId);
     if (card) return card;
   }
   return undefined;
@@ -12924,7 +13083,7 @@ function parseSimpleLifeChange(text: string): { kind: "gain_life" | "lose_life";
 // card" trigger is already fully owned by commonTriggerEffect's draw_cards case and the queued-
 // trigger system (findCommonTriggersForPermanentEntered); applying this here too for a permanent
 // would double the draw.
-function parseSimpleDrawEffect(text: string): { amount: number } | undefined {
+export function parseSimpleDrawEffect(text: string): { amount: number } | undefined {
   const lowered = text.toLowerCase();
   // "Draw three cards, then put two cards from your hand on top of your library in any order."
   // (Brainstorm, ...) — the bare draw regex below happily matches the "draw three cards" prefix on
@@ -12938,6 +13097,17 @@ function parseSimpleDrawEffect(text: string): { amount: number } | undefined {
       lowered
     )
   ) {
+    return undefined;
+  }
+  // "Look at the top three cards of your library, then put them back in any order. You may
+  // shuffle. Draw a card." (Ponder, and the same look/reorder-then-draw template on other cards) —
+  // same ordering bug as the Brainstorm guard just above: the bare draw regex below happily
+  // matches the trailing "Draw a card." on its own, which set ownEtbAlreadyHandled and skipped the
+  // rules advisor entirely, silently dropping the whole look/reorder step. Declining here lets the
+  // advisor's own reorder_top_cards workflow (rulesAdvisor.ts) handle it instead — see that
+  // workflow's matching "put them back in any order" phrasing. Reported live as "Ponder just draws
+  // a card, it skipped the whole look at the top 3... put them back" step.
+  if (/\bput (?:them|those cards) back in any order\b/.test(lowered)) {
     return undefined;
   }
   const match = lowered.match(/\bdraw\s+(a|one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+cards?\b/);
@@ -13165,7 +13335,7 @@ function parseMassPump(text: string): MassPumpEffect | undefined {
   };
 }
 
-function applyMassPumpEffect(session: GameSession, casterSeatId: string, sourceCardName: string, effect: MassPumpEffect): GameSession {
+export function applyMassPumpEffect(session: GameSession, casterSeatId: string, sourceCardName: string, effect: MassPumpEffect): GameSession {
   const qualifierText = effect.excludeType ? `non-${effect.excludeType} ` : "";
   const powerText = `${effect.power >= 0 ? "+" : ""}${effect.power}`;
   const toughnessText = `${effect.toughness >= 0 ? "+" : ""}${effect.toughness}`;
@@ -14371,7 +14541,7 @@ function findTriggeredAbilityForSpell(session: GameSession, action: Extract<Pend
   return undefined;
 }
 
-function findCommonTriggersForPermanentEntered(session: GameSession, enteringSeatId: string, enteringCard: VisibleCard): Array<Extract<PendingAction, { type: "trigger" }>> {
+export function findCommonTriggersForPermanentEntered(session: GameSession, enteringSeatId: string, enteringCard: VisibleCard): Array<Extract<PendingAction, { type: "trigger" }>> {
   const enteringSeat = session.seats.find((seat) => seat.id === enteringSeatId);
   if (!enteringSeat) return [];
   const enteredPermanent = enteringSeat.board.battlefield.find((card) => card.id === enteringCard.id) ?? enteringCard;
@@ -14942,6 +15112,17 @@ export function commonTriggerEffect(
   // already-handled replacement effect), but this ETB trigger just silently did nothing, turning
   // what should be a 1-for-1 tempo trade into a pure land-count gain.
   if (/\breturn a land you control to its owner'?s hand\b/.test(text)) return { kind: "return_land_to_hand", optional };
+
+  // "Exile another target permanent you own, then return it to the battlefield under your
+  // control." (Aminatou, the Fateshifter's -1, and the same self-blink template on a few other
+  // cards) — this engine had no blink (exile-then-return-to-the-battlefield) primitive at all
+  // before this; WHICH permanent is a real choice (same "resolveTriggerEffect is a pure function
+  // with no access to pendingRuleChoice" reasoning as return_land_to_hand just above), so it
+  // routes through the same trigger+pendingRuleChoice detour. Reported live as "did nothing, I did
+  // not get the chance to choose a permanent I control."
+  if (/\bexile another target permanent you own,?\s*then return it to the battlefield under your control\b/.test(text)) {
+    return { kind: "blink", optional };
+  }
 
   const gainLife = text.match(/\byou gain\s+(x|\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+life\b/);
   if (gainLife) {
@@ -15803,30 +15984,38 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
       ...resetForZoneChange(topCard, "exile"),
       ownerSeatId: topCard.ownerSeatId ?? fromSeat.id,
       exiledPlayableBySeatId: isLand ? undefined : trigger.controllerSeatId,
-      exiledPlayableUntilTurn: session.turn,
+      // No stated duration in this effect's own text ("...you may cast it without paying its mana
+      // cost") — same "for as long as it remains exiled" shape playCardFromZone already uses for
+      // Bribery-style steal-and-play (exiledPlayableUntilTurn left undefined, never swept by
+      // clearTemporaryBuffs, which only expires a turn-limited value). Previously hardcoded to the
+      // CURRENT turn, which expired the permission before the controller — who doesn't get
+      // priority again until their own next turn, since this triggers off an OPPONENT's cast —
+      // ever had a real chance to use it. Reported live as "Mind's Dilation does not work at all,
+      // I don't get to play the cards that are getting exiled by it."
+      exiledPlayableUntilTurn: undefined,
       exiledPlayableFree: !isLand
     };
     return {
       ...session,
       seats: session.seats.map((seat) => {
-        const isFromSeat = seat.id === fromSeat.id;
-        const isControllerSeat = seat.id === trigger.controllerSeatId;
-        if (!isFromSeat && !isControllerSeat) return seat;
-        let next = seat;
-        if (isFromSeat) {
-          next = { ...next, library: restLibrary, zones: { ...next.zones, library: Math.max(0, next.zones.library - 1) } };
-        }
-        if (isControllerSeat) {
-          next = { ...next, board: { ...next.board, exile: [...(next.board.exile ?? []), exiledCard] }, zones: { ...next.zones, exile: next.zones.exile + 1 } };
-        }
-        return next;
+        if (seat.id !== fromSeat.id) return seat;
+        // The exiled card lives in its OWNER's exile zone (fromSeat), not the controller's, even
+        // though the controller is who's permitted to cast it — an exiled card can never appear in
+        // another player's exile pile just because they have permission to play it. Reported live
+        // as "the card should land in their exile pile not mine."
+        return {
+          ...seat,
+          library: restLibrary,
+          board: { ...seat.board, exile: [...(seat.board.exile ?? []), exiledCard] },
+          zones: { ...seat.zones, library: Math.max(0, seat.zones.library - 1), exile: seat.zones.exile + 1 }
+        };
       }),
       events: [
         {
           id: crypto.randomUUID(),
           at: new Date().toISOString(),
           seatId: trigger.controllerSeatId,
-          message: `${trigger.sourceCardName} exiles ${exiledCard.name} from ${possessive(fromSeat)} library.${isLand ? "" : " Playable this turn without paying its mana cost."}`
+          message: `${trigger.sourceCardName} exiles ${exiledCard.name} from ${possessive(fromSeat)} library.${isLand ? "" : " Playable without paying its mana cost."}`
         },
         ...session.events
       ]
@@ -16058,7 +16247,8 @@ function ruleChoiceView(
         kind: "discard_to_hand_size" as const,
         prompt: choice.prompt,
         hand: humanSeat.board.hand,
-        requiredDiscards: choice.requiredDiscards
+        requiredDiscards: choice.requiredDiscards,
+        sourceCardName: choice.sourceCardName
       };
     }
     if (choice.kind === "put_cards_on_library") {
@@ -16084,6 +16274,14 @@ function ruleChoiceView(
         sourceCardName: choice.sourceCardName,
         prompt: choice.prompt,
         lands: humanSeat.board.battlefield.filter((card) => card.typeLine.includes("Land"))
+      };
+    }
+    if (choice.kind === "choose_permanent_to_blink") {
+      return {
+        kind: "choose_permanent_to_blink" as const,
+        sourceCardName: choice.sourceCardName,
+        prompt: choice.prompt,
+        permanents: humanSeat.board.battlefield.filter((card) => card.id !== choice.sourceCardId)
       };
     }
     if (choice.kind === "choose_creature_type") {
@@ -16530,32 +16728,42 @@ export function applyDeterministicPhaseTrigger(session: GameSession, seatId: str
   return undefined;
 }
 
-// "Each player sacrifices a creature or planeswalker of their choice. Each player who can't
-// discards a card." (Plaguecrafter, and the same "everyone independently, not just you or a single
-// chosen opponent" edict shape on similar cards) — no existing effect kind models "every player does
-// this to themselves" (TriggerEffect's kinds all either affect only the controller, a single chosen
-// target, or every OTHER player, never every player symmetrically including the controller), so this
-// is detected and applied as its own bespoke ETB shape rather than forced into that union.
-function parseEachPlayerSacrificeEffect(text: string): { typeFilter: string; discardFallback: boolean } | undefined {
+// "Each player sacrifices a creature or planeswalker of their choice. If a player can't, they
+// discard a card instead." (Plaguecrafter, and the same "everyone independently, not just you or a
+// single chosen opponent" edict shape on similar cards) — no existing effect kind models "every
+// player does this to themselves" (TriggerEffect's kinds all either affect only the controller, a
+// single chosen target, or every OTHER player, never every player symmetrically including the
+// controller), so this is detected and applied as its own bespoke ETB shape rather than forced into
+// that union. The discardFallback regex used to look for "each player who can't discards a card" —
+// a phrasing that doesn't match Plaguecrafter's real printed text ("If a player can't, they discard
+// a card instead") at all, so discardFallback was always false for the actual card and this whole
+// branch was silently dead code. Reported live as "Plaguecrafter does not let you choose what card
+// to discard if you got no creatures" — with the old regex, nothing happened for that player at all.
+export function parseEachPlayerSacrificeEffect(text: string): { typeFilter: string; discardFallback: boolean } | undefined {
   const match = text.toLowerCase().match(/\beach player sacrifices an? ([a-z ]+?) of their choice\b/);
   if (!match) return undefined;
-  return { typeFilter: match[1].trim(), discardFallback: /\beach player who can'?t discards a card\b/i.test(text) };
+  return { typeFilter: match[1].trim(), discardFallback: /\bif a player can'?t,? they discards? a card instead\b/i.test(text) };
 }
 
-function applyEachPlayerSacrificeEffect(
+export function applyEachPlayerSacrificeEffect(
   session: GameSession,
   sourceCardName: string,
   effect: { typeFilter: string; discardFallback: boolean }
-): GameSession {
+): { session: GameSession; humanDiscardNeededSeatId?: string } {
   const destructions: Array<{ seatId: string; cardId: string; message: string }> = [];
   const discarders: string[] = [];
+  let humanDiscardNeededSeatId: string | undefined;
   for (const seat of session.seats) {
     if (seat.hasLost) continue;
     const target = choosePlaguecrafterSacrifice(seat, effect.typeFilter);
     if (target) {
       destructions.push({ seatId: seat.id, cardId: target.id, message: `${seat.name} sacrifices ${target.name} to ${sourceCardName}.` });
     } else if (effect.discardFallback) {
-      discarders.push(seat.id);
+      // A human player chooses which card to discard themselves — see the interactive
+      // choose-a-card-to-discard prompt resolvePendingAction opens for humanDiscardNeededSeatId,
+      // reusing discard_to_hand_size's picker UI. Only an agent seat gets auto-resolved here.
+      if (seat.kind === "human") humanDiscardNeededSeatId = seat.id;
+      else discarders.push(seat.id);
     }
   }
   // Sacrifices resolve through the same destroyCreatures pipeline every other death path uses
@@ -16582,7 +16790,7 @@ function applyEachPlayerSacrificeEffect(
       ]
     };
   }
-  return next;
+  return { session: next, humanDiscardNeededSeatId };
 }
 
 // "Repeat the following process X times. Each opponent loses N life unless that player sacrifices a
@@ -17374,7 +17582,7 @@ function artifactCount(seat: PlayerSeat) {
 // works from the command zone too, not just the battlefield" — the commander sits in
 // seat.board.commander until actually cast, at which point it moves to the battlefield and this
 // check naturally picks it up from there instead (never both at once), so this can't double-count.
-function staticCostReduction(seat: PlayerSeat, card: VisibleCard): number {
+export function staticCostReduction(seat: PlayerSeat, card: VisibleCard): number {
   const commander = seat.board.commander;
   const commanderReduction = commander && /\beminence\b/i.test(commander.oracleText) ? parseGrantedCostReduction(commander, card) : 0;
   return commanderReduction + seat.board.battlefield.reduce((total, source) => total + parseGrantedCostReduction(source, card), 0);
@@ -17487,8 +17695,15 @@ function findMiracleGranter(seat: PlayerSeat): VisibleCard | undefined {
   );
 }
 
-function miracleCostFor(card: VisibleCard) {
-  return Math.max(coloredPipCount(card), card.manaValue - 4);
+// staticCostReduction stacks with the granted-miracle discount itself, same as it would with any
+// other cost reduction (rule 601.2f floors the combined total at coloredPipCount, never below it) —
+// previously omitted entirely, so a static reducer on the battlefield (Inquisitive Glimmer, ...)
+// was silently ignored for a miracle cast even though the exact same reduction was already correctly
+// applied for a normal hand cast (adjustedCastingCost). Reported live as Aminatou, Veil Piercer's
+// granted miracle (-4) plus Inquisitive Glimmer's own discount (-1) only ever reducing the cost by
+// 4, not the expected 5.
+export function miracleCostFor(seat: PlayerSeat, card: VisibleCard) {
+  return Math.max(coloredPipCount(card), card.manaValue - 4 - staticCostReduction(seat, card));
 }
 
 // A card's own printed "Miracle {cost}" line (Temporal Mastery: "Miracle {1}{U}"), as opposed to
@@ -18236,7 +18451,7 @@ function resolveAgentMulligans(seats: PlayerSeat[]) {
       id: crypto.randomUUID(),
       at: new Date().toISOString(),
       seatId: seat.id,
-      message: count === 0 ? `${seat.name} kept 7.` : `${seat.name} mulliganed and kept ${openingHandKeepSize(count)}.`
+      message: describeMulliganOutcome(seat.name, count)
     });
     return nextSeat;
   });
@@ -18264,6 +18479,16 @@ const MULLIGAN_HARD_CAP = 6;
 function openingHandKeepSize(mulliganCount: number) {
   if (mulliganCount <= 1) return 7;
   return Math.max(1, 8 - mulliganCount);
+}
+
+// Spells out the mulligan count explicitly rather than collapsing every non-mulligan outcome into
+// a single "kept 7" — the free mulligan (count 1) also keeps 7, so without this the action log gave
+// no way to tell "kept the original hand" apart from "mulliganed once, then kept the fresh 7."
+// Reported live: a user unable to tell from the log whether an agent had taken its free mulligan.
+function describeMulliganOutcome(seatName: string, count: number): string {
+  if (count === 0) return `${seatName} kept the original 7.`;
+  if (count === 1) return `${seatName} took the free mulligan and kept a fresh 7.`;
+  return `${seatName} mulliganed ${count} times and kept ${openingHandKeepSize(count)}.`;
 }
 
 function keepOpeningHandSize(seat: PlayerSeat, keepSize: number, returnCardIds: string[] = [], shuffleReturned = false): PlayerSeat {
@@ -18405,7 +18630,11 @@ export function resolveAgentLibraryLookWorkflow(
   sourceCardName: string,
   workflow: "scry_cards" | "surveil_cards" | "look_at_top_cards" | "look_at_top_cards_reveal_type_to_hand" | "reorder_top_cards",
   count: number,
-  allowedCardFilter?: string
+  allowedCardFilter?: string,
+  // reorder_top_cards only (Ponder's "...then draw a card.") — leaving the top of the library
+  // untouched is already a legal resolution of the reorder itself (see the no-op comment below),
+  // but the trailing draw is unconditional and still has to happen even when nothing else does.
+  drawCountAfter?: number
 ): GameSession {
   const seat = session.seats.find((item) => item.id === seatId);
   const seatName = seat?.name ?? "Agent";
@@ -18496,7 +18725,7 @@ export function resolveAgentLibraryLookWorkflow(
     };
   }
 
-  return {
+  const withEvent = {
     ...session,
     events: [
       {
@@ -18508,9 +18737,13 @@ export function resolveAgentLibraryLookWorkflow(
       ...session.events
     ]
   };
+  if (workflow === "reorder_top_cards" && drawCountAfter) {
+    return drawMultipleForSeat(withEvent, seatId, drawCountAfter, `${seatName} draws ${drawCountAfter === 1 ? "a card" : `${drawCountAfter} cards`}.`);
+  }
+  return withEvent;
 }
 
-function playCardFromZone(
+export function playCardFromZone(
   session: GameSession,
   seatId: string,
   cardId: string,
@@ -18524,13 +18757,39 @@ function playCardFromZone(
   let playedName = "";
   let enteredTapped = false;
   let shockLifePaid = 0;
+
+  // A card exiled by an effect like Mind's Dilation's physically sits in its OWNER's exile zone,
+  // not necessarily the seat granted permission to cast it (see the impulse_cast_free trigger
+  // resolution) — so when the acting seat's own exile doesn't have this card, search every other
+  // seat's exile for it before giving up. Every OTHER exile-cast shape already in this engine
+  // (Adventure cards, Bribery-style steal-and-play) keeps the card in the acting seat's own exile,
+  // so this fallback only ever fires for that new cross-seat case; ownExileCard being set is what
+  // keeps this whole function's existing same-seat behavior completely unchanged otherwise.
+  // Reported live as Mind's Dilation "not working at all" — the exiled card silently could never be
+  // found (and so never cast) once it stopped living in the caster's own exile array.
+  const actingSeat = session.seats.find((seat) => seat.id === seatId);
+  const ownExileCard = sourceZone === "exile" ? actingSeat?.board.exile?.find((item) => item.id === cardId) : undefined;
+  const exileOwnerSeatId =
+    sourceZone === "exile" && !ownExileCard
+      ? session.seats.find((seat) => seat.id !== seatId && seat.board.exile?.some((item) => item.id === cardId))?.id
+      : undefined;
+
   const seats = session.seats.map((seat) => {
+    if (exileOwnerSeatId && seat.id === exileOwnerSeatId) {
+      // Only removes the card from its owner's exile — the cast's actual resolution (added to the
+      // destination zone) is applied to the ACTING seat (seatId) below, same as every other cast.
+      return {
+        ...seat,
+        board: { ...seat.board, exile: (seat.board.exile ?? []).filter((item) => item.id !== cardId) },
+        zones: { ...seat.zones, exile: Math.max(0, seat.zones.exile - 1) }
+      };
+    }
     if (seat.id !== seatId) return seat;
     const sourceCard =
       sourceZone === "command"
         ? seat.board.commander
         : sourceZone === "exile"
-          ? seat.board.exile?.find((item) => item.id === cardId)
+          ? (ownExileCard ?? session.seats.find((s) => s.id === exileOwnerSeatId)?.board.exile?.find((item) => item.id === cardId))
           : seat.board.hand.find((item) => item.id === cardId);
     if (!sourceCard) return seat;
     const card = applyChosenFaceToCard(sourceCard, faceIndex);
@@ -18616,8 +18875,11 @@ function playCardFromZone(
     // Only relevant when a card is cast FROM exile and resolves somewhere other than back into
     // exile (Adventure's spell half is always cast from hand, so this is really only exercised by
     // an impulse-drawn/stolen card being cast normally) — kept distinct from the "entering exile"
-    // case below since both can't be true for the same resolution.
-    const leavesExileZone = sourceZone === "exile" && destination !== "exile";
+    // case below since both can't be true for the same resolution. Gated on ownExileCard: a
+    // Mind's-Dilation-style cross-seat cast never had this card in the ACTING seat's own exile in
+    // the first place (it was removed from its owner's exile in the seats.map branch above
+    // instead), so there is nothing to remove — or decrement zones.exile for — here.
+    const leavesExileZone = sourceZone === "exile" && destination !== "exile" && Boolean(ownExileCard);
     return {
       ...spentSeat,
       life: lifePaidForUntapped > 0 ? Math.max(0, spentSeat.life - lifePaidForUntapped) : spentSeat.life,

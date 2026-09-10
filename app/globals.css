@@ -438,6 +438,29 @@ h3 {
   width: 100%;
 }
 
+.three-board-fallback {
+  align-items: center;
+  color: var(--text);
+  display: flex;
+  justify-content: center;
+  padding: 2rem;
+  text-align: center;
+}
+
+.three-board-fallback-title {
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin: 0 0 0.5rem;
+}
+
+.three-board-fallback-detail {
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.5;
+  margin: 0;
+  max-width: 32rem;
+}
+
 .phase-popup {
   background: rgba(10, 12, 10, 0.92);
   border: 1px solid rgba(244, 201, 93, 0.75);

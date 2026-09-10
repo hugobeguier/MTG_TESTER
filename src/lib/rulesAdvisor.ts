@@ -54,6 +54,13 @@ export const RuleWorkflowSchema = z.object({
   // library (Brainstorm's "draw three cards, then put two cards from your hand on top of your
   // library" — maxChoices is 3, putBackAmount is 2).
   putBackAmount: z.number().int().min(0).max(20).optional(),
+  // reorder_top_cards only: a trailing "Draw a card." after the look/reorder (Ponder's exact
+  // template) — applied once the interactive reorder itself completes. Previously only surfaced as
+  // a warning ("that follow-up draw is not yet automated"); reported live as "Ponder just draws a
+  // card, it skipped the whole look at the top 3... put them back" once that warning's gap was
+  // traced back far enough to find the real cause (see parseSimpleDrawEffect's own guard in
+  // AppFlow.tsx, which used to short-circuit this whole workflow before it ever got a chance to run).
+  drawCountAfter: z.number().int().min(0).max(20).optional(),
   allowedCardFilter: z.string().optional(),
   destination: DestinationSchema,
   // "... put it into your hand or graveyard, then shuffle." (Dina's Guidance) — the found card's
@@ -221,13 +228,15 @@ export function deterministicRuleWorkflow(input: RuleAdvisorInput): RuleWorkflow
   }
 
   if (lookCount && (scopedText.includes("put them back in any order") || scopedText.includes("put those cards back in any order"))) {
+    const drawCountAfter = extractDrawCount(scopedText);
     return {
       workflow: "reorder_top_cards",
-      summary: `${input.sourceCard.name} instructs ${input.actorName} to look at the top ${lookCount} card${lookCount === 1 ? "" : "s"} and put them back in any order.`,
+      summary: `${input.sourceCard.name} instructs ${input.actorName} to look at the top ${lookCount} card${lookCount === 1 ? "" : "s"} and put them back in any order${drawCountAfter ? `, then draw ${drawCountAfter === 1 ? "a card" : `${drawCountAfter} cards`}` : ""}.`,
       sourceCardId: input.sourceCard.id,
       maxChoices: lookCount,
       requiresHumanChoice: true,
-      warnings: extractDrawCount(scopedText) ? [`${input.sourceCard.name} also draws a card after this resolves; that follow-up draw is not yet automated.`] : []
+      drawCountAfter,
+      warnings: []
     };
   }
 

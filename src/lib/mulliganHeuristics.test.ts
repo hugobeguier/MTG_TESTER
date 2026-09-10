@@ -181,6 +181,27 @@ describe("evaluateOpeningHand", () => {
     expect(control.score).toBeGreaterThan(midrange.score);
   });
 
+  it("does not credit a color-screwed ramp/spell as a play on curve (Veyra/Ur-Dragon bug)", () => {
+    const hand = [
+      land("Island", ["U"]),
+      land("Plains", ["W"]),
+      card({ name: "Sakura-Tribe Elder", role: "ramp", manaValue: 1, colors: ["G"] }),
+      card({ name: "Off-color Spell A", role: "creature", manaValue: 2, colors: ["B"] }),
+      card({ name: "Off-color Spell B", role: "creature", manaValue: 3, colors: ["R"] })
+    ];
+    const result = evaluateOpeningHand(seatWithHand(hand, ["W", "U", "B", "R", "G"]));
+    expect(result.reasons.join(" ")).toContain("no plays on curve");
+    expect(result.reasons.join(" ")).not.toContain("has a play on curve");
+    expect(result.keep).toBe(false);
+  });
+
+  it("penalizes a missing color more heavily for a high-color-identity (3+ color) commander", () => {
+    const hand = [land("Island", ["U"]), land("Swamp", ["B"]), land("Forest", ["G"]), card({ name: "Early Play", role: "creature", manaValue: 2 })];
+    const lowColorIdentity = evaluateOpeningHand(seatWithHand(hand, ["U", "R"]));
+    const highColorIdentity = evaluateOpeningHand(seatWithHand(hand, ["U", "B", "R"]));
+    expect(highColorIdentity.score).toBeLessThan(lowColorIdentity.score);
+  });
+
   it("scores card draw higher for a combo deck than the unweighted default", () => {
     const hand = [
       land("Forest"),

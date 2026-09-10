@@ -29,6 +29,7 @@ describe("deterministicRuleWorkflow", () => {
     const workflow = deterministicRuleWorkflow(input(ponder));
     expect(workflow?.workflow).toBe("reorder_top_cards");
     expect(workflow?.maxChoices).toBe(3);
+    expect(workflow?.drawCountAfter).toBe(1);
   });
 
   it("still chooses draw_cards for a plain draw spell with no look/reorder text", () => {
