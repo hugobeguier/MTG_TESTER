@@ -1,6 +1,17 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type DragEvent, type MutableRefObject, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  Component,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent,
+  type ErrorInfo,
+  type MutableRefObject,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode
+} from "react";
 import * as THREE from "three";
 import type { AgentReasoning, GameSession, PlayerSeat, VisibleCard } from "@/lib/types";
 import { effectivePower, effectiveToughness } from "@/lib/counters";
@@ -101,6 +112,7 @@ interface ThreeGameTableProps {
   onCompletePutCardsOnLibrary?: (cardIds: string[]) => void;
   onCompleteConniveDiscard?: (cardIds: string[]) => void;
   onCompleteReturnLandToHand?: (cardIds: string[]) => void;
+  onCompleteChoosePermanentToBlink?: (cardIds: string[]) => void;
   onChooseCreatureType?: (creatureType: string) => void;
   onChooseColor?: (color: ManaColor) => void;
   onConfirmAttackTriggerManaColors?: (distribution: Partial<Record<Exclude<ManaColor, "C">, number>>) => void;
@@ -330,6 +342,9 @@ type RuleChoiceView =
       prompt: string;
       hand: VisibleCard[];
       requiredDiscards: number;
+      // See AppFlow.tsx's PendingRuleChoice "discard_to_hand_size" variant — set when this picker
+      // is reused for a trigger other than the real cleanup-step hand-size rule (e.g. Plaguecrafter).
+      sourceCardName?: string;
     }
   | {
       kind: "put_cards_on_library";
@@ -349,6 +364,12 @@ type RuleChoiceView =
       sourceCardName: string;
       prompt: string;
       lands: VisibleCard[];
+    }
+  | {
+      kind: "choose_permanent_to_blink";
+      sourceCardName: string;
+      prompt: string;
+      permanents: VisibleCard[];
     }
   | {
       kind: "choose_creature_type";
@@ -460,7 +481,59 @@ const cardImageTexturePending = new Map<string, Promise<THREE.Texture>>();
 const failedCardImageUrls = new Set<string>();
 const counterBadgeTextureCache = new Map<string, THREE.Texture>();
 
+interface ThreeGameTableBoundaryState {
+  error?: Error;
+}
+
+// THREE.WebGLRenderer's constructor (see the mount effect below) throws synchronously when the
+// browser genuinely cannot create a WebGL context at all — no hardware-accelerated backend and no
+// working software fallback (hardware acceleration disabled, a blocklisted/outdated GPU driver, a
+// remote/VM session with no GPU passthrough, ...). React propagates an error thrown inside an effect
+// to the nearest error boundary the same way it does a render error, but without one here that crash
+// took the ENTIRE game UI down with it — a bare, unrecoverable Next.js Runtime Error overlay —
+// instead of just the 3D board failing to come up. Reported live: "WebGL creation failed ...
+// FEATURE_FAILURE_WEBGL_EXHAUSTED_DRIVERS" crashing the whole app on startup.
+class ThreeGameTableBoundary extends Component<{ children: ReactNode }, ThreeGameTableBoundaryState> {
+  state: ThreeGameTableBoundaryState = {};
+
+  static getDerivedStateFromError(error: Error): ThreeGameTableBoundaryState {
+    return { error };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error("ThreeGameTable failed to render:", error, info.componentStack);
+  }
+
+  render() {
+    const error = this.state.error;
+    if (!error) return this.props.children;
+    const isWebglFailure = /webgl/i.test(error.message);
+    return (
+      <section className="three-game-shell three-board-fallback">
+        <div>
+          <p className="three-board-fallback-title">
+            {isWebglFailure ? "The 3D game board couldn't start." : "Something went wrong rendering the game board."}
+          </p>
+          <p className="three-board-fallback-detail">
+            {isWebglFailure
+              ? "Your browser reported that it couldn't create a WebGL context, which this board requires. Check that hardware acceleration is enabled (chrome://gpu on Chrome), update your graphics drivers, or try a different browser/device."
+              : error.message}
+          </p>
+        </div>
+      </section>
+    );
+  }
+}
+
 export function ThreeGameTable(props: ThreeGameTableProps) {
+  return (
+    <ThreeGameTableBoundary>
+      <ThreeGameTableInner {...props} />
+    </ThreeGameTableBoundary>
+  );
+}
+
+function ThreeGameTableInner(props: ThreeGameTableProps) {
   const mountRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -982,6 +1055,15 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
       if (frameRef.current) cancelAnimationFrame(frameRef.current);
       mount.removeChild(renderer.domElement);
       renderer.dispose();
+      // dispose() only frees the renderer's own caches/programs — it does NOT release the underlying
+      // WebGL context itself, which otherwise lingers until garbage collection actually reclaims it.
+      // React StrictMode's deliberate dev-mode double mount/unmount (and any remount from HMR or
+      // switching views) creates a new context on every mount while old ones are still pending GC,
+      // and browsers cap the number of live WebGL contexts (Chrome/ANGLE ~16) — exceeding it throws
+      // "WebGL creation failed ... FEATURE_FAILURE_WEBGL_EXHAUSTED_DRIVERS". forceContextLoss()
+      // (WEBGL_lose_context under the hood) makes the browser reclaim this context immediately
+      // instead of waiting on GC, so remounting repeatedly can't exhaust the context budget.
+      renderer.forceContextLoss();
     };
   }, []);
 
@@ -1730,6 +1812,9 @@ export function ThreeGameTable(props: ThreeGameTableProps) {
       ) : null}
       {props.ruleChoice?.kind === "return_land_to_hand" ? (
         <ReturnLandToHandModal choice={props.ruleChoice} onConfirm={props.onCompleteReturnLandToHand} />
+      ) : null}
+      {props.ruleChoice?.kind === "choose_permanent_to_blink" ? (
+        <ChoosePermanentToBlinkModal choice={props.ruleChoice} onConfirm={props.onCompleteChoosePermanentToBlink} />
       ) : null}
       {props.ruleChoice?.kind === "choose_creature_type" ? (
         <ChooseCreatureTypeModal choice={props.ruleChoice} onChoose={props.onChooseCreatureType} />
@@ -2884,14 +2969,15 @@ function DiscardToHandSizeModal({
     });
   }
 
-  // No backdrop-dismiss: cleanup-step discard is a required action (rule 514.2), not an optional
-  // review, so unlike the other rule-choice modals this one has nothing for onClick to call.
+  // No backdrop-dismiss: this discard is a required action (rule 514.2 for the real cleanup-step
+  // case; equally mandatory for a reused trigger like Plaguecrafter's discard fallback), not an
+  // optional review, so unlike the other rule-choice modals this one has nothing for onClick to call.
   return (
-    <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label="Discard to hand size">
+    <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label="Discard a card">
       <article className="mana-choice-modal" onClick={(event) => event.stopPropagation()}>
         <header>
-          <p className="eyebrow">Cleanup step</p>
-          <h2>Discard to hand size</h2>
+          <p className="eyebrow">{choice.sourceCardName ?? "Cleanup step"}</p>
+          <h2>{choice.sourceCardName ? "Discard a card" : "Discard to hand size"}</h2>
         </header>
         <p>{choice.prompt}</p>
         <p>
@@ -3064,6 +3150,49 @@ function ReturnLandToHandModal({
         <div className="modal-actions">
           <button className="inspector-action" type="button" disabled={!selected} onClick={() => onConfirm?.(selected ? [selected] : [])}>
             Return to hand
+          </button>
+        </div>
+      </article>
+    </div>
+  );
+}
+
+function ChoosePermanentToBlinkModal({
+  choice,
+  onConfirm
+}: {
+  choice: Extract<RuleChoiceView, { kind: "choose_permanent_to_blink" }>;
+  onConfirm?: (cardIds: string[]) => void;
+}) {
+  const [selected, setSelected] = useState<string | undefined>(undefined);
+
+  // No backdrop-dismiss: this exile-and-return is a mandatory part of resolving the source ability,
+  // not an optional review — same reasoning as ReturnLandToHandModal just above.
+  return (
+    <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label={`${choice.sourceCardName}: choose a permanent`}>
+      <article className="mana-choice-modal" onClick={(event) => event.stopPropagation()}>
+        <header>
+          <p className="eyebrow">{choice.sourceCardName}</p>
+          <h2>Exile and return a permanent you own</h2>
+        </header>
+        <p>{choice.prompt}</p>
+        <div className="modal-actions discard-hand-list">
+          {choice.permanents.map((card) => (
+            <button
+              key={card.id}
+              type="button"
+              className="inspector-action"
+              aria-pressed={selected === card.id}
+              onClick={() => setSelected(card.id)}
+            >
+              {selected === card.id ? "✓ " : ""}
+              {card.name}
+            </button>
+          ))}
+        </div>
+        <div className="modal-actions">
+          <button className="inspector-action" type="button" disabled={!selected} onClick={() => onConfirm?.(selected ? [selected] : [])}>
+            Exile and return
           </button>
         </div>
       </article>

@@ -1,0 +1,10 @@
+1. The second thing Id like you to implement is making the agent .md file more generic, so they know more about Magic
+  than to specify who they are and what commander they play. They should be able to play any commander I give them and
+  build a deck around it. So instead of "You are Malik and you are playing Saheeli, The Gifted" maybe something like
+  "You are a player in a MTG Commander game where you are given a commander to build around following the bracket 3
+  rule set/ rankings. You know how all the mechanics in the card game work, how milling works, sacrifice etc.." just
+  so they know what MTG Commander is.
+
+2. Politics are a big thing in Magic, and I think that aspect of the game should exist in this 1 human vs 3 Agents game. So all 4 players should be able to  convers with each other openly.
+   There are some unwritten rules here for example you cannot tell someone what cards you have, you either say it out loud or you say I have a removal spell and dont tell the full story, maybe its a board wipe but try and get a deal from you doing that with another player.
+   If a deal is struck they should hold it otherwise its bad form.
