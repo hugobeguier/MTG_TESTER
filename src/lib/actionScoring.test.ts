@@ -118,6 +118,42 @@ describe("scoreLegalActions", () => {
     expect(fullStack).toBeGreaterThan(emptyStack);
   });
 
+  it("penalizes casting a reactive protection instant proactively during your own main phase (Tamiyo's Safekeeping)", () => {
+    const castProtection = action({
+      id: "cast:tamiyo-safekeeping",
+      actionType: "cast_spell",
+      role: "protection",
+      detail: "{W} Instant. Target permanent you control gains hexproof and indestructible until end of turn. You gain 2 life."
+    });
+    const context = baseContext({ purpose: "main_phase" });
+    const scored = scoreLegalAction(castProtection, context);
+    expect(scored.reasons).toContain("casting a reactive protection effect during your own main phase instead of holding it for a real threat");
+  });
+
+  it("does not penalize casting the same protection instant in response to something on the stack", () => {
+    const castProtection = action({
+      id: "cast:tamiyo-safekeeping",
+      actionType: "cast_spell",
+      role: "protection",
+      detail: "{W} Instant. Target permanent you control gains hexproof and indestructible until end of turn. You gain 2 life."
+    });
+    const context = baseContext({ purpose: "priority_response", stack: [{ id: "s1", cardName: "Removal Spell" }] });
+    const scored = scoreLegalAction(castProtection, context);
+    expect(scored.reasons).not.toContain("casting a reactive protection effect during your own main phase instead of holding it for a real threat");
+  });
+
+  it("does not penalize a sorcery-speed protection effect cast during main phase (it has no 'hold it' option)", () => {
+    const castProtection = action({
+      id: "cast:sorcery-protection",
+      actionType: "cast_spell",
+      role: "protection",
+      detail: "{1}{G} Sorcery. Target permanent you control gains hexproof until end of turn."
+    });
+    const context = baseContext({ purpose: "main_phase" });
+    const scored = scoreLegalAction(castProtection, context);
+    expect(scored.reasons).not.toContain("casting a reactive protection effect during your own main phase instead of holding it for a real threat");
+  });
+
   it("treats a ground creature as unable to legally block a flier, so a flying attacker scores as unblocked", () => {
     const flier: CardLike = { id: "atk", power: "2", toughness: "2", oracleText: "Flying" };
     const groundBlocker: CardLike = { id: "blk", power: "6", toughness: "6", tapped: false };

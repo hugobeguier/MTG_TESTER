@@ -23,7 +23,7 @@ describe("removalEffectTargetSpec", () => {
   });
 
   it("maps exile to a battlefield spec", () => {
-    const effect: RemovalEffect = { kind: "exile", targetType: "artifact" };
+    const effect: RemovalEffect = { kind: "exile", targetType: "artifact", lifeGainToControllerEqualToPower: false };
     const spec = removalEffectTargetSpec(effect, "src-1");
     expect(spec?.zone).toBe("battlefield");
     expect(spec?.permanentType).toBe("artifact");

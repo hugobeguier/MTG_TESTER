@@ -91,6 +91,8 @@ interface ThreeGameTableProps {
   onFinishLibrarySearch?: () => void;
   onChooseGraveyardReanimationTarget?: (seatId: string, cardId: string) => void;
   onChooseSacrificeCostTarget?: (seatId: string, cardId: string) => void;
+  onChooseEachPlayerSacrifice?: (seatId: string, cardId: string) => void;
+  onChooseCreatureToSacrificeForCast?: (seatId: string, cardId: string) => void;
   onChooseModalOption?: (index: number) => void;
   onChooseEffectTarget?: (target: { kind: "card"; seatId: string; cardId: string } | { kind: "player"; seatId: string }) => void;
   onDeclineEffectTarget?: () => void;
@@ -253,6 +255,26 @@ type RuleChoiceView =
     }
   | {
       kind: "choose_creature_to_sacrifice";
+      sourceCardName: string;
+      prompt: string;
+      cards: Array<{ card: VisibleCard; seatId: string; seatName: string }>;
+      actionLabel: string;
+    }
+  // "Each player sacrifices a creature or planeswalker of their choice." (Plaguecrafter, Accursed
+  // Marauder, ...) — the human controller's own pick, distinct from choose_creature_to_sacrifice
+  // (an activated ability's cost, creature-only) since this pool can include planeswalkers too.
+  | {
+      kind: "choose_each_player_sacrifice";
+      sourceCardName: string;
+      prompt: string;
+      cards: Array<{ card: VisibleCard; seatId: string; seatName: string }>;
+      actionLabel: string;
+    }
+  // "As an additional cost to cast this spell, sacrifice a creature." (Village Rites, ...) — opened
+  // BEFORE the spell is cast, unlike every other choice here which resolves an already-cast spell's
+  // effect.
+  | {
+      kind: "choose_creature_to_sacrifice_for_cast";
       sourceCardName: string;
       prompt: string;
       cards: Array<{ card: VisibleCard; seatId: string; seatName: string }>;
@@ -1718,6 +1740,28 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
           emptyLabel="No legal creature to sacrifice."
           onClose={props.onCloseLibrarySearch}
           onChoose={props.onChooseSacrificeCostTarget}
+        />
+      ) : null}
+      {props.ruleChoice?.kind === "choose_each_player_sacrifice" ? (
+        <TargetPickerModal
+          cards={props.ruleChoice.cards}
+          prompt={props.ruleChoice.prompt}
+          sourceCardName={props.ruleChoice.sourceCardName}
+          actionLabel={props.ruleChoice.actionLabel}
+          emptyLabel="No legal creature or planeswalker to sacrifice."
+          onClose={props.onCloseLibrarySearch}
+          onChoose={props.onChooseEachPlayerSacrifice}
+        />
+      ) : null}
+      {props.ruleChoice?.kind === "choose_creature_to_sacrifice_for_cast" ? (
+        <TargetPickerModal
+          cards={props.ruleChoice.cards}
+          prompt={props.ruleChoice.prompt}
+          sourceCardName={props.ruleChoice.sourceCardName}
+          actionLabel={props.ruleChoice.actionLabel}
+          emptyLabel="No legal creature to sacrifice."
+          onClose={props.onCloseLibrarySearch}
+          onChoose={props.onChooseCreatureToSacrificeForCast}
         />
       ) : null}
       {props.ruleChoice?.kind === "choose_modal_option" ? (

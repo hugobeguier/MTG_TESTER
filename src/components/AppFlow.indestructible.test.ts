@@ -96,3 +96,39 @@ describe("applyRemovalEffect — indestructible survives 'destroy' (rule 702.12b
     expect(after.board.graveyard).toHaveLength(1);
   });
 });
+
+describe("applyRemovalEffect — single-target destroy prefers a destructible target over an indestructible one", () => {
+  it("picks a non-indestructible artifact over Darksteel Citadel when both are legal targets (Krosan Grip, reported live)", () => {
+    const darksteelCitadel = card({ id: "citadel", name: "Darksteel Citadel", typeLine: "Artifact Land", oracleText: "Indestructible\n{T}: Add {C}." });
+    const opponentArtifact = card({ id: "signet", name: "Opponent's Signet", typeLine: "Artifact" });
+    const opponent = seat({ id: "opp", name: "Opponent", kind: "agent", board: { hand: [], battlefield: [darksteelCitadel, opponentArtifact] } });
+    const caster = seat({ id: "caster", name: "Caster", kind: "agent", board: { hand: [], battlefield: [] } });
+    const krosanGrip = card({ id: "krosan-grip", name: "Krosan Grip", typeLine: "Instant" });
+    const result = applyRemovalEffect(session([caster, opponent]), "caster", "Krosan Grip", krosanGrip, {
+      kind: "destroy",
+      targetType: "artifact_or_enchantment",
+      excludedColors: [],
+      artifactsExcluded: false,
+      basicsExcluded: false
+    });
+    const after = result.seats.find((s) => s.id === "opp")!;
+    // The destructible artifact is gone; the indestructible land is untouched.
+    expect(after.board.battlefield.map((c) => c.id)).toEqual(["citadel"]);
+    expect(after.board.graveyard?.map((c) => c.id)).toEqual(["signet"]);
+  });
+
+  it("still targets the indestructible permanent when it's the only legal target (no better option to fall back to)", () => {
+    const darksteelCitadel = card({ id: "citadel", name: "Darksteel Citadel", typeLine: "Artifact Land", oracleText: "Indestructible\n{T}: Add {C}." });
+    const opponent = seat({ id: "opp", name: "Opponent", kind: "agent", board: { hand: [], battlefield: [darksteelCitadel] } });
+    const caster = seat({ id: "caster", name: "Caster", kind: "agent", board: { hand: [], battlefield: [] } });
+    const krosanGrip = card({ id: "krosan-grip", name: "Krosan Grip", typeLine: "Instant" });
+    const result = applyRemovalEffect(session([caster, opponent]), "caster", "Krosan Grip", krosanGrip, {
+      kind: "destroy",
+      targetType: "artifact_or_enchantment",
+      excludedColors: [],
+      artifactsExcluded: false,
+      basicsExcluded: false
+    });
+    expect(result.events[0].message).toMatch(/indestructible.*fails to destroy/i);
+  });
+});

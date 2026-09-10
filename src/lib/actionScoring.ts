@@ -334,6 +334,21 @@ function scoreHoldInstants(action: ScorableAction, context: ScoringContext, delt
   }
 }
 
+// A protection effect's (role "protection" — see deckParser.ts's isProtectionEffectText) whole
+// value is answering a specific threat, so casting it during your OWN main phase — with nothing on
+// the stack to actually protect against, unlike scoreHoldInstants' priority_response scope, which
+// never applies to a proactive main-phase cast — spends a reactive resource for nothing. Scoped to
+// a genuine instant: a sorcery-speed protection effect has no "hold it" option at all, so casting it
+// during the only phase it can ever be cast isn't a waste. Reported live as Tamiyo's Safekeeping
+// cast on a land and a mana artifact during a quiet main phase instead of held for a real removal
+// spell aimed at a creature.
+function scoreProactiveProtectionCast(action: ScorableAction, context: ScoringContext, delta: (amount: number, reason: string) => void) {
+  if (action.actionType !== "cast_spell" || action.role !== "protection") return;
+  if (context.purpose !== "main_phase") return;
+  if (!/\binstant\b/i.test(action.detail ?? "")) return;
+  delta(-3, "casting a reactive protection effect during your own main phase instead of holding it for a real threat");
+}
+
 function scoreUpkeepValue(action: ScorableAction, context: ScoringContext, delta: (amount: number, reason: string) => void) {
   if (action.actionType !== "activate_ability") return;
   if (!/upkeep/i.test(action.detail ?? "")) return;
@@ -662,6 +677,7 @@ export function scoreLegalAction(action: ScorableAction, context: ScoringContext
   scoreAttackTargetSelection(action, context, delta);
   scoreBlockDecision(action, context, delta);
   scoreHoldInstants(action, context, delta);
+  scoreProactiveProtectionCast(action, context, delta);
   scoreUpkeepValue(action, context, delta);
   scoreSacrificeValue(action, context, delta);
   scoreTransformSacrifice(action, context, delta);

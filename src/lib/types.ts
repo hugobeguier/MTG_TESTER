@@ -413,7 +413,11 @@ export interface GameSession {
   // creature, not a player. Only ever appended to for a player target (not a planeswalker — rule
   // 120.3g explicitly excludes those from "deals combat damage to a player") and damageKind
   // "combat" (not e.g. Lightning Bolt).
-  pendingCombatDamageToPlayer?: Array<{ seatId: string; card: VisibleCard }>;
+  // damagedSeatId: the player who actually took the damage — needed by a board-wide watcher (Gix,
+  // Yawgmoth Praetor's "whenever a creature deals combat damage to ONE OF YOUR OPPONENTS," symmetric
+  // across every seat, not just seatId's own creatures) to check whether that player is an opponent
+  // of the WATCHING seat, not of the dealing creature's controller.
+  pendingCombatDamageToPlayer?: Array<{ seatId: string; card: VisibleCard; damagedSeatId: string }>;
   // Dedup keys ("turn:sourceCardId:effectKind") for triggered effects restricted by a trailing
   // "Do this only once each turn" clause — resolveTriggerEffect() is a pure function with no
   // per-turn ref to check against, so the dedup state lives on the session itself instead.

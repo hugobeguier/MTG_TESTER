@@ -66,6 +66,11 @@ export interface DestroyAllConditionalEffect {
 export interface ExileEffect {
   kind: "exile";
   targetType: RemovalTargetType;
+  // "Its controller gains life equal to its power." (Swords to Plowshares, Path to Exile's near-
+  // relatives) — a follow-up sentence right after the exile clause, not folded into a generic
+  // "any trailing sentence" mechanism since that's the only shape this codebase's real card pool
+  // needs. Reported live as Swords to Plowshares exiling the creature but granting no life at all.
+  lifeGainToControllerEqualToPower: boolean;
 }
 
 export interface DamageEffect {
@@ -230,7 +235,8 @@ function parseExile(text: string): ExileEffect | undefined {
   if (/^\s*return (?:it|that card|that permanent|that creature|the exiled card)\b/i.test(remainder)) return undefined;
   const targetType = matchTargetType(clauseMatch[0]);
   if (!targetType) return undefined;
-  return { kind: "exile", targetType };
+  const lifeGainToControllerEqualToPower = /^\s*its controller gains life equal to its power\b/i.test(remainder);
+  return { kind: "exile", targetType, lifeGainToControllerEqualToPower };
 }
 
 function parseDamage(text: string): DamageEffect | undefined {

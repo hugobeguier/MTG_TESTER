@@ -4,7 +4,7 @@ import { hasCardType, parseTypeGrantEffects, typeGrantAppliesTo } from "./typeGr
 describe("parseTypeGrantEffects", () => {
   it("parses Secret Arcade's nonland-permanent enchantment grant", () => {
     expect(parseTypeGrantEffects("Nonland permanents you control and permanent spells you control are enchantments in addition to their other types.")).toEqual([
-      { granteeFilter: "nonland permanent", grantedType: "Enchantment" }
+      { granteeFilter: "nonland permanent", grantedType: "Enchantment", global: false }
     ]);
   });
 
@@ -13,12 +13,18 @@ describe("parseTypeGrantEffects", () => {
       parseTypeGrantEffects(
         "Creatures you control are artifacts in addition to their other types. The same is true for creature spells you control and creature cards you own that aren't on the battlefield."
       )
-    ).toEqual([{ granteeFilter: "creature", grantedType: "Artifact" }]);
+    ).toEqual([{ granteeFilter: "creature", grantedType: "Artifact", global: false }]);
   });
 
   it("parses a compound granted-type phrase by its last word (Ashaya, Soul of the Wild)", () => {
     expect(parseTypeGrantEffects("Nontoken creatures you control are Forest lands in addition to their other types.")).toEqual([
-      { granteeFilter: "nontoken creature", grantedType: "Land" }
+      { granteeFilter: "nontoken creature", grantedType: "Land", global: false }
+    ]);
+  });
+
+  it("parses Mycosynth Lattice's global, controller-agnostic artifact grant", () => {
+    expect(parseTypeGrantEffects("All permanents are artifacts in addition to their other types.")).toEqual([
+      { granteeFilter: "permanent", grantedType: "Artifact", global: true }
     ]);
   });
 

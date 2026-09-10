@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { createDeckFromCards, createDeckFromList, parseDeckList } from "./deckParser";
+import { createDeckFromCards, createDeckFromList, inferRoleFromRecord, parseDeckList } from "./deckParser";
 import type { CardRecord } from "./types";
+
+function cardRecord(overrides: Partial<CardRecord> & Pick<CardRecord, "id" | "name" | "typeLine" | "oracleText">): CardRecord {
+  return { manaValue: 0, colors: [], colorIdentity: [], ...overrides };
+}
 
 describe("parseDeckList", () => {
   it("accepts common counted deck list lines", () => {
@@ -85,6 +89,38 @@ describe("parseDeckList", () => {
     expect(deck.archetype).toBeDefined();
     expect(deck.gamePlan).toBeDefined();
     expect(deck.gamePlan?.length).toBeGreaterThan(0);
+  });
+});
+
+describe("inferRoleFromRecord — protection effects", () => {
+  it("classifies Tamiyo's Safekeeping as protection, not a generic spell", () => {
+    const record = cardRecord({
+      id: "tamiyo-safekeeping",
+      name: "Tamiyo's Safekeeping",
+      typeLine: "Instant",
+      oracleText: "Target permanent you control gains hexproof and indestructible until end of turn. You gain 2 life."
+    });
+    expect(inferRoleFromRecord(record)).toBe("protection");
+  });
+
+  it("still classifies real removal as removal, not protection", () => {
+    const record = cardRecord({
+      id: "swords",
+      name: "Swords to Plowshares",
+      typeLine: "Instant",
+      oracleText: "Exile target creature. Its controller gains life equal to its power."
+    });
+    expect(inferRoleFromRecord(record)).toBe("removal");
+  });
+
+  it("does not misclassify an opponent-targeted hexproof grant as your own protection", () => {
+    const record = cardRecord({
+      id: "generic",
+      name: "Test Card",
+      typeLine: "Instant",
+      oracleText: "Target creature an opponent controls gains hexproof until end of turn."
+    });
+    expect(inferRoleFromRecord(record)).not.toBe("protection");
   });
 });
 

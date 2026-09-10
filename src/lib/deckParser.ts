@@ -152,12 +152,25 @@ function enrichParsedCards(cards: DeckCard[], catalog?: DeckCardLookup) {
   });
 }
 
-function inferRoleFromRecord(card: CardRecord) {
+// A reactive protection effect (grants hexproof/indestructible/protection to a permanent YOU
+// CONTROL) — its whole value is answering a specific threat, so unlike "removal" (fine to cast
+// proactively, it removes a real permanent right now) it's a candidate for
+// scoreProactiveProtectionCast's "don't cast it with nothing to protect against yet" penalty.
+// Checked before the generic "spell" fallback, and requires the literal "you control" so an
+// opponent-targeted or symmetric hexproof grant doesn't get mistaken for your own protection.
+// Reported live as Tamiyo's Safekeeping cast during a main phase with no threat on the stack,
+// wasting its protection on a land and a mana artifact instead of holding it for a creature.
+function isProtectionEffectText(oracleText: string) {
+  return /\b(?:gains?|has) (?:hexproof|indestructible|protection from)/i.test(oracleText) && /\byou control\b/i.test(oracleText);
+}
+
+export function inferRoleFromRecord(card: CardRecord) {
   const spellFace = modalDfcSpellFace(card);
   if (spellFace) {
     if (spellFace.typeLine.includes("Creature")) return "creature";
     if (/draw.*card/i.test(spellFace.oracleText)) return "draw";
     if (/destroy target|exile target|counter target/i.test(spellFace.oracleText)) return "removal";
+    if (isProtectionEffectText(spellFace.oracleText)) return "protection";
     return "spell";
   }
   if (card.typeLine.includes("Land")) return "land";
@@ -165,6 +178,7 @@ function inferRoleFromRecord(card: CardRecord) {
   if (card.typeLine.includes("Artifact") && /add .*mana|mana of any color/i.test(card.oracleText)) return "ramp";
   if (/draw.*card/i.test(card.oracleText)) return "draw";
   if (/destroy target|exile target|counter target/i.test(card.oracleText)) return "removal";
+  if (isProtectionEffectText(card.oracleText)) return "protection";
   return "spell";
 }
 

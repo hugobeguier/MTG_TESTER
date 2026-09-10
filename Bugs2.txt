@@ -1,9 +1,10 @@
-1. Veyra played Kodama's Reach and already had Green,black out on the battlefield and a blue land in hand, why does it not use Kodama's Reach to find maybe a white land and a red so he got all 5 colors
-2. Sable Played Tamiyo's Safekeeping and some lands and a Mana Artifact out, I would have used that Instant spell as a counter if someone tried to do something to my creatures instead of wasting it on some lands and a Mana Artifact
-3. Swords to Plowshares was cast my Malik targeting my Loyal Apprentice, which is a legal move but why was that a threat I need the Agents to think a bit more before doing stuff, I would have used Swords to Plowshares on a creature that actually is a threat, this was his resoning:  Malik chooses cast Swords to Plowshares. Removing the opponent's Loyal Apprentice with Swords to Plowshares prevents them from gaining additional tokens and dealing haste damage, providing a direct threat reduction and preserving board state.
-4. Swords to Plowshares did not give me life equal to target creatures power. When my creature got targeted by it.
-5. Sable just tried to use Krosan Grip on Darksteel Citadel, since that is an Artifact, but it has Indestructible which the Agent should be able to see, why did Sable use that?
-6. Padeem Consul of Innovation triggers though Malik has an Artifact that costs 2 mana out, I only have a Servo Artifact Creature Token and Darksteel Citadel which have 0 in mana cost, so I should not be able to draw from Padeem.
-7. Sable had Myriad landscape out sacrificed it and choose to take two swamps out, but did not have any forests out so I would of chosen to take forests out in that scenario
-8. I have Mycosynth Lattice out on the battlefield, I then activated Saheeli, The Gifted +1 loyalty ability letting me to cast the next spell for -1 generic mana for each artifact I control. With Mycosynth Lattice all my lands now counts as artifacts which are 7 in total, it also counts Saheeli, Padeem, and my servo artifact as Artifacts. Which should be 11 artifacts in total. But the +1 loyalty ability does not count those as artifacts. I tried to cast Hellkite Igniter but it would not let me here are the rulings:  Hellkite Igniter costs {5}{R}{R}. Because of the Lattice, you can spend {2} colorless/generic mana to satisfy the {R}{R} portion of the cost. You do not need a single source of red mana to cast it 
+1. Sables Gix, Yawgmoth Praetor did not trigger when I hit Malik, do I need to add every single card for them to work?
+2. Can I get more information how the Agents think during Mulligan step since I still think they think wierd sometimes
+3. Accursed Marauder did not trigger on ETB
+4. Plaguecrafter did not let me choose target creature to sacrifice, it auto picked which I dont like
+5. Village Rites did not give the choice to choose a creature to sacrifice
+6. the keyword "Sacrifice" should always let the player choose a creature they control, using the target UI that exists. 
+7. Meren did not trigger when Village Rites sacrificed a creature. 
+8. Feels like the "Stops" does not work quite as expected, I have end step on sable checked but it goes directly to my turn for some reason, and I have a creature I can sacrifice or if I would like to play an instant with my mana I got up
+9. Breena, the Demagogue does not work either we need a better way of handeling all these cards since if I play a new deck wwith 100 new cards nothing works as expected.
 

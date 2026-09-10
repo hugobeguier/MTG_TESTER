@@ -17,6 +17,10 @@ const SCOPE_NOUNS = ["permanent", "creature", "artifact", "land", "enchantment",
 export interface TypeGrantEffect {
   granteeFilter: string; // e.g. "permanent", "nonland permanent", "creature", "artifact", "land"
   grantedType: string; // capitalized card type, e.g. "Enchantment"
+  // true for "ALL permanents are X..." (Mycosynth Lattice) — applies to every permanent on the
+  // battlefield regardless of who controls it, unlike the far more common "X YOU CONTROL are Y"
+  // shape below, which only ever grants to its own controller's permanents.
+  global: boolean;
 }
 
 function parseScopeFilter(scopePhrase: string): string | undefined {
@@ -31,6 +35,18 @@ export function parseTypeGrantEffects(oracleText: string): TypeGrantEffect[] {
   const effects: TypeGrantEffect[] = [];
   for (const rawLine of oracleText.split("\n")) {
     const line = rawLine.toLowerCase();
+    // "All permanents are artifacts in addition to their other types." (Mycosynth Lattice) — checked
+    // first since it has no "you control" clause at all and would never match the controller-scoped
+    // pattern below. Reported live as Mycosynth Lattice granting the artifact type to nothing.
+    const globalMatch = line.match(/^all permanents are ([a-z][a-z ]*?) in addition to (?:their|its) other types?\b/);
+    if (globalMatch) {
+      const typeWords = globalMatch[1].trim().split(/\s+/);
+      const lastWord = typeWords[typeWords.length - 1].replace(/s$/, "");
+      if (CARD_TYPES.includes(lastWord)) {
+        effects.push({ granteeFilter: "permanent", grantedType: lastWord.charAt(0).toUpperCase() + lastWord.slice(1), global: true });
+      }
+      continue;
+    }
     const match = line.match(
       /\b([a-z][a-z ,\-]*?) you control(?:\s+and\s+[a-z][a-z ]*? you control)?\s+are\s+([a-z][a-z ]*?)\s+in addition to (?:their|its) other types?\b/
     );
@@ -40,7 +56,7 @@ export function parseTypeGrantEffects(oracleText: string): TypeGrantEffect[] {
     const typeWords = match[2].trim().split(/\s+/);
     const lastWord = typeWords[typeWords.length - 1].replace(/s$/, "");
     if (!CARD_TYPES.includes(lastWord)) continue;
-    effects.push({ granteeFilter, grantedType: lastWord.charAt(0).toUpperCase() + lastWord.slice(1) });
+    effects.push({ granteeFilter, grantedType: lastWord.charAt(0).toUpperCase() + lastWord.slice(1), global: false });
   }
   return effects;
 }

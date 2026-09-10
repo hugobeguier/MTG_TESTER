@@ -268,15 +268,16 @@ describe("parseRemovalEffect — variable (X) damage", () => {
 });
 
 describe("parseRemovalEffect — exile", () => {
-  it("parses exile target creature, ignoring a life-gain follow-up it can't compute (Swords to Plowshares)", () => {
+  it("parses exile target creature with its life-gain follow-up (Swords to Plowshares)", () => {
     expect(parseRemovalEffect("Exile target creature. Its controller gains life equal to its power.")).toEqual({
       kind: "exile",
-      targetType: "creature"
+      targetType: "creature",
+      lifeGainToControllerEqualToPower: true
     });
   });
 
   it("parses exile target nonland permanent (Utter End)", () => {
-    expect(parseRemovalEffect("Exile target nonland permanent.")).toEqual({ kind: "exile", targetType: "nonland_permanent" });
+    expect(parseRemovalEffect("Exile target nonland permanent.")).toEqual({ kind: "exile", targetType: "nonland_permanent", lifeGainToControllerEqualToPower: false });
   });
 
   it("parses 'exile another target' (Aetherjacket)", () => {
@@ -287,7 +288,7 @@ describe("parseRemovalEffect — exile", () => {
       artifactsExcluded: false,
       basicsExcluded: false
     });
-    expect(parseRemovalEffect("Exile another target creature.")).toEqual({ kind: "exile", targetType: "creature" });
+    expect(parseRemovalEffect("Exile another target creature.")).toEqual({ kind: "exile", targetType: "creature", lifeGainToControllerEqualToPower: false });
   });
 
   it("declines a temporary exile (flicker) instead of misreading it as permanent removal (Touch the Spirit Realm)", () => {
