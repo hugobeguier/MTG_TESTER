@@ -2625,11 +2625,20 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       return applyDeckToSeat(seat, config.deck);
     });
     const openingSeats = deckedSeats.map((seat) => withOpeningHand(seat, 7, 0));
-    // Fire-and-forget: not awaited, so it never delays the game actually starting. Runs over every
+    // Every agent seat's mulligan decision below is its own live Ollama round-trip — the single
+    // most important call this session makes, and the one place a timeout is most costly, since
+    // there's no cache to fall back on for a first-ever decision. Started AFTER resolving mulligans
+    // (not before/concurrently, as this used to) so it never competes with them for the same local
+    // Ollama instance's (typically serial, not truly parallel) generation queue — reported live as
+    // agent mulligans themselves timing out ("Ollama is unavailable") because this fire-and-forget
+    // prewarm's own PREWARM_CONCURRENCY-many requests were already occupying it. Still fire-and-
+    // forget and still never delays the game actually starting (that still means "mulligans
+    // resolved, ready to play," not "every setup step finished") — it now runs during the human's
+    // own opening-hand deliberation instead, a naturally idle window for Ollama. Runs over every
     // seat's full deck (not just the human's) since the cache is shared board-wide — any seat
     // encountering a card benefits every other seat's later encounter of the same card too.
-    void prewarmRuleWorkflowCache(openingSeats);
     const agentResolved = await resolveAgentMulligansWithLLM(openingSeats);
+    void prewarmRuleWorkflowCache(openingSeats);
     const nextSession: GameSession = {
       ...session,
       status: "ready",
