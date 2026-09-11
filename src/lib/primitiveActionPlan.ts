@@ -17,6 +17,8 @@
 
 import { z } from "zod";
 import { ollamaFetch, OLLAMA_TIMEOUT_MS } from "./ollama";
+import { getXMageCardByName } from "./cardDb";
+import { xmageReferenceBlurb } from "./xmageGrounding";
 
 // Lenient string-enum coercion for any field a small model might wrap in stray punctuation or
 // case — same defensive pattern as rulesAdvisor.ts's DestinationSchema (rulesAdvisor.ts:6-17),
@@ -319,6 +321,22 @@ export const PRIMITIVE_ACTION_STEP_JSON_SCHEMA = {
 
 export async function requestPrimitiveActionPlan(input: PrimitiveActionPlanInput, baseUrl = process.env.OLLAMA_BASE_URL ?? "http://localhost:11434") {
   const model = process.env.OLLAMA_RULES_MODEL ?? process.env.OLLAMA_MODEL ?? "qwen2.5:7b-instruct-q5_K_M";
+  // mtg-commander-engine-spec.md Phase 3a: unlike cardParser.ts's offline bulk parser (which only
+  // pays for a grounded retry when the plain attempt actually declined, since it runs over ~30k
+  // cards where most never need it), this is the LIVE, per-event fallback — a second full Ollama
+  // round-trip here would add real latency to an actual game in progress. So the lookup happens
+  // BEFORE the one call this function makes, included proactively when available, rather than
+  // reactively after a decline. getXMageCardByName returns undefined for a card XMage hasn't
+  // implemented, in which case this is a no-op exactly like before this existed.
+  const xmageCard = getXMageCardByName(input.cardName);
+  const userContent = JSON.stringify({
+    cardName: input.cardName,
+    oracleText: input.oracleText,
+    actorName: input.actorName,
+    battlefield: input.battlefieldSummary,
+    hand: input.handSummary,
+    graveyard: input.graveyardSummary
+  });
   const response = await ollamaFetch(
     `${baseUrl}/api/chat`,
     {
@@ -346,17 +364,7 @@ export async function requestPrimitiveActionPlan(input: PrimitiveActionPlanInput
         },
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
-          {
-            role: "user",
-            content: JSON.stringify({
-              cardName: input.cardName,
-              oracleText: input.oracleText,
-              actorName: input.actorName,
-              battlefield: input.battlefieldSummary,
-              hand: input.handSummary,
-              graveyard: input.graveyardSummary
-            })
-          }
+          { role: "user", content: xmageCard ? `${userContent}\n\n${xmageReferenceBlurb(xmageCard)}` : userContent }
         ]
       })
     },

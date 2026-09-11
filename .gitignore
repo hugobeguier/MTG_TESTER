@@ -10,3 +10,7 @@ data/*.db
 data/*.db-journal
 data/*.db-wal
 data/*.db-shm
+# Sparse clone of magefree/mage (Mage.Sets/src/mage/cards only) — the XMage reference-corpus
+# ingestion source (mtg-commander-engine-spec.md Phase 3a), re-fetched by scripts/ingest-xmage-
+# cards.mjs, not this repo's own content.
+data/xmage-source

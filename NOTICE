@@ -1,0 +1,49 @@
+Third-party notices
+====================
+
+This project (MTG-AI) does not redistribute any third-party source code in
+its own repository. It does, at runtime and via an offline ingestion script,
+read and index a third party's open-source card implementations from a local
+checkout for use as reference context handed to a locally-run LLM — see
+mtg-commander-engine-spec.md's "Phase 3a" for the design, and
+scripts/ingest-xmage-cards.mjs for the ingestion itself.
+
+XMage (magefree/mage)
+----------------------
+
+Project:  XMage — https://github.com/magefree/mage
+Used for: scripts/ingest-xmage-cards.mjs sparse-checks out
+          Mage.Sets/src/mage/cards from the project above into a local,
+          gitignored directory (data/xmage-source), and indexes each card's
+          Java implementation into a local SQLite table (src/lib/cardDb.ts's
+          xmage_cards). src/lib/xmageGrounding.ts and its two callers
+          (src/lib/cardParser.ts, src/lib/primitiveActionPlan.ts) look up a
+          card's XMage implementation and, when the plain oracle text alone
+          isn't enough, include it as read-only reference context in a
+          request to a locally-run LLM — never redistributed, published, or
+          shipped as part of this project's own source or build output.
+
+License:  MIT License
+
+          Copyright (c) 2010 betasteward@gmail.com
+
+          Permission is hereby granted, free of charge, to any person obtaining a copy
+          of this software and associated documentation files (the "Software"), to deal
+          in the Software without restriction, including without limitation the rights
+          to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+          copies of the Software, and to permit persons to whom the Software is
+          furnished to do so, subject to the following conditions:
+
+          The above copyright notice and this permission notice shall be included in all
+          copies or substantial portions of the Software.
+
+          THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+          IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+          FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+          AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+          LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+          OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+          SOFTWARE.
+
+          (verified against https://github.com/magefree/mage/blob/master/LICENSE.txt
+          on 2026-09-11)

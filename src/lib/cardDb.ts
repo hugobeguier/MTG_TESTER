@@ -66,6 +66,21 @@ export function getCardDb(): Database.Database {
       state TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_saved_games_saved_at ON saved_games(saved_at DESC);
+
+    -- mtg-commander-engine-spec.md's Phase 3a: a static, indexed mirror of magefree/mage's own
+    -- per-card Java implementations (scripts/ingest-xmage-cards.mjs populates this from a local
+    -- sparse checkout at data/xmage-source — see that script), keyed by xmageKeyForCardName's
+    -- normalized form of the card's OWN filename (not a name this project supplies — the ingestion
+    -- key is always derived from the real file XMage shipped, so it can never be wrong about what
+    -- it actually indexed, independent of how well xmageKeyForCardName's Scryfall-name-to-key guess
+    -- happens to work for any given lookup). Not yet consulted by anything at runtime — this is the
+    -- ingestion half only; the declined-card lookup/grounding half is future work.
+    CREATE TABLE IF NOT EXISTS xmage_cards (
+      xmage_key TEXT PRIMARY KEY,
+      file_path TEXT NOT NULL,
+      source TEXT NOT NULL,
+      ingested_at TEXT NOT NULL
+    );
   `);
 
   // First open: seed the cards table from the existing JSON catalog cardCatalog.ts already loads,
@@ -280,4 +295,76 @@ export function getParseStats() {
     remaining: totalCards - vanilla - parsed,
     byStatus: Object.fromEntries(byStatus.map((row) => [row.parse_status, row.n]))
   };
+}
+
+// mtg-commander-engine-spec.md Phase 3a — derives the same lookup key from a card's real (Scryfall)
+// name that xmage_cards' own ingestion (scripts/ingest-xmage-cards.mjs) derives from each Java
+// file's actual filename, so a name computed here can be looked up against a key computed there.
+// Only the FRONT face's name is used for a "//"-joined name (e.g. "Aang, Swift Savior // Aang and
+// La, Ocean's Fury"): XMage names a transform/modal-DFC card's file after its front face alone.
+// True split cards (Fire // Ice) are the one real exception — XMage combines both halves into one
+// file, "FireIce.java" — but front-face-only still gets the large majority of "//" names right,
+// since most of them are transforms/MDFCs, not true splits. Validated empirically at 98.5% against
+// this project's own ~30,500-card catalog (data/cards.db) before this function was trusted anywhere;
+// the misses are a mix of genuine XMage coverage gaps (a card it hasn't implemented at all) and true
+// split cards missing under this front-face-only key — a documented, known gap, not silently assumed
+// away. Lowercased so the SQLite key comparison never depends on case matching exactly.
+export function xmageKeyForCardName(name: string): string {
+  const frontFace = name.split(/\s*\/\/\s*/)[0];
+  return frontFace
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/g, "") // strip combining diacritics left behind by NFKD (Jötun -> Jotun)
+    .replace(/[Ææ]/g, "Ae") // the ligature isn't decomposed by NFKD, so it needs its own rule
+    .replace(/[^a-zA-Z0-9 ]/g, "") // strip apostrophes/commas/periods/hyphens/etc.
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => word[0].toUpperCase() + word.slice(1))
+    .join("")
+    .toLowerCase();
+}
+
+export interface XMageCardRow {
+  xmageKey: string;
+  filePath: string;
+  source: string;
+  ingestedAt: string;
+}
+
+export function getXMageCardByKey(xmageKey: string): XMageCardRow | undefined {
+  const row = getCardDb().prepare("SELECT * FROM xmage_cards WHERE xmage_key = ?").get(xmageKey) as
+    | { xmage_key: string; file_path: string; source: string; ingested_at: string }
+    | undefined;
+  return row ? { xmageKey: row.xmage_key, filePath: row.file_path, source: row.source, ingestedAt: row.ingested_at } : undefined;
+}
+
+// Looks a card up the same way a future declined-card grounding step would: by its real name,
+// through xmageKeyForCardName, rather than requiring the caller to compute the key itself.
+export function getXMageCardByName(cardName: string): XMageCardRow | undefined {
+  return getXMageCardByKey(xmageKeyForCardName(cardName));
+}
+
+// Bulk upsert for scripts/ingest-xmage-cards.mjs — replaces the whole table's contents with exactly
+// what's on disk right now (a stale entry for a file XMage has since renamed/removed would otherwise
+// linger forever with no natural expiry), inside one transaction so a re-ingest is atomic rather than
+// leaving the table half-old/half-new if it's interrupted partway through.
+export function replaceAllXMageCards(entries: Array<{ xmageKey: string; filePath: string; source: string }>): void {
+  const db = getCardDb();
+  const ingestedAt = new Date().toISOString();
+  const insert = db.prepare(`
+    INSERT INTO xmage_cards (xmage_key, file_path, source, ingested_at)
+    VALUES (@xmageKey, @filePath, @source, @ingestedAt)
+    ON CONFLICT(xmage_key) DO UPDATE SET
+      file_path = excluded.file_path, source = excluded.source, ingested_at = excluded.ingested_at
+  `);
+  const run = db.transaction((rows: Array<{ xmageKey: string; filePath: string; source: string }>) => {
+    db.prepare("DELETE FROM xmage_cards").run();
+    for (const row of rows) insert.run({ ...row, ingestedAt });
+  });
+  run(entries);
+}
+
+export function getXMageIngestStats() {
+  const total = (getCardDb().prepare("SELECT COUNT(*) AS n FROM xmage_cards").get() as { n: number }).n;
+  const lastIngestedAt = (getCardDb().prepare("SELECT MAX(ingested_at) AS at FROM xmage_cards").get() as { at: string | null }).at;
+  return { total, lastIngestedAt };
 }

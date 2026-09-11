@@ -10,6 +10,7 @@
     "cards:import": "node scripts/import-commander-cards.mjs",
     "cards:parse": "node scripts/parse-cards.mjs",
     "cards:override": "node scripts/override-card.mjs",
+    "xmage:ingest": "node scripts/ingest-xmage-cards.mjs",
     "bench:agents": "node scripts/agent-bench.mjs",
     "test": "vitest run"
   },

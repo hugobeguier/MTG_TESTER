@@ -10,6 +10,8 @@
 import { z } from "zod";
 import { ollamaFetch, OLLAMA_CARD_PARSE_TIMEOUT_MS } from "./ollama";
 import { LenientPrimitiveActionStepArraySchema, PRIMITIVE_ACTION_STEP_JSON_SCHEMA, filterGroundedSteps } from "./primitiveActionPlan";
+import { getXMageCardByName } from "./cardDb";
+import { xmageReferenceBlurb } from "./xmageGrounding";
 
 function lenientEnum<T extends readonly [string, ...string[]]>(values: T) {
   return z.preprocess((value) => {
@@ -154,21 +156,17 @@ export interface CardParseResult {
   model: string;
 }
 
-export async function requestCardParse(
-  input: CardParseInput,
-  baseUrl = process.env.OLLAMA_BASE_URL ?? "http://localhost:11434"
+// One retry with the validation error appended, per spec Phase 1a point 6 — a small local model
+// occasionally emits a kind/triggerEvent outside the enum or drops a required field; the raw zod
+// error message is usually specific enough for the model to self-correct on a second try. Shared by
+// both requestCardParse's plain attempt and its XMage-grounded retry below — the validation-retry
+// behavior should be identical either way, only the STARTING messages differ.
+async function runParseAttempts(
+  baseUrl: string,
+  model: string,
+  messages: Array<{ role: string; content: string }>,
+  input: CardParseInput
 ): Promise<CardParseResult> {
-  const model = process.env.OLLAMA_RULES_MODEL ?? process.env.OLLAMA_MODEL ?? "qwen2.5:7b-instruct-q5_K_M";
-  const userContent = JSON.stringify({ cardName: input.cardName, typeLine: input.typeLine, oracleText: input.oracleText });
-
-  const messages: Array<{ role: string; content: string }> = [
-    { role: "system", content: SYSTEM_PROMPT },
-    { role: "user", content: userContent }
-  ];
-
-  // One retry with the validation error appended, per spec Phase 1a point 6 — a small local model
-  // occasionally emits a kind/triggerEvent outside the enum or drops a required field; the raw
-  // zod error message is usually specific enough for the model to self-correct on a second try.
   let lastError: unknown;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
@@ -194,6 +192,34 @@ export async function requestCardParse(
     }
   }
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
+export async function requestCardParse(
+  input: CardParseInput,
+  baseUrl = process.env.OLLAMA_BASE_URL ?? "http://localhost:11434"
+): Promise<CardParseResult> {
+  const model = process.env.OLLAMA_RULES_MODEL ?? process.env.OLLAMA_MODEL ?? "qwen2.5:7b-instruct-q5_K_M";
+  const userContent = JSON.stringify({ cardName: input.cardName, typeLine: input.typeLine, oracleText: input.oracleText });
+  const result = await runParseAttempts(baseUrl, model, [{ role: "system", content: SYSTEM_PROMPT }, { role: "user", content: userContent }], input);
+
+  // mtg-commander-engine-spec.md Phase 3a: only spent when the plain attempt actually declined —
+  // this bulk parser runs offline over ~30k cards, and the large majority parse fine without ever
+  // needing the extra context, so this is a targeted second call for the subset that didn't, not a
+  // blanket cost on every card. getXMageCardByName returns undefined for the ~1.5% of cards XMage
+  // hasn't implemented either, in which case this is a no-op and the plain result stands.
+  if (!deriveCardDeclined(result.plan.abilities)) return result;
+  const xmageCard = getXMageCardByName(input.cardName);
+  if (!xmageCard) return result;
+
+  const groundedUserContent = `${userContent}\n\n${xmageReferenceBlurb(xmageCard)}`;
+  try {
+    return await runParseAttempts(baseUrl, model, [{ role: "system", content: SYSTEM_PROMPT }, { role: "user", content: groundedUserContent }], input);
+  } catch {
+    // The grounded retry itself failed validation twice (rare — the extra context is large enough
+    // that a small model can occasionally trip over it) — the plain, ungrounded result is still a
+    // perfectly valid (if declined) answer, so fall back to it rather than losing the whole parse.
+    return result;
+  }
 }
 
 async function callOllama(baseUrl: string, model: string, messages: Array<{ role: string; content: string }>): Promise<string> {
