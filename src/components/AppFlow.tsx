@@ -998,7 +998,10 @@ function ruleWorkflowCacheKey(event: string, oracleText: string) {
 // planner instead of the rule-workflow advisor — deliberately in-memory only for now (no
 // localStorage persistence, no prewarming) to keep this first pass small; ruleWorkflowCache's own
 // persistence/prewarm machinery is a reasonable follow-up once this fallback has real usage data.
-const primitiveActionPlanCache = new Map<string, PrimitiveActionPlan>();
+// usedXMageGrounding rides along with the cached plan (not just the plan alone) so a cache hit on a
+// repeat of the same trigger within this session still reports accurately whether XMage grounding
+// was involved in producing it — see xmageGrounding.ts / mtg-commander-engine-spec.md Phase 3a.
+const primitiveActionPlanCache = new Map<string, { plan: PrimitiveActionPlan; usedXMageGrounding: boolean }>();
 
 function loadRuleWorkflowCacheOnce() {
   if (ruleWorkflowCacheLoaded || typeof window === "undefined") return;
@@ -6284,11 +6287,16 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     const cacheKey = ruleWorkflowCacheKey(event, sourceCard.oracleText);
     const cached = primitiveActionPlanCache.get(cacheKey);
     if (cached) {
-      if (!cached.declined && cached.steps.length > 0 && isBoardConditionMet(cached.condition ?? "", seat)) {
-        if (cached.optional) {
-          offerOptionalPrimitivePlan(seatId, sourceCard, cached.steps, cached.summary);
+      if (!cached.plan.declined && cached.plan.steps.length > 0 && isBoardConditionMet(cached.plan.condition ?? "", seat)) {
+        if (cached.plan.optional) {
+          offerOptionalPrimitivePlan(seatId, sourceCard, cached.plan.steps, cached.plan.summary);
         } else {
-          setSession((current) => applyPrimitiveActionPlan(current, seatId, sourceCard, cached.steps));
+          setSession((current) => applyPrimitiveActionPlan(current, seatId, sourceCard, cached.plan.steps));
+          addEvent(
+            `${sourceCard.name}: ${cached.plan.summary || "resolved via the primitive-action fallback"} (cached)${cached.usedXMageGrounding ? " — grounded via XMage reference" : ""}.`,
+            seatId,
+            "Rules advisor (primitive plan)"
+          );
         }
       }
       return;
@@ -6320,14 +6328,18 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         })
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const result = (await response.json()) as { source: "ollama" | "fallback" | "cache"; plan: PrimitiveActionPlan };
-      primitiveActionPlanCache.set(cacheKey, result.plan);
+      const result = (await response.json()) as { source: "ollama" | "fallback" | "cache"; plan: PrimitiveActionPlan; usedXMageGrounding: boolean };
+      primitiveActionPlanCache.set(cacheKey, { plan: result.plan, usedXMageGrounding: result.usedXMageGrounding });
       if (!result.plan.declined && result.plan.steps.length > 0 && isBoardConditionMet(result.plan.condition ?? "", seat)) {
         if (result.plan.optional) {
           offerOptionalPrimitivePlan(seatId, sourceCard, result.plan.steps, result.plan.summary);
         } else {
           setSession((current) => applyPrimitiveActionPlan(current, seatId, sourceCard, result.plan.steps));
-          addEvent(`${sourceCard.name}: ${result.plan.summary || "resolved via the primitive-action fallback"}.`, seatId, "Rules advisor (primitive plan)");
+          addEvent(
+            `${sourceCard.name}: ${result.plan.summary || "resolved via the primitive-action fallback"}${result.usedXMageGrounding ? " — grounded via XMage reference" : ""}.`,
+            seatId,
+            "Rules advisor (primitive plan)"
+          );
         }
       }
     } catch (error) {

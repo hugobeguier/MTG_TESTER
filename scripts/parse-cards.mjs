@@ -75,7 +75,12 @@ async function main() {
   // Keyed by result.status (parsed/dry_run/cached/skipped_vanilla/failed/error) plus, for
   // parsed/dry_run results, a parallel ok/declined split — kept separate from status so a cache
   // hit's stored parseStatus never gets conflated with a freshly-parsed one under the same key.
-  const tally = { byStatus: {}, ok: 0, declined: 0 };
+  // mtg-commander-engine-spec.md Phase 3a: groundedOk/groundedDeclined further split the ok/declined
+  // counts down to just the requests that actually used XMage grounding (result.usedXMageGrounding,
+  // set by requestCardParse when the plain attempt declined and a reference was found) — this is
+  // the concrete, run-over-run answer to "is grounding actually helping," not just an inference from
+  // before/after totals.
+  const tally = { byStatus: {}, ok: 0, declined: 0, groundedOk: 0, groundedDeclined: 0 };
   let completed = 0;
   let cursor = 0;
 
@@ -89,6 +94,9 @@ async function main() {
       tally.byStatus[result.status] = (tally.byStatus[result.status] ?? 0) + 1;
       if ((result.status === "parsed" || result.status === "dry_run") && result.parseStatus) {
         tally[result.parseStatus] = (tally[result.parseStatus] ?? 0) + 1;
+        if (result.usedXMageGrounding) {
+          tally[result.parseStatus === "ok" ? "groundedOk" : "groundedDeclined"] += 1;
+        }
       }
       if (result.status === "failed" || result.status === "error") {
         await logFailure(card, result.error ?? "unknown error");
@@ -96,7 +104,7 @@ async function main() {
 
       if (completed % 100 === 0 || completed === candidates.length) {
         console.log(
-          `[${completed}/${candidates.length}] ok=${tally.ok} declined=${tally.declined} failed=${tally.byStatus.failed ?? 0} error=${tally.byStatus.error ?? 0} cached=${tally.byStatus.cached ?? 0}`
+          `[${completed}/${candidates.length}] ok=${tally.ok} declined=${tally.declined} failed=${tally.byStatus.failed ?? 0} error=${tally.byStatus.error ?? 0} cached=${tally.byStatus.cached ?? 0} grounded(ok=${tally.groundedOk} declined=${tally.groundedDeclined})`
         );
       }
     }
@@ -105,6 +113,11 @@ async function main() {
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, candidates.length) }, worker));
 
   console.log("Done.", tally);
+  if (tally.groundedOk + tally.groundedDeclined > 0) {
+    console.log(
+      `XMage grounding was used on ${tally.groundedOk + tally.groundedDeclined} card(s) this run (only attempted after a plain decline): ${tally.groundedOk} got past it (ok), ${tally.groundedDeclined} still declined even with a reference.`
+    );
+  }
   if ((tally.byStatus.failed ?? 0) > 0 || (tally.byStatus.error ?? 0) > 0) {
     console.log(`Failures logged to ${FAILED_LOG_PATH} — re-run with --retry-failed once fixed.`);
   }

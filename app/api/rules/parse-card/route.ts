@@ -41,12 +41,12 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const { plan, model } = await requestCardParse({ cardName: card.name, oracleText: card.oracleText, typeLine: card.typeLine });
+    const { plan, model, usedXMageGrounding } = await requestCardParse({ cardName: card.name, oracleText: card.oracleText, typeLine: card.typeLine });
     const parseStatus = plan.declined ? "declined" : "ok";
     if (!input.dryRun) {
-      saveParsedCard({ oracleId: card.oracleId, cardName: card.name, parseStatus, source: "llm_parsed", model, abilities: plan.abilities });
+      saveParsedCard({ oracleId: card.oracleId, cardName: card.name, parseStatus, source: "llm_parsed", model, abilities: plan.abilities, usedXMageGrounding });
     }
-    return NextResponse.json({ status: input.dryRun ? "dry_run" : "parsed", oracleId: card.oracleId, cardName: card.name, parseStatus, plan, model });
+    return NextResponse.json({ status: input.dryRun ? "dry_run" : "parsed", oracleId: card.oracleId, cardName: card.name, parseStatus, plan, model, usedXMageGrounding });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (!input.dryRun) {

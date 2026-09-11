@@ -154,6 +154,13 @@ Base the parse solely on the given oracle text — do not infer or recall other 
 export interface CardParseResult {
   plan: CardParse;
   model: string;
+  // mtg-commander-engine-spec.md Phase 3a observability: true only when THIS result actually came
+  // from the XMage-grounded retry (the plain attempt declined, a reference existed, and the
+  // grounded retry itself validated) — false for a plain success, a plain decline with no reference
+  // available, or a decline where the grounded retry itself failed validation and the plain result
+  // was kept instead. Threaded into parsed_cards.used_xmage_grounding by the /api/rules/parse-card
+  // route so getParseStats' xmageGrounding breakdown can answer "did grounding help" from real data.
+  usedXMageGrounding: boolean;
 }
 
 // One retry with the validation error appended, per spec Phase 1a point 6 — a small local model
@@ -166,7 +173,7 @@ async function runParseAttempts(
   model: string,
   messages: Array<{ role: string; content: string }>,
   input: CardParseInput
-): Promise<CardParseResult> {
+): Promise<{ plan: CardParse; model: string }> {
   let lastError: unknown;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
@@ -207,18 +214,24 @@ export async function requestCardParse(
   // needing the extra context, so this is a targeted second call for the subset that didn't, not a
   // blanket cost on every card. getXMageCardByName returns undefined for the ~1.5% of cards XMage
   // hasn't implemented either, in which case this is a no-op and the plain result stands.
-  if (!deriveCardDeclined(result.plan.abilities)) return result;
+  if (!deriveCardDeclined(result.plan.abilities)) return { ...result, usedXMageGrounding: false };
   const xmageCard = getXMageCardByName(input.cardName);
-  if (!xmageCard) return result;
+  if (!xmageCard) return { ...result, usedXMageGrounding: false };
 
   const groundedUserContent = `${userContent}\n\n${xmageReferenceBlurb(xmageCard)}`;
   try {
-    return await runParseAttempts(baseUrl, model, [{ role: "system", content: SYSTEM_PROMPT }, { role: "user", content: groundedUserContent }], input);
+    const groundedResult = await runParseAttempts(
+      baseUrl,
+      model,
+      [{ role: "system", content: SYSTEM_PROMPT }, { role: "user", content: groundedUserContent }],
+      input
+    );
+    return { ...groundedResult, usedXMageGrounding: true };
   } catch {
     // The grounded retry itself failed validation twice (rare — the extra context is large enough
     // that a small model can occasionally trip over it) — the plain, ungrounded result is still a
     // perfectly valid (if declined) answer, so fall back to it rather than losing the whole parse.
-    return result;
+    return { ...result, usedXMageGrounding: false };
   }
 }
 

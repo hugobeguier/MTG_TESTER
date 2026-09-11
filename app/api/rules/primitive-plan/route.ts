@@ -38,7 +38,8 @@ export async function POST(request: NextRequest) {
         optional: false,
         condition: "",
         steps: []
-      }
+      },
+      usedXMageGrounding: false
     });
   }
 }
@@ -60,6 +61,10 @@ function tryCache(cardName: string, event: string) {
       optional: ability.optional,
       condition: ability.condition,
       steps: ability.steps
-    }
+    },
+    // A cache hit never calls Ollama at all — nothing to ground. cardParser.ts's own
+    // parsed.usedXMageGrounding (recorded when THIS cache entry was first parsed, see
+    // parse-card/route.ts) is a separate, already-durable fact this response doesn't need to repeat.
+    usedXMageGrounding: false
   };
 }

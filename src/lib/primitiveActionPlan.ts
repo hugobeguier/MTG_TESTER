@@ -382,5 +382,11 @@ export async function requestPrimitiveActionPlan(input: PrimitiveActionPlanInput
   }
 
   const plan = PrimitiveActionPlanSchema.parse(JSON.parse(content));
-  return { source: "ollama" as const, plan: { ...plan, steps: filterGroundedSteps(plan.steps, input.oracleText) } };
+  // mtg-commander-engine-spec.md Phase 3a observability: true whenever a reference was found and
+  // included in the prompt above, regardless of what the model then did with it — this function
+  // (unlike cardParser.ts's requestCardParse) includes grounding proactively rather than after a
+  // decline, so "was grounding used" here just means "was xmageCard found," not "did the plan
+  // change as a result." Surfaced through /api/rules/primitive-plan so AppFlow.tsx's event log can
+  // show it live.
+  return { source: "ollama" as const, plan: { ...plan, steps: filterGroundedSteps(plan.steps, input.oracleText) }, usedXMageGrounding: Boolean(xmageCard) };
 }

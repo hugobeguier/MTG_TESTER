@@ -73,8 +73,8 @@ export function getCardDb(): Database.Database {
     -- normalized form of the card's OWN filename (not a name this project supplies — the ingestion
     -- key is always derived from the real file XMage shipped, so it can never be wrong about what
     -- it actually indexed, independent of how well xmageKeyForCardName's Scryfall-name-to-key guess
-    -- happens to work for any given lookup). Not yet consulted by anything at runtime — this is the
-    -- ingestion half only; the declined-card lookup/grounding half is future work.
+    -- happens to work for any given lookup). Consulted by cardParser.ts's offline bulk parser and
+    -- primitiveActionPlan.ts's live fallback via getXMageCardByName (src/lib/xmageGrounding.ts).
     CREATE TABLE IF NOT EXISTS xmage_cards (
       xmage_key TEXT PRIMARY KEY,
       file_path TEXT NOT NULL,
@@ -82,6 +82,16 @@ export function getCardDb(): Database.Database {
       ingested_at TEXT NOT NULL
     );
   `);
+
+  // parsed_cards already existed (and may already hold real rows) before used_xmage_grounding was
+  // added — CREATE TABLE IF NOT EXISTS above never adds a column to an existing table, so an
+  // explicit, idempotent ALTER TABLE is the only way an already-initialized data/cards.db picks it
+  // up. The very first schema migration this codebase has ever needed (every table before this one
+  // was new, not altered) — see saveParsedCard's own doc comment for what the column records.
+  const parsedCardsColumns = db.prepare("PRAGMA table_info(parsed_cards)").all() as Array<{ name: string }>;
+  if (!parsedCardsColumns.some((column) => column.name === "used_xmage_grounding")) {
+    db.exec("ALTER TABLE parsed_cards ADD COLUMN used_xmage_grounding INTEGER NOT NULL DEFAULT 0");
+  }
 
   // First open: seed the cards table from the existing JSON catalog cardCatalog.ts already loads,
   // rather than re-fetching Scryfall — this DB is a queryable mirror of that same import, not a
@@ -215,6 +225,13 @@ export interface ParsedCardRow {
   abilities: CardParse["abilities"];
   error: string | null;
   parsedAt: string;
+  // mtg-commander-engine-spec.md Phase 3a observability: whether the SAVED result actually came
+  // from a request whose prompt included an XMage reference implementation — see
+  // requestCardParse's own doc comment in cardParser.ts for exactly when that is (the plain attempt
+  // declined AND a reference existed AND the grounded retry itself validated). Lets a query answer
+  // "did grounding help" directly (compare parse_status across grounded vs ungrounded rows) instead
+  // of only being inferable from before/after re-parse runs.
+  usedXMageGrounding: boolean;
 }
 
 export function getParsedCard(oracleId: string): ParsedCardRow | undefined {
@@ -228,6 +245,7 @@ export function getParsedCard(oracleId: string): ParsedCardRow | undefined {
         abilities: string;
         error: string | null;
         parsed_at: string;
+        used_xmage_grounding: number;
       }
     | undefined;
   if (!row) return undefined;
@@ -239,7 +257,8 @@ export function getParsedCard(oracleId: string): ParsedCardRow | undefined {
     model: row.model,
     abilities: JSON.parse(row.abilities),
     error: row.error,
-    parsedAt: row.parsed_at
+    parsedAt: row.parsed_at,
+    usedXMageGrounding: Boolean(row.used_xmage_grounding)
   };
 }
 
@@ -251,6 +270,7 @@ export interface SaveParsedCardInput {
   model?: string;
   abilities: CardParse["abilities"];
   error?: string;
+  usedXMageGrounding?: boolean;
 }
 
 // Never overwrite a manually-corrected entry with a fresh LLM pass (spec Phase 1a point 8) — a
@@ -261,11 +281,12 @@ export function saveParsedCard(input: SaveParsedCardInput): void {
 
   getCardDb()
     .prepare(`
-      INSERT INTO parsed_cards (oracle_id, card_name, parse_status, source, model, abilities, error, parsed_at)
-      VALUES (@oracleId, @cardName, @parseStatus, @source, @model, @abilities, @error, @parsedAt)
+      INSERT INTO parsed_cards (oracle_id, card_name, parse_status, source, model, abilities, error, parsed_at, used_xmage_grounding)
+      VALUES (@oracleId, @cardName, @parseStatus, @source, @model, @abilities, @error, @parsedAt, @usedXMageGrounding)
       ON CONFLICT(oracle_id) DO UPDATE SET
         card_name = excluded.card_name, parse_status = excluded.parse_status, source = excluded.source,
-        model = excluded.model, abilities = excluded.abilities, error = excluded.error, parsed_at = excluded.parsed_at
+        model = excluded.model, abilities = excluded.abilities, error = excluded.error, parsed_at = excluded.parsed_at,
+        used_xmage_grounding = excluded.used_xmage_grounding
     `)
     .run({
       oracleId: input.oracleId,
@@ -275,7 +296,8 @@ export function saveParsedCard(input: SaveParsedCardInput): void {
       model: input.model ?? null,
       abilities: JSON.stringify(input.abilities),
       error: input.error ?? null,
-      parsedAt: new Date().toISOString()
+      parsedAt: new Date().toISOString(),
+      usedXMageGrounding: input.usedXMageGrounding ? 1 : 0
     });
 }
 
@@ -287,13 +309,25 @@ export function getParseStats() {
     parse_status: string;
     n: number;
   }>;
+  // mtg-commander-engine-spec.md Phase 3a: the actual "did grounding help" measurement — split by
+  // parse_status among only the rows a grounded request produced, so e.g. groundedByStatus.ok is
+  // literally "cards XMage grounding got past a plain decline," not just "cards that happen to have
+  // an XMage reference at all" (most of those never even needed the grounded retry — see
+  // requestCardParse's own doc comment on why it's only attempted after a plain decline).
+  const groundedByStatus = getCardDb()
+    .prepare("SELECT parse_status, COUNT(*) AS n FROM parsed_cards WHERE used_xmage_grounding = 1 GROUP BY parse_status")
+    .all() as Array<{ parse_status: string; n: number }>;
   return {
     totalCards,
     vanilla,
     nonVanilla: totalCards - vanilla,
     parsed,
     remaining: totalCards - vanilla - parsed,
-    byStatus: Object.fromEntries(byStatus.map((row) => [row.parse_status, row.n]))
+    byStatus: Object.fromEntries(byStatus.map((row) => [row.parse_status, row.n])),
+    xmageGrounding: {
+      totalUsed: groundedByStatus.reduce((sum, row) => sum + row.n, 0),
+      byStatus: Object.fromEntries(groundedByStatus.map((row) => [row.parse_status, row.n]))
+    }
   };
 }
 
