@@ -270,15 +270,9 @@ type PendingAction =
       sourceZone?: "hand" | "command" | "exile";
       manaSourceIds: string[];
       position?: { x: number; z: number };
-      triggersChecked?: boolean;
       faceIndex?: number;
       chosenX?: number;
       counterTargetId?: string;
-      // Which of the actor's spells this turn this one is (1 = their first spell, 2 = their
-      // second, ...) — set once in beginPendingAction from spellsCastThisTurn and carried on the
-      // action so findTriggeredAbilityForSpell can check "first spell each turn"-gated triggers
-      // (Esper Sentinel, ...) at resolution time without needing its own separate counter.
-      castOrdinal?: number;
       message: string;
     }
   | {
@@ -4758,7 +4752,6 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         const priorSpellCount = spellsCastThisTurn.current.get(turnSeatKey) ?? 0;
         const castOrdinal = priorSpellCount + 1;
         spellsCastThisTurn.current.set(turnSeatKey, castOrdinal);
-        action = { ...action, castOrdinal };
         const castTriggers = findCastTriggers(session, action.actorSeatId, sourceCard, castOrdinal);
         // Deferred, same reasoning as the land-ETB-trigger scheduling elsewhere in this file:
         // queueCommonTriggers itself calls beginPendingAction, so calling it synchronously here
@@ -5357,13 +5350,11 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       return;
     }
 
-    const trigger = action.triggersChecked ? undefined : findTriggeredAbilityForSpell(session, action);
-    if (trigger) {
-      const checkedAction = { ...action, triggersChecked: true };
-      updateStackAction(checkedAction);
-      beginPendingAction({ ...trigger, parentAction: checkedAction }, "Trigger");
-      return;
-    }
+    // "unless that player pays {N}" cast triggers (Mystic Remora, Esper Sentinel, ...) used to be
+    // checked here, at the triggering spell's own resolution — see findCastTriggers' own doc comment
+    // on why that broke the moment the spell got countered (its resolution is never reached at all).
+    // They're now found and queued at cast time instead, the same way every other cast trigger is —
+    // see beginPendingAction's own findCastTriggers call.
 
     // Lim-Dûl's Vault's repeatable look/bottom loop (see startLimDulVaultLook's own comment) needs
     // its own interactive flow the generic spell-resolution path further below has no way to
@@ -11249,6 +11240,48 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
   let changed = false;
   let next = session;
 
+  // Layer 7a CDA/devotion power-toughness, computed here — BEFORE the toughness<=0 death check just
+  // below — rather than only in the full creature-characteristics pass much further down this same
+  // function. A freshly-entered CDA creature (Darksteel Juggernaut: "power and toughness are each
+  // equal to the number of artifacts you control") starts with cdaToughness undefined; effectiveToughness's
+  // own fallback for that case reads its printed toughness, the literal string "*", which parses to
+  // NaN and is coerced to 0 — so it read as toughness 0 until something computed the real value,
+  // which didn't happen until that later pass, by which point the death check right after this
+  // comment had already destroyed it "for having toughness 0 or less" even with artifacts on the
+  // battlefield. Deliberately narrow (just power/toughness, not the full type-grant/attachment/
+  // keyword pass) and redundant with that later, fuller pass by design — recomputing the same CDA
+  // value twice in one call is harmless, and keeping this pre-pass small keeps its own risk small
+  // too. Reported live as Darksteel Juggernaut dying the instant it entered.
+  next = {
+    ...next,
+    seats: next.seats.map((seat) => ({
+      ...seat,
+      board: {
+        ...seat.board,
+        battlefield: seat.board.battlefield.map((card) => {
+          if (!hasCardType(card, "Creature")) return card;
+          const cda = parseCharacteristicDefiningAbility(card.oracleText);
+          const devotionCda = parseDevotionCda(card.oracleText);
+          if (!cda && !devotionCda) return card;
+          let cdaPower = card.cdaPower;
+          let cdaToughness = card.cdaToughness;
+          if (cda) {
+            const count = countMatchingPermanents(seat.board.battlefield, cda.matcher);
+            if (cda.stat === "both" || cda.stat === "power") cdaPower = count;
+            if (cda.stat === "both" || cda.stat === "toughness") cdaToughness = count;
+          }
+          if (devotionCda) {
+            const devotion = computeDevotion(seat.board.battlefield, devotionCda.color);
+            if (devotionCda.stat === "both" || devotionCda.stat === "power") cdaPower = devotion;
+            if (devotionCda.stat === "both" || devotionCda.stat === "toughness") cdaToughness = devotion;
+          }
+          if (cdaPower === card.cdaPower && cdaToughness === card.cdaToughness) return card;
+          return { ...card, cdaPower, cdaToughness };
+        })
+      }
+    }))
+  };
+
   // Toughness <= 0, no loyalty counters, and the legendary rule all destroy permanents.
   const destructions: Array<{ seatId: string; cardId: string; message: string }> = [];
   for (const seat of next.seats) {
@@ -12984,15 +13017,18 @@ function chooseCreatureCardsFromOwnGraveyard(session: GameSession, casterSeatId:
 
 // Regrow effects in this codebase's real-card sample are all self-graveyard-only (Regrowth,
 // Nature's Spiral) — no "any graveyard" variant found, so this deliberately doesn't take one.
+// Reuses removalSpells.ts's matchesTargetType (the same type-matching logic chooseRemovalTarget
+// already trusts) for every RegrowTargetType value it also recognizes — "card" (the one RegrowTargetType
+// value matchesTargetType has no concept of, meaning "any card, no restriction") is the sole special
+// case. The hand-written version this replaced only ever recognized "card"/"permanent"/"creature"/
+// "land", silently treating EVERY other RegrowTargetType (enchantment, artifact, nonland_permanent)
+// as "matches nothing" — so a regrow effect targeting any of those three always found zero candidates
+// regardless of what was actually in the graveyard, and the spell became uncastable outright ("no
+// legal target") even with a real match sitting right there. Reported live as Heliod, the Radiant
+// Dawn refusing to cast with Mind's Dilation (an Enchantment) in the graveyard.
 function chooseRegrowTarget(session: GameSession, casterSeatId: string, targetType: RegrowTargetType): VisibleCard | undefined {
   const seat = session.seats.find((item) => item.id === casterSeatId);
-  const candidates = (seat?.board.graveyard ?? []).filter((card) => {
-    if (targetType === "card") return true;
-    if (targetType === "permanent") return !card.typeLine.includes("Instant") && !card.typeLine.includes("Sorcery");
-    if (targetType === "creature") return card.typeLine.includes("Creature");
-    if (targetType === "land") return card.typeLine.includes("Land");
-    return false;
-  });
+  const candidates = (seat?.board.graveyard ?? []).filter((card) => (targetType === "card" ? true : matchesTargetType(card, targetType)));
   if (candidates.length === 0) return undefined;
   return candidates.reduce((a, b) => (b.manaValue > a.manaValue ? b : a));
 }
@@ -14791,49 +14827,6 @@ function resolveHumanUnblockedDamage(session: GameSession, choice: BlockChoiceSt
   };
 }
 
-// "Whenever an opponent casts a noncreature spell, you may pay {1}. If you do, draw a card."
-// (Mystic Remora) / "Whenever an opponent casts their first noncreature spell each turn, draw a
-// card unless that player pays {X}, ..." (Esper Sentinel) — both are cast triggers findCastTriggers
-// would otherwise catch via CAST_TRIGGER_PATTERN, but it deliberately defers any "unless ... pays"
-// clause to this dedicated finder instead (see the comment at its own skip check) since the tax
-// itself isn't modeled — this always resolves as a plain draw, same simplification the "you may
-// pay {1}" half of Mystic Remora already got before Esper Sentinel existed here. Reusing
-// parseCastTriggerCondition rather than a hand-rolled name/text check is what makes Esper
-// Sentinel's "first spell each turn" restriction (via requiredOrdinal/action.castOrdinal) come for
-// free instead of needing its own separate counter.
-function findTriggeredAbilityForSpell(session: GameSession, action: Extract<PendingAction, { type: "spell" }>): Extract<PendingAction, { type: "trigger" }> | undefined {
-  const actor = session.seats.find((seat) => seat.id === action.actorSeatId);
-  const spell = findSpellSourceCard(session, action);
-  if (!actor || !spell) return undefined;
-
-  for (const seat of session.seats) {
-    if (seat.id === action.actorSeatId) continue;
-    for (const source of seat.board.battlefield) {
-      for (const clause of oracleClauses(source.oracleText)) {
-        const condition = parseCastTriggerCondition(clause);
-        if (!condition || condition.relativity === "you") continue;
-        if (!/\bunless\b[^.]*\bpays?\b/i.test(condition.effectClause) || !/\bdraw a card\b/i.test(condition.effectClause)) continue;
-        if (!spellMatchesCastTriggerFilter(spell, condition.spellTypeFilter)) continue;
-        if (condition.requiredOrdinal !== undefined && condition.requiredOrdinal !== (action.castOrdinal ?? 1)) continue;
-        return {
-          id: crypto.randomUUID(),
-          type: "trigger",
-          actorSeatId: action.actorSeatId,
-          controllerSeatId: seat.id,
-          sourceCardId: source.id,
-          sourceCardName: source.name,
-          triggerKind: "common",
-          effect: { kind: "draw_cards", amount: 1 },
-          parentAction: { ...action, triggersChecked: true },
-          message: `${source.name} triggers because ${actor.name} cast ${spell.name}.`
-        };
-      }
-    }
-  }
-
-  return undefined;
-}
-
 export function findCommonTriggersForPermanentEntered(session: GameSession, enteringSeatId: string, enteringCard: VisibleCard): Array<Extract<PendingAction, { type: "trigger" }>> {
   const enteringSeat = session.seats.find((seat) => seat.id === enteringSeatId);
   if (!enteringSeat) return [];
@@ -15220,7 +15213,7 @@ function isImpulseCastFreeEffectClause(clause: string): boolean {
   return /\bexiles? the top card of (their|your) library\b/i.test(clause) && /\bwithout paying its mana cost\b/i.test(clause) && /\bnonland\b/i.test(clause);
 }
 
-function findCastTriggers(
+export function findCastTriggers(
   session: GameSession,
   casterSeatId: string,
   castCard: VisibleCard,
@@ -15239,14 +15232,21 @@ function findCastTriggers(
         if (condition.requiredOrdinal !== undefined && condition.requiredOrdinal !== castOrdinalThisTurnForCaster) continue;
         if (!spellMatchesCastTriggerFilter(castCard, condition.spellTypeFilter)) continue;
         // "... unless that player pays {N}." (Mystic Remora, Esper Sentinel, ...) is a tax-
-        // conditional effect this generic scan has no way to model — it would otherwise match the
-        // "draw a card" half via commonTriggerEffect below and silently drop the "unless" half,
-        // turning a conditional draw into an unconditional one. findTriggeredAbilityForSpell owns
-        // this exact shape instead (checked at resolution time, using the same
-        // parseCastTriggerCondition parse), so this scan defers to it rather than also matching the
-        // same clause — without this, every noncreature spell cast in front of one of these
-        // triggered it twice, once from each system, both silently ignoring the tax.
-        if (/\bunless\b[^.]*\bpays?\b/i.test(condition.effectClause)) continue;
+        // conditional effect this generic scan has no way to model — the tax itself is dropped, same
+        // simplification as everywhere else in this codebase that models a cost as "always paid" or
+        // "never paid" rather than as a real choice (see e.g. Gix, Yawgmoth Praetor's own "may pay
+        // life" resolution nearby). This USED TO be deferred entirely to a separate function
+        // (findTriggeredAbilityForSpell) that ran at the triggering SPELL'S OWN RESOLUTION time
+        // instead of at cast time — which meant the trigger only ever fired if the spell that caused
+        // it actually resolved. A triggered ability is its own independent object on the stack the
+        // instant it triggers (rule 603.3b): countering the spell that caused it doesn't cancel it.
+        // Since a countered spell's own resolvePendingAction is never reached at all (it's removed
+        // from the stack directly inside the COUNTERING spell's resolution instead), that deferred
+        // check never ran, and the trigger silently never fired. Reported live as Esper Sentinel not
+        // triggering off an opponent's Grave Pact once the human Countered it. Handled here instead,
+        // at the correct (cast) time, so it goes through the exact same commonTriggerEffect fall-
+        // through as every other cast trigger below — "draw a card" is still all commonTriggerEffect
+        // ever extracts from this clause, so the amount is unaffected; only the TIMING changed.
 
         if (isImpulseCastFreeEffectClause(condition.effectClause)) {
           triggers.push(

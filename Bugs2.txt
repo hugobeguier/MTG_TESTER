@@ -1,10 +1,4 @@
-1. Sables Gix, Yawgmoth Praetor did not trigger when I hit Malik, do I need to add every single card for them to work?
-2. Can I get more information how the Agents think during Mulligan step since I still think they think wierd sometimes
-3. Accursed Marauder did not trigger on ETB
-4. Plaguecrafter did not let me choose target creature to sacrifice, it auto picked which I dont like
-5. Village Rites did not give the choice to choose a creature to sacrifice
-6. the keyword "Sacrifice" should always let the player choose a creature they control, using the target UI that exists. 
-7. Meren did not trigger when Village Rites sacrificed a creature. 
-8. Feels like the "Stops" does not work quite as expected, I have end step on sable checked but it goes directly to my turn for some reason, and I have a creature I can sacrifice or if I would like to play an instant with my mana I got up
-9. Breena, the Demagogue does not work either we need a better way of handeling all these cards since if I play a new deck wwith 100 new cards nothing works as expected.
-
+1. Darksteel Juggernaut has 0 in power and thoughness but it gets +1/+1 for each artifact, so it should not enter the graveyard upon entering the battlefield unless the player does not have any artifacts
+2. Sable casts Grave Pact which triggers my Esper Sentinel, but when I then used a Counterspell on that spell my Esper Sentinel did not trigger afterwards
+3. I got Mind's Dilation in my graveyard, And I wanted to play Heliod, the Radiant Dawn to return that enchantment to my hand, but for some reason I get You cannot cast Heliod, the Radiant Dawn; there is no legal target.
+4. 
