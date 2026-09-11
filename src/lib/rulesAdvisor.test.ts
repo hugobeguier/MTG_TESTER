@@ -242,6 +242,24 @@ describe("deterministicRuleWorkflow", () => {
     expect(workflow?.allowedCardFilter).toBe("forest");
   });
 
+  it("extracts a comma-separated list of alternative types instead of the generic placeholder (Farseek)", () => {
+    // Real oracle text, verified via this codebase's local card database — no "with"/comparative
+    // qualifier, just a plain comma-separated list of four alternative basic land types. Reported
+    // live as Farseek fetching Atarka, World Render: the extraction regex's character class had no
+    // room for the commas, so it captured nothing, fell back to the generic placeholder, and
+    // chooseAgentLibraryCardForRuleChoice's own placeholder-triggered fallback (in AppFlow.tsx)
+    // handed back a creature instead of a land for a battlefield-bound search.
+    const farseek = card({
+      id: "farseek-1",
+      name: "Farseek",
+      typeLine: "Sorcery",
+      oracleText: "Search your library for a Plains, Island, Swamp, or Mountain card, put it onto the battlefield tapped, then shuffle."
+    });
+    const workflow = deterministicRuleWorkflow(input(farseek));
+    expect(workflow?.workflow).toBe("search_library_to_battlefield");
+    expect(workflow?.allowedCardFilter).toBe("plains, island, swamp, or mountain");
+  });
+
   it("falls back to the generic placeholder when no real type is named (Entomb)", () => {
     const entomb = card({
       id: "entomb-2",

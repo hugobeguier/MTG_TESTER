@@ -494,9 +494,23 @@ function extractSearchedCardType(text: string): string | undefined {
   // correctly returns undefined for a plain "a card"/"a creature" with no named type) while adding
   // the plural branch Buried Alive needs. Reported live as Buried Alive falling back to the generic
   // "cards matching the source effect" placeholder, losing the "creature" restriction entirely.
-  const pluralMatch = text.match(/\bsearch (?:your|their) library for up to \w+ ([a-z][a-z '-]*?) cards?\b/);
+  // Explicit list grammar — "word(, word)*(, or word)?" — rather than a single free-form character
+  // class with a comma thrown in: a bare "[a-z ,'-]*?" allowed the capture to cross a genuine
+  // sentence boundary and swallow unrelated later text too (Entomb's "a card, put that card into
+  // your graveyard" matched all the way to the SECOND "card," capturing "card, put that" instead of
+  // correctly finding no real type at all). This grammar only ever recognizes an actual list of
+  // alternatives — one or more comma-separated words, optionally ending in "[,] or word" — so a
+  // real list ("Plains, Island, Swamp, or Mountain card," Farseek) is captured in full while a plain
+  // "a card, <unrelated clause>" still correctly falls through to the generic placeholder below.
+  // Reported live as Farseek fetching Atarka, World Render: the PREVIOUS version of this fix (no
+  // comma support at all) couldn't capture the list either, which fell back to the same generic
+  // placeholder chooseAgentLibraryCardForRuleChoice's own destination-based fallback treats as "give
+  // up and hand back a creature instead" — exactly backwards for a spell whose whole point is
+  // fetching a land.
+  const LIST_OF_TYPES = "[a-z][a-z'-]*(?:,\\s*[a-z][a-z'-]*)*(?:,?\\s*or\\s+[a-z][a-z'-]*)?";
+  const pluralMatch = text.match(new RegExp(`\\bsearch (?:your|their) library for up to \\w+ (${LIST_OF_TYPES}) cards?\\b`));
   if (pluralMatch) return pluralMatch[1].trim();
-  const singularMatch = text.match(/\bsearch (?:your|their) library for an? ([a-z][a-z '-]*?) cards?\b/);
+  const singularMatch = text.match(new RegExp(`\\bsearch (?:your|their) library for an? (${LIST_OF_TYPES}) cards?\\b`));
   return singularMatch ? singularMatch[1].trim() : undefined;
 }
 

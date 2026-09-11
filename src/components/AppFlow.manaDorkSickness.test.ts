@@ -89,6 +89,30 @@ describe("chooseAgentLibraryCardForRuleChoice — typed search filter", () => {
   // only ever searches for "Forest") fetched Elvish Mystic once its Forests were already gone,
   // because both this filter's match branch and the "basic land" branch used to fall back to
   // whatever else was left (or library[0]) instead of admitting the search came up empty.
+  // Reported live: Farseek (real text "Search your library for a Plains, Island, Swamp, or Mountain
+  // card, put it onto the battlefield tapped, then shuffle.") fetched Atarka, World Render — a
+  // creature — instead of a land. The comma-separated allowedCardFilter ("plains, island, swamp, or
+  // mountain") that rulesAdvisor.ts's extractor now produces has to split into four real
+  // alternatives, not one unmatchable blob, or this same creature-first fallback fires again.
+  it("picks a Mountain over a creature for a comma-separated list of alternative types (Farseek)", () => {
+    const mystic = card({ id: "mystic", name: "Elvish Mystic", typeLine: "Creature — Elf Druid" });
+    const mountain = card({ id: "mountain", name: "Mountain", typeLine: "Basic Land — Mountain" });
+    const player = seat({ id: "p", name: "Player", kind: "agent", library: [mystic, mountain] });
+    const choice = {
+      id: "choice-farseek",
+      kind: "choose_card_from_library" as const,
+      controllerSeatId: "p",
+      sourceCardId: "farseek",
+      sourceCardName: "Farseek",
+      prompt: "Search your library for a Plains, Island, Swamp, or Mountain card.",
+      destination: "battlefield" as const,
+      maxChoices: 1,
+      allowedCardFilter: "plains, island, swamp, or mountain"
+    };
+    const picked = chooseAgentLibraryCardForRuleChoice(player, choice);
+    expect(picked?.id).toBe("mountain");
+  });
+
   it("fails to find (returns undefined) when a named type has no match left, instead of grabbing an unrelated card", () => {
     const mystic = card({ id: "mystic", name: "Elvish Mystic", typeLine: "Creature — Elf Druid" });
     const island = card({ id: "island", name: "Island", typeLine: "Basic Land — Island" });

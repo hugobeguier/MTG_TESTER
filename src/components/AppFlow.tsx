@@ -16861,7 +16861,17 @@ export function chooseAgentLibraryCardForRuleChoice(
     // through to the destination-based fallback below and, for a battlefield-bound search, handed
     // out the first CREATURE in the library instead of a land. Reproduced live: Three Visits found
     // Seedborn Muse. Match against any single alternative instead.
-    const alternatives = filter.split(/\s+or\s+/).map((word) => word.trim()).filter(Boolean);
+    // A longer list ("Plains, Island, Swamp, or Mountain," Farseek) uses commas between alternatives
+    // too, not just "or" — splitting on " or " alone left the first three names stuck together as
+    // one never-matching blob ("plains, island, swamp,"), which is exactly as unmatchable as the
+    // whole un-split phrase was, and fell through to the same creature-first fallback below.
+    // Reported live as Farseek fetching Atarka, World Render. Splits on ", " (optionally swallowing
+    // a following "or ") or a standalone " or ", so both "Forest or Plains" and "Plains, Island,
+    // Swamp, or Mountain" resolve to their real individual type words.
+    const alternatives = filter
+      .split(/\s*,\s*(?:or\s+)?|\s+or\s+/)
+      .map((word) => word.trim())
+      .filter(Boolean);
     const typeMatch = library.find((card) => {
       const typeLine = card.typeLine.toLowerCase();
       return alternatives.some((word) => typeLine.includes(word));
