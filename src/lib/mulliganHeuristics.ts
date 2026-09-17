@@ -4,11 +4,6 @@ export interface OpeningHandEvaluation {
   keep: boolean;
   score: number;
   reasons: string[];
-  /** True for a hand bad enough that keeping it should never be a judgment call at all — not just
-   *  "the heuristic leans mulligan" (any score < 0 already means that), but the same automatic-
-   *  mulligan tier as 0/7 lands. Callers that let an LLM make the actual keep/mulligan call should
-   *  treat this as authoritative and override a "keep" regardless of the model's stated reasoning. */
-  forceMulligan: boolean;
 }
 
 type ManaColor = "W" | "U" | "B" | "R" | "G" | "C";
@@ -48,15 +43,6 @@ const HIGH_COLOR_IDENTITY_THRESHOLD = 3;
 const MISSING_COLOR_PENALTY = 1;
 const MISSING_COLOR_PENALTY_HIGH_COLOR_IDENTITY = 2;
 
-// A hand can rack up this much negative score from a combination of factors (thin mana, no curve,
-// missing colors, ...) without ever tripping the 0/7-lands automatic mulligan above — but it's just
-// as bad in practice, and an LLM asked to weigh it is only ever advised (not required) to defer to
-// this heuristic. Reported live: Veyra (WUBRG) kept a score -8 hand — 2 lands, only 2 total mana
-// sources, no curve plays through turn 4, missing a commander color — reasoning about "powerful
-// cards" instead of the concrete mana problem it had itself identified. Matches the 0/7-lands
-// penalty (-6) as the bar for "this is not a judgment call."
-const HARD_MULLIGAN_SCORE_THRESHOLD = -6;
-
 // Archetype-specific emphasis, layered on top of the same land/ramp/curve/draw/interaction scoring
 // every hand gets — the foundation (lands, mana colors) never changes per archetype, since mana
 // matters equally regardless of game plan, but how much curve/draw/interaction matter does: aggro
@@ -91,47 +77,7 @@ function isInteraction(card: VisibleCard) {
   return card.role === "removal";
 }
 
-// card.producedMana is imported straight from Scryfall's own produced_mana field (see
-// import-commander-cards.mjs), which lists every color a card is EVER capable of producing under any
-// circumstance, with no distinction between a plain "{T}: Add" ability and one gated behind extra
-// mana, counters banked over several turns, or board state. That's fine for a quick "what colors does
-// this card touch" lookup, but wrong for opening-hand evaluation, which needs "what can this actually
-// produce right now." Reported live: Veyra kept a hand heuristic-scored as "covers all commander
-// colors" on the strength of Crucible of the Spirit Dragon and Three Tree City — both list all five
-// colors in produced_mana, but each land's only colored-mana ability is locked behind setup (storage
-// counters accumulated over turns; mana equal to creatures of a chosen type, worthless at 0 creatures)
-// that's never available in an opening hand. Only their unconditional "{T}: Add {C}" line is.
-//
-// A conservative filter, not a full cost parser: for a land specifically, only trust a color if some
-// line of its own oracle text taps for it at a cost of exactly "{T}" alone — the plain-tap-fixer
-// pattern (Command Tower, Exotic Orchard, basics, ...) — falling back to the raw producedMana list
-// when the card has no oracle text to check (e.g. test fixtures) or no such line matches at all.
-function immediatelyAvailableLandColors(card: VisibleCard): Set<ManaColor> | undefined {
-  if (!card.oracleText) return undefined;
-  const colors = new Set<ManaColor>();
-  let matchedManaLine = false;
-  for (const rawLine of card.oracleText.split("\n")) {
-    const line = rawLine.trim().replace(/^\(/, "").replace(/\)$/, "");
-    const match = /^\{T\}:\s*Add\s+(.+?)\.?$/i.exec(line);
-    if (!match) continue;
-    matchedManaLine = true;
-    const effect = match[1];
-    if (/any color/i.test(effect)) {
-      for (const color of ["W", "U", "B", "R", "G"] as ManaColor[]) colors.add(color);
-      continue;
-    }
-    for (const symbol of effect.matchAll(/\{([WUBRGC])\}/gi)) {
-      colors.add(symbol[1].toUpperCase() as ManaColor);
-    }
-  }
-  return matchedManaLine ? colors : undefined;
-}
-
 function producedColors(card: VisibleCard): Set<ManaColor> {
-  if (isLand(card)) {
-    const immediate = immediatelyAvailableLandColors(card);
-    if (immediate) return immediate;
-  }
   const colors = new Set<ManaColor>();
   for (const color of card.producedMana ?? []) {
     const normalized = color.toUpperCase();
@@ -300,12 +246,7 @@ export function evaluateOpeningHand(seat: PlayerSeat): OpeningHandEvaluation {
     reasons.push("hand covers all commander colors");
   }
 
-  if (!forceMulligan && score <= HARD_MULLIGAN_SCORE_THRESHOLD) {
-    forceMulligan = true;
-    reasons.push(`hand quality score ${score} is low enough to force a mulligan outright`);
-  }
-
-  return { keep: !forceMulligan && score >= 0, score, reasons, forceMulligan };
+  return { keep: !forceMulligan && score >= 0, score, reasons };
 }
 
 export function agentKeepsHand(seat: PlayerSeat) {

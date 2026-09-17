@@ -263,22 +263,6 @@ export function hasGraveyardShuffleReplacement(oracleText: string): boolean {
   );
 }
 
-// A rules-advisor allowedCardFilter can itself be an "X or Y" restriction (Grisly Salvage's "creature
-// or land"), not just a single type. Both places that enforce it — AppFlow.tsx's agent auto-resolver
-// and ThreeGameTable.tsx's human-facing look modal (which one a card's real typeLine could never
-// literally contain, e.g. "Land — Forest" has no substring "creature or land") used to check it as
-// one literal substring against typeLine, so a multi-type filter silently matched nothing at all —
-// reported live as Grisly Salvage's "To Hand" button never appearing for ANY card, creature or land
-// included. Splitting on " or " and matching any alternative handles both the single-type case
-// (Growing Rites' plain "creature") and the multi-type case the same way.
-export function cardMatchesTypeFilter(typeLine: string, filter: string): boolean {
-  const normalizedTypeLine = typeLine.toLowerCase();
-  return filter
-    .toLowerCase()
-    .split(" or ")
-    .some((part) => normalizedTypeLine.includes(part.trim()));
-}
-
 // "Whenever ~ attacks, add X mana in any combination of colors, where X is the total power of
 // attacking creatures. Spend this mana only to cast spells. Until end of turn, you don't lose this
 // mana as steps and phases end." (Klauth, Unrivaled Ancient — verified via the card data; not a mana
@@ -304,55 +288,4 @@ export function basicLandFetchManaCost(card: { oracleText: string }): number {
   const costPortion = clause?.split(":")[0] ?? "";
   const manaSymbols = costPortion.match(/\{(\d+)\}/g) ?? [];
   return manaSymbols.reduce((total, symbol) => total + (Number.parseInt(symbol.replace(/[{}]/g, ""), 10) || 0), 0);
-}
-
-const ROMAN_NUMERAL_VALUE: Record<string, number> = { I: 1, II: 2, III: 3, IV: 4, V: 5, VI: 6 };
-
-// Rule 714.2's standard reminder text: "(As this Saga enters and after your draw step, add a lore
-// counter. Sacrifice after <N>.)" — every real Saga is printed with this exact template (only <N>,
-// its own final chapter number, varies), so this is a reliable, card-name-independent way to learn
-// how many chapters a given Saga has, rather than trying to infer it from how many numbered clauses
-// happen to be present (which "I, II —" combined-chapter lines would undercount).
-function sagaChapterCount(oracleText: string): number | undefined {
-  const match = oracleText.match(/sacrifice after\s+(I{1,3}|IV|VI?)\s*\.?\)/i);
-  return match ? ROMAN_NUMERAL_VALUE[match[1].toUpperCase()] : undefined;
-}
-
-export interface SagaChapters {
-  chapterCount: number;
-  // Keyed by chapter number (1-based) — a combined "I, II — <text>" line populates both 1 and 2 with
-  // the same text, since rule 714.2c fires that one chapter ability once per lore counter that
-  // matches ANY of its listed numbers.
-  effectByChapter: Map<number, string>;
-}
-
-// Splits a Saga's own numbered chapter lines ("I — ...", "II — ...", or several numbers sharing one
-// line, "I, II — ...") into per-chapter effect text, the generalized form of what Urza's Saga's own
-// bespoke chapter-handling used to do only for that one card. Returns undefined for a non-Saga (or a
-// Saga missing the standard reminder text, which real oracle text always has) rather than guessing a
-// chapter count from context.
-export function parseSagaChapters(oracleText: string): SagaChapters | undefined {
-  const chapterCount = sagaChapterCount(oracleText);
-  if (!chapterCount) return undefined;
-  const effectByChapter = new Map<number, string>();
-  for (const clause of oracleClauses(oracleText)) {
-    const match = clause.match(/^((?:I{1,3}|IV|VI?)(?:\s*,\s*(?:I{1,3}|IV|VI?))*)\s*—\s*(.+)$/i);
-    if (!match) continue;
-    const numbers = match[1].split(",").map((part) => ROMAN_NUMERAL_VALUE[part.trim().toUpperCase()]);
-    for (const number of numbers) {
-      if (number) effectByChapter.set(number, match[2].trim());
-    }
-  }
-  return effectByChapter.size > 0 ? { chapterCount, effectByChapter } : undefined;
-}
-
-// "This Saga gains \"...\"" (Urza's Saga's chapter I/II, and the same template any other permanent-
-// level ability grant uses) — same shape/reasoning as parseEmblemGrant above, just naming a
-// permanent's own oracleText as the destination for the quoted text instead of a player's emblem
-// list. [^"]+ (not matching the closing double-quote) correctly captures a granted ability whose own
-// text contains single-quoted nested text (Urza's Saga chapter II's token ability description is
-// itself 'single-quoted' inside the outer "double-quoted" grant) without cutting it short.
-export function parseGainsAbilityGrant(effectText: string): string | undefined {
-  const match = effectText.match(/\bgains\s+"([^"]+)"/i);
-  return match ? match[1] : undefined;
 }

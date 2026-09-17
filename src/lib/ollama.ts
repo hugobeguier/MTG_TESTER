@@ -24,42 +24,6 @@ export function ollamaFetch(url: string, init: RequestInit, timeoutMs: number): 
   return fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
 }
 
-// Each agent seat plays under its own Ollama model, named after the agent (see agentModelName below).
-export function agentModelName(agentName: string) {
-  return `mtg-${agentName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
-}
-
-// A local Ollama instance typically keeps only one model resident, so switching from one agent's
-// model to another's forces a fresh weight load — on a 7B-class quantized model, a cold load can
-// easily run past OLLAMA_TIMEOUT_MS on its own, before any real generation even starts. Reported live
-// as an agent's opening-hand mulligan ("Ollama unavailable; using deterministic fallback") when it
-// happened to be the first seat to use a not-yet-loaded model that session, while other seats whose
-// models were already warm decided normally.
-//
-// A request to /api/generate with an empty prompt asks Ollama to load the model into memory without
-// generating anything, so callers can absorb this cold-load cost here — against this call's own much
-// more generous timeout — right before a real, tightly-timed decision request for the same model,
-// rather than have that real request pay for both the load and the generation. Best-effort: a failed
-// or slow warm-up just means the next real request pays the cold-load cost itself, exactly as it does
-// today without this, so errors are swallowed rather than surfaced.
-export const OLLAMA_WARMUP_TIMEOUT_MS = Number(process.env.OLLAMA_WARMUP_TIMEOUT_MS ?? 120000);
-
-export async function warmUpOllamaModel(model: string, baseUrl = process.env.OLLAMA_BASE_URL ?? "http://localhost:11434"): Promise<void> {
-  try {
-    await ollamaFetch(
-      `${baseUrl}/api/generate`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ model, prompt: "", stream: false })
-      },
-      OLLAMA_WARMUP_TIMEOUT_MS
-    );
-  } catch {
-    // Swallowed — see comment above.
-  }
-}
-
 const AgentActionSchema = z.object({
   actionType: z.enum([
     "keep_hand",
