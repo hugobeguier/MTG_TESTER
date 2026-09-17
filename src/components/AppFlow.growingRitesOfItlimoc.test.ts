@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { applyDeterministicPhaseTrigger, isRecognizedBoardCondition, putLookedAtCardsOnBottom, resolveAgentLibraryLookWorkflow } from "./AppFlow";
+import {
+  applyDeterministicPhaseTrigger,
+  isRecognizedBoardCondition,
+  putLookedAtCardsInGraveyard,
+  putLookedAtCardsOnBottom,
+  resolveAgentLibraryLookWorkflow
+} from "./AppFlow";
 import type { CardFaceRecord, GameSession, PlayerSeat, VisibleCard } from "@/lib/types";
 
 function card(overrides: Partial<VisibleCard> & Pick<VisibleCard, "id" | "name" | "typeLine">): VisibleCard {
@@ -135,5 +141,57 @@ describe("resolveAgentLibraryLookWorkflow — look_at_top_cards_reveal_type_to_h
     const after = result.seats.find((s) => s.id === "p")!;
     expect(after.board.hand).toHaveLength(0);
     expect(after.library?.map((c) => c.id).sort()).toEqual(["bolt", "forest"]);
+  });
+
+  // Reported live: Grisly Salvage "does not work as intended" — its real "creature or land" filter
+  // was checked as one literal substring against typeLine (which never contains "creature or land"
+  // verbatim), so no card ever matched, and its "rest into your graveyard" destination was never
+  // modeled at all (only "to the bottom" was).
+  it("honors an 'X or Y' filter (Grisly Salvage's 'creature or land') and sends the rest to the graveyard", () => {
+    const forest = card({ id: "forest", name: "Forest", typeLine: "Basic Land — Forest", manaValue: 0, zone: "library" });
+    const bigBear = card({ id: "big", name: "Big Bear", typeLine: "Creature — Bear", manaValue: 3, zone: "library" });
+    const instant = card({ id: "bolt", name: "Lightning Bolt", typeLine: "Instant", manaValue: 1, zone: "library" });
+    const player = seat({ id: "p", name: "You", kind: "agent", library: [forest, bigBear, instant] });
+    const result = resolveAgentLibraryLookWorkflow(
+      session([player]),
+      "p",
+      "Grisly Salvage",
+      "look_at_top_cards_reveal_type_to_hand",
+      3,
+      "creature or land",
+      undefined,
+      "graveyard"
+    );
+    const after = result.seats.find((s) => s.id === "p")!;
+    expect(after.board.hand.map((c) => c.id)).toEqual(["big"]);
+    expect(after.board.graveyard?.map((c) => c.id).sort()).toEqual(["bolt", "forest"]);
+    expect(after.library ?? []).toHaveLength(0);
+  });
+});
+
+describe("putLookedAtCardsInGraveyard", () => {
+  it("moves the given cards to the graveyard, preserving their relative order", () => {
+    const rest = [card({ id: "c1", name: "Card 1", typeLine: "Instant", zone: "library" }), card({ id: "c2", name: "Card 2", typeLine: "Sorcery", zone: "library" })];
+    const player = seat({ id: "p", name: "You", kind: "human", library: [...rest] });
+    const result = putLookedAtCardsInGraveyard(session([player]), "p", rest);
+    const after = result.seats.find((s) => s.id === "p")!;
+    expect(after.board.graveyard?.map((c) => c.id)).toEqual(["c1", "c2"]);
+    expect(after.library ?? []).toHaveLength(0);
+  });
+
+  it("redirects a Blightsteel-Colossus-style card back into the library instead of the graveyard", () => {
+    const blightsteel = card({
+      id: "bc",
+      name: "Blightsteel Colossus",
+      typeLine: "Artifact Creature — Golem",
+      oracleText: "If Blightsteel Colossus would be put into a graveyard from anywhere, reveal Blightsteel Colossus and shuffle it into its owner's library instead.",
+      zone: "library"
+    });
+    const other = card({ id: "other", name: "Other Card", typeLine: "Instant", zone: "library" });
+    const player = seat({ id: "p", name: "You", kind: "human", library: [blightsteel, other] });
+    const result = putLookedAtCardsInGraveyard(session([player]), "p", [blightsteel, other]);
+    const after = result.seats.find((s) => s.id === "p")!;
+    expect(after.board.graveyard?.map((c) => c.id)).toEqual(["other"]);
+    expect(after.library?.map((c) => c.id)).toEqual(["bc"]);
   });
 });

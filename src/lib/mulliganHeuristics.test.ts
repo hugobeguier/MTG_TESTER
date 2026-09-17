@@ -202,6 +202,59 @@ describe("evaluateOpeningHand", () => {
     expect(highColorIdentity.score).toBeLessThan(lowColorIdentity.score);
   });
 
+  it("force-mulligans a hand bad enough to match the 0/7-lands severity tier (Veyra WUBRG bug)", () => {
+    const hand = [
+      land("Island", ["U"]),
+      land("Plains", ["W"]),
+      card({ name: "Big Spell A", role: "creature", manaValue: 6 }),
+      card({ name: "Big Spell B", role: "creature", manaValue: 7 }),
+      card({ name: "Big Spell C", role: "creature", manaValue: 8 }),
+      card({ name: "Big Spell D", role: "creature", manaValue: 9 }),
+      card({ name: "Big Spell E", role: "creature", manaValue: 10 })
+    ];
+    const result = evaluateOpeningHand(seatWithHand(hand, ["W", "U", "B", "R", "G"]));
+    expect(result.score).toBeLessThanOrEqual(-6);
+    expect(result.forceMulligan).toBe(true);
+    expect(result.keep).toBe(false);
+  });
+
+  it("does not force-mulligan a merely below-average hand", () => {
+    const hand = [
+      land("Forest"),
+      land("Forest"),
+      card({ name: "Big Spell A", role: "creature", manaValue: 6 }),
+      card({ name: "Big Spell B", role: "creature", manaValue: 7 }),
+      card({ name: "Big Spell C", role: "creature", manaValue: 8 })
+    ];
+    const result = evaluateOpeningHand(seatWithHand(hand));
+    expect(result.forceMulligan).toBe(false);
+  });
+
+  it("does not credit a land's counter-gated/board-state-scaled colored mana as available in an opening hand (Crucible/Three Tree City bug)", () => {
+    const crucible = card({
+      name: "Crucible of the Spirit Dragon",
+      role: "land",
+      typeLine: "Land",
+      manaValue: 0,
+      producedMana: ["B", "C", "G", "R", "U", "W"],
+      oracleText:
+        "{T}: Add {C}.\n{1}, {T}: Put a storage counter on this land.\n{T}, Remove X storage counters from this land: Add X mana in any combination of colors. Spend this mana only to cast Dragon spells or activate abilities of Dragons."
+    });
+    const threeTreeCity = card({
+      name: "Three Tree City",
+      role: "land",
+      typeLine: "Legendary Land",
+      manaValue: 0,
+      producedMana: ["B", "C", "G", "R", "U", "W"],
+      oracleText:
+        "As Three Tree City enters, choose a creature type.\n{T}: Add {C}.\n{2}, {T}: Choose a color. Add an amount of mana of that color equal to the number of creatures you control of the chosen type."
+    });
+    const hand = [crucible, threeTreeCity, card({ name: "Big Spell A", role: "creature", manaValue: 6 }), card({ name: "Big Spell B", role: "creature", manaValue: 7 })];
+    const result = evaluateOpeningHand(seatWithHand(hand, ["W", "U", "B", "R", "G"]));
+    expect(result.reasons.join(" ")).not.toContain("covers all commander colors");
+    expect(result.reasons.join(" ")).toContain("missing a mana source");
+  });
+
   it("scores card draw higher for a combo deck than the unweighted default", () => {
     const hand = [
       land("Forest"),
