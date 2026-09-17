@@ -17,7 +17,9 @@ import {
   oracleClauses,
   parseAdditionalSacrificeCost,
   parseEmblemGrant,
-  parseModalHeader
+  parseGainsAbilityGrant,
+  parseModalHeader,
+  parseSagaChapters
 } from "./oracleClauses";
 
 describe("hasGraveyardShuffleReplacement", () => {
@@ -320,5 +322,48 @@ describe("mergeModalBulletClauses", () => {
     const clauses = oracleClauses("Choose one —\n• Gain 1 life.\n• Draw a card.\nFlying.");
     const merged = mergeModalBulletClauses(clauses);
     expect(merged).toEqual(["Choose one —\n• Gain 1 life.\n• Draw a card.", "Flying."]);
+  });
+});
+
+// Real oracle text, verified via this codebase's local card database.
+const URZAS_SAGA_TEXT =
+  '(As this Saga enters and after your draw step, add a lore counter. Sacrifice after III.)\nI — This Saga gains "{T}: Add {C}."\nII — This Saga gains "{2}, {T}: Create a 0/0 colorless Construct artifact creature token with \'This token gets +1/+1 for each artifact you control.\'"\nIII — Search your library for an artifact card with mana cost {0} or {1}, put it onto the battlefield, then shuffle.';
+
+describe("parseSagaChapters", () => {
+  it("parses Urza's Saga's three separately-numbered chapters and its chapter count from the reminder text", () => {
+    const result = parseSagaChapters(URZAS_SAGA_TEXT);
+    expect(result?.chapterCount).toBe(3);
+    expect(result?.effectByChapter.get(1)).toBe('This Saga gains "{T}: Add {C}."');
+    expect(result?.effectByChapter.get(2)).toBe(
+      'This Saga gains "{2}, {T}: Create a 0/0 colorless Construct artifact creature token with \'This token gets +1/+1 for each artifact you control.\'"'
+    );
+    expect(result?.effectByChapter.get(3)).toBe("Search your library for an artifact card with mana cost {0} or {1}, put it onto the battlefield, then shuffle.");
+  });
+
+  it("applies a combined 'I, II —' chapter line's text to both chapter numbers (Ascent of the Worthy)", () => {
+    const text =
+      "(As this Saga enters and after your draw step, add a lore counter. Sacrifice after III.)\nI, II — Choose a creature you control. Until your next turn, all damage that would be dealt to creatures you control is dealt to that creature instead.\nIII — Return target creature card from your graveyard to the battlefield with a flying counter on it. That creature is an Angel Warrior in addition to its other types.";
+    const result = parseSagaChapters(text);
+    expect(result?.chapterCount).toBe(3);
+    expect(result?.effectByChapter.get(1)).toBe(result?.effectByChapter.get(2));
+    expect(result?.effectByChapter.get(1)).toContain("Choose a creature you control");
+    expect(result?.effectByChapter.get(3)).toContain("Angel Warrior");
+  });
+
+  it("returns undefined for a non-Saga card", () => {
+    expect(parseSagaChapters("Flying, vigilance.")).toBeUndefined();
+  });
+});
+
+describe("parseGainsAbilityGrant", () => {
+  it("extracts the quoted ability text, including nested single-quoted text (Urza's Saga chapter II)", () => {
+    expect(parseGainsAbilityGrant('This Saga gains "{T}: Add {C}."')).toBe('{T}: Add {C}.');
+    expect(parseGainsAbilityGrant(
+      'This Saga gains "{2}, {T}: Create a 0/0 colorless Construct artifact creature token with \'This token gets +1/+1 for each artifact you control.\'"'
+    )).toBe("{2}, {T}: Create a 0/0 colorless Construct artifact creature token with 'This token gets +1/+1 for each artifact you control.'");
+  });
+
+  it("returns undefined for text with no 'gains \"...\"' shape", () => {
+    expect(parseGainsAbilityGrant("Search your library for an artifact card, put it onto the battlefield, then shuffle.")).toBeUndefined();
   });
 });

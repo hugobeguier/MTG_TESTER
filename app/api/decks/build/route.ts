@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createDeckFromCards } from "@/lib/deckParser";
 import { loadCardCatalog, lookupCard } from "@/lib/cardCatalog";
-import { requestCommanderDeck } from "@/lib/ollama";
+import { agentModelName, requestCommanderDeck, warmUpOllamaModel } from "@/lib/ollama";
 import { createSampleDeck } from "@/lib/sampleDecks";
 import { createDeckFromList } from "@/lib/deckParser";
 import { repairCommanderDeckCards } from "@/lib/deckRepair";
@@ -53,13 +53,23 @@ export async function POST(request: NextRequest) {
   const colors = commanderRecord && commanderRecord.colorIdentity.length > 0 ? commanderRecord.colorIdentity : input.colors;
   const synergyData = await fetchEdhrecSynergyData(commander);
 
+  const model = process.env.OLLAMA_MODEL ?? agentModelName(input.agentName);
+
   try {
     const knowledge = await loadKnowledgePack(knowledgeFilesForPurpose("deckbuilding"));
+    // Each agent's own build request can be the first thing this session asks its (per-agent-named)
+    // model to do — a cold model load on a local Ollama instance can easily eat into
+    // OLLAMA_DECK_TIMEOUT_MS on its own, before the actual deck-drafting generation even starts.
+    // Reported live as a deck build timing out ("Ollama is unavailable ... aborted due to timeout")
+    // for one seat while others built fine, the same failure mode fixed for agent mulligans via
+    // warmUpOllamaModel — absorb the cold-load cost here, against its own much more generous timeout,
+    // before the real, tightly-timed generation request below.
+    await warmUpOllamaModel(model);
     const generated = await requestCommanderDeck({
       ...input,
       commander,
       colors,
-      model: process.env.OLLAMA_MODEL ?? agentModelName(input.agentName),
+      model,
       synergyCardNames: synergyData?.cards.slice(0, 40).map((card) => card.name),
       knowledge
     });
@@ -129,8 +139,4 @@ export async function POST(request: NextRequest) {
       deck
     });
   }
-}
-
-function agentModelName(agentName: string) {
-  return `mtg-${agentName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
 }

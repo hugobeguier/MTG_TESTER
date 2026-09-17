@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { requestAgentAction } from "@/lib/ollama";
+import { agentModelName, requestAgentAction } from "@/lib/ollama";
 import { knowledgeFilesForPurpose, loadKnowledgePack } from "@/lib/knowledge";
 import { scoreLegalActions, type ScoringContext } from "@/lib/actionScoring";
 
@@ -197,8 +197,4 @@ function fallbackAction(scoredActions: ReturnType<typeof scoreLegalActions>, rea
     reason,
     fallbackAction: preferred.actionType === "end_turn" ? "end_turn" : "pass_priority"
   };
-}
-
-function agentModelName(agentName: string) {
-  return `mtg-${agentName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
 }
