@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deterministicRuleWorkflow, eventRelevantOracleText, type RuleAdvisorInput } from "./rulesAdvisor";
+import { deterministicRuleWorkflow, eventRelevantOracleText, extractManaValueRestriction, type RuleAdvisorInput } from "./rulesAdvisor";
 import type { VisibleCard } from "./types";
 
 function card(overrides: Partial<VisibleCard> & Pick<VisibleCard, "id" | "name" | "oracleText">): VisibleCard {
@@ -278,6 +278,19 @@ describe("deterministicRuleWorkflow", () => {
     expect(workflow?.allowedCardFilter).toBe("plains, island, swamp, or mountain");
   });
 
+  it("carries a mana-value restriction alongside the type filter (Urza's Saga chapter III's real text)", () => {
+    const urzasSagaChapterThree = card({
+      id: "urzas-saga-1",
+      name: "Urza's Saga",
+      typeLine: "Enchantment Land — Urza's Saga",
+      oracleText: "Search your library for an artifact card with mana cost {0} or {1}, put it onto the battlefield, then shuffle."
+    });
+    const workflow = deterministicRuleWorkflow(input(urzasSagaChapterThree));
+    expect(workflow?.workflow).toBe("search_library_to_battlefield");
+    expect(workflow?.allowedCardFilter).toBe("artifact");
+    expect(workflow?.manaValueRestriction).toEqual({ op: "lte", value: 1 });
+  });
+
   it("falls back to the generic placeholder when no real type is named (Entomb)", () => {
     const entomb = card({
       id: "entomb-2",
@@ -332,5 +345,26 @@ describe("eventRelevantOracleText", () => {
     expect(eventRelevantOracleText("card_moved_to_graveyard", hangarbackWalker)).toBe(
       "When Hangarback Walker dies, create a 1/1 colorless Thopter artifact creature token with flying for each +1/+1 counter on Hangarback Walker."
     );
+  });
+});
+
+describe("extractManaValueRestriction", () => {
+  it("parses an explicit enumerated mana-cost list as 'lte' the highest listed value (Urza's Saga chapter III's real text)", () => {
+    expect(extractManaValueRestriction("Search your library for an artifact card with mana cost {0} or {1}, put it onto the battlefield, then shuffle.")).toEqual({
+      op: "lte",
+      value: 1
+    });
+  });
+
+  it("parses the modern 'mana value N or less' phrasing", () => {
+    expect(extractManaValueRestriction("search your library for a creature card with mana value 3 or less")).toEqual({ op: "lte", value: 3 });
+  });
+
+  it("parses 'mana value N or greater'", () => {
+    expect(extractManaValueRestriction("search your library for a land card with mana value 6 or greater")).toEqual({ op: "gte", value: 6 });
+  });
+
+  it("returns undefined when there is no mana-value restriction at all", () => {
+    expect(extractManaValueRestriction("search your library for a basic land card")).toBeUndefined();
   });
 });

@@ -62,6 +62,13 @@ export const RuleWorkflowSchema = z.object({
   // AppFlow.tsx, which used to short-circuit this whole workflow before it ever got a chance to run).
   drawCountAfter: z.number().int().min(0).max(20).optional(),
   allowedCardFilter: z.string().optional(),
+  // search_library_to_* only: a mana-value restriction alongside allowedCardFilter's type restriction
+  // (Urza's Saga chapter III's "an artifact card with mana cost {0} or {1}," any real "search for a
+  // card with mana value N or less" tutor). extractSearchedCardType already cleanly drops this clause
+  // from allowedCardFilter's own type capture — this is what carries it forward instead of losing it
+  // silently, the same gap noted on getUrzaSagaChapterThreeOptions before this existed ("the generic
+  // choose_card_from_library picker has no enforced type/cost restriction").
+  manaValueRestriction: z.object({ op: z.enum(["lte", "eq", "gte"]), value: z.number().int().min(0) }).optional(),
   // look_at_top_cards_reveal_type_to_hand only: where the cards NOT taken to hand go. Undefined
   // means the bottom of the library (Growing Rites of Itlimoc's own template, and the pre-existing
   // default every consumer already assumed); "graveyard" is Grisly Salvage's real destination for
@@ -393,6 +400,7 @@ export function deterministicRuleWorkflow(input: RuleAdvisorInput): RuleWorkflow
       sourceCardId: input.sourceCard.id,
       maxChoices: 1,
       allowedCardFilter: extractSearchedCardType(scopedText) ?? "cards matching the source effect",
+      manaValueRestriction: extractManaValueRestriction(scopedText),
       destination: "hand",
       destinationChoices: ["hand", "graveyard"],
       requiresHumanChoice: true,
@@ -408,6 +416,7 @@ export function deterministicRuleWorkflow(input: RuleAdvisorInput): RuleWorkflow
       sourceCardId: input.sourceCard.id,
       maxChoices: numberWordToInt(graveyardSearchCountMatch?.[1]) ?? 1,
       allowedCardFilter: extractSearchedCardType(scopedText) ?? "cards matching the source effect",
+      manaValueRestriction: extractManaValueRestriction(scopedText),
       destination: "graveyard",
       requiresHumanChoice: true,
       warnings: ["Exact card restrictions may need manual review."]
@@ -421,6 +430,7 @@ export function deterministicRuleWorkflow(input: RuleAdvisorInput): RuleWorkflow
       sourceCardId: input.sourceCard.id,
       maxChoices: 1,
       allowedCardFilter: extractSearchedCardType(scopedText) ?? "cards matching the source effect",
+      manaValueRestriction: extractManaValueRestriction(scopedText),
       destination: "hand",
       requiresHumanChoice: true,
       warnings: ["Exact card restrictions may need manual review."]
@@ -438,6 +448,7 @@ export function deterministicRuleWorkflow(input: RuleAdvisorInput): RuleWorkflow
       sourceCardId: input.sourceCard.id,
       maxChoices: 1,
       allowedCardFilter: extractSearchedCardType(scopedText) ?? "cards matching the source effect",
+      manaValueRestriction: extractManaValueRestriction(scopedText),
       destination: "battlefield",
       tapped: scopedText.includes("tapped"),
       requiresHumanChoice: true,
@@ -548,6 +559,31 @@ function extractSearchedCardType(text: string): string | undefined {
   if (pluralMatch) return pluralMatch[1].trim();
   const singularMatch = text.match(new RegExp(`\\bsearch (?:your|their) library for an? (${LIST_OF_TYPES}) cards?\\b`));
   return singularMatch ? singularMatch[1].trim() : undefined;
+}
+
+// A mana-value/mana-cost restriction on a search's own type filter (extractSearchedCardType above
+// already correctly drops this clause from its own capture, so it needs its own extraction rather
+// than falling out for free). Three real phrasings, checked most-specific-first so "N or less"/"N or
+// greater" never get misread by the plain "mana value N" fallback:
+// - "mana value N or less" / "mana value N or greater" (the modern, common phrasing).
+// - "mana cost {0} or {1}" (an explicit enumerated list via mana symbols — older pre-"mana value"
+//   templating, e.g. Urza's Saga's real printed chapter III text). Every real card using this exact
+//   template lists a contiguous run starting at {0}, so the highest listed value is equivalent to
+//   "N or less."
+// - "mana value N" alone (an exact restriction, no card in this engine's real-card sample uses this
+//   but it's the obvious remaining case).
+export function extractManaValueRestriction(text: string): { op: "lte" | "eq" | "gte"; value: number } | undefined {
+  const orLess = text.match(/mana (?:value|cost) (\d+) or less\b/i);
+  if (orLess) return { op: "lte", value: Number.parseInt(orLess[1], 10) };
+  const orGreater = text.match(/mana (?:value|cost) (\d+) or (?:greater|more)\b/i);
+  if (orGreater) return { op: "gte", value: Number.parseInt(orGreater[1], 10) };
+  const enumerated = text.match(/mana cost((?:\s*\{\d+\}(?:\s*(?:,|or)\s*)?)+)/i);
+  if (enumerated) {
+    const values = [...enumerated[1].matchAll(/\{(\d+)\}/g)].map((symbol) => Number.parseInt(symbol[1], 10));
+    if (values.length > 0) return { op: "lte", value: Math.max(...values) };
+  }
+  const exact = text.match(/mana (?:value|cost) (?:of |equal to )?(\d+)\b/i);
+  return exact ? { op: "eq", value: Number.parseInt(exact[1], 10) } : undefined;
 }
 
 function extractLookAtTopCount(text: string) {

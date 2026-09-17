@@ -60,7 +60,6 @@ interface ThreeGameTableProps {
     sourceCardName: string;
     cards: VisibleCard[];
   };
-  urzaSagaSearchCards?: VisibleCard[];
   pendingAction?: PendingActionView;
   stackActions?: PendingActionView[];
   agentThinking?: Record<string, boolean>;
@@ -120,8 +119,6 @@ interface ThreeGameTableProps {
   onConfirmAttackTriggerManaColors?: (distribution: Partial<Record<Exclude<ManaColor, "C">, number>>) => void;
   onCloseMyriadSearch?: () => void;
   onCompleteMyriadSearch?: (cardIds: string[]) => void;
-  onCloseUrzaSagaSearch?: () => void;
-  onCompleteUrzaSagaSearch?: (cardId: string) => void;
   onCloseBasicLandFetchSearch?: () => void;
   onCompleteBasicLandFetchSearch?: (cardId: string) => void;
   onMoveCardToGraveyard?: (seatId: string, cardId: string) => void;
@@ -1892,9 +1889,6 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
       {props.myriadSearchCards ? (
         <MyriadSearchModal cards={props.myriadSearchCards} onClose={props.onCloseMyriadSearch} onChoose={props.onCompleteMyriadSearch} />
       ) : null}
-      {props.urzaSagaSearchCards ? (
-        <UrzaSagaSearchModal cards={props.urzaSagaSearchCards} onClose={props.onCloseUrzaSagaSearch} onChoose={props.onCompleteUrzaSagaSearch} />
-      ) : null}
       {props.basicLandFetchSearch ? (
         <BasicLandFetchModal
           sourceCardName={props.basicLandFetchSearch.sourceCardName}
@@ -3539,44 +3533,6 @@ function BasicLandFetchModal({
               </div>
               <button type="button" onClick={() => onChoose?.(card.id)}>
                 Put Onto Battlefield Tapped
-              </button>
-            </article>
-          ))}
-        </div>
-      </article>
-    </div>
-  );
-}
-
-function UrzaSagaSearchModal({
-  cards,
-  onClose,
-  onChoose
-}: {
-  cards: VisibleCard[];
-  onClose?: () => void;
-  onChoose?: (cardId: string) => void;
-}) {
-  return (
-    <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label="Resolve Urza's Saga chapter III" onClick={onClose}>
-      <article className="library-search-modal" onClick={(event) => event.stopPropagation()}>
-        <button className="card-inspector-close" type="button" onClick={onClose} aria-label="Close Urza's Saga search">
-          x
-        </button>
-        <header>
-          <p className="eyebrow">{"Urza's Saga — Chapter III"}</p>
-          <h2>Choose an Artifact (Mana Value 0 or 1)</h2>
-        </header>
-        <div className="library-search-results">
-          {cards.length === 0 ? <p>No artifact card with mana value 0 or 1 was found.</p> : null}
-          {cards.map((card) => (
-            <article className="library-search-card" key={card.id}>
-              <div>
-                <strong>{card.name}</strong>
-                <span>{card.typeLine}</span>
-              </div>
-              <button type="button" onClick={() => onChoose?.(card.id)}>
-                Put Onto Battlefield
               </button>
             </article>
           ))}

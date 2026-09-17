@@ -55,7 +55,10 @@ import {
   oracleClauses,
   parseAdditionalSacrificeCost,
   parseEmblemGrant,
-  parseModalHeader
+  parseGainsAbilityGrant,
+  parseModalHeader,
+  parseSagaChapters,
+  type SagaChapters
 } from "@/lib/oracleClauses";
 import {
   annihilatorAmount,
@@ -349,6 +352,12 @@ type PendingRuleChoice =
       tapped?: boolean;
       maxChoices: number;
       allowedCardFilter?: string;
+      // A mana-value restriction alongside allowedCardFilter's own type restriction (Urza's Saga
+      // chapter III's "an artifact card with mana cost {0} or {1}," any real "search for a card with
+      // mana value N or less" tutor) — see RuleWorkflow's own manaValueRestriction field. Optional and
+      // left unset by every construction site other than the rulesAdvisor-driven search dispatch, so
+      // nothing else is affected.
+      manaValueRestriction?: { op: "lte" | "eq" | "gte"; value: number };
       // Accumulates across multiple picks for an "up to N"/"N" search (Archaeomancer's Map's "up to
       // two basic Plains cards," ...) — chooseRuleLibraryCard appends to this and keeps the choice
       // open until maxChoices is reached (or the player clicks Done early, since "up to N" doesn't
@@ -1166,7 +1175,6 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   const [selectedBlockerIds, setSelectedBlockerIds] = useState<string[]>([]);
   const [myriadSearch, setMyriadSearch] = useState<MyriadSearchState | undefined>();
   const [myriadTapChoice, setMyriadTapChoice] = useState<MyriadTapChoiceState | undefined>();
-  const [urzaSagaSearch, setUrzaSagaSearch] = useState<{ seatId: string; cardId: string } | undefined>();
   const [basicLandFetchSearch, setBasicLandFetchSearch] = useState<BasicLandFetchSearchState | undefined>();
   const [pendingAction, setPendingAction] = useState<PendingAction | undefined>();
   const [stackActions, setStackActions] = useState<PendingAction[]>([]);
@@ -1656,6 +1664,12 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       let next = current.pendingEntries === entries ? { ...current, pendingEntries: undefined } : current;
       for (const { entry, zoneEffect } of zoneEffectsByEntry) {
         if (zoneEffect && entry !== deferredChoiceEntry?.entry) next = applyZoneEffect(next, entry.seatId, entry.card.name, zoneEffect);
+      }
+      // Rule 714.2a: a Saga reanimated/tutored/blinked onto the battlefield through this batched
+      // entry path (not a normal cast, which its own spell-resolution path already covers) still
+      // gets its own chapter 1 the instant it enters, same as any other vector.
+      for (const entry of entries) {
+        if (isSagaCard(entry.card)) next = applySagaEntryLoreCounter(next, entry.seatId, entry.card.id);
       }
       return next;
     });
@@ -2713,7 +2727,6 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
           blockChoice ||
           myriadSearch ||
           myriadTapChoice ||
-          urzaSagaSearch ||
           basicLandFetchSearch ||
           manaChoice ||
           inspectedCard ||
@@ -2821,7 +2834,6 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     setSelectedBlockerIds([]);
     setMyriadSearch(undefined);
     setMyriadTapChoice(undefined);
-    setUrzaSagaSearch(undefined);
     setBasicLandFetchSearch(undefined);
     setPendingAction(undefined);
     replaceStackActions([]);
@@ -3239,7 +3251,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
 
     if (phase === "draw step") {
       const drawnSession = drawForSeat(session, seatId, seatVerb(seat, `${seat.name} draws for turn.`, "You draw for turn."));
-      return advanceUrzaSagaLoreCounters(drawnSession, seatId);
+      return advanceSagaLoreCounters(drawnSession, seatId);
     }
 
     if (phase === "combat damage step") {
@@ -3270,45 +3282,109 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     return next;
   }
 
-  // Rule 714.2a's "after your draw step" half (the "as this Saga enters" half is applied where the
-  // land is played — see playCard's isUrzaSagaCard branch). Scoped to Urza's Saga specifically (see
-  // shouldConsultRulesAdvisor's Saga exclusion for why no other Saga gets chapter handling yet).
-  // Chapter III resolves the instant its 3rd lore counter lands: an agent auto-picks deterministically,
-  // a human gets a dedicated search modal (urzaSagaSearch), same split as Myriad Landscape's search.
-  function advanceUrzaSagaLoreCounters(session: GameSession, seatId: string): GameSession {
+  // Adds one Saga's next lore counter and, if that counter lands on one of its own numbered
+  // chapters, resolves that chapter's effect (triggerSagaChapter below) and sacrifices it once its
+  // counters reach its own final chapter (rule 714.4) — safe to do right away regardless of which of
+  // triggerSagaChapter's three resolution paths that final chapter took, since none of them depend on
+  // the source permanent still being on the battlefield once queued (see its own comment). Shared by
+  // both real moments a Saga gains a counter: entering the battlefield (chapter 1, via
+  // applySagaEntryLoreCounter below) and each of its controller's later draw steps
+  // (advanceSagaLoreCounters below, looping over every Saga still short of its own chapter count).
+  function applySagaLoreCounter(session: GameSession, seatId: string, saga: VisibleCard, chapters: SagaChapters): GameSession {
+    let next = applyLoreCounterEtb(session, seatId, saga.id);
+    const newCount = loreCounterCount(saga) + 1;
+    const chapterText = chapters.effectByChapter.get(newCount);
+    if (chapterText) next = triggerSagaChapter(next, seatId, saga, chapterText);
+    if (newCount >= chapters.chapterCount) next = moveCardBetweenVisibleZones(next, seatId, saga.id, "graveyard");
+    return next;
+  }
+
+  // Rule 714.2a's "as this Saga enters" half — looks the just-entered card up by id (rather than
+  // trusting whatever pre-entry face data a caller has on hand) so loreCounterCount always reads the
+  // real, freshly-placed permanent's own counters (always 0 here, but this keeps the same single
+  // source of truth applySagaLoreCounter's other caller uses). A no-op for a non-Saga or a card not
+  // actually on this seat's battlefield.
+  function applySagaEntryLoreCounter(session: GameSession, seatId: string, cardId: string): GameSession {
+    const saga = session.seats.find((seat) => seat.id === seatId)?.board.battlefield.find((card) => card.id === cardId);
+    const chapters = saga ? parseSagaChapters(saga.oracleText) : undefined;
+    return saga && chapters ? applySagaLoreCounter(session, seatId, saga, chapters) : session;
+  }
+
+  // Rule 714.2a's "after your draw step" half. Generalizes what advanceUrzaSagaLoreCounters (Urza's
+  // Saga only, hardcoded to exactly 3 chapters and Urza's Saga's own chapter III search) used to do:
+  // works for any real Saga, using parseSagaChapters to learn its own chapter count and each
+  // chapter's own effect text from its actual printed oracle text instead.
+  function advanceSagaLoreCounters(session: GameSession, seatId: string): GameSession {
     const seat = session.seats.find((item) => item.id === seatId);
-    const sagas = seat?.board.battlefield.filter((card) => isUrzaSagaCard(card) && loreCounterCount(card) < 3) ?? [];
-    if (!seat || sagas.length === 0) return session;
+    if (!seat) return session;
+    const sagas = seat.board.battlefield
+      .map((card) => ({ card, chapters: parseSagaChapters(card.oracleText) }))
+      .filter((entry): entry is { card: VisibleCard; chapters: SagaChapters } => Boolean(entry.chapters) && loreCounterCount(entry.card) < entry.chapters!.chapterCount);
+    if (sagas.length === 0) return session;
 
-    let next: GameSession = {
-      ...session,
-      seats: session.seats.map((item) =>
-        item.id === seatId
-          ? {
-              ...item,
-              board: {
-                ...item.board,
-                battlefield: item.board.battlefield.map((card) =>
-                  isUrzaSagaCard(card) && loreCounterCount(card) < 3 ? applyCounterDelta(card, "lore", 1) : card
-                )
-              }
-            }
-          : item
-      )
-    };
-
-    for (const saga of sagas) {
-      if (loreCounterCount(saga) + 1 !== 3) continue;
-      if (seat.kind === "human") {
-        window.setTimeout(() => setUrzaSagaSearch({ seatId, cardId: saga.id }), 0);
-        continue;
-      }
-      const updatedSeat = next.seats.find((item) => item.id === seatId);
-      const chosen = updatedSeat ? chooseUrzaSagaChapterThreeCard(updatedSeat) : undefined;
-      next = resolveUrzaSagaChapterThree(next, seatId, saga.id, chosen?.id);
+    let next = session;
+    for (const { card: saga, chapters } of sagas) {
+      next = applySagaLoreCounter(next, seatId, saga, chapters);
     }
 
     return next;
+  }
+
+  // Resolves one Saga chapter's own effect text, generalizing the same "deterministic first, LLM/DSL
+  // fallback second" shape activateLoyaltyAbility already uses for a loyalty ability's text (a
+  // structurally identical case: one card, several numbered/gated sub-abilities). Three paths, tried
+  // in order:
+  // 1. "This Saga gains \"...\"" (Urza's Saga chapter I/II) — not a one-shot effect at all, so it's
+  //    applied directly here rather than through the trigger/DSL pipeline: append the granted text
+  //    onto the Saga's own oracleText, the same pattern parseEnterAsCopyEffect's copy targets
+  //    (Mirrormade, Estrid's Invocation) already use for a permanent's oracleText growing to
+  //    include more text.
+  // 2. commonTriggerEffect recognizes the shape (a plain draw/destroy/mill/token/etc. effect) — queue
+  //    it as a real trigger, deferred via setTimeout to dodge reentrancy (queueCommonTriggers calls
+  //    beginPendingAction, so calling it synchronously from inside advanceSagaLoreCounters — itself
+  //    called from deep inside a setSession updater via runPhaseActions — would be reentrant).
+  // 3. Neither matches — defer to consultRulesAdvisor (deterministicRuleWorkflow, then the primitive-
+  //    action-plan LLM fallback), same "saga_chapter" treatment as loyalty_ability: a shallow-copied
+  //    card whose oracleText is replaced by just this chapter's own clause. Also deferred, for the
+  //    same reentrancy reason — consultRulesAdvisor itself calls setSession.
+  function triggerSagaChapter(session: GameSession, seatId: string, saga: VisibleCard, chapterText: string): GameSession {
+    const grantedAbility = parseGainsAbilityGrant(chapterText);
+    if (grantedAbility) {
+      return {
+        ...session,
+        seats: session.seats.map((seat) =>
+          seat.id === seatId
+            ? {
+                ...seat,
+                board: {
+                  ...seat.board,
+                  battlefield: seat.board.battlefield.map((card) =>
+                    card.id === saga.id ? { ...card, oracleText: `${card.oracleText}\n${grantedAbility}` } : card
+                  )
+                }
+              }
+            : seat
+        )
+      };
+    }
+    const effect = commonTriggerEffect(chapterText, "clause");
+    if (effect) {
+      const trigger: Extract<PendingAction, { type: "trigger" }> = {
+        id: crypto.randomUUID(),
+        type: "trigger",
+        actorSeatId: seatId,
+        controllerSeatId: seatId,
+        sourceCardId: saga.id,
+        sourceCardName: saga.name,
+        triggerKind: "common",
+        effect,
+        message: `${saga.name}'s chapter triggers.`
+      };
+      window.setTimeout(() => queueCommonTriggers([trigger]), 0);
+      return session;
+    }
+    window.setTimeout(() => void consultRulesAdvisor("saga_chapter", seatId, { ...saga, oracleText: chapterText }), 0);
+    return session;
   }
 
   function untapForSeat(session: GameSession, seatId: string): GameSession {
@@ -4137,11 +4213,10 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         if (playedSession === current) return current;
         const chosenTypeSession = choosesCreatureType ? applyChosenCreatureType(playedSession, seatId, cardId) : playedSession;
         const coloredSession = chooseColorEtb ? applyChosenColor(chosenTypeSession, seatId, cardId, chooseColorEtb.excludedColor) : chosenTypeSession;
-        // Rule 714.2a: "As this Saga enters ... add a lore counter" — chapter I text (Urza's Saga's
-        // "{T}: Add {C}" mana ability for lore counters 1-2) needs no extra action beyond the
-        // counter itself, unlike chapter III (see advanceUrzaSagaLoreCounters, fired from the
-        // controller's own draw step instead).
-        const nextSession = isUrzaSagaCard(playedFaceCard) ? applyLoreCounterEtb(coloredSession, seatId, cardId) : coloredSession;
+        // Rule 714.2a: "As this Saga enters ... add a lore counter" (Urza's Saga specifically is the
+        // only real Saga that's also a land, hence this hook living in the land-play path — every
+        // other Saga's own ETB is handled at its own spell-resolution path instead).
+        const nextSession = isSagaCard(playedFaceCard) ? applySagaEntryLoreCounter(coloredSession, seatId, cardId) : coloredSession;
         // Land ETB triggers never went through parseZoneEffect at all before (only the spell-
         // resolution path did) — a land whose whole ETB is a zone effect (Bojuka Bog's "exile
         // target player's graveyard," ...) had nowhere deterministic to resolve, and fell straight
@@ -6066,13 +6141,21 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
           allowedCardFilter: searchLibraryEffect.cardTypeFilter
         };
       }
+      // Rule 714.2a: "As this Saga enters ... add a lore counter" — the spell-cast half of the same
+      // hook playCard's land branch applies for Urza's Saga specifically (the one real Saga that's
+      // also a land); every other real Saga is cast as a plain enchantment spell, so this is the
+      // path that actually gives it its own chapter 1.
+      const sagaCounterSession =
+        sourceCard && destination === "battlefield" && isSagaCard(sourceCard)
+          ? applySagaEntryLoreCounter(chosenColorSession, action.actorSeatId, sourceCard.id)
+          : chosenColorSession;
       // Run state-based actions now, before checking ETB-trigger applicability, so grantedTypes
       // (Secret Arcade-style type grants) and the other SBA-computed fields are fresh — otherwise
       // a permanent that only becomes (e.g.) an enchantment via a separate static ability wouldn't
       // be recognized as one yet by "an enchantment enters" watchers, including its own, on the
       // very turn it enters. Safe to call early: checkStateBasedActions is pure and idempotent,
       // and the setSession wrapper still re-runs it on whatever this returns.
-      const resolvedSession = destination === "battlefield" ? checkStateBasedActions(chosenColorSession) : chosenColorSession;
+      const resolvedSession = destination === "battlefield" ? checkStateBasedActions(sagaCounterSession) : sagaCounterSession;
       const queuedTriggers = sourceCard && destination === "battlefield" ? findCommonTriggersForPermanentEntered(resolvedSession, action.actorSeatId, sourceCard) : [];
       if (sourceCard) {
         // If the deterministic common-trigger system already owns this card's own ETB clause
@@ -6504,7 +6587,8 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         destinationChoices: workflow.destinationChoices,
         tapped: workflow.tapped,
         maxChoices: Math.max(1, workflow.maxChoices || 1),
-        allowedCardFilter: workflow.allowedCardFilter
+        allowedCardFilter: workflow.allowedCardFilter,
+        manaValueRestriction: workflow.manaValueRestriction
       });
       return;
     }
@@ -7036,13 +7120,6 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     if (!activeSearch) return;
     setSession((current) => resolveMyriadLandscapeSearch(current, activeSearch.seatId, activeSearch.sourceCardId, cardIds));
     setMyriadSearch(undefined);
-  }
-
-  function completeUrzaSagaSearch(cardId: string) {
-    const activeSearch = urzaSagaSearch;
-    if (!activeSearch) return;
-    setSession((current) => resolveUrzaSagaChapterThree(current, activeSearch.seatId, activeSearch.cardId, cardId));
-    setUrzaSagaSearch(undefined);
   }
 
   function startLibraryLook(
@@ -8096,8 +8173,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   // "choose_one_bottom" (Growing Rites of Itlimoc) is different: ONLY the creature reveal is
   // optional ("you may") — "put the rest on the bottom" is mandatory regardless, so declining the
   // reveal must still send every looked-at card to the bottom rather than leaving them stuck
-  // wherever they physically sit in the library, same "close must still resolve the mandatory half"
-  // fix already applied to Urza's Saga's own search modal.
+  // wherever they physically sit in the library.
   function closeLibraryLook() {
     if (libraryLook?.mode === "choose_one_bottom") {
       setSession((current) =>
@@ -8454,7 +8530,6 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         onChooseAuraRetarget={chooseAuraRetarget}
         onChooseEquipTarget={confirmEquipTarget}
         myriadSearchCards={myriadSearch ? getMyriadLandscapeOptions(humanSeat.library ?? []) : undefined}
-        urzaSagaSearchCards={urzaSagaSearch ? getUrzaSagaChapterThreeOptions(humanSeat.library ?? []) : undefined}
         basicLandFetchSearch={
           basicLandFetchSearch
             ? {
@@ -8478,8 +8553,6 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         onFinishLibrarySearch={finishRuleLibrarySearch}
         onCloseMyriadSearch={() => setMyriadSearch(undefined)}
         onCompleteMyriadSearch={completeMyriadLandscape}
-        onCloseUrzaSagaSearch={() => setUrzaSagaSearch(undefined)}
-        onCompleteUrzaSagaSearch={completeUrzaSagaSearch}
         onCloseBasicLandFetchSearch={() => setBasicLandFetchSearch(undefined)}
         onCompleteBasicLandFetchSearch={completeBasicLandFetch}
         onKeepLibraryLookCardOnTop={keepLibraryLookCardOnTop}
@@ -17006,9 +17079,15 @@ export function chooseAgentLibraryCardForRuleChoice(
       .split(/\s*,\s*(?:or\s+)?|\s+or\s+/)
       .map((word) => word.trim())
       .filter(Boolean);
+    // A mana-value restriction alongside the type restriction (Urza's Saga chapter III's "an
+    // artifact card with mana cost {0} or {1},", any real "search for a card with mana value N or
+    // less" tutor) — see choice.manaValueRestriction's own doc comment.
+    const restriction = choice.manaValueRestriction;
+    const matchesManaValue = (card: VisibleCard) =>
+      !restriction || (restriction.op === "lte" ? card.manaValue <= restriction.value : restriction.op === "gte" ? card.manaValue >= restriction.value : card.manaValue === restriction.value);
     const typeMatch = library.find((card) => {
       const typeLine = card.typeLine.toLowerCase();
-      return alternatives.some((word) => typeLine.includes(word));
+      return alternatives.some((word) => typeLine.includes(word)) && matchesManaValue(card);
     });
     if (typeMatch) return typeMatch;
     // A real type name matched nothing — fail to find, same reasoning as the basic-land branch
@@ -17031,10 +17110,11 @@ export function shouldConsultRulesAdvisor(event: string, card: VisibleCard) {
   // Sagas (rule 714) gate each numbered chapter's text behind a lore-counter count that only
   // advances over several of the controller's own turns — the advisor has no concept of that
   // gating and reads the card's whole oracle text as one blob, so consulting it on ETB (event
-  // "land_played"/spell cast) would immediately run every later chapter's effect (e.g. Urza's
-  // Saga's chapter III artifact tutor) the same turn the Saga entered, instead of waiting for its
-  // lore counters to actually reach that chapter. Urza's Saga has its own dedicated, deterministic
-  // chapter handling (see isUrzaSagaCard/runPhaseActions) instead of going through this path at all.
+  // "land_played"/spell cast) would immediately run every later chapter's effect the same turn the
+  // Saga entered, instead of waiting for its lore counters to actually reach that chapter. Every
+  // Saga instead gets its own chapter-scoped consultation from triggerSagaChapter/
+  // applySagaLoreCounter/advanceSagaLoreCounters, fired at the right lore-counter threshold — this
+  // exclusion just stops the normal ETB/cast consultation path from misfiring on the whole card.
   if (card.typeLine.includes("Saga")) return false;
   // A land's ETB is now checked against parseZoneEffect deterministically before this ever runs
   // (see playCard's playingAsLand branch) — Bojuka Bog's "exile target player's graveyard" and the
@@ -20094,70 +20174,10 @@ function resolveMyriadLandscapeSearch(session: GameSession, seatId: string, card
   };
 }
 
-// Urza's Saga's chapter III: "Search your library for an artifact card with mana value 0 or 1, put
-// it onto the battlefield, then shuffle your library. Sacrifice Urza's Saga." Enters untapped
-// (unlike Myriad Landscape's fetched basics, this ability doesn't say "tapped"), and — unlike a
-// player-activated sacrifice ability — this fires automatically off the lore counter reaching 3, so
-// there's no separate cost-payment step here; by the time this is called the sacrifice is just part
-// of resolving the chapter.
-function resolveUrzaSagaChapterThree(session: GameSession, seatId: string, cardId: string, chosenCardId: string | undefined): GameSession {
-  let sourceName = "";
-  let foundName = "";
-
-  const seats = session.seats.map((seat) => {
-    if (seat.id !== seatId) return seat;
-    const source = seat.board.battlefield.find((card) => card.id === cardId);
-    if (!source || !isUrzaSagaCard(source)) return seat;
-
-    sourceName = source.name;
-    const library = seat.library ?? [];
-    const eligible = getUrzaSagaChapterThreeOptions(library);
-    const found = chosenCardId ? eligible.find((card) => card.id === chosenCardId) : undefined;
-    foundName = found?.name ?? "";
-    const graveyard = seat.board.graveyard ?? [];
-
-    return {
-      ...seat,
-      library: found ? library.filter((card) => card.id !== found.id) : library,
-      board: {
-        ...seat.board,
-        battlefield: [
-          ...seat.board.battlefield.filter((card) => card.id !== cardId),
-          ...(found ? [{ ...found, zone: "battlefield" as const, tapped: false, battlefieldPosition: undefined }] : [])
-        ],
-        graveyard: [
-          ...graveyard,
-          { ...source, zone: "graveyard" as const, tapped: false, battlefieldPosition: undefined, counters: undefined }
-        ]
-      },
-      zones: {
-        ...seat.zones,
-        battlefield: seat.zones.battlefield - 1 + (found ? 1 : 0),
-        graveyard: seat.zones.graveyard + 1,
-        library: Math.max(0, seat.zones.library - (found ? 1 : 0))
-      }
-    };
-  });
-
-  if (!sourceName) return session;
-
-  const seatName = session.seats.find((seat) => seat.id === seatId)?.name ?? "Player";
-  const detail = foundName ? ` Finds ${foundName}.` : " No artifact with mana value 0 or 1 was found.";
-  return {
-    ...session,
-    seats,
-    events: [
-      {
-        id: crypto.randomUUID(),
-        at: new Date().toISOString(),
-        seatId,
-        message: `${seatName}'s ${sourceName} reaches chapter III: searches for an artifact card with mana value 0 or 1, then sacrifices itself.${detail}`,
-        detail: "Rules action"
-      },
-      ...session.events
-    ]
-  };
-}
+// Urza's Saga's chapter III ("Search your library for an artifact card with mana cost {0} or {1},
+// put it onto the battlefield, then shuffle.") now flows through the generic search pipeline
+// (deterministicRuleWorkflow's search_library_to_battlefield + manaValueRestriction, via
+// triggerSagaChapter/consultRulesAdvisor) instead of this bespoke function — deleted along with it.
 
 function resolveBasicLandFetchSearch(session: GameSession, seatId: string, cardId: string, chosenCardId?: string): GameSession {
   let sourceName = "";
@@ -20331,31 +20351,14 @@ function chooseBestBasicLandForFetch(seat: PlayerSeat) {
   return basics.find((card) => preferredNames.includes(card.name)) ?? basics[0];
 }
 
-function isUrzaSagaCard(card: VisibleCard) {
-  return card.name === "Urza's Saga";
+// Generalized from isUrzaSagaCard (card.name === "Urza's Saga") — see parseSagaChapters/
+// advanceSagaLoreCounters, which now work for any real Saga instead of just that one.
+function isSagaCard(card: VisibleCard) {
+  return card.typeLine.includes("Saga");
 }
 
 function loreCounterCount(card: VisibleCard): number {
   return card.counters?.find((counter) => counter.kind === "lore")?.count ?? 0;
-}
-
-// Chapter III: "Search your library for an artifact card with mana value 0 or 1, put it onto the
-// battlefield, then shuffle." — the generic choose_card_from_library picker has no enforced type/
-// cost restriction (its allowedCardFilter is prompt text only), so this pre-filters the candidate
-// list itself the same way getMyriadLandscapeOptions/getBasicLandFetchOptions do, rather than
-// relying on that unconstrained picker for a search this specific.
-function getUrzaSagaChapterThreeOptions(library: VisibleCard[]): VisibleCard[] {
-  return library.filter((card) => card.typeLine.includes("Artifact") && card.manaValue <= 1);
-}
-
-// No agent heuristic exists yet for artifact quality, so this just prefers the higher mana value
-// (the 0-or-1 cap means that only ever chooses between {0} and {1}, and a {1} artifact is rarely a
-// worse hit than a {0} one) — same "no choice UI, pick deterministically" pattern as
-// chooseBestBasicLandPairForMyriad.
-function chooseUrzaSagaChapterThreeCard(seat: PlayerSeat): VisibleCard | undefined {
-  const options = getUrzaSagaChapterThreeOptions(seat.library ?? []);
-  if (options.length === 0) return undefined;
-  return [...options].sort((a, b) => b.manaValue - a.manaValue)[0];
 }
 
 function basicLandForColor(color: string): string | undefined {
