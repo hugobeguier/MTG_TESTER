@@ -13,6 +13,7 @@ import {
   isCardsLeaveGraveyardClause,
   isCombatDamageToPlayerClause,
   isNonEtbWheneverClause,
+  isSagaTransformChapter,
   mergeModalBulletClauses,
   oracleClauses,
   parseAdditionalSacrificeCost,
@@ -330,9 +331,10 @@ const URZAS_SAGA_TEXT =
   '(As this Saga enters and after your draw step, add a lore counter. Sacrifice after III.)\nI — This Saga gains "{T}: Add {C}."\nII — This Saga gains "{2}, {T}: Create a 0/0 colorless Construct artifact creature token with \'This token gets +1/+1 for each artifact you control.\'"\nIII — Search your library for an artifact card with mana cost {0} or {1}, put it onto the battlefield, then shuffle.';
 
 describe("parseSagaChapters", () => {
-  it("parses Urza's Saga's three separately-numbered chapters and its chapter count from the reminder text", () => {
+  it("parses Urza's Saga's three separately-numbered chapters, its chapter count, and that it sacrifices on its final chapter", () => {
     const result = parseSagaChapters(URZAS_SAGA_TEXT);
     expect(result?.chapterCount).toBe(3);
+    expect(result?.sacrificesOnFinalChapter).toBe(true);
     expect(result?.effectByChapter.get(1)).toBe('This Saga gains "{T}: Add {C}."');
     expect(result?.effectByChapter.get(2)).toBe(
       'This Saga gains "{2}, {T}: Create a 0/0 colorless Construct artifact creature token with \'This token gets +1/+1 for each artifact you control.\'"'
@@ -350,6 +352,32 @@ describe("parseSagaChapters", () => {
     expect(result?.effectByChapter.get(3)).toContain("Angel Warrior");
   });
 
+  // Real oracle text (verified via this codebase's local card database) for the "transforming Saga"
+  // template introduced in Kamigawa: Neon Dynasty — its reminder text omits "Sacrifice after N"
+  // entirely, because chapter III's own printed text already exiles and transforms it instead of
+  // being sacrificed by rule 714.4's standing rule. Without deriving chapterCount from the numbered
+  // chapter clauses themselves (rather than that reminder text), this whole card was unparseable —
+  // parseSagaChapters returned undefined and the Saga never gained a single lore counter.
+  it("parses a transforming Saga (Fable of the Mirror-Breaker) despite its reminder text omitting 'Sacrifice after N'", () => {
+    const text =
+      '(As this Saga enters and after your draw step, add a lore counter.)\nI — Create a 2/2 red Goblin Shaman creature token with "Whenever this token attacks, create a Treasure token."\nII — You may discard up to two cards. If you do, draw that many cards.\nIII — Exile this Saga, then return it to the battlefield transformed under your control.';
+    const result = parseSagaChapters(text);
+    expect(result?.chapterCount).toBe(3);
+    expect(result?.sacrificesOnFinalChapter).toBe(false);
+    expect(result?.effectByChapter.get(3)).toBe("Exile this Saga, then return it to the battlefield transformed under your control.");
+  });
+
+  // Real oracle text for a different final-chapter shape (rarer, but still real): this Saga bounces
+  // itself to hand as its own chapter III effect instead of transforming or being auto-sacrificed —
+  // sacrificesOnFinalChapter is false for the same reason as the transforming-Saga case above.
+  it("parses a bounce-style Saga (The Aesir Escape Valhalla) whose own final chapter returns it to hand instead of sacrificing it", () => {
+    const text =
+      "(As this Saga enters and after your draw step, add a lore counter.)\nI — Exile a permanent card from your graveyard. You gain life equal to its mana value.\nII — Put a number of +1/+1 counters on target creature you control equal to the mana value of the exiled card.\nIII — Return this Saga and the exiled card to their owner's hand.";
+    const result = parseSagaChapters(text);
+    expect(result?.chapterCount).toBe(3);
+    expect(result?.sacrificesOnFinalChapter).toBe(false);
+  });
+
   it("returns undefined for a non-Saga card", () => {
     expect(parseSagaChapters("Flying, vigilance.")).toBeUndefined();
   });
@@ -365,5 +393,24 @@ describe("parseGainsAbilityGrant", () => {
 
   it("returns undefined for text with no 'gains \"...\"' shape", () => {
     expect(parseGainsAbilityGrant("Search your library for an artifact card, put it onto the battlefield, then shuffle.")).toBeUndefined();
+  });
+});
+
+describe("isSagaTransformChapter", () => {
+  it("recognizes the 'transformed' phrasing (Fable of the Mirror-Breaker's real chapter III text)", () => {
+    expect(isSagaTransformChapter("Exile this Saga, then return it to the battlefield transformed under your control.")).toBe(true);
+  });
+
+  it("recognizes the 'front face up' phrasing, naming itself rather than 'this Saga' (Elesh Norn // The Argent Etchings' real chapter III text)", () => {
+    expect(isSagaTransformChapter("Destroy all other permanents except for artifacts, lands, and Phyrexians. Exile this Saga, then return it to the battlefield (front face up).")).toBe(true);
+    expect(isSagaTransformChapter("Cold Snap — Tap all lands your opponents control. Exile Shiva, then return it to the battlefield (front face up).")).toBe(true);
+  });
+
+  it("is false for a real final chapter that doesn't transform (The Aesir Escape Valhalla's own bounce-to-hand text)", () => {
+    expect(isSagaTransformChapter("Return this Saga and the exiled card to their owner's hand.")).toBe(false);
+  });
+
+  it("is false for a plain search-and-battlefield effect (Urza's Saga chapter III), which puts a DIFFERENT card onto the battlefield rather than exiling and returning itself", () => {
+    expect(isSagaTransformChapter("Search your library for an artifact card with mana cost {0} or {1}, put it onto the battlefield, then shuffle.")).toBe(false);
   });
 });

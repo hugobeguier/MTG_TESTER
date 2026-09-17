@@ -51,6 +51,7 @@ import {
   isActivatedAbilityClause,
   isAttackTriggerAddManaClause,
   isBasicLandFetchAbility,
+  isSagaTransformChapter,
   mergeModalBulletClauses,
   oracleClauses,
   parseAdditionalSacrificeCost,
@@ -3283,19 +3284,24 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   }
 
   // Adds one Saga's next lore counter and, if that counter lands on one of its own numbered
-  // chapters, resolves that chapter's effect (triggerSagaChapter below) and sacrifices it once its
-  // counters reach its own final chapter (rule 714.4) — safe to do right away regardless of which of
-  // triggerSagaChapter's three resolution paths that final chapter took, since none of them depend on
-  // the source permanent still being on the battlefield once queued (see its own comment). Shared by
-  // both real moments a Saga gains a counter: entering the battlefield (chapter 1, via
-  // applySagaEntryLoreCounter below) and each of its controller's later draw steps
-  // (advanceSagaLoreCounters below, looping over every Saga still short of its own chapter count).
+  // chapters, resolves that chapter's effect (triggerSagaChapter below) and, only for a Saga whose
+  // reminder text actually calls for it (chapters.sacrificesOnFinalChapter — see its own doc comment
+  // on SagaChapters), sacrifices it once its counters reach its own final chapter (rule 714.4) —
+  // safe to do right away regardless of which of triggerSagaChapter's resolution paths that final
+  // chapter took, since none of them depend on the source permanent still being on the battlefield
+  // once queued (see its own comment). A transforming Saga (Fable of the Mirror-Breaker, ...) or a
+  // bounce-style one (The Aesir Escape Valhalla) has sacrificesOnFinalChapter false precisely because
+  // its own final chapter's effect (handled by triggerSagaChapter, above) already relocated or
+  // transformed it — sacrificing it too here would fight that. Shared by both real moments a Saga
+  // gains a counter: entering the battlefield (chapter 1, via applySagaEntryLoreCounter below) and
+  // each of its controller's later draw steps (advanceSagaLoreCounters below, looping over every
+  // Saga still short of its own chapter count).
   function applySagaLoreCounter(session: GameSession, seatId: string, saga: VisibleCard, chapters: SagaChapters): GameSession {
     let next = applyLoreCounterEtb(session, seatId, saga.id);
     const newCount = loreCounterCount(saga) + 1;
     const chapterText = chapters.effectByChapter.get(newCount);
     if (chapterText) next = triggerSagaChapter(next, seatId, saga, chapterText);
-    if (newCount >= chapters.chapterCount) next = moveCardBetweenVisibleZones(next, seatId, saga.id, "graveyard");
+    if (newCount >= chapters.chapterCount && chapters.sacrificesOnFinalChapter) next = moveCardBetweenVisibleZones(next, seatId, saga.id, "graveyard");
     return next;
   }
 
@@ -3332,18 +3338,34 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
 
   // Resolves one Saga chapter's own effect text, generalizing the same "deterministic first, LLM/DSL
   // fallback second" shape activateLoyaltyAbility already uses for a loyalty ability's text (a
-  // structurally identical case: one card, several numbered/gated sub-abilities). Three paths, tried
+  // structurally identical case: one card, several numbered/gated sub-abilities). Four paths, tried
   // in order:
   // 1. "This Saga gains \"...\"" (Urza's Saga chapter I/II) — not a one-shot effect at all, so it's
   //    applied directly here rather than through the trigger/DSL pipeline: append the granted text
   //    onto the Saga's own oracleText, the same pattern parseEnterAsCopyEffect's copy targets
   //    (Mirrormade, Estrid's Invocation) already use for a permanent's oracleText growing to
   //    include more text.
-  // 2. commonTriggerEffect recognizes the shape (a plain draw/destroy/mill/token/etc. effect) — queue
+  // 2. "Exile this Saga, then return it to the battlefield transformed ..." (Fable of the Mirror-
+  //    Breaker and the rest of the "transforming Saga" template) / "Exile ~, then return it to the
+  //    battlefield (front face up)." (the Final Fantasy/March of the Machine "Dominant" cycle —
+  //    Elesh Norn // The Argent Etchings, Urabrask // The Great Work, ...; a Saga printed on the BACK
+  //    face of a transforming legendary creature, so its own final chapter flips back to the FRONT
+  //    face instead — mechanically the same flip, just worded from the other direction) — these are
+  //    exactly the shape sacrificesOnFinalChapter is false for (see SagaChapters' own doc comment),
+  //    so both are applied directly via the same transformPermanent flip every other transforming
+  //    permanent in this engine already uses (Growing Rites of Itlimoc's phase trigger, Heliod,
+  //    Westvale Abbey, ...), rather than routed through commonTriggerEffect (no "transform"
+  //    TriggerEffect kind exists) or the Rules Advisor (no transform workflow either).
+  //    transformPermanent's own flip (currentFaceIndex 0 <-> 1) is direction-agnostic, so the same
+  //    call is correct whichever face this chapter is written from. A declared simplification shared
+  //    with those other transform call sites: a real exile-then-return is a new object and would
+  //    retrigger ETBs and reset summoning sickness, neither of which transformPermanent's in-place
+  //    flip does.
+  // 3. commonTriggerEffect recognizes the shape (a plain draw/destroy/mill/token/etc. effect) — queue
   //    it as a real trigger, deferred via setTimeout to dodge reentrancy (queueCommonTriggers calls
   //    beginPendingAction, so calling it synchronously from inside advanceSagaLoreCounters — itself
   //    called from deep inside a setSession updater via runPhaseActions — would be reentrant).
-  // 3. Neither matches — defer to consultRulesAdvisor (deterministicRuleWorkflow, then the primitive-
+  // 4. Neither matches — defer to consultRulesAdvisor (deterministicRuleWorkflow, then the primitive-
   //    action-plan LLM fallback), same "saga_chapter" treatment as loyalty_ability: a shallow-copied
   //    card whose oracleText is replaced by just this chapter's own clause. Also deferred, for the
   //    same reentrancy reason — consultRulesAdvisor itself calls setSession.
@@ -3366,6 +3388,9 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
             : seat
         )
       };
+    }
+    if (isSagaTransformChapter(chapterText)) {
+      return transformPermanent(session, seatId, saga.id, saga.name, false);
     }
     const effect = commonTriggerEffect(chapterText, "clause");
     if (effect) {
@@ -17115,7 +17140,13 @@ export function shouldConsultRulesAdvisor(event: string, card: VisibleCard) {
   // Saga instead gets its own chapter-scoped consultation from triggerSagaChapter/
   // applySagaLoreCounter/advanceSagaLoreCounters, fired at the right lore-counter threshold — this
   // exclusion just stops the normal ETB/cast consultation path from misfiring on the whole card.
-  if (card.typeLine.includes("Saga")) return false;
+  // event "saga_chapter" is exempted: by the time triggerSagaChapter calls consultRulesAdvisor with
+  // it, oracleText has already been narrowed to just that one chapter's own clause (not the whole
+  // card), so there's no whole-card-blob risk left to guard against — and without this exemption,
+  // deterministicRuleWorkflow's search_library_to_battlefield workflow (and its manaValueRestriction,
+  // added for exactly this case) never actually runs for a search-shaped chapter like Urza's Saga's
+  // own chapter III, which fell through to the weaker LLM-only primitive-action planner instead.
+  if (event !== "saga_chapter" && card.typeLine.includes("Saga")) return false;
   // A land's ETB is now checked against parseZoneEffect deterministically before this ever runs
   // (see playCard's playingAsLand branch) — Bojuka Bog's "exile target player's graveyard" and the
   // rest of that shape (mill/reanimate/regrow/graveyard_to_library/gain_control/...) are already

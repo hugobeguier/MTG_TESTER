@@ -308,14 +308,16 @@ export function basicLandFetchManaCost(card: { oracleText: string }): number {
 
 const ROMAN_NUMERAL_VALUE: Record<string, number> = { I: 1, II: 2, III: 3, IV: 4, V: 5, VI: 6 };
 
-// Rule 714.2's standard reminder text: "(As this Saga enters and after your draw step, add a lore
-// counter. Sacrifice after <N>.)" — every real Saga is printed with this exact template (only <N>,
-// its own final chapter number, varies), so this is a reliable, card-name-independent way to learn
-// how many chapters a given Saga has, rather than trying to infer it from how many numbered clauses
-// happen to be present (which "I, II —" combined-chapter lines would undercount).
-function sagaChapterCount(oracleText: string): number | undefined {
-  const match = oracleText.match(/sacrifice after\s+(I{1,3}|IV|VI?)\s*\.?\)/i);
-  return match ? ROMAN_NUMERAL_VALUE[match[1].toUpperCase()] : undefined;
+// Rule 714.2's standard reminder text prints "Sacrifice after <N>," where <N> is always this Saga's
+// own final chapter number — but a real, sizable minority of Sagas (the "transforming Saga" template
+// introduced in Kamigawa: Neon Dynasty, e.g. Fable of the Mirror-Breaker, and rarer bounce-style ones
+// like The Aesir Escape Valhalla) omit this clause entirely, because their own final numbered chapter
+// already relocates/transforms the Saga itself instead of being sacrificed by the standing rule. Used
+// only to decide THAT behavior (see SagaChapters.sacrificesOnFinalChapter below) — chapterCount itself
+// is derived from the numbered chapter clauses directly (see parseSagaChapters), which every real
+// Saga template prints regardless of which of these two final-chapter behaviors it uses.
+function sagaSacrificesOnFinalChapter(oracleText: string): boolean {
+  return /sacrifice after\s+(?:I{1,3}|IV|VI?)\s*\.?\)/i.test(oracleText);
 }
 
 export interface SagaChapters {
@@ -324,16 +326,23 @@ export interface SagaChapters {
   // the same text, since rule 714.2c fires that one chapter ability once per lore counter that
   // matches ANY of its listed numbers.
   effectByChapter: Map<number, string>;
+  // See sagaSacrificesOnFinalChapter above: false for a transforming/bounce-style Saga whose own
+  // final chapter's printed effect text already handles removing/transforming it, so the caller
+  // (applySagaLoreCounter in AppFlow.tsx) must NOT also apply rule 714.4's automatic sacrifice on
+  // top of that — doing so would fight a transform or sacrifice a card that already left the
+  // battlefield via its own effect.
+  sacrificesOnFinalChapter: boolean;
 }
 
 // Splits a Saga's own numbered chapter lines ("I — ...", "II — ...", or several numbers sharing one
 // line, "I, II — ...") into per-chapter effect text, the generalized form of what Urza's Saga's own
-// bespoke chapter-handling used to do only for that one card. Returns undefined for a non-Saga (or a
-// Saga missing the standard reminder text, which real oracle text always has) rather than guessing a
-// chapter count from context.
+// bespoke chapter-handling used to do only for that one card. chapterCount is the highest chapter
+// number actually printed on the card (not the "Sacrifice after N" reminder, which — see
+// sagaSacrificesOnFinalChapter above — a transforming/bounce-style Saga's reminder text omits
+// entirely) — every real Saga's own chapter text is complete regardless of which final-chapter
+// behavior it uses, so this always finds the true count. Returns undefined for a non-Saga (or
+// anything with no numbered chapter clauses at all) rather than guessing.
 export function parseSagaChapters(oracleText: string): SagaChapters | undefined {
-  const chapterCount = sagaChapterCount(oracleText);
-  if (!chapterCount) return undefined;
   const effectByChapter = new Map<number, string>();
   for (const clause of oracleClauses(oracleText)) {
     const match = clause.match(/^((?:I{1,3}|IV|VI?)(?:\s*,\s*(?:I{1,3}|IV|VI?))*)\s*—\s*(.+)$/i);
@@ -343,7 +352,12 @@ export function parseSagaChapters(oracleText: string): SagaChapters | undefined 
       if (number) effectByChapter.set(number, match[2].trim());
     }
   }
-  return effectByChapter.size > 0 ? { chapterCount, effectByChapter } : undefined;
+  if (effectByChapter.size === 0) return undefined;
+  return {
+    chapterCount: Math.max(...effectByChapter.keys()),
+    effectByChapter,
+    sacrificesOnFinalChapter: sagaSacrificesOnFinalChapter(oracleText)
+  };
 }
 
 // "This Saga gains \"...\"" (Urza's Saga's chapter I/II, and the same template any other permanent-
@@ -355,4 +369,18 @@ export function parseSagaChapters(oracleText: string): SagaChapters | undefined 
 export function parseGainsAbilityGrant(effectText: string): string | undefined {
   const match = effectText.match(/\bgains\s+"([^"]+)"/i);
   return match ? match[1] : undefined;
+}
+
+// "Exile this Saga, then return it to the battlefield transformed under your control." (Fable of the
+// Mirror-Breaker and the rest of the "transforming Saga" template, introduced in Kamigawa: Neon
+// Dynasty) / "Exile ~, then return it to the battlefield (front face up)." (the Final Fantasy/March
+// of the Machine "Dominant" cycle — Elesh Norn // The Argent Etchings, Urabrask // The Great Work,
+// ...; here the Saga is printed on the BACK face of a transforming legendary creature, so its own
+// final chapter flips back to the FRONT face instead — mechanically the same flip, just worded from
+// the other direction). Both are real final-chapter shapes a Saga uses instead of being sacrificed by
+// rule 714.4 (see SagaChapters.sacrificesOnFinalChapter's own doc comment) — matched here as a plain
+// boolean, since the caller (triggerSagaChapter in AppFlow.tsx) always flips the same source
+// permanent regardless of how its own text names itself.
+export function isSagaTransformChapter(effectText: string): boolean {
+  return /\bexile (?:this saga|[a-z][a-z' -]*),?\s*then return it to the battlefield (?:transformed\b|\(front face up\))/i.test(effectText);
 }
