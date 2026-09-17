@@ -113,6 +113,24 @@ describe("deterministicRuleWorkflow", () => {
     expect(workflow?.allowedCardFilter).toBe("creature");
   });
 
+  // Reported live: Grisly Salvage "does not work as intended" — its real text uses "reveal" (not
+  // "look at") and sends the rest to the GRAVEYARD (not the bottom of the library), matching neither
+  // of Growing Rites' assumptions above, so it fell through to the generic look_at_top_cards
+  // fallback (no type restriction, wrong destination for the rest).
+  it("chooses look_at_top_cards_reveal_type_to_hand for Grisly Salvage's real 'reveal, put a creature-or-land to hand, rest to graveyard' shape", () => {
+    const grislySalvage = card({
+      id: "grisly-salvage-1",
+      name: "Grisly Salvage",
+      typeLine: "Instant",
+      oracleText: "Reveal the top five cards of your library. You may put a creature or land card from among them into your hand. Put the rest into your graveyard."
+    });
+    const workflow = deterministicRuleWorkflow(input(grislySalvage));
+    expect(workflow?.workflow).toBe("look_at_top_cards_reveal_type_to_hand");
+    expect(workflow?.maxChoices).toBe(5);
+    expect(workflow?.allowedCardFilter).toBe("creature or land");
+    expect(workflow?.restDestination).toBe("graveyard");
+  });
+
   it("returns no workflow for a check land whose text is only the tapped condition and a mana ability (Isolated Chapel)", () => {
     const isolatedChapel = card({
       id: "isolated-chapel-1",

@@ -263,6 +263,22 @@ export function hasGraveyardShuffleReplacement(oracleText: string): boolean {
   );
 }
 
+// A rules-advisor allowedCardFilter can itself be an "X or Y" restriction (Grisly Salvage's "creature
+// or land"), not just a single type. Both places that enforce it — AppFlow.tsx's agent auto-resolver
+// and ThreeGameTable.tsx's human-facing look modal (which one a card's real typeLine could never
+// literally contain, e.g. "Land — Forest" has no substring "creature or land") used to check it as
+// one literal substring against typeLine, so a multi-type filter silently matched nothing at all —
+// reported live as Grisly Salvage's "To Hand" button never appearing for ANY card, creature or land
+// included. Splitting on " or " and matching any alternative handles both the single-type case
+// (Growing Rites' plain "creature") and the multi-type case the same way.
+export function cardMatchesTypeFilter(typeLine: string, filter: string): boolean {
+  const normalizedTypeLine = typeLine.toLowerCase();
+  return filter
+    .toLowerCase()
+    .split(" or ")
+    .some((part) => normalizedTypeLine.includes(part.trim()));
+}
+
 // "Whenever ~ attacks, add X mana in any combination of colors, where X is the total power of
 // attacking creatures. Spend this mana only to cast spells. Until end of turn, you don't lose this
 // mana as steps and phases end." (Klauth, Unrivaled Ancient — verified via the card data; not a mana

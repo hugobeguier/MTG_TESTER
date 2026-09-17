@@ -28,7 +28,7 @@ import {
 import { equipCost, isEquipment } from "@/lib/attachments";
 import { parseManlandAnimation } from "@/lib/activatedAbilities";
 import { hasKeyword as hasOracleKeyword } from "@/lib/keywords";
-import { isBasicLandFetchAbility } from "@/lib/oracleClauses";
+import { cardMatchesTypeFilter, isBasicLandFetchAbility } from "@/lib/oracleClauses";
 import { DEFAULT_STOP_SETTINGS, stopKey, TURN_PHASES, type PriorityStopSettings } from "@/lib/priorityStops";
 import { VisualCard } from "./VisualCard";
 
@@ -429,6 +429,9 @@ interface LibraryLookState {
   // "choose_one_bottom" only (Growing Rites of Itlimoc's "a creature card") — restricts which card
   // the "To Hand" action is actually offered for.
   allowedCardFilter?: string;
+  // "choose_one_bottom" only: where the cards NOT sent to hand go — undefined/"bottom" (Growing
+  // Rites of Itlimoc) or "graveyard" (Grisly Salvage). See AppFlow.tsx's own LibraryLookState.
+  restDestination?: "bottom" | "graveyard";
 }
 
 type DraggedZone = "hand" | "graveyard" | "exile";
@@ -2375,7 +2378,9 @@ function LibraryLookModal({
                 : look.mode === "choose_one"
                   ? "Choose one card to put into your hand. The rest go back on top — you'll then order them."
                   : look.mode === "choose_one_bottom"
-                    ? `You may reveal a ${look.allowedCardFilter ?? "matching"} card to put into your hand. The rest go to the bottom of your library.`
+                    ? `You may reveal a ${look.allowedCardFilter ?? "matching"} card to put into your hand. The rest go ${
+                      look.restDestination === "graveyard" ? "into your graveyard" : "to the bottom of your library"
+                    }.`
                     : look.mode === "vault_look"
                       ? "Pay 1 life to put these on the bottom and look at the next 5, as many times as you like — or keep these and choose the order to put them back on top."
                       : "Choose Top to keep this card and finish scrying, or Bottom to look at the next card."}
@@ -2412,7 +2417,7 @@ function LibraryLookModal({
                   ) : look.mode === "choose_one_bottom" ? (
                     // Growing Rites of Itlimoc's real restriction ("a creature card") enforced here
                     // too, not just in the resolver — a non-matching card gets no action at all.
-                    look.allowedCardFilter && !card.typeLine.toLowerCase().includes(look.allowedCardFilter.toLowerCase()) ? (
+                    look.allowedCardFilter && !cardMatchesTypeFilter(card.typeLine, look.allowedCardFilter) ? (
                       <span>Doesn't match ({look.allowedCardFilter})</span>
                     ) : (
                       <button type="button" onClick={() => onToHand?.(card.id)}>To Hand</button>

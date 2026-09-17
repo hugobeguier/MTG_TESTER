@@ -42,6 +42,7 @@ import {
 import {
   basicLandFetchCostRequiresTap,
   basicLandFetchManaCost,
+  cardMatchesTypeFilter,
   cardsLeaveGraveyardEffectText,
   combatDamageToPlayerEffectText,
   deathEffectText,
@@ -300,8 +301,13 @@ interface LibraryLookState {
   remaining: number;
   orderedCards?: VisibleCard[];
   // "choose_one_bottom" only: restricts which looked-at card may actually be sent to hand (Growing
-  // Rites of Itlimoc's "a creature card") — undefined for every other mode, which allow any card.
+  // Rites of Itlimoc's "a creature card", Grisly Salvage's "a creature or land card") — undefined
+  // for every other mode, which allow any card.
   allowedCardFilter?: string;
+  // "choose_one_bottom" only: where the cards NOT sent to hand go once resolved. Undefined means the
+  // bottom of the library (Growing Rites of Itlimoc's own template, and this mode's original/default
+  // behavior) — "graveyard" is Grisly Salvage's real destination for the rest.
+  restDestination?: "bottom" | "graveyard";
   // "reorder" only, set solely by the direct reorder_top_cards workflow (Ponder's "...then draw a
   // card.") — how many cards to draw once the reorder itself completes. Left unset by every other
   // path that reuses "reorder" mode (the "choose_one" two-phase hand-off, Lim-Dûl's Vault's loop),
@@ -918,6 +924,28 @@ const DEFAULT_PLAYER_DECKLIST = `Commander: Aminatou, Veil Piercer
 // clears the "a decision is in flight" guard (agentDecisionRequests) that would otherwise lock a
 // phase out of ever being retried.
 const AGENT_REQUEST_TIMEOUT_MS = 45000;
+
+// Generous enough to cover Ollama's own OLLAMA_WARMUP_TIMEOUT_MS (120s) plus round-trip overhead —
+// this fetch is meant to sit through whatever cold-load time the model needs, unlike
+// AGENT_REQUEST_TIMEOUT_MS above which guards a real, time-boxed decision.
+const AGENT_WARMUP_TIMEOUT_MS = 125000;
+
+// Absorbs a seat's own Ollama model's cold-load time (see warmUpOllamaModel in lib/ollama.ts) before
+// its first real decision request, which has a much tighter timeout. Best-effort and silent: a
+// failed or slow warm-up just means the next real request pays the cold-load cost itself, exactly as
+// it would without this call.
+async function warmUpAgentModel(agentName: string) {
+  try {
+    await fetch("/api/agents/warmup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      signal: AbortSignal.timeout(AGENT_WARMUP_TIMEOUT_MS),
+      body: JSON.stringify({ agentName })
+    });
+  } catch {
+    // Swallowed — see comment above.
+  }
+}
 
 // A RuleWorkflow classification is a pure function of (event, the card's own oracle text) —
 // deterministicRuleWorkflow only ever reads those two fields, and the Ollama fallback's
@@ -2841,6 +2869,9 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         continue;
       }
 
+      // One-time per seat, before its first real decision request below — see warmUpAgentModel.
+      await warmUpAgentModel(seat.agentName ?? seat.name);
+
       let nextSeat = seat;
       let count = 0;
       while (count < MULLIGAN_HARD_CAP) {
@@ -2864,11 +2895,19 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         } catch {
           chosen = undefined;
         }
-        const chosenId = chosen?.legalActionId ?? (agentKeepsHand(nextSeat) ? "keep-hand" : "mulligan");
+        let chosenId = chosen?.legalActionId ?? (agentKeepsHand(nextSeat) ? "keep-hand" : "mulligan");
+        // heuristicHint.forceMulligan is the same "not a judgment call" tier as the 0/7-lands
+        // automatic mulligan — route.ts's system prompt only ever advises the model to defer to the
+        // heuristic, and a small local model can still talk itself into keeping a hand this bad with
+        // reasoning that doesn't hold up. Override the model's choice outright rather than trust the
+        // prompt wording to hold in every case.
+        const overrodeKeep = heuristicHint.forceMulligan && chosenId === "keep-hand";
+        if (overrodeKeep) chosenId = "mulligan";
         const decisionLabel = chosenId === "keep-hand" ? `keeps its ${openingHandKeepSize(count)}-card hand` : `mulligans its ${openingHandKeepSize(count)}-card hand`;
-        const reasonParts = [chosen?.reason?.trim(), heuristicHint.reasons.length > 0 ? `heuristic: ${heuristicHint.reasons.join("; ")}` : undefined].filter(
-          (part): part is string => Boolean(part)
-        );
+        const reasonParts = [
+          overrodeKeep ? "overriding the model's proposed keep — hand quality too low to keep" : chosen?.reason?.trim(),
+          heuristicHint.reasons.length > 0 ? `heuristic: ${heuristicHint.reasons.join("; ")}` : undefined
+        ].filter((part): part is string => Boolean(part));
         const reasoningText = reasonParts.length > 0 ? ` ${reasonParts.join(" — ")}.` : "";
         events.push({
           id: crypto.randomUUID(),
@@ -4744,6 +4783,16 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   }
 
   function beginPendingAction(action: PendingAction, detail: string, preChosenSacrificeTargets?: VisibleCard[]) {
+    // Set when this cast has its own triggers (Ledger Shredder's "cast your second spell", Mystic
+    // Remora, ...) waiting to be queued below — rule 601.2i puts those on the stack ABOVE the spell
+    // that triggered them before anyone gets priority, so this spell must not open its own priority
+    // window (fast-resolve or otherwise) until that's happened. Reported live: Moon-Blessed Cleric's
+    // ETB search resolved (and even prompted the human to pick an enchantment) before Ledger
+    // Shredder's connive trigger from casting it — because the trigger-queuing below is itself
+    // deferred via setTimeout to dodge reentrancy, and the requiredPasses.length===0 fast path
+    // further down used to fire its own independent setTimeout unconditionally, racing (and usually
+    // winning against) the trigger ever making it onto the stack.
+    let hasCastTriggers = false;
     if (action.type === "spell") {
       checkCastTriggeredKeywords(action);
       const sourceCard = findSpellSourceCard(session, action);
@@ -4753,10 +4802,11 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         const castOrdinal = priorSpellCount + 1;
         spellsCastThisTurn.current.set(turnSeatKey, castOrdinal);
         const castTriggers = findCastTriggers(session, action.actorSeatId, sourceCard, castOrdinal);
+        hasCastTriggers = castTriggers.length > 0;
         // Deferred, same reasoning as the land-ETB-trigger scheduling elsewhere in this file:
         // queueCommonTriggers itself calls beginPendingAction, so calling it synchronously here
         // (still inside this very call to beginPendingAction) would be reentrant.
-        if (castTriggers.length > 0) {
+        if (hasCastTriggers) {
           window.setTimeout(() => queueCommonTriggers(castTriggers), 0);
         }
       }
@@ -4847,6 +4897,12 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         ]
       };
     });
+
+    // hasCastTriggers: leave this action sitting on the stack (already pushed above) with no
+    // priority window of its own for now — the deferred queueCommonTriggers call above will push its
+    // trigger(s) on top and open the real next window, and resumeTopStackAction reopens this one
+    // normally once that trigger clears (see beginPendingAction's own comment on why).
+    if (hasCastTriggers) return;
 
     if (requiredPasses.length === 0) {
       window.setTimeout(() => resolvePendingAction(action), 0);
@@ -6527,7 +6583,13 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
                 : lookWorkflow === "look_at_top_cards_reveal_type_to_hand"
                   ? "choose_one_bottom"
                   : "scry";
-        startLibraryLook(humanMode, count, workflow.allowedCardFilter, lookWorkflow === "reorder_top_cards" ? workflow.drawCountAfter : undefined);
+        startLibraryLook(
+          humanMode,
+          count,
+          workflow.allowedCardFilter,
+          lookWorkflow === "reorder_top_cards" ? workflow.drawCountAfter : undefined,
+          lookWorkflow === "look_at_top_cards_reveal_type_to_hand" ? workflow.restDestination : undefined
+        );
         return;
       }
       setSession((current) =>
@@ -6538,7 +6600,8 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
           lookWorkflow,
           count,
           workflow.allowedCardFilter,
-          lookWorkflow === "reorder_top_cards" ? workflow.drawCountAfter : undefined
+          lookWorkflow === "reorder_top_cards" ? workflow.drawCountAfter : undefined,
+          lookWorkflow === "look_at_top_cards_reveal_type_to_hand" ? workflow.restDestination : undefined
         )
       );
       return;
@@ -6982,7 +7045,13 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     setUrzaSagaSearch(undefined);
   }
 
-  function startLibraryLook(mode: LibraryLookMode, count: number, allowedCardFilter?: string, drawCountAfter?: number) {
+  function startLibraryLook(
+    mode: LibraryLookMode,
+    count: number,
+    allowedCardFilter?: string,
+    drawCountAfter?: number,
+    restDestination?: "bottom" | "graveyard"
+  ) {
     // setLibraryLook must not be called from inside setSession's updater (React may invoke that
     // updater more than once, and other setState calls inside it are unreliable) — computed against
     // the current session directly instead, mirroring every other modal-opening call in this file.
@@ -6991,14 +7060,23 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     // object was still correct), while the actual look-window state silently never stuck.
     const seat = session.seats.find((item) => item.id === humanSeat.id);
     const cards = (seat?.library ?? []).slice(0, mode === "scry" ? 1 : count);
-    setLibraryLook({ seatId: humanSeat.id, mode, cards, remaining: count, orderedCards: mode === "reorder" ? [] : undefined, allowedCardFilter, drawCountAfter });
+    setLibraryLook({
+      seatId: humanSeat.id,
+      mode,
+      cards,
+      remaining: count,
+      orderedCards: mode === "reorder" ? [] : undefined,
+      allowedCardFilter,
+      restDestination,
+      drawCountAfter
+    });
     addEvent(
       mode === "scry"
         ? `${humanSeat.name} starts scry ${count}.`
         : mode === "reorder"
           ? `${humanSeat.name} looks at the top ${cards.length} card${cards.length === 1 ? "" : "s"} and will put them back in any order.`
           : mode === "choose_one_bottom"
-            ? `${humanSeat.name} looks at the top ${cards.length} card${cards.length === 1 ? "" : "s"}, may reveal a ${allowedCardFilter ?? "matching"} card to hand, and will put the rest on the bottom.`
+            ? `${humanSeat.name} looks at the top ${cards.length} card${cards.length === 1 ? "" : "s"}, may reveal a ${allowedCardFilter ?? "matching"} card to hand, and will put the rest ${restDestination === "graveyard" ? "into the graveyard" : "on the bottom"}.`
             : `${humanSeat.name} looks at the top ${cards.length} card${cards.length === 1 ? "" : "s"} to ${mode}.`,
       humanSeat.id
     );
@@ -7994,12 +8072,15 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     if (!activeLook || (activeLook.mode !== "choose_one" && activeLook.mode !== "choose_one_bottom")) return;
     const card = activeLook.cards.find((item) => item.id === cardId);
     if (!card) return;
-    const filter = activeLook.allowedCardFilter?.toLowerCase();
-    if (filter && !card.typeLine.toLowerCase().includes(filter)) return;
+    if (activeLook.allowedCardFilter && !cardMatchesTypeFilter(card.typeLine, activeLook.allowedCardFilter)) return;
     setSession((current) => moveLibraryCardToDestination(current, activeLook.seatId, cardId, "hand", false));
     const remainingCards = activeLook.cards.filter((item) => item.id !== cardId);
     if (activeLook.mode === "choose_one_bottom") {
-      setSession((current) => putLookedAtCardsOnBottom(current, activeLook.seatId, remainingCards));
+      setSession((current) =>
+        activeLook.restDestination === "graveyard"
+          ? putLookedAtCardsInGraveyard(current, activeLook.seatId, remainingCards)
+          : putLookedAtCardsOnBottom(current, activeLook.seatId, remainingCards)
+      );
       setLibraryLook(undefined);
       return;
     }
@@ -8019,7 +8100,11 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   // fix already applied to Urza's Saga's own search modal.
   function closeLibraryLook() {
     if (libraryLook?.mode === "choose_one_bottom") {
-      setSession((current) => putLookedAtCardsOnBottom(current, libraryLook.seatId, libraryLook.cards));
+      setSession((current) =>
+        libraryLook.restDestination === "graveyard"
+          ? putLookedAtCardsInGraveyard(current, libraryLook.seatId, libraryLook.cards)
+          : putLookedAtCardsOnBottom(current, libraryLook.seatId, libraryLook.cards)
+      );
     }
     setLibraryLook(undefined);
   }
@@ -10710,12 +10795,52 @@ function parsePhaseOutEffect(effectText: string): boolean {
 // '...'." (Estrid's Invocation) — a replacement effect on ETB, applied directly in playCardFromZone
 // rather than through the trigger/GenericAbilityEffect machinery those two functions feed (this
 // isn't a triggered ability with an effect to resolve later; it replaces how the permanent enters in
-// the first place). Narrow to this exact wording, same single-card scoping as the two functions
-// above.
-function parseEnterAsCopyEffect(oracleText: string): { extraAbilityText?: string } | undefined {
-  const match = oracleText.match(/\byou may have this enchantment enter as a copy of an enchantment you control(?:,?\s*except it has\s*"([^"]+)")?/i);
-  if (!match) return undefined;
-  return { extraAbilityText: match[1] };
+// the first place).
+//
+// "You may have this enchantment enter as a copy of any artifact or enchantment on the battlefield."
+// (Mirrormade) is the same replacement-effect shape but broader in two ways real oracle text
+// actually varies on: ANY permanent on the battlefield, not just one you control, and artifacts as
+// well as enchantments — reported live as "must be cast as a copy of another enchantment or artifact
+// on the battlefield" not working at all, because this parser only ever recognized Estrid's
+// Invocation's narrower "an enchantment you control" wording and Mirrormade's real text matches
+// neither restriction, so it silently entered as a blank, uncopied enchantment instead.
+function parseEnterAsCopyEffect(
+  oracleText: string
+): { extraAbilityText?: string; controlledOnly: boolean; allowedTypes: Array<"artifact" | "enchantment"> } | undefined {
+  const controlledMatch = oracleText.match(
+    /\byou may have this enchantment enter as a copy of an enchantment you control(?:,?\s*except it has\s*"([^"]+)")?/i
+  );
+  if (controlledMatch) return { extraAbilityText: controlledMatch[1], controlledOnly: true, allowedTypes: ["enchantment"] };
+  const anyMatch = oracleText.match(
+    /\byou may have this (?:enchantment|artifact|permanent) enter as a copy of any (artifact or enchantment|enchantment or artifact|artifact|enchantment) on the battlefield(?:,?\s*except it has\s*"([^"]+)")?/i
+  );
+  if (!anyMatch) return undefined;
+  const kinds = anyMatch[1].toLowerCase();
+  const allowedTypes: Array<"artifact" | "enchantment"> =
+    kinds.includes("artifact") && kinds.includes("enchantment") ? ["artifact", "enchantment"] : kinds.includes("artifact") ? ["artifact"] : ["enchantment"];
+  return { extraAbilityText: anyMatch[2], controlledOnly: false, allowedTypes };
+}
+
+// Shared by every "enter as a copy" shape parseEnterAsCopyEffect recognizes: controlledOnly (Estrid's
+// Invocation) only ever looks at the caster's own battlefield, while the broader "any ... on the
+// battlefield" shape (Mirrormade) searches everyone's — the caster's own permanents first (matching
+// the "prefer your own stuff" bias other unmodeled-choice heuristics in this file already use, e.g.
+// chooseNonAuraEnchantmentTarget for Zur), then every other seat's in turn order.
+function findEnterAsCopyTarget(
+  session: GameSession,
+  actingSeatId: string,
+  effect: { controlledOnly: boolean; allowedTypes: Array<"artifact" | "enchantment"> }
+): VisibleCard | undefined {
+  const matchesType = (card: VisibleCard) => effect.allowedTypes.some((type) => card.typeLine.includes(type === "artifact" ? "Artifact" : "Enchantment"));
+  const actingSeat = session.seats.find((seat) => seat.id === actingSeatId);
+  const ownMatch = actingSeat?.board.battlefield.find(matchesType);
+  if (ownMatch || effect.controlledOnly) return ownMatch;
+  for (const candidateSeat of session.seats) {
+    if (candidateSeat.id === actingSeatId) continue;
+    const match = candidateSeat.board.battlefield.find(matchesType);
+    if (match) return match;
+  }
+  return undefined;
 }
 
 // Zur, Eternal Schemer: "Target non-Aura enchantment becomes a creature. It's still an enchantment.
@@ -19179,7 +19304,11 @@ export function resolveAgentLibraryLookWorkflow(
   // reorder_top_cards only (Ponder's "...then draw a card.") — leaving the top of the library
   // untouched is already a legal resolution of the reorder itself (see the no-op comment below),
   // but the trailing draw is unconditional and still has to happen even when nothing else does.
-  drawCountAfter?: number
+  drawCountAfter?: number,
+  // look_at_top_cards_reveal_type_to_hand only: where the cards NOT taken to hand go — undefined/
+  // "bottom" (Growing Rites of Itlimoc) or "graveyard" (Grisly Salvage). See RuleWorkflow's own
+  // restDestination field.
+  restDestination?: "bottom" | "graveyard"
 ): GameSession {
   const seat = session.seats.find((item) => item.id === seatId);
   const seatName = seat?.name ?? "Agent";
@@ -19205,12 +19334,13 @@ export function resolveAgentLibraryLookWorkflow(
         ]
       };
     }
-    const filter = allowedCardFilter?.toLowerCase();
-    const eligible = filter ? cards.filter((card) => card.typeLine.toLowerCase().includes(filter)) : cards;
+    const eligible = allowedCardFilter ? cards.filter((card) => cardMatchesTypeFilter(card.typeLine, allowedCardFilter)) : cards;
     const chosen = eligible.length > 0 ? eligible.reduce((best, card) => (card.manaValue > best.manaValue ? card : best)) : undefined;
     const rest = cards.filter((card) => card.id !== chosen?.id);
     const withChosenInHand = chosen ? moveLibraryCardToDestination(session, seatId, chosen.id, "hand", false) : session;
-    const finalSession = putLookedAtCardsOnBottom(withChosenInHand, seatId, rest);
+    const finalSession =
+      restDestination === "graveyard" ? putLookedAtCardsInGraveyard(withChosenInHand, seatId, rest) : putLookedAtCardsOnBottom(withChosenInHand, seatId, rest);
+    const restPlace = restDestination === "graveyard" ? "into the graveyard" : "on the bottom";
     return {
       ...finalSession,
       events: [
@@ -19219,8 +19349,8 @@ export function resolveAgentLibraryLookWorkflow(
           at: new Date().toISOString(),
           seatId,
           message: chosen
-            ? `${seatName} resolves ${sourceCardName}: looks at the top ${cards.length}, puts ${chosen.name} into hand, and puts the rest on the bottom.`
-            : `${seatName} resolves ${sourceCardName}: looks at the top ${cards.length}, finds no ${allowedCardFilter ?? "matching"} card, and puts them all on the bottom.`
+            ? `${seatName} resolves ${sourceCardName}: looks at the top ${cards.length}, puts ${chosen.name} into hand, and puts the rest ${restPlace}.`
+            : `${seatName} resolves ${sourceCardName}: looks at the top ${cards.length}, finds no ${allowedCardFilter ?? "matching"} card, and puts them all ${restPlace}.`
         },
         ...finalSession.events
       ]
@@ -19302,6 +19432,10 @@ export function playCardFromZone(
   let playedName = "";
   let enteredTapped = false;
   let shockLifePaid = 0;
+  // Set only when an "enter as a copy" replacement effect (parseEnterAsCopyEffect) actually found a
+  // target — surfaced in the event log below so the copy is visible even if imageUris didn't come
+  // through for some reason (e.g. the copied card itself has none).
+  let copiedFromName: string | undefined;
 
   // A card exiled by an effect like Mind's Dilation's physically sits in its OWNER's exile zone,
   // not necessarily the seat granted permission to cast it (see the impulse_cast_free trigger
@@ -19390,14 +19524,15 @@ export function playCardFromZone(
       exiledPlayableUntilTurn: undefined
     };
     // Rule 707.2: "enters as a copy" is a replacement effect on the copiable values only (name,
-    // type line, oracle text, mana cost/value, colors, P/T) — everything else about enteredCard
-    // (id, zone, tapped state, ...) is untouched. seat.board.battlefield here is still the PRE-this-
-    // card board (this permanent hasn't been added to it yet), so it can't accidentally copy itself.
-    // "You may" is auto-accepted (this engine's standard "always take the beneficial choice" policy
-    // for unmodeled optional decisions) since entering with no copy target just leaves it a blank
-    // enchantment with no text, strictly worse in every real case.
+    // type line, oracle text, mana cost/value, colors, P/T, image) — everything else about
+    // enteredCard (id, zone, tapped state, ...) is untouched. session.seats here is still the PRE-
+    // this-card board (this permanent hasn't been added to any battlefield yet), so it can't
+    // accidentally copy itself. "You may" is auto-accepted (this engine's standard "always take the
+    // beneficial choice" policy for unmodeled optional decisions) since entering with no copy target
+    // just leaves it a blank enchantment with no text, strictly worse in every real case.
     const copyEffect = destination === "battlefield" ? parseEnterAsCopyEffect(enteredCard.oracleText) : undefined;
-    const copyTarget = copyEffect ? seat.board.battlefield.find((item) => item.typeLine.includes("Enchantment")) : undefined;
+    const copyTarget = copyEffect ? findEnterAsCopyTarget(session, seatId, copyEffect) : undefined;
+    if (copyTarget) copiedFromName = copyTarget.name;
     const played: VisibleCard = copyTarget
       ? {
           ...enteredCard,
@@ -19409,7 +19544,14 @@ export function playCardFromZone(
           colors: copyTarget.colors,
           colorIdentity: copyTarget.colorIdentity,
           power: copyTarget.power,
-          toughness: copyTarget.toughness
+          toughness: copyTarget.toughness,
+          // Not one of rule 707.2's own copiable values (paper Magic just relies on the physical
+          // copied card being face-up on the battlefield) — but this engine has only one card object
+          // per permanent, and the point of copying is to actually look like what it copied rather
+          // than sit there under its original art with a different name in small text. Reported
+          // live: even Estrid's Invocation's existing (narrower) copy support left the permanent
+          // showing its own card image no matter what it copied.
+          imageUris: copyTarget.imageUris ?? enteredCard.imageUris
         }
       : enteredCard;
     const spentSeat = spendManaSources(seat, manaSourceIds);
@@ -19459,7 +19601,7 @@ export function playCardFromZone(
         id: crypto.randomUUID(),
         at: new Date().toISOString(),
         seatId,
-        message: `${message ?? `${session.seats.find((seat) => seat.id === seatId)?.name ?? "Player"} plays ${playedName}.`}${enteredTapped ? " It enters tapped." : shockLifePaid > 0 ? ` Pays ${shockLifePaid} life for it to enter untapped.` : ""}${destination === "exile" ? " It's exiled — you may cast the other half later." : destination === "library" ? " It's shuffled into its owner's library." : ""}`,
+        message: `${message ?? `${session.seats.find((seat) => seat.id === seatId)?.name ?? "Player"} plays ${playedName}.`}${copiedFromName ? ` It enters as a copy of ${copiedFromName}.` : ""}${enteredTapped ? " It enters tapped." : shockLifePaid > 0 ? ` Pays ${shockLifePaid} life for it to enter untapped.` : ""}${destination === "exile" ? " It's exiled — you may cast the other half later." : destination === "library" ? " It's shuffled into its owner's library." : ""}`,
         detail: destination === "graveyard" || destination === "exile" || destination === "library" ? "Response" : undefined
       },
       ...session.events
@@ -20340,6 +20482,52 @@ export function putLookedAtCardsOnBottom(session: GameSession, seatId: string, c
         at: new Date().toISOString(),
         seatId,
         message: `${seatName} puts ${cards.length} looked-at card${cards.length === 1 ? "" : "s"} on the bottom of the library.`
+      },
+      ...session.events
+    ]
+  };
+}
+
+// "Put the rest into your graveyard." (Grisly Salvage) — mirrors applyMill's own handling of the
+// Blightsteel Colossus/Darksteel Colossus/Progenitus-style "would be put into a graveyard from
+// anywhere ... shuffle it into its owner's library instead" replacement effect (see its comment):
+// these cards are headed to the graveyard from the library too, so the same redirect applies.
+export function putLookedAtCardsInGraveyard(session: GameSession, seatId: string, cards: VisibleCard[]): GameSession {
+  if (cards.length === 0) return session;
+  const seat = session.seats.find((item) => item.id === seatId);
+  if (!seat) return session;
+  const cardIds = new Set(cards.map((card) => card.id));
+  const redirected = cards.filter((card) => hasGraveyardShuffleReplacement(card.oracleText));
+  const toGraveyard = cards.filter((card) => !hasGraveyardShuffleReplacement(card.oracleText)).map((card) => resetForZoneChange(card, "graveyard" as const));
+  const remainingLibrary = (seat.library ?? []).filter((card) => !cardIds.has(card.id));
+  return {
+    ...session,
+    seats: session.seats.map((item) =>
+      item.id === seatId
+        ? {
+            ...item,
+            library:
+              redirected.length > 0
+                ? shuffleCards([...remainingLibrary, ...redirected.map((card) => resetForZoneChange(card, "library" as const))])
+                : remainingLibrary,
+            board: toGraveyard.length > 0 ? { ...item.board, graveyard: [...(item.board.graveyard ?? []), ...toGraveyard] } : item.board,
+            zones: { ...item.zones, graveyard: item.zones.graveyard + toGraveyard.length, library: Math.max(0, item.zones.library - toGraveyard.length) }
+          }
+        : item
+    ),
+    events: [
+      ...redirected.map((card) => ({
+        id: crypto.randomUUID(),
+        at: new Date().toISOString(),
+        seatId,
+        message: `${card.name} is revealed and shuffled into ${possessive(seat)} library.`,
+        detail: "Rules action"
+      })),
+      {
+        id: crypto.randomUUID(),
+        at: new Date().toISOString(),
+        seatId,
+        message: `${seat.name} puts ${cards.length} looked-at card${cards.length === 1 ? "" : "s"} into the graveyard.`
       },
       ...session.events
     ]

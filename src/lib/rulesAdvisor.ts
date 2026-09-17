@@ -62,6 +62,11 @@ export const RuleWorkflowSchema = z.object({
   // AppFlow.tsx, which used to short-circuit this whole workflow before it ever got a chance to run).
   drawCountAfter: z.number().int().min(0).max(20).optional(),
   allowedCardFilter: z.string().optional(),
+  // look_at_top_cards_reveal_type_to_hand only: where the cards NOT taken to hand go. Undefined
+  // means the bottom of the library (Growing Rites of Itlimoc's own template, and the pre-existing
+  // default every consumer already assumed); "graveyard" is Grisly Salvage's real destination for
+  // the rest, which otherwise-identical template shares are just as likely to use.
+  restDestination: z.enum(["bottom", "graveyard"]).optional(),
   destination: DestinationSchema,
   // "... put it into your hand or graveyard, then shuffle." (Dina's Guidance) — the found card's
   // actual zone is the CONTROLLER'S choice, not a single fixed destination the way every other
@@ -197,6 +202,37 @@ export function deterministicRuleWorkflow(input: RuleAdvisorInput): RuleWorkflow
       maxChoices: 0,
       requiresHumanChoice: true,
       warnings: [`${input.sourceCard.name}'s repeat-until-satisfied loop isn't automated; walk through it by hand.`]
+    };
+  }
+
+  // "Reveal the top five cards of your library. You may put a creature or land card from among
+  // them into your hand. Put the rest into your graveyard." (Grisly Salvage, and the same "reveal
+  // (not look at), one restricted-type card to hand, rest to the GRAVEYARD" template a handful of
+  // other cards share — Commune with the Gods, Mulch, ...) — checked as its own narrow pattern,
+  // independent of lookCount/extractLookAtTopCount below (which only matches "look at the top" and
+  // is also read by several unrelated branches further down, so widening it here would widen those
+  // too). Two real differences from the Growing-Rites-shaped branch just below: the verb is "reveal"
+  // rather than "look at", and the rest goes to the graveyard rather than the bottom of the library
+  // — matching neither of that branch's fixed assumptions is why this was previously falling through
+  // to the generic look_at_top_cards fallback, which has no type restriction and puts the rest back
+  // on TOP of the library instead of into the graveyard. Also handles an "X or Y" type restriction
+  // (Grisly Salvage's own "creature or land") via allowedCardFilter's own consumers splitting on
+  // " or " — see cardMatchesTypeFilter in AppFlow.tsx.
+  const revealTopCountMatch = scopedText.match(/\breveal the top\s+(x|one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+cards?\b/);
+  const revealTopCount = revealTopCountMatch ? numberWordToInt(revealTopCountMatch[1]) : undefined;
+  const revealTypeToHandGraveyardRest = scopedText.match(
+    /\byou may put an? ([a-z][a-z ]*?) cards? from among them into your hand\.\s*put the rest into your graveyard\b/
+  );
+  if (revealTopCount && revealTypeToHandGraveyardRest) {
+    return {
+      workflow: "look_at_top_cards_reveal_type_to_hand",
+      summary: `${input.sourceCard.name} instructs ${input.actorName} to reveal the top ${revealTopCount} card${revealTopCount === 1 ? "" : "s"}, put a ${revealTypeToHandGraveyardRest[1]} card into hand, and put the rest into the graveyard.`,
+      sourceCardId: input.sourceCard.id,
+      maxChoices: revealTopCount,
+      allowedCardFilter: revealTypeToHandGraveyardRest[1],
+      restDestination: "graveyard",
+      requiresHumanChoice: true,
+      warnings: []
     };
   }
 
