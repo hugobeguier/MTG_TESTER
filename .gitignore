@@ -14,3 +14,5 @@ data/*.db-shm
 # ingestion source (mtg-commander-engine-spec.md Phase 3a), re-fetched by scripts/ingest-xmage-
 # cards.mjs, not this repo's own content.
 data/xmage-source
+# Per-run self-play output (scripts/self-play.ts) — generated JSONL logs, not repo content.
+bench/selfplay-results/

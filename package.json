@@ -12,6 +12,7 @@
     "cards:override": "node scripts/override-card.mjs",
     "xmage:ingest": "node scripts/ingest-xmage-cards.mjs",
     "bench:agents": "node scripts/agent-bench.mjs",
+    "selfplay": "vite-node -c vitest.config.ts scripts/self-play.ts --",
     "test": "vitest run"
   },
   "dependencies": {

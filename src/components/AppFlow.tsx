@@ -799,7 +799,7 @@ interface SeatConfig {
   activity: string[];
 }
 
-interface LegalAgentAction {
+export interface LegalAgentAction {
   id: string;
   actionType: AgentAction["actionType"];
   cardId?: string;
@@ -3102,16 +3102,6 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     setSession((current) => resolveEndTurn(current, activeSeat.id));
   }
 
-  function phaseEvent(seatId: string, message: string): GameEvent {
-    return {
-      id: crypto.randomUUID(),
-      at: new Date().toISOString(),
-      seatId,
-      message,
-      detail: "Phase change"
-    };
-  }
-
   function resolvePhaseAdvance(current: GameSession) {
     const activeId = current.activePlayerId ?? activeSeatId;
     const activeIndex = Math.max(0, current.seats.findIndex((seat) => seat.id === activeId));
@@ -3271,18 +3261,6 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   // the very next upkeep step that begins, whoever's turn it is, not each scheduled seat's own next
   // upkeep. So this drains the WHOLE queue the first time any upkeep step is reached, rather than
   // filtering by the seat whose upkeep this is.
-  function resolvePendingUpkeepDraws(session: GameSession): GameSession {
-    const pending = session.pendingUpkeepDraws;
-    if (!pending || pending.length === 0) return session;
-    let next: GameSession = { ...session, pendingUpkeepDraws: [] };
-    for (const entry of pending) {
-      const seat = next.seats.find((item) => item.id === entry.seatId);
-      if (!seat) continue;
-      next = drawMultipleForSeat(next, entry.seatId, entry.amount, `${entry.sourceName} resolves. ${seat.name} draws ${entry.amount === 1 ? "a card" : `${entry.amount} cards`}.`);
-    }
-    return next;
-  }
-
   // Adds one Saga's next lore counter and, if that counter lands on one of its own numbered
   // chapters, resolves that chapter's effect (triggerSagaChapter below) and, only for a Saga whose
   // reminder text actually calls for it (chapters.sacrificesOnFinalChapter — see its own doc comment
@@ -3410,63 +3388,6 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     }
     window.setTimeout(() => void consultRulesAdvisor("saga_chapter", seatId, { ...saga, oracleText: chapterText }), 0);
     return session;
-  }
-
-  function untapForSeat(session: GameSession, seatId: string): GameSession {
-    const seat = session.seats.find((item) => item.id === seatId);
-    // Rule 701.44b: a permanent with a stun counter removes one stun counter instead of untapping
-    // this step — it stays tapped, but the counter comes off, so it untaps normally again once none
-    // are left. summoningSick/attacking/blocking still clear either way (those track "since your
-    // last turn began"/"this combat", not tap state).
-    // Rule 702.26h: a phased-out permanent phases IN at the start of this same step, before any
-    // untapping happens — simplified here to just untapping it along with everything else rather
-    // than separately restoring its exact pre-phase-out tapped status, which this engine doesn't
-    // track (see phasedOut's doc comment on VisibleCard).
-    // "Stun counters can't be removed from permanents your opponents control." (Fear of Sleep
-    // Paralysis) overrides rule 701.44b above for whichever seat it's aimed at: normally a stun
-    // counter just costs one untap step before wearing off, but this locks it in place — the
-    // permanent stays tapped and stunned indefinitely until Fear of Sleep Paralysis itself leaves
-    // the battlefield (this check re-runs fresh every untap step, so it stops applying the moment
-    // that happens). Reported live as stun counters this seat received always still wearing off
-    // after one turn regardless.
-    const opponentStunLockActive = session.seats.some(
-      (other) => other.id !== seatId && other.board.battlefield.some((card) => /stun counters can'?t be removed from permanents your opponents control/i.test(card.oracleText))
-    );
-    const untapOrRemoveStun = (card: VisibleCard): VisibleCard => {
-      if (card.phasedOut) return { ...card, phasedOut: false, tapped: false, summoningSick: false, attacking: false, blocking: false };
-      if (counterCount(card, "stun") > 0) {
-        return opponentStunLockActive
-          ? { ...card, summoningSick: false, attacking: false, blocking: false }
-          : { ...applyCounterDelta(card, "stun", -1), summoningSick: false, attacking: false, blocking: false };
-      }
-      return { ...card, tapped: false, summoningSick: false, attacking: false, blocking: false };
-    };
-    const untappedSession = {
-      ...session,
-      seats: session.seats.map((item) =>
-        item.id === seatId
-          ? {
-              ...item,
-              board: {
-                ...item.board,
-                commander: item.board.commander ? untapOrRemoveStun(item.board.commander) : undefined,
-                battlefield: item.board.battlefield.map(untapOrRemoveStun)
-              }
-            }
-          : item
-      ),
-      events: [
-        phaseEvent(
-          seatId,
-          seat ? seatVerb(seat, `${seat.name} untaps their permanents.`, "You untap your permanents.") : "Player untaps their permanents."
-        ),
-        ...session.events
-      ]
-    };
-    // "Untap all artifacts/permanents you control during each other player's untap step." (Unwinding
-    // Clock, Seedborn Muse) — every OTHER seat's own untap step also untaps this seat's stuff, not
-    // just this seat's own.
-    return applyExtraUntapEffects(untappedSession, seatId);
   }
 
   function declareAttack(session: GameSession, seatId: string, cardId: string | undefined, targetId: string | undefined): GameSession {
@@ -3717,65 +3638,6 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   // attacker, in that order, which becomes the attacker's damage-assignment order (rule 509.2:
   // whoever declared the blocks chooses the order, so "the order you picked them in" is exactly
   // that choice). An empty array declares no blockers, same as before.
-  function assignBlockers(session: GameSession, choice: BlockChoiceState, blockerCardIds: string[]): GameSession {
-    const attacker = session.seats.find((seat) => seat.id === choice.attackerSeatId);
-    const defender = session.seats.find((seat) => seat.id === choice.defenderSeatId);
-    const attackingCard = attacker?.board.battlefield.find((card) => card.id === choice.attackerCardId && card.attacking);
-    if (!attacker || !defender || !attackingCard) return session;
-    const blockers = blockerCardIds
-      .map((id) => defender.board.battlefield.find((card) => card.id === id && canBlock(card, attackingCard)))
-      .filter((card): card is VisibleCard => Boolean(card));
-    const decidedSession = markAttackDecided(session, attacker.id, attackingCard.id);
-    if (blockers.length === 0) {
-      return {
-        ...decidedSession,
-        events: [
-          phaseEvent(defender.id, seatVerb(defender, `${defender.name} declares no blockers for ${attackingCard.name}.`, `You declare no blockers for ${attackingCard.name}.`)),
-          ...decidedSession.events
-        ]
-      };
-    }
-
-    const blockerIds = new Set(blockers.map((card) => card.id));
-    return {
-      ...decidedSession,
-      seats: decidedSession.seats.map((seat) => {
-        if (seat.id === defender.id) {
-          return {
-            ...seat,
-            board: {
-              ...seat.board,
-              battlefield: seat.board.battlefield.map((card) => (blockerIds.has(card.id) ? { ...card, blocking: true, blockingTargetId: attackingCard.id } : card))
-            }
-          };
-        }
-        if (seat.id === attacker.id && blockers.length > 1) {
-          return {
-            ...seat,
-            board: {
-              ...seat.board,
-              battlefield: seat.board.battlefield.map((card) =>
-                card.id === attackingCard.id ? { ...card, damageAssignmentOrder: blockers.map((blocker) => blocker.id) } : card
-              )
-            }
-          };
-        }
-        return seat;
-      }),
-      events: [
-        phaseEvent(
-          defender.id,
-          seatVerb(
-            defender,
-            `${defender.name} blocks ${attackingCard.name} with ${blockers.map((blocker) => blocker.name).join(" and ")}${blockers.length > 1 ? ` (damage order: ${blockers.map((blocker) => blocker.name).join(" then ")})` : ""}.`,
-            `You block ${attackingCard.name} with ${blockers.map((blocker) => blocker.name).join(" and ")}${blockers.length > 1 ? ` (damage order: ${blockers.map((blocker) => blocker.name).join(" then ")})` : ""}.`
-          )
-        ),
-        ...decidedSession.events
-      ]
-    };
-  }
-
   function toggleHumanBlocker(blockerCardId: string) {
     setSelectedBlockerIds((current) => (current.includes(blockerCardId) ? current.filter((id) => id !== blockerCardId) : [...current, blockerCardId]));
   }
@@ -3908,66 +3770,6 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       setSession((current) => resolveAgentLibraryLookWorkflow(current, seatId, sourceCard.name, mode === "scry" ? "scry_cards" : "surveil_cards", count));
     }
     return true;
-  }
-
-  function resolveCombatDamage(session: GameSession, attackerId: string): GameSession {
-    const attacker = session.seats.find((seat) => seat.id === attackerId);
-    if (!attacker) return session;
-    // Rule 702.8-adjacent Fog effect (Spore Frog's "Prevent all combat damage that would be dealt
-    // this turn.", see applySacrificeEffect's "prevent_combat_damage" case) — self-resets once the
-    // turn actually changes (see combatDamagePrevented's own doc comment on GameSession), so this
-    // check alone is enough without a separate end-of-turn cleanup step. No exceptType: identical
-    // to the original all-or-nothing behavior, skip this attacking seat's whole damage assignment.
-    const preventedThisTurn = session.combatDamagePrevented?.turn === session.turn;
-    const exceptType = session.combatDamagePrevented?.exceptType;
-    if (preventedThisTurn && !exceptType) {
-      return {
-        ...session,
-        events: [phaseEvent(attackerId, "All combat damage is prevented this turn."), ...session.events]
-      };
-    }
-    // "Prevent all combat damage that would be dealt this turn by non-Spider creatures." — an
-    // exceptType exempts matching attackers from the block above instead of skipping every
-    // attacker outright, so Arachnogenesis's own freshly-created Spiders can still deal damage.
-    const attackingCardIds = attacker.board.battlefield
-      .filter((card) => card.attacking)
-      .filter((card) => !preventedThisTurn || (exceptType !== undefined && card.typeLine.includes(exceptType)))
-      .map((card) => card.id);
-    if (attackingCardIds.length === 0) {
-      return {
-        ...session,
-        events: [phaseEvent(attackerId, "No attacking creatures assign combat damage."), ...session.events]
-      };
-    }
-
-    let result = session;
-    for (const cardId of attackingCardIds) {
-      const currentAttacker = result.seats.find((seat) => seat.id === attackerId);
-      const attackingCard = currentAttacker?.board.battlefield.find((card) => card.id === cardId);
-      if (!attackingCard) continue;
-      const target = resolveAttackTarget(result, attackingCard.attackTargetId);
-      if (!target) continue;
-      const allBlockers = target.seat.board.battlefield.filter((card) => card.blocking && card.blockingTargetId === attackingCard.id);
-      const orderedBlockers = attackingCard.damageAssignmentOrder
-        ? attackingCard.damageAssignmentOrder.map((blockerId) => allBlockers.find((card) => card.id === blockerId)).filter((card): card is VisibleCard => Boolean(card))
-        : allBlockers;
-      result =
-        orderedBlockers.length > 0
-          ? resolveBlockedCombatDamage(result, attackerId, attackingCard, target, orderedBlockers)
-          : applyCombatDamageToTarget(result, attackingCard.name, target, Math.max(0, effectivePower(attackingCard)), attackingCard, attackerId);
-    }
-    return result;
-  }
-
-  function cleanupCombat(session: GameSession, seatId: string): GameSession {
-    const seat = session.seats.find((item) => item.id === seatId);
-    return {
-      ...clearCombatState(session),
-      events: [
-        phaseEvent(seatId, seat ? seatVerb(seat, `${seat.name} clears combat at end of combat.`, "You clear combat at end of combat.") : "Player clears combat at end of combat."),
-        ...session.events
-      ]
-    };
   }
 
   function passPriority() {
@@ -8606,6 +8408,218 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   );
 }
 
+// --- Hoisted from inside AppFlow (were nested closures with no React state access) ---
+// Moved verbatim, no behavior change, so the headless self-play orchestrator (later milestone) can
+// call the same phase-advance primitives the live UI uses. Not every originally-planned function in
+// this group could be hoisted this way — see the ones still nested just above AppFlow's closing
+// brace (clearAllManaPools, declareAttack, runPhaseActions, advanceSagaLoreCounters) for why.
+
+export function phaseEvent(seatId: string, message: string): GameEvent {
+  return {
+    id: crypto.randomUUID(),
+    at: new Date().toISOString(),
+    seatId,
+    message,
+    detail: "Phase change"
+  };
+}
+
+// Arcane Denial's "at the beginning of the next turn's upkeep" delayed draws (see
+// GameSession.pendingUpkeepDraws and parseDelayedUpkeepDraws) — "the next turn's upkeep" means
+// the very next upkeep step that begins, whoever's turn it is, not each scheduled seat's own next
+// upkeep. So this drains the WHOLE queue the first time any upkeep step is reached, rather than
+// filtering by the seat whose upkeep this is.
+export function resolvePendingUpkeepDraws(session: GameSession): GameSession {
+  const pending = session.pendingUpkeepDraws;
+  if (!pending || pending.length === 0) return session;
+  let next: GameSession = { ...session, pendingUpkeepDraws: [] };
+  for (const entry of pending) {
+    const seat = next.seats.find((item) => item.id === entry.seatId);
+    if (!seat) continue;
+    next = drawMultipleForSeat(next, entry.seatId, entry.amount, `${entry.sourceName} resolves. ${seat.name} draws ${entry.amount === 1 ? "a card" : `${entry.amount} cards`}.`);
+  }
+  return next;
+}
+
+export function untapForSeat(session: GameSession, seatId: string): GameSession {
+  const seat = session.seats.find((item) => item.id === seatId);
+  // Rule 701.44b: a permanent with a stun counter removes one stun counter instead of untapping
+  // this step — it stays tapped, but the counter comes off, so it untaps normally again once none
+  // are left. summoningSick/attacking/blocking still clear either way (those track "since your
+  // last turn began"/"this combat", not tap state).
+  // Rule 702.26h: a phased-out permanent phases IN at the start of this same step, before any
+  // untapping happens — simplified here to just untapping it along with everything else rather
+  // than separately restoring its exact pre-phase-out tapped status, which this engine doesn't
+  // track (see phasedOut's doc comment on VisibleCard).
+  // "Stun counters can't be removed from permanents your opponents control." (Fear of Sleep
+  // Paralysis) overrides rule 701.44b above for whichever seat it's aimed at: normally a stun
+  // counter just costs one untap step before wearing off, but this locks it in place — the
+  // permanent stays tapped and stunned indefinitely until Fear of Sleep Paralysis itself leaves
+  // the battlefield (this check re-runs fresh every untap step, so it stops applying the moment
+  // that happens). Reported live as stun counters this seat received always still wearing off
+  // after one turn regardless.
+  const opponentStunLockActive = session.seats.some(
+    (other) => other.id !== seatId && other.board.battlefield.some((card) => /stun counters can'?t be removed from permanents your opponents control/i.test(card.oracleText))
+  );
+  const untapOrRemoveStun = (card: VisibleCard): VisibleCard => {
+    if (card.phasedOut) return { ...card, phasedOut: false, tapped: false, summoningSick: false, attacking: false, blocking: false };
+    if (counterCount(card, "stun") > 0) {
+      return opponentStunLockActive
+        ? { ...card, summoningSick: false, attacking: false, blocking: false }
+        : { ...applyCounterDelta(card, "stun", -1), summoningSick: false, attacking: false, blocking: false };
+    }
+    return { ...card, tapped: false, summoningSick: false, attacking: false, blocking: false };
+  };
+  const untappedSession = {
+    ...session,
+    seats: session.seats.map((item) =>
+      item.id === seatId
+        ? {
+            ...item,
+            board: {
+              ...item.board,
+              commander: item.board.commander ? untapOrRemoveStun(item.board.commander) : undefined,
+              battlefield: item.board.battlefield.map(untapOrRemoveStun)
+            }
+          }
+        : item
+    ),
+    events: [
+      phaseEvent(
+        seatId,
+        seat ? seatVerb(seat, `${seat.name} untaps their permanents.`, "You untap your permanents.") : "Player untaps their permanents."
+      ),
+      ...session.events
+    ]
+  };
+  // "Untap all artifacts/permanents you control during each other player's untap step." (Unwinding
+  // Clock, Seedborn Muse) — every OTHER seat's own untap step also untaps this seat's stuff, not
+  // just this seat's own.
+  return applyExtraUntapEffects(untappedSession, seatId);
+}
+
+export function resolveCombatDamage(session: GameSession, attackerId: string): GameSession {
+  const attacker = session.seats.find((seat) => seat.id === attackerId);
+  if (!attacker) return session;
+  // Rule 702.8-adjacent Fog effect (Spore Frog's "Prevent all combat damage that would be dealt
+  // this turn.", see applySacrificeEffect's "prevent_combat_damage" case) — self-resets once the
+  // turn actually changes (see combatDamagePrevented's own doc comment on GameSession), so this
+  // check alone is enough without a separate end-of-turn cleanup step. No exceptType: identical
+  // to the original all-or-nothing behavior, skip this attacking seat's whole damage assignment.
+  const preventedThisTurn = session.combatDamagePrevented?.turn === session.turn;
+  const exceptType = session.combatDamagePrevented?.exceptType;
+  if (preventedThisTurn && !exceptType) {
+    return {
+      ...session,
+      events: [phaseEvent(attackerId, "All combat damage is prevented this turn."), ...session.events]
+    };
+  }
+  // "Prevent all combat damage that would be dealt this turn by non-Spider creatures." — an
+  // exceptType exempts matching attackers from the block above instead of skipping every
+  // attacker outright, so Arachnogenesis's own freshly-created Spiders can still deal damage.
+  const attackingCardIds = attacker.board.battlefield
+    .filter((card) => card.attacking)
+    .filter((card) => !preventedThisTurn || (exceptType !== undefined && card.typeLine.includes(exceptType)))
+    .map((card) => card.id);
+  if (attackingCardIds.length === 0) {
+    return {
+      ...session,
+      events: [phaseEvent(attackerId, "No attacking creatures assign combat damage."), ...session.events]
+    };
+  }
+
+  let result = session;
+  for (const cardId of attackingCardIds) {
+    const currentAttacker = result.seats.find((seat) => seat.id === attackerId);
+    const attackingCard = currentAttacker?.board.battlefield.find((card) => card.id === cardId);
+    if (!attackingCard) continue;
+    const target = resolveAttackTarget(result, attackingCard.attackTargetId);
+    if (!target) continue;
+    const allBlockers = target.seat.board.battlefield.filter((card) => card.blocking && card.blockingTargetId === attackingCard.id);
+    const orderedBlockers = attackingCard.damageAssignmentOrder
+      ? attackingCard.damageAssignmentOrder.map((blockerId) => allBlockers.find((card) => card.id === blockerId)).filter((card): card is VisibleCard => Boolean(card))
+      : allBlockers;
+    result =
+      orderedBlockers.length > 0
+        ? resolveBlockedCombatDamage(result, attackerId, attackingCard, target, orderedBlockers)
+        : applyCombatDamageToTarget(result, attackingCard.name, target, Math.max(0, effectivePower(attackingCard)), attackingCard, attackerId);
+  }
+  return result;
+}
+
+export function cleanupCombat(session: GameSession, seatId: string): GameSession {
+  const seat = session.seats.find((item) => item.id === seatId);
+  return {
+    ...clearCombatState(session),
+    events: [
+      phaseEvent(seatId, seat ? seatVerb(seat, `${seat.name} clears combat at end of combat.`, "You clear combat at end of combat.") : "Player clears combat at end of combat."),
+      ...session.events
+    ]
+  };
+}
+
+// Hoisted for the same reason as untapForSeat/resolveCombatDamage/cleanupCombat above — was a
+// nested closure but never actually touched React state, only session/markAttackDecided/canBlock/
+// phaseEvent/seatVerb, all already module-level.
+export function assignBlockers(session: GameSession, choice: BlockChoiceState, blockerCardIds: string[]): GameSession {
+  const attacker = session.seats.find((seat) => seat.id === choice.attackerSeatId);
+  const defender = session.seats.find((seat) => seat.id === choice.defenderSeatId);
+  const attackingCard = attacker?.board.battlefield.find((card) => card.id === choice.attackerCardId && card.attacking);
+  if (!attacker || !defender || !attackingCard) return session;
+  const blockers = blockerCardIds
+    .map((id) => defender.board.battlefield.find((card) => card.id === id && canBlock(card, attackingCard)))
+    .filter((card): card is VisibleCard => Boolean(card));
+  const decidedSession = markAttackDecided(session, attacker.id, attackingCard.id);
+  if (blockers.length === 0) {
+    return {
+      ...decidedSession,
+      events: [
+        phaseEvent(defender.id, seatVerb(defender, `${defender.name} declares no blockers for ${attackingCard.name}.`, `You declare no blockers for ${attackingCard.name}.`)),
+        ...decidedSession.events
+      ]
+    };
+  }
+
+  const blockerIds = new Set(blockers.map((card) => card.id));
+  return {
+    ...decidedSession,
+    seats: decidedSession.seats.map((seat) => {
+      if (seat.id === defender.id) {
+        return {
+          ...seat,
+          board: {
+            ...seat.board,
+            battlefield: seat.board.battlefield.map((card) => (blockerIds.has(card.id) ? { ...card, blocking: true, blockingTargetId: attackingCard.id } : card))
+          }
+        };
+      }
+      if (seat.id === attacker.id && blockers.length > 1) {
+        return {
+          ...seat,
+          board: {
+            ...seat.board,
+            battlefield: seat.board.battlefield.map((card) =>
+              card.id === attackingCard.id ? { ...card, damageAssignmentOrder: blockers.map((blocker) => blocker.id) } : card
+            )
+          }
+        };
+      }
+      return seat;
+    }),
+    events: [
+      phaseEvent(
+        defender.id,
+        seatVerb(
+          defender,
+          `${defender.name} blocks ${attackingCard.name} with ${blockers.map((blocker) => blocker.name).join(" and ")}${blockers.length > 1 ? ` (damage order: ${blockers.map((blocker) => blocker.name).join(" then ")})` : ""}.`,
+          `You block ${attackingCard.name} with ${blockers.map((blocker) => blocker.name).join(" and ")}${blockers.length > 1 ? ` (damage order: ${blockers.map((blocker) => blocker.name).join(" then ")})` : ""}.`
+        )
+      ),
+      ...decidedSession.events
+    ]
+  };
+}
+
 function DeckSetupPanel({
   config,
   onBuild,
@@ -8778,7 +8792,7 @@ export function validateConfigsForPlay(configs: SeatConfig[]) {
   return { ready, configs: nextConfigs };
 }
 
-function applyDeckToSeat(seat: PlayerSeat, deck: CommanderDeck): PlayerSeat {
+export function applyDeckToSeat(seat: PlayerSeat, deck: CommanderDeck): PlayerSeat {
   const commander = createCommanderCard(deck, seat.board.commander);
   return {
     ...seat,
@@ -8913,7 +8927,7 @@ function hasIndestructible(card: VisibleCard) {
   return hasKeyword(card, "indestructible");
 }
 
-function hasVigilance(card: VisibleCard) {
+export function hasVigilance(card: VisibleCard) {
   return hasKeyword(card, "vigilance");
 }
 
@@ -8975,7 +8989,7 @@ function describeKeywords(card: VisibleCard): string[] {
   return keywords;
 }
 
-function resolveAttackTarget(session: GameSession, targetId: string | undefined): { seat: PlayerSeat; planeswalker?: VisibleCard } | undefined {
+export function resolveAttackTarget(session: GameSession, targetId: string | undefined): { seat: PlayerSeat; planeswalker?: VisibleCard } | undefined {
   if (!targetId) return undefined;
   const seat = session.seats.find((item) => item.id === targetId);
   if (seat) return { seat };
@@ -9201,7 +9215,7 @@ function applyAuraAttachToPlayer(session: GameSession, casterSeatId: string, aur
 // same card (Karn's Temporal Sundering, Time Walk's "you may play an additional land"-adjacent
 // text) still match here for the extra-turn half — this only ever grants the turn, not any other
 // clause bundled onto the same spell, since those are handled by their own respective parsers.
-function grantsExtraTurn(oracleText: string): boolean {
+export function grantsExtraTurn(oracleText: string): boolean {
   return /\btake an extra turn after this one\b/i.test(oracleText);
 }
 
@@ -9462,7 +9476,7 @@ function cumulativeUpkeepCost(card: VisibleCard) {
   return Math.max(1, base) * (ageCounters + 1);
 }
 
-function legalMainPhaseActions(
+export function legalMainPhaseActions(
   seat: PlayerSeat,
   hasPlayedLand: boolean,
   activeSeatId: string | undefined,
@@ -9773,7 +9787,7 @@ function describeAttackOption(card: VisibleCard, legalBlockers: VisibleCard[], t
   return `${effectivePower(card)}/${effectiveToughness(card)}${keywordText} ${card.oracleText} (${legalBlockers.length} untapped creature${legalBlockers.length === 1 ? "" : "s"} there could legally block).${taxText}`.trim();
 }
 
-function legalAttackActions(seat: PlayerSeat, opponents: PlayerSeat[] = []): LegalAgentAction[] {
+export function legalAttackActions(seat: PlayerSeat, opponents: PlayerSeat[] = []): LegalAgentAction[] {
   const attackers = seat.board.battlefield.filter(canAttack);
   const actions: LegalAgentAction[] = [];
   for (const card of attackers) {
@@ -9853,7 +9867,7 @@ function isPendingActionLikelyIrrelevantToSeat(seat: PlayerSeat, pendingAction: 
   return true;
 }
 
-function legalPriorityActions(seat: PlayerSeat, pendingAction: PendingAction, activeSeatId: string | undefined, session: GameSession): LegalAgentAction[] {
+export function legalPriorityActions(seat: PlayerSeat, pendingAction: PendingAction, activeSeatId: string | undefined, session: GameSession): LegalAgentAction[] {
   if (pendingAction.type === "trigger" && pendingAction.controllerSeatId === seat.id) {
     return [{ id: "resolve-trigger", actionType: "pass_priority", targetIds: [], label: `resolve ${pendingAction.sourceCardName} trigger` }];
   }
@@ -13590,7 +13604,7 @@ export function applyZoneEffect(session: GameSession, casterSeatId: string, sour
 // regexes already tolerate a literal "x" in their own alternation (harmless dead weight once this
 // substitution runs, and the correct "decline, don't guess" behavior on the rare path where
 // chosenX isn't available and "x" is left as-is).
-function substituteX(text: string, chosenX: number): string {
+export function substituteX(text: string, chosenX: number): string {
   return text.replace(/\bx\b/gi, String(chosenX));
 }
 
@@ -13613,7 +13627,7 @@ function substituteManaValueCount(text: string, manaValue: number): string {
 // a plain substring search rather than an anchored match, since it only ever runs alongside
 // removalEffect/pumpEffect/massPumpEffect above (each of which already owns matching its own single
 // sentence) and just needs to notice this second, independent sentence anywhere in the same text.
-function parseSimpleLifeChange(text: string): { kind: "gain_life" | "lose_life"; amount: number } | undefined {
+export function parseSimpleLifeChange(text: string): { kind: "gain_life" | "lose_life"; amount: number } | undefined {
   const lower = text.toLowerCase();
   const gainMatch = lower.match(/\byou gain\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+life\b/);
   if (gainMatch) {
@@ -13779,7 +13793,7 @@ function applyDiscardEffect(
   };
 }
 
-function applySimpleLifeChange(
+export function applySimpleLifeChange(
   session: GameSession,
   casterSeatId: string,
   sourceName: string,
@@ -13813,7 +13827,7 @@ interface PumpEffect {
 // unmodeled (no TriggerEffect/ZoneEffect kind covers a temporary, targeted P/T change). Reuses the
 // existing temporaryPowerBonus/temporaryToughnessBonus fields (already used for prowess) rather
 // than adding a parallel mechanism.
-function parseTargetedPump(text: string): PumpEffect | undefined {
+export function parseTargetedPump(text: string): PumpEffect | undefined {
   const match = text.match(/\btarget creature gets ([+-]\d+)\/([+-]\d+) until end of turn\b/i);
   if (!match) return undefined;
   return { power: Number.parseInt(match[1], 10), toughness: Number.parseInt(match[2], 10) };
@@ -13827,7 +13841,7 @@ function choosePumpTarget(session: GameSession, casterSeatId: string, effect: Pu
   return chooseCounterTarget(session, casterSeatId, effect.power >= 0 ? "+1/+1" : "-1/-1", false);
 }
 
-function applyTargetedPumpEffect(session: GameSession, casterSeatId: string, sourceCard: VisibleCard, effect: PumpEffect): GameSession {
+export function applyTargetedPumpEffect(session: GameSession, casterSeatId: string, sourceCard: VisibleCard, effect: PumpEffect): GameSession {
   const target = choosePumpTarget(session, casterSeatId, effect);
   if (!target) return noLegalTargetEvent(session, casterSeatId, sourceCard.name);
   const powerText = `${effect.power >= 0 ? "+" : ""}${effect.power}`;
@@ -13876,7 +13890,7 @@ interface MassPumpEffect {
 // mode once substituteX has resolved X, "Each creature you control gets +1/+1 until end of turn"
 // anthem-style tricks, ...) — previously entirely unmodeled, so a spell shaped like this (no single
 // "target creature" to find) silently did nothing.
-function parseMassPump(text: string): MassPumpEffect | undefined {
+export function parseMassPump(text: string): MassPumpEffect | undefined {
   const match = text.match(/\beach (?:non-([a-z]+) )?creatures?(?: (you control)| (an? opponent controls))? gets? ([+-]\d+)\/([+-]\d+) until end of turn\b/i);
   if (!match) return undefined;
   return {
@@ -13939,13 +13953,13 @@ export function applyMassPumpEffect(session: GameSession, casterSeatId: string, 
 // creatures). Reported live as Devastation Tide doing nothing at all: the old regex only matched
 // the literal word "creatures", so this text never matched, and even if it had,
 // applyMassBounceEffect's own battlefield filter was hardcoded to creatures only.
-function parseMassBounceEffect(text: string): "creatures" | "nonland_permanents" | undefined {
+export function parseMassBounceEffect(text: string): "creatures" | "nonland_permanents" | undefined {
   if (/\breturn all creatures to their owners'? hands?\b/i.test(text)) return "creatures";
   if (/\breturn all nonland permanents to their owners'? hands?\b/i.test(text)) return "nonland_permanents";
   return undefined;
 }
 
-function applyMassBounceEffect(session: GameSession, casterSeatId: string, sourceCardName: string, scope: "creatures" | "nonland_permanents" = "creatures"): GameSession {
+export function applyMassBounceEffect(session: GameSession, casterSeatId: string, sourceCardName: string, scope: "creatures" | "nonland_permanents" = "creatures"): GameSession {
   const targets = session.seats.flatMap((seat) =>
     seat.board.battlefield
       .filter((card) => (scope === "nonland_permanents" ? !isLandCard(card) : card.typeLine.includes("Creature")))
@@ -14256,7 +14270,7 @@ interface GenericModalEffect {
 // gain pair, a multi-target "up to X creatures" grant, ...) is simply dropped — the same "decline
 // rather than guess" behavior as every other unmatched shape in this codebase, and the same
 // behavior removalSpells.ts's own modal parsing already has for modes it can't place.
-function parseGenericModalEffect(oracleText: string, chosenX: number | undefined): GenericModalEffect | undefined {
+export function parseGenericModalEffect(oracleText: string, chosenX: number | undefined): GenericModalEffect | undefined {
   if (parseRemovalEffect(etbEffectText(oracleText))) return undefined;
   const header = parseModalHeader(oracleText);
   if (!header) return undefined;
@@ -14295,7 +14309,7 @@ function genericModalModeHasLegalTarget(session: GameSession, casterSeatId: stri
 // has no notion of declining (that only happens upstream, in the accept/decline UI a real triggered
 // ability goes through before ever reaching it), and a synthetic trigger built here skips that step
 // entirely, matching how cheaply this engine already treats "optional" ETB effects elsewhere.
-function applyGenericModalEffect(session: GameSession, casterSeatId: string, sourceCard: VisibleCard, effect: GenericModalEffect): GameSession {
+export function applyGenericModalEffect(session: GameSession, casterSeatId: string, sourceCard: VisibleCard, effect: GenericModalEffect): GameSession {
   const viableModes = effect.modes.filter((mode) => genericModalModeHasLegalTarget(session, casterSeatId, mode));
   const chosenModes = viableModes.slice(0, effect.chooseCount);
   if (chosenModes.length === 0) return noLegalTargetEvent(session, casterSeatId, sourceCard.name);
@@ -14887,7 +14901,7 @@ function describeBlockTrade(attacker: VisibleCard | undefined, blocker: VisibleC
   return `(neither creature dies${trampleNote}${noteSuffix}).`;
 }
 
-function legalBlockActions(session: GameSession, choice: BlockChoiceState): LegalAgentAction[] {
+export function legalBlockActions(session: GameSession, choice: BlockChoiceState): LegalAgentAction[] {
   const defender = session.seats.find((seat) => seat.id === choice.defenderSeatId);
   const attacker = session.seats.find((seat) => seat.id === choice.attackerSeatId);
   const attackingCard = attacker?.board.battlefield.find((card) => card.id === choice.attackerCardId);
@@ -15904,7 +15918,7 @@ function hasSorcerySpeedOnlyLimiter(clause: string): boolean {
   return /\bactivate only as a sorcery\b/i.test(clause);
 }
 
-function createTokensForSeat(session: GameSession, seatId: string, sourceCardId: string, specs: TokenSpec[]) {
+export function createTokensForSeat(session: GameSession, seatId: string, sourceCardId: string, specs: TokenSpec[]) {
   const createdTokens = specs.flatMap((spec) =>
     Array.from({ length: spec.count }, () => createTokenCard(seatId, sourceCardId, spec))
   );
@@ -17629,13 +17643,13 @@ export function applyPunisherChoiceEffect(session: GameSession, casterSeatId: st
 // this to themselves" shape just above, but that's a single step with no ordering dependency),
 // so it's its own bespoke shape, applied unconditionally to every seat, like that one. Previously
 // unhandled by any deterministic parser, reported live as "Living Death did not work."
-function isLivingDeathEffect(text: string): boolean {
+export function isLivingDeathEffect(text: string): boolean {
   return /\beach player exiles all creature cards from their graveyard,\s*then sacrifices all creatures they control,\s*then puts all cards they exiled this way onto the battlefield\b/i.test(
     text
   );
 }
 
-function applyLivingDeathEffect(session: GameSession, sourceCardName: string): GameSession {
+export function applyLivingDeathEffect(session: GameSession, sourceCardName: string): GameSession {
   // Step 1: snapshot and exile each player's own graveyard creatures FIRST, before anything else
   // moves — the creatures that die in step 2 must land in the graveyard as normal (this same spell
   // doesn't bring those back too), only what was already in the graveyard when Living Death resolved.
@@ -17753,7 +17767,7 @@ function spellResolutionDestination(session: GameSession, action: Extract<Pendin
   return effectiveCard.typeLine.includes("Instant") || effectiveCard.typeLine.includes("Sorcery") ? "graveyard" : "battlefield";
 }
 
-function isLandCard(card: VisibleCard) {
+export function isLandCard(card: VisibleCard) {
   return card.typeLine.includes("Land") || card.role === "land";
 }
 
@@ -17821,7 +17835,7 @@ export function modalDoubleFacedLandSplit(card: VisibleCard): { spellFace: CardF
   return undefined;
 }
 
-function roomDoorFaces(card: VisibleCard): [CardFaceRecord, CardFaceRecord] | undefined {
+export function roomDoorFaces(card: VisibleCard): [CardFaceRecord, CardFaceRecord] | undefined {
   const faces = twoSidedFaces(card);
   if (!faces) return undefined;
   return faces.every((face) => face.typeLine.includes("Room")) ? faces : undefined;
@@ -17836,7 +17850,7 @@ function roomDoorFaces(card: VisibleCard): [CardFaceRecord, CardFaceRecord] | un
 // way to be cast as its sorcery face specifically: it always resolved as the single fused,
 // combined-oracleText pseudo-card built from both faces mashed together, so the sorcery's own
 // effect text was never what actually ran.
-function independentlyCastableSpellFaces(card: VisibleCard): [CardFaceRecord, CardFaceRecord] | undefined {
+export function independentlyCastableSpellFaces(card: VisibleCard): [CardFaceRecord, CardFaceRecord] | undefined {
   const faces = twoSidedFaces(card);
   if (!faces) return undefined;
   const [first, second] = faces;
@@ -17871,7 +17885,7 @@ function xOrMultikickerUnitCost(card: VisibleCard): number {
   return xCount > 0 ? xCount : (parseMultikickerCost(card.oracleText) ?? 0);
 }
 
-function maxAffordableX(seat: PlayerSeat, card: VisibleCard, fixedCost: number, pool?: ManaPool): number {
+export function maxAffordableX(seat: PlayerSeat, card: VisibleCard, fixedCost: number, pool?: ManaPool): number {
   const unitCost = xOrMultikickerUnitCost(card);
   if (unitCost === 0) return 0;
   // fixedCost already had up to card.manaValue worth of any pending cost reduction subtracted
@@ -17887,7 +17901,7 @@ function maxAffordableX(seat: PlayerSeat, card: VisibleCard, fixedCost: number, 
 
 // A purely-generic fake card, used to reuse chooseManaSourcesForCost for costs that don't come
 // from an actual card's mana cost (e.g. paying an attack tax on declaration).
-function genericCostShim(amount: number): VisibleCard {
+export function genericCostShim(amount: number): VisibleCard {
   return {
     id: "attack-tax-shim",
     name: "Attack Tax",
@@ -17928,7 +17942,7 @@ function attackTaxEffectsFor(defender: PlayerSeat, targetIsPlaneswalker: boolean
 
 // Sum of all attack-tax effects the defending seat has in play, evaluated against their current
 // board state (e.g. Sphere of Safety's per-enchantment amount can change turn to turn).
-function totalAttackTax(defender: PlayerSeat, targetIsPlaneswalker: boolean): number {
+export function totalAttackTax(defender: PlayerSeat, targetIsPlaneswalker: boolean): number {
   const enchantmentCount = defender.board.battlefield.filter((card) => card.typeLine.includes("Enchantment")).length;
   return attackTaxEffectsFor(defender, targetIsPlaneswalker).reduce(
     (total, effect) => total + effectiveAttackTaxAmount(effect, enchantmentCount),
@@ -19102,7 +19116,7 @@ function depletionSacrificeCounterKind(oracleText: string): string | undefined {
 // zone-change rule, same as destroyCreatures/moveCardBetweenVisibleZones). Also charges any spent
 // painland's life cost — see painlandDamageAmount's own comment on why this is an approximation for
 // half the family, not an exact simulation.
-function spendManaSources(seat: PlayerSeat, sourceIds: string[]): PlayerSeat {
+export function spendManaSources(seat: PlayerSeat, sourceIds: string[]): PlayerSeat {
   if (sourceIds.length === 0) return seat;
   const sourceSet = new Set(sourceIds);
   const kept: VisibleCard[] = [];
@@ -19211,7 +19225,7 @@ function fallbackCommander(name: string) {
   return "Atraxa, Praetors' Voice";
 }
 
-function resolveAgentMulligans(seats: PlayerSeat[]) {
+export function resolveAgentMulligans(seats: PlayerSeat[]) {
   const mulligans: Record<string, number> = {};
   const keptHands: Record<string, boolean> = {};
   const events: GameEvent[] = [];
@@ -19293,7 +19307,7 @@ function keepOpeningHandSize(seat: PlayerSeat, keepSize: number, returnCardIds: 
   };
 }
 
-function withOpeningHand(seat: PlayerSeat, size: number, mulliganCount: number): PlayerSeat {
+export function withOpeningHand(seat: PlayerSeat, size: number, mulliganCount: number): PlayerSeat {
   const library = makeShuffledLibrary(seat, mulliganCount);
   const hand = library.slice(0, size).map((card) => ({ ...card, zone: "hand" as const }));
   const remainingLibrary = library.slice(size);
@@ -19312,7 +19326,7 @@ function withOpeningHand(seat: PlayerSeat, size: number, mulliganCount: number):
   };
 }
 
-function makeShuffledLibrary(seat: PlayerSeat, shuffleCount: number) {
+export function makeShuffledLibrary(seat: PlayerSeat, shuffleCount: number) {
   const deckCards = expandDeckCards(seat);
   if (deckCards.length === 0) {
     return Array.from({ length: 99 }, (_, index) =>
@@ -19324,12 +19338,12 @@ function makeShuffledLibrary(seat: PlayerSeat, shuffleCount: number) {
   );
 }
 
-function expandDeckCards(seat: PlayerSeat) {
+export function expandDeckCards(seat: PlayerSeat) {
   const cards = seat.deck?.cards.filter((card) => card.role !== "commander") ?? [];
   return cards.flatMap((card) => Array.from({ length: card.count }, () => card));
 }
 
-function drawForSeat(session: GameSession, seatId: string, message: string): GameSession {
+export function drawForSeat(session: GameSession, seatId: string, message: string): GameSession {
   const seat = session.seats.find((item) => item.id === seatId);
   if (seat && !seat.hasLost && !seat.library?.[0]) {
     return {
@@ -19382,7 +19396,7 @@ function drawForSeat(session: GameSession, seatId: string, message: string): Gam
   };
 }
 
-function drawMultipleForSeat(session: GameSession, seatId: string, count: number, message: string): GameSession {
+export function drawMultipleForSeat(session: GameSession, seatId: string, count: number, message: string): GameSession {
   let next = session;
   for (let index = 0; index < count; index += 1) {
     next = drawForSeat(next, seatId, index === 0 ? message : `${session.seats.find((seat) => seat.id === seatId)?.name ?? "Player"} draws a card.`);
@@ -19758,7 +19772,7 @@ function rollD20() {
 // Rule 103.2: before the game, each player rolls a die (traditionally a d20); the highest roll
 // chooses who plays first. Ties are broken by having only the tied players re-roll against each
 // other, not by falling back to seat/array order.
-function rollForStartingSeat(seats: PlayerSeat[]): { winnerId: string; rolls: Record<string, number> } {
+export function rollForStartingSeat(seats: PlayerSeat[]): { winnerId: string; rolls: Record<string, number> } {
   const allRolls: Record<string, number> = {};
   let contenders = seats;
   let guard = 0;
@@ -20694,7 +20708,7 @@ function isKnownManaArtifact(name: string) {
   return lower === "sol ring" || lower.includes("signet") || lower.includes("talisman") || lower === "wayfarer's bauble";
 }
 
-function shuffleCards(cards: VisibleCard[]) {
+export function shuffleCards(cards: VisibleCard[]) {
   const shuffled = cards.slice();
   for (let index = shuffled.length - 1; index > 0; index -= 1) {
     const swapIndex = randomInt(index + 1);

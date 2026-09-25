@@ -693,3 +693,30 @@ export function scoreLegalActions(actions: ScorableAction[], context: ScoringCon
     .map((action) => ({ ...action, ...scoreLegalAction(action, context) }))
     .sort((a, b) => b.score - a.score);
 }
+
+export interface FallbackAgentAction {
+  actionType: ScorableActionType;
+  legalActionId: string;
+  targetIds: string[];
+  cardId?: string;
+  reason: string;
+  fallbackAction: "pass_priority" | "end_turn";
+}
+
+// Moved out of app/api/agents/action/route.ts (was a local function there) so the deterministic
+// "what do we do when there's no LLM decision to trust" rule lives in exactly one place — both the
+// live route (when Ollama times out/returns garbage) and the headless self-play harness's
+// heuristicBrain (src/lib/selfplay/brains.ts, which has no LLM at all in this milestone) import it
+// from here rather than keeping two copies that could silently drift apart.
+export function fallbackAction(scoredActions: ScoredAction[], reason: string): FallbackAgentAction {
+  const preferred = scoredActions[0];
+
+  return {
+    actionType: preferred.actionType,
+    legalActionId: preferred.id,
+    targetIds: preferred.targetIds,
+    cardId: preferred.cardId,
+    reason,
+    fallbackAction: preferred.actionType === "end_turn" ? "end_turn" : "pass_priority"
+  };
+}

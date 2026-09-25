@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { agentModelName, requestAgentAction } from "@/lib/ollama";
 import { knowledgeFilesForPurpose, loadKnowledgePack } from "@/lib/knowledge";
-import { scoreLegalActions, type ScoringContext } from "@/lib/actionScoring";
+import { fallbackAction, scoreLegalActions, type ScoringContext } from "@/lib/actionScoring";
 
 const LegalActionSchema = z.object({
   id: z.string().min(1),
@@ -184,17 +184,4 @@ export async function POST(request: NextRequest) {
       action: fallbackAction(scoredActions, "Ollama unavailable; using deterministic fallback.")
     });
   }
-}
-
-function fallbackAction(scoredActions: ReturnType<typeof scoreLegalActions>, reason: string) {
-  const preferred = scoredActions[0];
-
-  return {
-    actionType: preferred.actionType,
-    legalActionId: preferred.id,
-    targetIds: preferred.targetIds,
-    cardId: preferred.cardId,
-    reason,
-    fallbackAction: preferred.actionType === "end_turn" ? "end_turn" : "pass_priority"
-  };
 }
