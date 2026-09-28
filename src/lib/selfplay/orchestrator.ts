@@ -125,6 +125,7 @@ import { parseZoneEffect } from "@/lib/zoneEffects";
 import type { CardLike, ScoringContext } from "@/lib/actionScoring";
 import type { GameSession, PlayerSeat, VisibleCard } from "@/lib/types";
 import { auditAfterAction, createAuditState, SelfPlayStrictViolationError, type AuditMeta, type AuditState, type AuditViolation } from "./audit";
+import { createAnomalyState, scanForAnomalies, type Anomaly, type AnomalyState } from "./anomalies";
 import type { Brain } from "./brains";
 
 type TurnPhase = (typeof TURN_PHASES)[number];
@@ -296,6 +297,10 @@ export interface PlayGameResult {
   // these falls through (tutors/library-search, counterspells, or a template none of the ~14
   // deterministic parsers recognize).
   unmatchedSpellCards: Record<string, number>;
+  // Soft, review-queue findings from anomalies.ts — never disqualifies a run the way a violation
+  // does, just surfaces suspicious-looking moments (see that module's own header) for a human to spot
+  // check, ranked by how often each kind recurs across a batch (scripts/self-play.ts's report).
+  anomalies: Anomaly[];
 }
 
 const MAX_MAIN_PHASE_ACTIONS = 40;
@@ -734,6 +739,7 @@ export async function playGame(session: GameSession, brains: Record<string, Brai
   const startedAt = Date.now();
 
   const auditState: AuditState = createAuditState(session);
+  const anomalyState: AnomalyState = createAnomalyState();
   const decisionCounts: DecisionCounts = {};
   const landPlaysThisTurn = new Set<string>();
   const spellEffectCoverage = { matched: 0, unmatched: 0 };
@@ -755,6 +761,7 @@ export async function playGame(session: GameSession, brains: Record<string, Brai
 
   function afterAction(prev: GameSession, next: GameSession, meta: AuditMeta) {
     auditAfterAction(auditState, next, meta, opts.strict ?? false);
+    scanForAnomalies(anomalyState, prev, next, meta);
   }
 
   let phaseIndex = 0;
@@ -861,7 +868,8 @@ export async function playGame(session: GameSession, brains: Record<string, Brai
       violations: auditState.violations,
       wallClockMs: Date.now() - startedAt,
       spellEffectCoverage,
-      unmatchedSpellCards
+      unmatchedSpellCards,
+      anomalies: anomalyState.anomalies
     };
   }
 
@@ -874,6 +882,7 @@ export async function playGame(session: GameSession, brains: Record<string, Brai
     violations: auditState.violations,
     wallClockMs: Date.now() - startedAt,
     spellEffectCoverage,
-    unmatchedSpellCards
+    unmatchedSpellCards,
+    anomalies: anomalyState.anomalies
   };
 }

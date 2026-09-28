@@ -20,6 +20,8 @@ import path from "node:path";
 import { heuristicBrain, ollamaBrain, type Brain } from "../src/lib/selfplay/brains";
 import { createSelfPlayGame, playGame, type PlayGameResult } from "../src/lib/selfplay/orchestrator";
 import { SelfPlayStrictViolationError, type AuditCheck, type AuditViolation } from "../src/lib/selfplay/audit";
+import type { Anomaly, AnomalyKind } from "../src/lib/selfplay/anomalies";
+import { DECK_FILES, computeGameRotation } from "../src/lib/selfplay/rotation";
 
 interface CliArgs {
   games: number;
@@ -33,7 +35,7 @@ interface CliArgs {
   // minutes) can be split across several short, plain FOREGROUND invocations — one game (or a small
   // batch) per call, each blocking until done — instead of one long-running/backgrounded process,
   // which is what got killed by the environment's idle-background memory-pressure reaper. The
-  // rotation periods (deck pairing period 8, first-seat period 2, ollama-seat period 4) are unchanged
+  // rotation periods (deck pairing period 8, first-seat period 2, ollama-seat period 3) are unchanged
   // by this — only WHERE the sequence starts.
   startIndex: number;
 }
@@ -53,11 +55,6 @@ function parseArgs(argv: string[]): CliArgs {
   };
 }
 
-// The four root decklists the plan names (Meren.txt, UrDragon.txt, Saheeli.txt, "Aminatou 100
-// cards.txt") — cycled across games (game i pairs decks[i % 4] vs decks[(i+1) % 4]) so a run of any
-// meaningful size exercises more than one deck's card pool, not just Meren vs UrDragon.
-const DECK_FILES = ["Meren.txt", "UrDragon.txt", "Saheeli.txt", "Aminatou 100 cards.txt"];
-
 // ollamaBrain's request carries seatName as agentName, and agentModelName(agentName) (src/lib/
 // ollama.ts:28) resolves it to a real, already-pulled Ollama model as literally "mtg-<lowercased
 // name>" — the live game's own three-agent roster (src/lib/sessionStore.ts, AgentName in
@@ -74,6 +71,10 @@ const DECK_AGENT_NAMES: Record<string, string> = { "Meren.txt": "Sable", "UrDrag
 
 function formatViolation(violation: AuditViolation): string {
   return `  [${violation.check}] turn ${violation.turn} ${violation.phase} (after ${violation.precedingAction}): ${violation.message}`;
+}
+
+function formatAnomaly(anomaly: Anomaly): string {
+  return `  [${anomaly.kind}] turn ${anomaly.turn} ${anomaly.phase} (after ${anomaly.precedingAction}): ${anomaly.message}`;
 }
 
 function dumpAndExit(error: SelfPlayStrictViolationError): never {
@@ -102,6 +103,8 @@ async function main() {
   const results: Array<PlayGameResult & { gameIndex: number; seatNames: [string, string]; deckFiles: [string, string]; firstSeatIndex: 0 | 1; ollamaSeatIndex?: 0 | 1 }> = [];
   const violationsByCheck = new Map<AuditCheck, number>();
   const violationExamples = new Map<AuditCheck, AuditViolation>();
+  const anomaliesByKind = new Map<AnomalyKind, number>();
+  const anomalyExamples = new Map<AnomalyKind, Anomaly>();
   const terminationCounts: Record<string, number> = {};
   let crashed = 0;
   const spellEffectCoverage = { matched: 0, unmatched: 0 };
@@ -116,48 +119,23 @@ async function main() {
   for (let gameIndex = 0; gameIndex < args.games; gameIndex += 1) {
     // globalIndex, not the local loop's own gameIndex, drives every rotation below — see startIndex's
     // own comment: this is what makes several small `--games=1 --start-index=N` invocations behave
-    // exactly like one big `--games=24` run, so the deck/first-seat/ollama-seat periods (8/2/4) stay
+    // exactly like one big `--games=24` run, so the deck/first-seat/ollama-seat periods (8/2/3) stay
     // correct across calls instead of restarting from 0 every time.
     const globalIndex = args.startIndex + gameIndex;
-    // Deck pairing changes every TWO games (pairIndex), while who-goes-first alternates every SINGLE
-    // game (globalIndex % 2) — deliberately different periods so within each 2-game block, the same
-    // deck matchup is played once with each seat going first. Driving both off the same index
-    // (an earlier version of this script did exactly that) silently confounds them: deck identity
-    // and turn order would move in lockstep, so a lopsided "first-seat win rate" could just as
-    // easily be "whichever deck happened to always go second is the stronger deck" rather than a
-    // real turn-order effect. Caught by actually reading this run's own numbers — see the report.
-    const pairIndex = Math.floor(globalIndex / 2) % DECK_FILES.length;
+    // Deck pairing, who-goes-first, and (under --ollama) which seat gets ollamaBrain are three
+    // independent rotations over globalIndex — see rotation.ts's own header comment for why their
+    // periods must be pairwise coprime, and the two real confounds that shipped before this got
+    // factored out into a tested module instead of re-derived by hand here.
+    const { pairIndex, forceFirstSeatIndex, ollamaSeatIndex } = computeGameRotation(globalIndex);
     const deckFiles: [string, string] = [DECK_FILES[pairIndex], DECK_FILES[(pairIndex + 1) % DECK_FILES.length]];
     // See DECK_AGENT_NAMES' own comment: under --ollama, seat names must match the live game's real
     // agent roster so ollamaBrain's requests resolve to an actually-pulled model instead of 404ing.
     const seatNames: [string, string] = args.ollama
       ? [DECK_AGENT_NAMES[deckFiles[0]] ?? deckFiles[0], DECK_AGENT_NAMES[deckFiles[1]] ?? deckFiles[1]]
       : ["Seat A", "Seat B"];
-    const forceFirstSeatIndex: 0 | 1 = (globalIndex % 2) as 0 | 1;
     const seed = args.seed !== undefined ? args.seed + globalIndex : undefined;
 
     const session = createSelfPlayGame({ deckListPaths: deckFiles, seatNames, forceFirstSeatIndex, seed });
-    // Which physical seat gets ollamaBrain this game.
-    //
-    // CORRECTED after a real 24-game run exposed the bug: this used to be
-    // `Math.floor(globalIndex / 2) % 2` on the theory that "period 4 vs deckFiles' period 8" was
-    // enough to decouple them. It isn't — pairIndex is `Math.floor(globalIndex / 2) % 4`, i.e. the
-    // SAME underlying counter (`Math.floor(globalIndex / 2)`) just read mod 4 instead of mod 2, and
-    // since 2 evenly divides 4, `pairIndex % 2` and the old ollamaSeatIndex were mathematically
-    // IDENTICAL for every game — not merely correlated, identical. The result: every deck that ever
-    // appeared in a 24-game run got exactly one brain assignment for its entire run (Sable/Meren and
-    // Malik/Saheeli were ALWAYS the ollama seat; Veyra/UrDragon and Aminatou were ALWAYS the
-    // heuristic seat), so that run's win/loss record cannot distinguish "ollamaBrain plays worse"
-    // from "Sable/Malik's decks are just weaker than Veyra/Aminatou's" — precisely the deck/brain
-    // confound this file's own header comment on deckFiles/forceFirstSeatIndex already warned about
-    // avoiding, reintroduced by a period choice that LOOKED distinct (4 vs 8) but wasn't
-    // number-theoretically independent (a period must be coprime with, not just different from, the
-    // period(s) it needs to decouple from). Fixed by using a period-3 rotation over the raw
-    // `globalIndex` itself — NOT derived from `Math.floor(globalIndex / 2)` — so it shares no common
-    // factor with forceFirstSeatIndex's period 2 or deckFiles' effective period 8 (2*4); LCM(8,2,3) =
-    // 24, so a 24-game run now genuinely covers every (deck pairing, first seat, ollama seat)
-    // combination instead of silently fixing one of them per deck.
-    const ollamaSeatIndex: 0 | 1 = args.ollama ? ((Math.floor(globalIndex / 3) % 2) as 0 | 1) : undefined!;
     const brains: Record<string, Brain> = args.ollama
       ? { [session.seats[ollamaSeatIndex].id]: ollamaBrainInstance!, [session.seats[1 - ollamaSeatIndex].id]: heuristicBrain }
       : { [session.seats[0].id]: heuristicBrain, [session.seats[1].id]: heuristicBrain };
@@ -186,6 +164,10 @@ async function main() {
     for (const violation of result.violations) {
       violationsByCheck.set(violation.check, (violationsByCheck.get(violation.check) ?? 0) + 1);
       if (!violationExamples.has(violation.check)) violationExamples.set(violation.check, violation);
+    }
+    for (const anomaly of result.anomalies) {
+      anomaliesByKind.set(anomaly.kind, (anomaliesByKind.get(anomaly.kind) ?? 0) + 1);
+      if (!anomalyExamples.has(anomaly.kind)) anomalyExamples.set(anomaly.kind, anomaly);
     }
 
     if (args.ollama) {
@@ -219,17 +201,20 @@ async function main() {
         unmatchedSpellCards: result.unmatchedSpellCards,
         ollamaSeatId: args.ollama ? session.seats[ollamaSeatIndex].id : undefined,
         violationCount: result.violations.length,
-        violations: result.violations
+        violations: result.violations,
+        anomalyCount: result.anomalies.length,
+        anomalies: result.anomalies
       }) + "\n"
     );
 
     if (args.verbose) {
       console.log(
-        `Game ${globalIndex + 1} (batch ${gameIndex + 1}/${args.games}): ${deckFiles.join(" vs ")} — winner ${winnerName ?? "(none)"} in ${result.turns} turns (${result.terminationReason}), ${result.violations.length} violation(s), ${result.wallClockMs}ms.`
+        `Game ${globalIndex + 1} (batch ${gameIndex + 1}/${args.games}): ${deckFiles.join(" vs ")} — winner ${winnerName ?? "(none)"} in ${result.turns} turns (${result.terminationReason}), ${result.violations.length} violation(s), ${result.anomalies.length} anomaly(ies), ${result.wallClockMs}ms.`
       );
       for (const violation of result.violations) console.log(formatViolation(violation));
+      for (const anomaly of result.anomalies) console.log(formatAnomaly(anomaly));
     } else {
-      process.stdout.write(result.violations.length > 0 ? "!" : ".");
+      process.stdout.write(result.violations.length > 0 ? "!" : result.anomalies.length > 0 ? "?" : ".");
     }
   }
 
@@ -304,6 +289,19 @@ async function main() {
       console.log(`  ${check}: ${count}`);
       const example = violationExamples.get(check);
       if (example) console.log(`    e.g. ${formatViolation(example)}`);
+    }
+  }
+
+  const totalAnomalies = results.reduce((sum, result) => sum + result.anomalies.length, 0);
+  console.log("\n--- Anomaly review queue (soft, expect false positives — see anomalies.ts) ---");
+  console.log(`Total flagged moments across all games: ${totalAnomalies}`);
+  if (anomaliesByKind.size === 0) {
+    console.log("Nothing flagged.");
+  } else {
+    for (const [kind, count] of [...anomaliesByKind.entries()].sort((a, b) => b[1] - a[1])) {
+      console.log(`  ${kind}: ${count}`);
+      const example = anomalyExamples.get(kind);
+      if (example) console.log(`    e.g. ${formatAnomaly(example)}`);
     }
   }
 

@@ -18754,8 +18754,27 @@ export function manaChoicesForCard(card: VisibleCard, seat: PlayerSeat, allSeats
 // ability granted by a SEPARATE permanent's static text. This is the one choke point that appends
 // grantedManaAbilityText (set by the state-based-action recompute pass, see parseGroupManaAbilityGrant)
 // onto the real oracleText, so those parsers see the granted line without needing to be rewritten.
+//
+// Also the one choke point that strips reminder text — parenthetical rules text that often restates
+// a DIFFERENT object's ability inline, most commonly a Treasure/Powerstone/Clue token's own
+// "(It's an artifact with \"{T}, Sacrifice this token: Add one mana of any color.\")" printed on
+// whatever card creates it. Every regex below used to read raw oracleText, so a card that merely
+// CREATES such a token — with no mana ability of its own — was misread as having that ability
+// itself, including the "sacrifice this token" clause, which isSacrificeManaSource also matches.
+// Caught live by self-play's anomaly detector: Storm the Vault (a Legendary Enchantment with no mana
+// ability at all — its only abilities are a Treasure-on-combat-damage trigger and an end-step
+// transform condition, neither implemented in self-play, so it should never have been touched by
+// mana payment) got chosen as a mana source purely from its own reminder text and was silently
+// sacrificed to help pay for an unrelated spell, with no game log entry naming it — this same
+// mana-payment code is shared by the live game, so a live match with any Treasure/Clue/Powerstone
+// producer printed with reminder text was equally exposed.
+function stripReminderText(oracleText: string): string {
+  return oracleText.replace(/\([^()]*\)/g, " ");
+}
+
 function effectiveManaOracleText(card: VisibleCard): string {
-  return card.grantedManaAbilityText ? `${card.oracleText}\n${card.grantedManaAbilityText}` : card.oracleText;
+  const base = stripReminderText(card.oracleText);
+  return card.grantedManaAbilityText ? `${base}\n${card.grantedManaAbilityText}` : base;
 }
 
 function manaChoicesForCardRaw(card: VisibleCard, seat: PlayerSeat, allSeats?: PlayerSeat[]): ManaColor[] {
@@ -19063,8 +19082,17 @@ function cannotPayMessage(seat: PlayerSeat, card: VisibleCard, availableMana: nu
 // artifact: Draw a card." ability alongside its plain "{T}: Add {C}."; the old text.includes(...)
 // check matched on that unrelated sentence and sacrificed Mind Stone the moment it was tapped for
 // ordinary mana, even via its non-sacrifice ability.
+//
+// Also requires "sacrifice THIS ___" specifically (self-referential — the same distinction the rest
+// of the codebase already draws, e.g. parseAdditionalSacrificeCost/parseGenericSacrificeAbilities),
+// not the bare word "sacrifice" — Phyrexian Tower's real cost is "{T}: Add {C}." alongside a SEPARATE
+// "{T}, Sacrifice a creature: Add {B}{B}." ability, which sacrifices a CREATURE, not itself; the land
+// stays on the battlefield either way. The old bare-"sacrifice" check matched that second clause and
+// sacrificed the LAND ITSELF every time it was tapped for its plain, free colorless mana, even though
+// nothing about that ability ever consumes the land. Caught live by self-play's anomaly detector
+// right after the Storm the Vault fix above, on the very next run.
 function isSacrificeManaSource(card: VisibleCard): boolean {
-  return /\{t\}[^.\n]*?sacrifice[^.\n]*?:\s*add\b/i.test(effectiveManaOracleText(card));
+  return /\{t\}[^.\n]*?sacrifice this\b[^.\n]*?:\s*add\b/i.test(effectiveManaOracleText(card));
 }
 
 // Painlands (Adarkar Wastes, Ancient Tomb, the "Threshold" cycle — Barbarian Ring, ...) and City of
