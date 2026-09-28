@@ -108,6 +108,7 @@ import {
   rollForStartingSeat,
   roomDoorFaces,
   runStateBasedActionsPass,
+  shuffleCards,
   spendManaSources,
   substituteX,
   totalAttackTax,
@@ -116,9 +117,10 @@ import {
   withOpeningHand,
   type LegalAgentAction
 } from "@/components/AppFlow";
+import { parseSearchLibraryEffectText, type SearchLibraryEffect } from "@/lib/activatedAbilities";
 import { loadCardCatalog, lookupCard } from "@/lib/cardCatalog";
 import { createDeckFromList } from "@/lib/deckParser";
-import { etbEffectText, parseModalHeader } from "@/lib/oracleClauses";
+import { cardMatchesTypeFilter, etbEffectText, parseModalHeader } from "@/lib/oracleClauses";
 import { TURN_PHASES } from "@/lib/priorityStops";
 import { parseRemovalEffect } from "@/lib/removalSpells";
 import { parseZoneEffect } from "@/lib/zoneEffects";
@@ -346,15 +348,25 @@ function filterSupportedMainPhaseActions(actions: LegalAgentAction[], seat: Play
 // its effect silently doesn't happen, exactly like EVERY instant/sorcery before this milestone. The
 // `matched` flag on the return value lets callers measure how often this actually happens instead
 // of guessing from a card list (see spellEffectCoverage in PlayGameResult / scripts/self-play.ts):
-//  - Library search / tutor effects (parseSearchLibraryEffectText — Rampant Growth, Three Visits,
-//    Demonic Tutor, ...). The live game's own agent auto-pick for these
-//    (resolveAgentRuleChoice -> chooseAgentLibraryCardForRuleChoice, AppFlow.tsx ~7705) is itself a
-//    component-nested closure (setPendingRuleChoice/completeRuleChoice) — the same "too
-//    React-coupled to hoist" situation resolvePendingAction's own orchestration glue is in.
+//  - Library search / tutor effects to hand or graveyard (Fabricate, Entomb, Buried Alive, Diabolic
+//    Intent, Rampant Growth-to-hand-shaped cards, ...) ARE handled, via applySearchLibraryEffect's
+//    own simple auto-pick — see its comment for why that's deliberately NOT the live game's agent
+//    heuristic (chooseAgentLibraryCardForRuleChoice, AppFlow.tsx ~7705, a component-nested closure
+//    this file can't reach). A battlefield-destination search (Three Visits-shaped) is still
+//    unmatched — see applySearchLibraryEffect's own note on why.
+//  - Diabolic Intent-shaped "as an additional cost, sacrifice a creature" is not modeled: the search
+//    still happens, but no creature is actually sacrificed to pay for it. Additional-cost payment
+//    happens at cast time in the live game, a step this orchestrator doesn't have; treating the
+//    search as free is a known simplification, not a rules-integrity violation (the audit only checks
+//    card conservation, not whether an additional cost was paid).
+//  - "Draw N cards, then put M back" with a FIXED N (Brainstorm) — parseZoneEffect's
+//    draw_x_then_put_back only recognizes the literal word "X" (Brainsurge-shaped), not a printed
+//    number, so Brainstorm itself stays unmatched.
 //  - Counterspells — unchanged; still need a real stack/priority window (documented as a known gap
 //    from the plan's first draft, not attempted here).
-//  - Any other shape none of the ~14 parsers below recognize (a pure "each player draws a card", a
-//    copy-target-spell effect, a bare static/replacement-effect instant, ...).
+//  - Any other shape none of the ~15 parsers below recognize (a pure "each player draws a card", a
+//    copy-target-spell effect, a bare static/replacement-effect instant, "reveal the top N, keep a
+//    matching one" digs like Grisly Salvage, surveil, ...).
 function resolveBareSpellEffect(session: GameSession, casterSeatId: string, sourceCard: VisibleCard, chosenX: number | undefined): { session: GameSession; matched: boolean } {
   const rawText = etbEffectText(sourceCard.oracleText);
   let working = session;
@@ -399,6 +411,22 @@ function resolveBareSpellEffect(session: GameSession, casterSeatId: string, sour
   const zoneEffect = !isModalCard ? parseZoneEffect(rawText) : undefined;
   if (zoneEffect) {
     working = applyZoneEffect(working, casterSeatId, sourceCard.name, zoneEffect, chosenX);
+    matched = true;
+  }
+
+  // Search your library for a[n] [type] card(s), put it into your hand/graveyard, then shuffle
+  // (Fabricate, Entomb, Buried Alive, Diabolic Intent, ...) — see applySearchLibraryEffect's own
+  // comment for why this uses its own simple auto-pick instead of the live game's agent heuristic.
+  // Diabolic Intent-shaped cards lead with "As an additional cost to cast this spell, sacrifice a
+  // creature." before the actual search clause; parseSearchLibraryEffectText's pattern is ^-anchored
+  // (it needs to be, to avoid matching "search your library" appearing mid-sentence in an unrelated
+  // clause elsewhere), so that leading sentence has to be stripped first or the whole match fails.
+  // Since the sacrifice itself isn't paid here either way (see this function's own header gap list),
+  // stripping it is consistent with the simplification already being made, not a separate one.
+  const withoutAdditionalSacrificeCost = rawText.replace(/^as an additional cost to cast this spell,\s*sacrifice an?\s+[a-z]+\.\s*/i, "");
+  const searchLibraryEffect = !isModalCard ? parseSearchLibraryEffectText(withoutAdditionalSacrificeCost) : undefined;
+  if (searchLibraryEffect) {
+    working = applySearchLibraryEffect(working, casterSeatId, sourceCard.name, searchLibraryEffect);
     matched = true;
   }
 
@@ -467,6 +495,68 @@ function resolveBareSpellEffect(session: GameSession, casterSeatId: string, sour
   }
 
   return { session: working, matched };
+}
+
+// Self-play's own auto-pick for a library search, deliberately NOT the live game's agent heuristic
+// (chooseAgentLibraryCardForRuleChoice, AppFlow.tsx ~7705) — that function is a component-nested
+// closure over setPendingRuleChoice/completeRuleChoice, the same "too React-coupled to hoist"
+// situation as every other interactive-choice flow this orchestrator can't reach. Just takes the
+// first `effect.count` library cards matching effect.cardTypeFilter in library order: this is about
+// measuring effect COVERAGE (did the tutor do something instead of nothing), not simulating a smart
+// choice, matching this file's existing "was it recognized" bar for every other bare-spell effect.
+// Battlefield-destination searches (Rampant Growth, Three Visits, ...) aren't handled here — none of
+// this file's unmatched-card backlog needs it, and doing it correctly means the same battlefield-
+// entry setup applyMainPhaseAction already does for a normal permanent cast, more than this one
+// helper should duplicate; a battlefield-destination effect is left unmatched, same as before.
+export function applySearchLibraryEffect(session: GameSession, casterSeatId: string, sourceCardName: string, effect: SearchLibraryEffect): GameSession {
+  if (effect.destination === "battlefield") return session;
+  const seat = session.seats.find((item) => item.id === casterSeatId);
+  if (!seat) return session;
+  const library = seat.library ?? [];
+  const eligible = effect.cardTypeFilter ? library.filter((card) => cardMatchesTypeFilter(card.typeLine, effect.cardTypeFilter!)) : library;
+  const found = eligible.slice(0, effect.count);
+
+  if (found.length === 0) {
+    return {
+      ...session,
+      seats: session.seats.map((item) => (item.id === casterSeatId ? { ...item, library: shuffleCards(library) } : item)),
+      events: [phaseEvent(casterSeatId, `${seat.name} searches with ${sourceCardName} but finds no ${effect.cardTypeFilter ?? "matching"} card, and shuffles.`), ...session.events]
+    };
+  }
+
+  const foundIds = new Set(found.map((card) => card.id));
+  const remainingLibrary = shuffleCards(library.filter((card) => !foundIds.has(card.id)));
+  const toHand = effect.destination !== "graveyard";
+  const movedCards = found.map((card) => ({ ...card, zone: toHand ? ("hand" as const) : ("graveyard" as const) }));
+
+  return {
+    ...session,
+    seats: session.seats.map((item) => {
+      if (item.id !== casterSeatId) return item;
+      return {
+        ...item,
+        library: remainingLibrary,
+        board: {
+          ...item.board,
+          hand: toHand ? [...item.board.hand, ...movedCards] : item.board.hand,
+          graveyard: toHand ? item.board.graveyard : [...(item.board.graveyard ?? []), ...movedCards]
+        },
+        zones: {
+          ...item.zones,
+          library: remainingLibrary.length,
+          hand: toHand ? item.zones.hand + movedCards.length : item.zones.hand,
+          graveyard: toHand ? item.zones.graveyard : item.zones.graveyard + movedCards.length
+        }
+      };
+    }),
+    events: [
+      phaseEvent(
+        casterSeatId,
+        `${seat.name} searches with ${sourceCardName} and finds ${found.map((card) => card.name).join(", ")}, putting ${found.length === 1 ? "it" : "them"} into ${toHand ? "hand" : "the graveyard"}.`
+      ),
+      ...session.events
+    ]
+  };
 }
 
 function applyMainPhaseAction(

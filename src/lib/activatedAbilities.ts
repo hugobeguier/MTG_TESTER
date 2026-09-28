@@ -19,7 +19,7 @@ import { parseRemovalEffect, type RemovalEffect } from "./removalSpells";
 // sacrificed, which this text-only parser has no way to see.
 export interface SearchLibraryEffect {
   kind: "search_library";
-  destination: "hand" | "battlefield" | "library";
+  destination: "hand" | "battlefield" | "library" | "graveyard";
   tapped: boolean;
   cardTypeFilter?: string;
   // "up to N" (Archaeomancer's Map's "up to two basic Plains cards", ...) or a bare count word
@@ -60,8 +60,13 @@ function parseCountWord(word: string | undefined): number {
 // rules advisor for every one of them — reported live as Archaeomancer's Map only ever fetching a
 // single Plains regardless of its real "up to two" count.
 const TRIGGER_CONDITION_PREFIX = "(?:(?:when|whenever)\\b[^,]*,\\s*)?(?:you may\\s+)?";
+// "into your graveyard" (Entomb, Buried Alive, ...) added alongside hand/battlefield below — the
+// reanimator-tutor family this engine previously only ever routed through the LLM-backed Rules
+// Advisor (rulesAdvisor.ts's own graveyard-destination handling), never this deterministic parser, so
+// self-play's headless resolver (which has no Rules Advisor at all) had no way to recognize these
+// casts. Same template otherwise, just a third destination phrase.
 const SEARCH_LIBRARY_PATTERN = new RegExp(
-  `^${TRIGGER_CONDITION_PREFIX}search your library for (?:up to ${COUNT_WORD}|an?)\\s+(?:([a-z][a-z ]*?)\\s+)?cards?(?:\\s+(?:that share|sharing) an? [a-z]+ type)?,?(?: reveal (?:it|them),?)? put (?:it|that card|them) (into your hand|onto the battlefield(?: tapped)?),? then shuffle\\.?`,
+  `^${TRIGGER_CONDITION_PREFIX}search your library for (?:up to ${COUNT_WORD}|an?)\\s+(?:([a-z][a-z ]*?)\\s+)?cards?(?:\\s+(?:that share|sharing) an? [a-z]+ type)?,?(?: reveal (?:it|them),?)? put (?:it|that card|them) (into your hand|onto the battlefield(?: tapped)?|into your graveyard),? then shuffle\\.?`,
   "i"
 );
 
@@ -82,7 +87,7 @@ export function parseSearchLibraryEffectText(text: string): SearchLibraryEffect 
     const destinationText = match[3].toLowerCase();
     return {
       kind: "search_library",
-      destination: destinationText.includes("battlefield") ? "battlefield" : "hand",
+      destination: destinationText.includes("battlefield") ? "battlefield" : destinationText.includes("graveyard") ? "graveyard" : "hand",
       tapped: destinationText.includes("tapped"),
       cardTypeFilter: typeWord && !/^cards?$/i.test(typeWord) ? typeWord : undefined,
       count: parseCountWord(match[1])

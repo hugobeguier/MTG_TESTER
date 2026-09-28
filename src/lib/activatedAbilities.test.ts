@@ -388,6 +388,28 @@ describe("parseSearchLibraryEffectText", () => {
     expect(parseSearchLibraryEffectText("draw a card.")).toBeUndefined();
   });
 
+  it("parses an untyped tutor-to-graveyard (Entomb)", () => {
+    expect(parseSearchLibraryEffectText("search your library for a card, put that card into your graveyard, then shuffle.")).toEqual({
+      kind: "search_library",
+      destination: "graveyard",
+      tapped: false,
+      cardTypeFilter: undefined,
+      count: 1
+    });
+  });
+
+  it("parses a typed, multi-count tutor-to-graveyard (Buried Alive)", () => {
+    expect(
+      parseSearchLibraryEffectText("search your library for up to three creature cards, put them into your graveyard, then shuffle.")
+    ).toEqual({
+      kind: "search_library",
+      destination: "graveyard",
+      tapped: false,
+      cardTypeFilter: "creature",
+      count: 3
+    });
+  });
+
   it("parses a typed tutor-to-top-of-library ability (Sterling Grove)", () => {
     expect(parseSearchLibraryEffectText("search your library for an enchantment card, reveal it, then shuffle and put that card on top.")).toEqual({
       kind: "search_library",

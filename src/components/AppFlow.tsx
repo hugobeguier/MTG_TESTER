@@ -18768,8 +18768,22 @@ export function manaChoicesForCard(card: VisibleCard, seat: PlayerSeat, allSeats
 // sacrificed to help pay for an unrelated spell, with no game log entry naming it — this same
 // mana-payment code is shared by the live game, so a live match with any Treasure/Clue/Powerstone
 // producer printed with reminder text was equally exposed.
+//
+// Also strips any double-quoted substring, not just parenthetical text — the OTHER real templating
+// shape that quotes an ability belonging to something other than the source card: a granted-ability
+// clause, "<permanents> you control have \"<ability text>\"" (Goldspan Dragon: "Treasures you control
+// have \"{T}, Sacrifice this artifact: Add two mana of any one color.\""; Insidious Roots: "Creature
+// tokens you control have \"{T}: Add one mana of any color.\""). This is a SEPARATE parser's job
+// (parseGroupManaAbilityGrant, reading the card's own raw oracleText directly, not through this
+// function) to actually grant that ability to the right permanents — but every mana-ability regex
+// here used to see the same quoted text and misread it as the GRANTING card's own ability. Caught
+// live immediately after the Storm the Vault fix above: Goldspan Dragon (a Creature — Dragon with no
+// mana ability of its own) got chosen as a mana source of any color and sacrificed the moment it was
+// tapped, for the same reason — Scryfall's own producedMana field for a card like this lists every
+// color the GRANTED ability could ever produce, and nothing here filtered it out once the reminder-
+// text fix above stopped catching this differently-shaped quote.
 function stripReminderText(oracleText: string): string {
-  return oracleText.replace(/\([^()]*\)/g, " ");
+  return oracleText.replace(/\([^()]*\)/g, " ").replace(/"[^"]*"/g, " ");
 }
 
 function effectiveManaOracleText(card: VisibleCard): string {
@@ -18823,7 +18837,19 @@ function manaChoicesForCardRaw(card: VisibleCard, seat: PlayerSeat, allSeats?: P
   }
 
   const costly = costlyTapManaColors(effectiveManaOracleText(card));
-  const produced = normalizeManaColors(card.producedMana ?? []).filter((color) => !costly.has(color));
+  // Scryfall's producedMana is a union over every mana ability the card's TEXT ever mentions —
+  // including one that actually belongs to a DIFFERENT permanent, quoted inside a granted-ability
+  // clause (Goldspan Dragon: "Treasures you control have \"{T}, Sacrifice this artifact: Add two mana
+  // of any one color.\""; Insidious Roots and the rest of that family). effectiveManaOracleText
+  // already strips that quoted text (see its own comment), so gating producedMana on the STRIPPED
+  // text still containing something shaped like the card's own "{T}: ... add" clause catches exactly
+  // this: a card with no real mana ability of its own no longer gets Scryfall's blanket color list
+  // trusted just because it prints someone else's ability inline. Every legitimate mana
+  // rock/dork/land already has its own such clause in plain, un-quoted text, so this loses no real
+  // case — and a source with no {T} at all (Ashnod's Altar, ...) was never reaching this branch for
+  // its color anyway, since it's caught by the explicit "{color}" symbol regex further down instead.
+  const hasOwnTapManaAbility = /\{t\}[^\n]*?\badd\b/i.test(effectiveManaOracleText(card));
+  const produced = hasOwnTapManaAbility ? normalizeManaColors(card.producedMana ?? []).filter((color) => !costly.has(color)) : [];
   if (produced.length > 0) return produced;
 
   const basicTypes = basicLandTypes(card);
