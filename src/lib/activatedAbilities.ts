@@ -292,6 +292,9 @@ export type GenericTapEffect =
   | { kind: "each_player_loots" }
   // "All Zombies gain menace until end of turn." (Lord of the Accursed)
   | { kind: "grant_keyword_to_all_until_eot"; typeMatcher: string; keyword: string }
+  // "You may cast target Zombie creature card from your graveyard this turn." (Zul Ashur, Lich Lord) — marks a
+  // matching graveyard card castable this turn (see graveyardCasting.ts).
+  | { kind: "grant_graveyard_cast"; cardMatcher: string }
   | SearchLibraryEffect;
 
 export interface GenericTapAbility {
@@ -364,6 +367,8 @@ function parseGenericTapEffectText(text: string): GenericTapEffect | undefined {
   if (/^exile target creature card from a graveyard\.\s*create\b[^.]*\btokens?\b/i.test(text)) return { kind: "exile_graveyard_creature_then_tokens" };
   if (/^draw a card, then you lose life equal to the number of cards in your hand\.?$/i.test(text)) return { kind: "draw_then_lose_life_equal_hand" };
   if (/^each player draws a card, then discards a card\.?$/i.test(text)) return { kind: "each_player_loots" };
+  const graveyardGrant = text.match(/^you may cast target ([a-z ]+?) card from your graveyard this turn\.?$/i);
+  if (graveyardGrant) return { kind: "grant_graveyard_cast", cardMatcher: graveyardGrant[1].trim().toLowerCase() };
   const grantAll = text.match(/^all ([a-z]+?)s? gain ([a-z ]+?) until end of turn\.?$/i);
   if (grantAll) return { kind: "grant_keyword_to_all_until_eot", typeMatcher: grantAll[1].toLowerCase(), keyword: grantAll[2].toLowerCase() };
   const zone = parseZoneEffect(text);

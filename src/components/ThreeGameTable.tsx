@@ -26,6 +26,7 @@ import {
   type SelfUntapAbility
 } from "@/lib/activatedAbilities";
 import { equipCost, isAura, isEquipment } from "@/lib/attachments";
+import { graveyardCastPermission } from "@/lib/graveyardCasting";
 import { parseManlandAnimation } from "@/lib/activatedAbilities";
 import { hasKeyword as hasOracleKeyword } from "@/lib/keywords";
 import { cardMatchesTypeFilter, isBasicLandFetchAbility } from "@/lib/oracleClauses";
@@ -80,6 +81,8 @@ interface ThreeGameTableProps {
   // Routes through AppFlow's respondWithCard when a response window is open, instead of onPlayCard
   // (which only handles main-phase casting and silently no-ops if something's already on the stack).
   onCastFromExile?: (seatId: string, cardId: string) => void;
+  // Flashback / "you may cast this card from your graveyard" — offered as a Cast button in the graveyard pile viewer.
+  onCastFromGraveyard?: (seatId: string, cardId: string) => void;
   onPlayCardFace?: (seatId: string, cardId: string, faceIndex: number) => void;
   onUnlockRoomDoor?: (seatId: string, cardId: string, faceIndex: number) => void;
   onDeclareAttack?: (cardId: string, targetId: string) => void;
@@ -1916,6 +1919,10 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
             props.onCastFromExile?.(zoneView.seatId, cardId);
             setZoneView(undefined);
           }}
+          onCastFromGraveyard={(cardId) => {
+            props.onCastFromGraveyard?.(zoneView.seatId, cardId);
+            setZoneView(undefined);
+          }}
         />
       ) : null}
       {priorityStopsOpen ? (
@@ -3683,7 +3690,8 @@ function ZoneViewerModal({
   onClose,
   onInspect,
   onMoveToHand,
-  onCastFromExile
+  onCastFromExile,
+  onCastFromGraveyard
 }: {
   seat?: PlayerSeat;
   zone: TableZone;
@@ -3693,7 +3701,15 @@ function ZoneViewerModal({
   onInspect?: (card: VisibleCard) => void;
   onMoveToHand?: (cardId: string) => void;
   onCastFromExile?: (cardId: string) => void;
+  onCastFromGraveyard?: (cardId: string) => void;
 }) {
+  // Cards in your own graveyard you may cast from there right now (flashback, Gravecrawler's standing
+  // permission, a Zul Ashur grant). Sorcery-speed casts only while no response window is open; the cast itself
+  // re-checks timing and mana.
+  const graveyardCastFor = (card: VisibleCard) =>
+    seat?.kind === "human" && zone === "graveyard" && !hasOpenResponseWindow
+      ? graveyardCastPermission(card, { seatId: seat.id, turn, controllerBattlefield: seat.board.battlefield })
+      : undefined;
   const cards = zone === "graveyard" ? (seat?.board.graveyard ?? []) : (seat?.board.exile ?? []);
   const title = zone === "graveyard" ? "Graveyard" : "Exile";
   const canReturnToHand = seat?.kind === "human" && zone === "graveyard";
@@ -3731,6 +3747,11 @@ function ZoneViewerModal({
               <button type="button" onClick={() => onInspect?.(card)}>Inspect</button>
               {canReturnToHand ? <button type="button" onClick={() => onMoveToHand?.(card.id)}>To Hand</button> : null}
               {canCastFromExile(card) ? <button type="button" onClick={() => onCastFromExile?.(card.id)}>Cast</button> : null}
+              {graveyardCastFor(card) ? (
+                <button type="button" onClick={() => onCastFromGraveyard?.(card.id)}>
+                  {graveyardCastFor(card)?.kind === "flashback" ? `Flashback ${graveyardCastFor(card)?.costText ?? ""}`.trim() : "Cast"}
+                </button>
+              ) : null}
             </article>
           ))}
         </div>

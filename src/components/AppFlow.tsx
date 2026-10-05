@@ -67,6 +67,7 @@ import {
 import { FOUNDATIONS_AGENT_DECKLISTS, FOUNDATIONS_PLAYER_DECKLIST, commanderFromDeckList } from "@/lib/precons";
 import { parseSpellExtraEffects, type SpellExtraEffect } from "@/lib/spellExtras";
 import { matchWatcherSubject } from "@/lib/triggerWatchers";
+import { graveyardCastPermission } from "@/lib/graveyardCasting";
 import {
   annihilatorAmount,
   hasKeyword as hasKeywordText,
@@ -292,7 +293,9 @@ type PendingAction =
       cardId: string;
       cardName: string;
       cardTypeLine?: string;
-      sourceZone?: "hand" | "command" | "exile";
+      sourceZone?: "hand" | "command" | "exile" | "graveyard";
+      // Cast from the graveyard via flashback: the spell is exiled instead of returning to the graveyard.
+      flashback?: boolean;
       manaSourceIds: string[];
       position?: { x: number; z: number };
       faceIndex?: number;
@@ -490,7 +493,7 @@ type PendingRuleChoice =
       sourceCardName: string;
       prompt: string;
       resumeVia: "playCard" | "respondWithCard";
-      sourceZone: "hand" | "command" | "exile";
+      sourceZone: "hand" | "command" | "exile" | "graveyard";
       faceIndex?: number;
       position?: { x: number; z: number };
     }
@@ -843,9 +846,9 @@ export interface LegalAgentAction {
   abilityIndex?: number;
   faceIndex?: number;
   loyaltyCost?: number;
-  // Set only for a cast_spell action sourced from exile (impulse-draw/steal-and-play effects) —
-  // absent means the normal "from hand" path.
-  sourceZone?: "exile";
+  // Set only for a cast_spell action sourced from exile (impulse-draw/steal-and-play effects) or from the
+  // graveyard (flashback, "you may cast this card from your graveyard") — absent means the normal "from hand" path.
+  sourceZone?: "exile" | "graveyard";
   targetIds: string[];
   label: string;
   detail?: string;
@@ -2463,7 +2466,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     }
     if ((action.actionType === "cast_spell" || action.actionType === "cast_commander") && action.cardId) {
       agentMainActions.current.add(`${session.turn}:${seat.id}:${session.phase}`);
-      playCard(seat.id, action.cardId, undefined, action.actionType === "cast_commander" ? "command" : action.sourceZone === "exile" ? "exile" : "hand", action.faceIndex);
+      playCard(seat.id, action.cardId, undefined, action.actionType === "cast_commander" ? "command" : action.sourceZone === "exile" ? "exile" : action.sourceZone === "graveyard" ? "graveyard" : "hand", action.faceIndex);
       return;
     }
     if (action.actionType === "activate_ability" && action.cardId && action.abilityKind === "basic_land_fetch") {
@@ -3983,7 +3986,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     seatId: string,
     cardId: string,
     position?: { x: number; z: number },
-    sourceZone: "hand" | "command" | "exile" = "hand",
+    sourceZone: "hand" | "command" | "exile" | "graveyard" = "hand",
     faceIndex?: number,
     preChosenSacrificeTargets?: VisibleCard[]
   ) {
@@ -4005,10 +4008,23 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         ? seat?.board.commander
         : sourceZone === "exile"
           ? findExiledCardAnySeat(session, cardId)
-          : seat?.board.hand.find((item) => item.id === cardId);
+          : sourceZone === "graveyard"
+            ? seat?.board.graveyard?.find((item) => item.id === cardId)
+            : seat?.board.hand.find((item) => item.id === cardId);
     if (!seat || !card) return;
 
     if (sourceZone === "command" && card.id !== cardId) return;
+    // Casting from the graveyard needs an actual permission — flashback, a standing "you may cast this card from
+    // your graveyard" (Gravecrawler), or a one-turn grant (Zul Ashur). Re-checked here even though the legal
+    // action / pile button only offers it when one exists.
+    const graveyardPermission =
+      sourceZone === "graveyard"
+        ? graveyardCastPermission(card, { seatId, turn: session.turn, controllerBattlefield: seat.board.battlefield })
+        : undefined;
+    if (sourceZone === "graveyard" && !graveyardPermission) {
+      addEvent(`${seat.name} can't cast ${card.name} from the graveyard right now.`, seatId, "Timing");
+      return;
+    }
     // Defense-in-depth: this should already be true whenever this path is reachable (the legal
     // action offering it only exists under the same condition), but exile-play permission is
     // itself temporary/scoped, so re-check it here too.
@@ -4207,8 +4223,22 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
 
     const doorFace = doors && faceIndex !== undefined ? doors[faceIndex] : undefined;
     const spellFace = spellFaces && faceIndex !== undefined ? spellFaces[faceIndex] : undefined;
-    const costCard = doorFace ? cardWithFaceManaCost(card, doorFace.manaCost) : spellFace ? cardWithFaceManaCost(card, spellFace.manaCost) : card;
-    const baseCost = doorFace ? manaValueFromManaCost(doorFace.manaCost) : spellFace ? manaValueFromManaCost(spellFace.manaCost) : card.manaValue;
+    // Flashback replaces the mana cost with the flashback cost (the same override mechanism an Adventure face uses).
+    const flashbackCostText = graveyardPermission?.kind === "flashback" ? graveyardPermission.costText : undefined;
+    const costCard = flashbackCostText
+      ? cardWithFaceManaCost(card, flashbackCostText)
+      : doorFace
+        ? cardWithFaceManaCost(card, doorFace.manaCost)
+        : spellFace
+          ? cardWithFaceManaCost(card, spellFace.manaCost)
+          : card;
+    const baseCost = flashbackCostText
+      ? manaValueFromManaCost(flashbackCostText)
+      : doorFace
+        ? manaValueFromManaCost(doorFace.manaCost)
+        : spellFace
+          ? manaValueFromManaCost(spellFace.manaCost)
+          : card.manaValue;
     const fixedCost =
       adjustedCastingCost(seat, costCard, baseCost, sourceZone, activeSeatId, session.seats, session.turn, session.onceEachTurnEffectsUsed) +
       (sourceZone === "command" ? card.commanderTax ?? 0 : 0);
@@ -4263,6 +4293,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       cardName: castName,
       cardTypeLine: castTypeLine,
       sourceZone,
+      flashback: graveyardPermission?.exileAfter ? true : undefined,
       manaSourceIds: payment.sourceIds,
       position,
       // A genuine transform DFC creature (Heliod, the Radiant Dawn // Heliod, the Warped Eclipse)
@@ -4274,7 +4305,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       faceIndex:
         doorFace ? faceIndex : spellFace ? faceIndex : dfcSplit ? dfcSplit.spellIndex : !doors && card.faces?.length === 2 ? 0 : undefined,
       chosenX: chosenX > 0 ? chosenX : undefined,
-      message: `${seat.name} casts ${castName}${xText}${sourceZone === "command" ? " from the command zone" : sourceZone === "exile" ? " from exile" : ""}${spentManaText}.`
+      message: `${seat.name} casts ${castName}${xText}${sourceZone === "command" ? " from the command zone" : sourceZone === "exile" ? " from exile" : sourceZone === "graveyard" ? (flashbackCostText ? " with flashback" : " from the graveyard") : ""}${spentManaText}.`
     };
     if (usesOnceEachTurnFreeCast) {
       setSession((current) => ({
@@ -5017,6 +5048,11 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   // playCard() bails out silently whenever something is already on the stack awaiting responses
   // (main-phase casting only), which used to make those buttons a dead click during a response
   // window. Route through respondWithCard instead whenever one is open.
+  // The Cast button in the graveyard pile viewer (flashback, Gravecrawler, a Zul Ashur grant).
+  function castFromGraveyard(seatId: string, cardId: string) {
+    playCard(seatId, cardId, undefined, "graveyard");
+  }
+
   function castFromExile(seatId: string, cardId: string) {
     if (pendingAction) {
       respondWithCard(cardId, "exile");
@@ -7387,7 +7423,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     if (choice.resumeVia === "playCard") {
       playCard(choice.controllerSeatId, choice.sourceCardId, choice.position, choice.sourceZone, choice.faceIndex, [chosenCard]);
     } else {
-      respondWithCard(choice.sourceCardId, choice.sourceZone === "command" ? "hand" : choice.sourceZone, [chosenCard]);
+      respondWithCard(choice.sourceCardId, choice.sourceZone === "command" || choice.sourceZone === "graveyard" ? "hand" : choice.sourceZone, [chosenCard]);
     }
   }
 
@@ -8430,6 +8466,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         onStopNext={() => setHoldPriorityOnce(true)}
         onPlayCard={playCard}
         onCastFromExile={castFromExile}
+        onCastFromGraveyard={castFromGraveyard}
         onRespond={openResponseWindow}
         onRespondWithSelectedCard={respondWithSelectedCard}
         onResolvePendingTrigger={resolvePendingTrigger}
@@ -9867,6 +9904,31 @@ export function legalMainPhaseActions(
       role: card.role
     });
   }
+  // Cards in this seat's own graveyard it may cast from there: flashback (Army of the Damned, Moan of the
+  // Unhallowed), a standing "you may cast this card from your graveyard" (Gravecrawler), or a one-turn grant
+  // (Zul Ashur). See graveyardCasting.ts.
+  for (const card of seat.board.graveyard ?? []) {
+    const permission = graveyardCastPermission(card, { seatId: seat.id, turn, controllerBattlefield: seat.board.battlefield });
+    if (!permission) continue;
+    const castCard = permission.costText ? cardWithFaceManaCost(card, permission.costText) : card;
+    const baseCost = permission.costText ? manaValueFromManaCost(permission.costText) : card.manaValue;
+    const fixedCost = adjustedCastingCost(seat, castCard, baseCost, "graveyard", activeSeatId, session.seats);
+    const chosenX = maxAffordableX(seat, castCard, fixedCost);
+    const totalCost = totalCastingCost(seat, castCard, baseCost, chosenX);
+    const payment = chooseManaSourcesForCost(seat, castCard, totalCost, undefined, session.seats);
+    if (!payment.ok) continue;
+    if (!hasResolvableTarget(session, seat.id, card)) continue;
+    actions.push({
+      id: `cast-graveyard:${card.id}`,
+      actionType: "cast_spell",
+      cardId: card.id,
+      sourceZone: "graveyard",
+      targetIds: [],
+      label: `cast ${card.name} from the graveyard${permission.kind === "flashback" ? " (flashback)" : ""}`,
+      detail: `${permission.costText ?? card.manaCost ?? ""} ${card.typeLine}. ${card.oracleText} Payable with ${formatManaPoolPayment(payment.spent)}.`.trim(),
+      role: card.role
+    });
+  }
   actions.push(...legalRoomUnlockActions(seat, session.seats));
   const commander = seat.board.commander;
   if (commander) {
@@ -10240,6 +10302,7 @@ function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllowed: boo
       // Nothing to act on: no creature card in any graveyard to exile, or no legal graveyard target.
       if (ability.effect.kind === "exile_graveyard_creature_then_tokens" && !session.seats.some((s) => (s.board.graveyard ?? []).some((c) => c.typeLine.includes("Creature")))) return;
       if (ability.effect.kind === "zone_effect" && !zoneEffectHasLegalTarget(session, seat.id, ability.effect.effect)) return;
+      if (ability.effect.kind === "grant_graveyard_cast" && !(seat.board.graveyard ?? []).some((c) => permanentMatchesQualifier(c, ability.effect.kind === "grant_graveyard_cast" ? ability.effect.cardMatcher : ""))) return;
       actions.push({
         id: `activate-generic-tap:${card.id}:${abilityIndex}`,
         actionType: "activate_ability",
@@ -11537,7 +11600,7 @@ function addCreatureTypeToTypeLine(typeLine: string, newType: string): string {
   return `${before} — ${newType}${after ? ` ${after}` : ""}`;
 }
 
-function applyGenericTapEffect(
+export function applyGenericTapEffect(
   session: GameSession,
   seatId: string,
   sourceCardId: string,
@@ -11670,6 +11733,25 @@ function applyGenericTapEffect(
     const specs = parseCreateTokenSpecs(clause);
     const created = specs.length > 0 ? createTokensForSeat(exiled, seatId, sourceCardId, specs).session : exiled;
     return rulesEvent(created, seatId, `${seat.name} activates ${sourceCardName}: exiles ${pick.card.name} and creates a token.`);
+  }
+
+  // Zul Ashur: pick the best matching creature card in the graveyard and let its controller cast it this turn.
+  if (effect.kind === "grant_graveyard_cast") {
+    const options = (seat.board.graveyard ?? []).filter((c) => permanentMatchesQualifier(c, effect.cardMatcher));
+    const best = options.length > 0 ? options.reduce((a, b) => (b.manaValue > a.manaValue ? b : a)) : undefined;
+    if (!best) return rulesEvent(session, seatId, `${sourceCardName} has no ${effect.cardMatcher} card in your graveyard to cast.`);
+    return rulesEvent(
+      {
+        ...session,
+        seats: session.seats.map((item) =>
+          item.id === seatId
+            ? { ...item, board: { ...item.board, graveyard: (item.board.graveyard ?? []).map((c) => (c.id === best.id ? { ...c, graveyardCastGrant: { seatId, turn: session.turn } } : c)) } }
+            : item
+        )
+      },
+      seatId,
+      `${seat.name} may cast ${best.name} from the graveyard this turn (${sourceCardName}).`
+    );
   }
 
   if (effect.kind !== "bounce_own") return session;
@@ -15896,7 +15978,9 @@ function pendingActionSourceCard(session: GameSession, action: PendingAction): V
       ? seat?.board.commander
       : action.sourceZone === "exile"
         ? seat?.board.exile?.find((card) => card.id === action.cardId)
-        : seat?.board.hand.find((card) => card.id === action.cardId);
+        : action.sourceZone === "graveyard"
+          ? seat?.board.graveyard?.find((card) => card.id === action.cardId)
+          : seat?.board.hand.find((card) => card.id === action.cardId);
   }
   if (action.type === "trigger") {
     const seat = session.seats.find((item) => item.id === action.controllerSeatId);
@@ -17836,7 +17920,9 @@ function findSpellSourceCard(session: GameSession, action: Extract<PendingAction
     ? actor?.board.commander
     : action.sourceZone === "exile"
       ? actor?.board.exile?.find((card) => card.id === action.cardId)
-      : actor?.board.hand.find((card) => card.id === action.cardId);
+      : action.sourceZone === "graveyard"
+        ? actor?.board.graveyard?.find((card) => card.id === action.cardId)
+        : actor?.board.hand.find((card) => card.id === action.cardId);
 }
 
 function ruleChoiceView(
@@ -18905,7 +18991,9 @@ function spellResolutionDestination(session: GameSession, action: Extract<Pendin
       ? actor?.board.commander
       : action.sourceZone === "exile"
         ? actor?.board.exile?.find((item) => item.id === action.cardId)
-        : actor?.board.hand.find((item) => item.id === action.cardId);
+        : action.sourceZone === "graveyard"
+          ? actor?.board.graveyard?.find((item) => item.id === action.cardId)
+          : actor?.board.hand.find((item) => item.id === action.cardId);
   if (!card) return "graveyard";
   // A two-faced card's own typeLine is the combined "Creature — Dragon // Sorcery — Omen" string,
   // which contains "Sorcery" regardless of which face was actually cast — checking it directly here
@@ -18922,6 +19010,9 @@ function spellResolutionDestination(session: GameSession, action: Extract<Pendin
   // Adventure, but shuffled into the owner's library instead of exiled — nothing carries over to
   // let it be cast again later the way Adventure's exile does.
   if (effectiveCard.typeLine.includes("Omen")) return "library";
+  // Flashback (rule 702.34a): an instant or sorcery cast with flashback is exiled instead of going anywhere
+  // else when it would leave the stack. A flashback PERMANENT just enters the battlefield as normal.
+  if (action.flashback && (effectiveCard.typeLine.includes("Instant") || effectiveCard.typeLine.includes("Sorcery"))) return "exile";
   return effectiveCard.typeLine.includes("Instant") || effectiveCard.typeLine.includes("Sorcery") ? "graveyard" : "battlefield";
 }
 
@@ -18936,7 +19027,7 @@ function isHistoricCard(card: VisibleCard) {
   return card.typeLine.includes("Artifact") || card.typeLine.includes("Legendary") || card.typeLine.includes("Saga");
 }
 
-function manaValueFromManaCost(manaCost: string | undefined): number {
+export function manaValueFromManaCost(manaCost: string | undefined): number {
   if (!manaCost) return 0;
   const symbols = manaCost.match(/\{[^}]+\}/g) ?? [];
   let total = 0;
@@ -19018,7 +19109,7 @@ export function independentlyCastableSpellFaces(card: VisibleCard): [CardFaceRec
   return faces;
 }
 
-function cardWithFaceManaCost(card: VisibleCard, manaCost: string | undefined): VisibleCard {
+export function cardWithFaceManaCost(card: VisibleCard, manaCost: string | undefined): VisibleCard {
   return { ...card, manaCost };
 }
 
@@ -19409,7 +19500,7 @@ export function adjustedCastingCost(
   seat: PlayerSeat,
   card: VisibleCard,
   baseCost: number,
-  sourceZone: "hand" | "command" | "exile",
+  sourceZone: "hand" | "command" | "exile" | "graveyard",
   activeSeatId: string | undefined,
   allSeats: PlayerSeat[] = [seat],
   turn?: number,
@@ -20783,7 +20874,7 @@ export function playCardFromZone(
   position?: { x: number; z: number },
   destination: "battlefield" | "graveyard" | "exile" | "library" = "battlefield",
   manaSourceIds: string[] = [],
-  sourceZone: "hand" | "command" | "exile" = "hand",
+  sourceZone: "hand" | "command" | "exile" | "graveyard" = "hand",
   faceIndex?: number
 ): GameSession {
   let playedName = "";
@@ -20826,7 +20917,9 @@ export function playCardFromZone(
         ? seat.board.commander
         : sourceZone === "exile"
           ? (ownExileCard ?? session.seats.find((s) => s.id === exileOwnerSeatId)?.board.exile?.find((item) => item.id === cardId))
-          : seat.board.hand.find((item) => item.id === cardId);
+          : sourceZone === "graveyard"
+            ? (seat.board.graveyard ?? []).find((item) => item.id === cardId)
+            : seat.board.hand.find((item) => item.id === cardId);
     if (!sourceCard) return seat;
     const card = applyChosenFaceToCard(sourceCard, faceIndex);
     playedName = card.name;
@@ -20877,8 +20970,10 @@ export function playCardFromZone(
       // exiledPlayableUntilTurn left undefined, same "for as long as it remains exiled" shape
       // applyStealAndPlay already uses for Bribery-style effects (never swept by
       // clearTemporaryBuffs, which only expires a turn-limited exiledPlayableUntilTurn).
-      exiledPlayableBySeatId: destination === "exile" ? seatId : undefined,
-      exiledPlayableUntilTurn: undefined
+      // A flashback spell exiled after resolving (from the graveyard) is NOT castable again from exile.
+      exiledPlayableBySeatId: destination === "exile" && sourceZone !== "graveyard" ? seatId : undefined,
+      exiledPlayableUntilTurn: undefined,
+      graveyardCastGrant: undefined
     };
     // Rule 707.2: "enters as a copy" is a replacement effect on the copiable values only (name,
     // type line, oracle text, mana cost/value, colors, P/T, image) — everything else about
@@ -20912,7 +21007,8 @@ export function playCardFromZone(
         }
       : enteredCard;
     const spentSeat = spendManaSources(seat, manaSourceIds);
-    const graveyard = spentSeat.board.graveyard ?? [];
+    // Casting from the graveyard takes the card out of it first (it re-enters only if it resolves back there).
+    const graveyard = sourceZone === "graveyard" ? (spentSeat.board.graveyard ?? []).filter((item) => item.id !== cardId) : (spentSeat.board.graveyard ?? []);
     const library = spentSeat.library ?? [];
     const exile = spentSeat.board.exile ?? [];
     const commanderLeavesCommand = sourceZone === "command" && seat.board.commander?.id === cardId;
@@ -20940,7 +21036,7 @@ export function playCardFromZone(
         ...spentSeat.zones,
         battlefield: spentSeat.zones.battlefield + (destination === "battlefield" ? 1 : 0),
         command: Math.max(0, spentSeat.zones.command - (commanderLeavesCommand ? 1 : 0)),
-        graveyard: spentSeat.zones.graveyard + (destination === "graveyard" ? 1 : 0),
+        graveyard: Math.max(0, spentSeat.zones.graveyard + (destination === "graveyard" ? 1 : 0) - (sourceZone === "graveyard" ? 1 : 0)),
         hand: sourceZone === "hand" ? Math.max(0, spentSeat.zones.hand - 1) : spentSeat.zones.hand,
         exile: Math.max(0, spentSeat.zones.exile + (destination === "exile" && sourceZone !== "exile" ? 1 : 0) - (leavesExileZone ? 1 : 0)),
         library: spentSeat.zones.library + (destination === "library" ? 1 : 0)
@@ -20958,7 +21054,7 @@ export function playCardFromZone(
         id: crypto.randomUUID(),
         at: new Date().toISOString(),
         seatId,
-        message: `${message ?? `${session.seats.find((seat) => seat.id === seatId)?.name ?? "Player"} plays ${playedName}.`}${copiedFromName ? ` It enters as a copy of ${copiedFromName}.` : ""}${enteredTapped ? " It enters tapped." : shockLifePaid > 0 ? ` Pays ${shockLifePaid} life for it to enter untapped.` : ""}${destination === "exile" ? " It's exiled — you may cast the other half later." : destination === "library" ? " It's shuffled into its owner's library." : ""}`,
+        message: `${message ?? `${session.seats.find((seat) => seat.id === seatId)?.name ?? "Player"} plays ${playedName}.`}${copiedFromName ? ` It enters as a copy of ${copiedFromName}.` : ""}${enteredTapped ? " It enters tapped." : shockLifePaid > 0 ? ` Pays ${shockLifePaid} life for it to enter untapped.` : ""}${destination === "exile" ? (sourceZone === "graveyard" ? " It's exiled (flashback)." : " It's exiled — you may cast the other half later.") : destination === "library" ? " It's shuffled into its owner's library." : ""}`,
         detail: destination === "graveyard" || destination === "exile" || destination === "library" ? "Response" : undefined
       },
       ...session.events

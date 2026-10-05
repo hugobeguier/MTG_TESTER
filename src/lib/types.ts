@@ -221,6 +221,9 @@ export interface VisibleCard {
   // recompute rather than surviving until clearTemporaryBuffs. See its read site's own comment.
   temporaryGrantedKeywords?: string[];
   attachedToId?: string;
+  // A card in a graveyard that another permanent let its controller cast this turn (Zul Ashur: "You may cast
+  // target Zombie creature card from your graveyard this turn") — see graveyardCasting.ts.
+  graveyardCastGrant?: { seatId: string; turn: number };
   // Set when this permanent was cast with its kicker paid (Josu Vess, Lich Knight) — "if it was kicked" enters
   // triggers only fire when this is true.
   kicked?: boolean;

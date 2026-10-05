@@ -92,6 +92,8 @@ import {
   legalAttackActions,
   legalBlockActions,
   legalMainPhaseActions,
+  cardWithFaceManaCost,
+  manaValueFromManaCost,
   maxAffordableX,
   modalDoubleFacedLandSplit,
   moveCardAcrossSeats,
@@ -128,6 +130,7 @@ import { cardMatchesTypeFilter, etbEffectText, parseModalHeader } from "@/lib/or
 import { TURN_PHASES } from "@/lib/priorityStops";
 import { parseRemovalEffect } from "@/lib/removalSpells";
 import { parseSpellExtraEffects } from "@/lib/spellExtras";
+import { graveyardCastPermission } from "@/lib/graveyardCasting";
 import { parseZoneEffect } from "@/lib/zoneEffects";
 import type { CardLike, ScoringContext } from "@/lib/actionScoring";
 import type { GameSession, PlayerSeat, VisibleCard } from "@/lib/types";
@@ -652,19 +655,38 @@ function applyMainPhaseAction(
   }
 
   if (action.actionType === "cast_spell" && action.cardId) {
-    const card = seat.board.hand.find((item) => item.id === action.cardId);
+    // From the graveyard (flashback, Gravecrawler, a Zul Ashur grant) or from hand.
+    const fromGraveyard = action.sourceZone === "graveyard";
+    const card = fromGraveyard ? (seat.board.graveyard ?? []).find((item) => item.id === action.cardId) : seat.board.hand.find((item) => item.id === action.cardId);
     if (!card) return { session, changed: false };
-    const fixedCost = adjustedCastingCost(seat, card, card.manaValue, "hand", session.activePlayerId, session.seats);
-    const chosenX = maxAffordableX(seat, card, fixedCost);
-    const totalCost = totalCastingCost(seat, card, card.manaValue, chosenX);
-    const payment = chooseManaSourcesForCost(seat, card, totalCost, undefined, session.seats);
+    const graveyardPermission = fromGraveyard
+      ? graveyardCastPermission(card, { seatId, turn: session.turn, controllerBattlefield: seat.board.battlefield })
+      : undefined;
+    if (fromGraveyard && !graveyardPermission) return { session, changed: false };
+    const costCard = graveyardPermission?.costText ? cardWithFaceManaCost(card, graveyardPermission.costText) : card;
+    const baseCost = graveyardPermission?.costText ? manaValueFromManaCost(graveyardPermission.costText) : card.manaValue;
+    const fixedCost = adjustedCastingCost(seat, costCard, baseCost, fromGraveyard ? "graveyard" : "hand", session.activePlayerId, session.seats);
+    const chosenX = maxAffordableX(seat, costCard, fixedCost);
+    const totalCost = totalCastingCost(seat, costCard, baseCost, chosenX);
+    const payment = chooseManaSourcesForCost(seat, costCard, totalCost, undefined, session.seats);
     if (!payment.ok) return { session, changed: false };
-    const destination = isPermanentTypeLine(card.typeLine) ? "battlefield" : "graveyard";
+    // A flashback instant/sorcery is exiled after it resolves instead of returning to the graveyard.
+    const destination = isPermanentTypeLine(card.typeLine) ? "battlefield" : graveyardPermission?.exileAfter ? "exile" : "graveyard";
     // "As an additional cost to cast this spell, discard a card." (Unexpected Windfall) — paid at cast
     // time, before the spell leaves the hand, same as the live game (601.2h).
     const costPaid = payAdditionalDiscardCost(session, seatId, card);
-    const next = playCardFromZone(costPaid, seatId, card.id, `${seat.name} casts ${card.name}.`, undefined, destination, payment.sourceIds, "hand", undefined);
-    if (destination === "graveyard" && next !== session) {
+    const next = playCardFromZone(
+      costPaid,
+      seatId,
+      card.id,
+      `${seat.name} casts ${card.name}${graveyardPermission?.kind === "flashback" ? " with flashback" : fromGraveyard ? " from the graveyard" : ""}.`,
+      undefined,
+      destination,
+      payment.sourceIds,
+      fromGraveyard ? "graveyard" : "hand",
+      undefined
+    );
+    if (destination !== "battlefield" && next !== session) {
       const resolved = resolveBareSpellEffect(next, seatId, card, chosenX);
       return {
         session: resolved.session,

@@ -540,3 +540,82 @@ describe("Zul Ashur — Ward—Pay 2 life", () => {
     expect(afterCountered.seats.find((s) => s.id === "a")!.life).toBe(2);
   });
 });
+
+import { applyGenericTapEffect, legalMainPhaseActions, playCardFromZone } from "./AppFlow";
+
+describe("casting from the graveyard", () => {
+  const moan = card({
+    id: "moan", name: "Moan of the Unhallowed", typeLine: "Sorcery", manaCost: "{2}{B}{B}", manaValue: 4, zone: "graveyard",
+    oracleText: "Create two 2/2 black Zombie creature tokens.\nFlashback {5}{B}{B} (You may cast this card from your graveyard for its flashback cost. Then exile it.)"
+  });
+  const gravecrawler = card({
+    id: "gc", name: "Gravecrawler", typeLine: "Creature — Zombie", manaCost: "{B}", manaValue: 1, power: "2", toughness: "1", role: "creature", zone: "graveyard", colors: ["B"],
+    oracleText: "This creature can't block.\nYou may cast this card from your graveyard as long as you control a Zombie."
+  });
+  const swamp = (id: string) => card({ id, name: "Swamp", typeLine: "Basic Land — Swamp", oracleText: "({T}: Add {B}.)", colors: [], role: "land" });
+  const swamps = (n: number) => Array.from({ length: n }, (_, i) => swamp(`sw${i}`));
+  const withGrave = (graveyard: VisibleCard[], battlefield: VisibleCard[]) => seat({ id: "a", name: "Me", kind: "human", board: { hand: [], battlefield, graveyard } });
+
+  it("a flashback spell leaves the graveyard and is exiled, not castable again from exile", () => {
+    const s = session([withGrave([moan], swamps(7))]);
+    const after = playCardFromZone(s, "a", "moan", "cast", undefined, "exile", [], "graveyard");
+    const mine = after.seats[0];
+    expect(mine.board.graveyard ?? []).toHaveLength(0);
+    expect(mine.board.exile?.map((c) => c.id)).toEqual(["moan"]);
+    expect(mine.board.exile?.[0].exiledPlayableBySeatId).toBeUndefined();
+    expect(mine.zones.graveyard).toBe(0);
+    expect(mine.zones.exile).toBe(1);
+  });
+
+  it("Gravecrawler returns to the battlefield from the graveyard", () => {
+    const s = session([withGrave([gravecrawler], [zombie("z1")])]);
+    const after = playCardFromZone(s, "a", "gc", "cast", undefined, "battlefield", [], "graveyard");
+    expect(after.seats[0].board.battlefield.map((c) => c.id)).toContain("gc");
+    expect(after.seats[0].board.graveyard ?? []).toHaveLength(0);
+  });
+
+  it("agents are offered a flashback cast only when they can pay the flashback cost", () => {
+    const cheap = withGrave([moan], swamps(6));
+    const rich = withGrave([moan], swamps(7));
+    const offered = (me: PlayerSeat) => legalMainPhaseActions(me, true, "a", 1, new Set(), session([me])).some((a) => a.id === "cast-graveyard:moan");
+    expect(offered(cheap)).toBe(false);
+    expect(offered(rich)).toBe(true);
+    const flashback = legalMainPhaseActions(rich, true, "a", 1, new Set(), session([rich])).find((a) => a.id === "cast-graveyard:moan")!;
+    expect(flashback).toMatchObject({ actionType: "cast_spell", sourceZone: "graveyard" });
+  });
+
+  it("Gravecrawler is only offered while you control a Zombie", () => {
+    const offered = (me: PlayerSeat) => legalMainPhaseActions(me, true, "a", 1, new Set(), session([me])).some((a) => a.id === "cast-graveyard:gc");
+    expect(offered(withGrave([gravecrawler], [...swamps(2)]))).toBe(false);
+    expect(offered(withGrave([gravecrawler], [...swamps(2), zombie("z1")]))).toBe(true);
+  });
+});
+
+describe("Zul Ashur's graveyard cast permission", () => {
+  it("{T}: may cast a Zombie creature card from your graveyard this turn", () => {
+    const [ability] = parseGenericTapAbilities("{T}: You may cast target Zombie creature card from your graveyard this turn.");
+    expect(ability.effect).toEqual({ kind: "grant_graveyard_cast", cardMatcher: "zombie creature" });
+  });
+
+  it("marks the best Zombie castable, and it is then offered as a graveyard cast", () => {
+    const [ability] = parseGenericTapAbilities("{T}: You may cast target Zombie creature card from your graveyard this turn.");
+    const zul = card({ id: "zul", name: "Zul Ashur, Lich Lord", typeLine: "Legendary Creature — Zombie Wizard", role: "creature" });
+    const cheap = zombie("cheap", { zone: "graveyard", manaValue: 1, manaCost: "{B}" });
+    const pricey = zombie("pricey", { zone: "graveyard", manaValue: 3, manaCost: "{2}{B}" });
+    const human = card({ id: "h", name: "Human", typeLine: "Creature — Human", zone: "graveyard", manaValue: 5 });
+    const swamp = (id: string) => card({ id, name: "Swamp", typeLine: "Basic Land — Swamp", oracleText: "({T}: Add {B}.)", role: "land" });
+    const me = seat({ id: "a", name: "Me", kind: "human", board: { hand: [], battlefield: [zul, swamp("s1"), swamp("s2"), swamp("s3")], graveyard: [cheap, pricey, human] } });
+    const s = session([me]);
+    const before = legalMainPhaseActions(me, true, "a", 1, new Set(), s).some((a) => a.id.startsWith("cast-graveyard:"));
+    expect(before).toBe(false);
+    // The ability's own effect text, as applyGenericTapEffect receives it.
+    const after = applyGenericTapEffect(s, "a", "zul", "Zul Ashur, Lich Lord", ability.effect, ability.clause);
+    const mine = after.seats[0];
+    expect(mine.board.graveyard?.find((c) => c.id === "pricey")?.graveyardCastGrant).toEqual({ seatId: "a", turn: 1 });
+    expect(mine.board.graveyard?.find((c) => c.id === "cheap")?.graveyardCastGrant).toBeUndefined();
+    expect(mine.board.graveyard?.find((c) => c.id === "h")?.graveyardCastGrant).toBeUndefined();
+    const offered = legalMainPhaseActions(mine, true, "a", 1, new Set(), after).map((a) => a.id);
+    expect(offered).toContain("cast-graveyard:pricey");
+    expect(offered).not.toContain("cast-graveyard:h");
+  });
+});
