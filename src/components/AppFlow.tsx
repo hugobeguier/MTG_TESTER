@@ -11334,6 +11334,8 @@ type GenericAbilityEffect =
   | { kind: "animate_enchantment" }
   | { kind: "trigger"; effect: TriggerEffect }
   | { kind: "phase_out" }
+  // Scavenging Ooze: "Exile target card from a graveyard. If it was a creature card, put a +1/+1 counter on this creature and you gain 1 life."
+  | { kind: "exile_graveyard_card_scavenge" }
   | { kind: "transform_self" };
 
 // "Transform Heliod." (Heliod, the Radiant Dawn's own activated ability, naming itself rather than
@@ -11416,7 +11418,10 @@ function parseEnchantmentAnimationEffect(effectText: string): boolean {
 // No chosenX exists for an activated ability (parseGenericManaAbilities already declines {X}-cost
 // abilities outright), so unlike the modal/spell path this never substitutes X — a "target creature
 // gets -X/-X" activated ability is simply declined, the same "no guessing" behavior it always had.
-function parseGenericAbilityEffect(effectText: string): GenericAbilityEffect | undefined {
+export function parseGenericAbilityEffect(effectText: string): GenericAbilityEffect | undefined {
+  if (/^exile target card from a graveyard\.\s*if it was a creature card, put a \+1\/\+1 counter on this creature and you gain 1 life\.?$/i.test(effectText.trim())) {
+    return { kind: "exile_graveyard_card_scavenge" };
+  }
   const removal = parseRemovalEffect(effectText);
   if (removal) return { kind: "removal", effect: removal };
   const pump = parseTargetedPump(effectText);
@@ -11527,6 +11532,7 @@ function genericAbilityEffectHasLegalTarget(session: GameSession, casterSeatId: 
   if (effect.kind === "zone") return zoneEffectHasLegalTarget(session, casterSeatId, effect.effect);
   if (effect.kind === "pump") return choosePumpTarget(session, casterSeatId, effect.effect) !== undefined;
   if (effect.kind === "animate_enchantment") return chooseNonAuraEnchantmentTarget(session, casterSeatId) !== undefined;
+  if (effect.kind === "exile_graveyard_card_scavenge") return session.seats.some((seat) => (seat.board.graveyard ?? []).length > 0);
   if (effect.kind === "phase_out") {
     const target = sourceCard.attachedToId ? findPermanentById(session, sourceCard.attachedToId) : undefined;
     return target !== undefined && !target.phasedOut;
@@ -11542,7 +11548,7 @@ function genericAbilityEffectHasLegalTarget(session: GameSession, casterSeatId: 
   return true;
 }
 
-function applyGenericAbilityEffect(session: GameSession, casterSeatId: string, sourceCard: VisibleCard, effect: GenericAbilityEffect): GameSession {
+export function applyGenericAbilityEffect(session: GameSession, casterSeatId: string, sourceCard: VisibleCard, effect: GenericAbilityEffect): GameSession {
   if (effect.kind === "removal") return applyPrimitiveAction(session, casterSeatId, sourceCard, { kind: "removal", effect: effect.effect });
   if (effect.kind === "zone") return applyPrimitiveAction(session, casterSeatId, sourceCard, { kind: "zone", effect: effect.effect });
   if (effect.kind === "pump") return applyPrimitiveAction(session, casterSeatId, sourceCard, { kind: "pump_target", effect: effect.effect });
@@ -11554,6 +11560,41 @@ function applyGenericAbilityEffect(session: GameSession, casterSeatId: string, s
   // before ever calling applyGenericAbilityEffect and opens the interactive library-search choice
   // instead (pendingRuleChoice is component state this pure function can't reach).
   if (effect.kind === "search_library") return session;
+  if (effect.kind === "exile_graveyard_card_scavenge") {
+    const caster = session.seats.find((seat) => seat.id === casterSeatId);
+    const all = session.seats.flatMap((seat) => (seat.board.graveyard ?? []).map((card) => ({ seatId: seat.id, card })));
+    // Prefers an opponent's creature card (growth + graveyard hate), then any other opponent card; never your own creature
+    // cards, which may be reanimation targets. Falls back to your own non-creature card only when nothing else exists.
+    const rank = (entry: { seatId: string; card: VisibleCard }) => {
+      const isCreature = entry.card.typeLine.includes("Creature");
+      if (entry.seatId !== casterSeatId) return (isCreature ? 20 : 10) + entry.card.manaValue / 100;
+      return isCreature ? -1 : 1;
+    };
+    const pick = all.reduce<(typeof all)[number] | undefined>((best, entry) => (!best || rank(entry) > rank(best) ? entry : best), undefined);
+    if (!caster || !pick) return rulesEvent(session, casterSeatId, `${sourceCard.name} has no card in any graveyard to exile.`);
+    const exiled = moveCardAcrossSeats(session, pick.seatId, pick.card.id, pick.seatId, "exile").session;
+    if (!pick.card.typeLine.includes("Creature")) return rulesEvent(exiled, casterSeatId, `${caster.name} exiles ${pick.card.name} with ${sourceCard.name}.`);
+    const grown: GameSession = {
+      ...exiled,
+      seats: exiled.seats.map((seat) =>
+        seat.id !== casterSeatId
+          ? seat
+          : {
+              ...seat,
+              life: seat.life + 1,
+              board: {
+                ...seat.board,
+                battlefield: seat.board.battlefield.map((card) =>
+                  card.id === sourceCard.id
+                    ? { ...card, counters: [...(card.counters ?? []).filter((counter) => counter.kind !== "+1/+1"), { kind: "+1/+1", count: ((card.counters ?? []).find((counter) => counter.kind === "+1/+1")?.count ?? 0) + 1 }] }
+                    : card
+                )
+              }
+            }
+      )
+    };
+    return rulesEvent(grown, casterSeatId, `${caster.name} exiles ${pick.card.name} with ${sourceCard.name}: a +1/+1 counter and 1 life.`);
+  }
   if (effect.kind === "phase_out") return applyPhaseOut(session, casterSeatId, sourceCard);
   if (effect.kind === "transform_self") return transformPermanent(session, casterSeatId, sourceCard.id, sourceCard.name, false);
   const syntheticTrigger: Extract<PendingAction, { type: "trigger" }> = {

@@ -2,8 +2,9 @@
 // the test: two earlier tests passed on invented text while the real cards stayed broken (Court of Grace, the
 // "with power N or greater" watchers). Skipped per card when the catalog doesn't have it.
 import { describe, expect, it } from "vitest";
-import { applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
+import { applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
 import { parseRemovalEffect } from "@/lib/removalSpells";
+import { parseGenericManaAbilities } from "@/lib/activatedAbilities";
 import { loadCardCatalog, lookupCard } from "@/lib/cardCatalog";
 import type { GameSession, PlayerSeat, VisibleCard } from "@/lib/types";
 
@@ -285,5 +286,31 @@ describe("Elder Gargaroth: attacks or blocks, choose one (real Oracle text)", ()
     const trigger = findAttackTriggers(s, { seatId: "a", card: garg(), defendingSeatId: "b" }).triggers[0];
     const after = resolveTriggerEffect(s, trigger);
     expect(after.seats[0].board.battlefield.some((card) => /Beast/.test(card.name))).toBe(true);
+  });
+});
+
+describe("Scavenging Ooze (real Oracle text)", () => {
+  const ooze = () => real("Scavenging Ooze", "ooze", { power: "2", toughness: "2" });
+  const run = (graveyard: VisibleCard[], mine: VisibleCard[] = []) => {
+    const mineSeat = seat("a", [ooze()]);
+    mineSeat.board.graveyard = mine;
+    const theirs = seat("b", []);
+    theirs.board.graveyard = graveyard;
+    const o = ooze();
+    const effect = parseGenericManaAbilities(o.oracleText).map((ability) => parseGenericAbilityEffect(ability.effectText)).find(Boolean);
+    expect(effect).toBeDefined();
+    return applyGenericAbilityEffect(session([mineSeat, theirs]), "a", o, effect!).seats;
+  };
+  const gy = (id: string, typeLine: string) => ({ ...bear(id, { typeLine, zone: "graveyard" as const }) });
+  it("exiling a creature card adds a +1/+1 counter and 1 life", () => {
+    const seats = run([gy("dead", "Creature — Bear")]);
+    expect(seats[1].board.graveyard).toHaveLength(0);
+    expect(seats[0].life).toBe(41);
+    expect(seats[0].board.battlefield[0].counters?.find((c) => c.kind === "+1/+1")?.count).toBe(1);
+  });
+  it("exiling a non-creature card gives nothing, and it prefers an opponent's creature card", () => {
+    const seats = run([gy("land", "Land"), gy("dead", "Creature — Bear")], [gy("mine", "Creature — Bear")]);
+    expect(seats[1].board.graveyard!.map((c) => c.id)).toEqual(["land"]);
+    expect(seats[0].board.graveyard!.map((c) => c.id)).toEqual(["mine"]);
   });
 });
