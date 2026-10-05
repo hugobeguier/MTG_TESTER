@@ -117,3 +117,20 @@ describe("Court of Grace", () => {
     expect(monarch[0]).toMatchObject({ power: "4", toughness: "4" });
   });
 });
+
+import { legalAttackActions } from "./AppFlow";
+
+describe("attack/block restrictions", () => {
+  const rhonas = card({
+    id: "rh", name: "Rhonas the Indomitable", typeLine: "Legendary Creature — God", power: "5", toughness: "5", role: "creature",
+    oracleText: "Deathtouch, indestructible\nRhonas can't attack or block unless you control another creature with power 4 or greater.\n{2}{G}: Another target creature gets +2/+0 and gains trample until end of turn."
+  });
+  it("Rhonas can't attack alone, and can once you control another creature with power 4+", () => {
+    const opp = seat({ id: "b", name: "Opp", kind: "agent" });
+    const attackersOf = (battlefield: VisibleCard[]) => legalAttackActions(seat({ id: "a", name: "Me", kind: "human", board: { hand: [], battlefield, graveyard: [] } }), [opp]).filter((a) => a.actionType === "attack").map((a) => a.cardId);
+    const settled = (c: VisibleCard) => ({ ...c, summoningSick: false });
+    expect(attackersOf([settled(rhonas)])).toEqual([]);
+    expect(attackersOf([settled(rhonas), settled(creature("2", "2"))])).not.toContain("rh");
+    expect(attackersOf([settled(rhonas), settled(creature("3", "4"))])).toContain("rh");
+  });
+});

@@ -2542,7 +2542,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     if (phaseTriggeredCards(seat, session.phase as TurnPhase).length > 0) return false;
 
     const hasMainAction = hasAgentMainPhaseAction(seat, hasPlayedLandThisTurn(seat.id, session.turn), activeSeatId, session.turn, loyaltyActivationsThisTurn.current, session);
-    const hasAttack = seat.board.battlefield.some((card) => canAttack(card));
+    const hasAttack = seat.board.battlefield.some((card) => canAttack(card, seat.board.battlefield));
 
     if (session.phase === "precombat main phase") return !hasMainAction && !hasAttack;
     if (session.phase === "declare attackers step") return !hasAttack && !hasAgentMainPhaseAction(seat, true, activeSeatId, session.turn, loyaltyActivationsThisTurn.current, session);
@@ -3468,7 +3468,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   function declareAttack(session: GameSession, seatId: string, cardId: string | undefined, targetId: string | undefined): GameSession {
     const attacker = session.seats.find((seat) => seat.id === seatId);
     if (!attacker) return session;
-    const attackingCard = attacker.board.battlefield.find((card) => card.id === cardId && canAttack(card));
+    const attackingCard = attacker.board.battlefield.find((card) => card.id === cardId && canAttack(card, attacker.board.battlefield));
     const target = resolveAttackTarget(session, targetId);
 
     if (!attackingCard || !target) {
@@ -8756,7 +8756,7 @@ export function assignBlockers(session: GameSession, choice: BlockChoiceState, b
   const attackingCard = attacker?.board.battlefield.find((card) => card.id === choice.attackerCardId && card.attacking);
   if (!attacker || !defender || !attackingCard) return session;
   const blockers = blockerCardIds
-    .map((id) => defender.board.battlefield.find((card) => card.id === id && canBlock(card, attackingCard)))
+    .map((id) => defender.board.battlefield.find((card) => card.id === id && canBlock(card, attackingCard, defender.board.battlefield)))
     .filter((card): card is VisibleCard => Boolean(card));
   const decidedSession = markAttackDecided(session, attacker.id, attackingCard.id);
   if (blockers.length === 0) {
@@ -9066,7 +9066,23 @@ function createCommanderCard(deck: CommanderDeck, existing?: VisibleCard): Visib
 // check meant none of those could ever attack or block despite genuinely being creatures —
 // reported live via this session's man-land audit (Celestial Colonnade correctly became a 4/4 but
 // still couldn't attack with it).
-function canAttack(card: VisibleCard) {
+// "~ can't attack or block unless you control another creature with power 4 or greater." (Rhonas the Indomitable).
+// controllerBattlefield is the permanent's controller's board; without it the restriction is assumed satisfied
+// (a caller with no board to check shouldn't wrongly forbid the attack — declareAttack and the legal-action lists
+// pass the real board).
+function attackBlockRestrictionMet(card: VisibleCard, controllerBattlefield?: VisibleCard[]): boolean {
+  if (card.abilitiesStripped || !controllerBattlefield) return true;
+  for (const line of card.oracleText.split("\n")) {
+    const match = line.replace(/\([^)]*\)/g, "").match(/can'?t attack or block unless you control (?:another|an?) creature with power (\d+) or greater/i);
+    if (!match) continue;
+    const needed = Number.parseInt(match[1], 10);
+    return controllerBattlefield.some((other) => other.id !== card.id && other.typeLine.includes("Creature") && effectivePower(other) >= needed);
+  }
+  return true;
+}
+
+function canAttack(card: VisibleCard, controllerBattlefield?: VisibleCard[]) {
+  if (!attackBlockRestrictionMet(card, controllerBattlefield)) return false;
   return hasCardType(card, "Creature") && !card.tapped && !card.phasedOut && (!card.summoningSick || hasHaste(card)) && !card.attacking && !hasDefender(card);
 }
 
@@ -9082,9 +9098,21 @@ export function creatureCantBlock(card: VisibleCard): boolean {
   });
 }
 
-function canBlock(card: VisibleCard, attacker?: VisibleCard) {
+// "This creature can't be blocked by creatures with power 2 or less." (Steel Leaf Champion)
+function attackerEvadesBlocker(attacker: VisibleCard, blocker: VisibleCard): boolean {
+  if (attacker.abilitiesStripped) return false;
+  for (const line of attacker.oracleText.split("\n")) {
+    const match = line.replace(/\([^)]*\)/g, "").match(/can'?t be blocked by creatures with power (\d+) or less/i);
+    if (match && effectivePower(blocker) <= Number.parseInt(match[1], 10)) return true;
+  }
+  return false;
+}
+
+function canBlock(card: VisibleCard, attacker?: VisibleCard, controllerBattlefield?: VisibleCard[]) {
   if (!hasCardType(card, "Creature") || card.tapped || card.phasedOut || card.blocking) return false;
   if (creatureCantBlock(card)) return false;
+  if (!attackBlockRestrictionMet(card, controllerBattlefield)) return false;
+  if (attacker && attackerEvadesBlocker(attacker, card)) return false;
   if (attacker && hasFlying(attacker) && !hasFlying(card) && !hasReach(card)) return false;
   if (attacker && isProtectedFrom(attacker, card)) return false;
   // Rule 702.111b: menace requires the attacker be blocked by two or more creatures, assigned
@@ -10090,11 +10118,11 @@ function describeAttackOption(card: VisibleCard, legalBlockers: VisibleCard[], t
 }
 
 export function legalAttackActions(seat: PlayerSeat, opponents: PlayerSeat[] = []): LegalAgentAction[] {
-  const attackers = seat.board.battlefield.filter(canAttack);
+  const attackers = seat.board.battlefield.filter((card) => canAttack(card, seat.board.battlefield));
   const actions: LegalAgentAction[] = [];
   for (const card of attackers) {
     for (const opponent of opponents) {
-      const legalBlockers = opponent.board.battlefield.filter((blocker) => canBlock(blocker, card));
+      const legalBlockers = opponent.board.battlefield.filter((blocker) => canBlock(blocker, card, opponent.board.battlefield));
       const tax = totalAttackTax(opponent, false);
       if (tax === 0 || chooseManaSourcesForCost(seat, genericCostShim(tax), tax, undefined, opponents).ok) {
         actions.push({
@@ -15969,7 +15997,7 @@ export function legalBlockActions(session: GameSession, choice: BlockChoiceState
   const attacker = session.seats.find((seat) => seat.id === choice.attackerSeatId);
   const attackingCard = attacker?.board.battlefield.find((card) => card.id === choice.attackerCardId);
   const actions: LegalAgentAction[] =
-    defender?.board.battlefield.filter((card) => canBlock(card, attackingCard)).map((card) => ({
+    defender?.board.battlefield.filter((card) => canBlock(card, attackingCard, defender.board.battlefield)).map((card) => ({
       id: `block:${card.id}`,
       actionType: "block" as const,
       cardId: card.id,
@@ -18296,7 +18324,7 @@ function blockChoiceView(session: GameSession, choice: BlockChoiceState | undefi
     attackerName: attacker.name,
     defenderName: defender.name,
     attackingCard: withEffectiveStats(attackingCard),
-    blockers: defender.board.battlefield.filter((card) => canBlock(card, attackingCard)).map(withEffectiveStats)
+    blockers: defender.board.battlefield.filter((card) => canBlock(card, attackingCard, defender.board.battlefield)).map(withEffectiveStats)
   };
 }
 
