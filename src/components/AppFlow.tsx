@@ -278,6 +278,10 @@ type TriggerEffect = (
   | { kind: "investigate_per_opponent_with_more_cards" }
   // "Put X +1/+1 counters on target creature, where X is that creature's power." (Thickest in the Thicket) — your strongest creature.
   | { kind: "double_power_counters" }
+  // "Put a +1/+1 counter on each of up to two target creatures." (Rishkar, Peema Renegade) — your strongest creatures.
+  | { kind: "counters_on_up_to_creatures"; counterKind: string; amount: number; count: number }
+  // Living weapon (Tangleweave Armor): "When this Equipment enters, create a 0/0 black Phyrexian Germ creature token, then attach this to it."
+  | { kind: "living_weapon" }
   // "Proliferate." (Norn's Choirmaster) — every eligible permanent and player, same as the blanket resolveProliferate.
   | { kind: "proliferate" }
 ) & {
@@ -4113,6 +4117,10 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     if (!seat || !card) return;
 
     if (sourceZone === "command" && card.id !== cardId) return;
+    if (castRestrictedByTurnCount(session, card)) {
+      addEvent(`${seat.name} can't cast ${card.name} during their first three turns of the game.`, seatId, "Timing");
+      return;
+    }
     // Casting from the graveyard needs an actual permission — flashback, a standing "you may cast this card from
     // your graveyard" (Gravecrawler), or a one-turn grant (Zul Ashur). Re-checked here even though the legal
     // action / pile button only offers it when one exists.
@@ -8843,7 +8851,9 @@ export function assignBlockers(session: GameSession, choice: BlockChoiceState, b
   if (!attacker || !defender || !attackingCard) return session;
   const blockers = blockerCardIds
     .map((id) => defender.board.battlefield.find((card) => card.id === id && canBlock(card, attackingCard, defender.board.battlefield)))
-    .filter((card): card is VisibleCard => Boolean(card));
+    .filter((card): card is VisibleCard => Boolean(card))
+    // Challenger Troll: its controller's power-4-or-greater creatures can't be blocked by more than one creature.
+    .slice(0, attackerLimitedToOneBlocker(attacker, attackingCard) ? 1 : undefined);
   const decidedSession = markAttackDecided(session, attacker.id, attackingCard.id);
   if (blockers.length === 0) {
     return {
@@ -9245,6 +9255,20 @@ function hasFirstStrike(card: VisibleCard) {
 
 function hasDoubleStrike(card: VisibleCard) {
   return hasKeyword(card, "double strike");
+}
+
+// "You can't cast Serra Avenger during your first, second, or third turns of the game." Own-turn number assumes plain
+// round-robin turns from the first seat (extra turns shift it by at most one).
+function castRestrictedByTurnCount(session: GameSession, card: VisibleCard): boolean {
+  if (!/\byou can'?t cast [^.]*? during your first, second, or third turns of the game\b/i.test(card.oracleText)) return false;
+  return Math.floor((session.turn - 1) / Math.max(1, session.seats.length)) + 1 <= 3;
+}
+
+function attackerLimitedToOneBlocker(attackerSeat: PlayerSeat, attacker: VisibleCard): boolean {
+  return (
+    effectivePower(attacker) >= 4 &&
+    attackerSeat.board.battlefield.some((card) => !card.abilitiesStripped && /\bcreature you control with power 4 or greater can'?t be blocked by more than one creature\b/i.test(card.oracleText))
+  );
 }
 
 // "Prevent all combat damage that would be dealt to this creature." (Seraph of the Sword) — combat damage only; other
@@ -9997,6 +10021,7 @@ export function legalMainPhaseActions(
     }
 
     if (isLandCard(card)) continue;
+    if (castRestrictedByTurnCount(session, card)) continue;
 
     const fixedCost = adjustedCastingCost(seat, card, card.manaValue, "hand", activeSeatId, session.seats);
     const chosenX = maxAffordableX(seat, card, fixedCost);
@@ -12336,6 +12361,14 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
               power += bonus.power;
               toughness += bonus.toughness;
             }
+            // "Equipped creature gets +X/+X, where X is the greatest mana value among your commanders." (Tangleweave Armor)
+            if (/\bequipped creature gets \+x\/\+x, where x is the greatest mana value among your commanders\b/i.test(attachment.oracleText)) {
+              const owner = next.seats.find((item) => item.id === (attachment.controllerSeatId ?? seat.id)) ?? seat;
+              const commanders = [...owner.board.battlefield.filter((permanent) => permanent.commander), ...(owner.board.commander ? [owner.board.commander] : [])];
+              const x = Math.max(0, ...commanders.map((commander) => commander.manaValue));
+              power += x;
+              toughness += x;
+            }
             for (const keyword of attachmentGrantedKeywords(attachment.oracleText)) keywordSet.add(keyword);
             for (const color of attachmentGrantedProtectionColors(attachment.oracleText)) protectionSet.add(color);
 
@@ -12401,6 +12434,7 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
                 if (grant.controlledOnly && sourceSeat.id !== seat.id) continue;
                 if (grant.excludeSelf && grantSource.id === card.id) continue;
                 if (!permanentMatchesQualifier(card, grant.matcher)) continue;
+                if (grant.withKeyword && !hasKeyword(card, grant.withKeyword)) continue;
                 for (const keyword of grant.keywords) keywordSet.add(keyword);
               }
             }
@@ -12417,6 +12451,7 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
             for (const grant of parseGroupManaAbilityGrant(grantSource.oracleText)) {
               if (grant.excludeSelf && grantSource.id === card.id) continue;
               if (!permanentMatchesQualifier(card, grant.matcher)) continue;
+              if (grant.requiresCounter && (card.counters ?? []).every((counter) => counter.count <= 0)) continue;
               manaAbilityGrantText = grant.abilityText;
               break;
             }
@@ -12452,11 +12487,11 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
           for (const conditionalSource of seat.board.battlefield) {
             if (conditionalSource.abilitiesStripped) continue;
             for (const boost of parseConditionalStaticBoosts(conditionalSource.oracleText)) {
-              if (!staticConditionMet(boost.condition, seat)) continue;
+              if (!staticConditionMet(boost.condition, seat, conditionalSource)) continue;
               if (boost.scope === "self" && conditionalSource.id !== card.id) continue;
               power += boost.power;
               toughness += boost.toughness;
-              if (boost.keyword && boost.scope === "creatures_you_control") keywordSet.add(boost.keyword);
+              if (boost.keyword) keywordSet.add(boost.keyword);
             }
           }
 
@@ -17322,7 +17357,10 @@ export function commonTriggerEffect(
   // with multiple clauses where only one is optional would be mis-flagged, a declared simplification.
   const optional = /\byou may\b/.test(text) || undefined;
   // Single-card shapes the generic parsers below would misread (a flat draw for a conditional one) or miss entirely.
+  if (mode === "entered" && /^living weapon\b/im.test(oracleText)) return { kind: "living_weapon" };
   if (/\byou gain life equal to that creature'?s toughness\b/.test(text)) return { kind: "gain_life_context_toughness" };
+  const upToCreatures = text.match(/\bput an? (\+1\/\+1) counter on each of up to (one|two|three) target creatures\b/);
+  if (upToCreatures) return { kind: "counters_on_up_to_creatures", counterKind: upToCreatures[1], amount: 1, count: numberWordToInt(upToCreatures[2]) ?? 1 };
   if (/(?:^|,\s*)proliferate\.?$/.test(text.replace(/\([^)]*\)/g, "").trim())) return { kind: "proliferate" };
   if (/\binvestigate once for each opponent who has more cards in hand than you\b/.test(text)) return { kind: "investigate_per_opponent_with_more_cards" };
   if (/\bput x \+1\/\+1 counters on target creature, where x is that creature'?s power\b/.test(text)) return { kind: "double_power_counters" };
@@ -18035,6 +18073,54 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
     return drawMultipleForSeat(session, trigger.controllerSeatId, trigger.effect.amount, `${trigger.sourceCardName} trigger resolves. ${seatName} draws ${trigger.effect.amount} card${trigger.effect.amount === 1 ? "" : "s"}.`);
   }
   if (trigger.effect.kind === "proliferate") return resolveProliferate(session);
+  if (trigger.effect.kind === "living_weapon") {
+    const owner = session.seats.find((item) => item.id === trigger.controllerSeatId);
+    const equipment = owner?.board.battlefield.find((card) => card.id === trigger.sourceCardId);
+    if (!owner || !equipment) return session;
+    const germ = createTokenCard(owner.id, equipment.id, { count: 1, name: "Phyrexian Germ Token", colors: ["B"], typeLine: "Token Creature - Phyrexian Germ", power: "0", toughness: "0", oracleText: "", role: "creature" });
+    // The Germ is 0/0 until the equipment's own bonus applies; seed that bonus now so the next state-based check doesn't bury it.
+    const flat = attachedPowerToughnessBonus(equipment.oracleText) ?? { power: 0, toughness: 0 };
+    const commanderX = /\bequipped creature gets \+x\/\+x, where x is the greatest mana value among your commanders\b/i.test(equipment.oracleText)
+      ? Math.max(0, ...[...owner.board.battlefield.filter((permanent) => permanent.commander), ...(owner.board.commander ? [owner.board.commander] : [])].map((commander) => commander.manaValue))
+      : 0;
+    const seeded: VisibleCard = { ...germ, attachmentPowerBonus: flat.power + commanderX || undefined, attachmentToughnessBonus: flat.toughness + commanderX || undefined };
+    const attached = {
+      ...session,
+      seats: session.seats.map((item) =>
+        item.id !== owner.id
+          ? item
+          : {
+              ...item,
+              board: {
+                ...item.board,
+                battlefield: [...item.board.battlefield.map((card) => (card.id === equipment.id ? { ...card, attachedToId: seeded.id, attachTimestamp: Date.now() } : card)), seeded]
+              },
+              zones: { ...item.zones, battlefield: item.zones.battlefield + 1 }
+            }
+        )
+    };
+    return rulesEvent(checkStateBasedActions(attached), owner.id, `${equipment.name}: a Phyrexian Germ token is created and equipped.`);
+  }
+  if (trigger.effect.kind === "counters_on_up_to_creatures") {
+    const { counterKind, amount, count } = trigger.effect;
+    const mine = session.seats.find((item) => item.id === trigger.controllerSeatId);
+    const chosen = (mine?.board.battlefield ?? [])
+      .filter((card) => card.typeLine.includes("Creature"))
+      .sort((a, b) => effectivePower(b) - effectivePower(a))
+      .slice(0, count);
+    if (!mine || chosen.length === 0) return session;
+    const ids = new Set(chosen.map((card) => card.id));
+    return rulesEvent(
+      {
+        ...session,
+        seats: session.seats.map((item) =>
+          item.id !== mine.id ? item : { ...item, board: { ...item.board, battlefield: item.board.battlefield.map((card) => (ids.has(card.id) ? applyCounterDelta(card, counterKind, amount) : card)) } }
+        )
+      },
+      mine.id,
+      `${trigger.sourceCardName}: ${chosen.map((card) => card.name).join(" and ")} get${chosen.length === 1 ? "s" : ""} a ${counterKind} counter.`
+    );
+  }
   if (trigger.effect.kind === "gain_life_context_toughness") {
     const entering = session.seats.flatMap((item) => item.board.battlefield).find((card) => card.id === trigger.contextCardId);
     const amount = entering ? Math.max(0, effectiveToughness(entering)) : 0;
@@ -19385,7 +19471,8 @@ export function applyDeterministicPhaseTrigger(session: GameSession, seatId: str
 
 const COMMANDER_STARTING_LIFE = 40;
 
-function staticConditionMet(condition: StaticCondition, seat: PlayerSeat): boolean {
+function staticConditionMet(condition: StaticCondition, seat: PlayerSeat, source?: VisibleCard): boolean {
+  if (condition.kind === "self_untapped") return source !== undefined && !source.tapped;
   if (condition.kind === "life_at_least") return seat.life >= condition.amount;
   if (condition.kind === "life_over_starting") return seat.life >= COMMANDER_STARTING_LIFE + condition.amount;
   return seat.board.battlefield.some((card) => card.commander);
@@ -19903,9 +19990,20 @@ function attackTaxEffectsFor(defender: PlayerSeat, targetIsPlaneswalker: boolean
 // board state (e.g. Sphere of Safety's per-enchantment amount can change turn to turn).
 export function totalAttackTax(defender: PlayerSeat, targetIsPlaneswalker: boolean): number {
   const enchantmentCount = defender.board.battlefield.filter((card) => card.typeLine.includes("Enchantment")).length;
-  return attackTaxEffectsFor(defender, targetIsPlaneswalker).reduce(
-    (total, effect) => total + effectiveAttackTaxAmount(effect, enchantmentCount),
-    0
+  // "As long as this creature is untapped, creatures can't attack you or planeswalkers you control unless their controller
+  // pays {1} for each of those creatures." (Archangel of Tithes) — read straight from the text, for cards the interpreter
+  // hasn't already turned into an attack_tax effect.
+  const textTax = defender.board.battlefield
+    .filter((card) => !card.abilitiesStripped && !(card.interpretedEffects ?? []).some((effect) => effect.kind === "attack_tax"))
+    .reduce((total, card) => {
+      const match = card.oracleText.match(/creatures can'?t attack you or planeswalkers you control unless their controller pays \{(\d+)\} for each of those creatures/i);
+      if (!match) return total;
+      if (/as long as this creature is untapped/i.test(card.oracleText) && card.tapped) return total;
+      return total + Number.parseInt(match[1], 10);
+    }, 0);
+  return (
+    textTax +
+    attackTaxEffectsFor(defender, targetIsPlaneswalker).reduce((total, effect) => total + effectiveAttackTaxAmount(effect, enchantmentCount), 0)
   );
 }
 

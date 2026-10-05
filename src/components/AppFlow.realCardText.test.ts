@@ -561,3 +561,42 @@ describe("combat and player-level cards, batch 4 (real Oracle text)", () => {
     expect(after.seats[1].board.hand).toHaveLength(1);
   });
 });
+
+describe("static abilities, batch 5 (real Oracle text)", () => {
+  it("Sephara gives OTHER flyers you control indestructible", () => {
+    const flyer = bear("fl", { oracleText: "Flying" });
+    const seats = settle([seat("a", [real("Sephara, Sky's Blade", "seph", { power: "7", toughness: "7" }), flyer, bear("ground")])]);
+    expect(find(seats, "a", "fl").grantedKeywords).toContain("indestructible");
+    expect(find(seats, "a", "ground").grantedKeywords ?? []).not.toContain("indestructible");
+    expect(find(seats, "a", "seph").grantedKeywords ?? []).not.toContain("indestructible");
+  });
+  it("Paradise Druid has hexproof only while untapped", () => {
+    const untapped = settle([seat("a", [real("Paradise Druid", "pd", { tapped: false })])]);
+    expect(find(untapped, "a", "pd").grantedKeywords).toContain("hexproof");
+    const tapped = settle([seat("a", [real("Paradise Druid", "pd", { tapped: true })])]);
+    expect(find(tapped, "a", "pd").grantedKeywords ?? []).not.toContain("hexproof");
+  });
+  it("Tangleweave Armor: living weapon makes a Germ that survives with +X/+X from your commander's mana value", () => {
+    const armor = real("Tangleweave Armor", "armor");
+    const cmdr = bear("cmdr", { commander: true, manaValue: 5 });
+    const s0 = session([seat("a", [armor, cmdr])]);
+    const triggers = findCommonTriggersForPermanentEntered(s0, "a", armor);
+    expect(triggers.map((t) => t.effect.kind)).toEqual(["living_weapon"]);
+    const after = resolveTriggerEffect(s0, triggers[0]);
+    const germ = after.seats[0].board.battlefield.find((c) => /Germ/.test(c.name));
+    expect(germ).toBeDefined();
+    const settled = runStateBasedActionsPass(after).session.seats;
+    const settledGerm = settled[0].board.battlefield.find((c) => /Germ/.test(c.name))!;
+    expect(settledGerm.attachmentPowerBonus).toBe(5);
+    expect(settled[0].board.battlefield.find((c) => c.id === "armor")!.attachedToId).toBe(settledGerm.id);
+  });
+  it("Rishkar: each creature you control with a counter gets a tap-for-G ability", () => {
+    const seats = settle([seat("a", [real("Rishkar, Peema Renegade", "rk", { power: "2", toughness: "2" }), bear("wc", { counters: [{ kind: "+1/+1", count: 1 }] }), bear("plain")])]);
+    expect(find(seats, "a", "wc").grantedManaAbilityText).toContain("{T}: Add {G}");
+    expect(find(seats, "a", "plain").grantedManaAbilityText).toBeUndefined();
+  });
+  it("Rishkar's enters trigger puts a +1/+1 counter on up to two creatures", () => {
+    const effect = commonTriggerEffect(real("Rishkar, Peema Renegade", "x").oracleText.split("\n")[0], "clause");
+    expect(effect).toEqual({ kind: "counters_on_up_to_creatures", counterKind: "+1/+1", amount: 1, count: 2 });
+  });
+});

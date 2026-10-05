@@ -337,6 +337,8 @@ export interface GroupKeywordGrant {
   // matching permanent EXCEPT the source itself; without "other," the source grants to itself too.
   excludeSelf: boolean;
   keywords: string[];
+  // "Other creatures you control with flying have indestructible." (Sephara): only permanents that already have this keyword.
+  withKeyword?: string;
 }
 
 const GRANTABLE_KEYWORDS = [
@@ -388,6 +390,13 @@ export function parseGroupKeywordGrant(oracleText: string): GroupKeywordGrant[] 
       if (boostKeywords.length > 0) grants.push({ matcher: boostAndHave[2].trim(), excludeSelf: Boolean(boostAndHave[1]), controlledOnly: Boolean(boostAndHave[3]), keywords: boostKeywords });
       continue;
     }
+    // "Other creatures you control with flying have indestructible." (Sephara, Sky's Blade)
+    const withKeyword = text.match(/^(other\s+)?([a-z][a-z ]*?) you control with ([a-z ]+?) have ([a-z, ]+?)\.?$/);
+    if (withKeyword) {
+      const grantedKeywords = GRANTABLE_KEYWORDS.filter((kw) => new RegExp(`\\b${kw}\\b`).test(withKeyword[4]));
+      if (grantedKeywords.length > 0) grants.push({ matcher: withKeyword[2].trim(), excludeSelf: Boolean(withKeyword[1]), controlledOnly: true, keywords: grantedKeywords, withKeyword: withKeyword[3].trim() });
+      continue;
+    }
     const match = text.match(/^(other\s+)?([a-z][a-z ]*?)\s+(you control\s+)?have\s+([a-z, ]+?)\.?$/);
     if (!match) continue;
     const keywords = GRANTABLE_KEYWORDS.filter((kw) => new RegExp(`\\b${kw}\\b`).test(match[4]));
@@ -404,7 +413,7 @@ export function parseGroupKeywordGrant(oracleText: string): GroupKeywordGrant[] 
 //   "Lieutenant — As long as you control your commander, this creature gets +2/+2 and creatures you control have
 //     vigilance." (Angelic Field Marshal)
 // Evaluated live against the controller's board/life by the characteristics pass.
-export type StaticCondition = { kind: "life_at_least"; amount: number } | { kind: "life_over_starting"; amount: number } | { kind: "controls_commander" };
+export type StaticCondition = { kind: "life_at_least"; amount: number } | { kind: "life_over_starting"; amount: number } | { kind: "controls_commander" } | { kind: "self_untapped" };
 
 export interface ConditionalStaticBoost {
   condition: StaticCondition;
@@ -421,6 +430,11 @@ export function parseConditionalStaticBoosts(oracleText: string): ConditionalSta
     const selfLife = text.match(/^this creature gets \+(\d+)\/\+(\d+) as long as you have (\d+) or more life\.?$/);
     if (selfLife) {
       boosts.push({ condition: { kind: "life_at_least", amount: Number.parseInt(selfLife[3], 10) }, scope: "self", power: Number.parseInt(selfLife[1], 10), toughness: Number.parseInt(selfLife[2], 10) });
+      continue;
+    }
+    const untappedKeyword = text.match(/^this creature has ([a-z ]+?) as long as it'?s untapped\.?$/);
+    if (untappedKeyword) {
+      boosts.push({ condition: { kind: "self_untapped" }, scope: "self", power: 0, toughness: 0, keyword: untappedKeyword[1].trim() });
       continue;
     }
     const overStarting = text.match(/^as long as you have at least (\d+) life more than your starting life total, creatures you control get \+(\d+)\/\+(\d+)\.?$/);
@@ -442,6 +456,8 @@ export interface GroupManaAbilityGrant {
   matcher: string;
   excludeSelf: boolean;
   abilityText: string;
+  // "Each creature you control with a counter on it has ..." (Rishkar, Peema Renegade): only permanents with any counter.
+  requiresCounter?: boolean;
 }
 
 // "Creature tokens you control have '{T}: Add one mana of any color.'" (Insidious Roots) — same
@@ -456,6 +472,11 @@ export interface GroupManaAbilityGrant {
 export function parseGroupManaAbilityGrant(oracleText: string): GroupManaAbilityGrant[] {
   const grants: GroupManaAbilityGrant[] = [];
   for (const rawClause of oracleText.split("\n")) {
+    const counterMatch = rawClause.trim().match(/^each creature you control with a counter on it has\s+"([^"]+)"\.?$/i);
+    if (counterMatch && /\{t\}[^"]*:\s*add\b/i.test(counterMatch[1])) {
+      grants.push({ matcher: "creature", excludeSelf: false, abilityText: counterMatch[1], requiresCounter: true });
+      continue;
+    }
     const match = rawClause.trim().match(/^(other\s+)?([A-Za-z][A-Za-z ]*?)\s+(?:you control\s+)?have\s+"([^"]+)"\.?$/i);
     if (!match) continue;
     if (!/\{t\}[^"]*:\s*add\b/i.test(match[3])) continue;
