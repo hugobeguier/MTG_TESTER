@@ -9469,6 +9469,15 @@ export function applyEntersWithCounterReplacements(session: GameSession, seatId:
   const others = seat.board.battlefield.filter((card) => card.id !== cardId);
   let extra = 0;
   const sources: string[] = [];
+  // Its OWN "enters with a +1/+1 counter on it for each Zombie card in your graveyard." (Diregraf Colossus).
+  const selfGraveyardCounters = entering.oracleText.match(/enters with an? \+1\/\+1 counter on it for each ([A-Za-z]+) cards? in your graveyard/i);
+  if (selfGraveyardCounters) {
+    const count = countMatchingPermanents(seat.board.graveyard ?? [], selfGraveyardCounters[1].toLowerCase());
+    if (count > 0) {
+      extra += count;
+      sources.push(entering.name);
+    }
+  }
   for (const source of others) {
     if (source.abilitiesStripped) continue;
     for (const replacement of parseEntersWithCounterReplacements(source.oracleText)) {
@@ -16356,6 +16365,9 @@ interface CastTriggerCondition {
   // ("whenever you cast a spell,"). 1 for "first", 2 for "second", and so on.
   requiredOrdinal?: number;
   spellTypeFilter?: "noncreature" | "instant_or_sorcery" | "enchantment" | "artifact" | "creature" | "planeswalker" | "land";
+  // Any other descriptor word before "spell" — a creature subtype ("Zombie spell", Diregraf Colossus) or color,
+  // matched with the shared qualifier matcher.
+  spellDescriptor?: string;
   effectClause: string;
 }
 
@@ -16372,7 +16384,7 @@ const ORDINAL_WORDS: Record<string, number> = { first: 1, second: 2, third: 3, f
 // creature/planeswalker/land) — declined rather than guessed at for anything else, same as every
 // other parser here.
 const CAST_TRIGGER_PATTERN =
-  /^whenever (you cast|an opponent casts|a player casts) (?:an?|(?:your|their) (first|second|third|fourth|fifth))\s*((?:noncreature|instant or sorcery|enchantment|artifact|creature|planeswalker|land)\s+)?spells?(?: each turn)?,\s*(.+)$/i;
+  /^whenever (you cast|an opponent casts|a player casts) (?:an?|(?:your|their) (first|second|third|fourth|fifth))\s*((?:instant or sorcery|[a-z]+)\s+)?spells?(?: each turn)?,\s*(.+)$/i;
 
 function parseCastTriggerCondition(clause: string): CastTriggerCondition | undefined {
   const match = clause.match(CAST_TRIGGER_PATTERN);
@@ -16391,7 +16403,8 @@ function parseCastTriggerCondition(clause: string): CastTriggerCondition | undef
       : typeWord === "instant or sorcery"
         ? "instant_or_sorcery"
         : undefined;
-  return { relativity, requiredOrdinal, spellTypeFilter, effectClause: match[4].trim() };
+  const spellDescriptor = typeWord && !spellTypeFilter && typeWord !== "instant or sorcery" ? typeWord : undefined;
+  return { relativity, requiredOrdinal, spellTypeFilter, spellDescriptor, effectClause: match[4].trim() };
 }
 
 function spellMatchesCastTriggerFilter(card: VisibleCard, filter: CastTriggerCondition["spellTypeFilter"]): boolean {
@@ -16436,6 +16449,7 @@ export function findCastTriggers(
         if (condition.relativity === "opponent" && seat.id === casterSeatId) continue;
         if (condition.requiredOrdinal !== undefined && condition.requiredOrdinal !== castOrdinalThisTurnForCaster) continue;
         if (!spellMatchesCastTriggerFilter(castCard, condition.spellTypeFilter)) continue;
+        if (condition.spellDescriptor && !permanentMatchesQualifier(castCard, condition.spellDescriptor)) continue;
         // "... unless that player pays {N}." (Mystic Remora, Esper Sentinel, ...) is a tax-
         // conditional effect this generic scan has no way to model — the tax itself is dropped, same
         // simplification as everywhere else in this codebase that models a cost as "always paid" or

@@ -443,3 +443,40 @@ describe("tap abilities that weren't offered at all", () => {
     expect(ability.effect).toMatchObject({ kind: "zone_effect", effect: { kind: "regrow", targetType: "creature" } });
   });
 });
+
+import { applyEntersWithCounterReplacements } from "./AppFlow";
+
+describe("Diregraf Colossus", () => {
+  const colossusText =
+    "This creature enters with a +1/+1 counter on it for each Zombie card in your graveyard.\nWhenever you cast a Zombie spell, create a tapped 2/2 black Zombie creature token.";
+
+  it("enters with a counter per Zombie card in your graveyard", () => {
+    const colossus = card({ id: "dc", name: "Diregraf Colossus", typeLine: "Creature — Zombie Giant", power: "0", toughness: "0", role: "creature", oracleText: colossusText });
+    const grave = [zombie("g1", { zone: "graveyard" }), zombie("g2", { zone: "graveyard" }), card({ id: "g3", name: "Human", typeLine: "Creature — Human", zone: "graveyard" })];
+    const me = seat({ id: "a", name: "Me", kind: "human", board: { hand: [], battlefield: [colossus], graveyard: grave } });
+    const after = applyEntersWithCounterReplacements(session([me]), "a", "dc");
+    expect(after.seats[0].board.battlefield[0].counters?.find((c) => c.kind === "+1/+1")?.count).toBe(2);
+  });
+
+  it("its cast trigger watches Zombie spells only", () => {
+    const parsed = commonTriggerEffect("create a tapped 2/2 black Zombie creature token.", "clause");
+    expect(parsed).toMatchObject({ kind: "create_tokens" });
+  });
+});
+
+import { findCastTriggers } from "./AppFlow";
+
+describe("Diregraf Colossus — Zombie spell cast trigger", () => {
+  it("fires for a Zombie spell and not for other spells", () => {
+    const colossus = card({
+      id: "dc", name: "Diregraf Colossus", typeLine: "Creature — Zombie Giant", power: "2", toughness: "2", role: "creature",
+      oracleText: "This creature enters with a +1/+1 counter on it for each Zombie card in your graveyard.\nWhenever you cast a Zombie spell, create a tapped 2/2 black Zombie creature token."
+    });
+    const me = seat({ id: "a", name: "Me", kind: "human", board: { hand: [], battlefield: [colossus], graveyard: [] } });
+    const s = session([me]);
+    const zombieSpell = card({ id: "zs", name: "Cryptbreaker", typeLine: "Creature — Zombie Rogue", colors: ["B"] });
+    const humanSpell = card({ id: "hs", name: "Human", typeLine: "Creature — Human Soldier", colors: ["W"] });
+    expect(findCastTriggers(s, "a", zombieSpell, 1)).toHaveLength(1);
+    expect(findCastTriggers(s, "a", humanSpell, 1)).toHaveLength(0);
+  });
+});
