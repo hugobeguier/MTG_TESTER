@@ -1779,6 +1779,46 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     setSession((current) => drawForSeat(current, monarch.id, `${monarch.name} draws a card as the monarch.`));
   }, [mode, gameStage, pendingAction, pendingRuleChoice, session.phase, session.turn, session.monarchSeatId, activeSeatId, session.seats]);
 
+  // Life gain has a dozen separate call sites that each just add to seat.life, so instead of hooking each one this watches every
+  // seat's life total and treats any rise as "you gained life": applies Angel of Vitality's +1, then queues the
+  // "whenever you gain life" triggers. (Manual +/- life edits count too — acceptable for a table that is also a sandbox.)
+  const lifeWatchRef = useRef<{ sessionId: string; lives: Record<string, number>; gainTurns: Record<string, number> }>({ sessionId: "", lives: {}, gainTurns: {} });
+  useEffect(() => {
+    const watch = lifeWatchRef.current;
+    if (watch.sessionId !== session.id) {
+      lifeWatchRef.current = { sessionId: session.id, lives: Object.fromEntries(session.seats.map((seat) => [seat.id, seat.life])), gainTurns: {} };
+      return;
+    }
+    if (mode !== "game" || gameStage !== "playing") {
+      for (const seat of session.seats) watch.lives[seat.id] = seat.life;
+      return;
+    }
+    const gains: Array<{ seatId: string; amount: number }> = [];
+    for (const seat of session.seats) {
+      const previous = watch.lives[seat.id];
+      watch.lives[seat.id] = seat.life;
+      if (previous !== undefined && seat.life > previous && !seat.hasLost) gains.push({ seatId: seat.id, amount: seat.life - previous });
+    }
+    if (gains.length === 0) return;
+    const bonuses = new Map(gains.map((gain) => [gain.seatId, lifeGainReplacementBonus(session.seats.find((seat) => seat.id === gain.seatId)!)]));
+    const queued: Array<Extract<PendingAction, { type: "trigger" }>> = [];
+    for (const gain of gains) {
+      const amount = gain.amount + (bonuses.get(gain.seatId) ?? 0);
+      const firstThisTurn = watch.gainTurns[gain.seatId] !== session.turn;
+      watch.gainTurns[gain.seatId] = session.turn;
+      queued.push(...findLifeGainTriggers(session, { seatId: gain.seatId, amount, firstThisTurn }));
+    }
+    const bonusSeats = gains.filter((gain) => (bonuses.get(gain.seatId) ?? 0) > 0);
+    if (bonusSeats.length > 0) {
+      for (const gain of bonusSeats) watch.lives[gain.seatId] += bonuses.get(gain.seatId) ?? 0;
+      setSession((current) => ({
+        ...current,
+        seats: current.seats.map((seat) => (bonuses.get(seat.id) ? { ...seat, life: seat.life + (bonuses.get(seat.id) ?? 0) } : seat))
+      }));
+    }
+    if (queued.length > 0 && !pendingAction) queueCommonTriggers(queued);
+  }, [session.seats, mode, gameStage]);
+
   const processedAttackBatchRef = useRef<GameSession["pendingAttackDeclarations"]>(undefined);
   useEffect(() => {
     if (pendingAction) return;
@@ -16462,6 +16502,35 @@ export function findCommonTriggersForPermanentDied(
 // (the watcher can be the attacker itself, another of its controller's permanents, or the defending
 // player's — Marchesa's Decree). `unparsed` lists attacker-side sources whose clause no deterministic
 // parser understands, which the caller sends to the rules advisor as the old phase sweep did.
+// "Whenever you gain life, ..." (Archangel of Thune, Exemplar of Light, Ajani's Pridemate) and "Whenever you gain life for the
+// first time each turn, ..." (Vanguard Seraph). Only the source's controller gaining life counts. `firstThisTurn` is supplied by
+// the caller, which is the one place that sees every gain.
+export function findLifeGainTriggers(
+  session: GameSession,
+  gain: { seatId: string; amount: number; firstThisTurn: boolean }
+): Array<Extract<PendingAction, { type: "trigger" }>> {
+  const triggers: Array<Extract<PendingAction, { type: "trigger" }>> = [];
+  const sourceSeat = session.seats.find((seat) => seat.id === gain.seatId);
+  if (!sourceSeat || sourceSeat.hasLost || gain.amount <= 0) return triggers;
+  for (const source of sourceSeat.board.battlefield) {
+    if (source.abilitiesStripped) continue;
+    for (const clause of oracleClauses(source.oracleText)) {
+      if (isActivatedAbilityClause(clause)) continue;
+      const match = clause.match(/^(?:when|whenever) you gain life( for the first time each turn)?,/i);
+      if (!match) continue;
+      if (match[1] && !gain.firstThisTurn) continue;
+      const effect = commonTriggerEffect(clause, "clause", undefined, sourceSeat);
+      if (effect) triggers.push(makeCommonTrigger(gain.seatId, gain.seatId, source, effect, `${source.name} triggers because ${sourceSeat.name} gained life.`));
+    }
+  }
+  return triggers;
+}
+
+// Angel of Vitality: "If you would gain life, you gain that much life plus 1 instead." One extra life per such permanent.
+export function lifeGainReplacementBonus(seat: PlayerSeat): number {
+  return seat.board.battlefield.filter((card) => !card.abilitiesStripped && /\bif you would gain life, you gain that much life plus 1 instead\b/i.test(card.oracleText)).length;
+}
+
 export function findAttackTriggers(
   session: GameSession,
   attack: { seatId: string; card: VisibleCard; defendingSeatId: string }
@@ -17142,6 +17211,17 @@ export function commonTriggerEffect(
     if (amount) return { kind: "drain", amount, scope: "each_opponent", noGain: true, optional };
   }
 
+  // "Put a +1/+1 counter on each creature you control." (Archangel of Thune) and "Surveil 1." / "Scry 2." (Vanguard Seraph) as a
+  // trigger's whole effect. Only in clause mode, where the text is a single triggered ability.
+  if (mode === "clause") {
+    const eachCounter = text.match(/\bput (a|one|two|three|\d+) (\+1\/\+1|-1\/-1) counters? on each ([a-z][a-z ]*?) you control\b/);
+    const eachAmount = eachCounter ? numberWordToInt(eachCounter[1]) : undefined;
+    if (eachCounter && eachAmount) return { kind: "add_counter", counterKind: eachCounter[2], amount: eachAmount, scope: "each_matching_you_control", matcher: eachCounter[3].trim(), optional };
+    const lookMatch = text.match(/(?:^|[,.] ?)(scry|surveil) (\d+|a|one|two|three|four|five)\b/);
+    const lookAmount = lookMatch ? numberWordToInt(lookMatch[2]) : undefined;
+    if (lookMatch && lookAmount) return { kind: lookMatch[1] === "scry" ? "scry_cards" : "surveil_cards", amount: lookAmount };
+  }
+
   const gainLife = text.match(/\byou gain\s+(x|\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+life\b/);
   if (gainLife) {
     const amount = numberWordToInt(gainLife[1]);
@@ -17680,6 +17760,9 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
   const seatName = session.seats.find((seat) => seat.id === trigger.controllerSeatId)?.name ?? "Player";
   if (trigger.effect.kind === "draw_cards") {
     return drawMultipleForSeat(session, trigger.controllerSeatId, trigger.effect.amount, `${trigger.sourceCardName} trigger resolves. ${seatName} draws ${trigger.effect.amount} card${trigger.effect.amount === 1 ? "" : "s"}.`);
+  }
+  if (trigger.effect.kind === "scry_cards" || trigger.effect.kind === "surveil_cards") {
+    return resolveAgentLibraryLookWorkflow(session, trigger.controllerSeatId, trigger.sourceCardName, trigger.effect.kind, trigger.effect.amount);
   }
   if (trigger.effect.kind === "draw_then_put_back") {
     return applyDrawXThenPutBack(session, trigger.controllerSeatId, trigger.sourceCardName, trigger.effect.drawAmount, trigger.effect.putBackAmount);

@@ -2,7 +2,7 @@
 // the test: two earlier tests passed on invented text while the real cards stayed broken (Court of Grace, the
 // "with power N or greater" watchers). Skipped per card when the catalog doesn't have it.
 import { describe, expect, it } from "vitest";
-import { applyRemovalEffect, runStateBasedActionsPass } from "./AppFlow";
+import { applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
 import { parseRemovalEffect } from "@/lib/removalSpells";
 import { loadCardCatalog, lookupCard } from "@/lib/cardCatalog";
 import type { GameSession, PlayerSeat, VisibleCard } from "@/lib/types";
@@ -245,5 +245,27 @@ describe("modal sweepers (real Oracle text)", () => {
   it("Cleansing Nova's second mode destroys enchantments too", () => {
     const effect = parseRemovalEffect(real("Cleansing Nova", "n").oracleText);
     expect(JSON.stringify(effect)).toContain("artifact_or_enchantment");
+  });
+});
+
+describe("life gain triggers (real Oracle text)", () => {
+  const gain = (name: string, firstThisTurn = true) => {
+    const s = session([seat("a", [real(name, "src")])]);
+    return findLifeGainTriggers(s, { seatId: "a", amount: 3, firstThisTurn });
+  };
+  it("Archangel of Thune, Exemplar of Light and Ajani's Pridemate trigger on any life gain", () => {
+    for (const name of ["Archangel of Thune", "Exemplar of Light", "Ajani's Pridemate"]) expect(gain(name), name).toHaveLength(1);
+  });
+  it("Vanguard Seraph only triggers for the first gain each turn", () => {
+    expect(gain("Vanguard Seraph", true)).toHaveLength(1);
+    expect(gain("Vanguard Seraph", false)).toHaveLength(0);
+  });
+  it("only the gaining player's permanents trigger", () => {
+    const s = session([seat("a", [real("Archangel of Thune", "src")]), seat("b", [])]);
+    expect(findLifeGainTriggers(s, { seatId: "b", amount: 2, firstThisTurn: true })).toHaveLength(0);
+  });
+  it("Angel of Vitality adds one life per gain", () => {
+    expect(lifeGainReplacementBonus(seat("a", [real("Angel of Vitality", "av")]))).toBe(1);
+    expect(lifeGainReplacementBonus(seat("a", [bear("x")]))).toBe(0);
   });
 });
