@@ -2,7 +2,8 @@
 // the test: two earlier tests passed on invented text while the real cards stayed broken (Court of Grace, the
 // "with power N or greater" watchers). Skipped per card when the catalog doesn't have it.
 import { describe, expect, it } from "vitest";
-import { runStateBasedActionsPass } from "./AppFlow";
+import { applyRemovalEffect, runStateBasedActionsPass } from "./AppFlow";
+import { parseRemovalEffect } from "@/lib/removalSpells";
 import { loadCardCatalog, lookupCard } from "@/lib/cardCatalog";
 import type { GameSession, PlayerSeat, VisibleCard } from "@/lib/types";
 
@@ -219,5 +220,30 @@ describe("pump abilities (real Oracle text)", () => {
     expect(find(after.seats, "a", "d1").temporaryPowerBonus).toBe(1);
     expect(find(after.seats, "a", "b1").temporaryPowerBonus).toBeUndefined();
     expect(find(after.seats, "b", "od").temporaryPowerBonus).toBeUndefined();
+  });
+});
+
+describe("modal sweepers (real Oracle text)", () => {
+  const artifact = (id: string) => bear(id, { typeLine: "Artifact", power: undefined, toughness: undefined, role: "permanent", manaValue: 2 });
+  const run = (name: string, seats: PlayerSeat[]) => {
+    const spell = real(name, "spell");
+    const effect = parseRemovalEffect(spell.oracleText);
+    expect(effect).toBeDefined();
+    return applyRemovalEffect(session(seats), "a", name, spell, effect!).seats;
+  };
+  const ids = (seats: PlayerSeat[], seatId: string) => seats.find((s) => s.id === seatId)!.board.battlefield.map((c) => c.id);
+
+  it("Austere Command picks the modes that hurt opponents, not your own artifacts", () => {
+    const seats = run("Austere Command", [
+      seat("a", [artifact("mine"), bear("mybear", { manaValue: 1, power: "1", toughness: "1" })]),
+      seat("b", [bear("big1", { manaValue: 5, power: "5", toughness: "5" }), bear("big2", { manaValue: 6, power: "6", toughness: "6" })])
+    ]);
+    expect(ids(seats, "a")).toContain("mine");
+    expect(ids(seats, "b")).toHaveLength(0);
+  });
+
+  it("Cleansing Nova's second mode destroys enchantments too", () => {
+    const effect = parseRemovalEffect(real("Cleansing Nova", "n").oracleText);
+    expect(JSON.stringify(effect)).toContain("artifact_or_enchantment");
   });
 });

@@ -46,7 +46,7 @@ export interface DestroyUpToXEffect {
 
 export interface DestroyAllEffect {
   kind: "destroy_all";
-  targetType: "creature" | "artifact" | "enchantment";
+  targetType: "creature" | "artifact" | "enchantment" | "artifact_or_enchantment";
   // "Destroy all non-Dragon/nonartifact/nonlegendary/nontoken/... creatures" (Crux of Fate, Toxic
   // Deluge-adjacent sweepers, ...) — a single lowercased qualifier word, or undefined for an
   // unqualified full wipe. Only ever populated for targetType "creature" in this codebase's real
@@ -239,6 +239,9 @@ function parseDestroy(text: string): DestroyEffect | DestroyAllEffect | DestroyA
       excludedColors: qualifier && isColor ? [qualifier] : []
     };
   }
+  // "Destroy all artifacts and enchantments." (Cleansing Nova's second mode) — checked before the artifact-only match, which
+  // would otherwise swallow it and leave the enchantments standing.
+  if (/\bdestroy all artifacts and enchantments\b/.test(text)) return { kind: "destroy_all", targetType: "artifact_or_enchantment", excludedColors: [] };
   if (/\bdestroy all artifacts\b/.test(text)) return { kind: "destroy_all", targetType: "artifact", excludedColors: [] };
   if (/\bdestroy all enchantments\b/.test(text)) return { kind: "destroy_all", targetType: "enchantment", excludedColors: [] };
   const conditional = text.match(/\bdestroy all creatures with mana value (\d+) or (less|greater)\b/);

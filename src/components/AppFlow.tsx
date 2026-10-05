@@ -13630,6 +13630,27 @@ function describeRemovalTargetType(targetType: RemovalTargetType): string {
   return targetType.replace(/_/g, " ");
 }
 
+// How good a mode is for its caster: what a sweeper takes from OPPONENTS minus what it takes from the caster. Single-target
+// modes just score a flat 1 (their legality is already checked).
+function removalModeScore(session: GameSession, casterSeatId: string, mode: Exclude<RemovalEffect, { kind: "modal" }>): number {
+  const worth = (card: VisibleCard) => (card.typeLine.includes("Creature") ? 1 + Math.max(0, effectivePower(card)) + Math.max(0, effectiveToughness(card)) : Math.max(1, card.manaValue));
+  const sweep = (matches: (card: VisibleCard) => boolean) =>
+    session.seats.reduce(
+      (total, seat) => total + seat.board.battlefield.filter((card) => matches(card) && !hasIndestructible(card)).reduce((sum, card) => sum + (seat.id === casterSeatId ? -worth(card) : worth(card)), 0),
+      0
+    );
+  if (mode.kind === "destroy_all") {
+    if (mode.targetType === "creature") return sweep((card) => card.typeLine.includes("Creature") && !cardMatchesExcludedType(card, mode.excludeType) && !cardMatchesExcludedColor(card, mode.excludedColors));
+    if (mode.targetType === "artifact") return sweep((card) => card.typeLine.includes("Artifact"));
+    if (mode.targetType === "enchantment") return sweep((card) => card.typeLine.includes("Enchantment"));
+    return sweep((card) => card.typeLine.includes("Artifact") || card.typeLine.includes("Enchantment"));
+  }
+  if (mode.kind === "destroy_all_conditional") {
+    return sweep((card) => card.typeLine.includes("Creature") && (mode.comparison === "or_less" ? card.manaValue <= mode.threshold : card.manaValue >= mode.threshold));
+  }
+  return 1;
+}
+
 function describeRemovalMode(mode: Exclude<RemovalEffect, { kind: "modal" }>): string {
   switch (mode.kind) {
     case "destroy":
@@ -13974,7 +13995,13 @@ export function applyRemovalEffect(
       // "destroy" case just below) destroying an indestructible creature outright.
       const typeMatches = (card: VisibleCard) => {
         const baseMatch =
-          effect.targetType === "creature" ? card.typeLine.includes("Creature") : effect.targetType === "artifact" ? card.typeLine.includes("Artifact") : card.typeLine.includes("Enchantment");
+          effect.targetType === "creature"
+            ? card.typeLine.includes("Creature")
+            : effect.targetType === "artifact"
+              ? card.typeLine.includes("Artifact")
+              : effect.targetType === "artifact_or_enchantment"
+                ? card.typeLine.includes("Artifact") || card.typeLine.includes("Enchantment")
+                : card.typeLine.includes("Enchantment");
         return (
           baseMatch &&
           !hasIndestructible(card) &&
@@ -14057,7 +14084,13 @@ export function applyRemovalEffect(
       // damage mode with no target) rather than burning a "choose N" slot on a guaranteed no-op,
       // and take the first `chooseCount` modes that do have something to do.
       const viableModes = effect.modes.filter((mode) => removalEffectHasLegalTarget(session, casterSeatId, source, mode));
-      const chosenModes = viableModes.slice(0, effect.chooseCount);
+      // Best modes first (by what each sweeps away from opponents vs from you) instead of printed order: Austere Command
+      // always destroyed artifacts and enchantments, your own included, and could never pick the creature modes.
+      const chosenModes = viableModes
+        .map((mode) => ({ mode, score: removalModeScore(session, casterSeatId, mode) }))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, effect.chooseCount)
+        .map((entry) => entry.mode);
       if (chosenModes.length === 0) return noLegalTargetEvent(session, casterSeatId, sourceName);
       return chosenModes.reduce((current, mode) => applyRemovalEffect(current, casterSeatId, sourceName, source, mode, chosenX), session);
     }
