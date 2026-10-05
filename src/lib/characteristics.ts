@@ -213,6 +213,8 @@ export interface GroupAnthemBoost {
   // applies to permanents matching the source's own chosenCreatureType (set via
   // pickChosenCreatureType at ETB), on top of the plain matcher qualifier above.
   requiresChosenType?: boolean;
+  // "Creatures you control of the chosen color get +1/+0." (Heraldic Banner) — only permanents of the source's chosenColor.
+  requiresChosenColor?: boolean;
   // Undefined means a flat +N/+N with no multiplier ("Creatures you control get +1/+1.").
   multiplier?: { kind: "counter"; counterKind: string } | { kind: "permanent_count"; countMatcher: string };
 }
@@ -240,7 +242,7 @@ export function parseGroupAnthemBoost(oracleText: string): GroupAnthemBoost[] {
       continue;
     }
     const match = text.match(
-      /^(other\s+)?([a-z][a-z ]*?)\s+(you control\s+)?(of the chosen type\s+)?gets? \+(\d+)\/\+(\d+)(?:\s+for each ([a-z0-9+/\- ]+?) counters? on (?:this|it)(?:\s+[a-z]+)?|\s+for each ([a-z ]+?) you control)?\.?$/
+      /^(other\s+)?([a-z][a-z ]*?)\s+(you control\s+)?(of the chosen (?:type|color)\s+)?gets? \+(\d+)\/\+(\d+)(?:\s+for each ([a-z0-9+/\- ]+?) counters? on (?:this|it)(?:\s+[a-z]+)?|\s+for each ([a-z ]+?) you control)?(?:\s+and have [a-z, ]+?)?\.?$/
     );
     if (!match) continue;
     const counterKind = match[7]?.trim();
@@ -249,7 +251,8 @@ export function parseGroupAnthemBoost(oracleText: string): GroupAnthemBoost[] {
       matcher: match[2].trim(),
       excludeSelf: Boolean(match[1]),
       controlledOnly: Boolean(match[3]),
-      requiresChosenType: match[4] ? true : undefined,
+      requiresChosenType: match[4] && /type/.test(match[4]) ? true : undefined,
+      requiresChosenColor: match[4] && /color/.test(match[4]) ? true : undefined,
       power: Number.parseInt(match[5], 10),
       toughness: Number.parseInt(match[6], 10),
       multiplier: counterKind ? { kind: "counter", counterKind } : countMatcher ? { kind: "permanent_count", countMatcher } : undefined
@@ -377,6 +380,14 @@ export function parseGroupKeywordGrant(oracleText: string): GroupKeywordGrant[] 
       }
       continue;
     }
+    // "Nontoken creatures you control get +1/+1 and have vigilance." / "Other Angels you control get +1/+1 and have
+    // lifelink." — the keyword half of a boost-and-grant line (its P/T half is parseGroupAnthemBoost's).
+    const boostAndHave = text.match(/^(other\s+)?([a-z][a-z ]*?)\s+(you control\s+)?gets? \+\d+\/\+\d+ and have ([a-z, ]+?)\.?$/);
+    if (boostAndHave) {
+      const boostKeywords = GRANTABLE_KEYWORDS.filter((kw) => new RegExp(`\\b${kw}\\b`).test(boostAndHave[4]));
+      if (boostKeywords.length > 0) grants.push({ matcher: boostAndHave[2].trim(), excludeSelf: Boolean(boostAndHave[1]), controlledOnly: Boolean(boostAndHave[3]), keywords: boostKeywords });
+      continue;
+    }
     const match = text.match(/^(other\s+)?([a-z][a-z ]*?)\s+(you control\s+)?have\s+([a-z, ]+?)\.?$/);
     if (!match) continue;
     const keywords = GRANTABLE_KEYWORDS.filter((kw) => new RegExp(`\\b${kw}\\b`).test(match[4]));
@@ -384,6 +395,47 @@ export function parseGroupKeywordGrant(oracleText: string): GroupKeywordGrant[] 
     grants.push({ matcher: match[2].trim(), excludeSelf: Boolean(match[1]), controlledOnly: Boolean(match[3]), keywords });
   }
   return grants;
+}
+
+// "As long as <condition>, ..." static boosts and keyword grants:
+//   "This creature gets +2/+2 as long as you have 25 or more life." (Angel of Vitality)
+//   "As long as you have at least 7 life more than your starting life total, creatures you control get +2/+2."
+//     (Righteous Valkyrie)
+//   "Lieutenant — As long as you control your commander, this creature gets +2/+2 and creatures you control have
+//     vigilance." (Angelic Field Marshal)
+// Evaluated live against the controller's board/life by the characteristics pass.
+export type StaticCondition = { kind: "life_at_least"; amount: number } | { kind: "life_over_starting"; amount: number } | { kind: "controls_commander" };
+
+export interface ConditionalStaticBoost {
+  condition: StaticCondition;
+  scope: "self" | "creatures_you_control";
+  power: number;
+  toughness: number;
+  keyword?: string;
+}
+
+export function parseConditionalStaticBoosts(oracleText: string): ConditionalStaticBoost[] {
+  const boosts: ConditionalStaticBoost[] = [];
+  for (const rawClause of oracleText.split("\n")) {
+    const text = rawClause.replace(/\([^)]*\)/g, "").trim().toLowerCase();
+    const selfLife = text.match(/^this creature gets \+(\d+)\/\+(\d+) as long as you have (\d+) or more life\.?$/);
+    if (selfLife) {
+      boosts.push({ condition: { kind: "life_at_least", amount: Number.parseInt(selfLife[3], 10) }, scope: "self", power: Number.parseInt(selfLife[1], 10), toughness: Number.parseInt(selfLife[2], 10) });
+      continue;
+    }
+    const overStarting = text.match(/^as long as you have at least (\d+) life more than your starting life total, creatures you control get \+(\d+)\/\+(\d+)\.?$/);
+    if (overStarting) {
+      boosts.push({ condition: { kind: "life_over_starting", amount: Number.parseInt(overStarting[1], 10) }, scope: "creatures_you_control", power: Number.parseInt(overStarting[2], 10), toughness: Number.parseInt(overStarting[3], 10) });
+      continue;
+    }
+    const lieutenant = text.match(/^lieutenant\s*[—-]\s*as long as you control your commander, this creature gets \+(\d+)\/\+(\d+) and creatures you control have ([a-z ]+?)\.?$/);
+    if (lieutenant) {
+      const condition: StaticCondition = { kind: "controls_commander" };
+      boosts.push({ condition, scope: "self", power: Number.parseInt(lieutenant[1], 10), toughness: Number.parseInt(lieutenant[2], 10) });
+      boosts.push({ condition, scope: "creatures_you_control", power: 0, toughness: 0, keyword: lieutenant[3].trim() });
+    }
+  }
+  return boosts;
 }
 
 export interface GroupManaAbilityGrant {

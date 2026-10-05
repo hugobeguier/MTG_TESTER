@@ -105,6 +105,8 @@ import {
   hasChooseCreatureTypeEtb,
   parseAllZonesCda,
   parseCharacteristicDefiningAbility,
+  parseConditionalStaticBoosts,
+  type StaticCondition,
   parseChooseColorEtb,
   parseDevotionCda,
   parseGroupAnthemBoost,
@@ -12266,6 +12268,8 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
                 if (anthem.excludeSelf && anthemSource.id === card.id) continue;
                 if (!permanentMatchesQualifier(card, anthem.matcher)) continue;
                 if (anthem.requiresChosenType && (!anthemSource.chosenCreatureType || !card.typeLine.includes(anthemSource.chosenCreatureType))) continue;
+                // Heraldic Banner: only creatures of the color chosen as it entered.
+                if (anthem.requiresChosenColor && (!anthemSource.chosenColor || !hasChosenColor(card, anthemSource.chosenColor))) continue;
                 const multiplier = anthem.multiplier
                   ? anthem.multiplier.kind === "counter"
                     ? counterCount(anthemSource, anthem.multiplier.counterKind)
@@ -12274,6 +12278,19 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
                 power += anthem.power * multiplier;
                 toughness += anthem.toughness * multiplier;
               }
+            }
+          }
+
+          // "As long as ..." boosts and grants (Angel of Vitality, Righteous Valkyrie, Angelic Field Marshal's lieutenant),
+          // checked live against the source controller's life / commander. Only a creature's OWN controller's sources.
+          for (const conditionalSource of seat.board.battlefield) {
+            if (conditionalSource.abilitiesStripped) continue;
+            for (const boost of parseConditionalStaticBoosts(conditionalSource.oracleText)) {
+              if (!staticConditionMet(boost.condition, seat)) continue;
+              if (boost.scope === "self" && conditionalSource.id !== card.id) continue;
+              power += boost.power;
+              toughness += boost.toughness;
+              if (boost.keyword && boost.scope === "creatures_you_control") keywordSet.add(boost.keyword);
             }
           }
 
@@ -18809,6 +18826,20 @@ export function applyDeterministicPhaseTrigger(session: GameSession, seatId: str
   }
 
   return undefined;
+}
+
+const COMMANDER_STARTING_LIFE = 40;
+
+function staticConditionMet(condition: StaticCondition, seat: PlayerSeat): boolean {
+  if (condition.kind === "life_at_least") return seat.life >= condition.amount;
+  if (condition.kind === "life_over_starting") return seat.life >= COMMANDER_STARTING_LIFE + condition.amount;
+  return seat.board.battlefield.some((card) => card.commander);
+}
+
+// A card's colors against a chosen color stored as a letter ("W") or a word ("white").
+function hasChosenColor(card: VisibleCard, chosen: string): boolean {
+  const letter = ({ white: "W", blue: "U", black: "B", red: "R", green: "G" } as Record<string, string>)[chosen.toLowerCase()] ?? chosen.toUpperCase();
+  return (card.colors ?? []).some((color) => color.toUpperCase() === letter);
 }
 
 // Sum of matching permanents/cards across EVERY seat's battlefield or graveyard (Soulless One).
