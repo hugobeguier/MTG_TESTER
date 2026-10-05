@@ -117,6 +117,12 @@ export function etbEffectText(oracleText: string): string {
         !isNonEtbWheneverClause(clause) &&
         !isStaticBoostClause(clause)
     )
+    // Reminder text ("(They create a Clue token. It's an artifact with "...: Draw a card.")") explains a
+    // keyword or token; it is never itself an effect. Left in, parsers read its "Draw a card" / "create a
+    // Clue token" as real effects — Fateful Absence gave its CASTER a card and a Clue on top of the
+    // destroyed permanent's controller getting one.
+    .map((clause) => clause.replace(/\s*\([^)]*\)/g, "").trim())
+    .filter(Boolean)
     .join(" ");
 }
 

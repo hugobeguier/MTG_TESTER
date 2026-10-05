@@ -470,3 +470,12 @@ describe("static boosts are not ETB effects", () => {
     expect(etbEffectText("Target creature gets +2/+2.")).toContain("Target creature");
   });
 });
+
+describe("etbEffectText drops reminder text", () => {
+  it("Fateful Absence: no stray 'Draw a card' or Clue creation from the reminder", () => {
+    const text = `Destroy target creature or planeswalker. Its controller investigates. (They create a Clue token. It's an artifact with "{2}, Sacrifice this token: Draw a card.")`;
+    const effect = etbEffectText(text);
+    expect(effect).toBe("Destroy target creature or planeswalker. Its controller investigates.");
+    expect(effect).not.toMatch(/draw a card/i);
+  });
+});
