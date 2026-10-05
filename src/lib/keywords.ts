@@ -34,9 +34,37 @@ export const KEYWORD_TABLE: KeywordDefinition[] = [
   { name: "ward", category: "protection", pattern: /\bward\b/i }
 ];
 
+// Words that mean a line is a sentence of rules text, not a list of keywords. "Flying" inside "Create a 5/5
+// Dragon creature token with flying" or "...gains trample until end of turn" is NOT the card having that
+// keyword — a plain text search made Nogi, Sarkhan and Dragonmaster Outcast permanent fliers, Rhonas a
+// trampler, and the Surraks permanently hasty.
+const NON_KEYWORD_WORDS = new Set([
+  "you", "your", "target", "creature", "creatures", "this", "that", "each", "when", "whenever", "at", "if", "get", "gets", "have", "has",
+  "gain", "gains", "create", "creates", "deals", "deal", "tap", "untap", "draw", "until", "spell", "spells", "cast", "may", "can", "can't",
+  "return", "put", "destroy", "exile", "sacrifice", "add", "all", "other", "another", "with", "as", "long", "than", "then", "token", "tokens"
+]);
+
+// The comma/semicolon-separated tokens of every line that consists only of keyword abilities ("Flying, vigilance",
+// "Ward {2}", "Protection from red"), lowercased, reminder text removed.
+export function keywordLineTokens(oracleText: string): string[] {
+  const tokens: string[] = [];
+  for (const rawLine of oracleText.split("\n")) {
+    const line = rawLine.replace(/\([^)]*\)/g, "").trim().toLowerCase();
+    if (!line || line.includes(":")) continue;
+    const parts = line.split(/[,;]/).map((part) => part.trim()).filter(Boolean);
+    const looksLikeKeywords = parts.length > 0 && parts.every((part) => {
+      const words = part.replace(/\{[^}]+\}/g, " ").split(/[\s—-]+/).filter(Boolean);
+      return words.length <= 5 && !words.some((word) => NON_KEYWORD_WORDS.has(word));
+    });
+    if (looksLikeKeywords) tokens.push(...parts);
+  }
+  return tokens;
+}
+
 export function hasKeyword(oracleText: string, name: string): boolean {
-  const definition = KEYWORD_TABLE.find((entry) => entry.name === name);
-  return definition ? definition.pattern.test(oracleText) : new RegExp(`\\b${name}\\b`, "i").test(oracleText);
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const startsWithName = new RegExp(`^${escaped}(?![a-z])`);
+  return keywordLineTokens(oracleText).some((token) => startsWithName.test(token));
 }
 
 // Ward's cost is usually mana ("Ward {2}") but can be an alternate cost ("Ward—Pay 2 life."); this
