@@ -430,6 +430,10 @@ export interface GameSession {
   // Taskmaster, Drakuseth, Tyrant's Familiar, ...). declareAttack is a pure transformer with no access
   // to the trigger-queueing machinery, so it records the attack here and a component effect drains it.
   pendingAttackDeclarations?: Array<{ seatId: string; card: VisibleCard; defendingSeatId: string }>;
+  // Rule 724: the player who is currently the monarch (Court of Grace, Skyline Despot, Marchesa's Decree). They draw
+  // an extra card at the beginning of their end step, and a creature that deals combat damage to them makes its
+  // controller the monarch instead.
+  monarchSeatId?: string;
   // Dedup keys ("turn:sourceCardId:effectKind") for triggered effects restricted by a trailing
   // "Do this only once each turn" clause — resolveTriggerEffect() is a pure function with no
   // per-turn ref to check against, so the dedup state lives on the session itself instead.

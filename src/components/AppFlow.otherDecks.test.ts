@@ -74,3 +74,46 @@ describe("scaling cost reductions", () => {
     expect(adjustedCastingCost(me, small, 6, "hand", "a", [me])).toBe(6);
   });
 });
+
+import { commonTriggerEffect, resolveTriggerEffect } from "./AppFlow";
+import type { GameSession } from "@/lib/types";
+
+describe("monarch", () => {
+  const sess = (seats: PlayerSeat[]): GameSession => ({
+    id: "t", createdAt: "", status: "playing", phase: "precombat main phase", turn: 1,
+    xmage: { enabled: false, status: "not_configured", message: "" }, seats, events: []
+  });
+
+  it("'you become the monarch' (Court of Grace, Skyline Despot) is a trigger effect that sets the monarch", () => {
+    expect(commonTriggerEffect("When this enchantment enters, you become the monarch.", "entered")).toMatchObject({ kind: "become_monarch" });
+    const me = seat({ id: "a", name: "Me", kind: "human" });
+    const them = seat({ id: "b", name: "Opp", kind: "agent" });
+    const after = resolveTriggerEffect(sess([me, them]), {
+      id: "t", type: "trigger", actorSeatId: "a", controllerSeatId: "a", sourceCardId: "c", sourceCardName: "Court of Grace", triggerKind: "common",
+      effect: { kind: "become_monarch" }, message: ""
+    } as never);
+    expect(after.monarchSeatId).toBe("a");
+  });
+});
+
+import { applyDeterministicPhaseTrigger } from "./AppFlow";
+
+describe("Court of Grace", () => {
+  const court = card({
+    id: "cg", name: "Court of Grace", typeLine: "Enchantment",
+    oracleText: "When this enchantment enters, you become the monarch.\nAt the beginning of your upkeep, create a 1/1 white Spirit creature token with flying. If you're the monarch, instead create a 4/4 white Angel creature token with flying and vigilance."
+  });
+  const run = (monarch: boolean) => {
+    const me = seat({ id: "a", name: "Me", kind: "human", board: { hand: [], battlefield: [court], graveyard: [] } });
+    const s: GameSession = { id: "t", createdAt: "", status: "playing", phase: "upkeep step", turn: 1, xmage: { enabled: false, status: "not_configured", message: "" }, seats: [me], events: [], monarchSeatId: monarch ? "a" : undefined };
+    return applyDeterministicPhaseTrigger(s, "a", court, "upkeep step")!.seats[0].board.battlefield.filter((c) => c.token);
+  };
+  it("makes a 1/1 Spirit normally, and a 4/4 Angel INSTEAD when you're the monarch", () => {
+    const normal = run(false);
+    expect(normal).toHaveLength(1);
+    expect(normal[0]).toMatchObject({ power: "1", toughness: "1" });
+    const monarch = run(true);
+    expect(monarch).toHaveLength(1);
+    expect(monarch[0]).toMatchObject({ power: "4", toughness: "4" });
+  });
+});

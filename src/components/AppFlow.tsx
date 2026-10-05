@@ -257,6 +257,8 @@ type TriggerEffect = (
   // "You may pay {2}{B}. If you do, return target creature card from your graveyard to your hand." (Eternal
   // Taskmaster) — always optional; accepting pays the mana (auto-tapped) and then applies the zone effect.
   | { kind: "pay_then_zone"; costText: string; zoneEffect: ZoneEffect }
+  // "You become the monarch." (Court of Grace, Skyline Despot, Marchesa's Decree)
+  | { kind: "become_monarch" }
 ) & {
   optional?: boolean;
   // "Create a 0/1 green Plant creature token, then put a +1/+1 counter on each Plant you control."
@@ -1740,7 +1742,14 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       ...findCombatDamageToPlayerTriggers(session, hit.seatId, hit.card, hit.damagedSeatId),
       ...findAnyCombatDamageToOpponentTriggers(session, hit.seatId, hit.card, hit.damagedSeatId)
     ]);
-    setSession((current) => (current.pendingCombatDamageToPlayer === hits ? { ...current, pendingCombatDamageToPlayer: undefined } : current));
+    // Monarch: a creature that deals combat damage to the monarch makes its controller the monarch.
+    const stealingHit = hits.find((hit) => session.monarchSeatId && hit.damagedSeatId === session.monarchSeatId && hit.seatId !== session.monarchSeatId);
+    setSession((current) => {
+      const cleared = current.pendingCombatDamageToPlayer === hits ? { ...current, pendingCombatDamageToPlayer: undefined } : current;
+      if (!stealingHit || cleared.monarchSeatId !== stealingHit.damagedSeatId) return cleared;
+      const thief = cleared.seats.find((seat) => seat.id === stealingHit.seatId);
+      return thief ? rulesEvent({ ...cleared, monarchSeatId: thief.id }, thief.id, `${thief.name} becomes the monarch by dealing combat damage to the monarch.`) : cleared;
+    });
     if (damageTriggers.length > 0) queueCommonTriggers(damageTriggers);
   }, [session.pendingCombatDamageToPlayer, pendingAction]);
 
@@ -1748,6 +1757,19 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   // planeswalker you control, ..." — queued per DECLARED attacker (see pendingAttackDeclarations on
   // GameSession) instead of by the old once-per-phase sweep that fired for every creature with
   // "attacks" text whether or not it attacked.
+  // Monarch (rule 724): the monarch draws an extra card at the beginning of their own end step.
+  const monarchDrawChecked = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (mode !== "game" || gameStage !== "playing" || pendingAction || pendingRuleChoice) return;
+    if (session.phase !== "end step" || !session.monarchSeatId || session.monarchSeatId !== activeSeatId) return;
+    const key = `${session.turn}:${session.monarchSeatId}`;
+    if (monarchDrawChecked.current.has(key)) return;
+    monarchDrawChecked.current.add(key);
+    const monarch = session.seats.find((seat) => seat.id === session.monarchSeatId);
+    if (!monarch || monarch.hasLost) return;
+    setSession((current) => drawForSeat(current, monarch.id, `${monarch.name} draws a card as the monarch.`));
+  }, [mode, gameStage, pendingAction, pendingRuleChoice, session.phase, session.turn, session.monarchSeatId, activeSeatId, session.seats]);
+
   const processedAttackBatchRef = useRef<GameSession["pendingAttackDeclarations"]>(undefined);
   useEffect(() => {
     if (pendingAction) return;
@@ -16904,6 +16926,8 @@ export function commonTriggerEffect(
     return { kind: "blink", optional };
   }
 
+  if (/\byou become the monarch\b/.test(text)) return { kind: "become_monarch", optional };
+
   const payThen = relevantText.match(/\byou may pay ((?:\{[^}]+\})+)\.\s*if you do,\s*([^.]+\.?)/i);
   if (payThen) {
     const zoneEffect = parseZoneEffect(payThen[2].endsWith(".") ? payThen[2] : `${payThen[2]}.`);
@@ -17868,6 +17892,11 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
   // `then: add_counter` (see this kind's own doc comment) resolves separately, against
   // trigger.controllerSeatId (Breena's own controller), via resolveTriggerEffect's existing
   // recursive `then` handling just below this function — nothing extra needed here for that half.
+  if (trigger.effect.kind === "become_monarch") {
+    const newMonarch = session.seats.find((seat) => seat.id === trigger.controllerSeatId);
+    if (!newMonarch || newMonarch.hasLost) return session;
+    return rulesEvent({ ...session, monarchSeatId: newMonarch.id }, newMonarch.id, `${newMonarch.name} becomes the monarch (${trigger.sourceCardName}).`);
+  }
   if (trigger.effect.kind === "pay_then_zone") {
     const payer = session.seats.find((seat) => seat.id === trigger.controllerSeatId);
     if (!payer) return session;
@@ -18685,6 +18714,16 @@ export function applyDeterministicPhaseTrigger(session: GameSession, seatId: str
       }
       return rulesEvent(session, seatId, `${sourceCard.name} resolves with X = ${xAmount}; nothing is created.`);
     }
+  }
+
+  // "Create a 1/1 white Spirit creature token with flying. If you're the monarch, instead create a 4/4 white Angel
+  // creature token with flying and vigilance." (Court of Grace) — ONE of the two, chosen by whether you're the
+  // monarch; reading both clauses made it create a Spirit AND an Angel every upkeep.
+  const monarchInstead = clauseText.match(/(create [^.]+)\.\s*if you(?:'re| are) the monarch, instead (create [^.]+)\./i);
+  if (monarchInstead) {
+    const chosenClause = session.monarchSeatId === seatId ? monarchInstead[2] : monarchInstead[1];
+    const specs = parseCreateTokenSpecs(chosenClause);
+    if (specs.length > 0) return createTokensForSeat(session, seatId, sourceCard.id, specs).session;
   }
 
   const commonEffect = commonTriggerEffect(clauseText, "clause");
