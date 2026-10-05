@@ -177,7 +177,9 @@ type TriggerEffect = (
   // "creatures your opponents control get -1/-1 until end of turn") — shares its shape with
   // spell-cast MassPumpEffect (see parseMassPump/applyMassPumpEffect) so the same application
   // logic is reused rather than duplicated.
-  | { kind: "mass_pump"; power: number; toughness: number; excludeType?: string; scope: "all" | "controlled" | "opponents" }
+  | { kind: "mass_pump"; power: number; toughness: number; excludeType?: string; scope: "all" | "controlled" | "opponents"; matcher?: string }
+  // "This creature gets +1/+0 until end of turn." (Scourge of Valkas) — only the source itself.
+  | { kind: "self_pump"; power: number; toughness: number }
   // Mind's Dilation-style "exile the top card of [that player]'s library. Until end of turn, you
   // may cast that card without paying its mana cost if it's a nonland card." — cross-seat (exiles
   // from fromSeatId's library, grants cast permission to the trigger's own controller) and waives
@@ -15028,6 +15030,8 @@ export function applyTargetedPumpEffect(session: GameSession, casterSeatId: stri
 }
 
 interface MassPumpEffect {
+  // Only creatures matching this qualifier ("Dragons you control get +1/+0", Lathliss).
+  matcher?: string;
   power: number;
   toughness: number;
   // Lowercased creature type excluded from the effect (Exude Toxin's "non-Dragon"), undefined for
@@ -15067,6 +15071,7 @@ export function applyMassPumpEffect(session: GameSession, casterSeatId: string, 
         battlefield: seat.board.battlefield.map((card) => {
           if (!card.typeLine.includes("Creature")) return card;
           if (effect.excludeType && card.typeLine.toLowerCase().includes(effect.excludeType)) return card;
+          if (effect.matcher && !permanentMatchesQualifier(card, effect.matcher)) return card;
           affectedCount += 1;
           return { ...card, temporaryPowerBonus: (card.temporaryPowerBonus ?? 0) + effect.power, temporaryToughnessBonus: (card.temporaryToughnessBonus ?? 0) + effect.toughness };
         })
@@ -17219,6 +17224,15 @@ export function commonTriggerEffect(
   // opponents control get -1/-1 until end of turn") — the triggered-ability sibling of
   // parseMassPump, which only ever matches a spell's "each creature..." phrasing and misses this
   // "creatures your opponents control get..." shape.
+  // "This creature gets +1/+0 until end of turn." — itself only. The broad "creature gets" pattern below read this as a
+  // pump for EVERY creature.
+  const selfPumpMatch = text.match(/\b(?:this creature|it) gets ([+-]\d+)\/([+-]\d+) until end of turn\b/);
+  if (selfPumpMatch) return { kind: "self_pump", power: Number.parseInt(selfPumpMatch[1], 10), toughness: Number.parseInt(selfPumpMatch[2], 10), optional };
+  // "Dragons you control get +1/+0 until end of turn." (Lathliss)
+  const groupPumpMatch = text.match(/\b([a-z]+?)s you control get ([+-]\d+)\/([+-]\d+) until end of turn\b/);
+  if (groupPumpMatch && groupPumpMatch[1] !== "creature") {
+    return { kind: "mass_pump", scope: "controlled", matcher: groupPumpMatch[1], power: Number.parseInt(groupPumpMatch[2], 10), toughness: Number.parseInt(groupPumpMatch[3], 10), optional };
+  }
   const massPumpMatch = text.match(
     /\b(?:each )?(?:non-([a-z]+) )?creatures?(?: (you control)| (your opponents control|an opponent controls))? gets? ([+-]\d+)\/([+-]\d+) until end of turn\b/
   );
@@ -18037,6 +18051,25 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
   // `then: add_counter` (see this kind's own doc comment) resolves separately, against
   // trigger.controllerSeatId (Breena's own controller), via resolveTriggerEffect's existing
   // recursive `then` handling just below this function — nothing extra needed here for that half.
+  if (trigger.effect.kind === "self_pump") {
+    const { power, toughness } = trigger.effect;
+    return rulesEvent(
+      {
+        ...session,
+        seats: session.seats.map((seat) => ({
+          ...seat,
+          board: {
+            ...seat.board,
+            battlefield: seat.board.battlefield.map((card) =>
+              card.id === trigger.sourceCardId ? { ...card, temporaryPowerBonus: (card.temporaryPowerBonus ?? 0) + power, temporaryToughnessBonus: (card.temporaryToughnessBonus ?? 0) + toughness } : card
+            )
+          }
+        }))
+      },
+      trigger.controllerSeatId,
+      `${trigger.sourceCardName} gets ${power >= 0 ? "+" : ""}${power}/${toughness >= 0 ? "+" : ""}${toughness} until end of turn.`
+    );
+  }
   if (trigger.effect.kind === "damage_effect") {
     const source = findPermanentById(session, trigger.sourceCardId) ?? ({ id: trigger.sourceCardId, name: trigger.sourceCardName, typeLine: "", oracleText: "", manaValue: 0, colors: [], role: "effect", zone: "battlefield" } as VisibleCard);
     return applyRemovalEffect(session, trigger.controllerSeatId, trigger.sourceCardName, source, trigger.effect.effect);

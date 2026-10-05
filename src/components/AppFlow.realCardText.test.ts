@@ -192,3 +192,32 @@ describe("Dragon damage triggers (real Oracle text)", () => {
     expect(resolveTriggerEffect(s, found[0]).seats.find((x) => x.id === "b")!.life).toBe(36);
   });
 });
+
+import { commonTriggerEffect } from "./AppFlow";
+
+describe("pump abilities (real Oracle text)", () => {
+  it("Scourge of Valkas: {R}: this creature gets +1/+0 — itself only", () => {
+    const scourge = real("Scourge of Valkas", "sv");
+    const other = bear("o1");
+    const effect = commonTriggerEffect("This creature gets +1/+0 until end of turn.", "clause")!;
+    expect(effect).toMatchObject({ kind: "self_pump", power: 1, toughness: 0 });
+    const s = session([seat("a", [scourge, other]), seat("b", [bear("opp")])]);
+    const after = resolveTriggerEffect(s, { id: "t", type: "trigger", actorSeatId: "a", controllerSeatId: "a", sourceCardId: "sv", sourceCardName: "Scourge of Valkas", triggerKind: "common", effect, message: "" } as never);
+    expect(find(after.seats, "a", "sv").temporaryPowerBonus).toBe(1);
+    expect(find(after.seats, "a", "o1").temporaryPowerBonus).toBeUndefined();
+    expect(find(after.seats, "b", "opp").temporaryPowerBonus).toBeUndefined();
+  });
+
+  it("Lathliss: {1}{R}: Dragons you control get +1/+0 — your Dragons only", () => {
+    const lathliss = real("Lathliss, Dragon Queen", "lq");
+    const text = lathliss.oracleText.split("\n").find((line) => line.includes("Dragons you control get"))!.split(": ")[1];
+    const effect = commonTriggerEffect(text, "clause")!;
+    expect(effect).toMatchObject({ kind: "mass_pump", scope: "controlled", matcher: "dragon" });
+    const dragon = bear("d1", { typeLine: "Creature — Dragon" });
+    const s = session([seat("a", [lathliss, dragon, bear("b1")]), seat("b", [bear("od", { typeLine: "Creature — Dragon" })])]);
+    const after = resolveTriggerEffect(s, { id: "t", type: "trigger", actorSeatId: "a", controllerSeatId: "a", sourceCardId: "lq", sourceCardName: "Lathliss", triggerKind: "common", effect, message: "" } as never);
+    expect(find(after.seats, "a", "d1").temporaryPowerBonus).toBe(1);
+    expect(find(after.seats, "a", "b1").temporaryPowerBonus).toBeUndefined();
+    expect(find(after.seats, "b", "od").temporaryPowerBonus).toBeUndefined();
+  });
+});
