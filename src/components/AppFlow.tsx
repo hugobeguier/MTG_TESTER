@@ -179,7 +179,7 @@ type TriggerEffect = (
   // "creatures your opponents control get -1/-1 until end of turn") — shares its shape with
   // spell-cast MassPumpEffect (see parseMassPump/applyMassPumpEffect) so the same application
   // logic is reused rather than duplicated.
-  | { kind: "mass_pump"; power: number; toughness: number; excludeType?: string; scope: "all" | "controlled" | "opponents"; matcher?: string }
+  | { kind: "mass_pump"; power: number; toughness: number; excludeType?: string; scope: "all" | "controlled" | "opponents"; matcher?: string; minPower?: number; grantsKeyword?: string }
   // "This creature gets +1/+0 until end of turn." (Scourge of Valkas) — only the source itself.
   | { kind: "self_pump"; power: number; toughness: number }
   // Mind's Dilation-style "exile the top card of [that player]'s library. Until end of turn, you
@@ -270,8 +270,18 @@ type TriggerEffect = (
   | { kind: "damage_effect"; effect: RemovalEffect }
   // "Whenever a creature you control enters, it deals damage equal to its power to any target." (Warstorm Surge)
   | { kind: "context_power_damage" }
+  // "You gain life equal to that creature's toughness." (Verdant Sun's Avatar, Righteous Valkyrie) — the entering creature.
+  | { kind: "gain_life_context_toughness" }
+  // "Creatures you control gain double strike until end of turn." (Terror of Mount Velus)
+  | { kind: "creatures_gain_keywords"; keywords: string[] }
+  // "Investigate once for each opponent who has more cards in hand than you." (Wojek Investigator)
+  | { kind: "investigate_per_opponent_with_more_cards" }
+  // "Put X +1/+1 counters on target creature, where X is that creature's power." (Thickest in the Thicket) — your strongest creature.
+  | { kind: "double_power_counters" }
 ) & {
   optional?: boolean;
+  // Only resolves if this holds when the trigger resolves ("...if you control the creature with the greatest power").
+  condition?: TriggerCondition;
   // "Create a 0/1 green Plant creature token, then put a +1/+1 counter on each Plant you control."
   // (Insidious Roots) — a narrow, single compound field rather than a general sequence/list of
   // effects, matching how add_counter's own alsoTap flag already models a compound tap-and-counter
@@ -279,6 +289,8 @@ type TriggerEffect = (
   // call at the end of resolveTriggerEffect once the primary effect has resolved.
   then?: TriggerEffect;
 };
+
+type TriggerCondition = { kind: "controls_greatest_power" } | { kind: "controls_no_other"; subtype: string };
 
 interface TokenSpec {
   count: number;
@@ -15216,6 +15228,10 @@ export function applyTargetedPumpEffect(session: GameSession, casterSeatId: stri
 interface MassPumpEffect {
   // Only creatures matching this qualifier ("Dragons you control get +1/+0", Lathliss).
   matcher?: string;
+  // "each creature you control with power 4 or greater" (Goreclaw) and "...gets +1/+1 and gains trample" — only creatures at or above
+  // this power, and an optional keyword granted along with the pump.
+  minPower?: number;
+  grantsKeyword?: string;
   power: number;
   toughness: number;
   // Lowercased creature type excluded from the effect (Exude Toxin's "non-Dragon"), undefined for
@@ -15256,8 +15272,14 @@ export function applyMassPumpEffect(session: GameSession, casterSeatId: string, 
           if (!card.typeLine.includes("Creature")) return card;
           if (effect.excludeType && card.typeLine.toLowerCase().includes(effect.excludeType)) return card;
           if (effect.matcher && !permanentMatchesQualifier(card, effect.matcher)) return card;
+          if (effect.minPower !== undefined && effectivePower(card) < effect.minPower) return card;
           affectedCount += 1;
-          return { ...card, temporaryPowerBonus: (card.temporaryPowerBonus ?? 0) + effect.power, temporaryToughnessBonus: (card.temporaryToughnessBonus ?? 0) + effect.toughness };
+          return {
+            ...card,
+            temporaryPowerBonus: (card.temporaryPowerBonus ?? 0) + effect.power,
+            temporaryToughnessBonus: (card.temporaryToughnessBonus ?? 0) + effect.toughness,
+            ...(effect.grantsKeyword ? { temporaryGrantedKeywords: [...(card.temporaryGrantedKeywords ?? []), effect.grantsKeyword] } : {})
+          };
         })
       }
     };
@@ -16669,6 +16691,10 @@ export function findAttackTriggers(
           if (!quoted) continue;
           triggerClause = quoted[1];
         }
+        // "Whenever this creature attacks, put a +1/+1 counter on it." — "it" is the attacker itself.
+        if (/^(?:when|whenever) (?:this creature|[a-z',-]+) (?:attacks|blocks)\b/i.test(triggerClause) && source.id === attack.card.id) {
+          triggerClause = triggerClause.replace(/\bon it\b/i, "on this creature");
+        }
         const applies = matchWatcherSubject(triggerClause, event, {
           sourceId: source.id,
           sourceName: source.name,
@@ -16692,6 +16718,9 @@ export function findAttackTriggers(
           const modal = parseGenericModalEffect([triggerClause, ...bullets].join("\n"), undefined);
           if (modal) effect = { kind: "modal", modal };
         }
+        // "...attacks while you don't control another Dinosaur, ..." (Pugnacious Hammerskull)
+        const noOtherOfType = triggerClause.match(/\bwhile you don'?t control another ([a-z]+)\b/i);
+        if (effect && noOtherOfType) effect = { ...effect, condition: { kind: "controls_no_other", subtype: noOtherOfType[1] } };
         if (effect) {
           triggers.push(makeCommonTrigger(attack.seatId, sourceSeat.id, source, effect, `${source.name} triggers because ${attack.card.name} ${event === "attacks" ? "attacked" : "blocked"}.`, attack.card.id));
         } else if (sourceSeat.id === attack.seatId) {
@@ -17209,6 +17238,15 @@ export function commonTriggerEffect(
   // this engine's one-effect-per-clause parsing (see the module comment on TriggerEffect); a card
   // with multiple clauses where only one is optional would be mis-flagged, a declared simplification.
   const optional = /\byou may\b/.test(text) || undefined;
+  // Single-card shapes the generic parsers below would misread (a flat draw for a conditional one) or miss entirely.
+  if (/\byou gain life equal to that creature'?s toughness\b/.test(text)) return { kind: "gain_life_context_toughness" };
+  if (/\binvestigate once for each opponent who has more cards in hand than you\b/.test(text)) return { kind: "investigate_per_opponent_with_more_cards" };
+  if (/\bput x \+1\/\+1 counters on target creature, where x is that creature'?s power\b/.test(text)) return { kind: "double_power_counters" };
+  if (/\bdraw two cards if you control the creature with the greatest power or tied for the greatest power\b/.test(text)) {
+    return { kind: "draw_cards", amount: 2, condition: { kind: "controls_greatest_power" } };
+  }
+  const groupGrant = text.match(/^(?:[^,]*,\s*)?creatures you control gain ([a-z ]+?) until end of turn\.?$/);
+  if (groupGrant && !/\bget\b/.test(text)) return { kind: "creatures_gain_keywords", keywords: groupGrant[1].split(/ and |, /) };
   const tokenSpecs = parseCreateTokenSpecs(relevantText, dynamicCounterCount, controllerSeat);
   if (tokenSpecs.length > 0) {
     // "..., then put a +1/+1 counter on each Plant you control." (Insidious Roots, following its own
@@ -17469,6 +17507,19 @@ export function commonTriggerEffect(
   const groupPumpMatch = text.match(/\b([a-z]+?)s you control get ([+-]\d+)\/([+-]\d+) until end of turn\b/);
   if (groupPumpMatch && groupPumpMatch[1] !== "creature") {
     return { kind: "mass_pump", scope: "controlled", matcher: groupPumpMatch[1], power: Number.parseInt(groupPumpMatch[2], 10), toughness: Number.parseInt(groupPumpMatch[3], 10), optional };
+  }
+  // "Each creature you control with power 4 or greater gets +1/+1 and gains trample until end of turn." (Goreclaw)
+  const thresholdPump = text.match(/\beach creature you control with power (\d+) or greater gets ([+-]\d+)\/([+-]\d+)(?: and gains ([a-z ]+?))? until end of turn\b/);
+  if (thresholdPump) {
+    return {
+      kind: "mass_pump",
+      scope: "controlled",
+      minPower: Number.parseInt(thresholdPump[1], 10),
+      power: Number.parseInt(thresholdPump[2], 10),
+      toughness: Number.parseInt(thresholdPump[3], 10),
+      ...(thresholdPump[4] ? { grantsKeyword: thresholdPump[4] } : {}),
+      optional
+    };
   }
   const massPumpMatch = text.match(
     /\b(?:each )?(?:non-([a-z]+) )?creatures?(?: (you control)| (your opponents control|an opponent controls))? gets? ([+-]\d+)\/([+-]\d+) until end of turn\b/
@@ -17862,9 +17913,23 @@ export function resolveTriggerEffect(session: GameSession, trigger: Extract<Pend
   return resolveTriggerEffect(resolved, { ...trigger, id: crypto.randomUUID(), effect: trigger.effect.then, message: "" });
 }
 
+function triggerConditionMet(session: GameSession, trigger: Extract<PendingAction, { type: "trigger" }>, condition: TriggerCondition): boolean {
+  const seat = session.seats.find((item) => item.id === trigger.controllerSeatId);
+  if (!seat) return false;
+  if (condition.kind === "controls_no_other") {
+    return !seat.board.battlefield.some((card) => card.id !== trigger.sourceCardId && card.typeLine.toLowerCase().includes(condition.subtype.toLowerCase()));
+  }
+  // "...if you control the creature with the greatest power or tied for the greatest power" — among ALL creatures.
+  const powers = (target: PlayerSeat) => target.board.battlefield.filter((card) => card.typeLine.includes("Creature")).map((card) => effectivePower(card));
+  const mine = Math.max(-Infinity, ...powers(seat));
+  const best = Math.max(-Infinity, ...session.seats.flatMap(powers));
+  return mine !== -Infinity && mine >= best;
+}
+
 function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<PendingAction, { type: "trigger" }>): GameSession {
   const chainCount = (session.triggerChainGuard?.turn === session.turn ? session.triggerChainGuard.count : 0) + 1;
   session = { ...session, triggerChainGuard: { turn: session.turn, count: chainCount } };
+  if (trigger.effect.condition && !triggerConditionMet(session, trigger, trigger.effect.condition)) return session;
   if (chainCount > MAX_TRIGGER_RESOLUTIONS_PER_TURN) {
     return {
       ...session,
@@ -17884,6 +17949,59 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
   const seatName = session.seats.find((seat) => seat.id === trigger.controllerSeatId)?.name ?? "Player";
   if (trigger.effect.kind === "draw_cards") {
     return drawMultipleForSeat(session, trigger.controllerSeatId, trigger.effect.amount, `${trigger.sourceCardName} trigger resolves. ${seatName} draws ${trigger.effect.amount} card${trigger.effect.amount === 1 ? "" : "s"}.`);
+  }
+  if (trigger.effect.kind === "gain_life_context_toughness") {
+    const entering = session.seats.flatMap((item) => item.board.battlefield).find((card) => card.id === trigger.contextCardId);
+    const amount = entering ? Math.max(0, effectiveToughness(entering)) : 0;
+    if (amount === 0) return session;
+    return rulesEvent({ ...session, seats: session.seats.map((item) => (item.id === trigger.controllerSeatId ? { ...item, life: item.life + amount } : item)) }, trigger.controllerSeatId, `${trigger.sourceCardName}: ${seatName} gains ${amount} life (${entering?.name}'s toughness).`);
+  }
+  if (trigger.effect.kind === "creatures_gain_keywords") {
+    const keywords = trigger.effect.keywords;
+    return rulesEvent(
+      {
+        ...session,
+        seats: session.seats.map((item) =>
+          item.id !== trigger.controllerSeatId
+            ? item
+            : {
+                ...item,
+                board: {
+                  ...item.board,
+                  battlefield: item.board.battlefield.map((card) =>
+                    card.typeLine.includes("Creature") ? { ...card, temporaryGrantedKeywords: [...(card.temporaryGrantedKeywords ?? []), ...keywords], grantedKeywords: [...new Set([...(card.grantedKeywords ?? []), ...keywords])] } : card
+                  )
+                }
+              }
+        )
+      },
+      trigger.controllerSeatId,
+      `${trigger.sourceCardName}: creatures ${seatName} controls gain ${keywords.join(" and ")} until end of turn.`
+    );
+  }
+  if (trigger.effect.kind === "investigate_per_opponent_with_more_cards") {
+    const mine = session.seats.find((item) => item.id === trigger.controllerSeatId);
+    const count = mine ? session.seats.filter((item) => item.id !== mine.id && !item.hasLost && item.board.hand.length > mine.board.hand.length).length : 0;
+    if (count === 0) return session;
+    return createTokensForSeat(session, trigger.controllerSeatId, trigger.sourceCardId, [{ ...predefinedTokenSpec("Clue"), count }]).session;
+  }
+  if (trigger.effect.kind === "double_power_counters") {
+    const mine = session.seats.find((item) => item.id === trigger.controllerSeatId);
+    const target = strongestControlledCreature(mine);
+    const amount = target ? Math.max(0, effectivePower(target)) : 0;
+    if (!mine || !target || amount === 0) return session;
+    return rulesEvent(
+      {
+        ...session,
+        seats: session.seats.map((item) =>
+          item.id !== mine.id
+            ? item
+            : { ...item, board: { ...item.board, battlefield: item.board.battlefield.map((card) => (card.id === target.id ? { ...card, counters: [...(card.counters ?? []).filter((counter) => counter.kind !== "+1/+1"), { kind: "+1/+1", count: ((card.counters ?? []).find((counter) => counter.kind === "+1/+1")?.count ?? 0) + amount }] } : card)) } }
+        )
+      },
+      mine.id,
+      `${trigger.sourceCardName}: ${target.name} gets ${amount} +1/+1 counters.`
+    );
   }
   if (trigger.effect.kind === "modal") {
     const modalSource = session.seats.flatMap((seat) => seat.board.battlefield).find((card) => card.id === trigger.sourceCardId);

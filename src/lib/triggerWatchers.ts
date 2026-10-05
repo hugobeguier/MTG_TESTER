@@ -107,11 +107,23 @@ export function matchWatcherSubject(oracleText: string, event: "enters" | "dies"
     if (!match) continue;
     sawClause = true;
     // "...with power 3 or greater" contains an "or" that separates nothing.
-    const parts = match[1].split(/\s+or\s+(?!greater\b|less\b|fewer\b)/).map((part) => parsePart(part, context.sourceName));
+    // "another Angel or Cleric you control": later list items inherit the first one's determiner.
+    let lastDeterminer = "a";
+    const parts = match[1]
+      .split(/\s+or\s+(?!greater\b|less\b|fewer\b)/)
+      .map((part, index) => {
+        const determiner = part.trim().match(/^(another|each other|a|an)\s/);
+        if (determiner) lastDeterminer = determiner[1];
+        else if (index > 0 && !/^this\s/.test(part.trim())) part = `${lastDeterminer} ${part.trim()}`;
+        return parsePart(part, context.sourceName);
+      });
     if (parts.some((part) => part === undefined)) {
       allParsed = false;
       continue;
     }
+    // ...and a trailing "you control" on the last item applies to the whole list.
+    const listControl = (parts as SubjectPart[]).find((part) => !part.self && part.control !== "any")?.control;
+    if (listControl) for (const part of parts as SubjectPart[]) if (!part.self && part.control === "any") part.control = listControl;
     // "...attacks you or a planeswalker you control": only counts when the defender is the source's controller.
     if (event === "attacks" && /^\s+you\b/.test(match[2]) && context.defendingPlayerIsSourceController !== true) {
       allParsed = allParsed && true;

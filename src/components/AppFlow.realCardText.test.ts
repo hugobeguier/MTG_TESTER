@@ -380,3 +380,83 @@ describe("one-shot spells (real Oracle text)", () => {
     expect(seats[1].life).toBe(36);
   });
 });
+
+describe("triggered abilities, batch 2 (real Oracle text)", () => {
+  const attackWith = (name: string, extra: VisibleCard[] = [], opts: Partial<VisibleCard> = {}) => {
+    const src = real(name, "src", { power: "4", toughness: "4", ...opts });
+    const s = session([seat("a", [src, ...extra]), seat("b", [])]);
+    const triggers = findAttackTriggers(s, { seatId: "a", card: src, defendingSeatId: "b" }).triggers;
+    return { s, triggers, src };
+  };
+  const resolveAll = (s: GameSession, triggers: ReturnType<typeof findAttackTriggers>["triggers"]) => triggers.reduce((acc, t) => resolveTriggerEffect(acc, t), s);
+  const onBoard = (s: GameSession, id: string) => s.seats.flatMap((x) => x.board.battlefield).find((c) => c.id === id)!;
+
+  it("Herald of War puts a +1/+1 counter on itself when it attacks", () => {
+    const { s, triggers } = attackWith("Herald of War");
+    expect(triggers).toHaveLength(1);
+    expect(onBoard(resolveAll(s, triggers), "src").counters?.find((c) => c.kind === "+1/+1")?.count).toBe(1);
+  });
+
+  it("Goreclaw pumps and tramples only creatures with power 4 or greater", () => {
+    const { s, triggers } = attackWith("Goreclaw, Terror of Qal Sisma", [bear("big", { power: "5", toughness: "5" }), bear("small")]);
+    expect(triggers).toHaveLength(1);
+    const after = resolveAll(s, triggers);
+    expect(onBoard(after, "big").temporaryPowerBonus).toBe(1);
+    expect(onBoard(after, "big").temporaryGrantedKeywords).toContain("trample");
+    expect(onBoard(after, "small").temporaryPowerBonus).toBeUndefined();
+  });
+
+  it("Pugnacious Hammerskull stuns itself only while you control no other Dinosaur", () => {
+    const alone = attackWith("Pugnacious Hammerskull");
+    expect(onBoard(resolveAll(alone.s, alone.triggers), "src").counters?.find((c) => c.kind === "stun")?.count).toBe(1);
+    const withRaptor = attackWith("Pugnacious Hammerskull", [bear("raptor", { typeLine: "Creature — Dinosaur" })]);
+    expect(onBoard(resolveAll(withRaptor.s, withRaptor.triggers), "src").counters?.find((c) => c.kind === "stun")).toBeUndefined();
+  });
+
+  it("Wojek Investigator makes one Clue per opponent with more cards in hand", () => {
+    const mine = seat("a", [real("Wojek Investigator", "wi")]);
+    const rich = seat("b", []);
+    rich.board.hand = [bear("h1"), bear("h2")];
+    const poor = seat("c", []);
+    const s = session([mine, rich, poor]);
+    const trigger = {
+      id: "t", type: "trigger" as const, actorSeatId: "a", controllerSeatId: "a", sourceCardId: "wi", sourceCardName: "Wojek Investigator",
+      triggerKind: "common" as const, effect: commonTriggerEffect(real("Wojek Investigator", "x").oracleText.split("\n").find((l) => /^At the beginning/.test(l))!, "clause")!, message: ""
+    };
+    expect(trigger.effect.kind).toBe("investigate_per_opponent_with_more_cards");
+    const after = resolveTriggerEffect(s, trigger);
+    expect(after.seats[0].board.battlefield.filter((c) => /Clue/.test(c.name))).toHaveLength(1);
+  });
+
+  it("Terror of Mount Velus gives your creatures double strike", () => {
+    const effect = commonTriggerEffect(real("Terror of Mount Velus", "x").oracleText, "entered");
+    expect(effect).toEqual({ kind: "creatures_gain_keywords", keywords: ["double strike"] });
+  });
+
+  it("Verdant Sun's Avatar and Righteous Valkyrie gain life equal to the entering creature's toughness", () => {
+    for (const name of ["Verdant Sun's Avatar", "Righteous Valkyrie"]) {
+      const watcher = real(name, "w", { power: "4", toughness: "4" });
+      const entering = bear("ang", { typeLine: "Creature — Angel", toughness: "3" });
+      const s = session([seat("a", [watcher, entering])]);
+      const triggers = findCommonTriggersForPermanentEntered(s, "a", entering);
+      expect(triggers.map((t) => t.effect.kind), name).toEqual(["gain_life_context_toughness"]);
+      expect(resolveTriggerEffect(s, triggers[0]).seats[0].life, name).toBe(43);
+    }
+  });
+
+  it("Thickest in the Thicket: counters equal to power; end-step draw only with the greatest power", () => {
+    const [etb, endStep] = [real("Thickest in the Thicket", "x").oracleText.split("\n")[0], real("Thickest in the Thicket", "x").oracleText.split("\n")[1]];
+    expect(commonTriggerEffect(etb, "clause")?.kind).toBe("double_power_counters");
+    const draw = commonTriggerEffect(endStep, "clause")!;
+    expect(draw).toMatchObject({ kind: "draw_cards", amount: 2, condition: { kind: "controls_greatest_power" } });
+    const mk = (myPower: string, theirPower: string) => {
+      const mine = seat("a", [bear("m", { power: myPower })]);
+      mine.library = Array.from({ length: 5 }, (_, i) => bear(`l${i}`, { zone: "library" as const }));
+      mine.zones = { ...mine.zones, library: 5 };
+      return session([mine, seat("b", [bear("t", { power: theirPower })])]);
+    };
+    const trig = { id: "t", type: "trigger" as const, actorSeatId: "a", controllerSeatId: "a", sourceCardId: "x", sourceCardName: "Thickest", triggerKind: "common" as const, effect: draw, message: "" };
+    expect(resolveTriggerEffect(mk("5", "3"), trig).seats[0].board.hand).toHaveLength(2);
+    expect(resolveTriggerEffect(mk("2", "3"), trig).seats[0].board.hand).toHaveLength(0);
+  });
+});
