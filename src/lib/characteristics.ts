@@ -26,6 +26,27 @@ export function parseCharacteristicDefiningAbility(oracleText: string): Characte
   return undefined;
 }
 
+// "Power and toughness are each equal to the number of Zombies on the battlefield plus the number of
+// Zombie cards in all graveyards." (Soulless One) — counts across EVERY player's battlefield and
+// graveyards, unlike the "you control" CDA above. Left unparsed it stayed */* = 0 toughness and died the
+// moment it entered.
+export interface AllZonesCda {
+  stat: CdaStat;
+  terms: Array<{ zone: "battlefield" | "graveyard"; matcher: string }>;
+}
+
+export function parseAllZonesCda(oracleText: string): AllZonesCda | undefined {
+  const match = oracleText.toLowerCase().match(/power and toughness are each equal to the number of ([a-z ]+?) on the battlefield plus the number of ([a-z ]+?) cards in all graveyards/);
+  if (!match) return undefined;
+  return {
+    stat: "both",
+    terms: [
+      { zone: "battlefield", matcher: match[1].trim() },
+      { zone: "graveyard", matcher: match[2].trim() }
+    ]
+  };
+}
+
 export type ManaColorLetter = "W" | "U" | "B" | "R" | "G";
 
 export interface DevotionCda {
@@ -143,7 +164,8 @@ export interface SelfAnthemBoost {
   power: number;
   toughness: number;
   matcher: string;
-  zone: "battlefield" | "graveyard";
+  // "opponents_graveyards": "+1/+1 for each creature card in your opponents' graveyards" (Wight of Precinct Six).
+  zone: "battlefield" | "graveyard" | "opponents_graveyards";
 }
 
 // "~ gets +N/+N for each [creature] you control." (a battlefield anthem) or "...for each creature
@@ -158,6 +180,16 @@ export function parseSelfAnthemBoost(oracleText: string): SelfAnthemBoost | unde
   const graveyard = text.match(/\bgets? \+(\d+)\/\+(\d+) for each ([a-z]+) cards? in your graveyard\b/);
   if (graveyard) {
     return { power: Number.parseInt(graveyard[1], 10), toughness: Number.parseInt(graveyard[2], 10), matcher: graveyard[3].trim(), zone: "graveyard" };
+  }
+
+  const opponentsGraveyards = text.match(/\bgets? \+(\d+)\/\+(\d+) for each ([a-z]+) cards? in your opponents' graveyards\b/);
+  if (opponentsGraveyards) {
+    return {
+      power: Number.parseInt(opponentsGraveyards[1], 10),
+      toughness: Number.parseInt(opponentsGraveyards[2], 10),
+      matcher: opponentsGraveyards[3].trim(),
+      zone: "opponents_graveyards"
+    };
   }
 
   const battlefield = text.match(/\bgets? \+(\d+)\/\+(\d+) for each ([a-z ]+?) you control\b/);
@@ -226,7 +258,16 @@ export function parseGroupAnthemBoost(oracleText: string): GroupAnthemBoost[] {
   return boosts;
 }
 
-type QualifiableCard = { typeLine: string; token?: boolean; grantedTypes?: string[] };
+type QualifiableCard = { typeLine: string; token?: boolean; grantedTypes?: string[]; colors?: string[] };
+
+// Color words in a qualifier ("black creatures", "nonwhite creatures") are checked against the card's
+// COLORS, never its type line — Bad Moon ("Black creatures get +1/+1") and Bontu's Monument ("Black
+// creature spells cost {1} less") did nothing because "black" was looked up as if it were a subtype.
+const COLOR_LETTERS: Record<string, string> = { white: "W", blue: "U", black: "B", red: "R", green: "G" };
+
+function hasColor(card: QualifiableCard, letter: string): boolean {
+  return Boolean(card.colors?.some((color) => color.toUpperCase() === letter || COLOR_LETTERS[color.toLowerCase()] === letter));
+}
 
 // A granted type (Zur, Eternal Schemer's "target non-Aura enchantment becomes a creature," Secret
 // Arcade/Biotransference-style "are Xs in addition to their other types," ...) counts the same as a
@@ -254,6 +295,12 @@ function matchesQualifierWord(card: QualifiableCard, word: string): boolean {
   const broad = BROAD_CATEGORIES[word];
   if (broad) return broad(card);
   if (word === "token" || word === "tokens") return Boolean(card.token);
+  if (word === "nontoken") return !card.token;
+  if (word === "colorless") return !card.colors || card.colors.length === 0;
+  const colorLetter = COLOR_LETTERS[word];
+  if (colorLetter) return hasColor(card, colorLetter);
+  const negatedColor = word.startsWith("non") ? COLOR_LETTERS[word.slice(3)] : undefined;
+  if (negatedColor) return !hasColor(card, negatedColor);
 
   // Fall back to a creature-subtype match (Elves, Goblins, Zombies, ...): singularize crudely and
   // check it appears in the type line, matching how the rest of this codebase parses subtypes.

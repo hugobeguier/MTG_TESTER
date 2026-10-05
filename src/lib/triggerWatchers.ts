@@ -1,0 +1,100 @@
+// Parses WHO a "Whenever <subject> enters / dies" trigger watches, and checks a given permanent against
+// it. The older enteredTriggerApplies / deathTriggerApplies in AppFlow.tsx only understand a fixed list
+// of type words, so qualifiers they had no concept of silently broke real cards: Champion of the
+// Perished ("another Zombie you control enters" — Zombie isn't a type word), Ayara ("Ayara or another
+// BLACK creature you control enters" — the source named by its own short name, and a color),
+// Headless Rider / Undead Augur ("this creature or another [nontoken] Zombie you control dies"),
+// Midnight Reaper / Open the Graves ("a NONTOKEN creature you control dies").
+//
+// Returns undefined when the clause isn't a shape this parser fully understands, so callers fall back
+// to their existing logic instead of guessing.
+
+import { permanentMatchesQualifier } from "./characteristics";
+
+export interface WatcherSubjectContext {
+  sourceId: string;
+  sourceName: string;
+  subject: { id: string; typeLine: string; token?: boolean; grantedTypes?: string[]; colors?: string[] };
+  // The permanent entering / dying is controlled by the same player who controls the watcher.
+  subjectIsControlledBySourceController: boolean;
+}
+
+type Control = "you" | "opponent" | "any";
+
+interface SubjectPart {
+  self: boolean;
+  another: boolean;
+  descriptor: string;
+  control: Control;
+}
+
+const CONTROL_SUFFIXES: Array<{ pattern: RegExp; control: Control }> = [
+  { pattern: /\s+you control$/, control: "you" },
+  { pattern: /\s+under your control$/, control: "you" },
+  { pattern: /\s+(?:an opponent controls|your opponents control|you don'?t control)$/, control: "opponent" }
+];
+
+// A descriptor word this parser can evaluate: "nontoken", a color or "non<color>", or a plain noun
+// (type or creature subtype). Anything else ("nonland", "noncreature", "legendary" negations, ...) makes
+// the whole clause unparseable rather than half-evaluated.
+function descriptorIsEvaluable(descriptor: string): boolean {
+  return descriptor.split(/\s+/).every((word) => {
+    if (/^non/.test(word)) return word === "nontoken" || /^non(?:white|blue|black|red|green)$/.test(word);
+    return /^[a-z'-]+$/.test(word);
+  });
+}
+
+function parsePart(rawPart: string, sourceName: string): SubjectPart | undefined {
+  const part = rawPart.trim();
+  const shortName = sourceName.toLowerCase().split(",")[0].trim();
+  if (/^this\s+[a-z ]+$/.test(part) || part === sourceName.toLowerCase() || part === shortName) {
+    return { self: true, another: false, descriptor: "", control: "any" };
+  }
+  const match = part.match(/^(another|each other|a|an)\s+(.+)$/);
+  if (!match) return undefined;
+  let rest = match[2].trim();
+  let control: Control = "any";
+  for (const suffix of CONTROL_SUFFIXES) {
+    if (suffix.pattern.test(rest)) {
+      rest = rest.replace(suffix.pattern, "").trim();
+      control = suffix.control;
+      break;
+    }
+  }
+  if (!rest || !descriptorIsEvaluable(rest)) return undefined;
+  return { self: false, another: match[1] === "another" || match[1] === "each other", descriptor: rest, control };
+}
+
+// "Whenever this creature or another nontoken Zombie you control dies, ..." for event "dies"; same for
+// "enters". `afterVerb` catches the trailing "under your control" of "a land enters under your control".
+export function matchWatcherSubject(oracleText: string, event: "enters" | "dies", context: WatcherSubjectContext): boolean | undefined {
+  const verb = event;
+  let sawClause = false;
+  let allParsed = true;
+  for (const rawClause of oracleText.split("\n")) {
+    const clause = rawClause.replace(/\([^)]*\)/g, "").trim().toLowerCase();
+    const match = clause.match(new RegExp(`\\b(?:when|whenever)\\s+([^,.:]+?)\\s+${verb}\\b([^,.]*)`));
+    if (!match) continue;
+    sawClause = true;
+    const parts = match[1].split(/\s+or\s+/).map((part) => parsePart(part, context.sourceName));
+    if (parts.some((part) => part === undefined)) {
+      allParsed = false;
+      continue;
+    }
+    const trailingControl: Control | undefined = /\bunder your control\b/.test(match[2]) ? "you" : /\bunder an opponent'?s control\b/.test(match[2]) ? "opponent" : undefined;
+    for (const part of parts as SubjectPart[]) {
+      if (part.self) {
+        if (context.subject.id === context.sourceId) return true;
+        continue;
+      }
+      if (part.another && context.subject.id === context.sourceId) continue;
+      if (!permanentMatchesQualifier(context.subject, part.descriptor)) continue;
+      const control = part.control !== "any" ? part.control : trailingControl ?? "any";
+      if (control === "you" && !context.subjectIsControlledBySourceController) continue;
+      if (control === "opponent" && context.subjectIsControlledBySourceController) continue;
+      return true;
+    }
+  }
+  if (!sawClause) return undefined;
+  return allParsed ? false : undefined;
+}

@@ -65,6 +65,7 @@ import {
 } from "@/lib/oracleClauses";
 import { FOUNDATIONS_AGENT_DECKLISTS, FOUNDATIONS_PLAYER_DECKLIST, commanderFromDeckList } from "@/lib/precons";
 import { parseSpellExtraEffects, type SpellExtraEffect } from "@/lib/spellExtras";
+import { matchWatcherSubject } from "@/lib/triggerWatchers";
 import {
   annihilatorAmount,
   hasKeyword as hasKeywordText,
@@ -98,6 +99,7 @@ import {
   computeDevotion,
   countMatchingPermanents,
   hasChooseCreatureTypeEtb,
+  parseAllZonesCda,
   parseCharacteristicDefiningAbility,
   parseChooseColorEtb,
   parseDevotionCda,
@@ -204,7 +206,7 @@ type TriggerEffect = (
   // is unused/0 when this is set. Also changes the gain side: "the life lost this way" is the SUM
   // across every opponent (devotion × opponent count), not the flat per-trigger amount Zulaport
   // Cutthroat's wording uses — see applyDrainEffect's gainEqualsTotalLoss parameter.
-  | { kind: "drain"; amount: number; scope: "target_player" | "each_opponent"; devotionColor?: ManaColorLetter }
+  | { kind: "drain"; amount: number; scope: "target_player" | "each_opponent"; devotionColor?: ManaColorLetter; noGain?: boolean }
   // "Return a land you control to its owner's hand." (Simic Growth Chamber and the rest of the
   // karoo/bounce-land cycle: "This land enters tapped. When this land enters, return a land you
   // control to its owner's hand.") — mandatory, and WHICH land is a real choice (routed through
@@ -5696,9 +5698,18 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       // countCreaturesAttackingSeat threaded through for "Create X ... tokens, where X is the
       // number of creatures attacking you" (Arachnogenesis) — a board-state count, unrelated to
       // chosenX (this card has no {X} in its cost at all).
-      const tokenSpecs = sourceCard
-        ? parseCreateTokenSpecs(etbEffectText(sourceCard.oracleText), undefined, undefined, action.chosenX, countCreaturesAttackingSeat(playedSession, action.actorSeatId))
-        : [];
+      // A PERMANENT whose enters-effect is already a queued trigger (Grave Titan's "When this creature
+      // enters or attacks, create two 2/2 Zombies", Liliana's Mastery) must not ALSO make those tokens
+      // here — the trigger system creates them when it resolves, so doing both doubled every such
+      // card (4 Zombies instead of 2). Non-permanent spells keep creating their tokens here.
+      const etbTokensOwnedByTrigger =
+        destination === "battlefield" &&
+        sourceCard !== undefined &&
+        commonTriggerEffect(sourceCard.oracleText, "entered", undefined, playedSession.seats.find((seat) => seat.id === action.actorSeatId))?.kind === "create_tokens";
+      const tokenSpecs =
+        sourceCard && !etbTokensOwnedByTrigger
+          ? parseCreateTokenSpecs(etbEffectText(sourceCard.oracleText), undefined, undefined, action.chosenX, countCreaturesAttackingSeat(playedSession, action.actorSeatId))
+          : [];
       // Beast Within ("its controller creates..."), Generous Gift ("its owner creates..."), and any
       // future card sharing this "destroy target permanent, the affected player creates a
       // consolation token" template: the token belongs to whoever controlled/owned the DESTROYED
@@ -11641,13 +11652,19 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
           if (!hasCardType(card, "Creature")) return card;
           const cda = parseCharacteristicDefiningAbility(card.oracleText);
           const devotionCda = parseDevotionCda(card.oracleText);
-          if (!cda && !devotionCda) return card;
+          const allZonesCda = parseAllZonesCda(card.oracleText);
+          if (!cda && !devotionCda && !allZonesCda) return card;
           let cdaPower = card.cdaPower;
           let cdaToughness = card.cdaToughness;
           if (cda) {
             const count = countMatchingPermanents(seat.board.battlefield, cda.matcher);
             if (cda.stat === "both" || cda.stat === "power") cdaPower = count;
             if (cda.stat === "both" || cda.stat === "toughness") cdaToughness = count;
+          }
+          if (allZonesCda) {
+            const count = countAcrossAllZones(next.seats, allZonesCda.terms);
+            cdaPower = count;
+            cdaToughness = count;
           }
           if (devotionCda) {
             const devotion = computeDevotion(seat.board.battlefield, devotionCda.color);
@@ -11790,6 +11807,13 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
             if (cda.stat === "both" || cda.stat === "power") cdaPower = count;
             if (cda.stat === "both" || cda.stat === "toughness") cdaToughness = count;
           }
+          // Soulless One: counts every player's battlefield AND graveyards.
+          const allZonesCdaFull = parseAllZonesCda(card.oracleText);
+          if (allZonesCdaFull) {
+            const count = countAcrossAllZones(next.seats, allZonesCdaFull.terms);
+            cdaPower = count;
+            cdaToughness = count;
+          }
 
           // Layer 7a, devotion variant: "~'s power is equal to your devotion to blue" (Callaphe,
           // the God cycle) — counts colored mana symbols across the battlefield instead of matching
@@ -11884,7 +11908,12 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
           // not literally attachment-only) rather than adding a parallel field for the same layer.
           const selfAnthem = parseSelfAnthemBoost(card.oracleText);
           if (selfAnthem) {
-            const source = selfAnthem.zone === "graveyard" ? (seat.board.graveyard ?? []) : seat.board.battlefield;
+            const source =
+              selfAnthem.zone === "graveyard"
+                ? (seat.board.graveyard ?? [])
+                : selfAnthem.zone === "opponents_graveyards"
+                  ? next.seats.filter((other) => other.id !== seat.id).flatMap((other) => other.board.graveyard ?? [])
+                  : seat.board.battlefield;
             const count = countMatchingPermanents(source, selfAnthem.matcher);
             power += selfAnthem.power * count;
             toughness += selfAnthem.toughness * count;
@@ -14286,7 +14315,10 @@ export function parseSimpleLifeChange(text: string): { kind: "gain_life" | "lose
     const amount = numberWordToInt(gainMatch[1]);
     if (amount) return { kind: "gain_life", amount };
   }
-  const loseMatch = lower.match(/\byou lose\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+life\b/);
+  // "You draw two cards AND LOSE 2 life." (Night's Whisper, Ambition's Cost) — the lose half has no second
+  // "you", which the plain "you lose N life" match never accepted, so the draw happened and the life
+  // payment never did.
+  const loseMatch = lower.match(/\b(?:you lose|and lose)\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+life\b/);
   if (loseMatch) {
     const amount = numberWordToInt(loseMatch[1]);
     if (amount) return { kind: "lose_life", amount };
@@ -14351,7 +14383,9 @@ function applyDrainEffect(
   // Gray Merchant of Asphodel's devotion-drain cycle instead prints "you gain life equal to the life
   // lost this way," i.e. the SUM across every opponent (devotion × opponent count), a genuinely
   // different total when there's more than one opponent — set true only for that shape.
-  gainEqualsTotalLoss = false
+  gainEqualsTotalLoss = false,
+  // "Each opponent loses 1 life." with no gain (Vengeful Dead) — a pure life loss.
+  noGain = false
 ): GameSession {
   const seatName = session.seats.find((seat) => seat.id === casterSeatId)?.name ?? "Player";
   const opponents = session.seats.filter((seat) => seat.id !== casterSeatId && !seat.hasLost);
@@ -14360,7 +14394,7 @@ function applyDrainEffect(
   // "Enchant player" branch already uses for the same "no real choice UI, pick a sensible default"
   // reason. "each opponent" (Zulaport Cutthroat, Cruel Celebrant, Gray Merchant) hits everyone at once.
   const losers = scope === "each_opponent" ? opponents : opponents.length > 0 ? [opponents.reduce((a, b) => (b.life > a.life ? b : a))] : [];
-  const gainAmount = gainEqualsTotalLoss ? amount * losers.length : amount;
+  const gainAmount = noGain ? 0 : gainEqualsTotalLoss ? amount * losers.length : amount;
   // Both scopes build losers from `opponents` above, so the controller can never also be in
   // loserIds — gain and loss never land on the same seat.
   const loserIds = new Set(losers.map((seat) => seat.id));
@@ -14378,7 +14412,7 @@ function applyDrainEffect(
         id: crypto.randomUUID(),
         at: new Date().toISOString(),
         seatId: casterSeatId,
-        message: `${sourceName} ${verb}. ${seatName} gains ${gainAmount} life; ${loserNames} loses ${amount} life each.`
+        message: noGain ? `${sourceName} ${verb}. ${loserNames} loses ${amount} life each.` : `${sourceName} ${verb}. ${seatName} gains ${gainAmount} life; ${loserNames} loses ${amount} life each.`
       },
       ...session.events
     ]
@@ -16204,6 +16238,16 @@ function cardHasWatchedType(card: VisibleCard, typeWord: string): boolean {
 function enteredTriggerApplies(source: VisibleCard, sourceSeatId: string, enteredCard: VisibleCard, enteredSeatId: string) {
   const text = source.oracleText.toLowerCase();
   if (!text.includes("enter")) return false;
+  // The structured subject parser (this/another/a + nontoken, color, creature subtype, "you control",
+  // the source's own short name) decides first; the older type-word heuristics below only run for a
+  // clause it declines to interpret.
+  const parsedSubject = matchWatcherSubject(source.oracleText, "enters", {
+    sourceId: source.id,
+    sourceName: source.name,
+    subject: enteredCard,
+    subjectIsControlledBySourceController: enteredSeatId === sourceSeatId
+  });
+  if (parsedSubject !== undefined) return parsedSubject;
   const underYourControl = enteredSeatId === sourceSeatId;
   const isAnother = source.id !== enteredCard.id;
   const selfEntered = source.id === enteredCard.id;
@@ -16270,6 +16314,16 @@ function enteredTriggerApplies(source: VisibleCard, sourceSeatId: string, entere
 function deathTriggerApplies(source: VisibleCard, sourceSeatId: string, deadCard: VisibleCard, deadSeatId: string, attachedSourceIds?: string[]) {
   const text = source.oracleText.toLowerCase();
   if (!text.includes("dies")) return false;
+  // See enteredTriggerApplies: structured subject first (Headless Rider, Midnight Reaper, Open the
+  // Graves, Undead Augur, Vengeful Dead — "nontoken", "Zombie", "this creature or another ..."), old
+  // heuristics only for clauses it declines.
+  const parsedSubject = matchWatcherSubject(source.oracleText, "dies", {
+    sourceId: source.id,
+    sourceName: source.name,
+    subject: deadCard,
+    subjectIsControlledBySourceController: deadSeatId === sourceSeatId
+  });
+  if (parsedSubject !== undefined) return parsedSubject;
   const underYourControl = deadSeatId === sourceSeatId;
   const isAnother = source.id !== deadCard.id;
 
@@ -16393,7 +16447,12 @@ export function commonTriggerEffect(
   // variant covered a devotion-computed amount, so this whole clause silently failed to parse and the
   // ability never did anything at all. Reported live as "Gray Merchant did not give life to me or
   // take life from my opponents."
-  const devotionDrain = text.match(/\beach opponent loses life equal to your devotion to (white|blue|black|red|green)\b[\s\S]*?\byou gain life equal to the life lost this way\b/);
+  // Both printed wordings: "loses life equal to your devotion to black" and the real Gray Merchant text
+  // "loses X life, where X is your devotion to black" — the old pattern only knew the first, so Gray
+  // Merchant fell to the LLM fallback.
+  const devotionDrain = text.match(
+    /\beach opponent loses (?:life equal to your devotion to|x life, where x is your devotion to) (white|blue|black|red|green)\b[\s\S]*?\byou gain life equal to the life lost this way\b/
+  );
   if (devotionDrain) {
     const devotionColor = { white: "W", blue: "U", black: "B", red: "R", green: "G" }[devotionDrain[1]] as ManaColorLetter;
     return { kind: "drain", amount: 0, scope: "each_opponent", devotionColor, optional };
@@ -16421,6 +16480,32 @@ export function commonTriggerEffect(
   // not get the chance to choose a permanent I control."
   if (/\bexile another target permanent you own,?\s*then return it to the battlefield under your control\b/.test(text)) {
     return { kind: "blink", optional };
+  }
+
+  // "You draw a card and lose 1 life." (Undead Augur, Phyrexian Arena, ...) / "This creature deals 1
+  // damage to you and you draw a card." (Midnight Reaper) — a draw plus a life payment in ONE clause.
+  // Checked before the single-effect gain/lose/draw matches below, each of which would otherwise return
+  // just ITS half and silently drop the other (the draw happened but the life never went down, or the
+  // reverse).
+  const drawAndLoseLife = text.match(/\b(?:you )?draws?\s+(a|an|one|two|three|four|five|\d+) (?:additional )?cards?,? and (?:you )?lose\s+(\d+|one|two|three|four|five)\s+life\b/);
+  const damageToYouAndDraw = text.match(/\bdeals?\s+(\d+|one|two|three|four|five)\s+damage to you and you draw\s+(a|an|one|two|three|four|five|\d+) cards?\b/);
+  if (drawAndLoseLife) {
+    const drawAmount = numberWordToInt(drawAndLoseLife[1]);
+    const lifeAmount = numberWordToInt(drawAndLoseLife[2]);
+    if (drawAmount && lifeAmount) return { kind: "draw_cards", amount: drawAmount, optional, then: { kind: "lose_life", amount: lifeAmount } };
+  }
+  if (damageToYouAndDraw) {
+    const lifeAmount = numberWordToInt(damageToYouAndDraw[1]);
+    const drawAmount = numberWordToInt(damageToYouAndDraw[2]);
+    if (drawAmount && lifeAmount) return { kind: "draw_cards", amount: drawAmount, optional, then: { kind: "lose_life", amount: lifeAmount } };
+  }
+
+  // "Each opponent loses N life." with NO matching "you gain" (Vengeful Dead) — the drain checks above
+  // all require the gain half.
+  const opponentsLoseOnly = text.match(/\beach opponent loses\s+(\d+|one|two|three|four|five)\s+life\b(?!\s+and you gain)/);
+  if (opponentsLoseOnly) {
+    const amount = numberWordToInt(opponentsLoseOnly[1]);
+    if (amount) return { kind: "drain", amount, scope: "each_opponent", noGain: true, optional };
   }
 
   const gainLife = text.match(/\byou gain\s+(x|\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+life\b/);
@@ -16681,7 +16766,7 @@ export function parseCreateTokenSpecs(
   ];
 
   for (const item of predefined) {
-    const match = normalized.match(new RegExp(`create\\s+(a|an|one|two|three|four|five|six|seven|eight|nine|ten|\\d+)\\s+${item.name}\\s+tokens?`, "i"));
+    const match = normalized.match(new RegExp(`creates?\\s+(a|an|one|two|three|four|five|six|seven|eight|nine|ten|\\d+)\\s+${item.name}\\s+tokens?`, "i"));
     if (match && item.spec) {
       specs.push({ ...item.spec, count: numberWordToInt(match[1]) ?? 1 });
     }
@@ -16694,7 +16779,7 @@ export function parseCreateTokenSpecs(
   // "Create X ... tokens, where X is the number of creatures attacking you") is a separate dynamic
   // basis, resolved against attackersTargetingCount instead — see the "where x is..." check below.
   const creaturePattern =
-    /create\s+(a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|twice x|x|\d+)\s+(?:tapped\s+)?((?:\d+\/\d+\s+)?(?:(?:white|blue|black|red|green|colorless|multicolored)\s+)*(?:[A-Z][a-zA-Z'-]*\s+){0,4}creature tokens?(?: with [^.]+)?)/gi;
+    /creates?\s+(a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|twice x|x|\d+)\s+(?:tapped\s+)?((?:\d+\/\d+\s+)?(?:(?:white|blue|black|red|green|colorless|multicolored)\s+)*(?:[A-Z][a-zA-Z'-]*\s+){0,4}creature tokens?(?: with [^.]+)?)/gi;
   // "...with reach, where X is the number of creatures attacking you." (Arachnogenesis) — this
   // clause sits INSIDE the "with [ability]" tail creaturePattern's own capture already grabs (unlike
   // forEachControlledPattern's basis below, which trails AFTER the match entirely on cards with no
@@ -16972,7 +17057,7 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
     // board-state-dependent and can genuinely change between this trigger being queued and actually
     // resolving (responses on the stack in between), so parse-time would be a stale/wrong number.
     const amount = devotionColor && controllerSeat ? computeDevotion(controllerSeat.board.battlefield, devotionColor) : trigger.effect.amount;
-    return applyDrainEffect(session, trigger.controllerSeatId, trigger.sourceCardName, amount, trigger.effect.scope, "trigger resolves", Boolean(devotionColor));
+    return applyDrainEffect(session, trigger.controllerSeatId, trigger.sourceCardName, amount, trigger.effect.scope, "trigger resolves", Boolean(devotionColor), Boolean(trigger.effect.noGain));
   }
   if (trigger.effect.kind === "connive") {
     let next = session;
@@ -18108,6 +18193,28 @@ export function applyDeterministicPhaseTrigger(session: GameSession, seatId: str
   const zoneEffect = parseZoneEffect(clauseText);
   if (zoneEffect) return applyZoneEffect(session, seatId, sourceCard.name, zoneEffect);
 
+  // An X that's a board count, not a cost: "you draw X cards and lose X life, where X is the number of
+  // Zombies you control." (Graveborn Muse) and "create X 2/2 black Zombie creature tokens, where X is
+  // half the number of Zombies you control, rounded down." (Endless Ranks of the Dead). Neither reached
+  // any deterministic path before — the draw/life half went to the LLM, and the token count parsed the
+  // bare "X" as 1.
+  const phaseSeat = session.seats.find((item) => item.id === seatId);
+  const xAmount = phaseSeat ? resolveWhereXBoardCount(clauseText, phaseSeat) : undefined;
+  if (phaseSeat && xAmount !== undefined) {
+    if (/\byou draw x cards? and (?:you )?lose x life\b/i.test(clauseText)) {
+      const drawn = drawMultipleForSeat(session, seatId, xAmount, `${phaseSeat.name} draws ${xAmount} card${xAmount === 1 ? "" : "s"} from ${sourceCard.name}.`);
+      const afterLoss: GameSession = { ...drawn, seats: drawn.seats.map((item) => (item.id === seatId ? { ...item, life: item.life - xAmount } : item)) };
+      return rulesEvent(afterLoss, seatId, `${phaseSeat.name} loses ${xAmount} life from ${sourceCard.name}.`);
+    }
+    if (/\bcreate x\b/i.test(clauseText)) {
+      const specs = parseCreateTokenSpecs(clauseText.replace(/\bcreate x\b/i, "create two"));
+      if (specs.length > 0 && xAmount > 0) {
+        return createTokensForSeat(session, seatId, sourceCard.id, specs.map((spec) => ({ ...spec, count: xAmount }))).session;
+      }
+      return rulesEvent(session, seatId, `${sourceCard.name} resolves with X = ${xAmount}; nothing is created.`);
+    }
+  }
+
   const commonEffect = commonTriggerEffect(clauseText, "clause");
   if (commonEffect) {
     const trigger = makeCommonTrigger(seatId, seatId, sourceCard, commonEffect, `${sourceCard.name}'s ${phase} trigger resolves.`);
@@ -18115,6 +18222,25 @@ export function applyDeterministicPhaseTrigger(session: GameSession, seatId: str
   }
 
   return undefined;
+}
+
+// Sum of matching permanents/cards across EVERY seat's battlefield or graveyard (Soulless One).
+function countAcrossAllZones(seats: PlayerSeat[], terms: Array<{ zone: "battlefield" | "graveyard"; matcher: string }>): number {
+  return terms.reduce(
+    (total, term) =>
+      total + seats.reduce((sum, seat) => sum + countMatchingPermanents(term.zone === "battlefield" ? seat.board.battlefield : (seat.board.graveyard ?? []), term.matcher), 0),
+    0
+  );
+}
+
+// "..., where X is [half] the number of <Qualifier> you control[, rounded down|up]" read off the seat's own
+// battlefield. undefined when the clause has no such definition.
+function resolveWhereXBoardCount(text: string, seat: PlayerSeat): number | undefined {
+  const match = text.match(/\bwhere x is (half )?the number of ([a-z ]+?) you control(?:, rounded (down|up))?/i);
+  if (!match) return undefined;
+  const count = countMatchingPermanents(seat.board.battlefield, match[2].trim().toLowerCase());
+  if (!match[1]) return count;
+  return match[3]?.toLowerCase() === "up" ? Math.ceil(count / 2) : Math.floor(count / 2);
 }
 
 // "Each player sacrifices a creature or planeswalker of their choice. If a player can't, they
@@ -19091,7 +19217,9 @@ function matchesCostReductionQualifier(qualifier: string, card: VisibleCard): bo
   if (qualifier === "historic") return isHistoricCard(card);
   // Tribal cost reducers (Urza's Incubator's chosen creature type, Herald's Horn's chosen type,
   // ...) — match the qualifier word against the type line's own text (creature subtypes live after
-  // the em dash).
+  // the em dash). A multi-word or colored qualifier ("black creature", Bontu's Monument) goes through the
+  // shared qualifier matcher, which knows colors — a plain substring test never matched "black creature".
+  if (/\s/.test(qualifier) || /^(?:white|blue|black|red|green|nontoken|colorless)$/.test(qualifier)) return permanentMatchesQualifier(card, qualifier);
   return card.typeLine.toLowerCase().includes(qualifier);
 }
 
