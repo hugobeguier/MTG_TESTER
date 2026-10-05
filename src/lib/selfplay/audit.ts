@@ -295,7 +295,20 @@ function auditLifeAndLoss(state: AuditState, session: GameSession, meta: AuditMe
 function auditLiveness(state: AuditState, session: GameSession, meta: AuditMeta) {
   if (!meta.seatId) return;
   const key = `${meta.seatId}:${meta.turn}:${meta.phase}`;
-  const fingerprint = JSON.stringify(session.seats.map((seat) => ({ life: seat.life, hand: seat.board.hand.length, bf: seat.board.battlefield.map((card) => `${card.id}:${card.tapped}:${card.attacking}:${card.blocking}`) })));
+  // blockDecided (set by assignBlockers, AppFlow.tsx) has to be part of the fingerprint, not just
+  // tapped/attacking/blocking — a defender declaring "no blockers" for an attacker changes NOTHING
+  // else on that attacker (it was already tapped from attacking, stays not-blocking), so a wide
+  // combat with more unblocked attackers than the repeat threshold below (5+ creatures attacking into
+  // a single blocker, or none) produced an IDENTICAL fingerprint for every one of those legitimate,
+  // real per-attacker resolutions and falsely tripped this detector as a "stall." Reproduced live:
+  // `--strict` halting on turn 15's declare blockers step with 6 real attackers (Grim Haruspex,
+  // Sakura-Tribe Elder, Shriekmaw, Caustic Caterpillar, Midnight Reaper, Merciless Executioner) each
+  // legitimately resolving to "no blockers" one at a time against a single blocker — every one of
+  // this run's "liveness" violations against declare blockers step was this same false positive, not
+  // a real engine loop.
+  const fingerprint = JSON.stringify(
+    session.seats.map((seat) => ({ life: seat.life, hand: seat.board.hand.length, bf: seat.board.battlefield.map((card) => `${card.id}:${card.tapped}:${card.attacking}:${card.blocking}:${card.blockDecided}`) }))
+  );
   const existing = state.livenessBySeat.get(key);
   if (!existing || existing.lastSnapshot !== fingerprint) {
     state.livenessBySeat.set(key, { key, lastSnapshot: fingerprint, repeats: 0 });

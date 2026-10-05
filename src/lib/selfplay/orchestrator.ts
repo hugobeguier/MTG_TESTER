@@ -91,6 +91,7 @@ import {
   legalMainPhaseActions,
   maxAffordableX,
   modalDoubleFacedLandSplit,
+  moveCardAcrossSeats,
   parseCreateTokenSpecs,
   parseGenericModalEffect,
   parseMassBounceEffect,
@@ -348,25 +349,28 @@ function filterSupportedMainPhaseActions(actions: LegalAgentAction[], seat: Play
 // its effect silently doesn't happen, exactly like EVERY instant/sorcery before this milestone. The
 // `matched` flag on the return value lets callers measure how often this actually happens instead
 // of guessing from a card list (see spellEffectCoverage in PlayGameResult / scripts/self-play.ts):
-//  - Library search / tutor effects to hand or graveyard (Fabricate, Entomb, Buried Alive, Diabolic
-//    Intent, Rampant Growth-to-hand-shaped cards, ...) ARE handled, via applySearchLibraryEffect's
+//  - Library search / tutor effects to hand, graveyard, OR battlefield (Fabricate, Entomb, Buried
+//    Alive, Diabolic Intent, Farseek-style land ramp, ...) ARE handled, via applySearchLibraryEffect's
 //    own simple auto-pick — see its comment for why that's deliberately NOT the live game's agent
 //    heuristic (chooseAgentLibraryCardForRuleChoice, AppFlow.tsx ~7705, a component-nested closure
-//    this file can't reach). A battlefield-destination search (Three Visits-shaped) is still
-//    unmatched — see applySearchLibraryEffect's own note on why.
+//    this file can't reach).
 //  - Diabolic Intent-shaped "as an additional cost, sacrifice a creature" is not modeled: the search
 //    still happens, but no creature is actually sacrificed to pay for it. Additional-cost payment
 //    happens at cast time in the live game, a step this orchestrator doesn't have; treating the
 //    search as free is a known simplification, not a rules-integrity violation (the audit only checks
 //    card conservation, not whether an additional cost was paid).
-//  - "Draw N cards, then put M back" with a FIXED N (Brainstorm) — parseZoneEffect's
-//    draw_x_then_put_back only recognizes the literal word "X" (Brainsurge-shaped), not a printed
-//    number, so Brainstorm itself stays unmatched.
+//  - "Draw N cards, then put M back" (Brainstorm, Brainsurge) and "Surveil N" (Otherworldly Gaze) ARE
+//    handled, via the shared parseZoneEffect/applyZoneEffect (draw_x_then_put_back's drawAmount field,
+//    and the "surveil" kind) — both benefit the live game too, not just self-play. A "look at the top
+//    N, put them back in any order, draw a card" shape (Ponder) is handled SELF-PLAY-ONLY, further
+//    down in this function: the live game routes that one to the Rules Advisor for a real reorder
+//    choice, which this auto-resolution deliberately doesn't attempt.
 //  - Counterspells — unchanged; still need a real stack/priority window (documented as a known gap
 //    from the plan's first draft, not attempted here).
-//  - Any other shape none of the ~15 parsers below recognize (a pure "each player draws a card", a
+//  - Any other shape none of the parsers below recognize (a pure "each player draws a card", a
 //    copy-target-spell effect, a bare static/replacement-effect instant, "reveal the top N, keep a
-//    matching one" digs like Grisly Salvage, surveil, ...).
+//    matching one" digs like Grisly Salvage, a dynamic "draw cards equal to X" count, a mass "gain
+//    indestructible" grant, an edict like "each player sacrifices N creatures," ...).
 function resolveBareSpellEffect(session: GameSession, casterSeatId: string, sourceCard: VisibleCard, chosenX: number | undefined): { session: GameSession; matched: boolean } {
   const rawText = etbEffectText(sourceCard.oracleText);
   let working = session;
@@ -480,6 +484,26 @@ function resolveBareSpellEffect(session: GameSession, casterSeatId: string, sour
     matched = true;
   }
 
+  // "Look at the top N cards of your library, then put them back in any order[. You may shuffle].
+  // Draw a card." (Ponder, ...) — parseSimpleDrawEffect deliberately DECLINES this shape (see its own
+  // comment) so the live game routes it to the Rules Advisor's real reorder_top_cards choice, which
+  // self-play has no equivalent for. Self-play-only, not folded into the shared parser: "put them
+  // back in any order" legally includes leaving them in the SAME order, and "you may shuffle" is
+  // optional, so resolving this as a no-op look plus the actual draw is fully legal here — but it
+  // would be a real, unwanted downgrade for the live game, which can make an informed reorder choice
+  // this fallback deliberately doesn't attempt.
+  const ponderShapedDraw = !matched
+    ? rawText.match(/\blook at the top [a-z\d]+ cards? of your library, then put (?:them|it) back in any order\.(?:\s*you may shuffle\.)?\s*draw (a|one|two|three|four|five|\d+) cards?\b/i)
+    : null;
+  if (ponderShapedDraw) {
+    const amount = { a: 1, one: 1, two: 2, three: 3, four: 4, five: 5 }[ponderShapedDraw[1].toLowerCase()] ?? Number.parseInt(ponderShapedDraw[1], 10);
+    if (Number.isFinite(amount) && amount > 0) {
+      const seatName = working.seats.find((seat) => seat.id === casterSeatId)?.name ?? "Player";
+      working = drawMultipleForSeat(working, casterSeatId, amount, `${seatName} looks at their library with ${sourceCard.name}, keeps it in order, and draws ${amount} card${amount === 1 ? "" : "s"}.`);
+      matched = true;
+    }
+  }
+
   // Rule 500.7 extra turns — unconditional regardless of modal status in the source too.
   if (grantsExtraTurn(sourceCard.oracleText)) {
     working = { ...working, extraTurnsQueue: [...(working.extraTurnsQueue ?? []), casterSeatId] };
@@ -504,12 +528,7 @@ function resolveBareSpellEffect(session: GameSession, casterSeatId: string, sour
 // first `effect.count` library cards matching effect.cardTypeFilter in library order: this is about
 // measuring effect COVERAGE (did the tutor do something instead of nothing), not simulating a smart
 // choice, matching this file's existing "was it recognized" bar for every other bare-spell effect.
-// Battlefield-destination searches (Rampant Growth, Three Visits, ...) aren't handled here — none of
-// this file's unmatched-card backlog needs it, and doing it correctly means the same battlefield-
-// entry setup applyMainPhaseAction already does for a normal permanent cast, more than this one
-// helper should duplicate; a battlefield-destination effect is left unmatched, same as before.
 export function applySearchLibraryEffect(session: GameSession, casterSeatId: string, sourceCardName: string, effect: SearchLibraryEffect): GameSession {
-  if (effect.destination === "battlefield") return session;
   const seat = session.seats.find((item) => item.id === casterSeatId);
   if (!seat) return session;
   const library = seat.library ?? [];
@@ -521,6 +540,30 @@ export function applySearchLibraryEffect(session: GameSession, casterSeatId: str
       ...session,
       seats: session.seats.map((item) => (item.id === casterSeatId ? { ...item, library: shuffleCards(library) } : item)),
       events: [phaseEvent(casterSeatId, `${seat.name} searches with ${sourceCardName} but finds no ${effect.cardTypeFilter ?? "matching"} card, and shuffles.`), ...session.events]
+    };
+  }
+
+  // Battlefield destination (Farseek-style land ramp, ...) reuses moveCardAcrossSeats — the same
+  // shared library->battlefield primitive the live game's own zone effects already lean on (see its
+  // SacrificeThenReanimate caller) — rather than duplicating battlefield-entry setup here. This only
+  // places the card; it does NOT run the fetched permanent's own ETB triggers (a land landing on the
+  // battlefield via a search almost never has one worth modeling here, and self-play has no generic
+  // ETB-trigger pipeline at all regardless — see this file's own header gap list).
+  if (effect.destination === "battlefield") {
+    const working = found.reduce(
+      (acc, card) => moveCardAcrossSeats(acc, casterSeatId, card.id, casterSeatId, "battlefield", { tapped: effect.tapped }).session,
+      session
+    );
+    return {
+      ...working,
+      seats: working.seats.map((item) => (item.id === casterSeatId ? { ...item, library: shuffleCards(item.library ?? []) } : item)),
+      events: [
+        phaseEvent(
+          casterSeatId,
+          `${seat.name} searches with ${sourceCardName} and puts ${found.map((card) => card.name).join(", ")} onto the battlefield${effect.tapped ? " tapped" : ""}.`
+        ),
+        ...working.events
+      ]
     };
   }
 

@@ -226,11 +226,44 @@ describe("parseZoneEffect — steal and play", () => {
 });
 
 describe("parseZoneEffect — draw X then put back", () => {
-  it("parses draw X then put N cards from hand on top of library in any order (Brainsurge)", () => {
+  it("parses a literal 'draw X' then put N cards from hand on top of library in any order", () => {
     expect(parseZoneEffect("Draw X cards, then put two cards from your hand on top of your library in any order.")).toEqual({
       kind: "draw_x_then_put_back",
-      putBackAmount: 2
+      putBackAmount: 2,
+      drawAmount: undefined
     });
+  });
+
+  it("parses a fixed draw count instead of X (Brainstorm)", () => {
+    expect(parseZoneEffect("Draw three cards, then put two cards from your hand on top of your library in any order.")).toEqual({
+      kind: "draw_x_then_put_back",
+      putBackAmount: 2,
+      drawAmount: 3
+    });
+  });
+
+  it("parses a different fixed draw count (Brainsurge, per this engine's own card data — a fixed draw, not an X spell)", () => {
+    expect(parseZoneEffect("Draw four cards, then put two cards from your hand on top of your library in any order.")).toEqual({
+      kind: "draw_x_then_put_back",
+      putBackAmount: 2,
+      drawAmount: 4
+    });
+  });
+});
+
+describe("parseZoneEffect — look/dig", () => {
+  it("parses a typed dig with rest to graveyard (Grisly Salvage)", () => {
+    expect(
+      parseZoneEffect(
+        "Reveal the top five cards of your library. You may put a creature or land card from among them into your hand. Put the rest into your graveyard."
+      )
+    ).toEqual({ kind: "look_dig", amount: 5, cardTypeFilter: "creature or land", restDestination: "graveyard" });
+  });
+
+  it("parses an untyped dig with rest back on top (Diabolic Vision)", () => {
+    expect(parseZoneEffect("Look at the top five cards of your library. Put one of them into your hand and the rest on top of your library in any order.")).toEqual(
+      { kind: "look_dig", amount: 5, cardTypeFilter: undefined, restDestination: "library_top" }
+    );
   });
 });
 

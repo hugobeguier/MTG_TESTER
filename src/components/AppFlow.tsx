@@ -61,6 +61,7 @@ import {
   parseSagaChapters,
   type SagaChapters
 } from "@/lib/oracleClauses";
+import { FOUNDATIONS_AGENT_DECKLISTS, FOUNDATIONS_PLAYER_DECKLIST, commanderFromDeckList } from "@/lib/precons";
 import {
   annihilatorAmount,
   hasKeyword as hasKeywordText,
@@ -108,7 +109,7 @@ import {
 } from "@/lib/characteristics";
 import { matchesTargetType, parseRemovalEffect, type RemovalEffect, type RemovalTargetType } from "@/lib/removalSpells";
 import { hasCardType, parseTypeGrantEffects, typeGrantAppliesTo } from "@/lib/typeGrants";
-import { parseZoneEffect, type RegrowTargetType, type ZoneEffect } from "@/lib/zoneEffects";
+import { parseZoneEffect, type LookDigEffect, type RegrowTargetType, type ZoneEffect } from "@/lib/zoneEffects";
 import { legalTargets, targetsStillLegal, type ChosenTarget, type TargetSpec } from "@/lib/targeting";
 import { removalEffectTargetSpec, zoneEffectTargetSpec } from "@/lib/targetSpecs";
 import { DEFAULT_STOP_SETTINGS, shouldStopForPriority, stopKey, TURN_PHASES, type PriorityStopSettings } from "@/lib/priorityStops";
@@ -675,6 +676,10 @@ type PendingRuleChoice =
       // a card instead") — lets the modal header and event-log message name the actual source
       // instead of defaulting to "hand size" wording that would be wrong for those cases.
       sourceCardName?: string;
+      // Set when the discard is the human's own choice for an activated ability's "Discard a card"
+      // cost (Cryptbreaker) — on completion the activation is re-run with the picked card instead
+      // of discarding it here, so the mana, tap and discard are all paid together.
+      activation?: { cardId: string; abilityIndex: number };
     }
   | {
       id: string;
@@ -1582,10 +1587,10 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
 
   useEffect(() => {
     if (autoValidatedDefaultDeck.current) return;
-    const humanConfig = configs.find((config) => config.kind === "human" && config.mode === "decklist" && config.deckList.trim());
-    if (!humanConfig || humanConfig.deck) return;
+    const pending = configs.filter((config) => config.mode === "decklist" && config.deckList.trim() && !config.deck);
+    if (pending.length === 0) return;
     autoValidatedDefaultDeck.current = true;
-    void buildDeck(humanConfig);
+    pending.forEach((config) => void buildDeck(config));
   }, [configs]);
 
   // destroyCreatures() is a pure session transformer with no access to queueCommonTriggers (that
@@ -4405,13 +4410,42 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     setSession(() => applySacrificeEffect(paid.session, seatId, paid.card, paid.ability.effect, paid.ability.clause));
   }
 
-  function activateGenericTapAbility(seatId: string, cardId: string, abilityIndex: number) {
+  function activateGenericTapAbility(seatId: string, cardId: string, abilityIndex: number, chosenDiscardId?: string) {
     const seat = session.seats.find((item) => item.id === seatId);
     const card = seat?.board.battlefield.find((item) => item.id === cardId);
     const ability = card ? parseGenericTapAbilities(card.oracleText)[abilityIndex] : undefined;
     const humanPool = seat?.kind === "human" ? poolForSeat(seatId) : undefined;
+    if (seat?.kind === "human" && card && ability) {
+      // Dry run of the whole cost first, so a human who can't pay gets told why instead of a click
+      // that silently does nothing — and so the discard prompt below is only ever offered for an
+      // activation that will actually go through once they've picked.
+      if (!payGenericTapCost(session, seatId, cardId, abilityIndex, humanPool, chosenDiscardId)) {
+        addEvent(
+          ability.costDiscard && seat.board.hand.length === 0
+            ? `You have no card in hand to discard, so you can't activate ${card.name}.`
+            : `You don't have enough open mana to activate ${card.name} (${ability.costManaText || "no mana"}).`,
+          seatId,
+          "Rules action"
+        );
+        return;
+      }
+      // The discard half of the cost is the player's own choice (Cryptbreaker: "Discard a card") —
+      // payGenericTapCost's chooseWorstHandCardToDiscard would otherwise pick for them.
+      if (ability.costDiscard && !chosenDiscardId) {
+        setPendingRuleChoice({
+          id: crypto.randomUUID(),
+          kind: "discard_to_hand_size",
+          controllerSeatId: seatId,
+          sourceCardName: card.name,
+          prompt: `${card.name}: choose a card to discard as part of the cost.`,
+          requiredDiscards: 1,
+          activation: { cardId, abilityIndex }
+        });
+        return;
+      }
+    }
     if (card && ability?.effect.kind === "search_library") {
-      const paid = payGenericTapCost(session, seatId, cardId, abilityIndex, humanPool);
+      const paid = payGenericTapCost(session, seatId, cardId, abilityIndex, humanPool, chosenDiscardId);
       if (!paid) return;
       if (paid.poolSpent) {
         setSeatManaPool(seatId, paid.poolSpent);
@@ -4433,7 +4467,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       });
       return;
     }
-    const paid = payGenericTapCost(session, seatId, cardId, abilityIndex, humanPool);
+    const paid = payGenericTapCost(session, seatId, cardId, abilityIndex, humanPool, chosenDiscardId);
     if (!paid) return;
     if (paid.poolSpent) {
       setSeatManaPool(seatId, paid.poolSpent);
@@ -7479,6 +7513,12 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       return;
     }
 
+    if (choice.kind === "discard_to_hand_size" && choice.activation && cardIds[0]) {
+      setPendingRuleChoice(undefined);
+      activateGenericTapAbility(choice.controllerSeatId, choice.activation.cardId, choice.activation.abilityIndex, cardIds[0]);
+      return;
+    }
+
     if (choice.kind === "discard_to_hand_size") {
       const seat = session.seats.find((item) => item.id === choice.controllerSeatId);
       const discardIds = cardIds.slice(0, choice.requiredDiscards);
@@ -8732,19 +8772,26 @@ function Status(props: { label: string; value: string; detail: string }) {
   );
 }
 
+// Foundations Commander precons are the default test set: the human seat starts with Wretched
+// Ranks and each agent seat (in seat order) with one of the other three, all in decklist mode so
+// the Build AI Deck window opens pre-filled instead of empty.
 function createInitialConfigs(seats: PlayerSeat[]): SeatConfig[] {
-  return seats.map((seat) => ({
-    seatId: seat.id,
-    name: seat.name,
-    kind: seat.kind,
-    mode: seat.kind === "human" ? "decklist" : "commander",
-    commander: seat.deck?.commander ?? (seat.kind === "human" ? DEFAULT_PLAYER_COMMANDER : ""),
-    deckList: seat.kind === "human" ? DEFAULT_PLAYER_DECKLIST : "",
-    deck: seat.deck,
-    status: seat.deck?.validation.legal ? "ready" : "empty",
-    message: seat.deck?.validation.legal ? "Deck is ready for play." : seat.kind === "human" ? "Default deck will validate automatically." : "Choose a commander or paste a deck list.",
-    activity: []
-  }));
+  let agentIndex = 0;
+  return seats.map((seat) => {
+    const precon = seat.kind === "human" ? FOUNDATIONS_PLAYER_DECKLIST : FOUNDATIONS_AGENT_DECKLISTS[agentIndex++];
+    return {
+      seatId: seat.id,
+      name: seat.name,
+      kind: seat.kind,
+      mode: precon ? "decklist" : seat.kind === "human" ? "decklist" : "commander",
+      commander: precon ? commanderFromDeckList(precon) : seat.deck?.commander ?? (seat.kind === "human" ? DEFAULT_PLAYER_COMMANDER : ""),
+      deckList: precon ?? (seat.kind === "human" ? DEFAULT_PLAYER_DECKLIST : ""),
+      deck: undefined,
+      status: "empty",
+      message: precon ? "Foundations precon will validate automatically." : "Choose a commander or paste a deck list.",
+      activity: []
+    };
+  });
 }
 
 function formatDeckList(deck: CommanderDeck) {
@@ -9980,7 +10027,8 @@ function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllowed: boo
       // supply one tap). Without this exclusion a mana-producing sacrifice permanent could pay part
       // of its own cost with itself — reported live as Mind Stone tapping for {C} and then still
       // being sacrificed for its draw ability the same turn.
-      const affordable = ability.costMana === 0 || chooseManaSourcesForCost(seat, genericCostShim(ability.costMana), ability.costMana, card.id, session.seats).ok;
+      const sacrificeCostTotal = manaValueFromManaCost(ability.costManaText);
+      const affordable = sacrificeCostTotal === 0 || chooseManaSourcesForCost(seat, genericManaAbilityCostShim(ability), sacrificeCostTotal, card.id, session.seats).ok;
       if (!affordable) return;
       const targetNames =
         ability.sacrificeTarget === "self"
@@ -10009,7 +10057,8 @@ function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllowed: boo
       if (card.typeLine.includes("Creature") && card.summoningSick && !hasHaste(card)) return;
       if (ability.costDiscard && seat.board.hand.length === 0) return;
       // excludeCardId: card.id — same self-tap exclusion as the sacrifice-ability loop above.
-      const affordable = ability.costMana === 0 || chooseManaSourcesForCost(seat, genericCostShim(ability.costMana), ability.costMana, card.id, session.seats).ok;
+      const tapCostTotal = manaValueFromManaCost(ability.costManaText);
+      const affordable = tapCostTotal === 0 || chooseManaSourcesForCost(seat, genericManaAbilityCostShim(ability), tapCostTotal, card.id, session.seats).ok;
       if (!affordable) return;
       if (
         (ability.effect.kind === "counter_and_transform" || ability.effect.kind === "bounce_own") &&
@@ -10527,19 +10576,20 @@ export function payGenericSacrificeCost(
   // seat at 0 life could still activate a life-cost ability.
   if (ability.costLife > 0 && seat.life < ability.costLife) return undefined;
 
-  const costCard = genericCostShim(ability.costMana);
-  const poolPayment = ability.costMana > 0 && humanPool ? payCostFromPool(humanPool, costCard, ability.costMana) : undefined;
+  const totalManaCost = manaValueFromManaCost(ability.costManaText);
+  const costCard = genericManaAbilityCostShim(ability);
+  const poolPayment = totalManaCost > 0 && humanPool ? payCostFromPool(humanPool, costCard, totalManaCost) : undefined;
   // excludeCardId: cardId — this ability's own {T} already requires the source untapped; it can't
   // also tap itself via a separate mana ability of its own to help pay this same activation's
   // generic cost (a permanent can only supply one tap). See the sibling exclusion in
   // legalActivatedAbilityActions' own affordability check above.
   const payment =
-    ability.costMana > 0
+    totalManaCost > 0
       ? poolPayment?.ok
         ? poolPayment
-        : chooseManaSourcesForCost(seat, costCard, ability.costMana, cardId, session.seats)
+        : chooseManaSourcesForCost(seat, costCard, totalManaCost, cardId, session.seats)
       : undefined;
-  if (ability.costMana > 0 && !payment?.ok) return undefined;
+  if (totalManaCost > 0 && !payment?.ok) return undefined;
 
   const sacrificeTargets =
     ability.sacrificeTarget === "self"
@@ -10799,7 +10849,10 @@ export function payGenericTapCost(
   seatId: string,
   cardId: string,
   abilityIndex: number,
-  humanPool?: ManaPool
+  humanPool?: ManaPool,
+  // A human's own pick for a "Discard a card" cost (Cryptbreaker, ...) — chooseWorstHandCardToDiscard
+  // is only the fallback for agents and callers with no prompt of their own.
+  chosenDiscardId?: string
 ): { session: GameSession; ability: GenericTapAbility; card: VisibleCard; poolSpent?: ManaPool } | undefined {
   const seat = session.seats.find((item) => item.id === seatId);
   const card = seat?.board.battlefield.find((item) => item.id === cardId);
@@ -10809,21 +10862,24 @@ export function payGenericTapCost(
   if (!ability) return undefined;
   if (!activateOnlyIfConditionMet(ability.clause, seat)) return undefined;
 
-  const discardCard = ability.costDiscard ? chooseWorstHandCardToDiscard(seat) : undefined;
+  const discardCard = ability.costDiscard
+    ? (chosenDiscardId ? seat.board.hand.find((handCard) => handCard.id === chosenDiscardId) : undefined) ?? chooseWorstHandCardToDiscard(seat)
+    : undefined;
   if (ability.costDiscard && !discardCard) return undefined;
 
-  const costCard = genericCostShim(ability.costMana);
-  const poolPayment = ability.costMana > 0 && humanPool ? payCostFromPool(humanPool, costCard, ability.costMana) : undefined;
+  const totalManaCost = manaValueFromManaCost(ability.costManaText);
+  const costCard = genericManaAbilityCostShim(ability);
+  const poolPayment = totalManaCost > 0 && humanPool ? payCostFromPool(humanPool, costCard, totalManaCost) : undefined;
   // excludeCardId: cardId — same self-tap exclusion as payGenericSacrificeCost above: this
   // ability's own {T} already requires the source untapped, so it can't also tap itself via a
   // separate mana ability of its own to help pay this same activation's generic cost.
   const payment =
-    ability.costMana > 0
+    totalManaCost > 0
       ? poolPayment?.ok
         ? poolPayment
-        : chooseManaSourcesForCost(seat, costCard, ability.costMana, cardId, session.seats)
+        : chooseManaSourcesForCost(seat, costCard, totalManaCost, cardId, session.seats)
       : undefined;
-  if (ability.costMana > 0 && !payment?.ok) return undefined;
+  if (totalManaCost > 0 && !payment?.ok) return undefined;
 
   let next = session;
   if (payment?.ok && !poolPayment?.ok) {
@@ -12809,6 +12865,8 @@ function zoneEffectHasLegalTarget(session: GameSession, casterSeatId: string, ef
     case "impulse_draw":
     case "steal_and_play":
     case "draw_x_then_put_back":
+    case "surveil":
+    case "look_dig":
       return true;
   }
 }
@@ -13591,8 +13649,101 @@ export function applyZoneEffect(session: GameSession, casterSeatId: string, sour
     case "steal_and_play":
       return applyStealAndPlay(session, casterSeatId, sourceName);
     case "draw_x_then_put_back":
-      return applyDrawXThenPutBack(session, casterSeatId, sourceName, chosenX ?? 0, effect.putBackAmount);
+      return applyDrawXThenPutBack(session, casterSeatId, sourceName, effect.drawAmount ?? chosenX ?? 0, effect.putBackAmount);
+    case "surveil":
+      return applySurveilEffect(session, casterSeatId, sourceName, effect.amount);
+    case "look_dig":
+      return applyLookDigEffect(session, casterSeatId, sourceName, effect);
   }
+}
+
+// Surveil N: look at the top N library cards, put any number into the graveyard, the rest back on
+// top in any order (rule 701.42). A real player evaluates each card; this auto-choice is a simple,
+// deterministic stand-in that only ever bins LANDS and keeps everything else on top in its original
+// order — a rough "thin excess lands, keep spells" heuristic, not an attempt at optimal play (this
+// engine has no general "is this card good right now" evaluator to lean on here, same simplification
+// every other auto-pick in this file already makes).
+function applySurveilEffect(session: GameSession, casterSeatId: string, sourceName: string, amount: number): GameSession {
+  const seat = session.seats.find((item) => item.id === casterSeatId);
+  if (!seat) return session;
+  const library = seat.library ?? [];
+  const looked = library.slice(0, amount);
+  if (looked.length === 0) return session;
+  const kept = looked.filter((card) => !card.typeLine.includes("Land"));
+  const binned = looked.filter((card) => card.typeLine.includes("Land"));
+  const rest = library.slice(looked.length);
+
+  return {
+    ...session,
+    seats: session.seats.map((item) => {
+      if (item.id !== casterSeatId) return item;
+      return {
+        ...item,
+        library: [...kept, ...rest],
+        board: { ...item.board, graveyard: [...(item.board.graveyard ?? []), ...binned.map((card) => ({ ...card, zone: "graveyard" as const }))] },
+        zones: { ...item.zones, graveyard: item.zones.graveyard + binned.length }
+      };
+    }),
+    events: [
+      phaseEvent(
+        casterSeatId,
+        binned.length > 0
+          ? `${seat.name} surveils ${amount} with ${sourceName}, putting ${binned.map((card) => card.name).join(", ")} into the graveyard and the rest on top.`
+          : `${seat.name} surveils ${amount} with ${sourceName} and keeps everything on top.`
+      ),
+      ...session.events
+    ]
+  };
+}
+
+// "Reveal/look at the top N cards, put [a matching one / one of them] into your hand, put the rest
+// into the graveyard / back on top in any order" (Grisly Salvage, Diabolic Vision). Auto-choice: the
+// FIRST card among those looked at that matches cardTypeFilter (or, with no filter, simply the first
+// one) goes to hand; this doesn't try to evaluate which candidate is actually best, same
+// simplification as every other auto-pick in this file. "Rest back on top in any order" keeps its
+// original relative order — a fully legal resolution of "any order," not an attempt to sequence a
+// future draw.
+function applyLookDigEffect(session: GameSession, casterSeatId: string, sourceName: string, effect: LookDigEffect): GameSession {
+  const seat = session.seats.find((item) => item.id === casterSeatId);
+  if (!seat) return session;
+  const library = seat.library ?? [];
+  const looked = library.slice(0, effect.amount);
+  if (looked.length === 0) return session;
+  const rest = library.slice(looked.length);
+
+  const chosen = effect.cardTypeFilter ? looked.find((card) => cardMatchesTypeFilter(card.typeLine, effect.cardTypeFilter!)) : looked[0];
+  const notChosen = looked.filter((card) => card.id !== chosen?.id);
+  const toGraveyard = effect.restDestination === "graveyard";
+  const newLibrary = toGraveyard ? rest : [...notChosen, ...rest];
+
+  return {
+    ...session,
+    seats: session.seats.map((item) => {
+      if (item.id !== casterSeatId) return item;
+      return {
+        ...item,
+        library: newLibrary,
+        board: {
+          ...item.board,
+          hand: chosen ? [...item.board.hand, { ...chosen, zone: "hand" as const }] : item.board.hand,
+          graveyard: toGraveyard ? [...(item.board.graveyard ?? []), ...notChosen.map((card) => ({ ...card, zone: "graveyard" as const }))] : item.board.graveyard
+        },
+        zones: {
+          ...item.zones,
+          graveyard: toGraveyard ? item.zones.graveyard + notChosen.length : item.zones.graveyard
+        }
+      };
+    }),
+    events: [
+      phaseEvent(
+        casterSeatId,
+        chosen
+          ? `${seat.name} digs with ${sourceName}, puts ${chosen.name} into hand, and ${toGraveyard ? "puts the rest into the graveyard" : "keeps the rest on top"}.`
+          : `${seat.name} digs with ${sourceName} but finds no ${effect.cardTypeFilter ?? "matching"} card, ${toGraveyard ? "putting them all into the graveyard" : "keeping them all on top"}.`
+      ),
+      ...session.events
+    ]
+  };
 }
 
 // Replaces the standalone word "X" with the caster's actual paid X, so a mode/effect written with
@@ -17920,7 +18071,7 @@ export function genericCostShim(amount: number): VisibleCard {
 // it the same way they already do for a real card's casting cost — genericCostShim's plain numeric
 // amount has no color information, which silently treated a colored activation cost (Greed's
 // "{B}, Pay 2 life: Draw a card.") as free, since its digit-only mana-symbol sum found no digits.
-function genericManaAbilityCostShim(ability: GenericManaAbility): VisibleCard {
+function genericManaAbilityCostShim(ability: { costManaText: string }): VisibleCard {
   return { ...genericCostShim(manaValueFromManaCost(ability.costManaText)), manaCost: ability.costManaText || undefined };
 }
 

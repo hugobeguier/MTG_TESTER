@@ -271,12 +271,20 @@ export function hasGraveyardShuffleReplacement(oracleText: string): boolean {
 // reported live as Grisly Salvage's "To Hand" button never appearing for ANY card, creature or land
 // included. Splitting on " or " and matching any alternative handles both the single-type case
 // (Growing Rites' plain "creature") and the multi-type case the same way.
+//
+// A comma-separated list with a trailing "or" (Farseek's "a Plains, Island, Swamp, or Mountain
+// card") is the same restriction with more than two alternatives — splitting on commas too, then
+// trimming a leftover "or " prefix off whichever part had it, turns "plains, island, swamp, or
+// mountain" into the same four independent alternatives " or "-only splitting already handled for
+// exactly two.
 export function cardMatchesTypeFilter(typeLine: string, filter: string): boolean {
   const normalizedTypeLine = typeLine.toLowerCase();
   return filter
     .toLowerCase()
-    .split(" or ")
-    .some((part) => normalizedTypeLine.includes(part.trim()));
+    .split(/,| or /)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0)
+    .some((part) => normalizedTypeLine.includes(part));
 }
 
 // "Whenever ~ attacks, add X mana in any combination of colors, where X is the total power of

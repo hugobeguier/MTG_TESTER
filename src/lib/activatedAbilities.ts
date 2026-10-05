@@ -65,8 +65,13 @@ const TRIGGER_CONDITION_PREFIX = "(?:(?:when|whenever)\\b[^,]*,\\s*)?(?:you may\
 // Advisor (rulesAdvisor.ts's own graveyard-destination handling), never this deterministic parser, so
 // self-play's headless resolver (which has no Rules Advisor at all) had no way to recognize these
 // casts. Same template otherwise, just a third destination phrase.
+//
+// The type-word group now also tolerates commas (Farseek's "a Plains, Island, Swamp, or Mountain
+// card") — cardMatchesTypeFilter (oracleClauses.ts) already splits a comma-and-"or" list into
+// independent alternatives, but couldn't do that if this regex never captured the comma-bearing
+// phrase as the type word in the first place.
 const SEARCH_LIBRARY_PATTERN = new RegExp(
-  `^${TRIGGER_CONDITION_PREFIX}search your library for (?:up to ${COUNT_WORD}|an?)\\s+(?:([a-z][a-z ]*?)\\s+)?cards?(?:\\s+(?:that share|sharing) an? [a-z]+ type)?,?(?: reveal (?:it|them),?)? put (?:it|that card|them) (into your hand|onto the battlefield(?: tapped)?|into your graveyard),? then shuffle\\.?`,
+  `^${TRIGGER_CONDITION_PREFIX}search your library for (?:up to ${COUNT_WORD}|an?)\\s+(?:([a-z][a-z ,]*?)\\s+)?cards?(?:\\s+(?:that share|sharing) an? [a-z]+ type)?,?(?: reveal (?:it|them),?)? put (?:it|that card|them) (into your hand|onto the battlefield(?: tapped)?|into your graveyard),? then shuffle\\.?`,
   "i"
 );
 
@@ -133,6 +138,10 @@ export type SacrificeEffect =
 
 export interface SacrificeAbility {
   costMana: number;
+  // Raw {..} mana symbols from the cost prefix, {T} excluded (e.g. "{1}{B}") — costMana alone is a
+  // digit-only sum, so a colored pip like {B} contributes nothing to it; callers pay through this
+  // text (shim card + manaRequirementForCard) so the colored requirement is actually enforced.
+  costManaText: string;
   costTap: boolean;
   costDiscard: boolean;
   // "Pay 1 life" as part of the activation cost (Arid Mesa and the rest of the Onslaught/Zendikar
@@ -226,7 +235,8 @@ export function parseGenericSacrificeAbilities(oracleText: string): SacrificeAbi
     const effect = parseSacrificeEffectText(effectText);
     if (!effect) continue;
 
-    abilities.push({ costMana, costTap, costDiscard, costLife, sacrificeTarget, sacrificeTargetTypeFilter, sacrificeCount, effect, clause });
+    const costManaText = (costPrefix.match(/\{[^}]+\}/g) ?? []).filter((symbol) => !/^\{t\}$/i.test(symbol)).join("");
+    abilities.push({ costMana, costManaText, costTap, costDiscard, costLife, sacrificeTarget, sacrificeTargetTypeFilter, sacrificeCount, effect, clause });
   }
 
   return abilities;
@@ -248,6 +258,9 @@ export type GenericTapEffect =
 
 export interface GenericTapAbility {
   costMana: number;
+  // See SacrificeAbility.costManaText — Cryptbreaker's "{1}{B}, {T}, Discard a card" was paid as a
+  // plain {1} because costMana sums digits only, leaving the {B} free.
+  costManaText: string;
   // "Discard a [Type] card" as part of the cost (Fauna Shaman's "{G}, {T}, Discard a creature
   // card: ..."). Not type-filtered at resolution time — chooseWorstHandCardToDiscard picks
   // whatever's worst regardless of type, the same simplification parseGenericSacrificeAbilities'
@@ -302,7 +315,8 @@ export function parseGenericTapAbilities(oracleText: string): GenericTapAbility[
     const effect = parseGenericTapEffectText(effectText);
     if (!effect) continue;
 
-    abilities.push({ costMana, costDiscard, untapsSelf, effect, clause });
+    const costManaText = (costPrefix.match(/\{[^}]+\}/g) ?? []).filter((symbol) => !/^\{t\}$/i.test(symbol)).join("");
+    abilities.push({ costMana, costManaText, costDiscard, untapsSelf, effect, clause });
   }
 
   return abilities;

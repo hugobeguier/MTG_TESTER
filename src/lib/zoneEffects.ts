@@ -91,9 +91,47 @@ export interface StealAndPlayEffect {
 // order." The draw amount is the spell's own paid X, which only the caller (AppFlow.tsx, at spell
 // resolution) has access to via the cast action's chosenX — this effect only carries the fixed
 // put-back count; the caller supplies X separately when applying it.
+//
+// Brainstorm-style: the SAME "draw N, put M back" shape but with a literal printed draw count
+// instead of "X" (Brainstorm draws three, Brainsurge itself is actually printed as a fixed "draw
+// four" on this engine's own card data, not an X spell at all, despite the name suggesting
+// otherwise) — drawAmount carries that literal count directly, so the caller doesn't need a chosenX
+// at all for these. Undefined means "this was the literal word X," matching the original shape.
 export interface DrawXThenPutBackEffect {
   kind: "draw_x_then_put_back";
   putBackAmount: number;
+  drawAmount?: number;
+}
+
+// "Surveil N." (Otherworldly Gaze, and the whole Ikoira-onward surveil family) — real Magic
+// templating always prints this as a bare digit ("Surveil 3."), never spelled out, unlike most other
+// count words this file parses. Previously routed live through the LLM-backed Rules Advisor
+// (rulesAdvisor.ts's surveil_cards workflow) rather than this deterministic parser, and not
+// recognized by self-play's bare-spell resolver at all — folded into ZoneEffect (not a standalone
+// parser) so both consumers pick it up through the same parseZoneEffect/applyZoneEffect call sites
+// they already have, with no separate wiring. See applySurveilEffect's own comment for the
+// auto-choice it makes once parsed.
+export interface SurveilEffect {
+  kind: "surveil";
+  amount: number;
+}
+
+// "Reveal/look at the top N cards of your library, [you may] put [a/one of] [a type-restricted] card
+// from among them into your hand, put the rest into your graveyard/back on top in any order." (Grisly
+// Salvage, Diabolic Vision, and the wider "dig" family) — two real templates fold into this one
+// shape: Grisly Salvage's "you may put a creature or land card... put the rest into your graveyard"
+// (typed, optional, rest to graveyard) and Diabolic Vision's "put one of them into your hand and the
+// rest on top... in any order" (untyped, effectively mandatory since any card matches, rest back on
+// top). Both were previously routed live through the LLM-backed Rules Advisor
+// (rulesAdvisor.ts's look_at_top_cards_reveal_type_to_hand workflow for the first, the much vaguer
+// generic look_at_top_cards fallback for the second — see that file's own comment on why Diabolic
+// Vision never got a precise dedicated workflow at all) and not recognized by self-play's bare-spell
+// resolver either. See applyLookDigEffect's own comment for the auto-choice it makes once parsed.
+export interface LookDigEffect {
+  kind: "look_dig";
+  amount: number;
+  cardTypeFilter?: string;
+  restDestination: "graveyard" | "library_top";
 }
 
 // Victimize-style: "Choose N target creature cards in your graveyard. Sacrifice a creature. If you
@@ -123,7 +161,9 @@ export type ZoneEffect =
   | GainControlEffect
   | ImpulseDrawEffect
   | StealAndPlayEffect
-  | DrawXThenPutBackEffect;
+  | DrawXThenPutBackEffect
+  | SurveilEffect
+  | LookDigEffect;
 
 function numberWordToInt(value?: string): number | undefined {
   if (!value) return undefined;
@@ -289,11 +329,43 @@ export function parseZoneEffect(oracleText: string): ZoneEffect | undefined {
   }
 
   const drawXThenPutBack = text.match(
-    /\bdraw x cards?,?\s*then put (a|one|two|three|four|five|\d+) cards? from your hand on top of your library in any order\b/
+    /\bdraw (x|a|one|two|three|four|five|six|seven|eight|nine|ten|\d+) cards?,?\s*then put (a|one|two|three|four|five|\d+) cards? from your hand on top of your library in any order\b/
   );
   if (drawXThenPutBack) {
-    const putBackAmount = numberWordToInt(drawXThenPutBack[1]);
-    if (putBackAmount) return { kind: "draw_x_then_put_back", putBackAmount };
+    const putBackAmount = numberWordToInt(drawXThenPutBack[2]);
+    if (putBackAmount) {
+      const drawWord = drawXThenPutBack[1];
+      const drawAmount = drawWord.toLowerCase() === "x" ? undefined : numberWordToInt(drawWord);
+      return { kind: "draw_x_then_put_back", putBackAmount, drawAmount };
+    }
+  }
+
+  // Real templating always prints a bare digit ("Surveil 3."), never a spelled-out word.
+  const surveil = text.match(/\bsurveil (\d+)\b/);
+  if (surveil) {
+    const amount = Number.parseInt(surveil[1], 10);
+    if (amount > 0) return { kind: "surveil", amount };
+  }
+
+  // Grisly Salvage-shaped: typed, optional, rest to graveyard. Checked first since its own "reveal...
+  // you may put... put the rest into your graveyard" wording never overlaps with the untyped
+  // Diabolic Vision shape below.
+  const typedDigToGraveyard = text.match(
+    /\breveal the top (\w+) cards? of your library\.\s*you may put an? ([a-z][a-z ]*?) cards? from among them into your hand\.\s*put the rest into your graveyard\b/
+  );
+  if (typedDigToGraveyard) {
+    const amount = numberWordToInt(typedDigToGraveyard[1]);
+    if (amount) return { kind: "look_dig", amount, cardTypeFilter: typedDigToGraveyard[2].trim(), restDestination: "graveyard" };
+  }
+
+  // Diabolic Vision-shaped: untyped ("one of them," any card qualifies), rest back on top in any
+  // order.
+  const untypedDigToTop = text.match(
+    /\b(?:look at|reveal) the top (\w+) cards? of your library\.\s*put one of them into your hand and the rest (?:on top of your library|back on top) in any order\b/
+  );
+  if (untypedDigToTop) {
+    const amount = numberWordToInt(untypedDigToTop[1]);
+    if (amount) return { kind: "look_dig", amount, cardTypeFilter: undefined, restDestination: "library_top" };
   }
 
   return undefined;

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   basicLandFetchCostRequiresTap,
   basicLandFetchManaCost,
+  cardMatchesTypeFilter,
   cardsLeaveGraveyardEffectText,
   combatDamageToPlayerEffectText,
   deathEffectText,
@@ -22,6 +23,26 @@ import {
   parseModalHeader,
   parseSagaChapters
 } from "./oracleClauses";
+
+describe("cardMatchesTypeFilter", () => {
+  it("matches a single type", () => {
+    expect(cardMatchesTypeFilter("Creature — Bear", "creature")).toBe(true);
+    expect(cardMatchesTypeFilter("Land", "creature")).toBe(false);
+  });
+
+  it("matches any alternative in a two-way 'X or Y' filter (Grisly Salvage)", () => {
+    expect(cardMatchesTypeFilter("Creature — Bear", "creature or land")).toBe(true);
+    expect(cardMatchesTypeFilter("Basic Land — Forest", "creature or land")).toBe(true);
+    expect(cardMatchesTypeFilter("Instant", "creature or land")).toBe(false);
+  });
+
+  it("matches any alternative in a comma-separated list with a trailing 'or' (Farseek)", () => {
+    const filter = "Plains, Island, Swamp, or Mountain";
+    expect(cardMatchesTypeFilter("Basic Land — Plains", filter)).toBe(true);
+    expect(cardMatchesTypeFilter("Basic Land — Mountain", filter)).toBe(true);
+    expect(cardMatchesTypeFilter("Basic Land — Forest", filter)).toBe(false);
+  });
+});
 
 describe("hasGraveyardShuffleReplacement", () => {
   it("recognizes Blightsteel Colossus's real oracle text", () => {

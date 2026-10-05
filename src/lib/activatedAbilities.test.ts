@@ -82,6 +82,7 @@ describe("parseGenericSacrificeAbilities", () => {
     expect(abilities).toEqual([
       {
         costMana: 2,
+        costManaText: "{2}",
         costTap: true,
         costDiscard: false,
         costLife: 0,
@@ -232,6 +233,13 @@ describe("parseGenericSacrificeAbilities", () => {
 });
 
 describe("parseGenericTapAbilities", () => {
+  // Reported live: Cryptbreaker's {1}{B} was paid as just {1} (one Swamp) because costMana only
+  // sums digit symbols. costManaText must keep the colored pip so the full cost is enforced.
+  it("keeps colored pips in costManaText (Cryptbreaker's {1}{B}, {T}, Discard a card)", () => {
+    const [ability] = parseGenericTapAbilities("{1}{B}, {T}, Discard a card: Create a 2/2 black Zombie creature token.");
+    expect(ability).toMatchObject({ costManaText: "{1}{B}", costDiscard: true, effect: { kind: "create_tokens" } });
+  });
+
   it("parses Retrofitter Foundry's real '{2}, {T}: Create a Servo' ability", () => {
     const [ability] = parseGenericTapAbilities("{2}, {T}: Create a 1/1 colorless Servo artifact creature token.");
     expect(ability).toMatchObject({ costMana: 2, untapsSelf: false, effect: { kind: "create_tokens" } });
@@ -407,6 +415,18 @@ describe("parseSearchLibraryEffectText", () => {
       tapped: false,
       cardTypeFilter: "creature",
       count: 3
+    });
+  });
+
+  it("parses a comma-separated multi-type tutor to battlefield tapped (Farseek)", () => {
+    expect(
+      parseSearchLibraryEffectText("search your library for a Plains, Island, Swamp, or Mountain card, put it onto the battlefield tapped, then shuffle.")
+    ).toEqual({
+      kind: "search_library",
+      destination: "battlefield",
+      tapped: true,
+      cardTypeFilter: "Plains, Island, Swamp, or Mountain",
+      count: 1
     });
   });
 

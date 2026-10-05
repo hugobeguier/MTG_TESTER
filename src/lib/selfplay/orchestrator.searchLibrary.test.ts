@@ -93,12 +93,26 @@ describe("applySearchLibraryEffect", () => {
     expect(result.events[0].message).toContain("no creature card");
   });
 
-  it("does nothing for a battlefield-destination search (not handled here — see the function's own comment)", () => {
-    const library = [libraryCard("1", "Forest", "Basic Land — Forest")];
-    const effect: SearchLibraryEffect = { kind: "search_library", destination: "battlefield", tapped: false, cardTypeFilter: "forest", count: 1 };
-    const before = session(seatWithLibrary(library));
-    const result = applySearchLibraryEffect(before, "p", "Nature's Lore", effect);
+  it("puts a comma-filtered land onto the battlefield tapped and shuffles the rest (Farseek-shaped)", () => {
+    const library = [
+      libraryCard("1", "Forest", "Basic Land — Forest"),
+      libraryCard("2", "Mountain", "Basic Land — Mountain"),
+      libraryCard("3", "Bear", "Creature — Bear")
+    ];
+    const effect: SearchLibraryEffect = {
+      kind: "search_library",
+      destination: "battlefield",
+      tapped: true,
+      cardTypeFilter: "Plains, Island, Swamp, or Mountain",
+      count: 1
+    };
+    const result = applySearchLibraryEffect(session(seatWithLibrary(library)), "p", "Farseek", effect);
+    const seat = result.seats[0];
 
-    expect(result).toBe(before);
+    expect(seat.board.battlefield.map((c) => c.name)).toEqual(["Mountain"]);
+    expect(seat.board.battlefield[0].tapped).toBe(true);
+    expect(seat.library?.map((c) => c.id).sort()).toEqual(["1", "3"]);
+    expect(result.events[0].message).toContain("Mountain");
+    expect(result.events[0].message).toContain("tapped");
   });
 });
