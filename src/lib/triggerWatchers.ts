@@ -96,12 +96,13 @@ function parsePart(rawPart: string, sourceName: string): SubjectPart | undefined
 
 // "Whenever this creature or another nontoken Zombie you control dies, ..." for event "dies"; same for
 // "enters". `afterVerb` catches the trailing "under your control" of "a land enters under your control".
-export function matchWatcherSubject(oracleText: string, event: "enters" | "dies" | "attacks", context: WatcherSubjectContext): boolean | undefined {
+export function matchWatcherSubject(oracleText: string, event: "enters" | "dies" | "attacks" | "blocks", context: WatcherSubjectContext): boolean | undefined {
   const verb = event;
   let sawClause = false;
   let allParsed = true;
   for (const rawClause of oracleText.split("\n")) {
-    const clause = rawClause.replace(/\([^)]*\)/g, "").trim().toLowerCase();
+    // "attacks or blocks" is one trigger watching both events; reduce it to whichever verb is being asked about.
+    const clause = rawClause.replace(/\([^)]*\)/g, "").trim().toLowerCase().replace(/\battacks or blocks\b/, verb);
     const match = clause.match(new RegExp(`\\b(?:when|whenever)\\s+([^,.:]+?)\\s+${verb}\\b([^,.]*)`));
     if (!match) continue;
     sawClause = true;

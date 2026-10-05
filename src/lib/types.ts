@@ -429,6 +429,9 @@ export interface GameSession {
   // permanent with "attacks" text, whether or not the creature actually attacked (Grave Titan, Eternal
   // Taskmaster, Drakuseth, Tyrant's Familiar, ...). declareAttack is a pure transformer with no access
   // to the trigger-queueing machinery, so it records the attack here and a component effect drains it.
+  // Same idea for blockers: filled by assignBlockers, drained by a component effect that queues "whenever this creature blocks"
+  // / "attacks or blocks" triggers (Elder Gargaroth).
+  pendingBlockDeclarations?: Array<{ seatId: string; card: VisibleCard; attackerSeatId: string }>;
   pendingAttackDeclarations?: Array<{ seatId: string; card: VisibleCard; defendingSeatId: string }>;
   // Rule 724: the player who is currently the monarch (Court of Grace, Skyline Despot, Marchesa's Decree). They draw
   // an extra card at the beginning of their end step, and a creature that deals combat damage to them makes its

@@ -269,3 +269,21 @@ describe("life gain triggers (real Oracle text)", () => {
     expect(lifeGainReplacementBonus(seat("a", [bear("x")]))).toBe(0);
   });
 });
+
+describe("Elder Gargaroth: attacks or blocks, choose one (real Oracle text)", () => {
+  const garg = () => real("Elder Gargaroth", "garg", { power: "6", toughness: "6" });
+  it("queues a modal trigger when it attacks and when it blocks, but not when another creature does", () => {
+    const s = session([seat("a", [garg(), bear("other")]), seat("b", [])]);
+    const attackTriggers = findAttackTriggers(s, { seatId: "a", card: garg(), defendingSeatId: "b" }).triggers;
+    expect(attackTriggers).toHaveLength(1);
+    expect(attackTriggers[0].effect.kind).toBe("modal");
+    expect(findAttackTriggers(s, { seatId: "a", card: garg(), defendingSeatId: "b" }, "blocks").triggers).toHaveLength(1);
+    expect(findAttackTriggers(s, { seatId: "a", card: bear("other"), defendingSeatId: "b" }).triggers).toHaveLength(0);
+  });
+  it("resolving the trigger performs a mode (a Beast token for the first viable mode)", () => {
+    const s = session([seat("a", [garg()]), seat("b", [])]);
+    const trigger = findAttackTriggers(s, { seatId: "a", card: garg(), defendingSeatId: "b" }).triggers[0];
+    const after = resolveTriggerEffect(s, trigger);
+    expect(after.seats[0].board.battlefield.some((card) => /Beast/.test(card.name))).toBe(true);
+  });
+});

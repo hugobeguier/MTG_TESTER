@@ -146,6 +146,8 @@ type LibraryLookMode = "scry" | "surveil" | "reorder" | "choose_one" | "choose_o
 // just because it's beneficial (and it's also how an unbounded self-copy loop, like Ondu
 // Spiritdancer under Secret Arcade, used to happen with no way to stop it).
 type TriggerEffect = (
+  // A "choose one —" triggered ability (Elder Gargaroth): the parsed modes, resolved through applyGenericModalEffect.
+  | { kind: "modal"; modal: GenericModalEffect }
   | { kind: "draw_cards"; amount: number }
   | { kind: "gain_life"; amount: number }
   | { kind: "lose_life"; amount: number }
@@ -1818,6 +1820,17 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     }
     if (queued.length > 0 && !pendingAction) queueCommonTriggers(queued);
   }, [session.seats, mode, gameStage]);
+
+  const processedBlockBatchRef = useRef<GameSession["pendingBlockDeclarations"]>(undefined);
+  useEffect(() => {
+    if (pendingAction) return;
+    const blocks = session.pendingBlockDeclarations;
+    if (!blocks || blocks.length === 0 || blocks === processedBlockBatchRef.current) return;
+    processedBlockBatchRef.current = blocks;
+    const queued = blocks.flatMap((block) => findAttackTriggers(session, { seatId: block.seatId, card: block.card, defendingSeatId: block.attackerSeatId }, "blocks").triggers);
+    setSession((current) => (current.pendingBlockDeclarations === blocks ? { ...current, pendingBlockDeclarations: undefined } : current));
+    if (queued.length > 0) queueCommonTriggers(queued);
+  }, [session.pendingBlockDeclarations, pendingAction]);
 
   const processedAttackBatchRef = useRef<GameSession["pendingAttackDeclarations"]>(undefined);
   useEffect(() => {
@@ -8831,6 +8844,7 @@ export function assignBlockers(session: GameSession, choice: BlockChoiceState, b
   const blockerIds = new Set(blockers.map((card) => card.id));
   return {
     ...decidedSession,
+    pendingBlockDeclarations: [...(decidedSession.pendingBlockDeclarations ?? []), ...blockers.map((blocker) => ({ seatId: defender.id, card: { ...blocker, blocking: true }, attackerSeatId: attacker.id }))],
     seats: decidedSession.seats.map((seat) => {
       if (seat.id === defender.id) {
         return {
@@ -16533,7 +16547,8 @@ export function lifeGainReplacementBonus(seat: PlayerSeat): number {
 
 export function findAttackTriggers(
   session: GameSession,
-  attack: { seatId: string; card: VisibleCard; defendingSeatId: string }
+  attack: { seatId: string; card: VisibleCard; defendingSeatId: string },
+  event: "attacks" | "blocks" = "attacks"
 ): { triggers: Array<Extract<PendingAction, { type: "trigger" }>>; unparsed: Array<{ seatId: string; source: VisibleCard }> } {
   const triggers: Array<Extract<PendingAction, { type: "trigger" }>> = [];
   const unparsed: Array<{ seatId: string; source: VisibleCard }> = [];
@@ -16541,8 +16556,10 @@ export function findAttackTriggers(
     if (sourceSeat.hasLost) continue;
     for (const source of sourceSeat.board.battlefield) {
       if (source.abilitiesStripped) continue;
-      for (const clause of oracleClauses(source.oracleText)) {
-        if (isActivatedAbilityClause(clause) || !/\b(?:when|whenever)\b[^,.]*\battacks\b/i.test(clause)) continue;
+      const sourceClauses = oracleClauses(source.oracleText);
+      for (const [clauseIndex, clause] of sourceClauses.entries()) {
+        const eventPattern = event === "attacks" ? /\b(?:when|whenever)\b[^,.]*\battacks\b/i : /\b(?:when|whenever)\b[^,.]*\bblocks\b/i;
+        if (isActivatedAbilityClause(clause) || !eventPattern.test(clause)) continue;
         // Owned by declareAttack's own inline handling.
         if (isAttackTriggerAddManaClause(clause) || parseMetalcraftAttackDebuff(clause)) continue;
         // "Lieutenant — As long as you control your commander, this creature gets +2/+2 and has \"Whenever this
@@ -16555,7 +16572,7 @@ export function findAttackTriggers(
           if (!quoted) continue;
           triggerClause = quoted[1];
         }
-        const applies = matchWatcherSubject(triggerClause, "attacks", {
+        const applies = matchWatcherSubject(triggerClause, event, {
           sourceId: source.id,
           sourceName: source.name,
           subject: attack.card,
@@ -16567,9 +16584,19 @@ export function findAttackTriggers(
           if (sourceSeat.id === attack.seatId && source.id === attack.card.id) unparsed.push({ seatId: sourceSeat.id, source });
           continue;
         }
-        const effect = commonTriggerEffect(triggerClause, "clause", undefined, sourceSeat);
+        let effect = commonTriggerEffect(triggerClause, "clause", undefined, sourceSeat);
+        // "..., choose one —" with the modes on the following bullet lines.
+        if (!effect && /[—-]\s*$/.test(triggerClause)) {
+          const bullets: string[] = [];
+          for (const next of sourceClauses.slice(clauseIndex + 1)) {
+            if (!/^[•*]/.test(next)) break;
+            bullets.push(next);
+          }
+          const modal = parseGenericModalEffect([triggerClause, ...bullets].join("\n"), undefined);
+          if (modal) effect = { kind: "modal", modal };
+        }
         if (effect) {
-          triggers.push(makeCommonTrigger(attack.seatId, sourceSeat.id, source, effect, `${source.name} triggers because ${attack.card.name} attacked.`, attack.card.id));
+          triggers.push(makeCommonTrigger(attack.seatId, sourceSeat.id, source, effect, `${source.name} triggers because ${attack.card.name} ${event === "attacks" ? "attacked" : "blocked"}.`, attack.card.id));
         } else if (sourceSeat.id === attack.seatId) {
           unparsed.push({ seatId: sourceSeat.id, source });
         }
@@ -17760,6 +17787,10 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
   const seatName = session.seats.find((seat) => seat.id === trigger.controllerSeatId)?.name ?? "Player";
   if (trigger.effect.kind === "draw_cards") {
     return drawMultipleForSeat(session, trigger.controllerSeatId, trigger.effect.amount, `${trigger.sourceCardName} trigger resolves. ${seatName} draws ${trigger.effect.amount} card${trigger.effect.amount === 1 ? "" : "s"}.`);
+  }
+  if (trigger.effect.kind === "modal") {
+    const modalSource = session.seats.flatMap((seat) => seat.board.battlefield).find((card) => card.id === trigger.sourceCardId);
+    return modalSource ? applyGenericModalEffect(session, trigger.controllerSeatId, modalSource, trigger.effect.modal) : session;
   }
   if (trigger.effect.kind === "scry_cards" || trigger.effect.kind === "surveil_cards") {
     return resolveAgentLibraryLookWorkflow(session, trigger.controllerSeatId, trigger.sourceCardName, trigger.effect.kind, trigger.effect.amount);
