@@ -10,11 +10,12 @@
 // to their existing logic instead of guessing.
 
 import { permanentMatchesQualifier } from "./characteristics";
+import { hasKeyword } from "./keywords";
 
 export interface WatcherSubjectContext {
   sourceId: string;
   sourceName: string;
-  subject: { id: string; typeLine: string; token?: boolean; grantedTypes?: string[]; colors?: string[] };
+  subject: { id: string; typeLine: string; token?: boolean; grantedTypes?: string[]; colors?: string[]; power?: string; oracleText?: string };
   // The permanent entering / dying is controlled by the same player who controls the watcher.
   subjectIsControlledBySourceController: boolean;
   // "attacks" only: the player being attacked is the source's controller ("attacks you or a planeswalker
@@ -25,6 +26,9 @@ export interface WatcherSubjectContext {
 type Control = "you" | "opponent" | "any";
 
 interface SubjectPart {
+  // "a creature with power 3 or greater" / "a creature with flying" (Garruk's Packleader, Dragon Tempest).
+  minPower?: number;
+  keyword?: string;
   self: boolean;
   another: boolean;
   descriptor: string;
@@ -64,8 +68,20 @@ function parsePart(rawPart: string, sourceName: string): SubjectPart | undefined
       break;
     }
   }
+  let minPower: number | undefined;
+  let keyword: string | undefined;
+  const powerCondition = rest.match(/\s+with power (\d+) or greater$/);
+  if (powerCondition) {
+    minPower = Number.parseInt(powerCondition[1], 10);
+    rest = rest.replace(powerCondition[0], "").trim();
+  }
+  const keywordCondition = rest.match(/\s+with (flying|haste|reach|trample|deathtouch|lifelink|first strike|vigilance|menace|hexproof)$/);
+  if (keywordCondition) {
+    keyword = keywordCondition[1];
+    rest = rest.replace(keywordCondition[0], "").trim();
+  }
   if (!rest || !descriptorIsEvaluable(rest)) return undefined;
-  return { self: false, another: match[1] === "another" || match[1] === "each other", descriptor: rest, control };
+  return { self: false, another: match[1] === "another" || match[1] === "each other", descriptor: rest, control, minPower, keyword };
 }
 
 // "Whenever this creature or another nontoken Zombie you control dies, ..." for event "dies"; same for
@@ -79,7 +95,8 @@ export function matchWatcherSubject(oracleText: string, event: "enters" | "dies"
     const match = clause.match(new RegExp(`\\b(?:when|whenever)\\s+([^,.:]+?)\\s+${verb}\\b([^,.]*)`));
     if (!match) continue;
     sawClause = true;
-    const parts = match[1].split(/\s+or\s+/).map((part) => parsePart(part, context.sourceName));
+    // "...with power 3 or greater" contains an "or" that separates nothing.
+    const parts = match[1].split(/\s+or\s+(?!greater\b|less\b|fewer\b)/).map((part) => parsePart(part, context.sourceName));
     if (parts.some((part) => part === undefined)) {
       allParsed = false;
       continue;
@@ -97,6 +114,8 @@ export function matchWatcherSubject(oracleText: string, event: "enters" | "dies"
       }
       if (part.another && context.subject.id === context.sourceId) continue;
       if (!permanentMatchesQualifier(context.subject, part.descriptor)) continue;
+      if (part.minPower !== undefined && !(Number.parseInt(context.subject.power ?? "", 10) >= part.minPower)) continue;
+      if (part.keyword && !hasKeyword(context.subject.oracleText ?? "", part.keyword)) continue;
       const control = part.control !== "any" ? part.control : trailingControl ?? "any";
       if (control === "you" && !context.subjectIsControlledBySourceController) continue;
       if (control === "opponent" && context.subjectIsControlledBySourceController) continue;

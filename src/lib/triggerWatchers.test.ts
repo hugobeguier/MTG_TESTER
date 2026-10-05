@@ -92,3 +92,20 @@ describe("matchWatcherSubject — dies", () => {
     expect(check(text, "dies", zombieToken)).toBe(false);
   });
 });
+
+describe("matchWatcherSubject — power and keyword conditions", () => {
+  const big = { id: "big", typeLine: "Creature — Dinosaur", power: "6", colors: ["G"], oracleText: "Trample" };
+  const small = { id: "small", typeLine: "Creature — Elf", power: "1", colors: ["G"], oracleText: "" };
+  const flier = { id: "fl", typeLine: "Creature — Dragon", power: "4", colors: ["R"], oracleText: "Flying" };
+  it("Garruk's Packleader: a creature with power 3 or greater entering under your control", () => {
+    const text = "Whenever another creature with power 3 or greater enters under your control, you may draw a card.";
+    expect(check(text, "enters", big)).toBe(true);
+    expect(check(text, "enters", small)).toBe(false);
+    expect(check(text, "enters", big, { mine: false })).toBe(false);
+  });
+  it("Dragon Tempest: a creature with flying", () => {
+    const text = "Whenever a creature with flying enters under your control, it gains haste until end of turn.";
+    expect(check(text, "enters", flier)).toBe(true);
+    expect(check(text, "enters", big)).toBe(false);
+  });
+});

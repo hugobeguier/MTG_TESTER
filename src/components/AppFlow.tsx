@@ -16975,6 +16975,14 @@ export function commonTriggerEffect(
   // reverse).
   const drawAndLoseLife = text.match(/\b(?:you )?draws?\s+(a|an|one|two|three|four|five|\d+) (?:additional )?cards?,? and (?:you )?lose\s+(\d+|one|two|three|four|five)\s+life\b/);
   const damageToYouAndDraw = text.match(/\bdeals?\s+(\d+|one|two|three|four|five)\s+damage to you and you draw\s+(a|an|one|two|three|four|five|\d+) cards?\b/);
+  // "You gain 1 life and draw a card." (Inspiring Overseer, Bishop of Wings-style) — the plain gain-life match
+  // below returned only that half and silently dropped the draw.
+  const gainAndDraw = text.match(/\byou gain\s+(\d+|one|two|three|four|five)\s+life and (?:you )?draw\s+(a|an|one|two|three|four|five|\d+) cards?\b/);
+  if (gainAndDraw) {
+    const lifeAmount = numberWordToInt(gainAndDraw[1]);
+    const drawAmount = numberWordToInt(gainAndDraw[2]);
+    if (lifeAmount && drawAmount) return { kind: "draw_cards", amount: drawAmount, optional, then: { kind: "gain_life", amount: lifeAmount } };
+  }
   if (drawAndLoseLife) {
     const drawAmount = numberWordToInt(drawAndLoseLife[1]);
     const lifeAmount = numberWordToInt(drawAndLoseLife[2]);
@@ -20020,6 +20028,12 @@ function isBoardConditionMet(conditionRaw: string, seat: PlayerSeat, allSeats?: 
   const genericCountMatch = condition.match(/^you control (\d+|two|three|four|five|six|seven|eight|nine|ten) or more ([a-z]+)$/);
   if (genericCountMatch) return countMatchingPermanents(seat.board.battlefield, genericCountMatch[2]) >= (numberWordToInt(genericCountMatch[1]) ?? Infinity);
 
+  const bigCreatureMatch = condition.match(/^you control an? creature with power (\d+|two|three|four|five|six|seven|eight|nine|ten) or greater$/);
+  if (bigCreatureMatch) {
+    const needed = numberWordToInt(bigCreatureMatch[1]) ?? Infinity;
+    return seat.board.battlefield.some((card) => hasCardType(card, "Creature") && effectivePower(card) >= needed);
+  }
+
   const graveyardCountMatch = condition.match(/^you have (\d+|two|three|four|five|six|seven|eight|nine|ten) or more ([a-z]+) cards? in your graveyard$/);
   if (graveyardCountMatch) return countMatchingPermanents(seat.board.graveyard ?? [], graveyardCountMatch[2]) >= (numberWordToInt(graveyardCountMatch[1]) ?? Infinity);
 
@@ -20060,6 +20074,8 @@ export function isRecognizedBoardCondition(conditionRaw: string): boolean {
   if (condition === "you control a commander" || condition === "you control your commander") return true;
   if (/^you control (\d+|two|three|four|five|six|seven|eight|nine|ten) or more lands$/.test(condition)) return true;
   if (/^you control (\d+|two|three|four|five|six|seven|eight|nine|ten) or more ([a-z]+)$/.test(condition)) return true;
+  // "you control a creature with power 4 or greater" (Whisperer of the Wilds' ferocious mana)
+  if (/^you control an? creature with power (\d+|two|three|four|five|six|seven|eight|nine|ten) or greater$/.test(condition)) return true;
   // "you have four or more creature cards in your graveyard" (Oversold Cemetery)
   if (/^you have (\d+|two|three|four|five|six|seven|eight|nine|ten) or more ([a-z]+) cards? in your graveyard$/.test(condition)) return true;
   if (/^you control an? ([a-z]+) or an? ([a-z]+)$/.test(condition)) return true;
@@ -20084,6 +20100,12 @@ function conditionallyUnavailableColors(oracleText: string, seat: PlayerSeat): S
     if (/add (?:one|two|three) mana of any (?:one )?color/i.test(clause)) {
       for (const color of ["W", "U", "B", "R", "G", "C"]) colors.add(color);
     }
+  }
+  // A color some OTHER, unconditional clause of the same card still produces isn't unavailable: Whisperer of the
+  // Wilds' plain "{T}: Add {G}." works even while its ferocious "Activate only if ..." {G}{G} clause doesn't.
+  for (const clause of clauses) {
+    if (/\bactivate (?:this ability )?only if\b/i.test(clause)) continue;
+    for (const match of clause.matchAll(/add \{([wubrgc])\}/gi)) colors.delete(match[1].toUpperCase());
   }
   return colors;
 }
@@ -20446,7 +20468,13 @@ export function manaAmountFromAddClause(oracleText: string): number | undefined 
 export function manaProducedBy(card: VisibleCard, seat: PlayerSeat) {
   const scaling = scalingManaAmount(card, seat);
   if (scaling !== undefined) return scaling;
-  return manaAmountFromAddClause(effectiveManaOracleText(card)) ?? 1;
+  // A clause gated by an unmet "Activate only if ..." (Whisperer of the Wilds' ferocious {G}{G}) isn't available, so
+  // it can't raise the amount a plain tap produces.
+  const usableText = effectiveManaOracleText(card)
+    .split("\n")
+    .filter((line) => !(/\bactivate (?:this ability )?only if\b/i.test(line) && !activateOnlyIfConditionMet(line, seat)))
+    .join("\n");
+  return manaAmountFromAddClause(usableText) ?? 1;
 }
 
 function selectedManaTotal(seat: PlayerSeat, sourceIds: string[]) {

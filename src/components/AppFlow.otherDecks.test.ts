@@ -134,3 +134,29 @@ describe("attack/block restrictions", () => {
     expect(attackersOf([settled(rhonas), settled(creature("3", "4"))])).toContain("rh");
   });
 });
+
+describe("Inspiring Overseer", () => {
+  it("gains 1 life AND draws a card", () => {
+    expect(commonTriggerEffect("When this creature enters, you gain 1 life and draw a card.", "clause")).toMatchObject({
+      kind: "draw_cards", amount: 1, then: { kind: "gain_life", amount: 1 }
+    });
+  });
+});
+
+import { manaChoicesForCard, manaProducedBy } from "./AppFlow";
+
+describe("Whisperer of the Wilds", () => {
+  const whisperer = card({
+    id: "w", name: "Whisperer of the Wilds", typeLine: "Creature — Elf Shaman", power: "0", toughness: "1", role: "creature", summoningSick: false,
+    oracleText: "{T}: Add {G}.\nFerocious — {T}: Add {G}{G}. Activate only if you control a creature with power 4 or greater."
+  });
+  it("taps for {G} normally and is not blocked by the unrecognized condition", () => {
+    const me = seat({ id: "a", name: "Me", kind: "human", board: { hand: [], battlefield: [whisperer], graveyard: [] } });
+    expect(manaChoicesForCard(whisperer, me)).toContain("G");
+    expect(manaProducedBy(whisperer, me)).toBe(1);
+  });
+  it("taps for {G}{G} once you control a creature with power 4 or greater", () => {
+    const me = seat({ id: "a", name: "Me", kind: "human", board: { hand: [], battlefield: [whisperer, creature("big", "5")], graveyard: [] } });
+    expect(manaProducedBy(whisperer, me)).toBe(2);
+  });
+});
