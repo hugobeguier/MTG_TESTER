@@ -6039,7 +6039,13 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       // returns early), so without this the life change was silently dropped whenever the spell's
       // main effect was something else. Scanned as its own pass over the same scoped text, same
       // "applies regardless of the spell's own destination" reasoning as removal/zone/pump.
-      const simpleLifeEffect = sourceCard && !isModalCard ? parseSimpleLifeChange(etbEffectText(sourceCard.oracleText)) : undefined;
+      // A PERMANENT whose enters-effect is already a queued trigger (Inspiring Overseer's "you gain 1 life and draw a
+      // card") must not also apply its life change here — it gained 2 life instead of 1.
+      const lifeOwnedByTrigger =
+        destination === "battlefield" &&
+        sourceCard !== undefined &&
+        commonTriggerEffect(sourceCard.oracleText, "entered", undefined, playedSession.seats.find((s) => s.id === action.actorSeatId)) !== undefined;
+      const simpleLifeEffect = sourceCard && !isModalCard && !lifeOwnedByTrigger ? parseSimpleLifeChange(etbEffectText(sourceCard.oracleText)) : undefined;
       const simpleLifeResolvedSession =
         simpleLifeEffect && sourceCard ? applySimpleLifeChange(massBounceResolvedSession, action.actorSeatId, sourceCard.name, simpleLifeEffect) : massBounceResolvedSession;
       // "Repeat the following process X times. Each opponent loses N life unless that player
@@ -16201,6 +16207,22 @@ function resolveHumanUnblockedDamage(session: GameSession, choice: BlockChoiceSt
   };
 }
 
+// The "When this creature/Linvala enters, [if <condition>,] <effect>" clauses of a permanent's own text, each split into
+// its optional intervening-if condition and its effect.
+function selfEntersClauses(source: VisibleCard): Array<{ condition?: string; effectText: string }> {
+  const shortName = source.name.toLowerCase().split(",")[0].trim();
+  const clauses: Array<{ condition?: string; effectText: string }> = [];
+  for (const rawClause of oracleClauses(source.oracleText)) {
+    const clause = rawClause.replace(/\([^)]*\)/g, "").trim();
+    const match = clause.match(/^when ([^,]+?) enters(?: the battlefield)?,\s*(?:if (.+?),\s*)?(.+)$/i);
+    if (!match) continue;
+    const subject = match[1].trim().toLowerCase();
+    if (!(/^this\b/.test(subject) || subject === source.name.toLowerCase() || subject === shortName)) continue;
+    clauses.push({ condition: match[2]?.trim(), effectText: match[3].trim() });
+  }
+  return clauses;
+}
+
 export function findCommonTriggersForPermanentEntered(session: GameSession, enteringSeatId: string, enteringCard: VisibleCard): Array<Extract<PendingAction, { type: "trigger" }>> {
   const enteringSeat = session.seats.find((seat) => seat.id === enteringSeatId);
   if (!enteringSeat) return [];
@@ -16209,6 +16231,22 @@ export function findCommonTriggersForPermanentEntered(session: GameSession, ente
 
   for (const seat of session.seats) {
     for (const source of seat.board.battlefield) {
+      // "When ~ enters, if <condition>, <effect>" (Linvala, the Preserver has TWO such lines; Garruk's Uprising one):
+      // each clause is its own trigger with its own condition, instead of one merged effect that ignored the ifs.
+      if (source.id === enteredPermanent.id) {
+        const conditionalClauses = selfEntersClauses(source);
+        if (conditionalClauses.some((clause) => clause.condition)) {
+          for (const clause of conditionalClauses) {
+            // "if he was kicked" (Josu Vess) — true only for a kicked cast.
+            if (clause.condition && /\bwas kicked\b/i.test(clause.condition) && !source.kicked) continue;
+            if (clause.condition && isRecognizedBoardCondition(clause.condition) && !isBoardConditionMet(clause.condition, seat, session.seats)) continue;
+            const clauseEffect = commonTriggerEffect(clause.effectText, "clause", undefined, seat);
+            if (!clauseEffect) continue;
+            triggers.push(makeCommonTrigger(enteringSeatId, seat.id, source, clauseEffect, `${source.name} triggers because it entered the battlefield.`, enteredPermanent.id));
+          }
+          continue;
+        }
+      }
       const effect = commonTriggerEffect(source.oracleText, "entered", undefined, seat);
       if (!effect || !enteredTriggerApplies(source, seat.id, enteredPermanent, enteringSeatId)) continue;
       // "When ~ enters, if he was kicked, ..." (Josu Vess) only fires for a kicked cast.
@@ -20099,6 +20137,14 @@ function isBoardConditionMet(conditionRaw: string, seat: PlayerSeat, allSeats?: 
   const genericCountMatch = condition.match(/^you control (\d+|two|three|four|five|six|seven|eight|nine|ten) or more ([a-z]+)$/);
   if (genericCountMatch) return countMatchingPermanents(seat.board.battlefield, genericCountMatch[2]) >= (numberWordToInt(genericCountMatch[1]) ?? Infinity);
 
+  if (condition === "an opponent has more life than you") {
+    return (allSeats ?? []).some((other) => other.id !== seat.id && !other.hasLost && other.life > seat.life);
+  }
+  if (condition === "an opponent controls more creatures than you") {
+    const creatures = (candidate: PlayerSeat) => candidate.board.battlefield.filter((card) => hasCardType(card, "Creature")).length;
+    return (allSeats ?? []).some((other) => other.id !== seat.id && !other.hasLost && creatures(other) > creatures(seat));
+  }
+
   const bigCreatureMatch = condition.match(/^you control an? creature with power (\d+|two|three|four|five|six|seven|eight|nine|ten) or greater$/);
   if (bigCreatureMatch) {
     const needed = numberWordToInt(bigCreatureMatch[1]) ?? Infinity;
@@ -20145,6 +20191,8 @@ export function isRecognizedBoardCondition(conditionRaw: string): boolean {
   if (condition === "you control a commander" || condition === "you control your commander") return true;
   if (/^you control (\d+|two|three|four|five|six|seven|eight|nine|ten) or more lands$/.test(condition)) return true;
   if (/^you control (\d+|two|three|four|five|six|seven|eight|nine|ten) or more ([a-z]+)$/.test(condition)) return true;
+  // Linvala, the Preserver's two conditions
+  if (condition === "an opponent has more life than you" || condition === "an opponent controls more creatures than you") return true;
   // "you control a creature with power 4 or greater" (Whisperer of the Wilds' ferocious mana)
   if (/^you control an? creature with power (\d+|two|three|four|five|six|seven|eight|nine|ten) or greater$/.test(condition)) return true;
   // "you have four or more creature cards in your graveyard" (Oversold Cemetery)

@@ -114,3 +114,36 @@ describe("watchers and monarch (real Oracle text)", () => {
     expect(run(true).map((t) => `${t.power}/${t.toughness}`)).toEqual(["4/4"]);
   });
 });
+
+describe("conditional enters triggers (real Oracle text)", () => {
+  const triggersOf = (name: string, mine: VisibleCard[], others: VisibleCard[]) => {
+    const source = real(name, "src");
+    const me = seat("a", [source, ...mine]);
+    const opp = seat("b", others, { life: 40 });
+    const s = session([me, opp]);
+    return findCommonTriggersForPermanentEntered(s, "a", source).map((t) => t.effect.kind);
+  };
+
+  it("Linvala: the 5 life needs an opponent with more life, the Angel needs an opponent with more creatures", () => {
+    const meLife = (life: number) => {
+      const source = real("Linvala, the Preserver", "src");
+      const s = session([seat("a", [source], { life }), seat("b", [bear("o1"), bear("o2")], { life: 40 })]);
+      return findCommonTriggersForPermanentEntered(s, "a", source).map((t) => t.effect.kind);
+    };
+    // Opponent has more life (40 > 30) AND more creatures (2 > 1).
+    expect(meLife(30).sort()).toEqual(["create_tokens", "gain_life"]);
+    // Equal life (40) but opponent still has more creatures: only the Angel.
+    expect(meLife(40)).toEqual(["create_tokens"]);
+  });
+
+  it("Linvala does nothing when no opponent is ahead", () => {
+    const source = real("Linvala, the Preserver", "src");
+    const s = session([seat("a", [source, bear("m1"), bear("m2")], { life: 40 }), seat("b", [bear("o1")], { life: 20 })]);
+    expect(findCommonTriggersForPermanentEntered(s, "a", source)).toHaveLength(0);
+  });
+
+  it("Garruk's Uprising draws on entering only with a power-4 creature", () => {
+    expect(triggersOf("Garruk's Uprising", [bear("big", { power: "5", toughness: "5" })], [])).toContain("draw_cards");
+    expect(triggersOf("Garruk's Uprising", [bear("small")], [])).not.toContain("draw_cards");
+  });
+});
