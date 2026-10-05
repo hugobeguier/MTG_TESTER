@@ -248,6 +248,12 @@ type TriggerEffect = (
   // "...that creature's controller loses 1 life." (Marchesa's Decree) — resolves against actorSeatId, the
   // attacking creature's controller, not the watcher's.
   | { kind: "actor_loses_life"; amount: number }
+  // "...that player discards a card" (Liliana's Reaver) — the damaged player, filled in when the combat-damage
+  // trigger is created; the card is chosen by the usual discard heuristic.
+  | { kind: "seat_discards"; amount: number; seatId?: string }
+  // "You may pay {2}{B}. If you do, return target creature card from your graveyard to your hand." (Eternal
+  // Taskmaster) — always optional; accepting pays the mana (auto-tapped) and then applies the zone effect.
+  | { kind: "pay_then_zone"; costText: string; zoneEffect: ZoneEffect }
 ) & {
   optional?: boolean;
   // "Create a 0/1 green Plant creature token, then put a +1/+1 counter on each Plant you control."
@@ -1726,7 +1732,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     if (!hits || hits.length === 0 || hits === processedCombatDamageToPlayerBatchRef.current) return;
     processedCombatDamageToPlayerBatchRef.current = hits;
     const damageTriggers = hits.flatMap((hit) => [
-      ...findCombatDamageToPlayerTriggers(session, hit.seatId, hit.card),
+      ...findCombatDamageToPlayerTriggers(session, hit.seatId, hit.card, hit.damagedSeatId),
       ...findAnyCombatDamageToOpponentTriggers(session, hit.seatId, hit.card, hit.damagedSeatId)
     ]);
     setSession((current) => (current.pendingCombatDamageToPlayer === hits ? { ...current, pendingCombatDamageToPlayer: undefined } : current));
@@ -16082,13 +16088,25 @@ export function findAttackTriggers(
   return { triggers, unparsed };
 }
 
-function findCombatDamageToPlayerTriggers(session: GameSession, dealingSeatId: string, dealingCard: VisibleCard): Array<Extract<PendingAction, { type: "trigger" }>> {
+export function findCombatDamageToPlayerTriggers(
+  session: GameSession,
+  dealingSeatId: string,
+  dealingCard: VisibleCard,
+  damagedSeatId?: string
+): Array<Extract<PendingAction, { type: "trigger" }>> {
   if (!hasCardType(dealingCard, "Creature")) return [];
   const seat = session.seats.find((item) => item.id === dealingSeatId);
   if (!seat) return [];
   const triggers: Array<Extract<PendingAction, { type: "trigger" }>> = [];
   for (const source of seat.board.battlefield) {
-    const effect = commonTriggerEffect(source.oracleText, "combat_damage_to_player");
+    // "Whenever THIS creature deals combat damage to a player" (Liliana's Reaver) only applies to the source's
+    // own damage; "a creature you control" (Toski) applies to any. This used to fire for every creature.
+    const damageClause = oracleClauses(source.oracleText).find((clause) => /\b(?:when|whenever)\b[^,.]*\bdeals combat damage to a player\b/i.test(clause));
+    const damageSubject = damageClause?.toLowerCase().match(/\b(?:when|whenever)\s+(.+?)\s+deals combat damage to a player/)?.[1]?.trim();
+    const shortName = source.name.toLowerCase().split(",")[0].trim();
+    if (damageSubject && (/^this\b/.test(damageSubject) || damageSubject === source.name.toLowerCase() || damageSubject === shortName) && source.id !== dealingCard.id) continue;
+    const rawEffect = commonTriggerEffect(source.oracleText, "combat_damage_to_player");
+    const effect = rawEffect && rawEffect.then?.kind === "seat_discards" && damagedSeatId ? { ...rawEffect, then: { ...rawEffect.then, seatId: damagedSeatId } } : rawEffect;
     if (!effect) continue;
     triggers.push(makeCommonTrigger(dealingSeatId, seat.id, source, effect, `${source.name} triggers because ${dealingCard.name} dealt combat damage to a player.`));
   }
@@ -16579,10 +16597,14 @@ export function commonTriggerEffect(
     // the create_tokens effect immediately. See TriggerEffect's shared `then` field.
     const thenCounterMatch = text.match(/\bthen put (a|one|two|three|four|five|\d+) (\+1\/\+1|-1\/-1|[a-z]+) counters? on each ([a-z][a-z ]*?) you control\b/);
     const thenAmount = thenCounterMatch ? numberWordToInt(thenCounterMatch[1]) : undefined;
+    const thenDiscardMatch = text.match(/\bthat player discards\s+(a|one|two|three|\d+)\s+cards?\b/);
+    const thenDiscardAmount = thenDiscardMatch ? numberWordToInt(thenDiscardMatch[1]) : undefined;
     const then: TriggerEffect | undefined =
       thenCounterMatch && thenAmount
         ? { kind: "add_counter", counterKind: thenCounterMatch[2], amount: thenAmount, scope: "each_matching_you_control", matcher: thenCounterMatch[3].trim() }
-        : undefined;
+        : thenDiscardAmount
+          ? { kind: "seat_discards", amount: thenDiscardAmount }
+          : undefined;
     return { kind: "create_tokens", tokens: tokenSpecs, optional, then };
   }
 
@@ -16643,6 +16665,12 @@ export function commonTriggerEffect(
   // not get the chance to choose a permanent I control."
   if (/\bexile another target permanent you own,?\s*then return it to the battlefield under your control\b/.test(text)) {
     return { kind: "blink", optional };
+  }
+
+  const payThen = relevantText.match(/\byou may pay ((?:\{[^}]+\})+)\.\s*if you do,\s*([^.]+\.?)/i);
+  if (payThen) {
+    const zoneEffect = parseZoneEffect(payThen[2].endsWith(".") ? payThen[2] : `${payThen[2]}.`);
+    if (zoneEffect) return { kind: "pay_then_zone", costText: payThen[1], zoneEffect, optional: true };
   }
 
   const actorLosesLife = text.match(/\b(?:that creature'?s|its) controller loses\s+(\d+|one|two|three|four|five)\s+life\b/);
@@ -17603,6 +17631,30 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
   // `then: add_counter` (see this kind's own doc comment) resolves separately, against
   // trigger.controllerSeatId (Breena's own controller), via resolveTriggerEffect's existing
   // recursive `then` handling just below this function — nothing extra needed here for that half.
+  if (trigger.effect.kind === "pay_then_zone") {
+    const payer = session.seats.find((seat) => seat.id === trigger.controllerSeatId);
+    if (!payer) return session;
+    const total = manaValueFromManaCost(trigger.effect.costText);
+    const payment = chooseManaSourcesForCost(payer, genericManaAbilityCostShim({ costManaText: trigger.effect.costText }), total, undefined, session.seats);
+    if (!payment.ok) {
+      return rulesEvent(session, payer.id, `${payer.name} can't pay ${trigger.effect.costText} for ${trigger.sourceCardName}.`);
+    }
+    const paid = { ...session, seats: session.seats.map((seat) => (seat.id === payer.id ? spendManaSources(seat, payment.sourceIds) : seat)) };
+    return applyZoneEffect(rulesEvent(paid, payer.id, `${payer.name} pays ${trigger.effect.costText} for ${trigger.sourceCardName}.`), payer.id, trigger.sourceCardName, trigger.effect.zoneEffect);
+  }
+  if (trigger.effect.kind === "seat_discards") {
+    const { amount } = trigger.effect;
+    const discarderId = trigger.effect.seatId ?? trigger.actorSeatId;
+    let next = session;
+    for (let i = 0; i < amount; i += 1) {
+      const discarder = next.seats.find((seat) => seat.id === discarderId);
+      const toDiscard = discarder ? chooseWorstHandCardToDiscard(discarder) : undefined;
+      if (!discarder || !toDiscard) break;
+      next = moveCardBetweenVisibleZones(next, discarderId, toDiscard.id, "graveyard");
+      next = rulesEvent(next, discarderId, `${discarder.name} discards ${toDiscard.name} (${trigger.sourceCardName}).`);
+    }
+    return next;
+  }
   if (trigger.effect.kind === "actor_loses_life") {
     const { amount } = trigger.effect;
     const actorSeat = session.seats.find((seat) => seat.id === trigger.actorSeatId);

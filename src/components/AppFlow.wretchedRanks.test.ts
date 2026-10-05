@@ -317,3 +317,42 @@ describe("attack triggers fire per declared attacker", () => {
     expect(findAttackTriggers(s, { seatId: "a", card: zombie("z1"), defendingSeatId: "c" }).triggers).toHaveLength(0);
   });
 });
+
+import { findCombatDamageToPlayerTriggers } from "./AppFlow";
+
+describe("Eternal Taskmaster / Liliana's Reaver", () => {
+  it("Taskmaster's attack trigger is an optional pay-then-return, not a free return", () => {
+    const effect = commonTriggerEffect(
+      "Whenever this creature attacks, you may pay {2}{B}. If you do, return target creature card from your graveyard to your hand.",
+      "clause"
+    );
+    expect(effect).toMatchObject({ kind: "pay_then_zone", costText: "{2}{B}", optional: true });
+  });
+
+  it("Taskmaster can't return a card without the mana", () => {
+    const trigger = {
+      id: "t", type: "trigger", actorSeatId: "a", controllerSeatId: "a", sourceCardId: "tm", sourceCardName: "Eternal Taskmaster", triggerKind: "common",
+      effect: { kind: "pay_then_zone", costText: "{2}{B}", zoneEffect: { kind: "regrow", targetType: "creature" } }, message: ""
+    } as never;
+    const me = seat({ id: "a", name: "Me", kind: "human", board: { hand: [], battlefield: [], graveyard: [zombie("dead", { zone: "graveyard" })] } });
+    const after = resolveTriggerEffect(session([me]), trigger);
+    expect(after.seats[0].board.hand).toHaveLength(0);
+  });
+
+  it("Liliana's Reaver triggers only for itself, and makes the damaged player discard", () => {
+    const reaver = card({
+      id: "rv", name: "Liliana's Reaver", typeLine: "Creature — Zombie", power: "4", toughness: "3", role: "creature",
+      oracleText: "Deathtouch\nWhenever this creature deals combat damage to a player, that player discards a card and you create a tapped 2/2 black Zombie creature token."
+    });
+    const me = seat({ id: "a", name: "Me", kind: "human", board: { hand: [], battlefield: [reaver, zombie("other")], graveyard: [] } });
+    const them = seat({ id: "b", name: "Opp", kind: "agent", board: { hand: [card({ id: "h1", name: "Spell", typeLine: "Sorcery", zone: "hand" })], battlefield: [], graveyard: [] } });
+    const s = session([me, them]);
+    expect(findCombatDamageToPlayerTriggers(s, "a", zombie("other"), "b")).toHaveLength(0);
+    const triggers = findCombatDamageToPlayerTriggers(s, "a", reaver, "b");
+    expect(triggers).toHaveLength(1);
+    expect(triggers[0].effect).toMatchObject({ kind: "create_tokens", then: { kind: "seat_discards", seatId: "b" } });
+    const after = resolveTriggerEffect(s, triggers[0]);
+    expect(after.seats.find((x) => x.id === "b")!.board.hand).toHaveLength(0);
+    expect(bf(after, "a").filter((c) => c.token && c.tapped)).toHaveLength(1);
+  });
+});
