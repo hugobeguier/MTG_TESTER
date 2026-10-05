@@ -245,6 +245,9 @@ type TriggerEffect = (
   // scope: "target_creature_you_control" }` here resolves against controllerSeatId exactly as
   // real Magic requires, with zero new counter-placement logic needed.
   | { kind: "actor_draws_cards"; amount: number }
+  // "...that creature's controller loses 1 life." (Marchesa's Decree) — resolves against actorSeatId, the
+  // attacking creature's controller, not the watcher's.
+  | { kind: "actor_loses_life"; amount: number }
 ) & {
   optional?: boolean;
   // "Create a 0/1 green Plant creature token, then put a +1/+1 counter on each Plant you control."
@@ -1729,6 +1732,29 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     setSession((current) => (current.pendingCombatDamageToPlayer === hits ? { ...current, pendingCombatDamageToPlayer: undefined } : current));
     if (damageTriggers.length > 0) queueCommonTriggers(damageTriggers);
   }, [session.pendingCombatDamageToPlayer, pendingAction]);
+
+  // Attack triggers: "Whenever this creature attacks, ..." / "Whenever a creature attacks you or a
+  // planeswalker you control, ..." — queued per DECLARED attacker (see pendingAttackDeclarations on
+  // GameSession) instead of by the old once-per-phase sweep that fired for every creature with
+  // "attacks" text whether or not it attacked.
+  const processedAttackBatchRef = useRef<GameSession["pendingAttackDeclarations"]>(undefined);
+  useEffect(() => {
+    if (pendingAction) return;
+    const attacks = session.pendingAttackDeclarations;
+    if (!attacks || attacks.length === 0 || attacks === processedAttackBatchRef.current) return;
+    processedAttackBatchRef.current = attacks;
+    const queued: Array<Extract<PendingAction, { type: "trigger" }>> = [];
+    const unparsed: Array<{ seatId: string; source: VisibleCard }> = [];
+    for (const attack of attacks) {
+      const found = findAttackTriggers(session, attack);
+      queued.push(...found.triggers);
+      unparsed.push(...found.unparsed);
+    }
+    setSession((current) => (current.pendingAttackDeclarations === attacks ? { ...current, pendingAttackDeclarations: undefined } : current));
+    if (queued.length > 0) queueCommonTriggers(queued);
+    // A clause no deterministic parser understands still goes to the rules advisor, as the old sweep did.
+    for (const item of unparsed) void consultRulesAdvisor(phaseEventName("declare attackers step"), item.seatId, item.source);
+  }, [session.pendingAttackDeclarations, pendingAction]);
 
   // Same shape again, for pendingGraveyardDepartures — see that field's own comment on GameSession
   // for the bug this fixes (Willow Geist, Insidious Roots: "whenever one or more cards leave your
@@ -3454,6 +3480,9 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
 
     const attackDeclaredSession: GameSession = {
       ...session,
+      // Drained by the pendingAttackDeclarations effect, which queues this attacker's "whenever ... attacks"
+      // triggers (and any watcher's, e.g. Marchesa's Decree on the defending player's side).
+      pendingAttackDeclarations: [...(session.pendingAttackDeclarations ?? []), { seatId, card: { ...attackingCard, attacking: true }, defendingSeatId: target.seat.id }],
       seats: session.seats.map((seat) =>
         seat.id === seatId
           ? {
@@ -16011,6 +16040,48 @@ export function findCommonTriggersForPermanentDied(
 // template is self-relative ("a creature YOU control"), unlike findCommonTriggersForPermanentDied's
 // all-seats scan. See pendingCombatDamageToPlayer's own comment on GameSession for why this can't
 // just be a generic phase trigger.
+// Every "Whenever <subject> attacks" trigger caused by ONE declared attacker, on any seat's battlefield
+// (the watcher can be the attacker itself, another of its controller's permanents, or the defending
+// player's — Marchesa's Decree). `unparsed` lists attacker-side sources whose clause no deterministic
+// parser understands, which the caller sends to the rules advisor as the old phase sweep did.
+export function findAttackTriggers(
+  session: GameSession,
+  attack: { seatId: string; card: VisibleCard; defendingSeatId: string }
+): { triggers: Array<Extract<PendingAction, { type: "trigger" }>>; unparsed: Array<{ seatId: string; source: VisibleCard }> } {
+  const triggers: Array<Extract<PendingAction, { type: "trigger" }>> = [];
+  const unparsed: Array<{ seatId: string; source: VisibleCard }> = [];
+  for (const sourceSeat of session.seats) {
+    if (sourceSeat.hasLost) continue;
+    for (const source of sourceSeat.board.battlefield) {
+      if (source.abilitiesStripped) continue;
+      for (const clause of oracleClauses(source.oracleText)) {
+        if (isActivatedAbilityClause(clause) || !/\b(?:when|whenever)\b[^,.]*\battacks\b/i.test(clause)) continue;
+        // Owned by declareAttack's own inline handling.
+        if (isAttackTriggerAddManaClause(clause) || parseMetalcraftAttackDebuff(clause)) continue;
+        const applies = matchWatcherSubject(clause, "attacks", {
+          sourceId: source.id,
+          sourceName: source.name,
+          subject: attack.card,
+          subjectIsControlledBySourceController: attack.seatId === sourceSeat.id,
+          defendingPlayerIsSourceController: attack.defendingSeatId === sourceSeat.id
+        });
+        if (applies === false) continue;
+        if (applies === undefined) {
+          if (sourceSeat.id === attack.seatId && source.id === attack.card.id) unparsed.push({ seatId: sourceSeat.id, source });
+          continue;
+        }
+        const effect = commonTriggerEffect(clause, "clause", undefined, sourceSeat);
+        if (effect) {
+          triggers.push(makeCommonTrigger(attack.seatId, sourceSeat.id, source, effect, `${source.name} triggers because ${attack.card.name} attacked.`, attack.card.id));
+        } else if (sourceSeat.id === attack.seatId) {
+          unparsed.push({ seatId: sourceSeat.id, source });
+        }
+      }
+    }
+  }
+  return { triggers, unparsed };
+}
+
 function findCombatDamageToPlayerTriggers(session: GameSession, dealingSeatId: string, dealingCard: VisibleCard): Array<Extract<PendingAction, { type: "trigger" }>> {
   if (!hasCardType(dealingCard, "Creature")) return [];
   const seat = session.seats.find((item) => item.id === dealingSeatId);
@@ -16572,6 +16643,12 @@ export function commonTriggerEffect(
   // not get the chance to choose a permanent I control."
   if (/\bexile another target permanent you own,?\s*then return it to the battlefield under your control\b/.test(text)) {
     return { kind: "blink", optional };
+  }
+
+  const actorLosesLife = text.match(/\b(?:that creature'?s|its) controller loses\s+(\d+|one|two|three|four|five)\s+life\b/);
+  if (actorLosesLife) {
+    const amount = numberWordToInt(actorLosesLife[1]);
+    if (amount) return { kind: "actor_loses_life", amount, optional };
   }
 
   // "You draw a card and lose 1 life." (Undead Augur, Phyrexian Arena, ...) / "This creature deals 1
@@ -17526,6 +17603,16 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
   // `then: add_counter` (see this kind's own doc comment) resolves separately, against
   // trigger.controllerSeatId (Breena's own controller), via resolveTriggerEffect's existing
   // recursive `then` handling just below this function — nothing extra needed here for that half.
+  if (trigger.effect.kind === "actor_loses_life") {
+    const { amount } = trigger.effect;
+    const actorSeat = session.seats.find((seat) => seat.id === trigger.actorSeatId);
+    if (!actorSeat || actorSeat.hasLost) return session;
+    return rulesEvent(
+      { ...session, seats: session.seats.map((seat) => (seat.id === trigger.actorSeatId ? { ...seat, life: seat.life - amount } : seat)) },
+      trigger.actorSeatId,
+      `${trigger.sourceCardName} triggers: ${actorSeat.name} loses ${amount} life.`
+    );
+  }
   if (trigger.effect.kind === "actor_draws_cards") {
     const { amount } = trigger.effect;
     const actorSeat = session.seats.find((seat) => seat.id === trigger.actorSeatId);
@@ -18121,9 +18208,11 @@ function phaseTriggerTextMatches(text: string, phase: TurnPhase) {
   // substring match would otherwise also catch it, doubling the effect (once correct via
   // declareAttack, once via this sweep falling through to a rules-advisor consult that has no
   // workflow kind for it anyway).
-  if (phase === "declare attackers step") {
-    return (text.includes("whenever") && (text.includes(" attacks") || text.includes("a creature attacks"))) && !parseMetalcraftAttackDebuff(text);
-  }
+  // "Whenever ... attacks" triggers are NOT matched here any more: this sweep fires once per phase entry for
+  // every permanent with such text, whether or not it attacked (Grave Titan, Drakuseth, Tyrant's Familiar,
+  // Eternal Taskmaster all triggered with nothing attacking). They are queued per declared attacker via
+  // pendingAttackDeclarations / findAttackTriggers instead.
+  if (phase === "declare attackers step") return false;
   if (phase === "declare blockers step") return text.includes("whenever") && (text.includes(" blocks") || text.includes("becomes blocked"));
   // "Whenever a creature you control deals combat damage to a player, ..." (Toski, Bearer of
   // Secrets, and the same standard templating on plenty of other cards) is excluded here even

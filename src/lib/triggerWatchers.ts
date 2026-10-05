@@ -17,6 +17,9 @@ export interface WatcherSubjectContext {
   subject: { id: string; typeLine: string; token?: boolean; grantedTypes?: string[]; colors?: string[] };
   // The permanent entering / dying is controlled by the same player who controls the watcher.
   subjectIsControlledBySourceController: boolean;
+  // "attacks" only: the player being attacked is the source's controller ("attacks you or a planeswalker
+  // you control", Marchesa's Decree).
+  defendingPlayerIsSourceController?: boolean;
 }
 
 type Control = "you" | "opponent" | "any";
@@ -67,7 +70,7 @@ function parsePart(rawPart: string, sourceName: string): SubjectPart | undefined
 
 // "Whenever this creature or another nontoken Zombie you control dies, ..." for event "dies"; same for
 // "enters". `afterVerb` catches the trailing "under your control" of "a land enters under your control".
-export function matchWatcherSubject(oracleText: string, event: "enters" | "dies", context: WatcherSubjectContext): boolean | undefined {
+export function matchWatcherSubject(oracleText: string, event: "enters" | "dies" | "attacks", context: WatcherSubjectContext): boolean | undefined {
   const verb = event;
   let sawClause = false;
   let allParsed = true;
@@ -81,7 +84,12 @@ export function matchWatcherSubject(oracleText: string, event: "enters" | "dies"
       allParsed = false;
       continue;
     }
-    const trailingControl: Control | undefined = /\bunder your control\b/.test(match[2]) ? "you" : /\bunder an opponent'?s control\b/.test(match[2]) ? "opponent" : undefined;
+    // "...attacks you or a planeswalker you control": only counts when the defender is the source's controller.
+    if (event === "attacks" && /^\s+you\b/.test(match[2]) && context.defendingPlayerIsSourceController !== true) {
+      allParsed = allParsed && true;
+      continue;
+    }
+    const trailingControl: Control | undefined =/\bunder your control\b/.test(match[2]) ? "you" : /\bunder an opponent'?s control\b/.test(match[2]) ? "opponent" : undefined;
     for (const part of parts as SubjectPart[]) {
       if (part.self) {
         if (context.subject.id === context.sourceId) return true;

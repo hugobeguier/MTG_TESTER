@@ -418,6 +418,12 @@ export interface GameSession {
   // across every seat, not just seatId's own creatures) to check whether that player is an opponent
   // of the WATCHING seat, not of the dealing creature's controller.
   pendingCombatDamageToPlayer?: Array<{ seatId: string; card: VisibleCard; damagedSeatId: string }>;
+  // Every attacker declared this combat, queued for "Whenever <this creature / a creature> attacks"
+  // triggers. The old generic declare-attackers phase sweep fired those once per phase entry for any
+  // permanent with "attacks" text, whether or not the creature actually attacked (Grave Titan, Eternal
+  // Taskmaster, Drakuseth, Tyrant's Familiar, ...). declareAttack is a pure transformer with no access
+  // to the trigger-queueing machinery, so it records the attack here and a component effect drains it.
+  pendingAttackDeclarations?: Array<{ seatId: string; card: VisibleCard; defendingSeatId: string }>;
   // Dedup keys ("turn:sourceCardId:effectKind") for triggered effects restricted by a trailing
   // "Do this only once each turn" clause — resolveTriggerEffect() is a pure function with no
   // per-turn ref to check against, so the dedup state lives on the session itself instead.

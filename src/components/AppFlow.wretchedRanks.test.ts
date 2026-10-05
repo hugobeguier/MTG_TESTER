@@ -272,3 +272,48 @@ describe("'can't block' creatures", () => {
     expect(creatureCantBlock(zombie("x", { name: "Elsewhere", oracleText: "Creatures you control can't block." }))).toBe(false);
   });
 });
+
+import { findAttackTriggers } from "./AppFlow";
+
+describe("attack triggers fire per declared attacker", () => {
+  const titan = card({
+    id: "titan",
+    name: "Grave Titan",
+    typeLine: "Creature — Giant",
+    power: "6",
+    toughness: "6",
+    role: "creature",
+    oracleText: "Deathtouch\nWhenever this creature enters or attacks, create two 2/2 black Zombie creature tokens."
+  });
+  const decree = card({
+    id: "decree",
+    name: "Marchesa's Decree",
+    typeLine: "Enchantment",
+    oracleText: "When this enchantment enters, you become the monarch.\nWhenever a creature attacks you or a planeswalker you control, that creature's controller loses 1 life."
+  });
+
+  it("Grave Titan triggers when IT attacks, not when another creature does", () => {
+    const me = seat({ id: "a", name: "Me", kind: "human", board: { hand: [], battlefield: [titan, zombie("z1")], graveyard: [] } });
+    const them = seat({ id: "b", name: "Opp", kind: "agent" });
+    const s = session([me, them]);
+    const titanAttack = findAttackTriggers(s, { seatId: "a", card: titan, defendingSeatId: "b" });
+    expect(titanAttack.triggers).toHaveLength(1);
+    expect(titanAttack.triggers[0].effect).toMatchObject({ kind: "create_tokens" });
+    const otherAttack = findAttackTriggers(s, { seatId: "a", card: zombie("z1"), defendingSeatId: "b" });
+    expect(otherAttack.triggers).toHaveLength(0);
+  });
+
+  it("Marchesa's Decree makes the attacker's controller lose 1 life, only when attacking the Decree's controller", () => {
+    const me = seat({ id: "a", name: "Me", kind: "human", board: { hand: [], battlefield: [zombie("z1")], graveyard: [] } });
+    const them = seat({ id: "b", name: "Opp", kind: "agent", board: { hand: [], battlefield: [decree], graveyard: [] } });
+    const third = seat({ id: "c", name: "Third", kind: "agent" });
+    const s = session([me, them, third]);
+    const hit = findAttackTriggers(s, { seatId: "a", card: zombie("z1"), defendingSeatId: "b" });
+    expect(hit.triggers).toHaveLength(1);
+    expect(hit.triggers[0].effect).toMatchObject({ kind: "actor_loses_life", amount: 1 });
+    expect(hit.triggers[0].controllerSeatId).toBe("b");
+    const resolved = resolveTriggerEffect(s, hit.triggers[0]);
+    expect(resolved.seats.find((x) => x.id === "a")!.life).toBe(39);
+    expect(findAttackTriggers(s, { seatId: "a", card: zombie("z1"), defendingSeatId: "c" }).triggers).toHaveLength(0);
+  });
+});
