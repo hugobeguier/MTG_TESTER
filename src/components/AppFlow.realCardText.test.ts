@@ -2,7 +2,7 @@
 // the test: two earlier tests passed on invented text while the real cards stayed broken (Court of Grace, the
 // "with power N or greater" watchers). Skipped per card when the catalog doesn't have it.
 import { describe, expect, it } from "vitest";
-import { payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
+import { resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
 import { parseRemovalEffect } from "@/lib/removalSpells";
 import { parseSpellExtraEffects } from "@/lib/spellExtras";
 import { etbEffectText } from "@/lib/oracleClauses";
@@ -514,5 +514,50 @@ describe("tap abilities with counter costs and activation restrictions (real Ora
     expect(ability.effect.kind).toBe("create_tokens");
     expect(payGenericTapCost(session([seat("a", [speaker], { life: 46 })]), "a", "sp", 0)).toBeUndefined();
     expect(payGenericTapCost(session([seat("a", [speaker], { life: 47 })]), "a", "sp", 0)).toBeDefined();
+  });
+});
+
+describe("combat and player-level cards, batch 4 (real Oracle text)", () => {
+  const fight = (attacker: VisibleCard, blocker: VisibleCard) => {
+    const a = { ...attacker, attacking: true, attackTargetId: "b" };
+    const b = { ...blocker, blocking: true, blockingTargetId: a.id };
+    return resolveCombatDamage(session([seat("a", [a]), seat("b", [b])]), "a");
+  };
+  const alive = (s: GameSession, seatId: string, id: string) => s.seats.find((x) => x.id === seatId)!.board.battlefield.some((c) => c.id === id);
+
+  it("Seraph of the Sword takes no combat damage but still deals it", () => {
+    const seraph = real("Seraph of the Sword", "seraph", { power: "2", toughness: "4" });
+    const after = fight(bear("big", { power: "7", toughness: "7" }), seraph);
+    expect(alive(after, "b", "seraph")).toBe(true);
+    const asAttacker = fight(seraph, bear("wall", { power: "9", toughness: "2" }));
+    expect(alive(asAttacker, "a", "seraph")).toBe(true);
+    expect(alive(asAttacker, "b", "wall")).toBe(false);
+  });
+
+  it("Herald of Eternal Dawn: its controller doesn't lose at 0 life", () => {
+    const withHerald = seat("a", [real("Herald of Eternal Dawn", "h")], { life: 0 });
+    const without = seat("c", [bear("x")], { life: 0 });
+    const after = runStateBasedActionsPass(session([withHerald, without])).session.seats;
+    expect(after.find((x) => x.id === "a")!.hasLost).toBeFalsy();
+    expect(after.find((x) => x.id === "c")!.hasLost).toBe(true);
+  });
+
+  it("Metropolis Reformer: you have hexproof, and damage to it gains you that much life", () => {
+    const reformer = real("Metropolis Reformer", "mr", { power: "2", toughness: "3" });
+    const burn = real("Lightning Bolt", "bolt");
+    const hexproofSeat = session([seat("a", [bear("mine")]), seat("b", [reformer])]);
+    const target = applyRemovalEffect(hexproofSeat, "a", "Lightning Bolt", burn, { kind: "damage", amount: 3, targetType: "player" });
+    expect(target.seats[1].life).toBe(40);
+    const afterFight = fight(bear("big", { power: "2", toughness: "2" }), real("Metropolis Reformer", "mr2", { power: "2", toughness: "3" }));
+    expect(afterFight.seats[1].life).toBe(42);
+  });
+
+  it("Ripjaw Raptor draws a card when dealt damage", () => {
+    const raptor = real("Ripjaw Raptor", "rr", { power: "4", toughness: "5" });
+    const owner = seat("b", [raptor]);
+    owner.library = Array.from({ length: 5 }, (_, i) => bear(`l${i}`, { zone: "library" as const }));
+    owner.zones = { ...owner.zones, library: 5 };
+    const after = resolveCombatDamage(session([seat("a", [{ ...bear("atk", { power: "2", toughness: "2" }), attacking: true, attackTargetId: "b" }]), { ...owner, board: { ...owner.board, battlefield: [{ ...raptor, blocking: true, blockingTargetId: "atk" }] } }]), "a");
+    expect(after.seats[1].board.hand).toHaveLength(1);
   });
 });

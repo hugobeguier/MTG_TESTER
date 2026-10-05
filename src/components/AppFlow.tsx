@@ -9247,6 +9247,22 @@ function hasDoubleStrike(card: VisibleCard) {
   return hasKeyword(card, "double strike");
 }
 
+// "Prevent all combat damage that would be dealt to this creature." (Seraph of the Sword) — combat damage only; other
+// damage and "destroy" effects still affect it.
+function preventsCombatDamageToSelf(card: VisibleCard): boolean {
+  return !card.abilitiesStripped && /\bprevent all combat damage that would be dealt to this creature\b/i.test(card.oracleText);
+}
+
+// "You have hexproof." (Metropolis Reformer)
+function playerHasHexproof(seat: PlayerSeat): boolean {
+  return seat.board.battlefield.some((card) => !card.abilitiesStripped && /^you have hexproof\b/im.test(card.oracleText));
+}
+
+// "You can't lose the game and your opponents can't win the game." (Herald of Eternal Dawn)
+function playerCantLose(seat: PlayerSeat): boolean {
+  return seat.board.battlefield.some((card) => !card.abilitiesStripped && /\byou can'?t lose the game\b/i.test(card.oracleText));
+}
+
 function hasIndestructible(card: VisibleCard) {
   return hasKeyword(card, "indestructible");
 }
@@ -12553,6 +12569,8 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
   };
   const seatsAfterLossChecks = next.seats.map((seat) => {
     if (seat.hasLost) return eliminatedPermanentsLeave(seat);
+    // Herald of Eternal Dawn: "You can't lose the game" — life, poison and commander damage don't eliminate this player.
+    if (playerCantLose(seat)) return seat;
     if (seat.life <= 0) return eliminatedPermanentsLeave({ ...seat, hasLost: true, lossReason: "life total reached 0" });
     if (Object.values(seat.commanderDamage).some((amount) => amount >= 21)) {
       return eliminatedPermanentsLeave({ ...seat, hasLost: true, lossReason: "took 21 or more combat damage from a single commander" });
@@ -13137,6 +13155,40 @@ function dealDamageToCreature(
   source?: VisibleCard,
   sourceControllerSeatId?: string
 ): GameSession {
+  const damaged = session.seats.find((seat) => seat.id === targetSeatId)?.board.battlefield.find((card) => card.id === targetCardId);
+  const result = dealDamageToCreatureCore(session, sourceName, targetSeatId, targetCardId, amount, source, sourceControllerSeatId);
+  return damaged && amount > 0 ? applyDealtDamageTriggers(result, targetSeatId, damaged, amount) : result;
+}
+
+// "Whenever this creature is dealt damage, ..." (Ripjaw Raptor's enrage draw, Metropolis Reformer's lifegain). Resolved on the
+// spot rather than queued: the effects involved (draw, gain life) never need a choice.
+function applyDealtDamageTriggers(session: GameSession, seatId: string, card: VisibleCard, amount: number): GameSession {
+  if (card.abilitiesStripped || amount <= 0) return session;
+  let next = session;
+  for (const clause of oracleClauses(card.oracleText)) {
+    const match = clause.match(/(?:^|— )whenever this creature is dealt damage, (.+)$/i);
+    if (!match) continue;
+    const effectText = match[1].replace(/\([^)]*\)/g, "").trim();
+    if (/^you gain that much life\.?$/i.test(effectText)) {
+      next = rulesEvent({ ...next, seats: next.seats.map((seat) => (seat.id === seatId ? { ...seat, life: seat.life + amount } : seat)) }, seatId, `${card.name}: gains its controller ${amount} life.`);
+      continue;
+    }
+    const effect = commonTriggerEffect(effectText, "clause");
+    if (!effect) continue;
+    next = resolveTriggerEffect(next, makeCommonTrigger(seatId, seatId, card, effect, `${card.name} was dealt damage.`));
+  }
+  return next;
+}
+
+function dealDamageToCreatureCore(
+  session: GameSession,
+  sourceName: string,
+  targetSeatId: string,
+  targetCardId: string,
+  amount: number,
+  source?: VisibleCard,
+  sourceControllerSeatId?: string
+): GameSession {
   if (amount <= 0) return session;
   const targetSeat = session.seats.find((seat) => seat.id === targetSeatId);
   const target = targetSeat?.board.battlefield.find((card) => card.id === targetCardId);
@@ -13356,13 +13408,15 @@ type DamageTarget = { kind: "player"; seat: PlayerSeat } | { kind: "creature"; s
 // otherwise there's no legal target.
 function chooseDamageTarget(session: GameSession, casterSeatId: string, amount: number, targetType: "any" | "creature" | "player", sourceCard: VisibleCard): DamageTarget | undefined {
   const opponents = session.seats.filter((seat) => seat.id !== casterSeatId && !seat.hasLost);
+  // A hexproof player (Metropolis Reformer's "You have hexproof.") can't be chosen; their creatures still can.
+  const targetablePlayers = opponents.filter((seat) => !playerHasHexproof(seat));
 
   // "target player or planeswalker" can never legally resolve against a creature — checked before
   // any of the creature-candidate logic below, unlike "any target" which prefers a lethal creature
   // kill when one's available.
   if (targetType === "player") {
-    if (opponents.length === 0) return undefined;
-    const lowestLife = opponents.reduce((a, b) => (b.life < a.life ? b : a));
+    if (targetablePlayers.length === 0) return undefined;
+    const lowestLife = targetablePlayers.reduce((a, b) => (b.life < a.life ? b : a));
     return { kind: "player", seat: lowestLife };
   }
 
@@ -13383,8 +13437,8 @@ function chooseDamageTarget(session: GameSession, casterSeatId: string, amount: 
     return { kind: "creature", seatId: best.seatId, card: best.card };
   }
 
-  if (targetType === "any" && opponents.length > 0) {
-    const lowestLife = opponents.reduce((a, b) => (b.life < a.life ? b : a));
+  if (targetType === "any" && targetablePlayers.length > 0) {
+    const lowestLife = targetablePlayers.reduce((a, b) => (b.life < a.life ? b : a));
     return { kind: "player", seat: lowestLife };
   }
 
@@ -16052,7 +16106,7 @@ function simulateMultiBlockedCombat(attackingCard: VisibleCard, blockers: Visibl
     damageMarked: 0,
     dealtToAttacker: 0,
     toughness: effectiveToughness(card),
-    protectedFromAttacker: isProtectedFrom(card, attackingCard)
+    protectedFromAttacker: isProtectedFrom(card, attackingCard) || preventsCombatDamageToSelf(card)
   }));
 
   for (const step of ["first", "regular"] as const) {
@@ -16079,7 +16133,7 @@ function simulateMultiBlockedCombat(attackingCard: VisibleCard, blockers: Visibl
     const dealtDamageThisStep = new Set<string>();
     for (const state of states) {
       if (!state.alive || !dealsDamageInCombatStep(state.card, step)) continue;
-      if (isProtectedFrom(attackingCard, state.card)) continue;
+      if (isProtectedFrom(attackingCard, state.card) || preventsCombatDamageToSelf(attackingCard)) continue;
       const dealt = Math.max(0, effectivePower(state.card));
       attackerDamageMarked += dealt;
       state.dealtToAttacker += dealt;
@@ -16138,8 +16192,8 @@ function simulateBlockedCombat(attackingCard: VisibleCard, blocker: VisibleCard)
   const blockerPower = Math.max(0, effectivePower(blocker));
   const attackerToughness = effectiveToughness(attackingCard);
   const blockerToughness = effectiveToughness(blocker);
-  const blockerProtected = isProtectedFrom(blocker, attackingCard);
-  const attackerProtected = isProtectedFrom(attackingCard, blocker);
+  const blockerProtected = isProtectedFrom(blocker, attackingCard) || preventsCombatDamageToSelf(blocker);
+  const attackerProtected = isProtectedFrom(attackingCard, blocker) || preventsCombatDamageToSelf(attackingCard);
 
   let attackerAlive = true;
   let blockerAlive = true;
@@ -16264,6 +16318,9 @@ function resolveBlockedCombatDamage(
   if (outcome.trampleOverflow > 0) {
     nextSession = applyCombatDamageToTarget(nextSession, attackingCard.name, target, outcome.trampleOverflow, attackingCard, attackerSeatId);
   }
+  // Damage-taken triggers ("whenever this creature is dealt damage"): every creature that was actually dealt combat damage.
+  for (const result of outcome.blockerResults) nextSession = applyDealtDamageTriggers(nextSession, target.seat.id, result.blocker, result.damageMarked);
+  nextSession = applyDealtDamageTriggers(nextSession, attackerSeatId, attackingCard, outcome.attackerDamageMarked);
 
   return destroyCreatures(nextSession, destructions);
 }
@@ -21382,6 +21439,7 @@ export function expandDeckCards(seat: PlayerSeat) {
 
 export function drawForSeat(session: GameSession, seatId: string, message: string): GameSession {
   const seat = session.seats.find((item) => item.id === seatId);
+  if (seat && !seat.hasLost && !seat.library?.[0] && playerCantLose(seat)) return session;
   if (seat && !seat.hasLost && !seat.library?.[0]) {
     return {
       ...session,
