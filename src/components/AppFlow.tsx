@@ -5852,8 +5852,13 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       // Giada, Font of Hope & co.: a different permanent's "enters with an additional +1/+1 counter".
       const replacementCounterSession =
         sourceCard && destination === "battlefield" ? applyEntersWithCounterReplacements(fixedCounterSession, action.actorSeatId, sourceCard.id) : fixedCounterSession;
+      // Josu Vess-style single kicker: remember on the permanent that it was kicked, for its "if it was kicked" trigger.
+      const kickedSession =
+        sourceCard && destination === "battlefield" && action.chosenX && hasSingleKicker(sourceCard.oracleText)
+          ? { ...replacementCounterSession, seats: replacementCounterSession.seats.map((seat) => (seat.id === action.actorSeatId ? { ...seat, board: { ...seat.board, battlefield: seat.board.battlefield.map((c) => (c.id === sourceCard.id ? { ...c, kicked: true } : c)) } } : seat)) }
+          : replacementCounterSession;
       const exploreTimes = sourceCard && destination === "battlefield" ? exploreCount(sourceCard.oracleText) : undefined;
-      const exploredSession = exploreTimes ? resolveExplore(replacementCounterSession, action.actorSeatId, sourceCard!.id, exploreTimes) : replacementCounterSession;
+      const exploredSession = exploreTimes ? resolveExplore(kickedSession, action.actorSeatId, sourceCard!.id, exploreTimes) : kickedSession;
       // Generic destroy/exile/direct-damage spells (Murder, Lightning Bolt, ...) — applies
       // regardless of where the spell itself ends up, since instants/sorceries resolve to the
       // graveyard while their effect still needs to happen.
@@ -9417,8 +9422,14 @@ function colorsAmongPermanentsControlled(seat: PlayerSeat, excludeCardId: string
 // this doesn't need its own parallel casting-cost pipeline — a card is never both an {X} spell and
 // multikicker in this codebase's real-card sample, so treating "times kicked" as chosenX is safe.
 function parseMultikickerCost(oracleText: string): number | undefined {
-  const match = oracleText.match(/\bmultikicker\s+((?:\{[^}]+\})+)/i);
+  const match = oracleText.match(/\b(?:multi)?kicker\s+((?:\{[^}]+\})+)/i);
   return match ? manaValueFromManaCost(match[1]) : undefined;
+}
+
+// "Kicker {5}{B}" (single kicker, Josu Vess) — paid at most once, unlike multikicker. Rides the same chosenX
+// plumbing, capped at one.
+function hasSingleKicker(oracleText: string): boolean {
+  return /\bkicker\s+(?:\{[^}]+\})+/i.test(oracleText) && !/\bmultikicker\b/i.test(oracleText);
 }
 
 // "This artifact enters with a charge counter on it for each time it was kicked." (Everflowing
@@ -15997,6 +16008,8 @@ export function findCommonTriggersForPermanentEntered(session: GameSession, ente
     for (const source of seat.board.battlefield) {
       const effect = commonTriggerEffect(source.oracleText, "entered", undefined, seat);
       if (!effect || !enteredTriggerApplies(source, seat.id, enteredPermanent, enteringSeatId)) continue;
+      // "When ~ enters, if he was kicked, ..." (Josu Vess) only fires for a kicked cast.
+      if (source.id === enteredPermanent.id && /\bif (?:he|she|it|this creature|this permanent) was kicked\b/i.test(source.oracleText) && !source.kicked) continue;
       triggers.push(
         makeCommonTrigger(enteringSeatId, seat.id, source, effect, `${source.name} triggers because ${enteredPermanent.name} entered the battlefield.`, enteredPermanent.id)
       );
@@ -19024,7 +19037,8 @@ export function maxAffordableX(seat: PlayerSeat, card: VisibleCard, fixedCost: n
   // to paying just RRR, then the remaining 7 becomes 7 more X the player didn't have to tap for).
   const leftoverReduction = Math.max(0, pendingArtifactAffinityReduction(seat) - card.manaValue);
   const budget = availableManaForSeat(seat, pool) - fixedCost + leftoverReduction;
-  return budget > 0 ? Math.floor(budget / unitCost) : 0;
+  const maxUnits = budget > 0 ? Math.floor(budget / unitCost) : 0;
+  return hasSingleKicker(card.oracleText) ? Math.min(1, maxUnits) : maxUnits;
 }
 
 // A purely-generic fake card, used to reuse chooseManaSourcesForCost for costs that don't come

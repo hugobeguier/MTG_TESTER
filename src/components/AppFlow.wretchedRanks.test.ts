@@ -494,3 +494,22 @@ describe("Oversold Cemetery", () => {
     expect(applyDeterministicPhaseTrigger(session([withThree]), "a", cemetery, "upkeep step")!.seats[0].board.hand).toHaveLength(0);
   });
 });
+
+import { findCommonTriggersForPermanentEntered } from "./AppFlow";
+
+describe("Josu Vess, Lich Knight — kicker", () => {
+  const josuText =
+    "Kicker {5}{B} (You may pay an additional {5}{B} as you cast this spell.)\nMenace\nWhen Josu Vess enters, if he was kicked, create eight 2/2 black Zombie Knight creature tokens with menace.";
+  const josu = (kicked: boolean) => card({ id: "josu", name: "Josu Vess, Lich Knight", typeLine: "Legendary Creature — Zombie Knight", power: "4", toughness: "5", role: "creature", oracleText: josuText, kicked });
+
+  it("makes the eight Knights only when it was kicked", () => {
+    const build = (kicked: boolean) => {
+      const me = seat({ id: "a", name: "Me", kind: "human", board: { hand: [], battlefield: [josu(kicked)], graveyard: [] } });
+      return findCommonTriggersForPermanentEntered(session([me]), "a", josu(kicked));
+    };
+    expect(build(false)).toHaveLength(0);
+    const kickedTriggers = build(true);
+    expect(kickedTriggers).toHaveLength(1);
+    expect(kickedTriggers[0].effect).toMatchObject({ kind: "create_tokens" });
+  });
+});

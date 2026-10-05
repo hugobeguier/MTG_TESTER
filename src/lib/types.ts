@@ -221,6 +221,9 @@ export interface VisibleCard {
   // recompute rather than surviving until clearTemporaryBuffs. See its read site's own comment.
   temporaryGrantedKeywords?: string[];
   attachedToId?: string;
+  // Set when this permanent was cast with its kicker paid (Josu Vess, Lich Knight) — "if it was kicked" enters
+  // triggers only fire when this is true.
+  kicked?: boolean;
   // Set instead of attachedToId for an "Enchant player" Aura (Overwhelming Splendor, the Curse
   // cycle, ...) — this engine has no per-creature-permanent object for a player to attach to, so
   // the enchanted seat is referenced directly.
