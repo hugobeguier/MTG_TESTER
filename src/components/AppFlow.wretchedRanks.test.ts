@@ -416,3 +416,30 @@ describe("Cemetery Recruitment / Withering Torment / edicts", () => {
     expect(bf(after, "b").map((x) => x.id)).toEqual(["small"]);
   });
 });
+
+import { parseGenericTapAbilities } from "@/lib/activatedAbilities";
+
+describe("tap abilities that weren't offered at all", () => {
+  it("Lord of the Undead: return target Zombie card from your graveyard (Zombies only)", () => {
+    const [ability] = parseGenericTapAbilities("{1}{B}, {T}: Return target Zombie card from your graveyard to your hand.");
+    expect(ability.effect).toMatchObject({ kind: "zone_effect", effect: { kind: "regrow", subtype: "zombie" } });
+    if (ability.effect.kind !== "zone_effect") throw new Error("wrong kind");
+    const lord = card({ id: "lord", name: "Lord of the Undead", typeLine: "Creature — Zombie", role: "creature" });
+    const grave = [card({ id: "h", name: "Human", typeLine: "Creature — Human", zone: "graveyard" }), zombie("zg", { zone: "graveyard", manaValue: 1 })];
+    const me = seat({ id: "a", name: "Me", kind: "human", board: { hand: [], battlefield: [lord], graveyard: grave } });
+    const after = applyZoneEffect(session([me]), "a", "Lord of the Undead", ability.effect.effect);
+    expect(after.seats[0].board.hand.map((c) => c.id)).toEqual(["zg"]);
+  });
+
+  it("Cemetery Reaper, Castle Locthwain, Geier Reach and Lord of the Accursed parse", () => {
+    expect(parseGenericTapAbilities("{2}{B}, {T}: Exile target creature card from a graveyard. Create a 2/2 black Zombie creature token.")[0].effect.kind).toBe("exile_graveyard_creature_then_tokens");
+    expect(parseGenericTapAbilities("{1}{B}{B}, {T}: Draw a card, then you lose life equal to the number of cards in your hand.")[0].effect.kind).toBe("draw_then_lose_life_equal_hand");
+    expect(parseGenericTapAbilities("{2}, {T}: Each player draws a card, then discards a card.")[0].effect.kind).toBe("each_player_loots");
+    expect(parseGenericTapAbilities("{1}{B}, {T}: All Zombies gain menace until end of turn.")[0].effect).toMatchObject({ kind: "grant_keyword_to_all_until_eot", typeMatcher: "zombie", keyword: "menace" });
+  });
+
+  it("Memorial to Folly's sacrifice ability returns a creature card", () => {
+    const [ability] = parseGenericSacrificeAbilities("{2}{B}, {T}, Sacrifice this land: Return target creature card from your graveyard to your hand.");
+    expect(ability.effect).toMatchObject({ kind: "zone_effect", effect: { kind: "regrow", targetType: "creature" } });
+  });
+});

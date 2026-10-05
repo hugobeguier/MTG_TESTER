@@ -30,6 +30,9 @@ export interface RegrowEffect {
   // "If it's a Zombie card, draw a card." (Cemetery Recruitment) — the draw only happens when the card
   // actually returned has this subtype/type.
   drawIfType?: string;
+  // "Return target Zombie card from your graveyard to your hand." (Lord of the Undead) — a creature subtype
+  // (lowercase) the returned card must have.
+  subtype?: string;
 }
 
 export type MillScope = "you" | "target_player" | "each_opponent" | "each_player";
@@ -233,11 +236,19 @@ export function parseZoneEffect(oracleText: string): ZoneEffect | undefined {
   // "If the gift was promised, return target creature card ..." (Consumed by Greed) — the gift isn't modeled
   // (no promise is ever made), so the conditional return never happens rather than happening unconditionally.
   const giftConditional = /\bif the gift was promised\b/.test(text);
-  const regrow = giftConditional ? null : text.match(/\breturn target (permanent|creature|land|enchantment|artifact)?\s*cards?(?: that isn'?t an? [a-z]+)? from your graveyard to your hand\b/);
+  const regrow = giftConditional ? null : text.match(/\breturn target (permanent|creature|land|enchantment|artifact|[a-z]+)?\s*cards?(?: that isn'?t an? [a-z]+)? from your graveyard to your hand\b/);
   if (regrow) {
-    const typeWord = regrow[1] as RegrowTargetType | undefined;
+    const word = regrow[1];
+    // Any word that isn't one of the card types is a creature subtype ("target Zombie card").
+    const isKnownType = word === undefined || ["permanent", "creature", "land", "enchantment", "artifact"].includes(word);
+    const typeWord = isKnownType ? (word as RegrowTargetType | undefined) : undefined;
     const conditionalDraw = text.match(/\bif it'?s an? ([a-z]+) card, draw a card\b/);
-    return { kind: "regrow", targetType: typeWord ?? "card", ...(conditionalDraw ? { drawIfType: conditionalDraw[1] } : {}) };
+    return {
+      kind: "regrow",
+      targetType: typeWord ?? "card",
+      ...(!isKnownType && word ? { subtype: word } : {}),
+      ...(conditionalDraw ? { drawIfType: conditionalDraw[1] } : {})
+    };
   }
 
   // Victimize: "Choose two target creature cards in your graveyard. Sacrifice a creature. If you

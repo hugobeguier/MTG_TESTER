@@ -6,6 +6,7 @@
 
 import { mergeModalBulletClauses, oracleClauses } from "./oracleClauses";
 import { parseRemovalEffect, type RemovalEffect } from "./removalSpells";
+import { parseZoneEffect, type ZoneEffect } from "./zoneEffects";
 
 // "Search your library for a[n] [Type] card[, reveal it], put it/that card into your hand/onto the
 // battlefield[ tapped], then shuffle." — the general tutor shape underlying most non-basic-land
@@ -121,6 +122,8 @@ export type SacrificeEffect =
   // "Create X 2/2 black Zombie creature tokens, where X is the sacrificed creature's power." (Ghoulcaller
   // Gisa) — the count comes from the creature that was sacrificed to pay for this very activation.
   | { kind: "create_tokens_by_sacrificed_power" }
+  // "Return target creature card from your graveyard to your hand." (Memorial to Folly)
+  | { kind: "zone_effect"; effect: ZoneEffect }
   | SearchLibraryEffect
   // "Transform this land/permanent/creature[, then untap it]." (Westvale Abbey -> Ormendahl,
   // Profane Prince). Whether it also untaps is read straight from the clause text at apply time
@@ -276,6 +279,19 @@ export type GenericTapEffect =
   | { kind: "create_tokens" }
   | { kind: "counter_and_transform"; targetTypeFilter?: string; power?: number; toughness?: number; addedType?: string }
   | { kind: "bounce_own"; targetTypeFilter?: string }
+  // Any graveyard/zone effect parseZoneEffect understands, as a tap ability's effect: "Return target Zombie
+  // card from your graveyard to your hand." (Lord of the Undead).
+  | { kind: "zone_effect"; effect: ZoneEffect }
+  // "Exile target creature card from a graveyard. Create a 2/2 black Zombie creature token." (Cemetery
+  // Reaper) — exiling the card is part of the effect, so with no creature card in any graveyard it can't be
+  // activated at all (it used to make a free token with every graveyard empty).
+  | { kind: "exile_graveyard_creature_then_tokens" }
+  // "Draw a card, then you lose life equal to the number of cards in your hand." (Castle Locthwain)
+  | { kind: "draw_then_lose_life_equal_hand" }
+  // "Each player draws a card, then discards a card." (Geier Reach Sanitarium)
+  | { kind: "each_player_loots" }
+  // "All Zombies gain menace until end of turn." (Lord of the Accursed)
+  | { kind: "grant_keyword_to_all_until_eot"; typeMatcher: string; keyword: string }
   | SearchLibraryEffect;
 
 export interface GenericTapAbility {
@@ -345,6 +361,14 @@ export function parseGenericTapAbilities(oracleText: string): GenericTapAbility[
 }
 
 function parseGenericTapEffectText(text: string): GenericTapEffect | undefined {
+  if (/^exile target creature card from a graveyard\.\s*create\b[^.]*\btokens?\b/i.test(text)) return { kind: "exile_graveyard_creature_then_tokens" };
+  if (/^draw a card, then you lose life equal to the number of cards in your hand\.?$/i.test(text)) return { kind: "draw_then_lose_life_equal_hand" };
+  if (/^each player draws a card, then discards a card\.?$/i.test(text)) return { kind: "each_player_loots" };
+  const grantAll = text.match(/^all ([a-z]+?)s? gain ([a-z ]+?) until end of turn\.?$/i);
+  if (grantAll) return { kind: "grant_keyword_to_all_until_eot", typeMatcher: grantAll[1].toLowerCase(), keyword: grantAll[2].toLowerCase() };
+  const zone = parseZoneEffect(text);
+  if (zone && zone.kind === "regrow") return { kind: "zone_effect", effect: zone };
+
   if (/\bcreate\b[^.]*\btokens?\b/i.test(text)) {
     return { kind: "create_tokens" };
   }
@@ -574,6 +598,9 @@ function parseSacrificeEffectText(text: string): SacrificeEffect | undefined {
 
   const searchLibrary = parseSearchLibraryEffectText(lower);
   if (searchLibrary) return searchLibrary;
+
+  const zoneEffect = parseZoneEffect(text.endsWith(".") ? text : `${text}.`);
+  if (zoneEffect && zoneEffect.kind === "regrow") return { kind: "zone_effect", effect: zoneEffect };
 
   // Catches "Destroy/Exile/deals damage to/Return target X [to its owner's hand]" shapes, plain or
   // modal ("Choose one — ..."), by reusing removalSpells.ts's own parser rather than re-narrowing

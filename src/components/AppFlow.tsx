@@ -10216,6 +10216,9 @@ function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllowed: boo
         return;
       }
       if (ability.effect.kind === "search_library" && (seat.library?.length ?? 0) === 0) return;
+      // Nothing to act on: no creature card in any graveyard to exile, or no legal graveyard target.
+      if (ability.effect.kind === "exile_graveyard_creature_then_tokens" && !session.seats.some((s) => (s.board.graveyard ?? []).some((c) => c.typeLine.includes("Creature")))) return;
+      if (ability.effect.kind === "zone_effect" && !zoneEffectHasLegalTarget(session, seat.id, ability.effect.effect)) return;
       actions.push({
         id: `activate-generic-tap:${card.id}:${abilityIndex}`,
         actionType: "activate_ability",
@@ -10872,6 +10875,8 @@ export function applySacrificeEffect(
       ]
     };
   }
+
+  if (effect.kind === "zone_effect") return applyZoneEffect(session, seatId, sourceCardName, effect.effect);
 
   // Ghoulcaller Gisa: X Zombies, X = the sacrificed creature's power.
   if (effect.kind === "create_tokens_by_sacrificed_power") {
@@ -11590,6 +11595,63 @@ function applyGenericTapEffect(
     };
   }
 
+  if (effect.kind === "zone_effect") return applyZoneEffect(session, seatId, sourceCardName, effect.effect);
+
+  // Castle Locthwain: "Draw a card, then you lose life equal to the number of cards in your hand."
+  if (effect.kind === "draw_then_lose_life_equal_hand") {
+    const drawn = drawForSeat(session, seatId, `${seat.name} draws a card from ${sourceCardName}.`);
+    const handSize = drawn.seats.find((item) => item.id === seatId)?.board.hand.length ?? 0;
+    return rulesEvent(
+      { ...drawn, seats: drawn.seats.map((item) => (item.id === seatId ? { ...item, life: item.life - handSize } : item)) },
+      seatId,
+      `${seat.name} loses ${handSize} life (cards in hand) from ${sourceCardName}.`
+    );
+  }
+
+  // Geier Reach Sanitarium: each player draws a card, then discards a card.
+  if (effect.kind === "each_player_loots") {
+    let next = session;
+    for (const player of session.seats) {
+      if (player.hasLost) continue;
+      next = drawForSeat(next, player.id, `${player.name} draws a card from ${sourceCardName}.`);
+      const current = next.seats.find((item) => item.id === player.id);
+      const discard = current ? chooseWorstHandCardToDiscard(current) : undefined;
+      if (discard) {
+        next = moveCardBetweenVisibleZones(next, player.id, discard.id, "graveyard");
+        next = rulesEvent(next, player.id, `${player.name} discards ${discard.name} (${sourceCardName}).`);
+      }
+    }
+    return next;
+  }
+
+  // Lord of the Accursed: all Zombies gain menace until end of turn (every player's).
+  if (effect.kind === "grant_keyword_to_all_until_eot") {
+    const seats = session.seats.map((item) => ({
+      ...item,
+      board: {
+        ...item.board,
+        battlefield: item.board.battlefield.map((permanent) =>
+          permanentMatchesQualifier(permanent, effect.typeMatcher) ? { ...permanent, temporaryGrantedKeywords: [...(permanent.temporaryGrantedKeywords ?? []), effect.keyword] } : permanent
+        )
+      }
+    }));
+    return rulesEvent({ ...session, seats }, seatId, `${seat.name} activates ${sourceCardName}: all ${effect.typeMatcher}s gain ${effect.keyword} until end of turn.`);
+  }
+
+  // Cemetery Reaper: exile a creature card from a graveyard, then create the token.
+  if (effect.kind === "exile_graveyard_creature_then_tokens") {
+    const candidates = session.seats.flatMap((item) => (item.board.graveyard ?? []).filter((c) => c.typeLine.includes("Creature")).map((c) => ({ seatId: item.id, card: c })));
+    // Prefers an opponent's best card (graveyard hate), otherwise the weakest card of its own.
+    const opposing = candidates.filter((entry) => entry.seatId !== seatId);
+    const pick = opposing.length > 0 ? opposing.reduce((a, b) => (b.card.manaValue > a.card.manaValue ? b : a)) : candidates.reduce((a, b) => (b.card.manaValue < a.card.manaValue ? b : a), candidates[0]);
+    if (!pick) return rulesEvent(session, seatId, `${sourceCardName} has no creature card in any graveyard to exile.`);
+    const exiled = moveCardAcrossSeats(session, pick.seatId, pick.card.id, pick.seatId, "exile").session;
+    const specs = parseCreateTokenSpecs(clause);
+    const created = specs.length > 0 ? createTokensForSeat(exiled, seatId, sourceCardId, specs).session : exiled;
+    return rulesEvent(created, seatId, `${seat.name} activates ${sourceCardName}: exiles ${pick.card.name} and creates a token.`);
+  }
+
+  if (effect.kind !== "bounce_own") return session;
   // bounce_own
   const target = chooseGenericTapTarget(seat, effect.targetTypeFilter);
   if (!target) return session;
@@ -13445,7 +13507,7 @@ function zoneEffectHasLegalTarget(session: GameSession, casterSeatId: string, ef
     case "reanimate":
       return chooseReanimationTarget(session, casterSeatId, effect.anyGraveyard, effect.targetType) !== undefined;
     case "regrow":
-      return chooseRegrowTarget(session, casterSeatId, effect.targetType) !== undefined;
+      return chooseRegrowTarget(session, casterSeatId, effect.targetType, effect.subtype) !== undefined;
     case "gain_control":
       return chooseControlTarget(session, casterSeatId) !== undefined;
     case "sacrifice_then_reanimate":
@@ -14007,9 +14069,11 @@ function chooseCreatureCardsFromOwnGraveyard(session: GameSession, casterSeatId:
 // regardless of what was actually in the graveyard, and the spell became uncastable outright ("no
 // legal target") even with a real match sitting right there. Reported live as Heliod, the Radiant
 // Dawn refusing to cast with Mind's Dilation (an Enchantment) in the graveyard.
-function chooseRegrowTarget(session: GameSession, casterSeatId: string, targetType: RegrowTargetType): VisibleCard | undefined {
+function chooseRegrowTarget(session: GameSession, casterSeatId: string, targetType: RegrowTargetType, subtype?: string): VisibleCard | undefined {
   const seat = session.seats.find((item) => item.id === casterSeatId);
-  const candidates = (seat?.board.graveyard ?? []).filter((card) => (targetType === "card" ? true : matchesTargetType(card, targetType)));
+  const candidates = (seat?.board.graveyard ?? []).filter(
+    (card) => (targetType === "card" ? true : matchesTargetType(card, targetType)) && (!subtype || card.typeLine.toLowerCase().includes(subtype.toLowerCase()))
+  );
   if (candidates.length === 0) return undefined;
   return candidates.reduce((a, b) => (b.manaValue > a.manaValue ? b : a));
 }
@@ -14192,7 +14256,7 @@ export function applyZoneEffect(session: GameSession, casterSeatId: string, sour
       };
     }
     case "regrow": {
-      const target = resolvePreChosenGraveyardTarget(session, casterSeatId, preChosenTarget) ?? chooseRegrowTarget(session, casterSeatId, effect.targetType);
+      const target = resolvePreChosenGraveyardTarget(session, casterSeatId, preChosenTarget) ?? chooseRegrowTarget(session, casterSeatId, effect.targetType, effect.subtype);
       if (!target) return noLegalTargetEvent(session, casterSeatId, sourceName);
       const { session: regrownSession } = moveCardAcrossSeats(session, casterSeatId, target.id, casterSeatId, "hand");
       const regrown: GameSession = {
