@@ -48,6 +48,10 @@ export type SpellExtraEffect =
   // "Target opponent sacrifices a creature with the greatest power among creatures they control." (Consumed by
   // Greed)
   | { kind: "opponent_sacrifices_greatest_power" }
+  // "You and target opponent each draw three cards." (Secret Rendezvous)
+  | { kind: "you_and_opponent_draw"; amount: number }
+  // "Each opponent draws a card, then you draw a card for each opponent who drew a card this way." (Cut a Deal)
+  | { kind: "opponents_draw_then_you_draw" }
   // "Add {R} for each tapped land your opponents control." (Mana Geyser)
   | { kind: "add_mana_per_tapped_opponent_land"; color: "W" | "U" | "B" | "R" | "G" | "C" };
 
@@ -155,6 +159,15 @@ export function parseSpellExtraEffects(text: string): SpellExtraEffect[] {
 
   if (/\btarget opponent sacrifices a creature with the greatest power among creatures they control\b/i.test(normalized)) {
     effects.push({ kind: "opponent_sacrifices_greatest_power" });
+  }
+
+  const mutualDraw = normalized.match(/\byou and target opponent each draw (a|one|two|three|four|five|\d+) cards?\b/i);
+  if (mutualDraw) {
+    const amount = wordToInt(mutualDraw[1]);
+    if (amount) effects.push({ kind: "you_and_opponent_draw", amount });
+  }
+  if (/\beach opponent draws a card, then you draw a card for each opponent who drew a card this way\b/i.test(normalized)) {
+    effects.push({ kind: "opponents_draw_then_you_draw" });
   }
 
   const addMana = normalized.match(/^add \{([wubrgc])\} for each tapped land your opponents control\b/i);

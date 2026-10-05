@@ -31,6 +31,8 @@ export interface DestroyEffect {
   // "Its controller investigates." (Fateful Absence) — the destroyed permanent's controller, not the
   // caster, gets a Clue token.
   controllerInvestigates?: boolean;
+  // "Destroy target creature with toughness 4 or greater." (Destroy Evil) — a legal target needs at least this much toughness.
+  minToughness?: number;
 }
 
 // "Destroy up to X target artifacts and/or enchantments." (Pest Infestation) — a variable, MULTI-
@@ -261,7 +263,8 @@ function parseDestroy(text: string): DestroyEffect | DestroyAllEffect | DestroyA
     excludedColors: COLORS.filter((color) => clause.includes(`non${color}`)),
     artifactsExcluded: clause.includes("nonartifact"),
     basicsExcluded: clause.includes("nonbasic"),
-    ...(/\bits controller investigates\b/.test(text) ? { controllerInvestigates: true } : {})
+    ...(/\bits controller investigates\b/.test(text) ? { controllerInvestigates: true } : {}),
+    ...(clause.match(/target creature with toughness (\d+) or greater/) ? { minToughness: Number.parseInt(clause.match(/target creature with toughness (\d+) or greater/)![1], 10) } : {})
   };
 }
 

@@ -13053,7 +13053,9 @@ function chooseRemovalTarget(
   // wastes the whole spell for nothing. Same preference shape as the existing ward avoidance just
   // below. Reported live as Krosan Grip auto-targeting Darksteel Citadel (indestructible) while an
   // opponent's non-indestructible artifact was sitting right there.
-  avoidIndestructible: boolean = false
+  avoidIndestructible: boolean = false,
+  // "toughness 4 or greater" (Destroy Evil): candidates below this toughness aren't legal targets.
+  minToughness?: number
 ): { seatId: string; card: VisibleCard } | undefined {
   const excludedColorCodes = excludedColors.map((color) => PROTECTION_COLOR_CODE[color]).filter(Boolean);
   const candidates: Array<{ seatId: string; card: VisibleCard }> = [];
@@ -13062,6 +13064,7 @@ function chooseRemovalTarget(
       if (!matchesTargetType(card, targetType)) continue;
       if (artifactsExcluded && card.typeLine.includes("Artifact")) continue;
       if (basicsExcluded && card.typeLine.includes("Basic")) continue;
+      if (minToughness !== undefined && effectiveToughness(card) < minToughness) continue;
       if (excludedColorCodes.length > 0 && card.colors.some((color) => excludedColorCodes.includes(color))) continue;
       // Rule 601.2c/702.11c/702.12b: hexproof/shroud/protection all make a permanent an illegal
       // target, not just a bad one — hexproof only blocks opponents, shroud and protection block
@@ -13541,6 +13544,27 @@ export function applySpellExtraEffect(session: GameSession, casterSeatId: string
       return destroyCreatures(session, [{ seatId: chosen.other.id, cardId: chosen.best.id, message: `${chosen.other.name} sacrifices ${chosen.best.name} to ${sourceName}.` }], "Rules action");
     }
 
+    case "you_and_opponent_draw": {
+      // "Target opponent": the weakest (lowest life) one, so the symmetric draw doesn't feed the biggest threat.
+      const opponents = session.seats.filter((other) => other.id !== casterSeatId && !other.hasLost);
+      const target = opponents.length > 0 ? opponents.reduce((a, b) => (b.life < a.life ? b : a)) : undefined;
+      let next = drawMultipleForSeat(session, casterSeatId, effect.amount, `${caster.name} draws ${effect.amount} card${effect.amount === 1 ? "" : "s"} from ${sourceName}.`);
+      if (target) next = drawMultipleForSeat(next, target.id, effect.amount, `${target.name} draws ${effect.amount} card${effect.amount === 1 ? "" : "s"} from ${sourceName}.`);
+      return next;
+    }
+
+    case "opponents_draw_then_you_draw": {
+      const opponents = session.seats.filter((other) => other.id !== casterSeatId && !other.hasLost);
+      let next = session;
+      let drew = 0;
+      for (const opponent of opponents) {
+        if (!(opponent.library?.length ?? 0)) continue;
+        next = drawForSeat(next, opponent.id, `${opponent.name} draws a card from ${sourceName}.`);
+        drew += 1;
+      }
+      return drew > 0 ? drawMultipleForSeat(next, casterSeatId, drew, `${caster.name} draws ${drew} card${drew === 1 ? "" : "s"} from ${sourceName}.`) : next;
+    }
+
     // Needs the live game's mana pool — see manaFromTappedOpponentLands.
     case "add_mana_per_tapped_opponent_land":
       return session;
@@ -13604,7 +13628,7 @@ function removalEffectHasLegalTarget(session: GameSession, casterSeatId: string,
     case "destroy_all_conditional":
       return true;
     case "destroy":
-      return chooseRemovalTarget(session, casterSeatId, effect.targetType, sourceCard, effect.excludedColors, effect.artifactsExcluded, effect.basicsExcluded, true) !== undefined;
+      return chooseRemovalTarget(session, casterSeatId, effect.targetType, sourceCard, effect.excludedColors, effect.artifactsExcluded, effect.basicsExcluded, true, effect.minToughness) !== undefined;
     // Rule 601.2c: "up to X" never requires a legal target — choosing zero is always legal, same
     // reasoning as proliferate's "choose any number" just below.
     case "destroy_up_to_x":
@@ -14050,7 +14074,7 @@ export function applyRemovalEffect(
     case "destroy": {
       const target =
         resolvePreChosenBattlefieldTarget(session, preChosenTarget) ??
-        chooseRemovalTarget(session, casterSeatId, effect.targetType, source, effect.excludedColors, effect.artifactsExcluded, effect.basicsExcluded, true);
+        chooseRemovalTarget(session, casterSeatId, effect.targetType, source, effect.excludedColors, effect.artifactsExcluded, effect.basicsExcluded, true, effect.minToughness);
       if (!target) return noLegalTargetEvent(session, casterSeatId, sourceName);
       const warded = payWardIfNeeded(session, casterSeatId, target.card, sourceName);
       if (warded.countered) return warded.session;
@@ -14737,6 +14761,9 @@ export function parseSimpleLifeChange(text: string): { kind: "gain_life" | "lose
 // would double the draw.
 export function parseSimpleDrawEffect(text: string): { amount: number } | undefined {
   const lowered = text.toLowerCase();
+  // Symmetric draws are owned by spellExtras (Secret Rendezvous, Cut a Deal) — a plain "draw three cards" here gave only
+  // the caster the cards.
+  if (/\byou and target opponent each draw\b|\beach opponent draws a card, then you draw/.test(lowered)) return undefined;
   // "If it's a Zombie card, draw a card." (Cemetery Recruitment) — a CONDITIONAL draw owned by the regrow
   // effect it follows; an unconditional draw here was giving the card for free.
   if (/\bif (?:it'?s|that card is|you do)\b[^.]*,\s*(?:you )?draw\b/.test(lowered)) return undefined;

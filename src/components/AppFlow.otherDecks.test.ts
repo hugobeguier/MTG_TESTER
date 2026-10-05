@@ -160,3 +160,45 @@ describe("Whisperer of the Wilds", () => {
     expect(manaProducedBy(whisperer, me)).toBe(2);
   });
 });
+
+import { applySpellExtraEffect, applyRemovalEffect, parseSimpleDrawEffect } from "./AppFlow";
+import { parseSpellExtraEffects } from "@/lib/spellExtras";
+
+describe("Calling All Angels spells", () => {
+  const withLib = (n: number) => ({ library: Array.from({ length: n }, (_, i) => card({ id: `l${i}`, name: `L${i}`, typeLine: "Creature", zone: "library" })), zones: { library: n, hand: 0, battlefield: 0, graveyard: 0, exile: 0, command: 0 } });
+  const sess = (seats: PlayerSeat[]): GameSession => ({ id: "t", createdAt: "", status: "playing", phase: "precombat main phase", turn: 1, xmage: { enabled: false, status: "not_configured", message: "" }, seats, events: [] });
+  const src = card({ id: "s", name: "Spell", typeLine: "Instant" });
+
+  it("Secret Rendezvous: you AND the opponent draw three", () => {
+    const text = "You and target opponent each draw three cards.";
+    expect(parseSimpleDrawEffect(text)).toBeUndefined();
+    const me = seat({ id: "a", name: "Me", kind: "human", ...withLib(5) });
+    const opp = seat({ id: "b", name: "Opp", kind: "agent", ...withLib(5) });
+    const after = applySpellExtraEffect(sess([me, opp]), "a", src, parseSpellExtraEffects(text)[0]);
+    expect(after.seats[0].board.hand).toHaveLength(3);
+    expect(after.seats[1].board.hand).toHaveLength(3);
+  });
+
+  it("Cut a Deal: each opponent draws one, you draw one per opponent who drew", () => {
+    const text = "Each opponent draws a card, then you draw a card for each opponent who drew a card this way.";
+    const me = seat({ id: "a", name: "Me", kind: "human", ...withLib(5) });
+    const b = seat({ id: "b", name: "B", kind: "agent", ...withLib(5) });
+    const c = seat({ id: "c", name: "C", kind: "agent", ...withLib(5) });
+    const after = applySpellExtraEffect(sess([me, b, c]), "a", src, parseSpellExtraEffects(text)[0]);
+    expect(after.seats[0].board.hand).toHaveLength(2);
+    expect(after.seats[1].board.hand).toHaveLength(1);
+    expect(after.seats[2].board.hand).toHaveLength(1);
+  });
+
+  it("Destroy Evil only has legal targets with toughness 4 or greater", () => {
+    const effect = parseRemovalEffect("destroy target creature with toughness 4 or greater.")!;
+    expect(effect).toMatchObject({ kind: "destroy", minToughness: 4 });
+    const me = seat({ id: "a", name: "Me", kind: "human" });
+    const small = seat({ id: "b", name: "Opp", kind: "agent", board: { hand: [], battlefield: [creature("s", "2")], graveyard: [] } });
+    const unchanged = applyRemovalEffect(sess([me, small]), "a", "Destroy Evil", src, effect);
+    expect(unchanged.seats[1].board.battlefield).toHaveLength(1); // 2/2 is not a legal target
+    const big = seat({ id: "b", name: "Opp", kind: "agent", board: { hand: [], battlefield: [creature("s", "2"), card({ id: "big", name: "Big", typeLine: "Creature — Giant", power: "5", toughness: "5", role: "creature" })], graveyard: [] } });
+    const after = applyRemovalEffect(sess([me, big]), "a", "Destroy Evil", src, effect);
+    expect(after.seats[1].board.battlefield.map((c) => c.id)).toEqual(["s"]);
+  });
+});
