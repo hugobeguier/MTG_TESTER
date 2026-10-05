@@ -180,3 +180,82 @@ describe("Gray Merchant / Vengeful Dead", () => {
     expect(resolved.seats.find((s) => s.id === "b")!.life).toBe(39);
   });
 });
+
+import { applySacrificeEffect } from "./AppFlow";
+import { parseGenericSacrificeAbilities } from "@/lib/activatedAbilities";
+
+describe("'Sacrifice another …' abilities", () => {
+  it("Ghoulcaller Gisa: another creature, tokens equal to its power", () => {
+    const [ability] = parseGenericSacrificeAbilities(
+      "{B}, {T}, Sacrifice another creature: Create X 2/2 black Zombie creature tokens, where X is the sacrificed creature's power."
+    );
+    expect(ability).toMatchObject({ sacrificeTarget: "creature", sacrificeExcludesSelf: true, effect: { kind: "create_tokens_by_sacrificed_power" } });
+    expect(ability.sacrificeTargetTypeFilter).toBeUndefined();
+  });
+
+  it("Gisa's activation makes as many Zombies as the sacrificed creature's power", () => {
+    const [ability] = parseGenericSacrificeAbilities(
+      "{B}, {T}, Sacrifice another creature: Create X 2/2 black Zombie creature tokens, where X is the sacrificed creature's power."
+    );
+    const gisa = card({ id: "gisa", name: "Ghoulcaller Gisa", typeLine: "Legendary Creature — Human Wizard", power: "3", toughness: "4", role: "creature" });
+    const victim = zombie("v", { power: "4", toughness: "4" });
+    const me = seat({ id: "a", name: "Me", kind: "human", board: { hand: [], battlefield: [gisa], graveyard: [] } });
+    const after = applySacrificeEffect(session([me]), "a", gisa, ability.effect, ability.clause, [victim]);
+    const tokens = bf(after, "a").filter((c) => c.token);
+    expect(tokens).toHaveLength(4);
+    expect(tokens.every((t) => t.power === "2" && t.toughness === "2")).toBe(true);
+  });
+
+  it("Ayara: another BLACK creature", () => {
+    const [ability] = parseGenericSacrificeAbilities("{T}, Sacrifice another black creature: Draw a card.");
+    expect(ability).toMatchObject({ sacrificeExcludesSelf: true, sacrificeTargetTypeFilter: "black creature", effect: { kind: "draw_cards", amount: 1 } });
+  });
+
+  it("Kalitas: another Vampire or Zombie, two +1/+1 counters on himself", () => {
+    const [ability] = parseGenericSacrificeAbilities("{2}{B}, Sacrifice another Vampire or Zombie: Put two +1/+1 counters on Kalitas.");
+    expect(ability).toMatchObject({
+      sacrificeExcludesSelf: true,
+      sacrificeTargetTypeFilter: "Vampire or Zombie",
+      effect: { kind: "add_counter", counterKind: "+1/+1", amount: 2 }
+    });
+  });
+
+  it("Infernal Idol: draw two AND lose 2 life", () => {
+    const abilities = parseGenericSacrificeAbilities("{T}: Add {B}.\n{1}{B}{B}, {T}, Sacrifice this artifact: You draw two cards and lose 2 life.");
+    expect(abilities[0].effect).toMatchObject({ kind: "draw_cards", amount: 2, alsoLoseLife: 2 });
+  });
+});
+
+import { destroyCreatures } from "./AppFlow";
+
+describe("Kalitas, Traitor of Ghet — exile instead of dying", () => {
+  const kalitasText =
+    "Lifelink\nIf a nontoken creature an opponent controls would die, instead exile that card and create a 2/2 black Zombie creature token.\n{2}{B}, Sacrifice another Vampire or Zombie: Put two +1/+1 counters on Kalitas.";
+  const kalitas = card({ id: "kal", name: "Kalitas, Traitor of Ghet", typeLine: "Legendary Creature — Vampire Warrior", power: "3", toughness: "4", role: "creature", oracleText: kalitasText });
+
+  it("casting Kalitas no longer reads the replacement as a free Zombie", () => {
+    expect(etbEffectText(kalitasText)).not.toMatch(/create a 2\/2/i);
+  });
+
+  it("an opponent's nontoken creature is exiled, and Kalitas's controller gets a Zombie", () => {
+    const me = seat({ id: "a", name: "Me", kind: "human", board: { hand: [], battlefield: [kalitas], graveyard: [] } });
+    const them = seat({ id: "b", name: "Opp", kind: "agent", board: { hand: [], battlefield: [card({ id: "bear", name: "Bear", typeLine: "Creature — Bear", power: "2", toughness: "2", role: "creature" })], graveyard: [] } });
+    const after = destroyCreatures(session([me, them]), [{ seatId: "b", cardId: "bear", message: "Bear dies" }], "Rules action");
+    const theirs = after.seats.find((s) => s.id === "b")!;
+    expect(theirs.board.battlefield).toHaveLength(0);
+    expect(theirs.board.graveyard ?? []).toHaveLength(0);
+    expect(theirs.board.exile?.map((c) => c.id)).toEqual(["bear"]);
+    expect(bf(after, "a").filter((c) => c.token && c.name.includes("Zombie"))).toHaveLength(1);
+    expect(after.pendingDeaths ?? []).toHaveLength(0); // it never died
+  });
+
+  it("your own creatures and opposing TOKENS die normally", () => {
+    const mine = zombie("mine");
+    const me = seat({ id: "a", name: "Me", kind: "human", board: { hand: [], battlefield: [kalitas, mine], graveyard: [] } });
+    const them = seat({ id: "b", name: "Opp", kind: "agent", board: { hand: [], battlefield: [zombie("tok", { token: true })], graveyard: [] } });
+    const after = destroyCreatures(session([me, them]), [{ seatId: "a", cardId: "mine", message: "x" }, { seatId: "b", cardId: "tok", message: "y" }], "Rules action");
+    expect(after.seats.find((s) => s.id === "a")!.board.graveyard?.map((c) => c.id)).toEqual(["mine"]);
+    expect(bf(after, "b")).toHaveLength(0);
+    expect(bf(after, "a").filter((c) => c.token)).toHaveLength(0);
+  });
+});

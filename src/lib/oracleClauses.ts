@@ -115,7 +115,8 @@ export function etbEffectText(oracleText: string): string {
         !isDeathTriggerClause(clause) &&
         !isPhaseTriggerClause(clause) &&
         !isNonEtbWheneverClause(clause) &&
-        !isStaticBoostClause(clause)
+        !isStaticBoostClause(clause) &&
+        !isReplacementEffectClause(clause)
     )
     // Reminder text ("(They create a Clue token. It's an artifact with "...: Draw a card.")") explains a
     // keyword or token; it is never itself an effect. Left in, parsers read its "Draw a card" / "create a
@@ -124,6 +125,31 @@ export function etbEffectText(oracleText: string): string {
     .map((clause) => clause.replace(/\s*\([^)]*\)/g, "").trim())
     .filter(Boolean)
     .join(" ");
+}
+
+// "If a nontoken creature an opponent controls would die, instead exile that card and create a 2/2 black
+// Zombie creature token." (Kalitas, Traitor of Ghet) — a replacement effect (rule 614), never something
+// that happens when the permanent enters. Left in etbEffectText it was read as a plain "create a token"
+// and cast Kalitas for a free Zombie.
+export function isReplacementEffectClause(clause: string): boolean {
+  return /\bwould\b[^.]*,\s*instead\b/i.test(clause) || /\binstead\b[^.]*\bwould\b/i.test(clause);
+}
+
+export interface ExileInsteadOfDyingReplacement {
+  // The text of the token this replacement creates ("create a 2/2 black Zombie creature token"), for the
+  // shared token parser.
+  tokenClause: string;
+}
+
+// Kalitas's shape only: "If a nontoken creature an opponent controls would die, instead exile that card
+// and create a <token>."
+export function parseExileInsteadOfDyingReplacement(oracleText: string): ExileInsteadOfDyingReplacement | undefined {
+  for (const rawClause of oracleText.split("\n")) {
+    const clause = rawClause.replace(/\([^)]*\)/g, "").trim();
+    const match = clause.match(/^if a nontoken creature an opponent controls would die, instead exile that card and (create [^.]+)\.?$/i);
+    if (match) return { tokenClause: match[1] };
+  }
+  return undefined;
 }
 
 // "Other Zombie creatures get +1/+1." (Lord of the Undead), "Black creatures get +1/+1." (Bad Moon),

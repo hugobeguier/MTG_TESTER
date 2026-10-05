@@ -114,9 +114,13 @@ export function parseSearchLibraryEffectText(text: string): SearchLibraryEffect 
 }
 
 export type SacrificeEffect =
-  | { kind: "scry" | "surveil" | "draw_cards" | "gain_life" | "lose_life"; amount: number }
+  // alsoLoseLife: "You draw two cards and lose 2 life." (Infernal Idol) — the life loss half of a compound draw.
+  | { kind: "scry" | "surveil" | "draw_cards" | "gain_life" | "lose_life"; amount: number; alsoLoseLife?: number }
   | { kind: "add_counter"; counterKind: string; amount: number }
   | { kind: "create_tokens" }
+  // "Create X 2/2 black Zombie creature tokens, where X is the sacrificed creature's power." (Ghoulcaller
+  // Gisa) — the count comes from the creature that was sacrificed to pay for this very activation.
+  | { kind: "create_tokens_by_sacrificed_power" }
   | SearchLibraryEffect
   // "Transform this land/permanent/creature[, then untap it]." (Westvale Abbey -> Ormendahl,
   // Profane Prince). Whether it also untaps is read straight from the clause text at apply time
@@ -153,6 +157,8 @@ export interface SacrificeAbility {
   // "Sacrifice a Servo"/"Sacrifice a Thopter", not just "sacrifice a creature") — undefined means
   // any creature qualifies. Only meaningful when sacrificeTarget is "creature".
   sacrificeTargetTypeFilter?: string;
+  // "Sacrifice ANOTHER creature" — the source itself isn't a legal sacrifice for its own cost.
+  sacrificeExcludesSelf: boolean;
   // How many creatures must be sacrificed — 1 for the ordinary "sacrifice a/an creature" shape,
   // N for a fixed-count plural shape (Westvale Abbey's "Sacrifice five creatures"). Always 1 when
   // sacrificeTarget is "self" (a card never sacrifices multiple copies of itself).
@@ -204,7 +210,7 @@ function numberWordToInt(value: string | undefined): number | undefined {
 // doesn't — the whole clause silently failed to match, and every real fetch land had no activated
 // ability recognized at all (not offered as a legal action, no interactive search, nothing).
 const SACRIFICE_CLAUSE_PATTERN =
-  /^((?:(?:\{[^}]+\}|discard a card|pay \d+ life)\s*,?\s*)*)sacrifice\s+(this\s+[a-z]+|an?\s+creature|(?:a|one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+creatures|an?\s+(?!permanents?\b|lands?\b|cards?\b|artifacts?\b|enchantments?\b|planeswalkers?\b|tokens?\b)[a-z]+)\s*:\s*([\s\S]+?)\.?\s*$/i;
+  /^((?:(?:\{[^}]+\}|discard a card|pay \d+ life)\s*,?\s*)*)sacrifice\s+(another\s+(?:creature|[a-z]+\s+creature|[a-z]+\s+or\s+[a-z]+)|this\s+[a-z]+|an?\s+creature|(?:a|one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+creatures|an?\s+(?!permanents?\b|lands?\b|cards?\b|artifacts?\b|enchantments?\b|planeswalkers?\b|tokens?\b)[a-z]+)\s*:\s*([\s\S]+?)\.?\s*$/i;
 
 const SACRIFICE_COUNT_PATTERN = /^(a|one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+creatures$/i;
 
@@ -229,14 +235,30 @@ export function parseGenericSacrificeAbilities(oracleText: string): SacrificeAbi
     const sacrificeTarget: "self" | "creature" = /^this\b/i.test(targetPhrase) ? "self" : "creature";
     const countMatch = targetPhrase.match(SACRIFICE_COUNT_PATTERN);
     const sacrificeCount = countMatch ? numberWordToInt(countMatch[1]) ?? 1 : 1;
-    const typeWord = countMatch ? undefined : targetPhrase.replace(/^an?\s+/i, "");
+    // "Sacrifice ANOTHER creature" (Ghoulcaller Gisa, Ayara, Kalitas) must not let the source pay for its
+    // own cost; the descriptor after "another" can carry a color or an "or" ("another black creature",
+    // "another Vampire or Zombie"), which chooseSacrificeTargets evaluates with the shared qualifier matcher.
+    const sacrificeExcludesSelf = /^another\b/i.test(targetPhrase);
+    const typeWord = countMatch ? undefined : targetPhrase.replace(/^(?:another|an?)\s+/i, "");
     const sacrificeTargetTypeFilter = sacrificeTarget === "creature" && typeWord !== undefined && !/^creatures?$/i.test(typeWord) ? typeWord : undefined;
 
     const effect = parseSacrificeEffectText(effectText);
     if (!effect) continue;
 
     const costManaText = (costPrefix.match(/\{[^}]+\}/g) ?? []).filter((symbol) => !/^\{t\}$/i.test(symbol)).join("");
-    abilities.push({ costMana, costManaText, costTap, costDiscard, costLife, sacrificeTarget, sacrificeTargetTypeFilter, sacrificeCount, effect, clause });
+    abilities.push({
+      costMana,
+      costManaText,
+      costTap,
+      costDiscard,
+      costLife,
+      sacrificeTarget,
+      sacrificeTargetTypeFilter,
+      sacrificeExcludesSelf,
+      sacrificeCount,
+      effect,
+      clause
+    });
   }
 
   return abilities;
@@ -517,7 +539,9 @@ function parseSacrificeEffectText(text: string): SacrificeEffect | undefined {
   const drawMatch = lower.match(/\bdraw\s+(a|one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+cards?\b/);
   if (drawMatch) {
     const amount = numberWordToInt(drawMatch[1]);
-    if (amount) return { kind: "draw_cards", amount };
+    const alsoLose = lower.match(/\band (?:you )?lose\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+life\b/);
+    const alsoLoseLife = alsoLose ? numberWordToInt(alsoLose[1]) : undefined;
+    if (amount) return { kind: "draw_cards", amount, ...(alsoLoseLife ? { alsoLoseLife } : {}) };
   }
 
   const gainMatch = lower.match(/\byou gain\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+life\b/);
@@ -532,9 +556,12 @@ function parseSacrificeEffectText(text: string): SacrificeEffect | undefined {
     if (amount) return { kind: "lose_life", amount };
   }
 
-  const counterMatch = lower.match(/\bput an? \+1\/\+1 counter on (?:this creature|it)\b/);
-  if (counterMatch) return { kind: "add_counter", counterKind: "+1/+1", amount: 1 };
+  // "Put a +1/+1 counter on this creature." / "Put two +1/+1 counters on Kalitas." — the permanent may be
+  // named by its short name instead of "this creature".
+  const counterMatch = lower.match(/\bput (an?|one|two|three|four|\d+) \+1\/\+1 counters? on (?!target\b|each\b|another\b)(?:this creature|it|[a-z][a-z' -]*?)\.?$/);
+  if (counterMatch) return { kind: "add_counter", counterKind: "+1/+1", amount: numberWordToInt(counterMatch[1]) ?? 1 };
 
+  if (/\bcreate x\b[^.]*\btokens?\b[^.]*\bwhere x is the sacrificed creature'?s power\b/.test(lower)) return { kind: "create_tokens_by_sacrificed_power" };
   if (/\bcreate\b[^.]*\btokens?\b/.test(lower)) return { kind: "create_tokens" };
 
   if (/^transform this (?:land|permanent|artifact|creature|enchantment)\b/.test(lower)) return { kind: "transform_self" };

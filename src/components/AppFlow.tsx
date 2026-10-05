@@ -58,6 +58,7 @@ import {
   parseAdditionalSacrificeCost,
   parseEmblemGrant,
   parseEntersWithCounterReplacements,
+  parseExileInsteadOfDyingReplacement,
   parseGainsAbilityGrant,
   parseModalHeader,
   parseSagaChapters,
@@ -437,6 +438,8 @@ type PendingRuleChoice =
       // Retrofitter Foundry's "Sacrifice a Servo"/"Sacrifice a Thopter" — mirrors
       // SacrificeAbility.sacrificeTargetTypeFilter (activatedAbilities.ts) exactly.
       typeFilter?: string;
+      // "Sacrifice ANOTHER creature" — the source can't be offered as its own sacrifice.
+      excludeCardId?: string;
       // How many creatures must be sacrificed — almost always 1; carried through so multi-select
       // (Westvale Abbey's "Sacrifice five creatures") isn't silently capped at one pick.
       count: number;
@@ -4373,6 +4376,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         prompt: `${card.name}: choose a creature to sacrifice.`,
         abilityIndex,
         typeFilter: ability.sacrificeTargetTypeFilter,
+        excludeCardId: ability.sacrificeExcludesSelf ? cardId : undefined,
         count: ability.sacrificeCount
       });
       return;
@@ -4415,7 +4419,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       setSeatManaPool(seatId, paid.poolSpent);
       clearManaContributions(seatId);
     }
-    setSession(() => applySacrificeEffect(paid.session, seatId, paid.card, paid.ability.effect, paid.ability.clause));
+    setSession(() => applySacrificeEffect(paid.session, seatId, paid.card, paid.ability.effect, paid.ability.clause, paid.sacrificed));
   }
 
   function activateGenericTapAbility(seatId: string, cardId: string, abilityIndex: number, chosenDiscardId?: string) {
@@ -7308,7 +7312,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       setSeatManaPool(choice.controllerSeatId, paid.poolSpent);
       clearManaContributions(choice.controllerSeatId);
     }
-    setSession(() => applySacrificeEffect(paid.session, choice.controllerSeatId, paid.card, paid.ability.effect, paid.ability.clause));
+    setSession(() => applySacrificeEffect(paid.session, choice.controllerSeatId, paid.card, paid.ability.effect, paid.ability.clause, paid.sacrificed));
   }
 
   // Human resolution for choose_each_player_sacrifice — every OTHER seat's sacrifice/discard already
@@ -10112,7 +10116,7 @@ function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllowed: boo
       // Rule 119.4: a life payment (Arid Mesa and the rest of the fetch-land cycle's "Pay 1 life"
       // cost, ...) can only be made if the player's life total is at least that much.
       if (ability.costLife > 0 && seat.life < ability.costLife) return;
-      if (ability.sacrificeTarget === "creature" && !chooseSacrificeTargets(seat, ability.sacrificeTargetTypeFilter, ability.sacrificeCount)) return;
+      if (ability.sacrificeTarget === "creature" && !chooseSacrificeTargets(seat, ability.sacrificeTargetTypeFilter, ability.sacrificeCount, ability.sacrificeExcludesSelf ? card.id : undefined)) return;
       if (ability.effect.kind === "search_library" && (seat.library?.length ?? 0) === 0) return;
       // Rule 601.2c-equivalent for an activated ability: don't offer "activate Cankerbloom" with
       // nothing to destroy any more than legalMainPhaseActions offers casting a removal spell with
@@ -10130,7 +10134,7 @@ function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllowed: boo
       const targetNames =
         ability.sacrificeTarget === "self"
           ? [card.name]
-          : (chooseSacrificeTargets(seat, ability.sacrificeTargetTypeFilter, ability.sacrificeCount) ?? []).map((target) => target.name);
+          : (chooseSacrificeTargets(seat, ability.sacrificeTargetTypeFilter, ability.sacrificeCount, ability.sacrificeExcludesSelf ? card.id : undefined) ?? []).map((target) => target.name);
       actions.push({
         id: `activate-sacrifice:${card.id}:${abilityIndex}`,
         actionType: "activate_ability",
@@ -10496,9 +10500,20 @@ function chooseSacrificeTarget(seat: PlayerSeat, typeFilter?: string): VisibleCa
 // fixed-count sacrifice (Westvale Abbey's "Sacrifice five creatures") — spends tokens before real
 // cards, lowest combined power+toughness first within each group, and returns undefined (not a
 // legal activation) if there aren't enough creatures to pay the full count.
-function chooseSacrificeTargets(seat: PlayerSeat, typeFilter: string | undefined, count: number): VisibleCard[] | undefined {
+// A sacrifice cost's descriptor ("Servo", "black creature", "Vampire or Zombie") checked with the shared
+// qualifier matcher, so colors and "or" alternatives work — a plain type-line substring never matched
+// "another black creature" (Ayara) or "another Vampire or Zombie" (Kalitas).
+function matchesSacrificeFilter(card: VisibleCard, filter: string | undefined): boolean {
+  if (!filter) return true;
+  return filter
+    .toLowerCase()
+    .split(/s+ors+/)
+    .some((alternative) => permanentMatchesQualifier(card, alternative.trim()));
+}
+
+function chooseSacrificeTargets(seat: PlayerSeat, typeFilter: string | undefined, count: number, excludeCardId?: string): VisibleCard[] | undefined {
   const creatures = seat.board.battlefield.filter(
-    (card) => card.typeLine.includes("Creature") && (!typeFilter || card.typeLine.toLowerCase().includes(typeFilter.toLowerCase()))
+    (card) => card.typeLine.includes("Creature") && card.id !== excludeCardId && matchesSacrificeFilter(card, typeFilter)
   );
   if (creatures.length < count) return undefined;
   const byValue = (card: VisibleCard) => effectivePower(card) + effectiveToughness(card);
@@ -10657,7 +10672,7 @@ export function payGenericSacrificeCost(
   // Undefined for every other caller (search_library's own cost payment, the agent path, "sacrifice
   // this creature" self-sacrifices), which all keep the exact heuristic behavior they had before.
   preChosenSacrificeTargets?: VisibleCard[]
-): { session: GameSession; ability: SacrificeAbility; card: VisibleCard; poolSpent?: ManaPool } | undefined {
+): { session: GameSession; ability: SacrificeAbility; card: VisibleCard; sacrificed: VisibleCard[]; poolSpent?: ManaPool } | undefined {
   const seat = session.seats.find((item) => item.id === seatId);
   const card = seat?.board.battlefield.find((item) => item.id === cardId);
   if (!seat || !card) return undefined;
@@ -10691,7 +10706,7 @@ export function payGenericSacrificeCost(
   const sacrificeTargets =
     ability.sacrificeTarget === "self"
       ? [card]
-      : (preChosenSacrificeTargets ?? chooseSacrificeTargets(seat, ability.sacrificeTargetTypeFilter, ability.sacrificeCount));
+      : (preChosenSacrificeTargets ?? chooseSacrificeTargets(seat, ability.sacrificeTargetTypeFilter, ability.sacrificeCount, ability.sacrificeExcludesSelf ? card.id : undefined));
   if (!sacrificeTargets || sacrificeTargets.length === 0) return undefined;
 
   let next = session;
@@ -10766,7 +10781,7 @@ export function payGenericSacrificeCost(
     "Rules action"
   );
 
-  return { session: next, ability, card, poolSpent: poolPayment?.ok ? poolPayment.pool : undefined };
+  return { session: next, ability, card, sacrificed: sacrificeTargets, poolSpent: poolPayment?.ok ? poolPayment.pool : undefined };
 }
 
 export function applySacrificeEffect(
@@ -10774,7 +10789,10 @@ export function applySacrificeEffect(
   seatId: string,
   sourceCard: VisibleCard,
   effect: SacrificeAbility["effect"],
-  clause: string
+  clause: string,
+  // The creature(s) sacrificed to pay for this activation — Ghoulcaller Gisa's X is "the sacrificed
+  // creature's power".
+  sacrificed: VisibleCard[] = []
 ): GameSession {
   const sourceCardId = sourceCard.id;
   const sourceCardName = sourceCard.name;
@@ -10807,8 +10825,25 @@ export function applySacrificeEffect(
     };
   }
 
+  // Ghoulcaller Gisa: X Zombies, X = the sacrificed creature's power.
+  if (effect.kind === "create_tokens_by_sacrificed_power") {
+    const count = Math.max(0, ...sacrificed.map((creature) => effectivePower(creature)));
+    const specs = parseCreateTokenSpecs(clause.replace(/create x/i, "create two"));
+    if (specs.length === 0 || count <= 0) {
+      return rulesEvent(session, seatId, `${sourceCardName} resolves, but the sacrificed creature had no power to make tokens from.`);
+    }
+    const created = createTokensForSeat(session, seatId, sourceCardId, specs.map((spec) => ({ ...spec, count })));
+    return rulesEvent(created.session, seatId, `${seat.name} activates ${sourceCardName} and creates ${count} ${created.createdTokens[0]?.name ?? "token"}${count === 1 ? "" : "s"}.`);
+  }
+
   if (effect.kind === "draw_cards") {
-    return drawMultipleForSeat(session, seatId, effect.amount, `${seat.name} draws ${effect.amount} from ${sourceCardName}.`);
+    const drawn = drawMultipleForSeat(session, seatId, effect.amount, `${seat.name} draws ${effect.amount} from ${sourceCardName}.`);
+    if (!effect.alsoLoseLife) return drawn;
+    return rulesEvent(
+      { ...drawn, seats: drawn.seats.map((item) => (item.id === seatId ? { ...item, life: item.life - effect.alsoLoseLife! } : item)) },
+      seatId,
+      `${seat.name} loses ${effect.alsoLoseLife} life from ${sourceCardName}.`
+    );
   }
 
   if (effect.kind === "gain_life" || effect.kind === "lose_life") {
@@ -12184,12 +12219,56 @@ function resetForZoneChange<T extends VisibleCard>(card: T, zone: VisibleCard["z
   };
 }
 
+// "If a nontoken creature an opponent controls would die, instead exile that card and create a 2/2 black
+// Zombie creature token." (Kalitas, Traitor of Ghet) — a replacement effect, so the creature never dies:
+// no death triggers, it goes to exile, and the replacement's controller gets the token. Applied here at
+// the single place every death path (combat, removal, sacrifice, state-based) funnels through.
 export function destroyCreatures(
   session: GameSession,
   destructions: Array<{ seatId: string; cardId: string; message: string }>,
   detail: string = "Combat damage"
 ): GameSession {
   if (destructions.length === 0) return session;
+  const replaced = destructions
+    .map((entry) => ({ entry, replacement: findExileInsteadOfDying(session, entry.seatId, entry.cardId) }))
+    .filter((item): item is { entry: (typeof destructions)[number]; replacement: NonNullable<ReturnType<typeof findExileInsteadOfDying>> } => item.replacement !== undefined);
+  if (replaced.length === 0) return destroyCreaturesCore(session, destructions, detail);
+  let working = session;
+  for (const { entry, replacement } of replaced) {
+    const dyingCard = working.seats.find((seat) => seat.id === entry.seatId)?.board.battlefield.find((card) => card.id === entry.cardId);
+    working = moveCardBetweenVisibleZones(working, entry.seatId, entry.cardId, "exile");
+    working = rulesEvent(working, replacement.sourceSeatId, `${replacement.sourceName} exiles ${dyingCard?.name ?? "the creature"} instead of it dying.`);
+    const specs = parseCreateTokenSpecs(replacement.tokenClause);
+    if (specs.length > 0) working = createTokensForSeat(working, replacement.sourceSeatId, replacement.sourceId, specs).session;
+  }
+  const replacedIds = new Set(replaced.map((item) => item.entry.cardId));
+  const remaining = destructions.filter((entry) => !replacedIds.has(entry.cardId));
+  return remaining.length > 0 ? destroyCreaturesCore(working, remaining, detail) : working;
+}
+
+function findExileInsteadOfDying(
+  session: GameSession,
+  dyingSeatId: string,
+  cardId: string
+): { sourceId: string; sourceName: string; sourceSeatId: string; tokenClause: string } | undefined {
+  const card = session.seats.find((seat) => seat.id === dyingSeatId)?.board.battlefield.find((item) => item.id === cardId);
+  if (!card || card.token || !card.typeLine.includes("Creature")) return undefined;
+  for (const sourceSeat of session.seats) {
+    if (sourceSeat.id === dyingSeatId || sourceSeat.hasLost) continue;
+    for (const source of sourceSeat.board.battlefield) {
+      if (source.abilitiesStripped) continue;
+      const replacement = parseExileInsteadOfDyingReplacement(source.oracleText);
+      if (replacement) return { sourceId: source.id, sourceName: source.name, sourceSeatId: sourceSeat.id, tokenClause: replacement.tokenClause };
+    }
+  }
+  return undefined;
+}
+
+function destroyCreaturesCore(
+  session: GameSession,
+  destructions: Array<{ seatId: string; cardId: string; message: string }>,
+  detail: string
+): GameSession {
   const events: GameEvent[] = [];
   const newDeaths: Array<{ seatId: string; card: VisibleCard; attachedSourceIds?: string[] }> = [];
   // Equipment/Aura attachedToId snapshot, taken from the pre-destruction battlefield before this
@@ -17512,7 +17591,7 @@ function ruleChoiceView(
         // The source permanent itself is a legal choice ("a creature", not "another creature") —
         // deliberately not excluded, unlike choose_creature_on_battlefield's own sourceCardId filter.
         cards: humanSeat.board.battlefield
-          .filter((card) => hasCardType(card, "Creature") && (!filter || card.typeLine.toLowerCase().includes(filter)))
+          .filter((card) => hasCardType(card, "Creature") && card.id !== choice.excludeCardId && matchesSacrificeFilter(card, filter))
           .map((card) => ({ card, seatId: humanSeat.id, seatName: humanSeat.name }))
       };
     }
@@ -19736,6 +19815,18 @@ function entersBattlefieldTapped(card: VisibleCard, controller?: PlayerSeat) {
   }
   if (text.includes("enters tapped unless you control two or more basic lands")) {
     return !controller || controller.board.battlefield.filter((permanent) => basicLandTypes(permanent).length > 0).length < 2;
+  }
+  // "This land enters tapped unless you control a Swamp." (Castle Locthwain) — a single land type, no
+  // "or"; and "...unless you control three or more other Swamps." (Witch's Cottage). Both used to fall to
+  // the catch-all at the bottom, which matches the literal "enters tapped" prefix and so always tapped them.
+  const singleTypeMatch = text.match(/enters (?:the battlefield )?tapped unless you control an? ([a-z]+)\b(?! or\b)/);
+  if (singleTypeMatch) return !controller || !controlsLandType(controller, [capitalizeWord(singleTypeMatch[1])]);
+  const countOtherTypeMatch = text.match(/enters (?:the battlefield )?tapped unless you control (a|one|two|three|four|five|\d+) or more other ([a-z]+?)s?\b/);
+  if (countOtherTypeMatch) {
+    const needed = numberWordToInt(countOtherTypeMatch[1]) ?? 1;
+    const wantedType = capitalizeWord(countOtherTypeMatch[2]);
+    const have = controller ? controller.board.battlefield.filter((permanent) => permanent.id !== card.id && basicLandTypes(permanent).includes(wantedType)).length : 0;
+    return have < needed;
   }
   // Fastlands ("...unless you control two or FEWER other lands", Blackcleave Cliffs, ...) and
   // slowlands ("...two or MORE other lands", Deserted Beach, ...) — heavily played efficient duals

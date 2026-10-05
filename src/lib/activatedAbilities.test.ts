@@ -87,6 +87,7 @@ describe("parseGenericSacrificeAbilities", () => {
         costDiscard: false,
         costLife: 0,
         sacrificeTarget: "self",
+        sacrificeExcludesSelf: false,
         sacrificeCount: 1,
         effect: { kind: "gain_life", amount: 3 },
         clause: "{2}, {T}, Sacrifice this artifact: You gain 3 life."
