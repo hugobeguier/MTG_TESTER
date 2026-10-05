@@ -42,6 +42,12 @@ export type SpellExtraEffect =
   // "Target creature you control deals damage equal to its power to target creature or planeswalker
   // you don't control." (Bite Down)
   | { kind: "creature_bites" }
+  // "Each other player sacrifices a creature of their choice. You create a 2/2 black Zombie creature token for
+  // each creature sacrificed this way." (Syphon Flesh) — tokenClause is "create a 2/2 ... token".
+  | { kind: "each_other_player_sacrifices"; tokenClause?: string }
+  // "Target opponent sacrifices a creature with the greatest power among creatures they control." (Consumed by
+  // Greed)
+  | { kind: "opponent_sacrifices_greatest_power" }
   // "Add {R} for each tapped land your opponents control." (Mana Geyser)
   | { kind: "add_mana_per_tapped_opponent_land"; color: "W" | "U" | "B" | "R" | "G" | "C" };
 
@@ -140,6 +146,15 @@ export function parseSpellExtraEffects(text: string): SpellExtraEffect[] {
 
   if (/\btarget creature you control deals damage equal to its power to target creature or planeswalker you don'?t control\b/i.test(normalized)) {
     effects.push({ kind: "creature_bites" });
+  }
+
+  if (/\beach other player sacrifices (?:a|one) creature of their choice\b/i.test(normalized)) {
+    const perSacrifice = normalized.match(/\b(create [^.]+?) for each creature sacrificed this way\b/i);
+    effects.push({ kind: "each_other_player_sacrifices", ...(perSacrifice ? { tokenClause: perSacrifice[1] } : {}) });
+  }
+
+  if (/\btarget opponent sacrifices a creature with the greatest power among creatures they control\b/i.test(normalized)) {
+    effects.push({ kind: "opponent_sacrifices_greatest_power" });
   }
 
   const addMana = normalized.match(/^add \{([wubrgc])\} for each tapped land your opponents control\b/i);

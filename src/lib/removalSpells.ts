@@ -9,6 +9,7 @@ import { parseModalHeader } from "./oracleClauses";
 export type RemovalTargetType =
   | "creature"
   | "creature_or_planeswalker"
+  | "creature_or_enchantment"
   | "artifact_creature_or_planeswalker"
   | "artifact_or_enchantment"
   | "artifact"
@@ -171,6 +172,9 @@ const QUALIFIER = "(?:non\\w+[,\\s]*)*";
 const TARGET_TYPE_PATTERNS: Array<{ pattern: RegExp; type: RemovalTargetType }> = [
   { pattern: new RegExp(`target ${QUALIFIER}artifact, creature, or planeswalker`), type: "artifact_creature_or_planeswalker" },
   { pattern: new RegExp(`target ${QUALIFIER}creature or planeswalker`), type: "creature_or_planeswalker" },
+  // Withering Torment: "Destroy target creature or enchantment." — checked before the plain "creature" pattern,
+  // which would otherwise match its "target creature" prefix and silently drop the enchantment half.
+  { pattern: new RegExp(`target ${QUALIFIER}creature or ${QUALIFIER}enchantment\\b`), type: "creature_or_enchantment" },
   { pattern: /target nonland permanent/, type: "nonland_permanent" },
   { pattern: new RegExp(`target ${QUALIFIER}permanent`), type: "permanent" },
   // "Destroy target artifact or enchantment." (Reclamation Sage, Krosan Grip, ...) — checked before
@@ -377,6 +381,8 @@ export function matchesTargetType(card: { typeLine: string; grantedTypes?: strin
       return has("Creature");
     case "creature_or_planeswalker":
       return has("Creature") || has("Planeswalker");
+    case "creature_or_enchantment":
+      return has("Creature") || has("Enchantment");
     case "artifact_creature_or_planeswalker":
       return has("Artifact") || has("Creature") || has("Planeswalker");
     case "artifact_or_enchantment":

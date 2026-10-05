@@ -10876,7 +10876,7 @@ export function applySacrificeEffect(
   // Ghoulcaller Gisa: X Zombies, X = the sacrificed creature's power.
   if (effect.kind === "create_tokens_by_sacrificed_power") {
     const count = Math.max(0, ...sacrificed.map((creature) => effectivePower(creature)));
-    const specs = parseCreateTokenSpecs(clause.replace(/create x/i, "create two"));
+    const specs = parseCreateTokenSpecs(clause.replace(/\bcreate x\b/i, "create two"));
     if (specs.length === 0 || count <= 0) {
       return rulesEvent(session, seatId, `${sourceCardName} resolves, but the sacrificed creature had no power to make tokens from.`);
     }
@@ -13299,6 +13299,32 @@ export function applySpellExtraEffect(session: GameSession, casterSeatId: string
       return dealDamageToCreature(warded.session, sourceName, target.seatId, target.card.id, power, dealer, casterSeatId);
     }
 
+    case "each_other_player_sacrifices": {
+      const destructions: Array<{ seatId: string; cardId: string; message: string }> = [];
+      for (const other of session.seats) {
+        if (other.id === casterSeatId || other.hasLost) continue;
+        const victim = chooseSacrificeTargets(other, undefined, 1)?.[0];
+        if (victim) destructions.push({ seatId: other.id, cardId: victim.id, message: `${other.name} sacrifices ${victim.name} to ${sourceName}.` });
+      }
+      let next = destroyCreatures(session, destructions, "Rules action");
+      const specs = effect.tokenClause ? parseCreateTokenSpecs(effect.tokenClause) : [];
+      if (specs.length > 0 && destructions.length > 0) {
+        next = createTokensForSeat(next, casterSeatId, source.id, specs.map((spec) => ({ ...spec, count: spec.count * destructions.length }))).session;
+      }
+      return destructions.length === 0 ? noLegalTargetEvent(next, casterSeatId, sourceName) : next;
+    }
+
+    case "opponent_sacrifices_greatest_power": {
+      // "Target opponent": the one whose best creature is the biggest, same threat bias as other untargeted picks.
+      const options = session.seats
+        .filter((other) => other.id !== casterSeatId && !other.hasLost)
+        .map((other) => ({ other, best: strongestControlledCreature(other) }))
+        .filter((item): item is { other: PlayerSeat; best: VisibleCard } => item.best !== undefined);
+      if (options.length === 0) return noLegalTargetEvent(session, casterSeatId, sourceName);
+      const chosen = options.reduce((a, b) => (effectivePower(b.best) > effectivePower(a.best) ? b : a));
+      return destroyCreatures(session, [{ seatId: chosen.other.id, cardId: chosen.best.id, message: `${chosen.other.name} sacrifices ${chosen.best.name} to ${sourceName}.` }], "Rules action");
+    }
+
     // Needs the live game's mana pool — see manaFromTappedOpponentLands.
     case "add_mana_per_tapped_opponent_land":
       return session;
@@ -13486,6 +13512,9 @@ function hasResolvableSpellExtraTarget(session: GameSession, casterSeatId: strin
         return hasOwnAttacker && opposingCreature;
       case "shuffle_permanent_reveal_top":
         return chooseRemovalTarget(session, casterSeatId, "permanent", card) !== undefined;
+      case "each_other_player_sacrifices":
+      case "opponent_sacrifices_greatest_power":
+        return opposingCreature;
       default:
         return true;
     }
@@ -14166,7 +14195,7 @@ export function applyZoneEffect(session: GameSession, casterSeatId: string, sour
       const target = resolvePreChosenGraveyardTarget(session, casterSeatId, preChosenTarget) ?? chooseRegrowTarget(session, casterSeatId, effect.targetType);
       if (!target) return noLegalTargetEvent(session, casterSeatId, sourceName);
       const { session: regrownSession } = moveCardAcrossSeats(session, casterSeatId, target.id, casterSeatId, "hand");
-      return {
+      const regrown: GameSession = {
         ...regrownSession,
         events: [
           {
@@ -14179,6 +14208,11 @@ export function applyZoneEffect(session: GameSession, casterSeatId: string, sour
           ...regrownSession.events
         ]
       };
+      // Cemetery Recruitment: only draws when the returned card is the named type.
+      if (effect.drawIfType && target.typeLine.toLowerCase().includes(effect.drawIfType)) {
+        return drawMultipleForSeat(regrown, casterSeatId, 1, `${sourceName}: ${target.name} is a ${effect.drawIfType}, so ${session.seats.find((seat) => seat.id === casterSeatId)?.name ?? "the caster"} draws a card.`);
+      }
+      return regrown;
     }
     case "mill": {
       // "target player" has no strong heuristic preference among opponents (milling is a hazard,
@@ -14462,6 +14496,9 @@ export function parseSimpleLifeChange(text: string): { kind: "gain_life" | "lose
 // would double the draw.
 export function parseSimpleDrawEffect(text: string): { amount: number } | undefined {
   const lowered = text.toLowerCase();
+  // "If it's a Zombie card, draw a card." (Cemetery Recruitment) — a CONDITIONAL draw owned by the regrow
+  // effect it follows; an unconditional draw here was giving the card for free.
+  if (/\bif (?:it'?s|that card is|you do)\b[^.]*,\s*(?:you )?draw\b/.test(lowered)) return undefined;
   // "Draw three cards, then put two cards from your hand on top of your library in any order."
   // (Brainstorm, ...) — the bare draw regex below happily matches the "draw three cards" prefix on
   // its own, which set ownEtbAlreadyHandled and skipped the rules advisor entirely (see this

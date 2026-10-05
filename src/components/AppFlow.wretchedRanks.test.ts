@@ -356,3 +356,63 @@ describe("Eternal Taskmaster / Liliana's Reaver", () => {
     expect(bf(after, "a").filter((c) => c.token && c.tapped)).toHaveLength(1);
   });
 });
+
+import { applySpellExtraEffect, applyZoneEffect, applyRemovalEffect } from "./AppFlow";
+import { parseSpellExtraEffects } from "@/lib/spellExtras";
+import { parseZoneEffect } from "@/lib/zoneEffects";
+import { parseRemovalEffect } from "@/lib/removalSpells";
+
+describe("Cemetery Recruitment / Withering Torment / edicts", () => {
+  const recruitText = "Return target creature card from your graveyard to your hand. If it's a Zombie card, draw a card.";
+
+  it("Cemetery Recruitment draws only when the returned card is a Zombie", () => {
+    expect(parseSimpleDrawEffect(recruitText)).toBeUndefined();
+    const effect = parseZoneEffect(recruitText)!;
+    expect(effect).toMatchObject({ kind: "regrow", drawIfType: "zombie" });
+    const lib = libCards(2);
+    const withZombie = seat({ id: "a", name: "Me", kind: "human", ...withLibrary(lib), board: { hand: [], battlefield: [], graveyard: [zombie("zc", { zone: "graveyard" })] } });
+    const a = applyZoneEffect(session([withZombie]), "a", "Cemetery Recruitment", effect);
+    expect(a.seats[0].board.hand.map((c) => c.id)).toContain("zc");
+    expect(a.seats[0].board.hand).toHaveLength(2); // the Zombie plus the drawn card
+    const human = card({ id: "hc", name: "Human", typeLine: "Creature — Human", zone: "graveyard", role: "creature" });
+    const withHuman = seat({ id: "a", name: "Me", kind: "human", ...withLibrary(libCards(2)), board: { hand: [], battlefield: [], graveyard: [human] } });
+    expect(applyZoneEffect(session([withHuman]), "a", "Cemetery Recruitment", effect).seats[0].board.hand).toHaveLength(1);
+  });
+
+  it("Withering Torment can destroy an enchantment", () => {
+    const effect = parseRemovalEffect("Destroy target creature or enchantment. You lose 2 life.")!;
+    expect(effect).toMatchObject({ kind: "destroy", targetType: "creature_or_enchantment" });
+    const me = seat({ id: "a", name: "Me", kind: "human" });
+    const them = seat({ id: "b", name: "Opp", kind: "agent", board: { hand: [], battlefield: [card({ id: "ench", name: "Pacifism", typeLine: "Enchantment — Aura" })], graveyard: [] } });
+    const after = applyRemovalEffect(session([me, them]), "a", "Withering Torment", card({ id: "wt", name: "Withering Torment", typeLine: "Instant" }), effect);
+    expect(bf(after, "b")).toHaveLength(0);
+  });
+
+  it("Syphon Flesh: each other player sacrifices a creature, you get a Zombie per sacrifice", () => {
+    const text = "Each other player sacrifices a creature of their choice. You create a 2/2 black Zombie creature token for each creature sacrificed this way.";
+    const extra = parseSpellExtraEffects(text)[0];
+    expect(extra.kind).toBe("each_other_player_sacrifices");
+    const me = seat({ id: "a", name: "Me", kind: "human" });
+    const b = seat({ id: "b", name: "B", kind: "agent", board: { hand: [], battlefield: [zombie("b1")], graveyard: [] } });
+    const c = seat({ id: "c", name: "C", kind: "agent", board: { hand: [], battlefield: [zombie("c1"), zombie("c2")], graveyard: [] } });
+    const d = seat({ id: "d", name: "D", kind: "agent" });
+    const after = applySpellExtraEffect(session([me, b, c, d]), "a", card({ id: "sf", name: "Syphon Flesh", typeLine: "Sorcery" }), extra);
+    expect(bf(after, "b")).toHaveLength(0);
+    expect(bf(after, "c")).toHaveLength(1);
+    expect(bf(after, "a").filter((x) => x.token)).toHaveLength(2); // B and C each sacrificed one; D had none
+  });
+
+  it("Consumed by Greed: the opponent sacrifices their greatest-power creature; the gift-gated regrow does nothing", () => {
+    const text =
+      "Gift a card (You may promise an opponent a gift as you cast this spell. If you do, they draw a card before its other effects.)\nTarget opponent sacrifices a creature with the greatest power among creatures they control. If the gift was promised, return target creature card from your graveyard to your hand.";
+    const body = etbEffectText(text);
+    const extra = parseSpellExtraEffects(body)[0];
+    expect(extra.kind).toBe("opponent_sacrifices_greatest_power");
+    expect(parseZoneEffect(body)).toBeUndefined();
+    expect(parseSimpleDrawEffect(body)).toBeUndefined();
+    const me = seat({ id: "a", name: "Me", kind: "human" });
+    const them = seat({ id: "b", name: "Opp", kind: "agent", board: { hand: [], battlefield: [zombie("small", { power: "1", toughness: "1" }), zombie("big", { power: "7", toughness: "7" })], graveyard: [] } });
+    const after = applySpellExtraEffect(session([me, them]), "a", card({ id: "cg", name: "Consumed by Greed", typeLine: "Instant" }), extra);
+    expect(bf(after, "b").map((x) => x.id)).toEqual(["small"]);
+  });
+});
