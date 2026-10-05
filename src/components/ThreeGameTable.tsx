@@ -25,7 +25,7 @@ import {
   type GenericTapAbility,
   type SelfUntapAbility
 } from "@/lib/activatedAbilities";
-import { equipCost, isEquipment } from "@/lib/attachments";
+import { equipCost, isAura, isEquipment } from "@/lib/attachments";
 import { parseManlandAnimation } from "@/lib/activatedAbilities";
 import { hasKeyword as hasOracleKeyword } from "@/lib/keywords";
 import { cardMatchesTypeFilter, isBasicLandFetchAbility } from "@/lib/oracleClauses";
@@ -3793,6 +3793,20 @@ function rebuildDynamicScene(
   group.clear();
   cardMeshesRef.current = [];
 
+  // Where every NON-attached permanent on the table lands, across all seats, computed up front: an Aura
+  // or Equipment is tucked against the permanent it's attached to, and that permanent can belong to a
+  // different seat than the attachment's own controller (Kenrith's Transformation on an opponent's
+  // creature) — a per-seat map can't see across seats.
+  const isTuckedAttachment = (card: VisibleCard) => (isEquipment(card) || isAura(card)) && Boolean(card.attachedToId);
+  const resolvedBattlefieldPositions = new Map<string, { x: number; z: number }>();
+  session.seats.forEach((seat, seatIndex) => {
+    const seatArea = PLAYER_AREAS[seatIndex] ?? PLAYER_AREAS[0];
+    for (const card of seat.board.battlefield) {
+      if (isTuckedAttachment(card)) continue;
+      resolvedBattlefieldPositions.set(card.id, card.battlefieldPosition ?? defaultBattlefieldPosition(seatArea, card, seat.board.battlefield));
+    }
+  });
+
   session.seats.forEach((seat, index) => {
     const area = PLAYER_AREAS[index] ?? PLAYER_AREAS[0];
     addBattlefieldArea(group, area, seat.kind === "human");
@@ -3808,30 +3822,29 @@ function rebuildDynamicScene(
       addCard(group, seat.board.commander, seat.id, "command", commanderSlot.x, commanderSlot.z, area.rot, selectedCardId, cardMeshesRef);
     }
 
-    // Two passes so an attached Equipment can be tucked against its creature instead of getting its
-    // own independent grid slot (Auras are left alone — scoped to Equipment only, per the original
-    // report). First pass resolves/renders everything else and records where each landed; second
-    // pass looks up its target's resolved spot and renders the Equipment at a small fixed offset
-    // from it instead. Applies uniformly through this same shared function for every seat, so an
-    // agent's equipped creatures get the same treatment automatically. Falls back to the normal
-    // independent slot if the target's position wasn't found (shouldn't happen — attachedToId is
+    // An attached Equipment or Aura is tucked against the permanent it's attached to instead of getting
+    // its own independent grid slot, so it's obvious what it's on (reported live for Kenrith's
+    // Transformation, an Aura that previously sat in a separate slot with nothing linking it to the
+    // enchanted creature). Everything else is rendered first at its position from
+    // resolvedBattlefieldPositions; attachments then render at a small fixed offset from their target's
+    // spot — Equipment to its right, Auras to its left so the two never overlap. Falls back to the
+    // normal independent slot if the target's position wasn't found (shouldn't happen — attachedToId is
     // already cleared once its target leaves the battlefield).
-    const resolvedBattlefieldPositions = new Map<string, { x: number; z: number }>();
     const attachedEquipmentByTarget = new Map<string, VisibleCard[]>();
     const unattachedCards: VisibleCard[] = [];
     for (const card of seat.board.battlefield) {
-      if (isEquipment(card) && card.attachedToId) {
-        const siblings = attachedEquipmentByTarget.get(card.attachedToId) ?? [];
+      const attachedTo = isTuckedAttachment(card) ? card.attachedToId : undefined;
+      if (attachedTo) {
+        const siblings = attachedEquipmentByTarget.get(attachedTo) ?? [];
         siblings.push(card);
-        attachedEquipmentByTarget.set(card.attachedToId, siblings);
+        attachedEquipmentByTarget.set(attachedTo, siblings);
       } else {
         unattachedCards.push(card);
       }
     }
 
     unattachedCards.forEach((card) => {
-      const point = card.battlefieldPosition ?? defaultBattlefieldPosition(area, card, seat.board.battlefield);
-      resolvedBattlefieldPositions.set(card.id, point);
+      const point = resolvedBattlefieldPositions.get(card.id) ?? card.battlefieldPosition ?? defaultBattlefieldPosition(area, card, seat.board.battlefield);
       addCard(group, card, seat.id, "battlefield", point.x, point.z, area.rot, selectedCardId, cardMeshesRef);
     });
 
@@ -3839,7 +3852,7 @@ function rebuildDynamicScene(
       const targetPoint = resolvedBattlefieldPositions.get(targetId);
       equipmentCards.forEach((card, siblingIndex) => {
         const point = targetPoint
-          ? { x: targetPoint.x + 0.15 + siblingIndex * 0.12, z: targetPoint.z + 0.14 }
+          ? { x: targetPoint.x + (isAura(card) ? -0.15 - siblingIndex * 0.12 : 0.15 + siblingIndex * 0.12), z: targetPoint.z + 0.14 }
           : card.battlefieldPosition ?? defaultBattlefieldPosition(area, card, seat.board.battlefield);
         addCard(group, card, seat.id, "battlefield", point.x, point.z, area.rot, selectedCardId, cardMeshesRef);
       });

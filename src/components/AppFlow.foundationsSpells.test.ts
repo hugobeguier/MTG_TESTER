@@ -348,3 +348,53 @@ describe("lords on the board", () => {
     expect(find("a", "baron").attachmentPowerBonus).toBeUndefined();
   });
 });
+
+describe("Giada, Font of Hope — other Angels enter with extra +1/+1 counters", () => {
+  const giada = card({
+    id: "giada",
+    name: "Giada, Font of Hope",
+    typeLine: "Legendary Creature — Angel",
+    power: "2",
+    toughness: "2",
+    oracleText:
+      "Flying, vigilance\nEach other Angel you control enters with an additional +1/+1 counter on it for each Angel you already control.\n{T}: Add {W}. Spend this mana only to cast an Angel spell."
+  });
+  const counters = (c: VisibleCard | undefined) => c?.counters?.find((counter) => counter.kind === "+1/+1")?.count ?? 0;
+
+  it("gives Metropolis Reformer one counter per Angel already controlled", async () => {
+    const { applyEntersWithCounterReplacements } = await import("./AppFlow");
+    const reformer = card({ id: "ref", name: "Metropolis Reformer", typeLine: "Creature — Angel Cleric", power: "3", toughness: "3" });
+    const second = card({ id: "ang2", name: "Other Angel", typeLine: "Creature — Angel", power: "2", toughness: "2" });
+    // Giada + one more Angel already in play => the entering Angel gets 2 counters.
+    const you = seat({ id: "a", name: "You", kind: "human", board: { hand: [], battlefield: [giada, second, reformer], graveyard: [] } });
+    const result = applyEntersWithCounterReplacements(session([you]), "a", "ref");
+    expect(counters(result.seats[0].board.battlefield.find((c) => c.id === "ref"))).toBe(2);
+  });
+
+  it("gives nothing to a non-Angel, and Giada doesn't buff herself", async () => {
+    const { applyEntersWithCounterReplacements } = await import("./AppFlow");
+    const bear = creature("bear", "2", "2");
+    const you = seat({ id: "a", name: "You", kind: "human", board: { hand: [], battlefield: [giada, bear], graveyard: [] } });
+    const result = applyEntersWithCounterReplacements(session([you]), "a", "bear");
+    expect(counters(result.seats[0].board.battlefield.find((c) => c.id === "bear"))).toBe(0);
+    const alone = seat({ id: "a", name: "You", kind: "human", board: { hand: [], battlefield: [giada], graveyard: [] } });
+    expect(counters(applyEntersWithCounterReplacements(session([alone]), "a", "giada").seats[0].board.battlefield[0])).toBe(0);
+  });
+
+  it("adds to counters the creature already entered with", async () => {
+    const { applyEntersWithCounterReplacements } = await import("./AppFlow");
+    const reformer = card({ id: "ref", name: "Metropolis Reformer", typeLine: "Creature — Angel Cleric", power: "3", toughness: "3", counters: [{ kind: "+1/+1", count: 2 }] });
+    const you = seat({ id: "a", name: "You", kind: "human", board: { hand: [], battlefield: [giada, reformer], graveyard: [] } });
+    expect(counters(applyEntersWithCounterReplacements(session([you]), "a", "ref").seats[0].board.battlefield.find((c) => c.id === "ref"))).toBe(3);
+  });
+});
+
+describe("Kenrith's Transformation — base power and toughness", () => {
+  it("reads 'is a green Elk creature with base power and toughness 3/3'", async () => {
+    const { attachedBasePowerToughness, attachmentStripsAllAbilities } = await import("@/lib/attachments");
+    const text =
+      "Enchant creature\nWhen this Aura enters, draw a card.\nEnchanted creature loses all abilities and is a green Elk creature with base power and toughness 3/3. (It loses all other card types and creature types.)";
+    expect(attachedBasePowerToughness(text)).toEqual({ power: 3, toughness: 3 });
+    expect(attachmentStripsAllAbilities(text)).toBe(true);
+  });
+});

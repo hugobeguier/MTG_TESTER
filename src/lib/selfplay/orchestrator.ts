@@ -67,6 +67,7 @@ import {
   applyLivingDeathEffect,
   applyMassBounceEffect,
   applyMassPumpEffect,
+  applyEntersWithCounterReplacements,
   applySpellExtraEffect,
   applyPunisherChoiceEffect,
   payAdditionalDiscardCost,
@@ -673,7 +674,9 @@ function applyMainPhaseAction(
         spellEffectCardName: card.name
       };
     }
-    return { session: next, manaPayment: { seatId, sourceIds: payment.sourceIds, totalCost }, changed: next !== session };
+    // Giada, Font of Hope-style "each other Angel you control enters with an additional +1/+1 counter".
+    const withReplacementCounters = destination === "battlefield" && next !== session ? applyEntersWithCounterReplacements(next, seatId, card.id) : next;
+    return { session: withReplacementCounters, manaPayment: { seatId, sourceIds: payment.sourceIds, totalCost }, changed: next !== session };
   }
 
   // pass_priority / end_turn / anything unrecognized: no session change, handled by the caller

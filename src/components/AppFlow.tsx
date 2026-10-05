@@ -57,6 +57,7 @@ import {
   parseAdditionalDiscardCost,
   parseAdditionalSacrificeCost,
   parseEmblemGrant,
+  parseEntersWithCounterReplacements,
   parseGainsAbilityGrant,
   parseModalHeader,
   parseSagaChapters,
@@ -5798,8 +5799,11 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       const fixedCounterSession = fixedCounterEntry
         ? applyEntersWithCounterKind(colorCounterSession, action.actorSeatId, sourceCard!.id, fixedCounterEntry.kind, fixedCounterEntry.count)
         : colorCounterSession;
+      // Giada, Font of Hope & co.: a different permanent's "enters with an additional +1/+1 counter".
+      const replacementCounterSession =
+        sourceCard && destination === "battlefield" ? applyEntersWithCounterReplacements(fixedCounterSession, action.actorSeatId, sourceCard.id) : fixedCounterSession;
       const exploreTimes = sourceCard && destination === "battlefield" ? exploreCount(sourceCard.oracleText) : undefined;
-      const exploredSession = exploreTimes ? resolveExplore(fixedCounterSession, action.actorSeatId, sourceCard!.id, exploreTimes) : fixedCounterSession;
+      const exploredSession = exploreTimes ? resolveExplore(replacementCounterSession, action.actorSeatId, sourceCard!.id, exploreTimes) : replacementCounterSession;
       // Generic destroy/exile/direct-damage spells (Murder, Lightning Bolt, ...) — applies
       // regardless of where the spell itself ends up, since instants/sorceries resolve to the
       // graveyard while their effect still needs to happen.
@@ -9389,6 +9393,59 @@ function applyEntersWithCounterKind(session: GameSession, seatId: string, cardId
 // entirely on their enters-with-X-counters clause. Counters are the single source of truth for
 // +1/+1 bonuses (see src/lib/counters.ts's effectivePower/effectiveToughness) — every read site
 // computes the bonus from here rather than having it baked into the printed power/toughness.
+// Replacement effects on ANOTHER permanent's entry (rule 614.1c): "Each other Angel you control enters
+// with an additional +1/+1 counter on it for each Angel you already control." (Giada, Font of Hope).
+// Reads every permanent the controller already has for such a clause, and ADDS to whatever counters the
+// entering permanent already got from its own text (unlike applyEntersWithXCounters, which sets them).
+// Reported live as Giada not giving Metropolis Reformer a counter. Cast spells only — a token or a
+// reanimated creature entering doesn't pass through here yet.
+export function applyEntersWithCounterReplacements(session: GameSession, seatId: string, cardId: string): GameSession {
+  const seat = session.seats.find((item) => item.id === seatId);
+  const entering = seat?.board.battlefield.find((card) => card.id === cardId);
+  if (!seat || !entering || !entering.typeLine.includes("Creature")) return session;
+  const others = seat.board.battlefield.filter((card) => card.id !== cardId);
+  let extra = 0;
+  const sources: string[] = [];
+  for (const source of others) {
+    if (source.abilitiesStripped) continue;
+    for (const replacement of parseEntersWithCounterReplacements(source.oracleText)) {
+      if (!permanentMatchesQualifier(entering, replacement.matcher)) continue;
+      const count = replacement.perAlreadyControlled ? countMatchingPermanents(others, replacement.perAlreadyControlled) : 1;
+      if (count <= 0) continue;
+      extra += count;
+      sources.push(source.name);
+    }
+  }
+  if (extra <= 0) return session;
+  const existing = entering.counters?.find((counter) => counter.kind === "+1/+1")?.count ?? 0;
+  return {
+    ...session,
+    seats: session.seats.map((item) =>
+      item.id === seatId
+        ? {
+            ...item,
+            board: {
+              ...item.board,
+              battlefield: item.board.battlefield.map((card) =>
+                card.id === cardId ? { ...card, counters: [...(card.counters ?? []).filter((counter) => counter.kind !== "+1/+1"), { kind: "+1/+1", count: existing + extra }] } : card
+              )
+            }
+          }
+        : item
+    ),
+    events: [
+      {
+        id: crypto.randomUUID(),
+        at: new Date().toISOString(),
+        seatId,
+        message: `${entering.name} enters with ${extra} additional +1/+1 counter${extra === 1 ? "" : "s"} (${sources.join(", ")}).`,
+        detail: "Rules action"
+      },
+      ...session.events
+    ]
+  };
+}
+
 function applyEntersWithXCounters(session: GameSession, seatId: string, cardId: string, x: number): GameSession {
   if (x <= 0) return session;
   return {

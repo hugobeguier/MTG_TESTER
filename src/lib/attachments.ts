@@ -56,7 +56,10 @@ export function attachedBasePowerToughness(oracleText: string): AttachedBaseOver
   if (/\b(?:enchanted|equipped) creature[^.]*\bhas base power and toughness x\/x, where x is your life total\b/.test(text)) {
     return "life_total";
   }
-  const fixed = text.match(/\b(?:enchanted|equipped) creature[^.]*\bhas base power and toughness (\d+)\/(\d+)/);
+  // "has base power and toughness" (Utter Insignificance) OR "is a green Elk creature WITH base power
+  // and toughness 3/3" (Kenrith's Transformation) — the second wording used to be missed entirely, so
+  // the Aura stripped abilities but the creature kept its real power and toughness.
+  const fixed = text.match(/\b(?:enchanted|equipped) creature[^.]*\b(?:has|with) base power and toughness (\d+)\/(\d+)/);
   if (fixed) return { power: Number.parseInt(fixed[1], 10), toughness: Number.parseInt(fixed[2], 10) };
   return undefined;
 }

@@ -165,6 +165,31 @@ export function parseAdditionalDiscardCost(oracleText: string): { count: number 
   return { count: match[1] === "two" ? 2 : match[1] === "three" ? 3 : 1 };
 }
 
+export interface EntersWithCounterReplacement {
+  // Qualifier the ENTERING permanent must match ("angel", "creature", ...), checked with
+  // permanentMatchesQualifier — the replacement's source is a different permanent already in play.
+  matcher: string;
+  // "...for each Angel you already control" — counters scale with how many matching permanents the
+  // controller already has (the entering one doesn't count). Undefined means exactly one counter.
+  perAlreadyControlled?: string;
+}
+
+// "Each other Angel you control enters with an additional +1/+1 counter on it for each Angel you
+// already control." (Giada, Font of Hope) and the flat "Each other creature you control enters with an
+// additional +1/+1 counter on it." shape — a replacement effect on a DIFFERENT permanent's entry
+// (rule 614.1c), unlike the self-only "this enters with N counters" handled by entersWithXCounters.
+// Only +1/+1 counters are modeled.
+export function parseEntersWithCounterReplacements(oracleText: string): EntersWithCounterReplacement[] {
+  const replacements: EntersWithCounterReplacement[] = [];
+  for (const rawClause of oracleText.split("\n")) {
+    const text = rawClause.replace(/\([^)]*\)/g, "").trim().toLowerCase();
+    const match = text.match(/^each other ([a-z]+(?: [a-z]+)?) you control enters(?: the battlefield)? with an additional \+1\/\+1 counter on it(?: for each ([a-z]+(?: [a-z]+)?) you already control)?\.?$/);
+    if (!match) continue;
+    replacements.push({ matcher: match[1].trim(), ...(match[2] ? { perAlreadyControlled: match[2].trim() } : {}) });
+  }
+  return replacements;
+}
+
 // The inverse: isolates just the "dies"-triggered clause(s), so a permanent's death effect (e.g.
 // Solemn Simulacrum's "When this creature dies, you may draw a card.") is parsed from the right
 // sentence instead of the whole card (which would otherwise also match its unrelated ETB clause).
