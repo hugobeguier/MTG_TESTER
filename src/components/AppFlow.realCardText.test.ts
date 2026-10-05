@@ -147,3 +147,48 @@ describe("conditional enters triggers (real Oracle text)", () => {
     expect(triggersOf("Garruk's Uprising", [bear("small")], [])).not.toContain("draw_cards");
   });
 });
+
+import { findAttackTriggers, resolveTriggerEffect } from "./AppFlow";
+
+describe("Dragon damage triggers (real Oracle text)", () => {
+  it("Scourge of Valkas: when a Dragon enters, damage equal to the number of Dragons you control", () => {
+    const scourge = real("Scourge of Valkas", "sv");
+    const dragon = bear("d2", { typeLine: "Creature — Dragon", name: "Other Dragon" });
+    const them = bear("target", { power: "1", toughness: "2" });
+    const s = session([seat("a", [scourge, dragon]), seat("b", [them])]);
+    const triggers = findCommonTriggersForPermanentEntered(s, "a", dragon).filter((t) => t.sourceCardId === "sv");
+    expect(triggers).toHaveLength(1);
+    expect(triggers[0].effect).toMatchObject({ kind: "damage_effect" });
+    // 2 Dragons (Scourge is a Dragon too, per its type line, plus the other one): 2 damage kills a 1/2.
+    const after = resolveTriggerEffect(s, triggers[0]);
+    expect(after.seats.find((x) => x.id === "b")!.board.battlefield.map((c) => c.id)).not.toContain("target");
+  });
+
+  it("Warstorm Surge: the entering creature's power as damage", () => {
+    const surge = real("Warstorm Surge", "ws");
+    const big = bear("big", { power: "5", toughness: "5" });
+    const s = session([seat("a", [surge, big]), seat("b", [], { life: 40 })]);
+    const triggers = findCommonTriggersForPermanentEntered(s, "a", big).filter((t) => t.sourceCardId === "ws");
+    expect(triggers).toHaveLength(1);
+    const after = resolveTriggerEffect(s, triggers[0]);
+    expect(after.seats.find((x) => x.id === "b")!.life).toBe(35);
+  });
+
+  it("Tyrant's Familiar's attack trigger needs your commander on the battlefield", () => {
+    const familiar = real("Tyrant's Familiar", "tf", { attacking: true });
+    const commander = bear("cmd", { commander: true });
+    const victim = bear("v", { power: "1", toughness: "3" });
+    const withCmd = session([seat("a", [familiar, commander]), seat("b", [victim])]);
+    const withoutCmd = session([seat("a", [familiar]), seat("b", [victim])]);
+    expect(findAttackTriggers(withCmd, { seatId: "a", card: familiar, defendingSeatId: "b" }).triggers).toHaveLength(1);
+    expect(findAttackTriggers(withoutCmd, { seatId: "a", card: familiar, defendingSeatId: "b" }).triggers).toHaveLength(0);
+  });
+
+  it("Drakuseth: attacking deals 4 damage", () => {
+    const drakuseth = real("Drakuseth, Maw of Flames", "dr", { attacking: true });
+    const s = session([seat("a", [drakuseth]), seat("b", [], { life: 40 })]);
+    const found = findAttackTriggers(s, { seatId: "a", card: drakuseth, defendingSeatId: "b" }).triggers;
+    expect(found).toHaveLength(1);
+    expect(resolveTriggerEffect(s, found[0]).seats.find((x) => x.id === "b")!.life).toBe(36);
+  });
+});

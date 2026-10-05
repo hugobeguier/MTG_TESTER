@@ -86,7 +86,11 @@ export interface ExileEffect {
 // battlefield." — an X that's a board count instead of a mana-cost {X} the caster chooses. Without
 // this the amount stayed "X" with no chosenX to read, resolved as 0, and the spell reported "finds
 // no legal target" (Consuming Corruption, Tendrils of Corruption, Chain Reaction).
-export type DynamicAmount = { kind: "lands_you_control"; subtype: string } | { kind: "creatures_on_battlefield" };
+export type DynamicAmount =
+  | { kind: "lands_you_control"; subtype: string }
+  | { kind: "creatures_on_battlefield" }
+  // "where X is the number of Dragons you control" (Scourge of Valkas, Dragon Tempest)
+  | { kind: "permanents_you_control"; matcher: string };
 
 const BASIC_LAND_TYPES = ["plains", "island", "swamp", "mountain", "forest"];
 
@@ -94,6 +98,9 @@ export function parseWhereX(text: string): DynamicAmount | undefined {
   if (/\bwhere x is the number of creatures on the battlefield\b/i.test(text)) return { kind: "creatures_on_battlefield" };
   const lands = text.match(/\bwhere x is the number of ([a-z]+?)s you control\b/i);
   if (lands && BASIC_LAND_TYPES.includes(lands[1].toLowerCase())) return { kind: "lands_you_control", subtype: lands[1].toLowerCase() };
+  // Any other plural noun is a creature subtype or card type ("Dragons").
+  const others = text.match(/\bwhere x is the number of ([a-z]+?)s you control\b/i);
+  if (others) return { kind: "permanents_you_control", matcher: others[1].toLowerCase() };
   return undefined;
 }
 
@@ -287,7 +294,10 @@ function parseExile(text: string): ExileEffect | undefined {
 
 function parseDamage(text: string): DamageEffect | undefined {
   const anyTargetX = text.match(/deals x damage to any target\b/);
-  if (anyTargetX) return { kind: "damage", amount: "X", targetType: "any" };
+  if (anyTargetX) {
+    const anyXDefinition = parseWhereX(text);
+    return { kind: "damage", amount: "X", targetType: "any", ...(anyXDefinition ? { xDefinition: anyXDefinition } : {}) };
+  }
   const creatureTargetX = text.match(/deals x damage to target creature\b/);
   if (creatureTargetX) {
     const xDefinition = parseWhereX(text);

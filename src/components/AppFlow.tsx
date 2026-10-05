@@ -261,6 +261,11 @@ type TriggerEffect = (
   | { kind: "pay_then_zone"; costText: string; zoneEffect: ZoneEffect }
   // "You become the monarch." (Court of Grace, Skyline Despot, Marchesa's Decree)
   | { kind: "become_monarch" }
+  // A triggered "deals N / X damage to any target / each creature" (Scourge of Valkas, Dragon Tempest, Drakuseth,
+  // Tyrant's Familiar) — the same RemovalEffect a damage spell uses, resolved with the trigger's source.
+  | { kind: "damage_effect"; effect: RemovalEffect }
+  // "Whenever a creature you control enters, it deals damage equal to its power to any target." (Warstorm Surge)
+  | { kind: "context_power_damage" }
 ) & {
   optional?: boolean;
   // "Create a 0/1 green Plant creature token, then put a +1/+1 counter on each Plant you control."
@@ -5924,7 +5929,11 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       // Generic destroy/exile/direct-damage spells (Murder, Lightning Bolt, ...) — applies
       // regardless of where the spell itself ends up, since instants/sorceries resolve to the
       // graveyard while their effect still needs to happen.
-      const removalEffect = sourceCard ? parseRemovalEffect(etbEffectText(sourceCard.oracleText)) : undefined;
+      const etbDamageOwnedByTrigger =
+        destination === "battlefield" &&
+        sourceCard !== undefined &&
+        commonTriggerEffect(sourceCard.oracleText, "entered", undefined, playedSession.seats.find((s) => s.id === action.actorSeatId))?.kind === "damage_effect";
+      const removalEffect = sourceCard && !etbDamageOwnedByTrigger ? parseRemovalEffect(etbEffectText(sourceCard.oracleText)) : undefined;
       const removalResolvedSession =
         removalEffect && sourceCard
           ? applyPrimitiveAction(exploredSession, action.actorSeatId, sourceCard, { kind: "removal", effect: removalEffect, chosenX: action.chosenX })
@@ -13261,6 +13270,7 @@ function resolveDynamicAmount(session: GameSession, casterSeatId: string, amount
     return session.seats.reduce((total, seat) => total + seat.board.battlefield.filter((card) => card.typeLine.includes("Creature")).length, 0);
   }
   const caster = session.seats.find((seat) => seat.id === casterSeatId);
+  if (amount.kind === "permanents_you_control") return countMatchingPermanents(caster?.board.battlefield ?? [], amount.matcher);
   return (caster?.board.battlefield ?? []).filter((card) => card.typeLine.toLowerCase().includes(amount.subtype)).length;
 }
 
@@ -16428,7 +16438,17 @@ export function findAttackTriggers(
         if (isActivatedAbilityClause(clause) || !/\b(?:when|whenever)\b[^,.]*\battacks\b/i.test(clause)) continue;
         // Owned by declareAttack's own inline handling.
         if (isAttackTriggerAddManaClause(clause) || parseMetalcraftAttackDebuff(clause)) continue;
-        const applies = matchWatcherSubject(clause, "attacks", {
+        // "Lieutenant — As long as you control your commander, this creature gets +2/+2 and has \"Whenever this
+        // creature attacks, it deals 7 damage to target creature defending player controls.\"" (Tyrant's Familiar):
+        // the trigger is the QUOTED ability, and only exists while you control your commander.
+        let triggerClause = clause;
+        if (/^lieutenant\b/i.test(clause)) {
+          if (!sourceSeat.board.battlefield.some((permanent) => permanent.commander)) continue;
+          const quoted = clause.match(/"([^"]+)"/);
+          if (!quoted) continue;
+          triggerClause = quoted[1];
+        }
+        const applies = matchWatcherSubject(triggerClause, "attacks", {
           sourceId: source.id,
           sourceName: source.name,
           subject: attack.card,
@@ -16440,7 +16460,7 @@ export function findAttackTriggers(
           if (sourceSeat.id === attack.seatId && source.id === attack.card.id) unparsed.push({ seatId: sourceSeat.id, source });
           continue;
         }
-        const effect = commonTriggerEffect(clause, "clause", undefined, sourceSeat);
+        const effect = commonTriggerEffect(triggerClause, "clause", undefined, sourceSeat);
         if (effect) {
           triggers.push(makeCommonTrigger(attack.seatId, sourceSeat.id, source, effect, `${source.name} triggers because ${attack.card.name} attacked.`, attack.card.id));
         } else if (sourceSeat.id === attack.seatId) {
@@ -17212,6 +17232,13 @@ export function commonTriggerEffect(
       optional
     };
   }
+
+  // Triggered damage: "it deals X damage to any target, where X is the number of Dragons you control", "deals 4
+  // damage to any target", "deals 7 damage to target creature ...". Previously no trigger kind modeled damage at all, so every
+  // Dragon damage trigger was LLM-only or silently absent.
+  if (/\bdeals damage equal to its power to any target\b/.test(text)) return { kind: "context_power_damage", optional };
+  const damageEffect = parseRemovalEffect(text);
+  if (damageEffect && (damageEffect.kind === "damage" || damageEffect.kind === "mass_damage")) return { kind: "damage_effect", effect: damageEffect, optional };
 
   return undefined;
 }
@@ -18010,6 +18037,16 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
   // `then: add_counter` (see this kind's own doc comment) resolves separately, against
   // trigger.controllerSeatId (Breena's own controller), via resolveTriggerEffect's existing
   // recursive `then` handling just below this function — nothing extra needed here for that half.
+  if (trigger.effect.kind === "damage_effect") {
+    const source = findPermanentById(session, trigger.sourceCardId) ?? ({ id: trigger.sourceCardId, name: trigger.sourceCardName, typeLine: "", oracleText: "", manaValue: 0, colors: [], role: "effect", zone: "battlefield" } as VisibleCard);
+    return applyRemovalEffect(session, trigger.controllerSeatId, trigger.sourceCardName, source, trigger.effect.effect);
+  }
+  if (trigger.effect.kind === "context_power_damage") {
+    const entering = trigger.contextCardId ? findPermanentById(session, trigger.contextCardId) : undefined;
+    const power = entering ? Math.max(0, effectivePower(entering)) : 0;
+    if (power <= 0 || !entering) return noLegalTargetEvent(session, trigger.controllerSeatId, trigger.sourceCardName);
+    return applyRemovalEffect(session, trigger.controllerSeatId, trigger.sourceCardName, entering, { kind: "damage", amount: power, targetType: "any" });
+  }
   if (trigger.effect.kind === "become_monarch") {
     const newMonarch = session.seats.find((seat) => seat.id === trigger.controllerSeatId);
     if (!newMonarch || newMonarch.hasLost) return session;
