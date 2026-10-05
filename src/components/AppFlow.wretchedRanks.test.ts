@@ -480,3 +480,17 @@ describe("Diregraf Colossus — Zombie spell cast trigger", () => {
     expect(findCastTriggers(s, "a", humanSpell, 1)).toHaveLength(0);
   });
 });
+
+describe("Oversold Cemetery", () => {
+  const cemetery = card({
+    id: "oc", name: "Oversold Cemetery", typeLine: "Enchantment",
+    oracleText: "At the beginning of your upkeep, if you have four or more creature cards in your graveyard, you may return target creature card from your graveyard to your hand."
+  });
+  it("returns a creature only with four or more creature cards in the graveyard", () => {
+    const four = [1, 2, 3, 4].map((i) => zombie(`g${i}`, { zone: "graveyard", manaValue: i }));
+    const withFour = seat({ id: "a", name: "Me", kind: "human", board: { hand: [], battlefield: [cemetery], graveyard: four } });
+    expect(applyDeterministicPhaseTrigger(session([withFour]), "a", cemetery, "upkeep step")!.seats[0].board.hand).toHaveLength(1);
+    const withThree = seat({ id: "a", name: "Me", kind: "human", board: { hand: [], battlefield: [cemetery], graveyard: four.slice(0, 3) } });
+    expect(applyDeterministicPhaseTrigger(session([withThree]), "a", cemetery, "upkeep step")!.seats[0].board.hand).toHaveLength(0);
+  });
+});

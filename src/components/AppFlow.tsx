@@ -19805,6 +19805,9 @@ function isBoardConditionMet(conditionRaw: string, seat: PlayerSeat, allSeats?: 
   const genericCountMatch = condition.match(/^you control (\d+|two|three|four|five|six|seven|eight|nine|ten) or more ([a-z]+)$/);
   if (genericCountMatch) return countMatchingPermanents(seat.board.battlefield, genericCountMatch[2]) >= (numberWordToInt(genericCountMatch[1]) ?? Infinity);
 
+  const graveyardCountMatch = condition.match(/^you have (\d+|two|three|four|five|six|seven|eight|nine|ten) or more ([a-z]+) cards? in your graveyard$/);
+  if (graveyardCountMatch) return countMatchingPermanents(seat.board.graveyard ?? [], graveyardCountMatch[2]) >= (numberWordToInt(graveyardCountMatch[1]) ?? Infinity);
+
   const pairMatch = condition.match(/^you control an? ([a-z]+) or an? ([a-z]+)$/);
   if (pairMatch) return countMatchingPermanents(seat.board.battlefield, pairMatch[1]) > 0 || countMatchingPermanents(seat.board.battlefield, pairMatch[2]) > 0;
 
@@ -19842,6 +19845,8 @@ export function isRecognizedBoardCondition(conditionRaw: string): boolean {
   if (condition === "you control a commander" || condition === "you control your commander") return true;
   if (/^you control (\d+|two|three|four|five|six|seven|eight|nine|ten) or more lands$/.test(condition)) return true;
   if (/^you control (\d+|two|three|four|five|six|seven|eight|nine|ten) or more ([a-z]+)$/.test(condition)) return true;
+  // "you have four or more creature cards in your graveyard" (Oversold Cemetery)
+  if (/^you have (\d+|two|three|four|five|six|seven|eight|nine|ten) or more ([a-z]+) cards? in your graveyard$/.test(condition)) return true;
   if (/^you control an? ([a-z]+) or an? ([a-z]+)$/.test(condition)) return true;
   if (condition === "this land entered this turn or if you control a basic land") return true;
   if (/^you control an? ([a-z]+)$/.test(condition)) return true;
