@@ -71,7 +71,8 @@ import {
   annihilatorAmount,
   hasKeyword as hasKeywordText,
   protectionColors as cardProtectionColors,
-  wardAmount as cardWardAmount
+  wardAmount as cardWardAmount,
+  wardLifeAmount
 } from "@/lib/keywords";
 import {
   counterImmunityScopeMatches,
@@ -13678,8 +13679,24 @@ function hasResolvableGenericCreatureTarget(session: GameSession, casterSeatId: 
 // payment in resolvePendingAction's counterTargetId branch. Unpayable means the effect is countered.
 function payWardIfNeeded(session: GameSession, casterSeatId: string, targetCard: VisibleCard, sourceName: string): { session: GameSession; countered: boolean } {
   const wardCost = cardWardAmount(targetCard.oracleText);
-  if (wardCost === undefined || wardCost <= 0) return { session, countered: false };
+  const lifeWard = wardLifeAmount(targetCard.oracleText);
   const casterSeat = session.seats.find((seat) => seat.id === casterSeatId);
+  // "Ward—Pay 2 life." (Zul Ashur): pay the life if it wouldn't be fatal, otherwise the spell/ability is countered.
+  if (lifeWard !== undefined && wardCost === undefined && casterSeat && casterSeat.id !== (targetCard.ownerSeatId ?? "")) {
+    const affordable = casterSeat.life > lifeWard;
+    const result: GameSession = affordable
+      ? { ...session, seats: session.seats.map((seat) => (seat.id === casterSeatId ? { ...seat, life: seat.life - lifeWard } : seat)) }
+      : session;
+    return {
+      session: rulesEvent(
+        result,
+        casterSeatId,
+        affordable ? `${casterSeat.name} pays ${lifeWard} life for ${targetCard.name}'s ward.` : `${targetCard.name}'s ward counters ${sourceName}: ${casterSeat.name} can't pay ${lifeWard} life.`
+      ),
+      countered: !affordable
+    };
+  }
+  if (wardCost === undefined || wardCost <= 0) return { session, countered: false };
   if (!casterSeat) return { session, countered: false };
   const payment = chooseManaSourcesForCost(casterSeat, genericCostShim(wardCost), wardCost, undefined, session.seats);
   if (!payment.ok) {

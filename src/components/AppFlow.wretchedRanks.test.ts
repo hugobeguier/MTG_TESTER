@@ -513,3 +513,30 @@ describe("Josu Vess, Lich Knight — kicker", () => {
     expect(kickedTriggers[0].effect).toMatchObject({ kind: "create_tokens" });
   });
 });
+
+import { applyRemovalEffect as applyRemoval } from "./AppFlow";
+import { wardLifeAmount } from "@/lib/keywords";
+
+describe("Zul Ashur — Ward—Pay 2 life", () => {
+  const zul = card({
+    id: "zul", name: "Zul Ashur, Lich Lord", typeLine: "Legendary Creature — Zombie Wizard", power: "1", toughness: "3", role: "creature",
+    oracleText: "Ward—Pay 2 life. (Whenever this creature becomes the target of a spell or ability an opponent controls, counter it unless that player pays 2 life.)\n{T}: You may cast target Zombie creature card from your graveyard this turn."
+  });
+  const removal = parseRemovalEffect("Destroy target creature.")!;
+
+  it("reads the life ward", () => {
+    expect(wardLifeAmount(zul.oracleText)).toBe(2);
+  });
+
+  it("an opponent's removal costs them 2 life, and is countered when they can't afford it", () => {
+    const them = seat({ id: "b", name: "Opp", kind: "agent", board: { hand: [], battlefield: [zul], graveyard: [] }, ownerSeatId: undefined } as never);
+    const rich = seat({ id: "a", name: "Me", kind: "human", life: 20 });
+    const afterPaid = applyRemoval(session([rich, them]), "a", "Murder", card({ id: "m", name: "Murder", typeLine: "Instant" }), removal);
+    expect(afterPaid.seats.find((s) => s.id === "a")!.life).toBe(18);
+    expect(bf(afterPaid, "b")).toHaveLength(0);
+    const poor = seat({ id: "a", name: "Me", kind: "human", life: 2 });
+    const afterCountered = applyRemoval(session([poor, them]), "a", "Murder", card({ id: "m", name: "Murder", typeLine: "Instant" }), removal);
+    expect(bf(afterCountered, "b").map((c) => c.id)).toEqual(["zul"]);
+    expect(afterCountered.seats.find((s) => s.id === "a")!.life).toBe(2);
+  });
+});

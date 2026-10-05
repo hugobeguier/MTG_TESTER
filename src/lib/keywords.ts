@@ -47,6 +47,13 @@ export function wardAmount(oracleText: string): number | undefined {
   return match ? Number.parseInt(match[1], 10) : undefined;
 }
 
+// "Ward—Pay 2 life." (Zul Ashur, Lich Lord) — the life-payment form, which wardAmount above deliberately
+// doesn't read.
+export function wardLifeAmount(oracleText: string): number | undefined {
+  const match = oracleText.match(/\bward\s*(?:—|-)\s*pay (\d+) life/i);
+  return match ? Number.parseInt(match[1], 10) : undefined;
+}
+
 export function annihilatorAmount(oracleText: string): number | undefined {
   const match = oracleText.match(/\bannihilator\s+(\d+)/i);
   return match ? Number.parseInt(match[1], 10) : undefined;
