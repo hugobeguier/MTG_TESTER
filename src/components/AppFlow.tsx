@@ -8969,8 +8969,21 @@ function canAttack(card: VisibleCard) {
   return hasCardType(card, "Creature") && !card.tapped && !card.phasedOut && (!card.summoningSick || hasHaste(card)) && !card.attacking && !hasDefender(card);
 }
 
+// "This creature can't block." (Gravecrawler, Carrion Feeder) / "Razorlash Transmogrant can't block." — the
+// creature's OWN restriction, named by "this creature", its full name or its short name. A group
+// restriction ("Creatures you control can't block ...") is a different shape and isn't matched here.
+export function creatureCantBlock(card: VisibleCard): boolean {
+  if (card.abilitiesStripped) return false;
+  const shortName = card.name.toLowerCase().split(",")[0].trim();
+  return card.oracleText.split("\n").some((line) => {
+    const clause = line.replace(/\([^)]*\)/g, "").trim().toLowerCase().replace(/\.$/, "");
+    return clause === "this creature can't block" || clause === `${card.name.toLowerCase()} can't block` || clause === `${shortName} can't block`;
+  });
+}
+
 function canBlock(card: VisibleCard, attacker?: VisibleCard) {
   if (!hasCardType(card, "Creature") || card.tapped || card.phasedOut || card.blocking) return false;
+  if (creatureCantBlock(card)) return false;
   if (attacker && hasFlying(attacker) && !hasFlying(card) && !hasReach(card)) return false;
   if (attacker && isProtectedFrom(attacker, card)) return false;
   // Rule 702.111b: menace requires the attacker be blocked by two or more creatures, assigned

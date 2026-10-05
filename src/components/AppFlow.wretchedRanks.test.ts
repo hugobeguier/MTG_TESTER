@@ -259,3 +259,16 @@ describe("Kalitas, Traitor of Ghet — exile instead of dying", () => {
     expect(bf(after, "a").filter((c) => c.token)).toHaveLength(0);
   });
 });
+
+import { creatureCantBlock } from "./AppFlow";
+
+describe("'can't block' creatures", () => {
+  it("Gravecrawler, Razorlash Transmogrant and Carrion Feeder can't block; ordinary creatures can", () => {
+    expect(creatureCantBlock(zombie("g", { name: "Gravecrawler", oracleText: "This creature can't block.\nYou may cast this card from your graveyard as long as you control a Zombie." }))).toBe(true);
+    expect(creatureCantBlock(zombie("r", { name: "Razorlash Transmogrant", oracleText: "Razorlash Transmogrant can't block." }))).toBe(true);
+    expect(creatureCantBlock(zombie("c", { name: "Carrion Feeder", oracleText: "This creature can't block.\nSacrifice a creature: Put a +1/+1 counter on this creature." }))).toBe(true);
+    expect(creatureCantBlock(zombie("n", { name: "Plain Zombie", oracleText: "Deathtouch" }))).toBe(false);
+    // A group restriction isn't this creature's own.
+    expect(creatureCantBlock(zombie("x", { name: "Elsewhere", oracleText: "Creatures you control can't block." }))).toBe(false);
+  });
+});
