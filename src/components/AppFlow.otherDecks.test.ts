@@ -101,7 +101,7 @@ import { applyDeterministicPhaseTrigger } from "./AppFlow";
 describe("Court of Grace", () => {
   const court = card({
     id: "cg", name: "Court of Grace", typeLine: "Enchantment",
-    oracleText: "When this enchantment enters, you become the monarch.\nAt the beginning of your upkeep, create a 1/1 white Spirit creature token with flying. If you're the monarch, instead create a 4/4 white Angel creature token with flying and vigilance."
+    oracleText: "When this enchantment enters, you become the monarch.\nAt the beginning of your upkeep, create a 1/1 white Spirit creature token with flying. If you're the monarch, create a 4/4 white Angel creature token with flying instead."
   });
   const run = (monarch: boolean) => {
     const me = seat({ id: "a", name: "Me", kind: "human", board: { hand: [], battlefield: [court], graveyard: [] } });
@@ -200,5 +200,21 @@ describe("Calling All Angels spells", () => {
     const big = seat({ id: "b", name: "Opp", kind: "agent", board: { hand: [], battlefield: [creature("s", "2"), card({ id: "big", name: "Big", typeLine: "Creature — Giant", power: "5", toughness: "5", role: "creature" })], graveyard: [] } });
     const after = applyRemovalEffect(sess([me, big]), "a", "Destroy Evil", src, effect);
     expect(after.seats[1].board.battlefield.map((c) => c.id)).toEqual(["s"]);
+  });
+});
+
+describe("Skyline Despot's upkeep Dragon", () => {
+  const despot = card({
+    id: "sd", name: "Skyline Despot", typeLine: "Creature — Dragon", power: "5", toughness: "5", role: "creature",
+    oracleText: "Flying\nWhen this creature enters, you become the monarch.\nAt the beginning of your upkeep, if you're the monarch, create a 5/5 red Dragon creature token with flying."
+  });
+  const run = (monarch: boolean) => {
+    const me = seat({ id: "a", name: "Me", kind: "human", board: { hand: [], battlefield: [despot], graveyard: [] } });
+    const s: GameSession = { id: "t", createdAt: "", status: "playing", phase: "upkeep step", turn: 1, xmage: { enabled: false, status: "not_configured", message: "" }, seats: [me], events: [], monarchSeatId: monarch ? "a" : undefined };
+    return applyDeterministicPhaseTrigger(s, "a", despot, "upkeep step")!.seats[0].board.battlefield.filter((c) => c.token);
+  };
+  it("makes a Dragon only while you're the monarch", () => {
+    expect(run(false)).toHaveLength(0);
+    expect(run(true)).toHaveLength(1);
   });
 });

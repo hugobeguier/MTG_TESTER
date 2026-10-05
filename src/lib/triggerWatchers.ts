@@ -61,25 +61,35 @@ function parsePart(rawPart: string, sourceName: string): SubjectPart | undefined
   if (!match) return undefined;
   let rest = match[2].trim();
   let control: Control = "any";
-  for (const suffix of CONTROL_SUFFIXES) {
-    if (suffix.pattern.test(rest)) {
-      rest = rest.replace(suffix.pattern, "").trim();
-      control = suffix.control;
-      break;
-    }
-  }
   let minPower: number | undefined;
   let keyword: string | undefined;
-  const powerCondition = rest.match(/\s+with power (\d+) or greater$/);
-  if (powerCondition) {
-    minPower = Number.parseInt(powerCondition[1], 10);
-    rest = rest.replace(powerCondition[0], "").trim();
-  }
-  const keywordCondition = rest.match(/\s+with (flying|haste|reach|trample|deathtouch|lifelink|first strike|vigilance|menace|hexproof)$/);
-  if (keywordCondition) {
-    keyword = keywordCondition[1];
-    rest = rest.replace(keywordCondition[0], "").trim();
-  }
+  // The "with ..." condition comes LAST in the real wording ("a creature you control with power 3 or greater",
+  // "a creature you control with flying") — taken off first so the "you control" before it is still at the end of
+  // what's left. The control phrase may also come after it ("... with flying you control"), so it's checked again below.
+  const stripConditions = () => {
+    const powerCondition = rest.match(/\s+with power (\d+) or greater$/);
+    if (powerCondition) {
+      minPower = Number.parseInt(powerCondition[1], 10);
+      rest = rest.replace(powerCondition[0], "").trim();
+    }
+    const keywordCondition = rest.match(/\s+with (flying|haste|reach|trample|deathtouch|lifelink|first strike|vigilance|menace|hexproof)$/);
+    if (keywordCondition) {
+      keyword = keywordCondition[1];
+      rest = rest.replace(keywordCondition[0], "").trim();
+    }
+  };
+  const stripControl = () => {
+    for (const suffix of CONTROL_SUFFIXES) {
+      if (suffix.pattern.test(rest)) {
+        rest = rest.replace(suffix.pattern, "").trim();
+        control = suffix.control;
+        return;
+      }
+    }
+  };
+  stripConditions();
+  stripControl();
+  stripConditions();
   if (!rest || !descriptorIsEvaluable(rest)) return undefined;
   return { self: false, another: match[1] === "another" || match[1] === "each other", descriptor: rest, control, minPower, keyword };
 }

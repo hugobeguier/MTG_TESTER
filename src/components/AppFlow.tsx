@@ -18690,6 +18690,16 @@ export function applyDeterministicPhaseTrigger(session: GameSession, seatId: str
   const clauseText = phaseEffectText(sourceCard.oracleText, phase);
   if (!clauseText.trim()) return undefined;
 
+  // "At the beginning of your upkeep, if you're the monarch, create a 5/5 red Dragon token with flying." (Skyline
+  // Despot) — only does anything while you hold the monarchy.
+  const monarchOnly = clauseText.match(/at the beginning of [^,]+, if you(?:'re| are) the monarch, (create [^.]+)\./i);
+  if (monarchOnly) {
+    if (session.monarchSeatId !== seatId) return session;
+    const specs = parseCreateTokenSpecs(monarchOnly[1]);
+    if (specs.length > 0) return createTokensForSeat(session, seatId, sourceCard.id, specs).session;
+  }
+
+
   // "At the beginning of your upkeep, if you control no Thopters other than this creature, return
   // this creature to its owner's hand and create five ... tokens" (Thopter Assembly, ...) — none of
   // the parsers below understand a leading "if ~," condition gating the whole effect on their own,
@@ -18782,13 +18792,16 @@ export function applyDeterministicPhaseTrigger(session: GameSession, seatId: str
   // "Create a 1/1 white Spirit creature token with flying. If you're the monarch, instead create a 4/4 white Angel
   // creature token with flying and vigilance." (Court of Grace) — ONE of the two, chosen by whether you're the
   // monarch; reading both clauses made it create a Spirit AND an Angel every upkeep.
-  const monarchInstead = clauseText.match(/(create [^.]+)\.\s*if you(?:'re| are) the monarch, instead (create [^.]+)\./i);
+  // Real wording: "create a 1/1 ... Spirit ... token with flying. If you're the monarch, create a 4/4 ... Angel ...
+  // token with flying instead." ("instead" at the END); the older "instead create" ordering is accepted too.
+  const monarchInstead =
+    clauseText.match(/(create [^.]+)\.\s*if you(?:'re| are) the monarch, (create [^.]+?) instead\./i) ??
+    clauseText.match(/(create [^.]+)\.\s*if you(?:'re| are) the monarch, instead (create [^.]+)\./i);
   if (monarchInstead) {
     const chosenClause = session.monarchSeatId === seatId ? monarchInstead[2] : monarchInstead[1];
     const specs = parseCreateTokenSpecs(chosenClause);
     if (specs.length > 0) return createTokensForSeat(session, seatId, sourceCard.id, specs).session;
   }
-
   const commonEffect = commonTriggerEffect(clauseText, "clause");
   if (commonEffect) {
     const trigger = makeCommonTrigger(seatId, seatId, sourceCard, commonEffect, `${sourceCard.name}'s ${phase} trigger resolves.`);
