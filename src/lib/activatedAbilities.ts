@@ -277,6 +277,8 @@ export function parseGenericSacrificeAbilities(oracleText: string): SacrificeAbi
 // parseGenericSacrificeAbilities already owns) is declined rather than guessed at.
 export type GenericTapEffect =
   | { kind: "create_tokens" }
+  // "Draw a card." (Dragon's Hoard, Tome of Legends, Endless Atlas)
+  | { kind: "draw_cards"; amount: number }
   | { kind: "counter_and_transform"; targetTypeFilter?: string; power?: number; toughness?: number; addedType?: string }
   | { kind: "bounce_own"; targetTypeFilter?: string }
   // Any graveyard/zone effect parseZoneEffect understands, as a tap ability's effect: "Return target Zombie
@@ -312,6 +314,8 @@ export interface GenericTapAbility {
   // tapping to pay the cost still happens, but the permanent ends up untapped once the ability
   // resolves, so it can be activated again the same turn if its cost can be paid again.
   untapsSelf: boolean;
+  // "Remove a gold counter from this artifact" as part of the cost (Dragon's Hoard, Tome of Legends): the counter kind.
+  costRemoveCounter?: string;
   effect: GenericTapEffect;
   clause: string;
 }
@@ -320,7 +324,7 @@ export interface GenericTapAbility {
 // real cost is "{G}, {T}, Discard a creature card:", with {T} in the MIDDLE. The whole cost prefix
 // is captured generically (same shape as parseGenericSacrificeAbilities' own cost prefix) and {T}
 // presence is checked afterward instead, the same way costTap is already derived there.
-const GENERIC_TAP_CLAUSE_PATTERN = /^((?:(?:\{[^}]+\}|discard an? (?:[a-z]+ )?card)\s*,?\s*)+):\s*(.+?)\.?\s*$/i;
+const GENERIC_TAP_CLAUSE_PATTERN = /^((?:(?:\{[^}]+\}|discard an? (?:[a-z]+ )?card|remove an? [a-z]+ counter from (?:this|~) [a-z]+)\s*,?\s*)+):\s*(.+?)\.?\s*$/i;
 
 export function parseGenericTapAbilities(oracleText: string): GenericTapAbility[] {
   const abilities: GenericTapAbility[] = [];
@@ -346,6 +350,11 @@ export function parseGenericTapAbilities(oracleText: string): GenericTapAbility[
     const costMana = manaSymbols.reduce((total, symbol) => total + (Number.parseInt(symbol.replace(/[{}]/g, ""), 10) || 0), 0);
     const costDiscard = /discard an? (?:[a-z]+ )?card/i.test(costPrefix);
 
+    // "...Activate only if you control three or more lands with the same name." — a restriction, not part of the effect; the
+    // full clause keeps it for activateOnlyIfConditionMet.
+    effectText = effectText.replace(/\s*Activate (?:this ability )?only [^.]*\.?$/i, "").trim();
+    const costRemoveCounter = costPrefix.match(/remove an? ([a-z]+) counter from (?:this|~)/i)?.[1]?.toLowerCase();
+
     let untapsSelf = false;
     const untapMatch = effectText.match(/^untap [^.]+\.\s*/i);
     if (untapMatch) {
@@ -357,7 +366,7 @@ export function parseGenericTapAbilities(oracleText: string): GenericTapAbility[
     if (!effect) continue;
 
     const costManaText = (costPrefix.match(/\{[^}]+\}/g) ?? []).filter((symbol) => !/^\{t\}$/i.test(symbol)).join("");
-    abilities.push({ costMana, costManaText, costDiscard, untapsSelf, effect, clause });
+    abilities.push({ costMana, costManaText, costDiscard, untapsSelf, ...(costRemoveCounter ? { costRemoveCounter } : {}), effect, clause });
   }
 
   return abilities;
@@ -367,6 +376,8 @@ function parseGenericTapEffectText(text: string): GenericTapEffect | undefined {
   if (/^exile target creature card from a graveyard\.\s*create\b[^.]*\btokens?\b/i.test(text)) return { kind: "exile_graveyard_creature_then_tokens" };
   if (/^draw a card, then you lose life equal to the number of cards in your hand\.?$/i.test(text)) return { kind: "draw_then_lose_life_equal_hand" };
   if (/^each player draws a card, then discards a card\.?$/i.test(text)) return { kind: "each_player_loots" };
+  const plainDraw = text.match(/^draw (a|one|two|three) cards?\.?$/i);
+  if (plainDraw) return { kind: "draw_cards", amount: numberWordToInt(plainDraw[1]) ?? 1 };
   const graveyardGrant = text.match(/^you may cast target ([a-z ]+?) card from your graveyard this turn\.?$/i);
   if (graveyardGrant) return { kind: "grant_graveyard_cast", cardMatcher: graveyardGrant[1].trim().toLowerCase() };
   const grantAll = text.match(/^all ([a-z]+?)s? gain ([a-z ]+?) until end of turn\.?$/i);

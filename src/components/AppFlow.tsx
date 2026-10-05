@@ -10421,6 +10421,8 @@ function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllowed: boo
     if (card.abilitiesStripped) continue;
     parseGenericTapAbilities(card.oracleText).forEach((ability, abilityIndex) => {
       if (!activateOnlyIfConditionMet(ability.clause, seat)) return;
+      if (hasSorcerySpeedOnlyLimiter(ability.clause) && !sorcerySpeedAllowed) return;
+      if (ability.costRemoveCounter && counterCount(card, ability.costRemoveCounter) < 1) return;
       if (card.tapped) return;
       // Rule 302.6: same summoning-sickness gate as the sacrifice-ability loop above — a creature
       // can't be tapped to pay a {T} cost the turn it entered without haste.
@@ -11268,6 +11270,7 @@ export function payGenericTapCost(
   const ability = parseGenericTapAbilities(card.oracleText)[abilityIndex];
   if (!ability) return undefined;
   if (!activateOnlyIfConditionMet(ability.clause, seat)) return undefined;
+  if (ability.costRemoveCounter && counterCount(card, ability.costRemoveCounter) < 1) return undefined;
 
   const discardCard = ability.costDiscard
     ? (chosenDiscardId ? seat.board.hand.find((handCard) => handCard.id === chosenDiscardId) : undefined) ?? chooseWorstHandCardToDiscard(seat)
@@ -11326,7 +11329,24 @@ export function payGenericTapCost(
     ...next,
     seats: next.seats.map((item) =>
       item.id === seatId
-        ? { ...item, board: { ...item.board, battlefield: item.board.battlefield.map((c) => (c.id === cardId ? { ...c, tapped: !ability.untapsSelf } : c)) } }
+        ? {
+            ...item,
+            board: {
+              ...item.board,
+              battlefield: item.board.battlefield.map((c) =>
+                c.id !== cardId
+                  ? c
+                  : {
+                      ...c,
+                      tapped: !ability.untapsSelf,
+                      // "Remove a gold counter from this artifact" is part of the cost.
+                      ...(ability.costRemoveCounter
+                        ? { counters: (c.counters ?? []).map((counter) => (counter.kind === ability.costRemoveCounter ? { ...counter, count: counter.count - 1 } : counter)).filter((counter) => counter.count > 0) }
+                        : {})
+                    }
+              )
+            }
+          }
         : item
     )
   };
@@ -11869,6 +11889,10 @@ export function applyGenericTapEffect(
       seatId,
       `${seat.name} loses ${handSize} life (cards in hand) from ${sourceCardName}.`
     );
+  }
+
+  if (effect.kind === "draw_cards") {
+    return drawMultipleForSeat(session, seatId, effect.amount, `${seat.name} draws ${effect.amount} card${effect.amount === 1 ? "" : "s"} from ${sourceCardName}.`);
   }
 
   // Geier Reach Sanitarium: each player draws a card, then discards a card.
@@ -17560,7 +17584,7 @@ function hasOnceEachTurnLimiter(oracleText: string): boolean {
 // shape as hasOnceEachTurnLimiter above, checked against legalActivatedAbilityActions' existing
 // sorcerySpeedAllowed parameter (already used for equip/loyalty) rather than adding a parallel gate.
 function hasSorcerySpeedOnlyLimiter(clause: string): boolean {
-  return /\bactivate only as a sorcery\b/i.test(clause);
+  return /\bactivate only as a sorcery\b|\band only as a sorcery\b/i.test(clause);
 }
 
 export function createTokensForSeat(session: GameSession, seatId: string, sourceCardId: string, specs: TokenSpec[]) {
@@ -20524,7 +20548,8 @@ function chosenColorManaAbility(oracleText: string): { fixedColor?: ManaColor } 
 function activateOnlyIfConditionMet(clause: string, seat: PlayerSeat): boolean {
   const conditionMatch = clause.match(/\bactivate (?:this ability )?only if (.+?)\.?\s*$/i);
   if (!conditionMatch) return true;
-  return isBoardConditionMet(conditionMatch[1], seat);
+  // "...and only as a sorcery" is a separate timing restriction (hasSorcerySpeedOnlyLimiter), not part of the board condition.
+  return isBoardConditionMet(conditionMatch[1].replace(/\s+and only as a sorcery$/i, ""), seat);
 }
 
 // The board-state-phrase matcher activateOnlyIfConditionMet's "activate only if X" gate has always
@@ -20602,6 +20627,17 @@ function isBoardConditionMet(conditionRaw: string, seat: PlayerSeat, allSeats?: 
     return seat.board.battlefield.some((c) => isBasicLandCard(c));
   }
 
+  // "you control three or more lands with the same name" (Endless Atlas)
+  const sameNameMatch = condition.match(/^you control (\d+|two|three|four|five|six|seven|eight|nine|ten) or more lands with the same name$/);
+  if (sameNameMatch) {
+    const counts = new Map<string, number>();
+    for (const land of seat.board.battlefield.filter((c) => isLandCard(c))) counts.set(land.name, (counts.get(land.name) ?? 0) + 1);
+    return Math.max(0, ...counts.values()) >= (numberWordToInt(sameNameMatch[1]) ?? Infinity);
+  }
+  // "you have at least 7 life more than your starting life total" (Speaker of the Heavens)
+  const lifeOverMatch = condition.match(/^you have at least (\d+) life more than your starting life total$/);
+  if (lifeOverMatch) return seat.life >= COMMANDER_STARTING_LIFE + Number.parseInt(lifeOverMatch[1], 10);
+
   const singleMatch = condition.match(/^you control an? ([a-z]+)$/);
   if (singleMatch) return countMatchingPermanents(seat.board.battlefield, singleMatch[1]) > 0;
 
@@ -20636,6 +20672,8 @@ export function isRecognizedBoardCondition(conditionRaw: string): boolean {
   if (/^you control an? ([a-z]+) or an? ([a-z]+)$/.test(condition)) return true;
   if (condition === "this land entered this turn or if you control a basic land") return true;
   if (/^you control an? ([a-z]+)$/.test(condition)) return true;
+  if (/^you control (\d+|two|three|four|five|six|seven|eight|nine|ten) or more lands with the same name$/.test(condition)) return true;
+  if (/^you have at least (\d+) life more than your starting life total$/.test(condition)) return true;
   return false;
 }
 

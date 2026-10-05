@@ -2,11 +2,11 @@
 // the test: two earlier tests passed on invented text while the real cards stayed broken (Court of Grace, the
 // "with power N or greater" watchers). Skipped per card when the catalog doesn't have it.
 import { describe, expect, it } from "vitest";
-import { applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
+import { payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
 import { parseRemovalEffect } from "@/lib/removalSpells";
 import { parseSpellExtraEffects } from "@/lib/spellExtras";
 import { etbEffectText } from "@/lib/oracleClauses";
-import { parseGenericManaAbilities } from "@/lib/activatedAbilities";
+import { parseGenericManaAbilities, parseGenericTapAbilities } from "@/lib/activatedAbilities";
 import { loadCardCatalog, lookupCard } from "@/lib/cardCatalog";
 import type { GameSession, PlayerSeat, VisibleCard } from "@/lib/types";
 
@@ -480,5 +480,39 @@ describe("commander watchers (real Oracle text)", () => {
     const after = resolveTriggerEffect(s, entered[0]);
     expect(after.seats[0].board.battlefield.find((c) => c.id === "tome")!.counters?.find((c) => c.kind === "page")?.count).toBe(1);
     expect(findAttackTriggers(s, { seatId: "a", card: cmdr(), defendingSeatId: "b" }).triggers).toHaveLength(1);
+  });
+});
+
+describe("tap abilities with counter costs and activation restrictions (real Oracle text)", () => {
+  const tapAbilities = (name: string) => parseGenericTapAbilities(real(name, "x").oracleText);
+  it("Dragon's Hoard and Tome of Legends parse a remove-counter draw ability", () => {
+    expect(tapAbilities("Dragon's Hoard").find((a) => a.costRemoveCounter === "gold")?.effect.kind).toBe("draw_cards");
+    const tome = tapAbilities("Tome of Legends").find((a) => a.costRemoveCounter === "page");
+    expect(tome?.effect.kind).toBe("draw_cards");
+    expect(tome?.costMana).toBe(1);
+  });
+  it("paying the cost removes the counter, taps the card, and needs a counter to start", () => {
+    const hoard = (count: number) => real("Dragon's Hoard", "hoard", { counters: count > 0 ? [{ kind: "gold", count }] : undefined });
+    const idx = tapAbilities("Dragon's Hoard").findIndex((a) => a.costRemoveCounter);
+    const paid = payGenericTapCost(session([seat("a", [hoard(2)])]), "a", "hoard", idx);
+    expect(paid?.session.seats[0].board.battlefield[0].counters?.find((c) => c.kind === "gold")?.count).toBe(1);
+    expect(paid?.session.seats[0].board.battlefield[0].tapped).toBe(true);
+    expect(payGenericTapCost(session([seat("a", [hoard(0)])]), "a", "hoard", idx)).toBeUndefined();
+  });
+  it("Endless Atlas needs three lands with the same name", () => {
+    const [atlas] = tapAbilities("Endless Atlas");
+    expect(atlas.effect.kind).toBe("draw_cards");
+    const land = (id: string, name: string) => bear(id, { name, typeLine: "Basic Land — Forest", role: "land" });
+    const rich = seat("a", [real("Endless Atlas", "atlas"), land("f1", "Forest"), land("f2", "Forest"), land("f3", "Forest"), land("f4", "Forest")]);
+    const poor = seat("a", [real("Endless Atlas", "atlas"), land("f1", "Forest"), land("f2", "Forest"), land("p1", "Plains")]);
+    expect(payGenericTapCost(session([rich]), "a", "atlas", 0)).toBeDefined();
+    expect(payGenericTapCost(session([poor]), "a", "atlas", 0)).toBeUndefined();
+  });
+  it("Speaker of the Heavens needs life 7 above the starting total", () => {
+    const speaker = real("Speaker of the Heavens", "sp");
+    const [ability] = tapAbilities("Speaker of the Heavens");
+    expect(ability.effect.kind).toBe("create_tokens");
+    expect(payGenericTapCost(session([seat("a", [speaker], { life: 46 })]), "a", "sp", 0)).toBeUndefined();
+    expect(payGenericTapCost(session([seat("a", [speaker], { life: 47 })]), "a", "sp", 0)).toBeDefined();
   });
 });
