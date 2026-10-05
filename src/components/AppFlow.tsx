@@ -47,6 +47,7 @@ import {
   combatDamageToPlayerEffectText,
   deathEffectText,
   etbEffectText,
+  etbTriggerEffectText,
   hasGraveyardShuffleReplacement,
   isActivatedAbilityClause,
   isAttackTriggerAddManaClause,
@@ -13865,7 +13866,14 @@ export function applyRemovalEffect(
       const typeMatches = (card: VisibleCard) => {
         const baseMatch =
           effect.targetType === "creature" ? card.typeLine.includes("Creature") : effect.targetType === "artifact" ? card.typeLine.includes("Artifact") : card.typeLine.includes("Enchantment");
-        return baseMatch && !hasIndestructible(card) && !cardMatchesExcludedType(card, effect.excludeType) && !cardMatchesExcludedColor(card, effect.excludedColors);
+        return (
+          baseMatch &&
+          !hasIndestructible(card) &&
+          !cardMatchesExcludedType(card, effect.excludeType) &&
+          !cardMatchesExcludedColor(card, effect.excludedColors) &&
+          (!effect.requireTapped || Boolean(card.tapped)) &&
+          (!effect.requireKeyword || hasKeyword(card, effect.requireKeyword))
+        );
       };
       for (const seat of session.seats) {
         for (const card of seat.board.battlefield) {
@@ -16812,7 +16820,7 @@ export function commonTriggerEffect(
           ? cardsLeaveGraveyardEffectText(oracleText)
           : mode === "clause"
             ? oracleText
-            : etbEffectText(oracleText);
+            : etbTriggerEffectText(oracleText);
   const text = relevantText.toLowerCase();
   // A single text-wide "you may" check rather than per-match position tracking — good enough for
   // this engine's one-effect-per-clause parsing (see the module comment on TriggerEffect); a card
@@ -19546,7 +19554,7 @@ export function adjustedCastingCost(
   // from a cost reduction, and correctly bypass this floor entirely.
   return Math.max(
     coloredPipCount(card),
-    baseCost - pendingArtifactAffinityReduction(seat) - staticCostReduction(seat, card) - selfConditionalCostReduction(card, allSeats)
+    baseCost - pendingArtifactAffinityReduction(seat) - staticCostReduction(seat, card) - selfConditionalCostReduction(card, allSeats) - selfScalingCostReduction(card, seat, allSeats)
   );
 }
 
@@ -19645,6 +19653,22 @@ function selfConditionalCostReduction(card: VisibleCard, allSeats: PlayerSeat[])
   return creatureCount >= threshold ? amount : 0;
 }
 
+// A reduction that scales with the board: "This spell costs {1} less to cast for each creature on the battlefield."
+// (Blasphemous Act — every player's creatures) and "This spell costs {X} less to cast, where X is the total power of
+// creatures you control." (Ghalta, Primal Hunger — the caster's only). Neither was understood, so both were always full price.
+function selfScalingCostReduction(card: VisibleCard, caster: PlayerSeat, allSeats: PlayerSeat[]): number {
+  const perCreature = card.oracleText.match(/this spell costs \{(\d+)\} less to cast for each creature on the battlefield/i);
+  if (perCreature) {
+    const each = Number.parseInt(perCreature[1], 10);
+    const creatures = allSeats.reduce((total, seat) => total + seat.board.battlefield.filter((permanent) => permanent.typeLine.includes("Creature")).length, 0);
+    return Number.isFinite(each) ? each * creatures : 0;
+  }
+  if (/this spell costs \{x\} less to cast, where x is the total power of creatures you control/i.test(card.oracleText)) {
+    return caster.board.battlefield.filter((permanent) => permanent.typeLine.includes("Creature")).reduce((total, permanent) => total + Math.max(0, effectivePower(permanent)), 0);
+  }
+  return 0;
+}
+
 // "[Qualifier] spells [you cast ]cost {N} less to cast." and its "of the chosen type" tribal
 // variant (Urza's Incubator: "Creature spells of the chosen type cost {2} less to cast."; Herald's
 // Horn: "Creature spells you cast of the chosen type cost {1} less to cast.") — the latter only
@@ -19663,11 +19687,13 @@ function parseGrantedCostReduction(source: VisibleCard, castCard: VisibleCard): 
   const clauses = source.oracleText.split("\n").map((line) => line.trim()).filter(Boolean);
   let total = 0;
   for (const clause of clauses) {
-    const match = clause.match(/(?:^|,\s*)(?:other\s+)?(?:([a-z][a-z ]*?)\s+)?spells(?:\s+you cast)?(?:\s+of the chosen type)?(?:\s+you cast)? cost \{(\d+)\} less to cast\.?$/i);
+    const match = clause.match(/(?:^|,\s*)(?:other\s+)?(?:([a-z][a-z ]*?)\s+)?spells(?:\s+you cast)?(?:\s+of the chosen type)?(?:\s+you cast)?(?:\s+with power (\d+) or greater)? cost \{(\d+)\} less to cast\.?$/i);
     if (!match) continue;
     const qualifier = (match[1] ?? "").toLowerCase().trim();
-    const amount = Number.parseInt(match[2], 10);
+    const amount = Number.parseInt(match[3], 10);
     if (!Number.isFinite(amount) || amount <= 0) continue;
+    // "Creature spells you cast with power 4 or greater cost {2} less" (Goreclaw) — the cast creature's printed power.
+    if (match[2] !== undefined && !(Number.parseInt(castCard.power ?? "", 10) >= Number.parseInt(match[2], 10))) continue;
     if (/\bof the chosen type\b/i.test(clause)) {
       if (!source.chosenCreatureType || !castCard.typeLine.includes(source.chosenCreatureType)) continue;
     }

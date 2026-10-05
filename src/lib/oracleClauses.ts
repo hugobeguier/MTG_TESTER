@@ -107,10 +107,45 @@ export function isNonEtbWheneverClause(clause: string): boolean {
 // your upkeep, ... create five ... Thopter ... tokens" was firing the moment it entered instead of
 // waiting for its controller's next upkeep), or a standing non-ETB trigger (see
 // isNonEtbWheneverClause above).
+// ETB-relevant clauses INCLUDING those of other permanents' entry that this permanent merely watches ("Whenever
+// another Dragon you control enters, ..."). commonTriggerEffect needs these to parse a watcher's own effect.
+export function etbTriggerEffectText(oracleText: string): string {
+  return etbClauses(oracleText).join(" ");
+}
+
+// "Whenever another nontoken Dragon you control enters, create a 2/2 Dragon Egg token." (Lathliss) — a watcher on
+// OTHER permanents entering. It never happens when this permanent itself enters, but left in etbEffectText it
+// was read as a cast-time effect: casting Lathliss made a Dragon token immediately, and Atsushi / Parapet
+// Thrasher / Elder Dragon War misfired the same way.
+export function isEntersWatcherClause(clause: string): boolean {
+  return (
+    /\b(?:when|whenever)\s+(?:another|a|an|each other|one or more)\b[^,.]*?\s+(?:enters|enter)\b/i.test(clause) ||
+    // "Whenever this creature or another Dragon you control enters, ..." (Scourge of Valkas): ALSO a trigger, which fires
+    // for its own entry through the trigger system — resolution reading it too would apply it twice.
+    /\b(?:when|whenever)\s+this\b[^,.]*?\sor another\b[^,.]*?\s+(?:enters|enter)\b/i.test(clause)
+  );
+}
+
+// The text that happens when this permanent itself enters (what resolution reads).
 export function etbEffectText(oracleText: string): string {
-  return oracleClauses(oracleText)
+  return etbClauses(oracleText)
+    .filter((clause) => !isEntersWatcherClause(clause))
+    .join(" ");
+}
+
+// Saga chapters ("I — ...", "II, III — ...", "Read ahead") resolve through the saga system as lore counters are added, never
+// on entering (the Elder Dragon War dealt its chapter I damage and made its chapter III Dragon the moment it was cast).
+function isSagaChapterClause(clause: string): boolean {
+  return /^(?:[IVX]+(?:\s*,[\s]*[IVX]+)*)\s*[—-]/.test(clause) || /^read ahead\b/i.test(clause);
+}
+
+function etbClauses(oracleText: string): string[] {
+  // Modal bullets ("• Create a 3/3 Beast.") are glued back onto their "choose one —" header first, so a death/attack
+  // trigger's modes aren't mistaken for standalone ETB text (Atsushi, Elder Gargaroth, Parapet Thrasher).
+  return mergeModalBulletClauses(oracleClauses(oracleText))
     .filter(
       (clause) =>
+        !isSagaChapterClause(clause) &&
         !isActivatedAbilityClause(clause) &&
         !isDeathTriggerClause(clause) &&
         !isPhaseTriggerClause(clause) &&
@@ -123,8 +158,7 @@ export function etbEffectText(oracleText: string): string {
     // Clue token" as real effects — Fateful Absence gave its CASTER a card and a Clue on top of the
     // destroyed permanent's controller getting one.
     .map((clause) => clause.replace(/\s*\([^)]*\)/g, "").trim())
-    .filter(Boolean)
-    .join(" ");
+    .filter(Boolean);
 }
 
 // "If a nontoken creature an opponent controls would die, instead exile that card and create a 2/2 black

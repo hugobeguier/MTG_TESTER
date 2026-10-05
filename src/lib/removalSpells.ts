@@ -55,6 +55,9 @@ export interface DestroyAllEffect {
   // color is checked against a card's colors, not its type line (same split parseDestroy's
   // single-target DestroyEffect already makes between excludedColors and artifactsExcluded).
   excludedColors: string[];
+  // "Destroy all TAPPED creatures." (Sunblast Angel) / "Destroy all creatures WITH FLYING." (Whiptongue Hydra).
+  requireTapped?: boolean;
+  requireKeyword?: string;
 }
 
 // "Destroy all creatures with mana value N or less/greater" (Austere Command's creature modes,
@@ -209,6 +212,13 @@ function parseDestroy(text: string): DestroyEffect | DestroyAllEffect | DestroyA
   // Command) from matching as an unconditional wipe — it used to, since "destroy all creatures"
   // is a literal substring of that conditional clause, which meant a "choose two" modal wipe with
   // a mana-value-gated creature mode always resolved as an unconditional full board wipe.
+  if (/\bdestroy all tapped creatures\b/.test(text)) {
+    return { kind: "destroy_all", targetType: "creature", excludedColors: [], requireTapped: true };
+  }
+  const withKeyword = text.match(/\bdestroy all creatures with (flying|reach|trample|haste|menace|deathtouch|lifelink|first strike|vigilance)\b/);
+  if (withKeyword) {
+    return { kind: "destroy_all", targetType: "creature", excludedColors: [], requireKeyword: withKeyword[1] };
+  }
   const destroyAllCreatures = text.match(/\bdestroy all (?:non-?([a-z]+) )?creatures\b(?!\s+with\b)/);
   if (destroyAllCreatures) {
     const qualifier = destroyAllCreatures[1]?.toLowerCase();
