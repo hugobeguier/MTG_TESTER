@@ -15,7 +15,7 @@ import { hasKeyword } from "./keywords";
 export interface WatcherSubjectContext {
   sourceId: string;
   sourceName: string;
-  subject: { id: string; typeLine: string; token?: boolean; grantedTypes?: string[]; colors?: string[]; power?: string; oracleText?: string };
+  subject: { id: string; typeLine: string; commander?: boolean; token?: boolean; grantedTypes?: string[]; colors?: string[]; power?: string; oracleText?: string };
   // The permanent entering / dying is controlled by the same player who controls the watcher.
   subjectIsControlledBySourceController: boolean;
   // "attacks" only: the player being attacked is the source's controller ("attacks you or a planeswalker
@@ -57,6 +57,8 @@ function parsePart(rawPart: string, sourceName: string): SubjectPart | undefined
   if (/^this\s+[a-z ]+$/.test(part) || part === sourceName.toLowerCase() || part === shortName) {
     return { self: true, another: false, descriptor: "", control: "any" };
   }
+  // "your commander" / "a commander you control" (Tome of Legends, Norn's Choirmaster): matched on the card's commander flag.
+  if (part === "your commander" || part === "a commander you control") return { self: false, another: false, descriptor: "commander", control: "you" };
   const match = part.match(/^(another|each other|a|an)\s+(.+)$/);
   if (!match) return undefined;
   let rest = match[2].trim();
@@ -102,7 +104,7 @@ export function matchWatcherSubject(oracleText: string, event: "enters" | "dies"
   let allParsed = true;
   for (const rawClause of oracleText.split("\n")) {
     // "attacks or blocks" is one trigger watching both events; reduce it to whichever verb is being asked about.
-    const clause = rawClause.replace(/\([^)]*\)/g, "").trim().toLowerCase().replace(/\battacks or blocks\b/, verb);
+    const clause = rawClause.replace(/\([^)]*\)/g, "").trim().toLowerCase().replace(/\battacks or blocks\b|\benters or attacks\b/, verb);
     const match = clause.match(new RegExp(`\\b(?:when|whenever)\\s+([^,.:]+?)\\s+${verb}\\b([^,.]*)`));
     if (!match) continue;
     sawClause = true;
@@ -136,7 +138,7 @@ export function matchWatcherSubject(oracleText: string, event: "enters" | "dies"
         continue;
       }
       if (part.another && context.subject.id === context.sourceId) continue;
-      if (!permanentMatchesQualifier(context.subject, part.descriptor)) continue;
+      if (part.descriptor === "commander" ? !context.subject.commander : !permanentMatchesQualifier(context.subject, part.descriptor)) continue;
       if (part.minPower !== undefined && !(Number.parseInt(context.subject.power ?? "", 10) >= part.minPower)) continue;
       if (part.keyword && !hasKeyword(context.subject.oracleText ?? "", part.keyword)) continue;
       const control = part.control !== "any" ? part.control : trailingControl ?? "any";

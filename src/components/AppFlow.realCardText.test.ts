@@ -460,3 +460,25 @@ describe("triggered abilities, batch 2 (real Oracle text)", () => {
     expect(resolveTriggerEffect(mk("2", "3"), trig).seats[0].board.hand).toHaveLength(0);
   });
 });
+
+describe("commander watchers (real Oracle text)", () => {
+  const cmdr = (extra: Partial<VisibleCard> = {}) => bear("cmdr", { commander: true, ...extra });
+  it("Norn's Choirmaster proliferates when your commander enters or attacks, not for other creatures", () => {
+    const watcher = real("Norn's Choirmaster", "nc");
+    const s = session([seat("a", [watcher, cmdr(), bear("other")]), seat("b", [])]);
+    const onAttack = findAttackTriggers(s, { seatId: "a", card: cmdr(), defendingSeatId: "b" }).triggers;
+    expect(onAttack.map((t) => t.effect.kind)).toEqual(["proliferate"]);
+    expect(findAttackTriggers(s, { seatId: "a", card: bear("other"), defendingSeatId: "b" }).triggers).toHaveLength(0);
+    expect(findCommonTriggersForPermanentEntered(s, "a", cmdr()).map((t) => t.effect.kind)).toEqual(["proliferate"]);
+    expect(findCommonTriggersForPermanentEntered(s, "a", bear("other")).map((t) => t.effect.kind)).toEqual([]);
+  });
+  it("Tome of Legends adds a page counter when your commander enters or attacks", () => {
+    const tome = real("Tome of Legends", "tome");
+    const s = session([seat("a", [tome, cmdr()]), seat("b", [])]);
+    const entered = findCommonTriggersForPermanentEntered(s, "a", cmdr());
+    expect(entered).toHaveLength(1);
+    const after = resolveTriggerEffect(s, entered[0]);
+    expect(after.seats[0].board.battlefield.find((c) => c.id === "tome")!.counters?.find((c) => c.kind === "page")?.count).toBe(1);
+    expect(findAttackTriggers(s, { seatId: "a", card: cmdr(), defendingSeatId: "b" }).triggers).toHaveLength(1);
+  });
+});

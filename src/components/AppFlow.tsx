@@ -278,6 +278,8 @@ type TriggerEffect = (
   | { kind: "investigate_per_opponent_with_more_cards" }
   // "Put X +1/+1 counters on target creature, where X is that creature's power." (Thickest in the Thicket) — your strongest creature.
   | { kind: "double_power_counters" }
+  // "Proliferate." (Norn's Choirmaster) — every eligible permanent and player, same as the blanket resolveProliferate.
+  | { kind: "proliferate" }
 ) & {
   optional?: boolean;
   // Only resolves if this holds when the trigger resolves ("...if you control the creature with the greatest power").
@@ -17240,6 +17242,7 @@ export function commonTriggerEffect(
   const optional = /\byou may\b/.test(text) || undefined;
   // Single-card shapes the generic parsers below would misread (a flat draw for a conditional one) or miss entirely.
   if (/\byou gain life equal to that creature'?s toughness\b/.test(text)) return { kind: "gain_life_context_toughness" };
+  if (/(?:^|,\s*)proliferate\.?$/.test(text.replace(/\([^)]*\)/g, "").trim())) return { kind: "proliferate" };
   if (/\binvestigate once for each opponent who has more cards in hand than you\b/.test(text)) return { kind: "investigate_per_opponent_with_more_cards" };
   if (/\bput x \+1\/\+1 counters on target creature, where x is that creature'?s power\b/.test(text)) return { kind: "double_power_counters" };
   if (/\bdraw two cards if you control the creature with the greatest power or tied for the greatest power\b/.test(text)) {
@@ -17950,6 +17953,7 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
   if (trigger.effect.kind === "draw_cards") {
     return drawMultipleForSeat(session, trigger.controllerSeatId, trigger.effect.amount, `${trigger.sourceCardName} trigger resolves. ${seatName} draws ${trigger.effect.amount} card${trigger.effect.amount === 1 ? "" : "s"}.`);
   }
+  if (trigger.effect.kind === "proliferate") return resolveProliferate(session);
   if (trigger.effect.kind === "gain_life_context_toughness") {
     const entering = session.seats.flatMap((item) => item.board.battlefield).find((card) => card.id === trigger.contextCardId);
     const amount = entering ? Math.max(0, effectiveToughness(entering)) : 0;
