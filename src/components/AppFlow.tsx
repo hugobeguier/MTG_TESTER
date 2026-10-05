@@ -13645,8 +13645,31 @@ export function applySpellExtraEffect(session: GameSession, casterSeatId: string
       if (!target || target.kind !== "creature") return noLegalTargetEvent(session, casterSeatId, sourceName);
       const warded = payWardIfNeeded(session, casterSeatId, target.card, sourceName);
       if (warded.countered) return warded.session;
-      return dealDamageToCreature(warded.session, sourceName, target.seatId, target.card.id, power, dealer, casterSeatId);
+      const bitten = dealDamageToCreature(warded.session, sourceName, target.seatId, target.card.id, power, dealer, casterSeatId);
+      // Ram Through: with trample on the creature you control, the damage past lethal goes to that creature's controller.
+      const excess = effect.trampleExcess && hasKeyword(dealer, "trample") ? power - Math.max(0, effectiveToughness(target.card)) : 0;
+      if (excess <= 0) return bitten;
+      return rulesEvent(
+        { ...bitten, seats: bitten.seats.map((seat) => (seat.id === target.seatId ? { ...seat, life: seat.life - excess } : seat)) },
+        casterSeatId,
+        `${sourceName} tramples over: ${excess} excess damage is dealt to ${bitten.seats.find((seat) => seat.id === target.seatId)?.name ?? "the controller"}.`
+      );
     }
+
+    case "draw_per_creature": {
+      const count = caster.board.battlefield.filter((card) => card.typeLine.includes("Creature")).length;
+      return count === 0 ? session : drawMultipleForSeat(session, casterSeatId, count, `${caster.name} draws ${count} card${count === 1 ? "" : "s"} from ${sourceName}.`);
+    }
+
+    case "gain_life_per_creature": {
+      const count = caster.board.battlefield.filter((card) => card.typeLine.includes("Creature") && effectivePower(card) >= effect.minPower).length;
+      if (count === 0) return session;
+      const amount = count * effect.perCreature;
+      return rulesEvent({ ...session, seats: session.seats.map((seat) => (seat.id === casterSeatId ? { ...seat, life: seat.life + amount } : seat)) }, casterSeatId, `${caster.name} gains ${amount} life from ${sourceName}.`);
+    }
+
+    case "grant_keywords":
+      return applyRemovalEffect(session, casterSeatId, sourceName, source, { kind: "grant_keywords", keywords: effect.keywords });
 
     case "each_other_player_sacrifices": {
       const destructions: Array<{ seatId: string; cardId: string; message: string }> = [];
@@ -14929,6 +14952,8 @@ function substituteManaValueCount(text: string, manaValue: number): string {
 // sentence) and just needs to notice this second, independent sentence anywhere in the same text.
 export function parseSimpleLifeChange(text: string): { kind: "gain_life" | "lose_life"; amount: number } | undefined {
   const lower = text.toLowerCase();
+  // "You gain 4 life for each creature you control with power 4 or greater." scales; the flat amount here would be wrong.
+  if (/\byou gain\s+(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+life\s+for each\b/.test(lower)) return undefined;
   const gainMatch = lower.match(/\byou gain\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+life\b/);
   if (gainMatch) {
     const amount = numberWordToInt(gainMatch[1]);
@@ -14956,6 +14981,7 @@ export function parseSimpleDrawEffect(text: string): { amount: number } | undefi
   const lowered = text.toLowerCase();
   // Symmetric draws are owned by spellExtras (Secret Rendezvous, Cut a Deal) — a plain "draw three cards" here gave only
   // the caster the cards.
+  if (/\bdraw a card for each\b/.test(lowered)) return undefined;
   if (/\byou and target opponent each draw\b|\beach opponent draws a card, then you draw/.test(lowered)) return undefined;
   // "If it's a Zombie card, draw a card." (Cemetery Recruitment) — a CONDITIONAL draw owned by the regrow
   // effect it follows; an unconditional draw here was giving the card for free.

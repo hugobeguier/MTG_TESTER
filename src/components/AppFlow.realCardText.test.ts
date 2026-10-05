@@ -2,8 +2,10 @@
 // the test: two earlier tests passed on invented text while the real cards stayed broken (Court of Grace, the
 // "with power N or greater" watchers). Skipped per card when the catalog doesn't have it.
 import { describe, expect, it } from "vitest";
-import { applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
+import { applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
 import { parseRemovalEffect } from "@/lib/removalSpells";
+import { parseSpellExtraEffects } from "@/lib/spellExtras";
+import { etbEffectText } from "@/lib/oracleClauses";
 import { parseGenericManaAbilities } from "@/lib/activatedAbilities";
 import { loadCardCatalog, lookupCard } from "@/lib/cardCatalog";
 import type { GameSession, PlayerSeat, VisibleCard } from "@/lib/types";
@@ -340,5 +342,41 @@ describe("Collective Resistance and Valorous Stance (real Oracle text)", () => {
     const protectedSeats = cast("Valorous Stance", [seat("a", [bear("mine")]), seat("b", [bear("small")])]).seats;
     expect(protectedSeats[0].board.battlefield[0].temporaryGrantedKeywords).toEqual(["indestructible"]);
     expect(ids(protectedSeats, "b")).toHaveLength(1);
+  });
+});
+
+describe("one-shot spells (real Oracle text)", () => {
+  const extrasFor = (name: string) => parseSpellExtraEffects(etbEffectText(real(name, "x").oracleText));
+  const resolve = (name: string, seats: PlayerSeat[]) =>
+    extrasFor(name).reduce((acc, effect) => applySpellExtraEffect(acc, "a", real(name, "spell"), effect), session(seats)).seats;
+  const libSeat = (battlefield: VisibleCard[]) => {
+    const s = seat("a", battlefield);
+    s.library = Array.from({ length: 10 }, (_, i) => bear(`lib${i}`, { zone: "library" as const }));
+    s.zones = { ...s.zones, library: 10 };
+    return s;
+  };
+
+  it("Shamanic Revelation draws per creature and gains 4 life per creature with power 4+ (no flat life)", () => {
+    expect(extrasFor("Shamanic Revelation").map((e) => e.kind)).toEqual(["draw_per_creature", "gain_life_per_creature"]);
+    expect(parseSimpleLifeChange(etbEffectText(real("Shamanic Revelation", "x").oracleText))).toBeUndefined();
+    expect(parseSimpleDrawEffect(etbEffectText(real("Shamanic Revelation", "x").oracleText))).toBeUndefined();
+    const seats = resolve("Shamanic Revelation", [libSeat([bear("b1"), bear("b2"), bear("big", { power: "5", toughness: "5" })])]);
+    expect(seats[0].board.hand).toHaveLength(3);
+    expect(seats[0].life).toBe(44);
+  });
+
+  it("Tamiyo's Safekeeping grants hexproof and indestructible and gains 2 life", () => {
+    expect(parseSimpleLifeChange(etbEffectText(real("Tamiyo's Safekeeping", "x").oracleText))).toEqual({ kind: "gain_life", amount: 2 });
+    const seats = resolve("Tamiyo's Safekeeping", [libSeat([bear("b1")])]);
+    expect(seats[0].board.battlefield[0].temporaryGrantedKeywords).toEqual(expect.arrayContaining(["hexproof", "indestructible"]));
+  });
+
+  it("Ram Through: your creature deals damage equal to its power; trample sends the excess to the controller", () => {
+    const [effect] = extrasFor("Ram Through");
+    expect(effect).toEqual({ kind: "creature_bites", trampleExcess: true });
+    const trampler = bear("tr", { power: "6", toughness: "6", oracleText: "Trample" });
+    const seats = resolve("Ram Through", [libSeat([trampler]), seat("b", [bear("victim")])]);
+    expect(seats[1].board.battlefield).toHaveLength(0);
+    expect(seats[1].life).toBe(36);
   });
 });

@@ -41,7 +41,14 @@ export type SpellExtraEffect =
   | { kind: "creature_damages_everything_else" }
   // "Target creature you control deals damage equal to its power to target creature or planeswalker
   // you don't control." (Bite Down)
-  | { kind: "creature_bites" }
+  // trampleExcess: Ram Through's "If the creature you control has trample, excess damage is dealt to that creature's controller instead."
+  | { kind: "creature_bites"; trampleExcess?: boolean }
+  // "Draw a card for each creature you control." (Shamanic Revelation)
+  | { kind: "draw_per_creature" }
+  // "You gain 4 life for each creature you control with power 4 or greater." (Shamanic Revelation's ferocious line)
+  | { kind: "gain_life_per_creature"; perCreature: number; minPower: number }
+  // "Target permanent you control gains hexproof and indestructible until end of turn." (Tamiyo's Safekeeping)
+  | { kind: "grant_keywords"; keywords: string[] }
   // "Each other player sacrifices a creature of their choice. You create a 2/2 black Zombie creature token for
   // each creature sacrificed this way." (Syphon Flesh) — tokenClause is "create a 2/2 ... token".
   | { kind: "each_other_player_sacrifices"; tokenClause?: string }
@@ -150,7 +157,16 @@ export function parseSpellExtraEffects(text: string): SpellExtraEffect[] {
 
   if (/\btarget creature you control deals damage equal to its power to target creature or planeswalker you don'?t control\b/i.test(normalized)) {
     effects.push({ kind: "creature_bites" });
+  } else if (/\btarget creature you control deals damage equal to its power to target creature you don'?t control\b/i.test(normalized)) {
+    effects.push({ kind: "creature_bites", trampleExcess: /\bif the creature you control has trample, excess damage is dealt to that creature'?s controller instead\b/i.test(normalized) });
   }
+
+  if (/\bdraw a card for each creature you control\b/i.test(normalized)) effects.push({ kind: "draw_per_creature" });
+  const lifePerCreature = normalized.match(/\byou gain (\d+) life for each creature you control with power (\d+) or greater\b/i);
+  if (lifePerCreature) effects.push({ kind: "gain_life_per_creature", perCreature: Number.parseInt(lifePerCreature[1], 10), minPower: Number.parseInt(lifePerCreature[2], 10) });
+
+  const permanentGrant = normalized.match(/\btarget permanent you control gains ([a-z]+(?: and [a-z]+)?) until end of turn\b/i);
+  if (permanentGrant) effects.push({ kind: "grant_keywords", keywords: permanentGrant[1].toLowerCase().split(" and ") });
 
   if (/\beach other player sacrifices (?:a|one) creature of their choice\b/i.test(normalized)) {
     const perSacrifice = normalized.match(/\b(create [^.]+?) for each creature sacrificed this way\b/i);
