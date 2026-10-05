@@ -23,7 +23,24 @@ import { SelfPlayStrictViolationError, type AuditCheck, type AuditViolation } fr
 import type { Anomaly, AnomalyKind } from "../src/lib/selfplay/anomalies";
 import { DECK_FILES, computeGameRotation } from "../src/lib/selfplay/rotation";
 
+// --pool=foundations: one 4-seat Commander pod of the Foundations precons (decks/foundations/*.txt)
+// instead of the legacy 2-seat pairings. Seat order rotates every game; who goes first rotates on a
+// slower period so the two don't correlate.
+const FOUNDATIONS_DECK_FILES = [
+  "decks/foundations/WretchedRanks.txt",
+  "decks/foundations/ReignOfDragons.txt",
+  "decks/foundations/TramplesaurusRex.txt",
+  "decks/foundations/CallingAllAngels.txt"
+];
+const FOUNDATIONS_SEAT_NAMES: Record<string, string> = {
+  "decks/foundations/WretchedRanks.txt": "Wretched Ranks",
+  "decks/foundations/ReignOfDragons.txt": "Reign of Dragons",
+  "decks/foundations/TramplesaurusRex.txt": "Tramplesaurus Rex",
+  "decks/foundations/CallingAllAngels.txt": "Calling All Angels"
+};
+
 interface CliArgs {
+  pool: "legacy" | "foundations";
   games: number;
   seed?: number;
   strict: boolean;
@@ -46,11 +63,12 @@ function parseArgs(argv: string[]): CliArgs {
   const seedArg = get("seed");
   const startIndexArg = get("start-index");
   return {
+    pool: get("pool") === "foundations" ? "foundations" : "legacy",
     games: gamesArg ? Number.parseInt(gamesArg, 10) : 20,
     seed: seedArg ? Number.parseInt(seedArg, 10) : undefined,
     strict: argv.includes("--strict"),
     verbose: argv.includes("--verbose"),
-    ollama: argv.includes("--ollama"),
+    ollama: argv.includes("--ollama") && get("pool") !== "foundations",
     startIndex: startIndexArg ? Number.parseInt(startIndexArg, 10) : 0
   };
 }
@@ -100,7 +118,7 @@ async function main() {
   mkdirSync(outDir, { recursive: true });
   const outFile = path.join(outDir, `${new Date().toISOString().replace(/[:.]/g, "-")}.jsonl`);
 
-  const results: Array<PlayGameResult & { gameIndex: number; seatNames: [string, string]; deckFiles: [string, string]; firstSeatIndex: 0 | 1; ollamaSeatIndex?: 0 | 1 }> = [];
+  const results: Array<PlayGameResult & { gameIndex: number; seatNames: string[]; deckFiles: string[]; firstSeatIndex: number; ollamaSeatIndex?: 0 | 1 }> = [];
   const violationsByCheck = new Map<AuditCheck, number>();
   const violationExamples = new Map<AuditCheck, AuditViolation>();
   const anomaliesByKind = new Map<AnomalyKind, number>();
@@ -126,17 +144,26 @@ async function main() {
     // independent rotations over globalIndex — see rotation.ts's own header comment for why their
     // periods must be pairwise coprime, and the two real confounds that shipped before this got
     // factored out into a tested module instead of re-derived by hand here.
-    const { pairIndex, forceFirstSeatIndex, ollamaSeatIndex } = computeGameRotation(globalIndex);
-    const deckFiles: [string, string] = [DECK_FILES[pairIndex], DECK_FILES[(pairIndex + 1) % DECK_FILES.length]];
+    const { pairIndex, forceFirstSeatIndex: legacyFirstSeatIndex, ollamaSeatIndex } = computeGameRotation(globalIndex);
+    const foundations = args.pool === "foundations";
+    const rotateBy = globalIndex % FOUNDATIONS_DECK_FILES.length;
+    const deckFiles: string[] = foundations
+      ? [...FOUNDATIONS_DECK_FILES.slice(rotateBy), ...FOUNDATIONS_DECK_FILES.slice(0, rotateBy)]
+      : [DECK_FILES[pairIndex], DECK_FILES[(pairIndex + 1) % DECK_FILES.length]];
+    const forceFirstSeatIndex: number = foundations ? Math.floor(globalIndex / FOUNDATIONS_DECK_FILES.length) % FOUNDATIONS_DECK_FILES.length : legacyFirstSeatIndex;
     // See DECK_AGENT_NAMES' own comment: under --ollama, seat names must match the live game's real
     // agent roster so ollamaBrain's requests resolve to an actually-pulled model instead of 404ing.
-    const seatNames: [string, string] = args.ollama
-      ? [DECK_AGENT_NAMES[deckFiles[0]] ?? deckFiles[0], DECK_AGENT_NAMES[deckFiles[1]] ?? deckFiles[1]]
-      : ["Seat A", "Seat B"];
+    const seatNames: string[] = foundations
+      ? deckFiles.map((file) => FOUNDATIONS_SEAT_NAMES[file])
+      : args.ollama
+        ? [DECK_AGENT_NAMES[deckFiles[0]] ?? deckFiles[0], DECK_AGENT_NAMES[deckFiles[1]] ?? deckFiles[1]]
+        : ["Seat A", "Seat B"];
     const seed = args.seed !== undefined ? args.seed + globalIndex : undefined;
 
     const session = createSelfPlayGame({ deckListPaths: deckFiles, seatNames, forceFirstSeatIndex, seed });
-    const brains: Record<string, Brain> = args.ollama
+    const brains: Record<string, Brain> = foundations
+      ? Object.fromEntries(session.seats.map((seat) => [seat.id, heuristicBrain]))
+      : args.ollama
       ? { [session.seats[ollamaSeatIndex].id]: ollamaBrainInstance!, [session.seats[1 - ollamaSeatIndex].id]: heuristicBrain }
       : { [session.seats[0].id]: heuristicBrain, [session.seats[1].id]: heuristicBrain };
 
@@ -153,7 +180,7 @@ async function main() {
       throw error;
     }
 
-    results.push({ ...result, gameIndex: globalIndex, seatNames, deckFiles, firstSeatIndex: forceFirstSeatIndex, ollamaSeatIndex: args.ollama ? ollamaSeatIndex : undefined });
+    results.push({ ...result, gameIndex: globalIndex, seatNames, deckFiles, firstSeatIndex: forceFirstSeatIndex, ollamaSeatIndex: args.ollama && !foundations ? ollamaSeatIndex : undefined });
     terminationCounts[result.terminationReason] = (terminationCounts[result.terminationReason] ?? 0) + 1;
     if (result.terminationReason === "crash") crashed += 1;
     spellEffectCoverage.matched += result.spellEffectCoverage.matched;

@@ -27,6 +27,9 @@ export interface DestroyEffect {
   // is for "target nonartifact creature" rather than folding it into excludedColors (basic-ness
   // isn't a color).
   basicsExcluded: boolean;
+  // "Its controller investigates." (Fateful Absence) — the destroyed permanent's controller, not the
+  // caster, gets a Clue token.
+  controllerInvestigates?: boolean;
 }
 
 // "Destroy up to X target artifacts and/or enchantments." (Pest Infestation) — a variable, MULTI-
@@ -73,11 +76,31 @@ export interface ExileEffect {
   lifeGainToControllerEqualToPower: boolean;
 }
 
+// "..., where X is the number of Swamps you control." / "...the number of creatures on the
+// battlefield." — an X that's a board count instead of a mana-cost {X} the caster chooses. Without
+// this the amount stayed "X" with no chosenX to read, resolved as 0, and the spell reported "finds
+// no legal target" (Consuming Corruption, Tendrils of Corruption, Chain Reaction).
+export type DynamicAmount = { kind: "lands_you_control"; subtype: string } | { kind: "creatures_on_battlefield" };
+
+const BASIC_LAND_TYPES = ["plains", "island", "swamp", "mountain", "forest"];
+
+export function parseWhereX(text: string): DynamicAmount | undefined {
+  if (/\bwhere x is the number of creatures on the battlefield\b/i.test(text)) return { kind: "creatures_on_battlefield" };
+  const lands = text.match(/\bwhere x is the number of ([a-z]+?)s you control\b/i);
+  if (lands && BASIC_LAND_TYPES.includes(lands[1].toLowerCase())) return { kind: "lands_you_control", subtype: lands[1].toLowerCase() };
+  return undefined;
+}
+
 export interface DamageEffect {
   kind: "damage";
   // "X" for a variable-damage spell whose amount is the caster's chosen X (Comet Storm) — resolved
   // against the caster's actual chosenX at the call site, not guessed at here.
   amount: number | "X";
+  // Set when X is a board count (see DynamicAmount) rather than a cost the caster chose.
+  xDefinition?: DynamicAmount;
+  // "...and you gain X life" (Consuming Corruption, Tendrils of Corruption) — the caster gains the
+  // same X as the damage amount.
+  alsoGainLife?: boolean;
   // "player" (Boros Charm's "target player or planeswalker" mode) is kept distinct from "any" —
   // unlike "any target", it can never legally resolve against a creature.
   targetType: "any" | "creature" | "player";
@@ -91,6 +114,11 @@ export interface DamageEffect {
 export interface MassDamageEffect {
   kind: "mass_damage";
   amount: number | "X";
+  xDefinition?: DynamicAmount;
+  // "each creature WITHOUT FLYING and each planeswalker" (Magmaquake) — fliers are spared, and
+  // planeswalkers are hit too.
+  excludeFlying?: boolean;
+  includePlaneswalkers?: boolean;
   excludeType?: string;
   scope: "all" | "opponents";
 }
@@ -218,7 +246,8 @@ function parseDestroy(text: string): DestroyEffect | DestroyAllEffect | DestroyA
     targetType,
     excludedColors: COLORS.filter((color) => clause.includes(`non${color}`)),
     artifactsExcluded: clause.includes("nonartifact"),
-    basicsExcluded: clause.includes("nonbasic")
+    basicsExcluded: clause.includes("nonbasic"),
+    ...(/\bits controller investigates\b/.test(text) ? { controllerInvestigates: true } : {})
   };
 }
 
@@ -243,7 +272,11 @@ function parseDamage(text: string): DamageEffect | undefined {
   const anyTargetX = text.match(/deals x damage to any target\b/);
   if (anyTargetX) return { kind: "damage", amount: "X", targetType: "any" };
   const creatureTargetX = text.match(/deals x damage to target creature\b/);
-  if (creatureTargetX) return { kind: "damage", amount: "X", targetType: "creature" };
+  if (creatureTargetX) {
+    const xDefinition = parseWhereX(text);
+    const alsoGainLife = /\band you gain x life\b/.test(text);
+    return { kind: "damage", amount: "X", targetType: "creature", ...(xDefinition ? { xDefinition } : {}), ...(alsoGainLife ? { alsoGainLife } : {}) };
+  }
   // "Choose any target, then choose another target for each time this spell was kicked. ... deals
   // X damage to each of them." (Comet Storm) — the multikicker/multi-target part isn't modeled
   // (chooseDamageTarget only ever resolves a single target), but the common single-target case
@@ -270,6 +303,9 @@ function parseDamage(text: string): DamageEffect | undefined {
 function parseMassDamage(text: string): MassDamageEffect | undefined {
   const match = text.match(/deals (x|\d+) damage to each (?:non-?([a-z]+) )?creatures?(?: (you don'?t control))?/i);
   if (!match) return undefined;
+  const excludeFlying = /\bdeals (?:x|\d+) damage to each creature without flying\b/i.test(text);
+  const includePlaneswalkers = /\band each planeswalker\b/i.test(text);
+  const xDefinition = parseWhereX(text);
   const qualifier = match[2]?.toLowerCase();
   // A color-word qualifier ("nonwhite") would need to check the card's colors, not its type line —
   // no such card exists in this codebase's real data for a mass-damage effect (only for destroy_all
@@ -279,6 +315,9 @@ function parseMassDamage(text: string): MassDamageEffect | undefined {
   return {
     kind: "mass_damage",
     amount: amountText === "x" ? "X" : Number.parseInt(amountText, 10),
+    ...(xDefinition ? { xDefinition } : {}),
+    ...(excludeFlying ? { excludeFlying } : {}),
+    ...(includePlaneswalkers ? { includePlaneswalkers } : {}),
     excludeType: qualifier,
     scope: match[3] ? "opponents" : "all"
   };

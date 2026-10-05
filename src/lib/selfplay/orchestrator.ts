@@ -67,7 +67,9 @@ import {
   applyLivingDeathEffect,
   applyMassBounceEffect,
   applyMassPumpEffect,
+  applySpellExtraEffect,
   applyPunisherChoiceEffect,
+  payAdditionalDiscardCost,
   applyRemovalEffect,
   applySimpleLifeChange,
   applyTargetedPumpEffect,
@@ -124,6 +126,7 @@ import { createDeckFromList } from "@/lib/deckParser";
 import { cardMatchesTypeFilter, etbEffectText, parseModalHeader } from "@/lib/oracleClauses";
 import { TURN_PHASES } from "@/lib/priorityStops";
 import { parseRemovalEffect } from "@/lib/removalSpells";
+import { parseSpellExtraEffects } from "@/lib/spellExtras";
 import { parseZoneEffect } from "@/lib/zoneEffects";
 import type { CardLike, ScoringContext } from "@/lib/actionScoring";
 import type { GameSession, PlayerSeat, VisibleCard } from "@/lib/types";
@@ -140,12 +143,13 @@ export interface CreateSelfPlayGameOptions {
   // whose pairing (Meren.txt vs UrDragon.txt) is known to build cleanly against the built-in card
   // catalog fallback (see readDeckList's own comment on why: no data/commander-cards.json is
   // checked into the repo yet).
-  deckListPaths?: [string, string];
-  seatNames?: [string, string];
-  // Forces which seat (0 or 1, indexing into deckListPaths/seatNames) rolls to go first instead of
+  // Any number of seats (2 for the legacy pairings, 4 for a Commander pod) — one deck path per seat.
+  deckListPaths?: string[];
+  seatNames?: string[];
+  // Forces which seat (index into deckListPaths/seatNames) rolls to go first instead of
   // letting rollForStartingSeat's own d20 roll decide — used by scripts/self-play.ts to swap who
   // goes first across games so first-player advantage cancels out over a run, per the plan.
-  forceFirstSeatIndex?: 0 | 1;
+  forceFirstSeatIndex?: number;
   // See gap #7 above — only covers this function's own setup randomness.
   seed?: number;
 }
@@ -189,19 +193,19 @@ function buildBareSeat(id: string, name: string): PlayerSeat {
 
 export function createSelfPlayGame(opts: CreateSelfPlayGameOptions = {}): GameSession {
   return withSeededRandom(opts.seed, () => {
-    const [deckPathA, deckPathB] = opts.deckListPaths ?? ["Meren.txt", "UrDragon.txt"];
-    const [nameA, nameB] = opts.seatNames ?? ["Seat A", "Seat B"];
+    const deckPaths = opts.deckListPaths ?? ["Meren.txt", "UrDragon.txt"];
+    const names = opts.seatNames ?? deckPaths.map((_, index) => `Seat ${String.fromCharCode(65 + index)}`);
 
     const rawCatalog = loadCardCatalog();
     const catalog = { lookup: (name: string) => lookupCard(rawCatalog, name) };
 
-    const deckA = createDeckFromList({ owner: "seat-a", deckList: readRootDeckList(deckPathA), catalog });
-    const deckB = createDeckFromList({ owner: "seat-b", deckList: readRootDeckList(deckPathB), catalog });
+    const builtSeats = deckPaths.map((deckPath, index) => {
+      const seatId = `seat-${String.fromCharCode(97 + index)}`;
+      const deck = createDeckFromList({ owner: seatId, deckList: readRootDeckList(deckPath), catalog });
+      return applyDeckToSeat(buildBareSeat(seatId, names[index]), deck);
+    });
 
-    const seatA = applyDeckToSeat(buildBareSeat("seat-a", nameA), deckA);
-    const seatB = applyDeckToSeat(buildBareSeat("seat-b", nameB), deckB);
-
-    const openingSeats = [seatA, seatB].map((seat) => withOpeningHand(seat, 7, 0));
+    const openingSeats = builtSeats.map((seat) => withOpeningHand(seat, 7, 0));
     const { seats: mulliganedSeats } = resolveAgentMulligans(openingSeats);
 
     const firstSeatId =
@@ -484,6 +488,15 @@ function resolveBareSpellEffect(session: GameSession, casterSeatId: string, sour
     matched = true;
   }
 
+  // One-off shapes (Sign in Blood, Hit the Mother Lode, Necrotic Hex, Monstrous Onslaught, ...) — see
+  // spellExtras.ts. "Add {R} for each tapped land..." (Mana Geyser) is skipped: it needs the live game's
+  // mana pool, which headless self-play doesn't have, so it stays an honest "unmatched" here.
+  for (const extra of !isModalCard ? parseSpellExtraEffects(rawText) : []) {
+    if (extra.kind === "add_mana_per_tapped_opponent_land") continue;
+    working = applySpellExtraEffect(working, casterSeatId, sourceCard, extra, chosenX);
+    matched = true;
+  }
+
   // "Look at the top N cards of your library, then put them back in any order[. You may shuffle].
   // Draw a card." (Ponder, ...) — parseSimpleDrawEffect deliberately DECLINES this shape (see its own
   // comment) so the live game routes it to the Rules Advisor's real reorder_top_cards choice, which
@@ -646,7 +659,10 @@ function applyMainPhaseAction(
     const payment = chooseManaSourcesForCost(seat, card, totalCost, undefined, session.seats);
     if (!payment.ok) return { session, changed: false };
     const destination = isPermanentTypeLine(card.typeLine) ? "battlefield" : "graveyard";
-    const next = playCardFromZone(session, seatId, card.id, `${seat.name} casts ${card.name}.`, undefined, destination, payment.sourceIds, "hand", undefined);
+    // "As an additional cost to cast this spell, discard a card." (Unexpected Windfall) — paid at cast
+    // time, before the spell leaves the hand, same as the live game (601.2h).
+    const costPaid = payAdditionalDiscardCost(session, seatId, card);
+    const next = playCardFromZone(costPaid, seatId, card.id, `${seat.name} casts ${card.name}.`, undefined, destination, payment.sourceIds, "hand", undefined);
     if (destination === "graveyard" && next !== session) {
       const resolved = resolveBareSpellEffect(next, seatId, card, chosenX);
       return {

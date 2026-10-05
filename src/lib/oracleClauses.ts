@@ -37,7 +37,13 @@ export function isActivatedAbilityClause(clause: string): boolean {
   // triggered abilities are always phrased "When/Whenever/At ~, ..." with no colon; a colon
   // anywhere in a clause that ISN'T one of those is, in practice, always an activated ability's
   // cost/effect divider.
-  const colonIndex = clause.indexOf(":");
+  // Reminder text ("(They create a Clue token. It's an artifact with "{2}, Sacrifice this token:
+  // Draw a card.")") and quoted granted abilities ('gain "{T}: Add {G}."') carry their OWN colons
+  // that aren't this clause's cost/effect divider — Fateful Absence and Unexpected Windfall's whole
+  // spell text read as an activated ability (and so vanished from etbEffectText) purely because of
+  // their Clue/Treasure reminder text. Blanked out before looking for the divider.
+  const withoutReminderOrQuoted = clause.replace(/\([^)]*\)/g, (m) => " ".repeat(m.length)).replace(/"[^"]*"/g, (m) => " ".repeat(m.length));
+  const colonIndex = withoutReminderOrQuoted.indexOf(":");
   if (colonIndex === -1) return false;
   const preColon = clause.slice(0, colonIndex);
   // "DoorName: Ability text." (Secret Arcade // Dusty Parlor and the same templating on every
@@ -128,6 +134,15 @@ export function parseAdditionalSacrificeCost(oracleText: string): { count: numbe
   if (!match) return undefined;
   const count = match[1] === "two" ? 2 : match[1] === "three" ? 3 : 1;
   return { count };
+}
+
+// "As an additional cost to cast this spell, discard a card." (Unexpected Windfall, ...) — rule
+// 601.2h, paid at cast time like the sacrifice cost above. Unfiltered "discard a card"/"discard N
+// cards" only; a type-restricted discard ("discard a land card") isn't recognized.
+export function parseAdditionalDiscardCost(oracleText: string): { count: number } | undefined {
+  const match = oracleText.toLowerCase().match(/as an additional cost to cast this spell, discard (a|one|two|three) cards?\b/);
+  if (!match) return undefined;
+  return { count: match[1] === "two" ? 2 : match[1] === "three" ? 3 : 1 };
 }
 
 // The inverse: isolates just the "dies"-triggered clause(s), so a permanent's death effect (e.g.

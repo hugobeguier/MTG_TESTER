@@ -54,6 +54,7 @@ import {
   isSagaTransformChapter,
   mergeModalBulletClauses,
   oracleClauses,
+  parseAdditionalDiscardCost,
   parseAdditionalSacrificeCost,
   parseEmblemGrant,
   parseGainsAbilityGrant,
@@ -62,6 +63,7 @@ import {
   type SagaChapters
 } from "@/lib/oracleClauses";
 import { FOUNDATIONS_AGENT_DECKLISTS, FOUNDATIONS_PLAYER_DECKLIST, commanderFromDeckList } from "@/lib/precons";
+import { parseSpellExtraEffects, type SpellExtraEffect } from "@/lib/spellExtras";
 import {
   annihilatorAmount,
   hasKeyword as hasKeywordText,
@@ -107,7 +109,7 @@ import {
   pickChosenCreatureType,
   type ManaColorLetter
 } from "@/lib/characteristics";
-import { matchesTargetType, parseRemovalEffect, type RemovalEffect, type RemovalTargetType } from "@/lib/removalSpells";
+import { matchesTargetType, parseRemovalEffect, type DynamicAmount, type RemovalEffect, type RemovalTargetType } from "@/lib/removalSpells";
 import { hasCardType, parseTypeGrantEffects, typeGrantAppliesTo } from "@/lib/typeGrants";
 import { parseZoneEffect, type LookDigEffect, type RegrowTargetType, type ZoneEffect } from "@/lib/zoneEffects";
 import { legalTargets, targetsStillLegal, type ChosenTarget, type TargetSpec } from "@/lib/targeting";
@@ -258,6 +260,9 @@ interface TokenSpec {
   toughness?: string;
   oracleText: string;
   role: string;
+  // "Create thirteen TAPPED 2/2 black Zombie creature tokens." (Army of the Damned, Necrotic Hex) —
+  // only set when the card says so; absent means the token enters untapped like any other.
+  tapped?: boolean;
 }
 type PendingAction =
   | {
@@ -4814,13 +4819,15 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
             "Rules action"
           )
         : manaSpentSession;
+      // Same moment, same rule (601.2h) for a discard cost — see payAdditionalDiscardCost.
+      const costsPaidSession = castSourceCard && parseAdditionalDiscardCost(castSourceCard.oracleText) ? payAdditionalDiscardCost(sacrificedSession, action.actorSeatId, castSourceCard) : sacrificedSession;
       const noResponseNote = humanAutoPassedByPolicy ? `No stop set for ${session.phase} — auto-passed.` : "No available responses.";
       const baseMessage =
         detail === "Stack" && action.type === "spell"
           ? `${action.message} ${requiredPasses.length > 0 ? "Waiting for responses." : noResponseNote}`
           : `${action.message}${requiredPasses.length > 0 ? "" : ` ${noResponseNote}`}`;
       return {
-        ...sacrificedSession,
+        ...costsPaidSession,
         events: [
           {
             id: action.id,
@@ -4829,7 +4836,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
             message: baseMessage,
             detail
           },
-          ...sacrificedSession.events
+          ...costsPaidSession.events
         ]
       };
     });
@@ -5625,6 +5632,9 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       | undefined;
     let capturedAdvisorCall: { event: "spell_resolved_to_battlefield" | "spell_resolved_to_graveyard"; seatId: string; sourceCard: VisibleCard } | undefined;
     let capturedStaticInterpreterCall: { seatId: string; card: VisibleCard } | undefined;
+    // Mana a resolving spell adds (Mana Geyser) — mana pools live in this component's React state, not
+    // in the session the updater below returns, so it's captured here and added after the updater runs.
+    let capturedSpellMana: { color: ManaColor; amount: number } | undefined;
     let capturedTriggers: Array<Extract<PendingAction, { type: "trigger" }>> = [];
     setSession((current) => {
       const baseDestination = spellResolutionDestination(current, action);
@@ -5942,6 +5952,21 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
               `${punisherResolvedSession.seats.find((seat) => seat.id === action.actorSeatId)?.name ?? "Player"} draws ${simpleDrawEffect.amount} card${simpleDrawEffect.amount === 1 ? "" : "s"} from ${sourceCard.name}.`
             )
           : punisherResolvedSession;
+      // The one-off instant/sorcery shapes in spellExtras.ts (Sign in Blood, Hit the Mother Lode,
+      // Necrotic Hex, Monstrous Onslaught, Ezuri's Predation, Mutilate, Overwhelming Stampede,
+      // Rishkar's Expertise, Chaos Warp, Chandra's Ignition, Bite Down, Mana Geyser, ...) — each used
+      // to resolve as "mana spent, nothing happens" or fall to the LLM planner. Spells only: a
+      // permanent's own ETB text is owned by commonTriggerEffect.
+      const spellExtraEffects =
+        sourceCard && !isModalCard && destination !== "battlefield" ? parseSpellExtraEffects(etbEffectText(sourceCard.oracleText)) : [];
+      const spellExtrasResolvedSession = sourceCard
+        ? spellExtraEffects.reduce((acc, effect) => applySpellExtraEffect(acc, action.actorSeatId, sourceCard, effect, action.chosenX), simpleDrawResolvedSession)
+        : simpleDrawResolvedSession;
+      const manaExtra = spellExtraEffects.find((effect) => effect.kind === "add_mana_per_tapped_opponent_land");
+      if (manaExtra && manaExtra.kind === "add_mana_per_tapped_opponent_land") {
+        const amount = manaFromTappedOpponentLands(simpleDrawResolvedSession, action.actorSeatId);
+        if (amount > 0) capturedSpellMana = { color: manaExtra.color, amount };
+      }
       // Rule 500.7: "Take an extra turn after this one." (Temporal Mastery, Time Warp, ...) —
       // applies regardless of the spell's own destination, same "still happens even though the
       // instant/sorcery itself resolves to the graveyard" reasoning as removal/zone/pump above.
@@ -5949,8 +5974,8 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       // the current turn's own cleanup step or an End Turn shortcut next needs to pick who's next.
       const extraTurnGrantedSession =
         sourceCard && grantsExtraTurn(sourceCard.oracleText)
-          ? { ...simpleDrawResolvedSession, extraTurnsQueue: [...(simpleDrawResolvedSession.extraTurnsQueue ?? []), action.actorSeatId] }
-          : simpleDrawResolvedSession;
+          ? { ...spellExtrasResolvedSession, extraTurnsQueue: [...(spellExtrasResolvedSession.extraTurnsQueue ?? []), action.actorSeatId] }
+          : spellExtrasResolvedSession;
       const genericModalEffect = sourceCard && isModalCard && !removalEffect ? parseGenericModalEffect(sourceCard.oracleText, action.chosenX) : undefined;
       const preTriggerSession =
         genericModalEffect && sourceCard ? applyGenericModalEffect(extraTurnGrantedSession, action.actorSeatId, sourceCard, genericModalEffect) : extraTurnGrantedSession;
@@ -6058,6 +6083,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
           simpleLifeEffect !== undefined ||
           punisherEffect !== undefined ||
           simpleDrawEffect !== undefined ||
+          spellExtraEffects.length > 0 ||
           isLivingDeath ||
           massBounceEffect ||
           grantsExtraTurn(sourceCard.oracleText);
@@ -6092,6 +6118,9 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     // both silently no-opped — reported live as "resolves, mana spent, nothing happens." Deferring
     // this whole block by one more macrotask lets the already-scheduled updater run first.
     window.setTimeout(() => {
+      if (capturedSpellMana) {
+        setSeatManaPool(action.actorSeatId, addManaToPool(poolForSeat(action.actorSeatId), capturedSpellMana.color, capturedSpellMana.amount));
+      }
       if (capturedTriggers.length > 0) {
         queueCommonTriggers(capturedTriggers);
       } else if (!resumeTopStackAction(remainingStack)) {
@@ -11940,15 +11969,35 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
 
   // Life <= 0 and 21+ combat damage from a single commander are both game losses.
   const previousLossState = new Map(next.seats.map((seat) => [seat.id, Boolean(seat.hasLost)]));
+  // Rule 800.4a: a player who loses leaves the game, and every object they own leaves with them. Found by
+  // 4-player self-play: an eliminated player's creatures stayed on the battlefield, still targetable —
+  // an opponent's Swords to Plowshares exiled one and handed the already-dead player 6 life. Applied to
+  // ANY seat that has lost (including "drew from an empty library", which sets hasLost elsewhere), and
+  // idempotent. Cards go to exile rather than vanishing so every card stays accounted for; tokens
+  // simply cease to exist.
+  const eliminatedPermanentsLeave = (seat: PlayerSeat): PlayerSeat => {
+    if (seat.board.battlefield.length === 0) return seat;
+    const leaving = seat.board.battlefield.filter((card) => !card.token);
+    return {
+      ...seat,
+      board: {
+        ...seat.board,
+        battlefield: [],
+        exile: [...(seat.board.exile ?? []), ...leaving.map((card) => ({ ...card, zone: "exile" as const, tapped: false, attacking: false, blocking: false }))]
+      },
+      zones: { ...seat.zones, battlefield: 0, exile: seat.zones.exile + leaving.length }
+    };
+  };
   const seatsAfterLossChecks = next.seats.map((seat) => {
-    if (seat.hasLost) return seat;
-    if (seat.life <= 0) return { ...seat, hasLost: true, lossReason: "life total reached 0" };
+    if (seat.hasLost) return eliminatedPermanentsLeave(seat);
+    if (seat.life <= 0) return eliminatedPermanentsLeave({ ...seat, hasLost: true, lossReason: "life total reached 0" });
     if (Object.values(seat.commanderDamage).some((amount) => amount >= 21)) {
-      return { ...seat, hasLost: true, lossReason: "took 21 or more combat damage from a single commander" };
+      return eliminatedPermanentsLeave({ ...seat, hasLost: true, lossReason: "took 21 or more combat damage from a single commander" });
     }
-    if ((seat.poison ?? 0) >= 10) return { ...seat, hasLost: true, lossReason: "has 10 or more poison counters" };
+    if ((seat.poison ?? 0) >= 10) return eliminatedPermanentsLeave({ ...seat, hasLost: true, lossReason: "has 10 or more poison counters" });
     return seat;
   });
+  if (seatsAfterLossChecks.some((seat, index) => seat !== next.seats[index])) changed = true;
   const lossEvents: GameEvent[] = seatsAfterLossChecks
     .filter((seat) => seat.hasLost && !previousLossState.get(seat.id))
     .map((seat) => ({
@@ -12739,6 +12788,299 @@ function chooseDamageTarget(session: GameSession, casterSeatId: string, amount: 
   return undefined;
 }
 
+// A DynamicAmount X ("where X is the number of Swamps you control"), read off the board as the spell
+// resolves — see removalSpells.ts's DynamicAmount for why this isn't just chosenX.
+function resolveDynamicAmount(session: GameSession, casterSeatId: string, amount: DynamicAmount): number {
+  if (amount.kind === "creatures_on_battlefield") {
+    return session.seats.reduce((total, seat) => total + seat.board.battlefield.filter((card) => card.typeLine.includes("Creature")).length, 0);
+  }
+  const caster = session.seats.find((seat) => seat.id === casterSeatId);
+  return (caster?.board.battlefield ?? []).filter((card) => card.typeLine.toLowerCase().includes(amount.subtype)).length;
+}
+
+function rulesEvent(session: GameSession, seatId: string, message: string): GameSession {
+  return { ...session, events: [{ id: crypto.randomUUID(), at: new Date().toISOString(), seatId, message, detail: "Rules action" }, ...session.events] };
+}
+
+function greatestCreaturePower(seat: PlayerSeat | undefined): number {
+  const powers = (seat?.board.battlefield ?? []).filter((card) => card.typeLine.includes("Creature")).map((card) => effectivePower(card));
+  return powers.length > 0 ? Math.max(0, ...powers) : 0;
+}
+
+function strongestControlledCreature(seat: PlayerSeat | undefined): VisibleCard | undefined {
+  const creatures = (seat?.board.battlefield ?? []).filter((card) => card.typeLine.includes("Creature"));
+  if (creatures.length === 0) return undefined;
+  return creatures.reduce((best, card) => (effectivePower(card) > effectivePower(best) ? card : best));
+}
+
+// "Add {R} for each tapped land your opponents control." (Mana Geyser) — the amount only. Mana pools
+// live in the component's own React state, not in GameSession, so a pure session transformer can't
+// add the mana itself; the live-game caller reads this and adds it to the caster's pool (see
+// resolvePendingAction). Headless self-play has no pool at all, so this effect stays unmodeled there.
+export function manaFromTappedOpponentLands(session: GameSession, casterSeatId: string): number {
+  return session.seats
+    .filter((seat) => seat.id !== casterSeatId && !seat.hasLost)
+    .reduce((total, seat) => total + seat.board.battlefield.filter((card) => card.tapped && isLandCard(card)).length, 0);
+}
+
+// Applies one SpellExtraEffect (spellExtras.ts) for its caster. Same deterministic, no-target-prompt
+// conventions as the rest of this file's removal/pump appliers: the "best" target is picked by
+// heuristic for every seat kind (there's no selection UI for these shapes yet).
+export function applySpellExtraEffect(session: GameSession, casterSeatId: string, source: VisibleCard, effect: SpellExtraEffect, chosenX?: number): GameSession {
+  const caster = session.seats.find((seat) => seat.id === casterSeatId);
+  if (!caster) return session;
+  const sourceName = source.name;
+
+  switch (effect.kind) {
+    case "draw_and_lose_life": {
+      const drawn = drawMultipleForSeat(session, casterSeatId, effect.draw, `${caster.name} draws ${effect.draw} card${effect.draw === 1 ? "" : "s"} from ${sourceName}.`);
+      const afterLoss: GameSession = {
+        ...drawn,
+        seats: drawn.seats.map((seat) => (seat.id === casterSeatId ? { ...seat, life: seat.life - effect.lose } : seat))
+      };
+      return rulesEvent(afterLoss, casterSeatId, `${caster.name} loses ${effect.lose} life from ${sourceName}.`);
+    }
+
+    case "discover": {
+      // Rule 701.57: exile cards from the top until a nonland card with mana value N or less; cast it
+      // free or put it in hand; the rest go to the bottom in a random order. Always taking the "put it
+      // in your hand" option here — a legal choice, and it sidesteps casting a spell with no stack.
+      const library = caster.library ?? [];
+      const revealed: VisibleCard[] = [];
+      let found: VisibleCard | undefined;
+      for (const card of library) {
+        if (!isLandCard(card) && card.manaValue <= effect.amount) {
+          found = card;
+          break;
+        }
+        revealed.push(card);
+      }
+      let next = session;
+      if (found) next = moveCardAcrossSeats(next, casterSeatId, found.id, casterSeatId, "hand").session;
+      const revealedIds = new Set(revealed.map((card) => card.id));
+      next = {
+        ...next,
+        seats: next.seats.map((seat) => {
+          if (seat.id !== casterSeatId) return seat;
+          const remaining = (seat.library ?? []).filter((card) => !revealedIds.has(card.id));
+          const library = [...remaining, ...shuffleCards(revealed)];
+          return { ...seat, library, zones: { ...seat.zones, library: library.length } };
+        })
+      };
+      next = rulesEvent(
+        next,
+        casterSeatId,
+        found ? `${caster.name} discovers ${effect.amount} with ${sourceName} and puts ${found.name} into their hand.` : `${caster.name} discovers ${effect.amount} with ${sourceName} but finds no card.`
+      );
+      if (found && effect.treasuresForDifference && found.manaValue < effect.amount) {
+        const difference = effect.amount - found.manaValue;
+        next = createTokensForSeat(next, casterSeatId, source.id, [{ ...predefinedTokenSpec("Treasure"), count: difference, tapped: true }]).session;
+      }
+      return next;
+    }
+
+    case "each_player_sacrifices": {
+      // The tokens this same spell creates ("You create six tapped 2/2 Zombie tokens") come AFTER the
+      // sacrifice, so they're excluded from what a player can be made to sacrifice.
+      const destructions: Array<{ seatId: string; cardId: string; message: string }> = [];
+      for (const seat of session.seats) {
+        if (seat.hasLost) continue;
+        const candidates = seat.board.battlefield
+          .filter((card) => card.typeLine.includes("Creature") && !(card.token && card.tokenSourceCardId === source.id))
+          .sort((a, b) => Number(Boolean(b.token)) - Number(Boolean(a.token)) || effectivePower(a) + effectiveToughness(a) - (effectivePower(b) + effectiveToughness(b)));
+        for (const card of candidates.slice(0, effect.count)) {
+          destructions.push({ seatId: seat.id, cardId: card.id, message: `${seat.name} sacrifices ${card.name} to ${sourceName}.` });
+        }
+      }
+      return destroyCreatures(session, destructions, "Rules action");
+    }
+
+    case "divided_damage_greatest_power": {
+      let remaining = greatestCreaturePower(caster);
+      if (remaining <= 0) return noLegalTargetEvent(session, casterSeatId, sourceName);
+      const victims = session.seats
+        .filter((seat) => seat.id !== casterSeatId && !seat.hasLost)
+        .flatMap((seat) => seat.board.battlefield.filter((card) => card.typeLine.includes("Creature") && !hasShroud(card) && !hasHexproof(card) && !isProtectedFrom(card, source)).map((card) => ({ seatId: seat.id, card })))
+        .sort((a, b) => effectiveToughness(a.card) - effectiveToughness(b.card));
+      if (victims.length === 0) return noLegalTargetEvent(session, casterSeatId, sourceName);
+      // Divide as you choose: lethal damage to as many creatures as the total allows, cheapest kills first.
+      let next = session;
+      let dealtAny = false;
+      for (const victim of victims) {
+        const lethal = Math.max(1, effectiveToughness(victim.card));
+        if (remaining < lethal) continue;
+        const warded = payWardIfNeeded(next, casterSeatId, victim.card, sourceName);
+        if (warded.countered) {
+          next = warded.session;
+          continue;
+        }
+        next = dealDamageToCreature(warded.session, sourceName, victim.seatId, victim.card.id, lethal, source, casterSeatId);
+        remaining -= lethal;
+        dealtAny = true;
+      }
+      // Nothing was killable with the damage available: put it all on the weakest target rather than waste it.
+      if (!dealtAny) next = dealDamageToCreature(next, sourceName, victims[0].seatId, victims[0].card.id, remaining, source, casterSeatId);
+      return next;
+    }
+
+    case "tokens_fight_each_opponent_creature": {
+      const victims = session.seats
+        .filter((seat) => seat.id !== casterSeatId && !seat.hasLost)
+        .flatMap((seat) => seat.board.battlefield.filter((card) => card.typeLine.includes("Creature")).map((card) => ({ seatId: seat.id, card })));
+      if (victims.length === 0) return rulesEvent(session, casterSeatId, `${sourceName} resolves with no opposing creatures.`);
+      const created = createTokensForSeat(session, casterSeatId, source.id, [
+        {
+          count: victims.length,
+          name: `${effect.subtype} Token`,
+          colors: effect.colors,
+          typeLine: `Token Creature - ${effect.subtype}`,
+          power: effect.power,
+          toughness: effect.toughness,
+          oracleText: "",
+          role: "creature"
+        }
+      ]);
+      // Each token fights a different creature: both deal damage equal to their power to the other.
+      let next = created.session;
+      created.createdTokens.forEach((token, index) => {
+        const victim = victims[index];
+        if (!victim) return;
+        next = dealDamageToCreature(next, sourceName, victim.seatId, victim.card.id, Math.max(0, effectivePower(token)), token, casterSeatId);
+        next = dealDamageToCreature(next, sourceName, casterSeatId, token.id, Math.max(0, effectivePower(victim.card)), victim.card, victim.seatId);
+      });
+      return next;
+    }
+
+    case "pump_dynamic": {
+      const amount =
+        effect.basis.kind === "greatest_power_you_control"
+          ? greatestCreaturePower(caster)
+          : effect.basis.kind === "fixed"
+            ? effect.basis.amount
+            : effect.basis.kind === "creatures_on_battlefield" || effect.basis.kind === "lands_you_control"
+              ? resolveDynamicAmount(session, casterSeatId, effect.basis)
+              : (chosenX ?? 0);
+      const delta = effect.sign * amount;
+      let affected = 0;
+      const seats = session.seats.map((seat) => {
+        if (effect.scope === "controlled" && seat.id !== casterSeatId) return seat;
+        return {
+          ...seat,
+          board: {
+            ...seat.board,
+            battlefield: seat.board.battlefield.map((card) => {
+              if (!card.typeLine.includes("Creature")) return card;
+              affected += 1;
+              return {
+                ...card,
+                temporaryPowerBonus: (card.temporaryPowerBonus ?? 0) + delta,
+                temporaryToughnessBonus: (card.temporaryToughnessBonus ?? 0) + delta,
+                ...(effect.grantsTrample ? { temporaryGrantedKeywords: [...(card.temporaryGrantedKeywords ?? []), "trample"] } : {})
+              };
+            })
+          }
+        };
+      });
+      const sign = delta >= 0 ? "+" : "";
+      return rulesEvent(
+        { ...session, seats },
+        casterSeatId,
+        affected > 0
+          ? `${sourceName} gives ${effect.scope === "controlled" ? "creatures you control" : "each creature"} ${sign}${delta}/${sign}${delta}${effect.grantsTrample ? " and trample" : ""} until end of turn.`
+          : `${sourceName} resolves with no creatures to affect.`
+      );
+    }
+
+    case "draw_greatest_power_then_free_cast": {
+      const count = greatestCreaturePower(caster);
+      let next = drawMultipleForSeat(session, casterSeatId, count, `${caster.name} draws ${count} card${count === 1 ? "" : "s"} from ${sourceName}.`);
+      if (effect.freeCastMaxManaValue < 0) return next;
+      // "You may cast a spell ... without paying its mana cost." There's no free-cast pipeline for a
+      // spell resolving mid-resolution, so this takes the clean, always-legal subset: the best
+      // PERMANENT in hand with a small enough mana value goes onto the battlefield. (Its ETB triggers
+      // aren't run — a known simplification.) Instants/sorceries are left in hand.
+      const handNow = next.seats.find((seat) => seat.id === casterSeatId)?.board.hand ?? [];
+      const choice = handNow
+        .filter((card) => !isLandCard(card) && !card.typeLine.includes("Instant") && !card.typeLine.includes("Sorcery") && card.manaValue <= effect.freeCastMaxManaValue)
+        .sort((a, b) => b.manaValue - a.manaValue)[0];
+      if (choice) {
+        next = moveCardAcrossSeats(next, casterSeatId, choice.id, casterSeatId, "battlefield").session;
+        next = rulesEvent(next, casterSeatId, `${caster.name} casts ${choice.name} without paying its mana cost from ${sourceName}.`);
+      }
+      return next;
+    }
+
+    case "shuffle_permanent_reveal_top": {
+      const target = chooseRemovalTarget(session, casterSeatId, "permanent", source);
+      if (!target) return noLegalTargetEvent(session, casterSeatId, sourceName);
+      const warded = payWardIfNeeded(session, casterSeatId, target.card, sourceName);
+      if (warded.countered) return warded.session;
+      const ownerSeatId = target.card.ownerSeatId ?? target.seatId;
+      let next: GameSession;
+      if (target.card.token) {
+        // A token that leaves the battlefield ceases to exist — it never reaches the library.
+        next = {
+          ...warded.session,
+          seats: warded.session.seats.map((seat) =>
+            seat.id === target.seatId
+              ? { ...seat, board: { ...seat.board, battlefield: seat.board.battlefield.filter((card) => card.id !== target.card.id) }, zones: { ...seat.zones, battlefield: Math.max(0, seat.zones.battlefield - 1) } }
+              : seat
+          )
+        };
+        return rulesEvent(next, casterSeatId, `${sourceName}: ${target.card.name} ceases to exist.`);
+      }
+      next = moveCardAcrossSeats(warded.session, target.seatId, target.card.id, ownerSeatId, "library", { libraryPosition: "top" }).session;
+      next = {
+        ...next,
+        seats: next.seats.map((seat) => (seat.id === ownerSeatId ? { ...seat, library: shuffleCards(seat.library ?? []) } : seat))
+      };
+      next = rulesEvent(next, casterSeatId, `${sourceName} shuffles ${target.card.name} into its owner's library.`);
+      const top = next.seats.find((seat) => seat.id === ownerSeatId)?.library?.[0];
+      if (top && !top.typeLine.includes("Instant") && !top.typeLine.includes("Sorcery")) {
+        next = moveCardAcrossSeats(next, ownerSeatId, top.id, ownerSeatId, "battlefield").session;
+        next = rulesEvent(next, ownerSeatId, `${sourceName} reveals ${top.name}, a permanent card, and it's put onto the battlefield.`);
+      } else if (top) {
+        next = rulesEvent(next, ownerSeatId, `${sourceName} reveals ${top.name}, which stays on top of the library.`);
+      }
+      return next;
+    }
+
+    case "creature_damages_everything_else": {
+      const dealer = strongestControlledCreature(caster);
+      const power = dealer ? Math.max(0, effectivePower(dealer)) : 0;
+      if (!dealer || power <= 0) return noLegalTargetEvent(session, casterSeatId, sourceName);
+      let next = session;
+      for (const seat of session.seats) {
+        for (const card of seat.board.battlefield) {
+          if (card.id === dealer.id || !card.typeLine.includes("Creature")) continue;
+          next = dealDamageToCreature(next, sourceName, seat.id, card.id, power, dealer, casterSeatId);
+        }
+      }
+      for (const seat of session.seats) {
+        if (seat.id === casterSeatId || seat.hasLost) continue;
+        const current = next.seats.find((item) => item.id === seat.id);
+        if (current) next = applyCombatDamageToTarget(next, sourceName, { seat: current }, power, dealer, casterSeatId, "noncombat");
+      }
+      return rulesEvent(next, casterSeatId, `${dealer.name} deals ${power} damage to each other creature and each opponent (${sourceName}).`);
+    }
+
+    case "creature_bites": {
+      const dealer = strongestControlledCreature(caster);
+      const power = dealer ? Math.max(0, effectivePower(dealer)) : 0;
+      if (!dealer || power <= 0) return noLegalTargetEvent(session, casterSeatId, sourceName);
+      const target = chooseDamageTarget(session, casterSeatId, power, "creature", dealer);
+      if (!target || target.kind !== "creature") return noLegalTargetEvent(session, casterSeatId, sourceName);
+      const warded = payWardIfNeeded(session, casterSeatId, target.card, sourceName);
+      if (warded.countered) return warded.session;
+      return dealDamageToCreature(warded.session, sourceName, target.seatId, target.card.id, power, dealer, casterSeatId);
+    }
+
+    // Needs the live game's mana pool — see manaFromTappedOpponentLands.
+    case "add_mana_per_tapped_opponent_land":
+      return session;
+  }
+}
+
 function noLegalTargetEvent(session: GameSession, seatId: string, sourceName: string): GameSession {
   return {
     ...session,
@@ -12893,8 +13235,64 @@ function hasResolvableTarget(session: GameSession, casterSeatId: string, card: V
     hasResolvableZoneEffectTarget(session, casterSeatId, card) &&
     hasResolvableAuraEnchantTarget(session, casterSeatId, card) &&
     hasResolvableGenericCreatureTarget(session, casterSeatId, card) &&
-    hasPayableAdditionalSacrificeCost(session, casterSeatId, card)
+    hasResolvableSpellExtraTarget(session, casterSeatId, card) &&
+    hasPayableAdditionalSacrificeCost(session, casterSeatId, card) &&
+    hasPayableAdditionalDiscardCost(session, casterSeatId, card)
   );
+}
+
+// "Target creature you control deals damage ..." (Bite Down, Chandra's Ignition) and the other
+// spellExtras shapes that need something on the board — casting them with nothing to point at just
+// wastes the card (Bite Down fizzled six times in a 40-game self-play batch because the agent cast it
+// with no creature of its own).
+function hasResolvableSpellExtraTarget(session: GameSession, casterSeatId: string, card: VisibleCard): boolean {
+  const caster = session.seats.find((seat) => seat.id === casterSeatId);
+  const effects = parseSpellExtraEffects(etbEffectText(card.oracleText));
+  const hasOwnAttacker = greatestCreaturePower(caster) > 0;
+  const opposingCreature = session.seats.some((seat) => seat.id !== casterSeatId && !seat.hasLost && seat.board.battlefield.some((item) => item.typeLine.includes("Creature")));
+  return effects.every((effect) => {
+    switch (effect.kind) {
+      case "creature_bites": {
+        const dealer = strongestControlledCreature(caster);
+        return Boolean(dealer) && hasOwnAttacker && chooseDamageTarget(session, casterSeatId, Math.max(0, effectivePower(dealer!)), "creature", dealer!) !== undefined;
+      }
+      case "creature_damages_everything_else":
+        return hasOwnAttacker;
+      case "divided_damage_greatest_power":
+        return hasOwnAttacker && opposingCreature;
+      case "shuffle_permanent_reveal_top":
+        return chooseRemovalTarget(session, casterSeatId, "permanent", card) !== undefined;
+      default:
+        return true;
+    }
+  });
+}
+
+// "As an additional cost to cast this spell, discard a card." — uncastable when the hand holds nothing
+// else to discard (the spell itself doesn't count, it's leaving the hand to be cast).
+function hasPayableAdditionalDiscardCost(session: GameSession, casterSeatId: string, card: VisibleCard): boolean {
+  const cost = parseAdditionalDiscardCost(card.oracleText);
+  if (!cost) return true;
+  const seat = session.seats.find((item) => item.id === casterSeatId);
+  return Boolean(seat && seat.board.hand.filter((item) => item.id !== card.id).length >= cost.count);
+}
+
+// Pays the discard half of a spell's additional cost (Unexpected Windfall) at cast time, by the same
+// heuristic every other automatic discard here uses. The spell itself is never the discard.
+export function payAdditionalDiscardCost(session: GameSession, seatId: string, spell: VisibleCard): GameSession {
+  const cost = parseAdditionalDiscardCost(spell.oracleText);
+  const seat = session.seats.find((item) => item.id === seatId);
+  if (!cost || !seat) return session;
+  let next = session;
+  for (let paid = 0; paid < cost.count; paid += 1) {
+    const current = next.seats.find((item) => item.id === seatId);
+    if (!current) break;
+    const discard = chooseWorstHandCardToDiscard({ ...current, board: { ...current.board, hand: current.board.hand.filter((card) => card.id !== spell.id) } });
+    if (!discard) break;
+    next = moveCardBetweenVisibleZones(next, seatId, discard.id, "graveyard");
+    next = rulesEvent(next, seatId, `${seat.name} discards ${discard.name} as an additional cost to cast ${spell.name}.`);
+  }
+  return next;
 }
 
 // A mandatory additional cost (Village Rites' "sacrifice a creature", ...) makes a spell uncastable
@@ -13043,22 +13441,34 @@ export function applyRemovalEffect(
       return destroyCreatures(session, destructions, "Rules action");
     }
     case "mass_damage": {
-      const amount = effect.amount === "X" ? chosenX ?? 0 : effect.amount;
+      // X read from the board BEFORE any damage is dealt (Chain Reaction counts creatures as it
+      // resolves, not as each one dies), or from the caster's chosen {X} when it's a cost.
+      const amount = effect.amount === "X" ? (effect.xDefinition ? resolveDynamicAmount(session, casterSeatId, effect.xDefinition) : chosenX ?? 0) : effect.amount;
       if (amount <= 0) return noLegalTargetEvent(session, casterSeatId, sourceName);
       const targets: Array<{ seatId: string; cardId: string }> = [];
+      const planeswalkerTargets: Array<{ seat: PlayerSeat; card: VisibleCard }> = [];
       for (const seat of session.seats) {
         if (effect.scope === "opponents" && seat.id === casterSeatId) continue;
         for (const card of seat.board.battlefield) {
+          if (effect.includePlaneswalkers && card.typeLine.includes("Planeswalker")) {
+            planeswalkerTargets.push({ seat, card });
+            continue;
+          }
           if (!card.typeLine.includes("Creature")) continue;
           if (cardMatchesExcludedType(card, effect.excludeType)) continue;
+          if (effect.excludeFlying && hasFlying(card)) continue;
           targets.push({ seatId: seat.id, cardId: card.id });
         }
       }
-      if (targets.length === 0) return noLegalTargetEvent(session, casterSeatId, sourceName);
+      if (targets.length === 0 && planeswalkerTargets.length === 0) return noLegalTargetEvent(session, casterSeatId, sourceName);
       // No payWardIfNeeded here (unlike the single-"target creature" damage case below) — a mass
       // effect like this never targets any individual creature (rule 601.2c doesn't apply), so ward
       // — which only triggers on being targeted — never fires for it.
-      const damaged = targets.reduce((current, target) => dealDamageToCreature(current, sourceName, target.seatId, target.cardId, amount, source, casterSeatId), session);
+      const creaturesDamaged = targets.reduce((current, target) => dealDamageToCreature(current, sourceName, target.seatId, target.cardId, amount, source, casterSeatId), session);
+      const damaged = planeswalkerTargets.reduce(
+        (current, target) => applyCombatDamageToTarget(current, sourceName, { seat: target.seat, planeswalker: target.card }, amount, source, casterSeatId, "noncombat"),
+        creaturesDamaged
+      );
       return {
         ...damaged,
         events: [
@@ -13171,7 +13581,11 @@ export function applyRemovalEffect(
           ]
         };
       }
-      return destroyCreatures(warded.session, [{ seatId: target.seatId, cardId: target.card.id, message: `${target.card.name} is destroyed by ${sourceName}.` }], "Rules action");
+      const destroyedSession = destroyCreatures(warded.session, [{ seatId: target.seatId, cardId: target.card.id, message: `${target.card.name} is destroyed by ${sourceName}.` }], "Rules action");
+      // "Its controller investigates." (Fateful Absence) — the Clue goes to whoever controlled the
+      // destroyed permanent, not to the caster.
+      if (!effect.controllerInvestigates) return destroyedSession;
+      return createTokensForSeat(destroyedSession, target.seatId, source.id, [predefinedTokenSpec("Clue")]).session;
     }
     case "exile": {
       const target = resolvePreChosenBattlefieldTarget(session, preChosenTarget) ?? chooseRemovalTarget(session, casterSeatId, effect.targetType, source);
@@ -13200,8 +13614,27 @@ export function applyRemovalEffect(
       };
     }
     case "damage": {
-      const amount = effect.amount === "X" ? chosenX ?? 0 : effect.amount;
+      const amount = effect.amount === "X" ? (effect.xDefinition ? resolveDynamicAmount(session, casterSeatId, effect.xDefinition) : chosenX ?? 0) : effect.amount;
       if (amount <= 0) return noLegalTargetEvent(session, casterSeatId, sourceName);
+      // "...and you gain X life" (Consuming Corruption, Tendrils of Corruption): the same X, gained
+      // by the caster whether or not the damage ended up being dealt to something.
+      const withLifeGain = (resolved: GameSession): GameSession =>
+        effect.alsoGainLife
+          ? {
+              ...resolved,
+              seats: resolved.seats.map((seat) => (seat.id === casterSeatId ? { ...seat, life: seat.life + amount } : seat)),
+              events: [
+                {
+                  id: crypto.randomUUID(),
+                  at: new Date().toISOString(),
+                  seatId: casterSeatId,
+                  message: `${resolved.seats.find((seat) => seat.id === casterSeatId)?.name ?? "Player"} gains ${amount} life from ${sourceName}.`,
+                  detail: "Rules action"
+                },
+                ...resolved.events
+              ]
+            }
+          : resolved;
       const preChosenDamageTarget: DamageTarget | undefined =
         preChosenTarget?.kind === "card"
           ? (() => {
@@ -13219,9 +13652,9 @@ export function applyRemovalEffect(
       if (target.kind === "creature") {
         const warded = payWardIfNeeded(session, casterSeatId, target.card, sourceName);
         if (warded.countered) return warded.session;
-        return dealDamageToCreature(warded.session, sourceName, target.seatId, target.card.id, amount, source, casterSeatId);
+        return withLifeGain(dealDamageToCreature(warded.session, sourceName, target.seatId, target.card.id, amount, source, casterSeatId));
       }
-      return applyCombatDamageToTarget(session, sourceName, { seat: target.seat }, amount, source, casterSeatId, "noncombat");
+      return withLifeGain(applyCombatDamageToTarget(session, sourceName, { seat: target.seat }, amount, source, casterSeatId, "noncombat"));
     }
     case "bounce": {
       const target = resolvePreChosenBattlefieldTarget(session, preChosenTarget) ?? chooseRemovalTarget(session, casterSeatId, effect.targetType, source);
@@ -16116,7 +16549,8 @@ function createTokenCard(seatId: string, sourceCardId: string, spec: TokenSpec):
     ownerSeatId: seatId,
     power: spec.power,
     toughness: spec.toughness,
-    summoningSick: spec.typeLine.includes("Creature")
+    summoningSick: spec.typeLine.includes("Creature"),
+    ...(spec.tapped ? { tapped: true } : {})
   };
 }
 
@@ -16192,7 +16626,7 @@ export function parseCreateTokenSpecs(
   // "Create X ... tokens, where X is the number of creatures attacking you") is a separate dynamic
   // basis, resolved against attackersTargetingCount instead — see the "where x is..." check below.
   const creaturePattern =
-    /create\s+(a|an|one|two|three|four|five|six|seven|eight|nine|ten|twice x|x|\d+)\s+((?:\d+\/\d+\s+)?(?:(?:white|blue|black|red|green|colorless|multicolored)\s+)*(?:[A-Z][a-zA-Z'-]*\s+){0,4}creature tokens?(?: with [^.]+)?)/gi;
+    /create\s+(a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|twice x|x|\d+)\s+(?:tapped\s+)?((?:\d+\/\d+\s+)?(?:(?:white|blue|black|red|green|colorless|multicolored)\s+)*(?:[A-Z][a-zA-Z'-]*\s+){0,4}creature tokens?(?: with [^.]+)?)/gi;
   // "...with reach, where X is the number of creatures attacking you." (Arachnogenesis) — this
   // clause sits INSIDE the "with [ability]" tail creaturePattern's own capture already grabs (unlike
   // forEachControlledPattern's basis below, which trails AFTER the match entirely on cards with no
@@ -16251,7 +16685,8 @@ export function parseCreateTokenSpecs(
       count = dynamicCounterCount !== undefined && dynamicCounterCountPattern.test(description) ? dynamicCounterCount : (numberWordToInt(match[1]) ?? 1);
     }
     const spec = parseCreatureTokenDescription(description);
-    if (spec) specs.push({ ...spec, count });
+    const entersTapped = /^create\s+(?:twice x|\S+)\s+tapped\b/i.test(match[0]);
+    if (spec) specs.push({ ...spec, count, ...(entersTapped ? { tapped: true } : {}) });
   }
 
   return specs;

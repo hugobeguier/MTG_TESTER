@@ -115,6 +115,12 @@ export function scanForAnomalies(state: AnomalyState, prev: GameSession, next: G
 
   for (const [cardId, info] of prevBattlefield) {
     if (nextBattlefield.has(cardId)) continue;
+    // A Treasure (or any sacrifice-for-mana source) spent to pay for the action leaves the battlefield
+    // by design, with nothing logged by name — the action's own mana payment already accounts for it.
+    if (meta.manaPayment?.sourceIds.includes(cardId)) continue;
+    // Rule 800.4a: when a player loses, everything they control leaves with them — the one "X loses the
+    // game" event explains all of it, so those departures aren't individually logged by name.
+    if (next.seats.find((seat) => seat.id === info.seatId)?.hasLost) continue;
     // Lenient by design: matching the card's NAME anywhere in this step's new events (not a specific
     // verb) covers destroy/exile/bounce/sacrifice/control-change phrasing without hardcoding every
     // template AppFlow.tsx uses. Known false-negative: two same-named permanents where only one's

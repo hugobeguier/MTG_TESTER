@@ -435,3 +435,21 @@ describe("isSagaTransformChapter", () => {
     expect(isSagaTransformChapter("Search your library for an artifact card with mana cost {0} or {1}, put it onto the battlefield, then shuffle.")).toBe(false);
   });
 });
+
+describe("isActivatedAbilityClause — colons inside reminder text / quotes", () => {
+  it("does not read a spell's Clue reminder text as an activated-ability divider (Fateful Absence)", () => {
+    const text = `Destroy target creature or planeswalker. Its controller investigates. (They create a Clue token. It's an artifact with "{2}, Sacrifice this token: Draw a card.")`;
+    expect(isActivatedAbilityClause(text)).toBe(false);
+    expect(etbEffectText(text)).toContain("Destroy target creature or planeswalker.");
+  });
+
+  it("keeps the rest of a multi-line spell once a Treasure reminder no longer hides it (Unexpected Windfall)", () => {
+    const text = `As an additional cost to cast this spell, discard a card.\nDraw two cards and create two Treasure tokens. (They're artifacts with "{T}, Sacrifice this token: Add one mana of any color.")`;
+    expect(etbEffectText(text)).toContain("Draw two cards and create two Treasure tokens.");
+  });
+
+  it("still recognizes real activated abilities", () => {
+    expect(isActivatedAbilityClause("{T}: Add {G}.")).toBe(true);
+    expect(isActivatedAbilityClause("Sacrifice this creature: Draw a card.")).toBe(true);
+  });
+});
