@@ -171,6 +171,10 @@ export function parseSelfAnthemBoost(oracleText: string): SelfAnthemBoost | unde
 export interface GroupAnthemBoost {
   matcher: string;
   excludeSelf: boolean;
+  // True only when the clause says "you control" ("Other Zombies you control get +1/+1", Lord of the
+  // Accursed). Without it ("Other Zombie creatures get +1/+1", Lord of the Undead; "Black creatures get
+  // +1/+1", Bad Moon) the boost applies to EVERY player's matching creatures.
+  controlledOnly: boolean;
   power: number;
   toughness: number;
   // "Other creatures you control of the chosen type get +1/+1." (Morophon, the Boundless) — only
@@ -190,19 +194,32 @@ export interface GroupAnthemBoost {
 export function parseGroupAnthemBoost(oracleText: string): GroupAnthemBoost[] {
   const boosts: GroupAnthemBoost[] = [];
   for (const rawClause of oracleText.split("\n")) {
-    const text = rawClause.trim().toLowerCase();
+    // Reminder text in parentheses ("(Any amount of damage they deal to a creature is enough to destroy
+    // it.)") isn't part of the ability.
+    const text = rawClause.replace(/\([^)]*\)/g, "").trim().toLowerCase();
+    // "Skeletons you control and other Zombies you control get +1/+1 and have deathtouch." (Death Baron)
+    // — two groups sharing one boost; the keyword half is parseGroupKeywordGrant's.
+    const compound = text.match(/^([a-z][a-z ]*?) you control and other ([a-z][a-z ]*?) you control gets? \+(\d+)\/\+(\d+)(?: and have [a-z, ]+)?\.?$/);
+    if (compound) {
+      const power = Number.parseInt(compound[3], 10);
+      const toughness = Number.parseInt(compound[4], 10);
+      boosts.push({ matcher: compound[1].trim(), excludeSelf: false, controlledOnly: true, power, toughness });
+      boosts.push({ matcher: compound[2].trim(), excludeSelf: true, controlledOnly: true, power, toughness });
+      continue;
+    }
     const match = text.match(
-      /^(other\s+)?([a-z][a-z ]*?)\s+(?:you control\s+)?(of the chosen type\s+)?gets? \+(\d+)\/\+(\d+)(?:\s+for each ([a-z0-9+/\- ]+?) counters? on (?:this|it)(?:\s+[a-z]+)?|\s+for each ([a-z ]+?) you control)?\.?$/
+      /^(other\s+)?([a-z][a-z ]*?)\s+(you control\s+)?(of the chosen type\s+)?gets? \+(\d+)\/\+(\d+)(?:\s+for each ([a-z0-9+/\- ]+?) counters? on (?:this|it)(?:\s+[a-z]+)?|\s+for each ([a-z ]+?) you control)?\.?$/
     );
     if (!match) continue;
-    const counterKind = match[6]?.trim();
-    const countMatcher = match[7]?.trim();
+    const counterKind = match[7]?.trim();
+    const countMatcher = match[8]?.trim();
     boosts.push({
       matcher: match[2].trim(),
       excludeSelf: Boolean(match[1]),
-      requiresChosenType: match[3] ? true : undefined,
-      power: Number.parseInt(match[4], 10),
-      toughness: Number.parseInt(match[5], 10),
+      controlledOnly: Boolean(match[3]),
+      requiresChosenType: match[4] ? true : undefined,
+      power: Number.parseInt(match[5], 10),
+      toughness: Number.parseInt(match[6], 10),
       multiplier: counterKind ? { kind: "counter", counterKind } : countMatcher ? { kind: "permanent_count", countMatcher } : undefined
     });
   }
@@ -264,6 +281,8 @@ export function countMatchingPermanents(battlefield: QualifiableCard[], matcher:
 
 export interface GroupKeywordGrant {
   matcher: string;
+  // See GroupAnthemBoost.controlledOnly — absent "you control" means every player's matching creatures.
+  controlledOnly: boolean;
   // "Other enchantment creatures you control have flying." (Soaring Lightbringer) grants to every
   // matching permanent EXCEPT the source itself; without "other," the source grants to itself too.
   excludeSelf: boolean;
@@ -300,12 +319,22 @@ const GRANTABLE_KEYWORDS = [
 export function parseGroupKeywordGrant(oracleText: string): GroupKeywordGrant[] {
   const grants: GroupKeywordGrant[] = [];
   for (const rawClause of oracleText.split("\n")) {
-    const text = rawClause.trim().toLowerCase();
-    const match = text.match(/^(other\s+)?([a-z][a-z ]*?)\s+(?:you control\s+)?have\s+([a-z, ]+?)\.?$/);
+    const text = rawClause.replace(/\([^)]*\)/g, "").trim().toLowerCase();
+    // Death Baron: "Skeletons you control and other Zombies you control get +1/+1 and have deathtouch."
+    const compound = text.match(/^([a-z][a-z ]*?) you control and other ([a-z][a-z ]*?) you control gets? \+\d+\/\+\d+ and have ([a-z, ]+?)\.?$/);
+    if (compound) {
+      const compoundKeywords = GRANTABLE_KEYWORDS.filter((kw) => new RegExp(`\\b${kw}\\b`).test(compound[3]));
+      if (compoundKeywords.length > 0) {
+        grants.push({ matcher: compound[1].trim(), excludeSelf: false, controlledOnly: true, keywords: compoundKeywords });
+        grants.push({ matcher: compound[2].trim(), excludeSelf: true, controlledOnly: true, keywords: compoundKeywords });
+      }
+      continue;
+    }
+    const match = text.match(/^(other\s+)?([a-z][a-z ]*?)\s+(you control\s+)?have\s+([a-z, ]+?)\.?$/);
     if (!match) continue;
-    const keywords = GRANTABLE_KEYWORDS.filter((kw) => new RegExp(`\\b${kw}\\b`).test(match[3]));
+    const keywords = GRANTABLE_KEYWORDS.filter((kw) => new RegExp(`\\b${kw}\\b`).test(match[4]));
     if (keywords.length === 0) continue;
-    grants.push({ matcher: match[2].trim(), excludeSelf: Boolean(match[1]), keywords });
+    grants.push({ matcher: match[2].trim(), excludeSelf: Boolean(match[1]), controlledOnly: Boolean(match[3]), keywords });
   }
   return grants;
 }

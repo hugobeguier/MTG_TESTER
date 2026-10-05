@@ -212,7 +212,9 @@ describe("phase-trigger clauses nested inside a loyalty ability", () => {
   });
 
   it("etbEffectText excludes loyalty-ability clauses the same way it excludes mana-cost ones", () => {
-    expect(etbEffectText(tezzeretOracleText)).toBe("Artifact creatures you control get +1/+1.");
+    // Tezzeret's own static "Artifact creatures you control get +1/+1." is an ongoing boost, not an ETB
+    // effect either (see isStaticBoostClause), so once the loyalty abilities are excluded nothing is left.
+    expect(etbEffectText(tezzeretOracleText)).toBe("");
   });
 
   it("deathEffectText finds nothing since none of Tezzeret's clauses are death triggers", () => {
@@ -451,5 +453,20 @@ describe("isActivatedAbilityClause — colons inside reminder text / quotes", ()
   it("still recognizes real activated abilities", () => {
     expect(isActivatedAbilityClause("{T}: Add {G}.")).toBe(true);
     expect(isActivatedAbilityClause("Sacrifice this creature: Draw a card.")).toBe(true);
+  });
+});
+
+describe("static boosts are not ETB effects", () => {
+  it.each([
+    ["Lord of the Undead", "Other Zombie creatures get +1/+1.\n{1}{B}, {T}: Return target Zombie card from your graveyard to your hand."],
+    ["Bad Moon", "Black creatures get +1/+1."],
+    ["Death Baron", "Skeletons you control and other Zombies you control get +1/+1 and have deathtouch. (Any amount of damage they deal to a creature is enough to destroy it.)"]
+  ])("%s leaves nothing for etbEffectText", (_name, text) => {
+    expect(etbEffectText(text)).toBe("");
+  });
+
+  it("still keeps one-shot pumps", () => {
+    expect(etbEffectText("Creatures you control get +1/+1 until end of turn.")).toContain("until end of turn");
+    expect(etbEffectText("Target creature gets +2/+2.")).toContain("Target creature");
   });
 });

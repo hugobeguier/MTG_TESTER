@@ -109,8 +109,28 @@ export function isNonEtbWheneverClause(clause: string): boolean {
 // isNonEtbWheneverClause above).
 export function etbEffectText(oracleText: string): string {
   return oracleClauses(oracleText)
-    .filter((clause) => !isActivatedAbilityClause(clause) && !isDeathTriggerClause(clause) && !isPhaseTriggerClause(clause) && !isNonEtbWheneverClause(clause))
+    .filter(
+      (clause) =>
+        !isActivatedAbilityClause(clause) &&
+        !isDeathTriggerClause(clause) &&
+        !isPhaseTriggerClause(clause) &&
+        !isNonEtbWheneverClause(clause) &&
+        !isStaticBoostClause(clause)
+    )
     .join(" ");
+}
+
+// "Other Zombie creatures get +1/+1." (Lord of the Undead), "Black creatures get +1/+1." (Bad Moon),
+// "Skeletons you control and other Zombies you control get +1/+1 and have deathtouch." (Death Baron) —
+// an ongoing (static) boost, not something that happens when the permanent enters. Left in
+// etbEffectText it reached the LLM planner as if it were an ETB effect, which turned Lord of the
+// Undead into a one-shot "each creature gets +1/+1 until end of turn" pump. A real one-shot pump
+// always carries a duration ("until end of turn"), a target, or a trigger/cost wrapper, so those
+// shapes are deliberately NOT treated as static here.
+export function isStaticBoostClause(clause: string): boolean {
+  const text = clause.replace(/\([^)]*\)/g, " ");
+  if (!/\bgets?\s+[+-]\d+\/[+-]\d+\b/i.test(text)) return false;
+  return !/until end of turn|this turn|\btarget\b|\bwhen\b|\bwhenever\b|at the beginning|:/i.test(text);
 }
 
 // "You get an emblem with '...'" (planeswalker ultimates mostly — Tezzeret, Artifice Master's -9,

@@ -69,19 +69,19 @@ describe("parseSelfAnthemBoost", () => {
 describe("parseGroupKeywordGrant", () => {
   it("parses a single-keyword grant to a creature type (Dragons you control have indestructible)", () => {
     expect(parseGroupKeywordGrant("Dragons you control have indestructible.")).toEqual([
-      { matcher: "dragons", excludeSelf: false, keywords: ["indestructible"] }
+      { matcher: "dragons", excludeSelf: false, controlledOnly: true, keywords: ["indestructible"] }
     ]);
   });
 
   it("parses a multi-keyword grant to a compound qualifier (enchantment creatures)", () => {
     expect(parseGroupKeywordGrant("Enchantment creatures you control have deathtouch, lifelink, and hexproof.")).toEqual([
-      { matcher: "enchantment creatures", excludeSelf: false, keywords: ["deathtouch", "lifelink", "hexproof"] }
+      { matcher: "enchantment creatures", excludeSelf: false, controlledOnly: true, keywords: ["deathtouch", "lifelink", "hexproof"] }
     ]);
   });
 
   it("parses 'other' as excluding the source itself (Soaring Lightbringer)", () => {
     expect(parseGroupKeywordGrant("Other enchantment creatures you control have flying.")).toEqual([
-      { matcher: "enchantment creatures", excludeSelf: true, keywords: ["flying"] }
+      { matcher: "enchantment creatures", excludeSelf: true, controlledOnly: true, keywords: ["flying"] }
     ]);
   });
 
@@ -222,19 +222,19 @@ describe("pickChosenColor", () => {
 describe("parseGroupAnthemBoost", () => {
   it("parses a counter-scaled group anthem (Boon of the Spirit Realm)", () => {
     expect(parseGroupAnthemBoost("Creatures you control get +1/+1 for each blessing counter on this enchantment.")).toEqual([
-      { matcher: "creatures", excludeSelf: false, power: 1, toughness: 1, multiplier: { kind: "counter", counterKind: "blessing" } }
+      { matcher: "creatures", excludeSelf: false, controlledOnly: true, power: 1, toughness: 1, multiplier: { kind: "counter", counterKind: "blessing" } }
     ]);
   });
 
   it("parses a flat group anthem with no multiplier", () => {
     expect(parseGroupAnthemBoost("Creatures you control get +1/+1.")).toEqual([
-      { matcher: "creatures", excludeSelf: false, power: 1, toughness: 1, multiplier: undefined }
+      { matcher: "creatures", excludeSelf: false, controlledOnly: true, power: 1, toughness: 1, multiplier: undefined }
     ]);
   });
 
   it("parses a permanent-count-scaled group anthem with 'other'", () => {
     expect(parseGroupAnthemBoost("Other creatures you control get +1/+1 for each Zombie you control.")).toEqual([
-      { matcher: "creatures", excludeSelf: true, power: 1, toughness: 1, multiplier: { kind: "permanent_count", countMatcher: "zombie" } }
+      { matcher: "creatures", excludeSelf: true, controlledOnly: true, power: 1, toughness: 1, multiplier: { kind: "permanent_count", countMatcher: "zombie" } }
     ]);
   });
 
@@ -244,7 +244,7 @@ describe("parseGroupAnthemBoost", () => {
 
   it("parses a chosen-type-restricted group anthem (Morophon, the Boundless)", () => {
     expect(parseGroupAnthemBoost("Other creatures you control of the chosen type get +1/+1.")).toEqual([
-      { matcher: "creatures", excludeSelf: true, requiresChosenType: true, power: 1, toughness: 1, multiplier: undefined }
+      { matcher: "creatures", excludeSelf: true, controlledOnly: true, requiresChosenType: true, power: 1, toughness: 1, multiplier: undefined }
     ]);
   });
 });
@@ -283,5 +283,39 @@ describe("countMatchingPermanents", () => {
 
   it("returns 0 for a subtype that isn't present", () => {
     expect(countMatchingPermanents(battlefield, "Zombies")).toBe(0);
+  });
+});
+
+describe("lords — who a group boost applies to", () => {
+  it("Lord of the Undead boosts every player's other Zombies (no 'you control')", () => {
+    expect(parseGroupAnthemBoost("Other Zombie creatures get +1/+1.\n{1}{B}, {T}: Return target Zombie card from your graveyard to your hand.")).toEqual([
+      { matcher: "zombie creatures", excludeSelf: true, controlledOnly: false, power: 1, toughness: 1, multiplier: undefined }
+    ]);
+  });
+
+  it("Bad Moon boosts every black creature, not just its controller's", () => {
+    expect(parseGroupAnthemBoost("Black creatures get +1/+1.")).toEqual([
+      { matcher: "black creatures", excludeSelf: false, controlledOnly: false, power: 1, toughness: 1, multiplier: undefined }
+    ]);
+  });
+
+  it("Lord of the Accursed only boosts Zombies its controller controls", () => {
+    expect(parseGroupAnthemBoost("Other Zombies you control get +1/+1.\n{1}{B}, {T}: All Zombies gain menace until end of turn.")[0]).toMatchObject({
+      matcher: "zombies",
+      excludeSelf: true,
+      controlledOnly: true
+    });
+  });
+
+  it("Death Baron: Skeletons you control and other Zombies you control get +1/+1 and deathtouch", () => {
+    const text = "Skeletons you control and other Zombies you control get +1/+1 and have deathtouch. (Any amount of damage they deal to a creature is enough to destroy it.)";
+    expect(parseGroupAnthemBoost(text)).toEqual([
+      { matcher: "skeletons", excludeSelf: false, controlledOnly: true, power: 1, toughness: 1 },
+      { matcher: "zombies", excludeSelf: true, controlledOnly: true, power: 1, toughness: 1 }
+    ]);
+    expect(parseGroupKeywordGrant(text)).toEqual([
+      { matcher: "skeletons", excludeSelf: false, controlledOnly: true, keywords: ["deathtouch"] },
+      { matcher: "zombies", excludeSelf: true, controlledOnly: true, keywords: ["deathtouch"] }
+    ]);
   });
 });

@@ -302,3 +302,49 @@ describe("rule 800.4a — an eliminated player's permanents leave the game", () 
     expect(after.status).toBe("playing");
   });
 });
+
+describe("lords on the board", () => {
+  const zombie = (id: string) => creature(id, "2", "2", { typeLine: "Creature — Zombie" });
+  const lordOfTheUndead = card({
+    id: "lord",
+    name: "Lord of the Undead",
+    typeLine: "Creature — Zombie",
+    power: "2",
+    toughness: "2",
+    oracleText: "Other Zombie creatures get +1/+1.\n{1}{B}, {T}: Return target Zombie card from your graveyard to your hand."
+  });
+  const deathBaron = card({
+    id: "baron",
+    name: "Death Baron",
+    typeLine: "Creature — Zombie Wizard",
+    power: "2",
+    toughness: "2",
+    oracleText: "Skeletons you control and other Zombies you control get +1/+1 and have deathtouch. (Any amount of damage they deal to a creature is enough to destroy it.)"
+  });
+
+  it("Lord of the Undead boosts every other Zombie — including an opponent's — but not itself", async () => {
+    const { runStateBasedActionsPass } = await import("./AppFlow");
+    const mine = seat({ id: "a", name: "Me", kind: "human", board: { hand: [], battlefield: [lordOfTheUndead, zombie("z1")], graveyard: [] } });
+    const theirs = seat({ id: "b", name: "Opp", kind: "agent", board: { hand: [], battlefield: [zombie("z2"), creature("bear", "2", "2")], graveyard: [] } });
+    const { session: after } = runStateBasedActionsPass(session([mine, theirs]));
+    const find = (seatId: string, id: string) => after.seats.find((s) => s.id === seatId)!.board.battlefield.find((c) => c.id === id)!;
+    expect(find("a", "z1").attachmentPowerBonus).toBe(1);
+    expect(find("b", "z2").attachmentPowerBonus).toBe(1);
+    expect(find("a", "lord").attachmentPowerBonus).toBeUndefined();
+    expect(find("b", "bear").attachmentPowerBonus).toBeUndefined();
+    // A permanent anthem — nothing temporary about it.
+    expect(find("a", "z1").temporaryPowerBonus).toBeUndefined();
+  });
+
+  it("Death Baron boosts and gives deathtouch to its controller's other Zombies only", async () => {
+    const { runStateBasedActionsPass } = await import("./AppFlow");
+    const mine = seat({ id: "a", name: "Me", kind: "human", board: { hand: [], battlefield: [deathBaron, zombie("z1")], graveyard: [] } });
+    const theirs = seat({ id: "b", name: "Opp", kind: "agent", board: { hand: [], battlefield: [zombie("z2")], graveyard: [] } });
+    const { session: after } = runStateBasedActionsPass(session([mine, theirs]));
+    const find = (seatId: string, id: string) => after.seats.find((s) => s.id === seatId)!.board.battlefield.find((c) => c.id === id)!;
+    expect(find("a", "z1").attachmentPowerBonus).toBe(1);
+    expect(find("a", "z1").grantedKeywords).toContain("deathtouch");
+    expect(find("b", "z2").attachmentPowerBonus).toBeUndefined();
+    expect(find("a", "baron").attachmentPowerBonus).toBeUndefined();
+  });
+});

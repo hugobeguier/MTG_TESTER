@@ -11839,11 +11839,17 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
           // controller has (not just attachments) for a static keyword grant whose qualifier this
           // creature matches, distinct from parseSelfAnthemBoost (self-only P/T) and Aura/Equipment
           // grants (attached-target-only).
-          for (const grantSource of seat.board.battlefield) {
-            for (const grant of parseGroupKeywordGrant(grantSource.oracleText)) {
-              if (grant.excludeSelf && grantSource.id === card.id) continue;
-              if (!permanentMatchesQualifier(card, grant.matcher)) continue;
-              for (const keyword of grant.keywords) keywordSet.add(keyword);
+          // A grant that doesn't say "you control" (a lord over "Zombie creatures", Lord of the Undead)
+          // reaches every player's matching creatures, so every seat's permanents are scanned as sources;
+          // a "you control" one only counts when its source is on this creature's own side.
+          for (const sourceSeat of next.seats) {
+            for (const grantSource of sourceSeat.board.battlefield) {
+              for (const grant of parseGroupKeywordGrant(grantSource.oracleText)) {
+                if (grant.controlledOnly && sourceSeat.id !== seat.id) continue;
+                if (grant.excludeSelf && grantSource.id === card.id) continue;
+                if (!permanentMatchesQualifier(card, grant.matcher)) continue;
+                for (const keyword of grant.keywords) keywordSet.add(keyword);
+              }
             }
           }
 
@@ -11866,18 +11872,23 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
           // Layer 7d (group anthem): "[Other] [Qualifier] you control get +N/+N[ for each ...]."
           // (Boon of the Spirit Realm's blessing-counter anthem, plain flat group pumps, ...) — the
           // group counterpart to parseSelfAnthemBoost above, evaluated the same live-off-board way.
-          for (const anthemSource of seat.board.battlefield) {
-            for (const anthem of parseGroupAnthemBoost(anthemSource.oracleText)) {
-              if (anthem.excludeSelf && anthemSource.id === card.id) continue;
-              if (!permanentMatchesQualifier(card, anthem.matcher)) continue;
-              if (anthem.requiresChosenType && (!anthemSource.chosenCreatureType || !card.typeLine.includes(anthemSource.chosenCreatureType))) continue;
-              const multiplier = anthem.multiplier
-                ? anthem.multiplier.kind === "counter"
-                  ? counterCount(anthemSource, anthem.multiplier.counterKind)
-                  : countMatchingPermanents(seat.board.battlefield, anthem.multiplier.countMatcher)
-                : 1;
-              power += anthem.power * multiplier;
-              toughness += anthem.toughness * multiplier;
+          // Same scope rule as the keyword grants above: without "you control" the boost applies to every
+          // player's matching creatures (Lord of the Undead, Bad Moon), so every seat is a possible source.
+          for (const sourceSeat of next.seats) {
+            for (const anthemSource of sourceSeat.board.battlefield) {
+              for (const anthem of parseGroupAnthemBoost(anthemSource.oracleText)) {
+                if (anthem.controlledOnly && sourceSeat.id !== seat.id) continue;
+                if (anthem.excludeSelf && anthemSource.id === card.id) continue;
+                if (!permanentMatchesQualifier(card, anthem.matcher)) continue;
+                if (anthem.requiresChosenType && (!anthemSource.chosenCreatureType || !card.typeLine.includes(anthemSource.chosenCreatureType))) continue;
+                const multiplier = anthem.multiplier
+                  ? anthem.multiplier.kind === "counter"
+                    ? counterCount(anthemSource, anthem.multiplier.counterKind)
+                    : countMatchingPermanents(sourceSeat.board.battlefield, anthem.multiplier.countMatcher)
+                  : 1;
+                power += anthem.power * multiplier;
+                toughness += anthem.toughness * multiplier;
+              }
             }
           }
 
