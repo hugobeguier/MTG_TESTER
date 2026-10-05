@@ -334,15 +334,18 @@ export interface ModalHeader {
 // own modal handling and by AppFlow.tsx's generic (non-removal) modal handling, so both recognize
 // the same header shapes instead of drifting apart.
 export function parseModalHeader(oracleText: string): ModalHeader | undefined {
-  const header = oracleText.match(/\bchoose (one|two|three)\s*[—-]\s*/i);
+  const header = oracleText.match(/\bchoose (one or more|one or both|one|two|three)\s*[—-]\s*/i);
   if (!header || header.index === undefined) return undefined;
-  const chooseCount = { one: 1, two: 2, three: 3 }[header[1].toLowerCase() as "one" | "two" | "three"] ?? 1;
+  const word = header[1].toLowerCase();
   const modeTexts = oracleText
     .slice(header.index + header[0].length)
     .split(/[••]/)
     .map((mode) => mode.trim())
     .filter(Boolean);
   if (modeTexts.length < 2) return undefined;
+  // "One or both" / "one or more" mean up to every mode — except with escalate, where each extra mode costs extra mana
+  // this engine doesn't collect, so only the first (free) mode is taken (Collective Resistance).
+  const chooseCount = word === "one or more" || word === "one or both" ? (/\bescalate\b/i.test(oracleText) ? 1 : modeTexts.length) : ({ one: 1, two: 2, three: 3 } as Record<string, number>)[word] ?? 1;
   return { chooseCount, modeTexts };
 }
 

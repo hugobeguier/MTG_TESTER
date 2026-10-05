@@ -314,3 +314,31 @@ describe("Scavenging Ooze (real Oracle text)", () => {
     expect(seats[0].board.graveyard!.map((c) => c.id)).toEqual(["mine"]);
   });
 });
+
+describe("Collective Resistance and Valorous Stance (real Oracle text)", () => {
+  const cast = (name: string, seats: PlayerSeat[]) => {
+    const spell = real(name, "spell");
+    const effect = parseRemovalEffect(spell.oracleText);
+    expect(effect?.kind).toBe("modal");
+    return { effect: effect as Extract<typeof effect, { kind: "modal" }>, seats: applyRemovalEffect(session(seats), "a", name, spell, effect!).seats };
+  };
+  const ids = (seats: PlayerSeat[], seatId: string) => seats.find((s) => s.id === seatId)!.board.battlefield.map((c) => c.id);
+  it("Collective Resistance parses all three modes and takes one (escalate is not paid)", () => {
+    const { effect, seats } = cast("Collective Resistance", [seat("a", [bear("mine")]), seat("b", [bear("art", { typeLine: "Artifact", role: "permanent" })])]);
+    expect(effect.modes.map((m) => m.kind)).toEqual(["destroy", "destroy", "grant_keywords"]);
+    expect(effect.chooseCount).toBe(1);
+    expect(ids(seats, "b")).toHaveLength(0);
+  });
+  it("with nothing to destroy, Collective Resistance protects your creature", () => {
+    const { seats } = cast("Collective Resistance", [seat("a", [bear("mine")]), seat("b", [])]);
+    const mine = seats[0].board.battlefield[0];
+    expect(mine.temporaryGrantedKeywords).toEqual(expect.arrayContaining(["hexproof", "indestructible"]));
+  });
+  it("Valorous Stance destroys a toughness-4+ creature, otherwise protects your own", () => {
+    const big = bear("big", { power: "5", toughness: "5" });
+    expect(ids(cast("Valorous Stance", [seat("a", [bear("mine")]), seat("b", [big])]).seats, "b")).toHaveLength(0);
+    const protectedSeats = cast("Valorous Stance", [seat("a", [bear("mine")]), seat("b", [bear("small")])]).seats;
+    expect(protectedSeats[0].board.battlefield[0].temporaryGrantedKeywords).toEqual(["indestructible"]);
+    expect(ids(protectedSeats, "b")).toHaveLength(1);
+  });
+});

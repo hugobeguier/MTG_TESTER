@@ -13743,6 +13743,7 @@ function removalModeScore(session: GameSession, casterSeatId: string, mode: Excl
   if (mode.kind === "destroy_all_conditional") {
     return sweep((card) => card.typeLine.includes("Creature") && (mode.comparison === "or_less" ? card.manaValue <= mode.threshold : card.manaValue >= mode.threshold));
   }
+  if (mode.kind === "grant_keywords") return 0.5;
   return 1;
 }
 
@@ -13766,6 +13767,8 @@ function describeRemovalMode(mode: Exclude<RemovalEffect, { kind: "modal" }>): s
       return `Deal ${mode.amount} damage to each ${mode.excludeType ? `non-${mode.excludeType} ` : ""}creature${mode.scope === "opponents" ? " you don't control" : ""}.`;
     case "proliferate":
       return "Proliferate.";
+    case "grant_keywords":
+      return `Target creature gains ${mode.keywords.join(" and ")} until end of turn.`;
   }
 }
 
@@ -13796,6 +13799,8 @@ function removalEffectHasLegalTarget(session: GameSession, casterSeatId: string,
     // pointless) mode, same as the unconditional mass-effect kinds above.
     case "proliferate":
       return true;
+    case "grant_keywords":
+      return chooseCounterTarget(session, casterSeatId, "+1/+1", false) !== undefined;
     case "modal":
       return effect.modes.some((mode) => removalEffectHasLegalTarget(session, casterSeatId, sourceCard, mode));
   }
@@ -14173,6 +14178,31 @@ export function applyRemovalEffect(
     // choose_proliferate_targets instead of reaching this case at all for a human controller).
     case "proliferate":
       return resolveProliferate(session);
+    // Protective mode: your best creature gains the keywords until end of turn (hexproof/indestructible resolve on the next state pass).
+    case "grant_keywords": {
+      const target = chooseCounterTarget(session, casterSeatId, "+1/+1", false);
+      if (!target) return noLegalTargetEvent(session, casterSeatId, sourceName);
+      return rulesEvent(
+        {
+          ...session,
+          seats: session.seats.map((seat) =>
+            seat.id !== target.seatId
+              ? seat
+              : {
+                  ...seat,
+                  board: {
+                    ...seat.board,
+                    battlefield: seat.board.battlefield.map((card) =>
+                      card.id === target.card.id ? { ...card, temporaryGrantedKeywords: [...(card.temporaryGrantedKeywords ?? []), ...effect.keywords], grantedKeywords: [...new Set([...(card.grantedKeywords ?? []), ...effect.keywords])] } : card
+                    )
+                  }
+                }
+          )
+        },
+        casterSeatId,
+        `${sourceName} gives ${target.card.name} ${effect.keywords.join(" and ")} until end of turn.`
+      );
+    }
     case "modal": {
       // No target-selection UI exists here any more than elsewhere in this file's deterministic
       // targeting — skip modes with nothing to do (an empty-graveyard reanimate-shaped mode, a

@@ -156,6 +156,13 @@ export interface ProliferateEffect {
   kind: "proliferate";
 }
 
+// "Target creature gains hexproof and indestructible until end of turn." (Collective Resistance, Valorous Stance) — a
+// protective mode that sits beside real removal modes in the same "choose" spell.
+export interface GrantKeywordsEffect {
+  kind: "grant_keywords";
+  keywords: string[];
+}
+
 // "Choose one/two — • mode. • mode. ..." where each mode independently matches one of the shapes
 // above. Modes this parser can't recognize (card draw, pumps, life totals, ...) are simply absent
 // from `modes` — a modal spell where NO mode is removal-shaped parses to undefined entirely (see
@@ -176,6 +183,7 @@ export type RemovalEffect =
   | MassDamageEffect
   | BounceEffect
   | ProliferateEffect
+  | GrantKeywordsEffect
   | ModalEffect;
 
 // "target [nonX, nonY] <type>" — restrictions like "target nonartifact, nonblack creature" sit
@@ -375,8 +383,17 @@ function parseProliferate(text: string): ProliferateEffect | undefined {
   return /^proliferate\.?(\s*\(.*\))?\s*$/i.test(text.trim()) ? { kind: "proliferate" } : undefined;
 }
 
+const GRANTABLE_KEYWORDS = new Set(["hexproof", "indestructible", "flying", "trample", "lifelink", "deathtouch", "haste", "vigilance", "menace", "reach", "first strike", "double strike"]);
+
+function parseGrantKeywords(text: string): GrantKeywordsEffect | undefined {
+  const match = text.trim().replace(/\s*\([^)]*\)\s*$/, "").match(/^target creature gains ([a-z ,]+?) until end of turn\.?$/);
+  if (!match) return undefined;
+  const keywords = match[1].split(/,\s*(?:and\s+)?|\s+and\s+/).map((word) => word.trim()).filter(Boolean);
+  return keywords.length > 0 && keywords.every((word) => GRANTABLE_KEYWORDS.has(word)) ? { kind: "grant_keywords", keywords } : undefined;
+}
+
 function parseSingleRemovalEffect(text: string): Exclude<RemovalEffect, ModalEffect> | undefined {
-  return parseDestroy(text) ?? parseExile(text) ?? parseDamage(text) ?? parseMassDamage(text) ?? parseBounce(text) ?? parseProliferate(text);
+  return parseDestroy(text) ?? parseExile(text) ?? parseDamage(text) ?? parseMassDamage(text) ?? parseBounce(text) ?? parseProliferate(text) ?? parseGrantKeywords(text);
 }
 
 // "Choose one/two —\n• mode.\n• mode. ..." (Boros Charm, Austere Command, ...). Each bullet is
@@ -389,7 +406,8 @@ function parseModal(oracleText: string): ModalEffect | undefined {
   const header = parseModalHeader(oracleText);
   if (!header) return undefined;
   const modes = header.modeTexts.map((modeText) => parseSingleRemovalEffect(modeText.toLowerCase())).filter((mode): mode is Exclude<RemovalEffect, ModalEffect> => mode !== undefined);
-  if (modes.length === 0) return undefined;
+  // A modal spell whose only parsed mode is the protective grant isn't a removal spell.
+  if (modes.length === 0 || modes.every((mode) => mode.kind === "grant_keywords")) return undefined;
   return { kind: "modal", chooseCount: header.chooseCount, modes };
 }
 

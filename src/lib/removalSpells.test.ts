@@ -190,7 +190,7 @@ describe("parseRemovalEffect — mass damage", () => {
 });
 
 describe("parseRemovalEffect — modal", () => {
-  it("parses a 'choose one' spell, keeping only the removal-shaped mode (Boros Charm)", () => {
+  it("parses a 'choose one' spell, keeping the removal-shaped mode and the keyword grant (Boros Charm)", () => {
     expect(
       parseRemovalEffect(
         "Choose one —\n• Boros Charm deals 4 damage to target player or planeswalker.\n• Permanents you control gain indestructible until end of turn.\n• Target creature gains double strike until end of turn."
@@ -198,7 +198,7 @@ describe("parseRemovalEffect — modal", () => {
     ).toEqual({
       kind: "modal",
       chooseCount: 1,
-      modes: [{ kind: "damage", amount: 4, targetType: "player" }]
+      modes: [{ kind: "damage", amount: 4, targetType: "player" }, { kind: "grant_keywords", keywords: ["double strike"] }]
     });
   });
 
