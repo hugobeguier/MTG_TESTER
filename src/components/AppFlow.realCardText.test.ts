@@ -1171,3 +1171,14 @@ describe("Exalted and Merchant of Truth (real Oracle text)", () => {
     expect(applyExalted(once, "a")).toBe(once);
   });
 });
+
+describe("Outpost Siege (real Oracle text)", () => {
+  it("Khans mode: at your upkeep, exile the top card and you may play it this turn", () => {
+    const mine = seat("a", [real("Outpost Siege", "os")]);
+    mine.library = [bear("top", { zone: "library" as const }), bear("next", { zone: "library" as const })];
+    mine.zones = { ...mine.zones, library: 2 };
+    const after = applyDeterministicPhaseTrigger(session([mine]), "a", real("Outpost Siege", "os"), "upkeep step");
+    expect(after).toBeDefined();
+    expect(after!.seats[0].library!.map((c) => c.id)).toEqual(["next"]);
+  });
+});
