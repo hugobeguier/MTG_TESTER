@@ -1229,3 +1229,18 @@ describe("Mosswort Bridge hideaway (real Oracle text)", () => {
     expect(denied.seats[0].board.exile!.find((c) => c.id === "big")!.exiledPlayableFree).toBeUndefined();
   });
 });
+
+describe("Orb of Dragonkind's sacrifice ability (real Oracle text)", () => {
+  it("finds a Dragon in the top seven for your hand and bottoms the rest", () => {
+    const orb = real("Orb of Dragonkind", "orb");
+    const [ability] = parseGenericSacrificeAbilities(orb.oracleText);
+    expect(ability.effect).toEqual({ kind: "dig_type_to_hand", count: 7, typeWord: "dragon" });
+    const mine = seat("a", [orb]);
+    mine.library = [...Array.from({ length: 4 }, (_, i) => bear(`x${i}`, { zone: "library" as const })), bear("drag", { zone: "library" as const, typeLine: "Creature — Dragon" }), ...Array.from({ length: 5 }, (_, i) => bear(`y${i}`, { zone: "library" as const }))];
+    mine.zones = { ...mine.zones, library: 10 };
+    const after = applySacrificeEffect(session([mine]), "a", orb, ability.effect, ability.clause).seats[0];
+    expect(after.board.hand.map((c) => c.id)).toEqual(["drag"]);
+    expect(after.library!.length).toBe(9);
+    expect(after.library![0].id).toBe("y2");
+  });
+});

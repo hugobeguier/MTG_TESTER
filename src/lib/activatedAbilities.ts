@@ -138,6 +138,9 @@ export type SacrificeEffect =
   | { kind: "prevent_combat_damage" }
   // "Exile all graveyards." (Scavenger Grounds)
   | { kind: "exile_all_graveyards" }
+  // "Look at the top seven cards of your library. You may reveal a Dragon card from among them and put it into your hand. Put the
+  // rest on the bottom of your library in a random order." (Orb of Dragonkind)
+  | { kind: "dig_type_to_hand"; count: number; typeWord: string }
   // "{T}, Sacrifice this creature: Choose one — Destroy target artifact. Destroy target
   // enchantment. ..." (Cankerbloom, and any other sacrifice ability whose effect is a destroy/
   // exile/damage/bounce shape, modal or not) — reuses removalSpells.ts's own parser/executor
@@ -645,6 +648,8 @@ function parseSacrificeEffectText(text: string): SacrificeEffect | undefined {
   // rather than only matching the exact stored text.
   if (/\bprevent all combat damage that would be dealt(?: to you)? this turn\b/.test(lower)) return { kind: "prevent_combat_damage" };
   if (/^exile all graveyards\.?$/.test(lower.trim())) return { kind: "exile_all_graveyards" };
+  const digType = lower.match(/^look at the top (one|two|three|four|five|six|seven|eight|nine|ten|\d+) cards of your library\. you may reveal an? ([a-z]+) card from among them and put it into your hand\. put the rest on the bottom of your library in a random order\.?$/);
+  if (digType) return { kind: "dig_type_to_hand", count: numberWordToInt(digType[1]) ?? 7, typeWord: digType[2] };
 
   const searchLibrary = parseSearchLibraryEffectText(lower);
   if (searchLibrary) return searchLibrary;

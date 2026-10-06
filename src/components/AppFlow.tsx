@@ -11396,6 +11396,24 @@ export function applySacrificeEffect(
     return transformPermanent(session, seatId, sourceCardId, sourceCardName, /\bthen untap it\b/i.test(clause));
   }
 
+  if (effect.kind === "dig_type_to_hand") {
+    const library = seat.library ?? [];
+    const top = library.slice(0, effect.count);
+    const found = top.find((card) => card.typeLine.toLowerCase().includes(effect.typeWord));
+    const rest = top.filter((card) => card.id !== found?.id);
+    const seats = session.seats.map((item) => {
+      if (item.id !== seatId) return item;
+      const remaining = [...library.slice(top.length), ...shuffleCards(rest)];
+      return {
+        ...item,
+        library: remaining,
+        board: { ...item.board, hand: found ? [...item.board.hand, { ...found, zone: "hand" as const }] : item.board.hand },
+        zones: { ...item.zones, library: remaining.length, hand: item.zones.hand + (found ? 1 : 0) }
+      };
+    });
+    return rulesEvent({ ...session, seats }, seatId, found ? `${seat.name} sacrifices ${sourceCardName} and puts ${found.name} into their hand.` : `${seat.name} sacrifices ${sourceCardName} and finds no ${effect.typeWord}.`);
+  }
+
   if (effect.kind === "exile_all_graveyards") {
     const exiled = session.seats.reduce((next, other) => (other.board.graveyard ?? []).reduce((acc, card) => moveCardAcrossSeats(acc, other.id, card.id, other.id, "exile").session, next), session);
     return rulesEvent(exiled, seatId, `${seat.name} sacrifices ${sourceCardName}: all graveyards are exiled.`);
