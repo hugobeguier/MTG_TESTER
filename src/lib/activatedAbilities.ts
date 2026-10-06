@@ -136,6 +136,8 @@ export type SacrificeEffect =
   // failed to parse and the whole ability never appeared as an activatable option. Reported live as
   // "how do I activate Spore Frog's sacrifice ability" — there was no button to click.
   | { kind: "prevent_combat_damage" }
+  // "Exile all graveyards." (Scavenger Grounds)
+  | { kind: "exile_all_graveyards" }
   // "{T}, Sacrifice this creature: Choose one — Destroy target artifact. Destroy target
   // enchantment. ..." (Cankerbloom, and any other sacrifice ability whose effect is a destroy/
   // exile/damage/bounce shape, modal or not) — reuses removalSpells.ts's own parser/executor
@@ -235,7 +237,8 @@ export function parseGenericSacrificeAbilities(oracleText: string): SacrificeAbi
     const costMana = manaSymbols.reduce((total, symbol) => total + (Number.parseInt(symbol.replace(/[{}]/g, ""), 10) || 0), 0);
     const costLifeMatch = costPrefix.match(/pay (\d+) life/i);
     const costLife = costLifeMatch ? Number.parseInt(costLifeMatch[1], 10) : 0;
-    const sacrificeTarget: "self" | "creature" = /^this\b/i.test(targetPhrase) ? "self" : "creature";
+    // "Sacrifice a Desert" (Scavenger Grounds is itself a Desert) — the only way to pay it is the source.
+    const sacrificeTarget: "self" | "creature" = /^this\b/i.test(targetPhrase) || /^a desert$/i.test(targetPhrase) ? "self" : "creature";
     const countMatch = targetPhrase.match(SACRIFICE_COUNT_PATTERN);
     const sacrificeCount = countMatch ? numberWordToInt(countMatch[1]) ?? 1 : 1;
     // "Sacrifice ANOTHER creature" (Ghoulcaller Gisa, Ayara, Kalitas) must not let the source pay for its
@@ -637,6 +640,7 @@ function parseSacrificeEffectText(text: string): SacrificeEffect | undefined {
   // qualifier (see this SacrificeEffect kind's own doc comment), so both phrasings are accepted
   // rather than only matching the exact stored text.
   if (/\bprevent all combat damage that would be dealt(?: to you)? this turn\b/.test(lower)) return { kind: "prevent_combat_damage" };
+  if (/^exile all graveyards\.?$/.test(lower.trim())) return { kind: "exile_all_graveyards" };
 
   const searchLibrary = parseSearchLibraryEffectText(lower);
   if (searchLibrary) return searchLibrary;

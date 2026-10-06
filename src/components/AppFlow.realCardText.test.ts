@@ -2,7 +2,7 @@
 // the test: two earlier tests passed on invented text while the real cards stayed broken (Court of Grace, the
 // "with power N or greater" watchers). Skipped per card when the catalog doesn't have it.
 import { describe, expect, it } from "vitest";
-import { applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
+import { applySacrificeEffect, applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
 import { parseRemovalEffect } from "@/lib/removalSpells";
 import { parseZoneEffect } from "@/lib/zoneEffects";
 import { permanentMatchesQualifier } from "@/lib/characteristics";
@@ -1138,5 +1138,19 @@ describe("Defy Death (real Oracle text)", () => {
     expect(defy()).toMatchObject({ kind: "reanimate", counterIfType: { typeWord: "angel", count: 2 } });
     expect(run("Creature — Angel")?.counters?.find((c) => c.kind === "+1/+1")?.count).toBe(2);
     expect(run("Creature — Human")?.counters).toBeUndefined();
+  });
+});
+
+describe("Scavenger Grounds (real Oracle text)", () => {
+  it("parses as a self-sacrifice that exiles every graveyard", () => {
+    const [ability] = parseGenericSacrificeAbilities(real("Scavenger Grounds", "x").oracleText);
+    expect(ability.sacrificeTarget).toBe("self");
+    expect(ability.effect.kind).toBe("exile_all_graveyards");
+    const a = seat("a", []);
+    a.board.graveyard = [bear("g1", { zone: "graveyard" as const })];
+    const b = seat("b", []);
+    b.board.graveyard = [bear("g2", { zone: "graveyard" as const })];
+    const after = applySacrificeEffect(session([a, b]), "a", real("Scavenger Grounds", "sg"), ability.effect, ability.clause);
+    expect(after.seats.every((x) => (x.board.graveyard ?? []).length === 0)).toBe(true);
   });
 });

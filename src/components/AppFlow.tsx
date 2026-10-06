@@ -10543,6 +10543,13 @@ function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllowed: boo
       // ability would show up twice in the legal-actions list, once auto-picking a land and once
       // opening the interactive search UI for the exact same choice.
       if (ability.effect.kind === "search_library" && isBasicLandFetchAbility(card)) return;
+      // Graveyard hate only when it hurts opponents more than you (Scavenger Grounds).
+      if (
+        ability.effect.kind === "exile_all_graveyards" &&
+        session.seats.filter((other) => other.id !== seat.id).reduce((total, other) => total + (other.board.graveyard ?? []).length, 0) < (seat.board.graveyard ?? []).length + 4
+      ) {
+        return;
+      }
       if (ability.costTap && card.tapped) return;
       // Rule 302.6: a creature with summoning sickness can't be tapped to pay an activated
       // ability's {T} cost (Viscera Seer, Carrion Feeder-style "{T}, Sacrifice a creature: ..."
@@ -11341,6 +11348,11 @@ export function applySacrificeEffect(
 
   if (effect.kind === "transform_self") {
     return transformPermanent(session, seatId, sourceCardId, sourceCardName, /\bthen untap it\b/i.test(clause));
+  }
+
+  if (effect.kind === "exile_all_graveyards") {
+    const exiled = session.seats.reduce((next, other) => (other.board.graveyard ?? []).reduce((acc, card) => moveCardAcrossSeats(acc, other.id, card.id, other.id, "exile").session, next), session);
+    return rulesEvent(exiled, seatId, `${seat.name} sacrifices ${sourceCardName}: all graveyards are exiled.`);
   }
 
   if (effect.kind === "prevent_combat_damage") {
