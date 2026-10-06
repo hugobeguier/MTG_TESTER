@@ -8880,7 +8880,49 @@ export function untapForSeat(session: GameSession, seatId: string): GameSession 
   return applyExtraUntapEffects(untappedSession, seatId);
 }
 
-export function resolveCombatDamage(session: GameSession, attackerId: string): GameSession {
+// Exalted (rule 702.83): a creature attacking ALONE gets +1/+1 for each instance among its controller's permanents. Applied once, when
+// damage is about to be dealt, because attackers are declared one at a time here and "alone" is only knowable afterwards.
+// "Clues you control have exalted." (Merchant of Truth) adds one instance per Clue.
+export function applyExalted(session: GameSession, attackerSeatId: string): GameSession {
+  const seat = session.seats.find((item) => item.id === attackerSeatId);
+  const attackers = seat?.board.battlefield.filter((card) => card.attacking) ?? [];
+  if (!seat || attackers.length !== 1) return session;
+  const [lone] = attackers;
+  if (lone.temporaryGrantedKeywords?.includes("exalted-applied")) return session;
+  const clueExalted = seat.board.battlefield.some((card) => !card.abilitiesStripped && /\bclues you control have exalted\b/i.test(card.oracleText));
+  const instances = seat.board.battlefield.reduce((total, card) => {
+    if (card.abilitiesStripped) return total;
+    let count = hasKeywordText(card.oracleText, "exalted") ? 1 : 0;
+    if (clueExalted && card.typeLine.includes("Clue")) count += 1;
+    return total + count;
+  }, 0);
+  if (instances === 0) return session;
+  return rulesEvent(
+    {
+      ...session,
+      seats: session.seats.map((item) =>
+        item.id !== attackerSeatId
+          ? item
+          : {
+              ...item,
+              board: {
+                ...item.board,
+                battlefield: item.board.battlefield.map((card) =>
+                  card.id === lone.id
+                    ? { ...card, temporaryPowerBonus: (card.temporaryPowerBonus ?? 0) + instances, temporaryToughnessBonus: (card.temporaryToughnessBonus ?? 0) + instances, temporaryGrantedKeywords: [...(card.temporaryGrantedKeywords ?? []), "exalted-applied"] }
+                    : card
+                )
+              }
+            }
+      )
+    },
+    attackerSeatId,
+    `${lone.name} attacks alone and gets +${instances}/+${instances} (exalted).`
+  );
+}
+
+export function resolveCombatDamage(inputSession: GameSession, attackerId: string): GameSession {
+  const session = applyExalted(inputSession, attackerId);
   const attacker = session.seats.find((seat) => seat.id === attackerId);
   if (!attacker) return session;
   // Rule 702.8-adjacent Fog effect (Spore Frog's "Prevent all combat damage that would be dealt

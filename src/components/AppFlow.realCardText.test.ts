@@ -2,7 +2,7 @@
 // the test: two earlier tests passed on invented text while the real cards stayed broken (Court of Grace, the
 // "with power N or greater" watchers). Skipped per card when the catalog doesn't have it.
 import { describe, expect, it } from "vitest";
-import { applySacrificeEffect, applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
+import { applyExalted, applySacrificeEffect, applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
 import { parseRemovalEffect } from "@/lib/removalSpells";
 import { parseZoneEffect } from "@/lib/zoneEffects";
 import { permanentMatchesQualifier } from "@/lib/characteristics";
@@ -1152,5 +1152,22 @@ describe("Scavenger Grounds (real Oracle text)", () => {
     b.board.graveyard = [bear("g2", { zone: "graveyard" as const })];
     const after = applySacrificeEffect(session([a, b]), "a", real("Scavenger Grounds", "sg"), ability.effect, ability.clause);
     expect(after.seats.every((x) => (x.board.graveyard ?? []).length === 0)).toBe(true);
+  });
+});
+
+describe("Exalted and Merchant of Truth (real Oracle text)", () => {
+  const lone = () => bear("atk", { attacking: true, attackTargetId: "b" });
+  it("a lone attacker gets +1/+1 per Clue with Merchant of Truth, nothing without it", () => {
+    const clue = (id: string) => bear(id, { typeLine: "Token Artifact — Clue", role: "token" });
+    const withMerchant = applyExalted(session([seat("a", [real("Merchant of Truth", "mt"), clue("c1"), clue("c2"), lone()]), seat("b", [])]), "a");
+    expect(withMerchant.seats[0].board.battlefield.find((c) => c.id === "atk")!.temporaryPowerBonus).toBe(2);
+    const without = applyExalted(session([seat("a", [clue("c1"), lone()]), seat("b", [])]), "a");
+    expect(without.seats[0].board.battlefield.find((c) => c.id === "atk")!.temporaryPowerBonus).toBeUndefined();
+  });
+  it("two attackers: no exalted; and it only applies once", () => {
+    const two = session([seat("a", [real("Merchant of Truth", "mt"), bear("c1", { typeLine: "Token Artifact — Clue" }), lone(), bear("atk2", { attacking: true })]), seat("b", [])]);
+    expect(applyExalted(two, "a")).toBe(two);
+    const once = applyExalted(session([seat("a", [real("Merchant of Truth", "mt"), bear("c1", { typeLine: "Token Artifact — Clue" }), lone()]), seat("b", [])]), "a");
+    expect(applyExalted(once, "a")).toBe(once);
   });
 });
