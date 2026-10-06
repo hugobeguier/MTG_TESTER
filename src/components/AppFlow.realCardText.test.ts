@@ -2,7 +2,7 @@
 // the test: two earlier tests passed on invented text while the real cards stayed broken (Court of Grace, the
 // "with power N or greater" watchers). Skipped per card when the catalog doesn't have it.
 import { describe, expect, it } from "vitest";
-import { applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
+import { totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
 import { parseRemovalEffect } from "@/lib/removalSpells";
 import { permanentMatchesQualifier } from "@/lib/characteristics";
 import { parseSpellExtraEffects } from "@/lib/spellExtras";
@@ -1103,5 +1103,25 @@ describe("Haven of the Spirit Dragon's sacrifice ability (real Oracle text)", ()
     expect(abilities).toHaveLength(1);
     expect(abilities[0].effect.kind).toBe("zone_effect");
     expect(abilities[0].sacrificeTarget).toBe("self");
+  });
+});
+
+describe("Archangel of Tithes (real Oracle text)", () => {
+  const archangel = () => real("Archangel of Tithes", "aot", { attacking: true, attackTargetId: "b", power: "3", toughness: "5" });
+  const choice = { attackerSeatId: "a", defenderSeatId: "b", attackerCardId: "aot", targetId: "b" };
+  const defender = (lands: number) => seat("b", [bear("b1", { oracleText: "Reach" }), bear("b2", { oracleText: "Reach" }), ...Array.from({ length: lands }, (_, i) => real("Plains", `pl${i}`))]);
+  it("taxes each attacker {1} while untapped, nothing while tapped", () => {
+    expect(totalAttackTax(seat("a", [real("Archangel of Tithes", "aot")]), false)).toBe(1);
+    expect(totalAttackTax(seat("a", [real("Archangel of Tithes", "aot", { tapped: true })]), false)).toBe(0);
+  });
+  it("blockers must be paid for: one land pays for one blocker", () => {
+    const s = session([seat("a", [archangel()]), defender(1)]);
+    const result = assignBlockers(s, choice, ["b1", "b2"]);
+    expect(result.seats[1].board.battlefield.filter((c) => c.blocking)).toHaveLength(1);
+    expect(result.seats[1].board.battlefield.filter((c) => c.tapped)).toHaveLength(1);
+  });
+  it("no mana, no blockers", () => {
+    const result = assignBlockers(session([seat("a", [archangel()]), defender(0)]), choice, ["b1"]);
+    expect(result.seats[1].board.battlefield.filter((c) => c.blocking)).toHaveLength(0);
   });
 });

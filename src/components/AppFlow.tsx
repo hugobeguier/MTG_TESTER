@@ -8956,7 +8956,21 @@ export function assignBlockers(session: GameSession, choice: BlockChoiceState, b
   // Menace: a lone blocker is not a legal block, so the attacker goes unblocked.
   const menaceRejected = hasMenace(attackingCard) && blockers.length === 1;
   if (menaceRejected) blockers.length = 0;
-  const decidedSession = markAttackDecided(session, attacker.id, attackingCard.id);
+  // Archangel of Tithes: while it attacks, each creature that blocks costs its controller {1}. Only as many blockers as can be paid for block.
+  let blockTaxSession = session;
+  const blockTax = blockTaxPerBlocker(attackingCard);
+  if (blockTax > 0 && blockers.length > 0) {
+    for (let count = blockers.length; count >= 0; count -= 1) {
+      const total = count * blockTax;
+      const payment = total === 0 ? undefined : chooseManaSourcesForCost(defender, genericCostShim(total), total, undefined, session.seats);
+      if (total === 0 || payment?.ok) {
+        if (payment?.ok) blockTaxSession = { ...session, seats: session.seats.map((seat) => (seat.id === defender.id ? spendManaSources(seat, payment.sourceIds) : seat)) };
+        blockers.length = count;
+        break;
+      }
+    }
+  }
+  const decidedSession = markAttackDecided(blockTaxSession, attacker.id, attackingCard.id);
   if (blockers.length === 0) {
     return {
       ...decidedSession,
@@ -9368,6 +9382,13 @@ function hasDoubleStrike(card: VisibleCard) {
 function castRestrictedByTurnCount(session: GameSession, card: VisibleCard): boolean {
   if (!/\byou can'?t cast [^.]*? during your first, second, or third turns of the game\b/i.test(card.oracleText)) return false;
   return Math.floor((session.turn - 1) / Math.max(1, session.seats.length)) + 1 <= 3;
+}
+
+// "As long as this creature is attacking, creatures can't block unless their controller pays {1} for each of those creatures."
+function blockTaxPerBlocker(attacker: VisibleCard): number {
+  if (attacker.abilitiesStripped) return 0;
+  const match = attacker.oracleText.match(/as long as this creature is attacking, creatures can'?t block unless their controller pays \{(\d+)\} for each of those creatures/i);
+  return match ? Number.parseInt(match[1], 10) : 0;
 }
 
 function attackerLimitedToOneBlocker(attackerSeat: PlayerSeat, attacker: VisibleCard): boolean {
