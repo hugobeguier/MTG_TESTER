@@ -832,3 +832,41 @@ describe("Sarkhan, Dragon Ascendant (real Oracle text)", () => {
     expect(sk.temporaryGrantedKeywords).toContain("flying");
   });
 });
+
+describe("Leyline Tyrant (real Oracle text)", () => {
+  it("when it dies, you may pay all your red for that much damage", () => {
+    const tyrant = real("Leyline Tyrant", "lt", { power: "4", toughness: "4" });
+    const mountains = [real("Mountain", "m1"), real("Mountain", "m2"), real("Mountain", "m3")];
+    const s = session([seat("a", mountains), seat("b", [bear("victim", { toughness: "2", power: "2" })], { life: 40 })]);
+    const triggers = findCommonTriggersForPermanentDied(s, "a", tyrant);
+    expect(triggers.map((t) => t.effect.kind)).toEqual(["pay_red_for_damage"]);
+    const after = resolveTriggerEffect(s, triggers[0]);
+    expect(after.seats[0].board.battlefield.every((m) => m.tapped)).toBe(true);
+    // 3 damage kills the 2/2 (a lethal creature is preferred to face damage).
+    expect(after.seats[1].board.battlefield).toHaveLength(0);
+  });
+});
+
+describe("Breaching Dragonstorm (real Oracle text)", () => {
+  it("enters: exiles lands then puts the first nonland card in hand; a Dragon entering bounces it", () => {
+    const storm = real("Breaching Dragonstorm", "bd");
+    const mine = seat("a", [storm]);
+    mine.library = [bear("l1", { zone: "library" as const, typeLine: "Basic Land — Forest", role: "land" }), bear("spell", { zone: "library" as const }), bear("after", { zone: "library" as const })];
+    mine.zones = { ...mine.zones, library: 3 };
+    const s = session([mine]);
+    const triggers = findCommonTriggersForPermanentEntered(s, "a", storm);
+    expect(triggers.map((t) => t.effect.kind)).toEqual(["dig_nonland_to_hand"]);
+    const after = resolveTriggerEffect(s, triggers[0]).seats[0];
+    expect(after.board.hand.map((c) => c.id)).toEqual(["spell"]);
+    expect(after.board.exile!.map((c) => c.id)).toEqual(["l1"]);
+    expect(after.library!.map((c) => c.id)).toEqual(["after"]);
+
+    const dragon = bear("drag", { typeLine: "Creature — Dragon" });
+    const s2 = session([seat("a", [storm, dragon])]);
+    const bounce = findCommonTriggersForPermanentEntered(s2, "a", dragon);
+    expect(bounce.map((t) => t.effect.kind)).toEqual(["return_self_to_hand"]);
+    const returned = resolveTriggerEffect(s2, bounce[0]).seats[0];
+    expect(returned.board.battlefield.map((c) => c.id)).toEqual(["drag"]);
+    expect(returned.board.hand.map((c) => c.id)).toEqual(["bd"]);
+  });
+});

@@ -304,6 +304,12 @@ type TriggerEffect = (
   | { kind: "gift_destroy_artifact_or_enchantment" }
   // "Until end of turn, Sarkhan ... gains flying." (Sarkhan, Dragon Ascendant) — the source itself gains keywords until end of turn.
   | { kind: "self_gains_keywords"; keywords: string[] }
+  // "You may pay any amount of {R}. When you do, it deals that much damage to any target." (Leyline Tyrant) — pays every red it can.
+  | { kind: "pay_red_for_damage" }
+  // "Exile cards from the top of your library until you exile a nonland card. You may cast it without paying its mana cost if that
+  // spell's mana value is 8 or less. If you don't, put that card into your hand." (Breaching Dragonstorm) — always takes the hand
+  // option, which is a legal choice and avoids casting without a stack.
+  | { kind: "dig_nonland_to_hand" }
   // "Proliferate." (Norn's Choirmaster) — every eligible permanent and player, same as the blanket resolveProliferate.
   | { kind: "proliferate" }
 ) & {
@@ -1516,7 +1522,9 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   }
 
   function clearManaPool(seatId: string) {
-    setSeatManaPool(seatId, emptyManaPool());
+    // "You don't lose unspent red mana as steps and phases end." (Leyline Tyrant) — the red stays; everything else empties.
+    const keepsRed = session.seats.find((seat) => seat.id === seatId)?.board.battlefield.some((card) => !card.abilitiesStripped && /you don'?t lose unspent red mana as steps and phases end/i.test(card.oracleText));
+    setSeatManaPool(seatId, keepsRed ? { ...emptyManaPool(), R: poolForSeat(seatId).R } : emptyManaPool());
     setManaContributions((current) => ({ ...current, [seatId]: [] }));
   }
 
@@ -2136,6 +2144,15 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
           amount: targetCounterEffect.amount,
           restrictToYourControl: targetCounterEffect.scope === "target_creature_you_control"
         });
+        return;
+      }
+      // "At the beginning of your first main phase, add {G}{G}." (Hulking Raptor) — straight into the mana pool.
+      const phaseMana = phaseEffectText(sourceCard.oracleText, phase).match(/at the beginning of your first main phase, add ((?:\{[wubrgc]\})+)\.?/i);
+      if (phaseMana) {
+        let pool = poolForSeat(activeSeat.id);
+        for (const symbol of phaseMana[1].match(/\{([wubrgc])\}/gi) ?? []) pool = addManaToPool(pool, symbol[1].toUpperCase() as ManaColor, 1);
+        setSeatManaPool(activeSeat.id, pool);
+        addEvent(`${sourceCard.name} adds ${phaseMana[1]} to ${activeSeat.name}'s mana pool.`, activeSeat.id, "Rules action");
         return;
       }
       // Decide synchronously against the current render's session (consistent with the same kind
@@ -17573,6 +17590,9 @@ export function commonTriggerEffect(
   if (counterAndFly) {
     return { kind: "add_counter", counterKind: "+1/+1", amount: 1, scope: "self", then: { kind: "self_gains_keywords", keywords: counterAndFly[1].split(/ and |, /) } };
   }
+  if (/you may pay any amount of \{r\}\. when you do, it deals that much damage to any target/.test(text)) return { kind: "pay_red_for_damage", optional: true };
+  if (/exile cards from the top of your library until you exile a nonland card\. you may cast it without paying its mana cost if that spell'?s mana value is 8 or less\. if you don'?t, put that card into your hand/.test(text)) return { kind: "dig_nonland_to_hand" };
+  if (/(?:^|, )return this (?:enchantment|artifact|permanent|creature) to its owner'?s hand\.?$/.test(text.replace(/\([^)]*\)/g, "").trim())) return { kind: "return_self_to_hand" };
   const rummage = text.match(/\byou may discard a card\. if you do, draw (a|one|two|three) cards?\b/);
   if (rummage) return { kind: "discard_then_draw", draw: numberWordToInt(rummage[1]) ?? 1, optional: true };
   if (/\byou gain life equal to that creature'?s toughness\b/.test(text)) return { kind: "gain_life_context_toughness" };
@@ -18298,6 +18318,45 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
     return drawMultipleForSeat(session, trigger.controllerSeatId, trigger.effect.amount, `${trigger.sourceCardName} trigger resolves. ${seatName} draws ${trigger.effect.amount} card${trigger.effect.amount === 1 ? "" : "s"}.`);
   }
   if (trigger.effect.kind === "proliferate") return resolveProliferate(session);
+  if (trigger.effect.kind === "dig_nonland_to_hand") {
+    const owner = session.seats.find((item) => item.id === trigger.controllerSeatId);
+    const library = owner?.library ?? [];
+    const index = library.findIndex((card) => !isLandCard(card));
+    if (!owner) return session;
+    const exiledLands = (index < 0 ? library : library.slice(0, index)).map((card) => ({ ...resetForZoneChange(card, "exile"), ownerSeatId: card.ownerSeatId ?? owner.id }));
+    const found = index >= 0 ? library[index] : undefined;
+    const cut = index < 0 ? library.length : index + 1;
+    const seats = session.seats.map((item) =>
+      item.id !== owner.id
+        ? item
+        : {
+            ...item,
+            library: library.slice(cut),
+            board: { ...item.board, exile: [...(item.board.exile ?? []), ...exiledLands], hand: found ? [...item.board.hand, { ...found, zone: "hand" as const }] : item.board.hand },
+            zones: { ...item.zones, library: library.length - cut, exile: item.zones.exile + exiledLands.length, hand: item.zones.hand + (found ? 1 : 0) }
+          }
+    );
+    return rulesEvent({ ...session, seats }, owner.id, found ? `${trigger.sourceCardName}: ${owner.name} exiles ${exiledLands.length} land${exiledLands.length === 1 ? "" : "s"} and puts ${found.name} into their hand.` : `${trigger.sourceCardName}: no nonland card to find.`);
+  }
+  if (trigger.effect.kind === "pay_red_for_damage") {
+    const payer = session.seats.find((item) => item.id === trigger.controllerSeatId);
+    if (!payer) return session;
+    const costText = (count: number) => "{R}".repeat(count);
+    let paidCount = 0;
+    let sources: string[] = [];
+    for (let count = 12; count >= 1; count -= 1) {
+      const payment = chooseManaSourcesForCost(payer, genericManaAbilityCostShim({ costManaText: costText(count) }), count, undefined, session.seats);
+      if (payment.ok) {
+        paidCount = count;
+        sources = payment.sourceIds;
+        break;
+      }
+    }
+    if (paidCount === 0) return rulesEvent(session, payer.id, `${payer.name} has no red mana to pay for ${trigger.sourceCardName}.`);
+    const paid = { ...session, seats: session.seats.map((item) => (item.id === payer.id ? spendManaSources(item, sources) : item)) };
+    const source = { id: trigger.sourceCardId, name: trigger.sourceCardName, typeLine: "", oracleText: "", colors: ["R"], manaValue: 0, role: "permanent", zone: "graveyard" } as VisibleCard;
+    return applyRemovalEffect(rulesEvent(paid, payer.id, `${payer.name} pays ${costText(paidCount)} for ${trigger.sourceCardName}.`), payer.id, trigger.sourceCardName, source, { kind: "damage", amount: paidCount, targetType: "any" });
+  }
   if (trigger.effect.kind === "self_gains_keywords") {
     const keywords = trigger.effect.keywords;
     return {
@@ -18360,6 +18419,11 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
     );
   }
   if (trigger.effect.kind === "return_self_to_hand") {
+    const onBattlefield = session.seats.find((item) => item.board.battlefield.some((card) => card.id === trigger.sourceCardId));
+    if (onBattlefield) {
+      const ownerId = onBattlefield.board.battlefield.find((card) => card.id === trigger.sourceCardId)?.ownerSeatId ?? onBattlefield.id;
+      return rulesEvent(moveCardAcrossSeats(session, onBattlefield.id, trigger.sourceCardId, ownerId, "hand").session, ownerId, `${trigger.sourceCardName} returns to its owner's hand.`);
+    }
     const holder = session.seats.find((item) => (item.board.graveyard ?? []).some((card) => card.id === trigger.sourceCardId));
     if (!holder) return session;
     const ownerId = (holder.board.graveyard ?? []).find((card) => card.id === trigger.sourceCardId)?.ownerSeatId ?? holder.id;
