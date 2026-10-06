@@ -296,6 +296,11 @@ type TriggerEffect = (
   // "This creature deals 4 damage to each other opponent." (Parapet Thrasher) — every opponent except the one named by actorSeatId
   // (the player the Dragon just hit).
   | { kind: "damage_each_other_opponent"; amount: number }
+  // "Reveal cards from the top of your library until you reveal a land card. Put that card onto the battlefield tapped and the rest
+  // on the bottom of your library in a random order." (Clifftop Lookout)
+  | { kind: "reveal_until_land_to_battlefield" }
+  // Gift a card (Scrapshooter): promised whenever there is something worth destroying; the opponent whose permanent is destroyed draws.
+  | { kind: "gift_destroy_artifact_or_enchantment" }
   // "Proliferate." (Norn's Choirmaster) — every eligible permanent and player, same as the blanket resolveProliferate.
   | { kind: "proliferate" }
 ) & {
@@ -17541,6 +17546,10 @@ export function commonTriggerEffect(
   if (/^investigate\.?$/.test(text.replace(/\([^)]*\)/g, "").replace(/^[^,]*,\s*/, "").trim())) return { kind: "create_tokens", tokens: [{ ...predefinedTokenSpec("Clue"), count: 1 }] };
   const otherOpponents = text.match(/^(?:this creature|it) deals (\d+) damage to each other opponent\.?$/);
   if (otherOpponents) return { kind: "damage_each_other_opponent", amount: Number.parseInt(otherOpponents[1], 10) };
+  if (/^reveal cards from the top of your library until you reveal a land card\. put that card onto the battlefield tapped and the rest on the bottom of your library in a random order\.?$/.test(text.replace(/^[^,]*,\s*/, "").trim()) || /reveal cards from the top of your library until you reveal a land card\. put that card onto the battlefield tapped/.test(text)) {
+    return { kind: "reveal_until_land_to_battlefield" };
+  }
+  if (/if the gift was promised, destroy target artifact or enchantment an opponent controls/.test(text)) return { kind: "gift_destroy_artifact_or_enchantment" };
   const rummage = text.match(/\byou may discard a card\. if you do, draw (a|one|two|three) cards?\b/);
   if (rummage) return { kind: "discard_then_draw", draw: numberWordToInt(rummage[1]) ?? 1, optional: true };
   if (/\byou gain life equal to that creature'?s toughness\b/.test(text)) return { kind: "gain_life_context_toughness" };
@@ -18261,6 +18270,41 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
     return drawMultipleForSeat(session, trigger.controllerSeatId, trigger.effect.amount, `${trigger.sourceCardName} trigger resolves. ${seatName} draws ${trigger.effect.amount} card${trigger.effect.amount === 1 ? "" : "s"}.`);
   }
   if (trigger.effect.kind === "proliferate") return resolveProliferate(session);
+  if (trigger.effect.kind === "gift_destroy_artifact_or_enchantment") {
+    const source = session.seats.flatMap((item) => item.board.battlefield).find((card) => card.id === trigger.sourceCardId);
+    const before = new Map(session.seats.map((item) => [item.id, item.board.battlefield.length]));
+    const destroyed = applyRemovalEffect(session, trigger.controllerSeatId, trigger.sourceCardName, source ?? ({ id: trigger.sourceCardId, name: trigger.sourceCardName, typeLine: "", oracleText: "", colors: [], manaValue: 0, role: "permanent", zone: "battlefield" } as VisibleCard), {
+      kind: "destroy",
+      targetType: "artifact_or_enchantment",
+      excludedColors: [],
+      artifactsExcluded: false,
+      basicsExcluded: false
+    });
+    const victim = destroyed.seats.find((item) => item.id !== trigger.controllerSeatId && item.board.battlefield.length < (before.get(item.id) ?? 0));
+    if (!victim) return session;
+    return drawForSeat(destroyed, victim.id, `${victim.name} draws a card (the gift promised with ${trigger.sourceCardName}).`);
+  }
+  if (trigger.effect.kind === "reveal_until_land_to_battlefield") {
+    const owner = session.seats.find((item) => item.id === trigger.controllerSeatId);
+    const library = owner?.library ?? [];
+    const landIndex = library.findIndex((card) => isLandCard(card));
+    if (!owner) return session;
+    if (landIndex < 0) return rulesEvent(session, owner.id, `${trigger.sourceCardName}: no land card in ${owner.name}'s library.`);
+    const revealed = library.slice(0, landIndex);
+    const land = library[landIndex];
+    const afterLand = moveLibraryCardToDestination(session, owner.id, land.id, "battlefield", true);
+    const revealedIds = new Set(revealed.map((card) => card.id));
+    const reordered: GameSession = {
+      ...afterLand,
+      seats: afterLand.seats.map((item) => {
+        if (item.id !== owner.id) return item;
+        const rest = (item.library ?? []).filter((card) => !revealedIds.has(card.id));
+        const library = [...rest, ...shuffleCards(revealed)];
+        return { ...item, library, zones: { ...item.zones, library: library.length } };
+      })
+    };
+    return rulesEvent(reordered, owner.id, `${trigger.sourceCardName}: ${owner.name} reveals ${revealed.length + 1} card${revealed.length === 0 ? "" : "s"} and puts ${land.name} onto the battlefield tapped.`);
+  }
   if (trigger.effect.kind === "damage_each_other_opponent") {
     const { amount } = trigger.effect;
     const victims = session.seats.filter((item) => item.id !== trigger.controllerSeatId && item.id !== trigger.actorSeatId && !item.hasLost && !playerHasHexproof({ ...item, board: { ...item.board, battlefield: [] } }));

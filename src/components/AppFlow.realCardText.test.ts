@@ -776,3 +776,33 @@ describe("Parapet Thrasher (real Oracle text)", () => {
     expect(findCombatDamageToPlayerTriggers(s0, "a", bear("goblin"), "b")).toHaveLength(0);
   });
 });
+
+describe("Clifftop Lookout and Scrapshooter (real Oracle text)", () => {
+  it("Clifftop Lookout puts the first land from the top onto the battlefield tapped, rest to the bottom", () => {
+    const effect = commonTriggerEffect(real("Clifftop Lookout", "x").oracleText, "entered");
+    expect(effect?.kind).toBe("reveal_until_land_to_battlefield");
+    const mine = seat("a", [real("Clifftop Lookout", "cl")]);
+    mine.library = [bear("n1", { zone: "library" as const }), bear("n2", { zone: "library" as const }), bear("land", { zone: "library" as const, typeLine: "Basic Land — Forest", role: "land" }), bear("n3", { zone: "library" as const })];
+    mine.zones = { ...mine.zones, library: 4 };
+    const trigger = { id: "t", type: "trigger" as const, actorSeatId: "a", controllerSeatId: "a", sourceCardId: "cl", sourceCardName: "Clifftop Lookout", triggerKind: "common" as const, effect: effect!, message: "" };
+    const after = resolveTriggerEffect(session([mine]), trigger).seats[0];
+    const land = after.board.battlefield.find((c) => c.id === "land");
+    expect(land?.tapped).toBe(true);
+    expect(after.library!.map((c) => c.id)[0]).toBe("n3");
+    expect(after.library!.length).toBe(3);
+  });
+  it("Scrapshooter doesn't destroy anything when cast, but its enters trigger destroys an artifact and gives the gift", () => {
+    expect(parseRemovalEffect(etbEffectText(real("Scrapshooter", "x").oracleText))).toBeUndefined();
+    const effect = commonTriggerEffect(real("Scrapshooter", "x").oracleText, "entered");
+    expect(effect?.kind).toBe("gift_destroy_artifact_or_enchantment");
+    const theirs = seat("b", [bear("art", { typeLine: "Artifact", role: "permanent" })]);
+    theirs.library = Array.from({ length: 3 }, (_, i) => bear(`l${i}`, { zone: "library" as const }));
+    theirs.zones = { ...theirs.zones, library: 3 };
+    const trigger = { id: "t", type: "trigger" as const, actorSeatId: "a", controllerSeatId: "a", sourceCardId: "ss", sourceCardName: "Scrapshooter", triggerKind: "common" as const, effect: effect!, message: "" };
+    const after = resolveTriggerEffect(session([seat("a", [real("Scrapshooter", "ss")]), theirs]), trigger);
+    expect(after.seats[1].board.battlefield).toHaveLength(0);
+    expect(after.seats[1].board.hand).toHaveLength(1);
+    const nothing = resolveTriggerEffect(session([seat("a", [real("Scrapshooter", "ss")]), seat("b", [])]), trigger);
+    expect(nothing.seats[1].board.hand).toHaveLength(0);
+  });
+});

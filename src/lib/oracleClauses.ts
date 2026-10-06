@@ -129,7 +129,8 @@ export function isEntersWatcherClause(clause: string): boolean {
 // The text that happens when this permanent itself enters (what resolution reads).
 export function etbEffectText(oracleText: string): string {
   return etbClauses(oracleText)
-    .filter((clause) => !isEntersWatcherClause(clause))
+    // "...if the gift was promised, ..." (Scrapshooter) resolves through its own enters trigger, which also gives the gift.
+    .filter((clause) => !isEntersWatcherClause(clause) && !/^when [^,]+ enters, if the gift was promised, destroy\b/i.test(clause))
     .join(" ");
 }
 
