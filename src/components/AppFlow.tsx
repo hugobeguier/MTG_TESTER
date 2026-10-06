@@ -8918,12 +8918,20 @@ export function assignBlockers(session: GameSession, choice: BlockChoiceState, b
     .filter((card): card is VisibleCard => Boolean(card))
     // Challenger Troll: its controller's power-4-or-greater creatures can't be blocked by more than one creature.
     .slice(0, attackerLimitedToOneBlocker(attacker, attackingCard) ? 1 : undefined);
+  // Menace: a lone blocker is not a legal block, so the attacker goes unblocked.
+  const menaceRejected = hasMenace(attackingCard) && blockers.length === 1;
+  if (menaceRejected) blockers.length = 0;
   const decidedSession = markAttackDecided(session, attacker.id, attackingCard.id);
   if (blockers.length === 0) {
     return {
       ...decidedSession,
       events: [
-        phaseEvent(defender.id, seatVerb(defender, `${defender.name} declares no blockers for ${attackingCard.name}.`, `You declare no blockers for ${attackingCard.name}.`)),
+        phaseEvent(
+          defender.id,
+          menaceRejected
+            ? `${attackingCard.name} has menace; a single blocker isn't a legal block, so it is unblocked.`
+            : seatVerb(defender, `${defender.name} declares no blockers for ${attackingCard.name}.`, `You declare no blockers for ${attackingCard.name}.`)
+        ),
         ...decidedSession.events
       ]
     };
@@ -9276,12 +9284,8 @@ function canBlock(card: VisibleCard, attacker?: VisibleCard, controllerBattlefie
   if (attacker && attackerEvadesBlocker(attacker, card)) return false;
   if (attacker && hasFlying(attacker) && !hasFlying(card) && !hasReach(card)) return false;
   if (attacker && isProtectedFrom(attacker, card)) return false;
-  // Rule 702.111b: menace requires the attacker be blocked by two or more creatures, assigned
-  // simultaneously — this engine's block model (BlockChoiceState) only ever assigns one blocker
-  // per attacker, with no way to commit a second one alongside it. Rather than let a single
-  // creature illegally block a menace attacker alone, decline every single-block candidate for it,
-  // matching this codebase's "decline rather than guess" handling of shapes it can't fully model.
-  if (attacker && hasMenace(attacker)) return false;
+  // Rule 702.111b: menace requires two or more blockers — enforced where the blockers are assigned together (assignBlockers),
+  // since a single creature is only illegal as the WHOLE block, not as one member of a gang block.
   return true;
 }
 

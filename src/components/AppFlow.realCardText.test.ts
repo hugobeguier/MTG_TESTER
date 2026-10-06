@@ -2,7 +2,7 @@
 // the test: two earlier tests passed on invented text while the real cards stayed broken (Court of Grace, the
 // "with power N or greater" watchers). Skipped per card when the catalog doesn't have it.
 import { describe, expect, it } from "vitest";
-import { findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
+import { assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
 import { parseRemovalEffect } from "@/lib/removalSpells";
 import { permanentMatchesQualifier } from "@/lib/characteristics";
 import { parseSpellExtraEffects } from "@/lib/spellExtras";
@@ -868,5 +868,16 @@ describe("Breaching Dragonstorm (real Oracle text)", () => {
     const returned = resolveTriggerEffect(s2, bounce[0]).seats[0];
     expect(returned.board.battlefield.map((c) => c.id)).toEqual(["drag"]);
     expect(returned.board.hand.map((c) => c.id)).toEqual(["bd"]);
+  });
+});
+
+describe("menace (real Oracle text)", () => {
+  it("a lone blocker is rejected, two blockers are accepted", () => {
+    const menacing = bear("mn", { attacking: true, attackTargetId: "b", power: "4", toughness: "4", oracleText: "Menace" });
+    const s = session([seat("a", [menacing]), seat("b", [bear("b1"), bear("b2")])]);
+    const choice = { attackerSeatId: "a", defenderSeatId: "b", attackerCardId: "mn", targetId: "b" };
+    const blockedBy = (ids: string[]) => assignBlockers(s, choice, ids).seats[1].board.battlefield.filter((c) => c.blocking).length;
+    expect(blockedBy(["b1"])).toBe(0);
+    expect(blockedBy(["b1", "b2"])).toBe(2);
   });
 });
