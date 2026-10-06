@@ -2,7 +2,7 @@
 // the test: two earlier tests passed on invented text while the real cards stayed broken (Court of Grace, the
 // "with power N or greater" watchers). Skipped per card when the catalog doesn't have it.
 import { describe, expect, it } from "vitest";
-import { applyLabeledContinuation, spellTargetSlots, grantKeywordsToCreature, applyExalted, applySacrificeEffect, applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
+import { applyDigPick, applyLabeledContinuation, spellTargetSlots, grantKeywordsToCreature, applyExalted, applySacrificeEffect, applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
 import { parseRemovalEffect } from "@/lib/removalSpells";
 import { parseZoneEffect } from "@/lib/zoneEffects";
 import { permanentMatchesQualifier } from "@/lib/characteristics";
@@ -1360,5 +1360,31 @@ describe("labeled target prompts for spells (pure halves)", () => {
     const prompt = spellTargetSlots(s, "a", bolt)!;
     const gone = { kind: "card" as const, seatId: "b", cardId: "nope" };
     expect(applyLabeledContinuation(s, "a", bolt, prompt.continuation, [gone]).seats[1].board.battlefield).toHaveLength(1);
+  });
+});
+
+describe("Leyline Tyrant amount, hideaway pick, Orb pick (pure halves)", () => {
+  const trig = (effect: unknown) => ({ id: "t", type: "trigger" as const, actorSeatId: "a", controllerSeatId: "a", sourceCardId: "src", sourceCardName: "Src", triggerKind: "common" as const, effect: effect as never, message: "" });
+  it("Leyline Tyrant pays exactly the chosen amount of red", () => {
+    const mine = seat("a", [real("Mountain", "m1"), real("Mountain", "m2"), real("Mountain", "m3")]);
+    const s = session([mine, seat("b", [], { life: 40 })]);
+    const after = resolveTriggerEffect(s, trig({ kind: "pay_red_for_damage", chosenOption: "2" }));
+    expect(after.seats[0].board.battlefield.filter((m) => m.tapped)).toHaveLength(2);
+    expect(after.seats[1].life).toBe(38);
+  });
+  it("Hideaway hides the card the human picked", () => {
+    const mine = seat("a", [real("Mosswort Bridge", "src")]);
+    mine.library = [bear("a", { zone: "library" as const }), bear("b", { zone: "library" as const }), bear("c", { zone: "library" as const })];
+    mine.zones = { ...mine.zones, library: 3 };
+    const after = resolveTriggerEffect(session([mine]), trig({ kind: "hideaway", count: 3, chosenOption: "0" })).seats[0];
+    expect(after.board.exile!.map((c) => c.id)).toEqual(["a"]);
+  });
+  it("Orb of Dragonkind: the human takes the Dragon they pick, or nothing", () => {
+    const mine = seat("a", []);
+    mine.library = [bear("d1", { zone: "library" as const, typeLine: "Creature — Dragon" }), bear("d2", { zone: "library" as const, typeLine: "Creature — Dragon" }), bear("x", { zone: "library" as const })];
+    mine.zones = { ...mine.zones, library: 3 };
+    const second = applyDigPick(session([mine]), "a", "Orb of Dragonkind", 7, "dragon", "d2").seats[0];
+    expect(second.board.hand.map((c) => c.id)).toEqual(["d2"]);
+    expect(applyDigPick(session([mine]), "a", "Orb of Dragonkind", 7, "dragon", "none").seats[0].board.hand).toHaveLength(0);
   });
 });

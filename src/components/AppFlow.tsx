@@ -452,6 +452,19 @@ type LabeledContinuation =
   | { kind: "extra"; effect: SpellExtraEffect; lifeAmount?: number };
 
 type PendingRuleChoice =
+  // "Look at the top N cards... you may reveal a <type> card and put it into your hand" (Orb of Dragonkind): the human sees the cards
+  // and picks which qualifying one to take (or none) after paying the cost.
+  | {
+      id: string;
+      kind: "choose_dig_card";
+      controllerSeatId: string;
+      sourceCardId: string;
+      sourceCardName: string;
+      prompt: string;
+      count: number;
+      typeWord: string;
+      options: Array<{ index: number; label: string; cardId: string }>;
+    }
   // Targets that don't fit the board-click / graveyard pickers (a creature OR a player, two different targets in a row): a plain
   // list of labeled options, one slot at a time — Ram Through (your creature, then theirs), Lightning Bolt-style "any target".
   | {
@@ -4765,6 +4778,27 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       setSeatManaPool(seatId, paid.poolSpent);
       clearManaContributions(seatId);
     }
+    // Orb of Dragonkind: the human looks at the top cards and picks which Dragon (if any) to take.
+    if (seat?.kind === "human" && paid.ability.effect.kind === "dig_type_to_hand") {
+      const digEffect = paid.ability.effect;
+      const top = (paid.session.seats.find((item) => item.id === seatId)?.library ?? []).slice(0, digEffect.count);
+      const candidates = top.filter((candidate) => candidate.typeLine.toLowerCase().includes(digEffect.typeWord));
+      if (candidates.length >= 1) {
+        setSession(() => paid.session);
+        setPendingRuleChoice({
+          id: crypto.randomUUID(),
+          kind: "choose_dig_card",
+          controllerSeatId: seatId,
+          sourceCardId: cardId,
+          sourceCardName: paid.card.name,
+          prompt: paid.card.name + ": you look at the top " + top.length + " cards. Reveal a " + digEffect.typeWord + " card to put in your hand?",
+          count: digEffect.count,
+          typeWord: digEffect.typeWord,
+          options: [...candidates.map((candidate, index) => ({ index, label: candidate.name + " (" + candidate.typeLine + ")", cardId: candidate.id })), { index: candidates.length, label: "Take nothing", cardId: "none" }]
+        });
+        return;
+      }
+    }
     setSession(() => applySacrificeEffect(paid.session, seatId, paid.card, paid.ability.effect, paid.ability.clause, paid.sacrificed));
   }
 
@@ -5456,6 +5490,22 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       });
       return true;
     }
+    if (trigger.effect.kind === "hideaway") {
+      const top = (controller.library ?? []).slice(0, trigger.effect.count);
+      if (top.length < 2) return false;
+      return open(`${trigger.sourceCardName}: you look at the top ${top.length} cards. Choose one to exile face down; the rest go to the bottom.`, top.map((card, index) => ({ index, label: `${card.name} (${card.typeLine}, mana value ${card.manaValue})` })));
+    }
+    if (trigger.effect.kind === "pay_red_for_damage") {
+      let max = 0;
+      for (let count = 12; count >= 1; count -= 1) {
+        if (chooseManaSourcesForCost(controller, genericManaAbilityCostShim({ costManaText: "{R}".repeat(count) }), count, undefined, session.seats).ok) {
+          max = count;
+          break;
+        }
+      }
+      if (max === 0) return false;
+      return open(`${trigger.sourceCardName}: pay how much {R}? It deals that much damage to a target.`, Array.from({ length: max + 1 }, (_, count) => ({ index: count, label: count === 0 ? "Don't pay" : "{R} x" + count + " — " + count + " damage" })));
+    }
     if (trigger.effect.kind === "sacrifice_surplus_then_draw") {
       const lands = controller.board.battlefield.filter((card) => isLandCard(card) && card.id !== trigger.sourceCardId).length;
       if (lands === 0) return false;
@@ -5516,6 +5566,34 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     const choice = pendingRuleChoice;
     if (!choice || choice.kind !== "choose_trigger_option") return;
     setPendingRuleChoice(undefined);
+    // Leyline Tyrant: pay the chosen red now, then pick what the damage hits.
+    if (choice.trigger.effect.kind === "pay_red_for_damage") {
+      const paid = index > 0 ? payRedMana(session, choice.controllerSeatId, index) : undefined;
+      if (paid) {
+        const source = { id: choice.sourceCardId, name: choice.sourceCardName, typeLine: "", oracleText: "", colors: ["R"], manaValue: 0, role: "permanent", zone: "graveyard" } as VisibleCard;
+        const options = labeledTargetOptions(paid.session, choice.controllerSeatId, "any_damage", source);
+        const damage: RemovalEffect = { kind: "damage", amount: paid.count, targetType: "any" };
+        setSession(() => paid.session);
+        if (options.length >= 2) {
+          setPendingRuleChoice({
+            id: crypto.randomUUID(),
+            kind: "choose_labeled_target",
+            controllerSeatId: choice.controllerSeatId,
+            sourceCardId: choice.sourceCardId,
+            sourceCardName: choice.sourceCardName,
+            sourceCard: source,
+            slots: [{ prompt: choice.sourceCardName + ": choose a target for " + paid.count + " damage.", options }],
+            slotIndex: 0,
+            picks: [],
+            continuation: { kind: "damage", effect: damage }
+          });
+        } else {
+          setSession(() => applyRemovalEffect(paid.session, choice.controllerSeatId, choice.sourceCardName, source, damage));
+        }
+      }
+      resumeAfterTriggerChoice(choice.trigger, choice.remainingStack);
+      return;
+    }
     const chosen = { ...choice.trigger, effect: { ...choice.trigger.effect, chosenOption: String(index) } } as Extract<PendingAction, { type: "trigger" }>;
     setSession((current) => resolveTriggerEffect(current, chosen));
     resumeAfterTriggerChoice(choice.trigger, choice.remainingStack);
@@ -7923,6 +8001,14 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   }
 
   function chooseModalOption(index: number) {
+    if (pendingRuleChoice?.kind === "choose_dig_card") {
+      const dig = pendingRuleChoice;
+      const picked = dig.options.find((option) => option.index === index);
+      if (!picked) return;
+      setPendingRuleChoice(undefined);
+      setSession((current) => applyDigPick(current, dig.controllerSeatId, dig.sourceCardName, dig.count, dig.typeWord, picked.cardId));
+      return;
+    }
     if (pendingRuleChoice?.kind === "choose_labeled_target") {
       completeLabeledTarget(index);
       return;
@@ -11708,23 +11794,7 @@ export function applySacrificeEffect(
     return transformPermanent(session, seatId, sourceCardId, sourceCardName, /\bthen untap it\b/i.test(clause));
   }
 
-  if (effect.kind === "dig_type_to_hand") {
-    const library = seat.library ?? [];
-    const top = library.slice(0, effect.count);
-    const found = top.find((card) => card.typeLine.toLowerCase().includes(effect.typeWord));
-    const rest = top.filter((card) => card.id !== found?.id);
-    const seats = session.seats.map((item) => {
-      if (item.id !== seatId) return item;
-      const remaining = [...library.slice(top.length), ...shuffleCards(rest)];
-      return {
-        ...item,
-        library: remaining,
-        board: { ...item.board, hand: found ? [...item.board.hand, { ...found, zone: "hand" as const }] : item.board.hand },
-        zones: { ...item.zones, library: remaining.length, hand: item.zones.hand + (found ? 1 : 0) }
-      };
-    });
-    return rulesEvent({ ...session, seats }, seatId, found ? `${seat.name} sacrifices ${sourceCardName} and puts ${found.name} into their hand.` : `${seat.name} sacrifices ${sourceCardName} and finds no ${effect.typeWord}.`);
-  }
+  if (effect.kind === "dig_type_to_hand") return applyDigPick(session, seatId, sourceCardName, effect.count, effect.typeWord);
 
   if (effect.kind === "exile_all_graveyards") {
     const exiled = session.seats.reduce((next, other) => (other.board.graveyard ?? []).reduce((acc, card) => moveCardAcrossSeats(acc, other.id, card.id, other.id, "exile").session, next), session);
@@ -19001,6 +19071,45 @@ export function resolveTriggerEffect(session: GameSession, trigger: Extract<Pend
   return resolveTriggerEffect(resolved, { ...trigger, id: crypto.randomUUID(), effect: trigger.effect.then, message: "" });
 }
 
+// Pays {R} for each of `exact` (or as many as possible, up to twelve) from untapped sources. Undefined if none can be paid.
+function payRedMana(session: GameSession, seatId: string, exact?: number): { session: GameSession; count: number } | undefined {
+  const payer = session.seats.find((item) => item.id === seatId);
+  if (!payer) return undefined;
+  const costText = (count: number) => "{R}".repeat(count);
+  for (let count = exact ?? 12; count >= (exact ?? 1); count -= 1) {
+    if (count < 1) break;
+    const payment = chooseManaSourcesForCost(payer, genericManaAbilityCostShim({ costManaText: costText(count) }), count, undefined, session.seats);
+    if (payment.ok) {
+      const paid = { ...session, seats: session.seats.map((item) => (item.id === seatId ? spendManaSources(item, payment.sourceIds) : item)) };
+      return { session: rulesEvent(paid, seatId, `${payer.name} pays ${costText(count)}.`), count };
+    }
+  }
+  return undefined;
+}
+
+// "Look at the top N cards of your library. You may reveal a <type> card from among them and put it into your hand. Put the rest on
+// the bottom in a random order." pickedId is the human's choice; omitted, the first qualifying card is taken. "none" takes nothing.
+export function applyDigPick(session: GameSession, seatId: string, sourceName: string, count: number, typeWord: string, pickedId?: string): GameSession {
+  const seat = session.seats.find((item) => item.id === seatId);
+  if (!seat) return session;
+  const library = seat.library ?? [];
+  const top = library.slice(0, count);
+  const qualifies = (card: VisibleCard) => card.typeLine.toLowerCase().includes(typeWord);
+  const found = pickedId === "none" ? undefined : pickedId ? top.find((card) => card.id === pickedId && qualifies(card)) : top.find(qualifies);
+  const rest = top.filter((card) => card.id !== found?.id);
+  const seats = session.seats.map((item) => {
+    if (item.id !== seatId) return item;
+    const remaining = [...library.slice(top.length), ...shuffleCards(rest)];
+    return {
+      ...item,
+      library: remaining,
+      board: { ...item.board, hand: found ? [...item.board.hand, { ...found, zone: "hand" as const }] : item.board.hand },
+      zones: { ...item.zones, library: remaining.length, hand: item.zones.hand + (found ? 1 : 0) }
+    };
+  });
+  return rulesEvent({ ...session, seats }, seatId, found ? `${seat.name} sacrifices ${sourceName} and puts ${found.name} into their hand.` : `${seat.name} sacrifices ${sourceName} and takes no ${typeWord}.`);
+}
+
 function findPermanentOwnerTarget(session: GameSession, cardId: string): ChosenTarget | undefined {
   const owner = session.seats.find((seat) => seat.board.battlefield.some((card) => card.id === cardId));
   return owner ? { kind: "card", seatId: owner.id, cardId } : undefined;
@@ -19061,7 +19170,8 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
     if (!owner || library.length === 0) return session;
     const top = library.slice(0, trigger.effect.count);
     // Keeps the most expensive nonland card (the best thing to play for free later), else the first card.
-    const kept = [...top].sort((a, b) => Number(!isLandCard(b)) - Number(!isLandCard(a)) || b.manaValue - a.manaValue)[0];
+    const chosenIndex = trigger.effect.chosenOption !== undefined ? Number.parseInt(trigger.effect.chosenOption, 10) : undefined;
+    const kept = (chosenIndex !== undefined ? top[chosenIndex] : undefined) ?? [...top].sort((a, b) => Number(!isLandCard(b)) - Number(!isLandCard(a)) || b.manaValue - a.manaValue)[0];
     const rest = top.filter((card) => card.id !== kept.id);
     const hidden: VisibleCard = { ...resetForZoneChange(kept, "exile"), ownerSeatId: kept.ownerSeatId ?? owner.id, hideawaySourceId: trigger.sourceCardId };
     const seats = session.seats.map((item) => {
@@ -19153,21 +19263,13 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
   if (trigger.effect.kind === "pay_red_for_damage") {
     const payer = session.seats.find((item) => item.id === trigger.controllerSeatId);
     if (!payer) return session;
-    const costText = (count: number) => "{R}".repeat(count);
-    let paidCount = 0;
-    let sources: string[] = [];
-    for (let count = 12; count >= 1; count -= 1) {
-      const payment = chooseManaSourcesForCost(payer, genericManaAbilityCostShim({ costManaText: costText(count) }), count, undefined, session.seats);
-      if (payment.ok) {
-        paidCount = count;
-        sources = payment.sourceIds;
-        break;
-      }
-    }
-    if (paidCount === 0) return rulesEvent(session, payer.id, `${payer.name} has no red mana to pay for ${trigger.sourceCardName}.`);
-    const paid = { ...session, seats: session.seats.map((item) => (item.id === payer.id ? spendManaSources(item, sources) : item)) };
+    // The human's pick is an exact amount; otherwise every red it can pay.
+    const exact = trigger.effect.chosenOption !== undefined ? Number.parseInt(trigger.effect.chosenOption, 10) : undefined;
+    if (exact === 0) return session;
+    const paidResult = payRedMana(session, payer.id, exact);
+    if (!paidResult) return rulesEvent(session, payer.id, `${payer.name} has no red mana to pay for ${trigger.sourceCardName}.`);
     const source = { id: trigger.sourceCardId, name: trigger.sourceCardName, typeLine: "", oracleText: "", colors: ["R"], manaValue: 0, role: "permanent", zone: "graveyard" } as VisibleCard;
-    return applyRemovalEffect(rulesEvent(paid, payer.id, `${payer.name} pays ${costText(paidCount)} for ${trigger.sourceCardName}.`), payer.id, trigger.sourceCardName, source, { kind: "damage", amount: paidCount, targetType: "any" });
+    return applyRemovalEffect(paidResult.session, payer.id, trigger.sourceCardName, source, { kind: "damage", amount: paidResult.count, targetType: "any" });
   }
   if (trigger.effect.kind === "self_gains_keywords") {
     const keywords = trigger.effect.keywords;
@@ -20015,6 +20117,9 @@ function ruleChoiceView(
           .filter((card) => hasCardType(card, "Creature"))
           .map((card) => ({ card, seatId: humanSeat.id, seatName: humanSeat.name }))
       };
+    }
+    if (choice.kind === "choose_dig_card") {
+      return { kind: "choose_modal_option" as const, sourceCardName: choice.sourceCardName, prompt: choice.prompt, options: choice.options.map((option) => ({ index: option.index, label: option.label })) };
     }
     if (choice.kind === "choose_labeled_target") {
       const slot = choice.slots[choice.slotIndex];
