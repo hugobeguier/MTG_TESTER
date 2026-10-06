@@ -1182,3 +1182,19 @@ describe("Outpost Siege (real Oracle text)", () => {
     expect(after!.seats[0].library!.map((c) => c.id)).toEqual(["next"]);
   });
 });
+
+describe("God-Eternal Bontu enters (real Oracle text)", () => {
+  it("sacrifices lands beyond the seventh and draws that many", () => {
+    const bontu = real("God-Eternal Bontu", "gb", { power: "5", toughness: "6" });
+    const lands = Array.from({ length: 9 }, (_, i) => real("Swamp", `sw${i}`));
+    const mine = seat("a", [bontu, ...lands]);
+    mine.library = Array.from({ length: 5 }, (_, i) => bear(`l${i}`, { zone: "library" as const }));
+    mine.zones = { ...mine.zones, library: 5 };
+    const s = session([mine]);
+    const [trigger] = findCommonTriggersForPermanentEntered(s, "a", bontu);
+    expect(trigger.effect.kind).toBe("sacrifice_surplus_then_draw");
+    const after = resolveTriggerEffect(s, trigger).seats[0];
+    expect(after.board.battlefield.filter((c) => /Swamp/.test(c.name))).toHaveLength(7);
+    expect(after.board.hand).toHaveLength(2);
+  });
+});

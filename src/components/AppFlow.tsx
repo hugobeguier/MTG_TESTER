@@ -320,6 +320,8 @@ type TriggerEffect = (
   | { kind: "self_to_library_third" }
   // "When this land enters untapped, you may put target creature card from your graveyard on top of your library." (Witch's Cottage)
   | { kind: "graveyard_creature_to_library_top" }
+  // "Sacrifice any number of other permanents, then draw that many cards." (God-Eternal Bontu) — sacrifices only lands beyond the seventh.
+  | { kind: "sacrifice_surplus_then_draw" }
   // "Proliferate." (Norn's Choirmaster) — every eligible permanent and player, same as the blanket resolveProliferate.
   | { kind: "proliferate" }
 ) & {
@@ -17780,6 +17782,7 @@ export function commonTriggerEffect(
   if (/when this land enters untapped, you may put target creature card from your graveyard on top of your library/.test(text)) {
     return { kind: "graveyard_creature_to_library_top", condition: { kind: "source_untapped" }, optional: true };
   }
+  if (/sacrifice any number of other permanents, then draw that many cards/.test(text)) return { kind: "sacrifice_surplus_then_draw" };
   const rummage = text.match(/\byou may discard a card\. if you do, draw (a|one|two|three) cards?\b/);
   if (rummage) return { kind: "discard_then_draw", draw: numberWordToInt(rummage[1]) ?? 1, optional: true };
   if (/\byou gain life equal to that creature'?s toughness\b/.test(text)) return { kind: "gain_life_context_toughness" };
@@ -18565,6 +18568,31 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
     return drawMultipleForSeat(session, trigger.controllerSeatId, trigger.effect.amount, `${trigger.sourceCardName} trigger resolves. ${seatName} draws ${trigger.effect.amount} card${trigger.effect.amount === 1 ? "" : "s"}.`);
   }
   if (trigger.effect.kind === "proliferate") return resolveProliferate(session);
+  if (trigger.effect.kind === "sacrifice_surplus_then_draw") {
+    const owner = session.seats.find((item) => item.id === trigger.controllerSeatId);
+    if (!owner) return session;
+    const lands = owner.board.battlefield.filter((card) => isLandCard(card) && card.id !== trigger.sourceCardId).sort((a, b) => Number(Boolean(b.tapped)) - Number(Boolean(a.tapped)));
+    const surplus = lands.slice(0, Math.max(0, lands.length - 7));
+    if (surplus.length === 0) return rulesEvent(session, owner.id, `${trigger.sourceCardName}: ${owner.name} sacrifices nothing.`);
+    const ids = new Set(surplus.map((card) => card.id));
+    const sacrificed: GameSession = {
+      ...session,
+      seats: session.seats.map((item) =>
+        item.id !== owner.id
+          ? item
+          : {
+              ...item,
+              board: {
+                ...item.board,
+                battlefield: item.board.battlefield.filter((card) => !ids.has(card.id)),
+                graveyard: [...(item.board.graveyard ?? []), ...surplus.filter((card) => !card.token).map((card) => ({ ...resetForZoneChange(card, "graveyard"), ownerSeatId: card.ownerSeatId ?? owner.id }))]
+              },
+              zones: { ...item.zones, battlefield: item.zones.battlefield - surplus.length, graveyard: item.zones.graveyard + surplus.filter((card) => !card.token).length }
+            }
+      )
+    };
+    return drawMultipleForSeat(rulesEvent(sacrificed, owner.id, `${trigger.sourceCardName}: ${owner.name} sacrifices ${surplus.length} surplus land${surplus.length === 1 ? "" : "s"}.`), owner.id, surplus.length, `${owner.name} draws ${surplus.length} card${surplus.length === 1 ? "" : "s"} from ${trigger.sourceCardName}.`);
+  }
   if (trigger.effect.kind === "graveyard_creature_to_library_top") {
     const owner = session.seats.find((item) => item.id === trigger.controllerSeatId);
     const best = (owner?.board.graveyard ?? []).filter((card) => card.typeLine.includes("Creature")).sort((a, b) => b.manaValue - a.manaValue)[0];
