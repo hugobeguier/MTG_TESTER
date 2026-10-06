@@ -2096,6 +2096,30 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     }
   }, [session, mode, gameStage, pendingAction, pendingRuleChoice, libraryLook]);
 
+  // "At the beginning of each combat, ..." (Unnatural Growth) also fires on OTHER players' combats. The phase sweep walks only the
+  // active seat's permanents, so the permanents of every other seat get their "each combat" clauses resolved here, once per turn.
+  const eachCombatChecked = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (mode !== "game" || gameStage !== "playing" || pendingAction || libraryLook || pendingRuleChoice) return;
+    if (session.phase !== "beginning of combat step") return;
+    const key = `${session.turn}:${activeSeatId}:${session.extraCombatsPending ?? 0}`;
+    if (eachCombatChecked.current.has(key)) return;
+    eachCombatChecked.current.add(key);
+    const triggers: Array<Extract<PendingAction, { type: "trigger" }>> = [];
+    for (const seat of session.seats) {
+      if (seat.id === activeSeatId || seat.hasLost) continue;
+      for (const card of seat.board.battlefield) {
+        if (card.abilitiesStripped) continue;
+        for (const clause of oracleClauses(card.oracleText)) {
+          if (!/^at the beginning of each combat,/i.test(clause)) continue;
+          const effect = commonTriggerEffect(clause, "clause", undefined, seat);
+          if (effect) triggers.push(makeCommonTrigger(seat.id, seat.id, card, effect, `${card.name} triggers at the beginning of ${session.seats.find((item) => item.id === activeSeatId)?.name ?? "the"} combat.`));
+        }
+      }
+    }
+    if (triggers.length > 0) setSession((current) => triggers.reduce((acc, trigger) => resolveTriggerEffect(acc, trigger), current));
+  }, [session.phase, session.turn, mode, gameStage, pendingAction, libraryLook, pendingRuleChoice]);
+
   // "No interactive targeting exists for Auras" (see chooseAuraAttachTarget's own doc comment) — a
   // human's Aura auto-attaches to whatever the heuristic picked the instant it resolves, deep
   // inside a setSession updater with no access to setPendingRuleChoice. This offers a post-hoc
