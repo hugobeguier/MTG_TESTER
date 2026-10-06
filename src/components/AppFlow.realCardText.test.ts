@@ -2,7 +2,7 @@
 // the test: two earlier tests passed on invented text while the real cards stayed broken (Court of Grace, the
 // "with power N or greater" watchers). Skipped per card when the catalog doesn't have it.
 import { describe, expect, it } from "vitest";
-import { chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
+import { applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
 import { parseRemovalEffect } from "@/lib/removalSpells";
 import { permanentMatchesQualifier } from "@/lib/characteristics";
 import { parseSpellExtraEffects } from "@/lib/spellExtras";
@@ -930,5 +930,47 @@ describe("restricted mana, colorless fallback (real Oracle text)", () => {
     const s = seat("a", [haven]);
     const generic = bear("gen", { typeLine: "Creature — Elf", colors: [], manaCost: "{1}", manaValue: 1 });
     expect(chooseManaSourcesForCost(s, generic, 1, undefined, [s]).ok).toBe(true);
+  });
+});
+
+describe("Herald of War cost reduction (real Oracle text)", () => {
+  it("Angel and Human spells cost {1} less per +1/+1 counter on it", () => {
+    const herald = real("Herald of War", "hw", { counters: [{ kind: "+1/+1", count: 2 }] });
+    const s = seat("a", [herald]);
+    const angel = bear("an", { typeLine: "Creature — Angel", manaValue: 5, zone: "hand" as const });
+    const goblin = bear("go", { typeLine: "Creature — Goblin", manaValue: 5, zone: "hand" as const });
+    expect(adjustedCastingCost(s, angel, 5, "hand", "a", [s])).toBe(3);
+    expect(adjustedCastingCost(s, goblin, 5, "hand", "a", [s])).toBe(5);
+  });
+});
+
+describe("utility lands, batch 7 (real Oracle text)", () => {
+  const tap = (name: string) => parseGenericTapAbilities(real(name, "x").oracleText).find((a) => a.effect.kind !== "create_tokens" || true);
+  it("Rogue's Passage: target creature can't be blocked, and then really can't be blocked", () => {
+    const ability = tap("Rogue's Passage")!;
+    expect(ability.effect.kind).toBe("target_unblockable");
+    const attacker = bear("atk", { summoningSick: false, attacking: true, attackTargetId: "b" });
+    const s = session([seat("a", [real("Rogue's Passage", "rp"), attacker]), seat("b", [bear("blocker")])]);
+    const after = applyGenericTapEffect(s, "a", "rp", "Rogue's Passage", ability.effect, ability.clause);
+    const unblockable = after.seats[0].board.battlefield.find((c) => c.id === "atk")!;
+    const blocked = assignBlockers(after, { attackerSeatId: "a", defenderSeatId: "b", attackerCardId: "atk", targetId: "b" }, ["blocker"]);
+    expect(unblockable.temporaryGrantedKeywords).toContain("can't be blocked");
+    expect(blocked.seats[1].board.battlefield.filter((c) => c.blocking)).toHaveLength(0);
+  });
+  it("Witch's Clinic: your commander gains lifelink", () => {
+    const ability = tap("Witch's Clinic")!;
+    expect(ability.effect).toEqual({ kind: "commander_gains_keyword", keyword: "lifelink" });
+    const s = session([seat("a", [real("Witch's Clinic", "wc"), bear("cmdr", { commander: true }), bear("other", { power: "9" })])]);
+    const after = applyGenericTapEffect(s, "a", "wc", "Witch's Clinic", ability.effect, ability.clause);
+    expect(after.seats[0].board.battlefield.find((c) => c.id === "cmdr")!.temporaryGrantedKeywords).toContain("lifelink");
+    expect(after.seats[0].board.battlefield.find((c) => c.id === "other")!.temporaryGrantedKeywords).toBeUndefined();
+  });
+  it("War Room: pays life equal to the colors in your commander's identity to draw", () => {
+    const ability = tap("War Room")!;
+    expect(ability.effect.kind).toBe("draw_cards");
+    expect(ability.costLifeCommanderColors).toBe(true);
+    const mine = seat("a", [real("War Room", "wr"), real("Mountain", "m1"), real("Mountain", "m2"), real("Mountain", "m3"), bear("cmdr", { commander: true, colorIdentity: ["R", "G"] })]);
+    const paid = payGenericTapCost(session([mine]), "a", "wr", 0);
+    expect(paid?.session.seats[0].life).toBe(38);
   });
 });

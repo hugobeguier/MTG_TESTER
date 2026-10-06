@@ -279,6 +279,10 @@ export type GenericTapEffect =
   | { kind: "create_tokens" }
   // "Draw a card." (Dragon's Hoard, Tome of Legends, Endless Atlas)
   | { kind: "draw_cards"; amount: number }
+  // "Target creature can't be blocked this turn." (Rogue's Passage) — your best attacker.
+  | { kind: "target_unblockable" }
+  // "Target commander gains lifelink until end of turn." (Witch's Clinic)
+  | { kind: "commander_gains_keyword"; keyword: string }
   | { kind: "counter_and_transform"; targetTypeFilter?: string; power?: number; toughness?: number; addedType?: string }
   | { kind: "bounce_own"; targetTypeFilter?: string }
   // Any graveyard/zone effect parseZoneEffect understands, as a tap ability's effect: "Return target Zombie
@@ -316,6 +320,8 @@ export interface GenericTapAbility {
   untapsSelf: boolean;
   // "Remove a gold counter from this artifact" as part of the cost (Dragon's Hoard, Tome of Legends): the counter kind.
   costRemoveCounter?: string;
+  // "Pay life equal to the number of colors in your commanders' color identity" (War Room).
+  costLifeCommanderColors?: boolean;
   effect: GenericTapEffect;
   clause: string;
 }
@@ -324,7 +330,7 @@ export interface GenericTapAbility {
 // real cost is "{G}, {T}, Discard a creature card:", with {T} in the MIDDLE. The whole cost prefix
 // is captured generically (same shape as parseGenericSacrificeAbilities' own cost prefix) and {T}
 // presence is checked afterward instead, the same way costTap is already derived there.
-const GENERIC_TAP_CLAUSE_PATTERN = /^((?:(?:\{[^}]+\}|discard an? (?:[a-z]+ )?card|remove an? [a-z]+ counter from (?:this|~) [a-z]+)\s*,?\s*)+):\s*(.+?)\.?\s*$/i;
+const GENERIC_TAP_CLAUSE_PATTERN = /^((?:(?:\{[^}]+\}|discard an? (?:[a-z]+ )?card|remove an? [a-z]+ counter from (?:this|~) [a-z]+|pay life equal to the number of colors in your commanders' color identity)\s*,?\s*)+):\s*(.+?)\.?\s*$/i;
 
 export function parseGenericTapAbilities(oracleText: string): GenericTapAbility[] {
   const abilities: GenericTapAbility[] = [];
@@ -366,7 +372,7 @@ export function parseGenericTapAbilities(oracleText: string): GenericTapAbility[
     if (!effect) continue;
 
     const costManaText = (costPrefix.match(/\{[^}]+\}/g) ?? []).filter((symbol) => !/^\{t\}$/i.test(symbol)).join("");
-    abilities.push({ costMana, costManaText, costDiscard, untapsSelf, ...(costRemoveCounter ? { costRemoveCounter } : {}), effect, clause });
+    abilities.push({ costMana, costManaText, costDiscard, untapsSelf, ...(costRemoveCounter ? { costRemoveCounter } : {}), ...(/pay life equal to the number of colors in your commanders' color identity/i.test(costPrefix) ? { costLifeCommanderColors: true } : {}), effect, clause });
   }
 
   return abilities;
@@ -376,6 +382,9 @@ function parseGenericTapEffectText(text: string): GenericTapEffect | undefined {
   if (/^exile target creature card from a graveyard\.\s*create\b[^.]*\btokens?\b/i.test(text)) return { kind: "exile_graveyard_creature_then_tokens" };
   if (/^draw a card, then you lose life equal to the number of cards in your hand\.?$/i.test(text)) return { kind: "draw_then_lose_life_equal_hand" };
   if (/^each player draws a card, then discards a card\.?$/i.test(text)) return { kind: "each_player_loots" };
+  if (/^target creature can'?t be blocked this turn\.?$/i.test(text)) return { kind: "target_unblockable" };
+  const commanderKeyword = text.match(/^target commander gains ([a-z ]+?) until end of turn\.?$/i);
+  if (commanderKeyword) return { kind: "commander_gains_keyword", keyword: commanderKeyword[1].toLowerCase() };
   const plainDraw = text.match(/^draw (a|one|two|three) cards?\.?$/i);
   if (plainDraw) return { kind: "draw_cards", amount: numberWordToInt(plainDraw[1]) ?? 1 };
   const graveyardGrant = text.match(/^you may cast target ([a-z ]+?) card from your graveyard this turn\.?$/i);

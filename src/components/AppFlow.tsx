@@ -9286,6 +9286,9 @@ export function creatureCantBlock(card: VisibleCard): boolean {
 // "This creature can't be blocked by creatures with power 2 or less." (Steel Leaf Champion)
 function attackerEvadesBlocker(attacker: VisibleCard, blocker: VisibleCard): boolean {
   if (attacker.abilitiesStripped) return false;
+  // "Target creature can't be blocked this turn." (Rogue's Passage) is recorded as a temporary pseudo-keyword.
+  if (attacker.temporaryGrantedKeywords?.includes("can't be blocked")) return true;
+  if (attacker.oracleText.split("\n").some((line) => /^(?:this creature )?can'?t be blocked\.?$/i.test(line.replace(/\([^)]*\)/g, "").trim()))) return true;
   for (const line of attacker.oracleText.split("\n")) {
     const match = line.replace(/\([^)]*\)/g, "").match(/can'?t be blocked by creatures with power (\d+) or less/i);
     if (match && effectivePower(blocker) <= Number.parseInt(match[1], 10)) return true;
@@ -10548,6 +10551,7 @@ function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllowed: boo
       if (!activateOnlyIfConditionMet(ability.clause, seat)) return;
       if (hasSorcerySpeedOnlyLimiter(ability.clause) && !sorcerySpeedAllowed) return;
       if (ability.costRemoveCounter && counterCount(card, ability.costRemoveCounter) < 1) return;
+      if (ability.costLifeCommanderColors && seat.life <= commanderColorCount(seat)) return;
       if (card.tapped) return;
       // Rule 302.6: same summoning-sickness gate as the sacrifice-ability loop above — a creature
       // can't be tapped to pay a {T} cost the turn it entered without haste.
@@ -11396,6 +11400,8 @@ export function payGenericTapCost(
   if (!ability) return undefined;
   if (!activateOnlyIfConditionMet(ability.clause, seat)) return undefined;
   if (ability.costRemoveCounter && counterCount(card, ability.costRemoveCounter) < 1) return undefined;
+  const lifeCost = ability.costLifeCommanderColors ? commanderColorCount(seat) : 0;
+  if (lifeCost > 0 && seat.life <= lifeCost) return undefined;
 
   const discardCard = ability.costDiscard
     ? (chosenDiscardId ? seat.board.hand.find((handCard) => handCard.id === chosenDiscardId) : undefined) ?? chooseWorstHandCardToDiscard(seat)
@@ -11419,6 +11425,9 @@ export function payGenericTapCost(
   let next = session;
   if (payment?.ok && !poolPayment?.ok) {
     next = { ...next, seats: next.seats.map((item) => (item.id === seatId ? spendManaSources(item, payment.sourceIds) : item)) };
+  }
+  if (lifeCost > 0) {
+    next = rulesEvent({ ...next, seats: next.seats.map((item) => (item.id === seatId ? { ...item, life: item.life - lifeCost } : item)) }, seatId, `${seat.name} pays ${lifeCost} life to activate ${card.name}.`);
   }
   if (discardCard) {
     next = {
@@ -12016,6 +12025,33 @@ export function applyGenericTapEffect(
     );
   }
 
+  if (effect.kind === "target_unblockable" || effect.kind === "commander_gains_keyword") {
+    const keyword = effect.kind === "target_unblockable" ? "can't be blocked" : effect.keyword;
+    const mine = session.seats.find((item) => item.id === seatId);
+    const pool = (mine?.board.battlefield ?? []).filter((card) => (effect.kind === "commander_gains_keyword" ? card.commander : card.typeLine.includes("Creature") && !card.summoningSick));
+    const target = pool.sort((a, b) => effectivePower(b) - effectivePower(a))[0] ?? (effect.kind === "target_unblockable" ? strongestControlledCreature(mine) : undefined);
+    if (!mine || !target) return rulesEvent(session, seatId, `${sourceCardName} has no creature to target.`);
+    return rulesEvent(
+      {
+        ...session,
+        seats: session.seats.map((item) =>
+          item.id !== seatId
+            ? item
+            : {
+                ...item,
+                board: {
+                  ...item.board,
+                  battlefield: item.board.battlefield.map((card) =>
+                    card.id === target.id ? { ...card, temporaryGrantedKeywords: [...(card.temporaryGrantedKeywords ?? []), keyword], grantedKeywords: [...new Set([...(card.grantedKeywords ?? []), keyword])] } : card
+                  )
+                }
+              }
+        )
+      },
+      seatId,
+      `${seat.name} activates ${sourceCardName}: ${target.name} ${effect.kind === "target_unblockable" ? "can't be blocked this turn" : `gains ${keyword} until end of turn`}.`
+    );
+  }
   if (effect.kind === "draw_cards") {
     return drawMultipleForSeat(session, seatId, effect.amount, `${seat.name} draws ${effect.amount} card${effect.amount === 1 ? "" : "s"} from ${sourceCardName}.`);
   }
@@ -17955,6 +17991,12 @@ export function cycleCardInSession(session: GameSession, seatId: string, cardId:
   return { ok: true, session: drawForSeat(withEvent, seatId, `${seat.name} draws a card from cycling ${card.name}.`) };
 }
 
+// "...the number of colors in your commanders' color identity" (War Room).
+function commanderColorCount(seat: PlayerSeat): number {
+  const commanders = [...seat.board.battlefield.filter((card) => card.commander), ...(seat.board.commander ? [seat.board.commander] : [])];
+  return new Set(commanders.flatMap((card) => card.colorIdentity ?? card.colors ?? [])).size;
+}
+
 export function createTokensForSeat(session: GameSession, seatId: string, sourceCardId: string, specs: TokenSpec[]) {
   const createdTokens = specs.flatMap((spec) =>
     Array.from({ length: spec.count }, () => createTokenCard(seatId, sourceCardId, spec))
@@ -20985,6 +21027,13 @@ function parseGrantedCostReduction(source: VisibleCard, castCard: VisibleCard): 
   const clauses = source.oracleText.split("\n").map((line) => line.trim()).filter(Boolean);
   let total = 0;
   for (const clause of clauses) {
+    // "Angel spells and Human spells you cast cost {1} less to cast for each +1/+1 counter on this creature." (Herald of War)
+    const perCounter = clause.match(/^([a-z]+) spells and ([a-z]+) spells you cast cost \{(\d+)\} less to cast for each \+1\/\+1 counter on this creature\.?$/i);
+    if (perCounter) {
+      if (!matchesCostReductionQualifier(perCounter[1].toLowerCase(), castCard) && !matchesCostReductionQualifier(perCounter[2].toLowerCase(), castCard)) continue;
+      total += Number.parseInt(perCounter[3], 10) * counterCount(source, "+1/+1");
+      continue;
+    }
     const match = clause.match(/(?:^|,\s*)(?:other\s+)?(?:([a-z][a-z ]*?)\s+)?spells(?:\s+you cast)?(?:\s+of the chosen type)?(?:\s+you cast)?(?:\s+with power (\d+) or greater)? cost \{(\d+)\} less to cast\.?$/i);
     if (!match) continue;
     const qualifier = (match[1] ?? "").toLowerCase().trim();
