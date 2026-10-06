@@ -10552,10 +10552,14 @@ function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllowed: boo
       if (hasSorcerySpeedOnlyLimiter(ability.clause) && !sorcerySpeedAllowed) return;
       if (ability.costRemoveCounter && counterCount(card, ability.costRemoveCounter) < 1) return;
       if (ability.costLifeCommanderColors && seat.life <= commanderColorCount(seat)) return;
-      if (card.tapped) return;
-      // Rule 302.6: same summoning-sickness gate as the sacrifice-ability loop above — a creature
-      // can't be tapped to pay a {T} cost the turn it entered without haste.
-      if (card.typeLine.includes("Creature") && card.summoningSick && !hasHaste(card)) return;
+      if (ability.costTapCreatures) {
+        if (!chooseCreaturesToTapForCost(seat, ability.costTapCreatures.count, ability.costTapCreatures.subtype)) return;
+      } else {
+        if (card.tapped) return;
+        // Rule 302.6: same summoning-sickness gate as the sacrifice-ability loop above — a creature
+        // can't be tapped to pay a {T} cost the turn it entered without haste.
+        if (card.typeLine.includes("Creature") && card.summoningSick && !hasHaste(card)) return;
+      }
       if (ability.costDiscard && seat.board.hand.length === 0) return;
       // excludeCardId: card.id — same self-tap exclusion as the sacrifice-ability loop above.
       const tapCostTotal = manaValueFromManaCost(ability.costManaText);
@@ -11394,14 +11398,21 @@ export function payGenericTapCost(
 ): { session: GameSession; ability: GenericTapAbility; card: VisibleCard; poolSpent?: ManaPool } | undefined {
   const seat = session.seats.find((item) => item.id === seatId);
   const card = seat?.board.battlefield.find((item) => item.id === cardId);
-  if (!seat || !card || card.tapped) return undefined;
-  if (card.typeLine.includes("Creature") && card.summoningSick && !hasHaste(card)) return undefined;
+  if (!seat || !card) return undefined;
   const ability = parseGenericTapAbilities(card.oracleText)[abilityIndex];
   if (!ability) return undefined;
+  // "Tap three untapped Zombies you control" has no {T} of its own, so the source's own tapped/summoning-sick state is irrelevant.
+  if (!ability.costTapCreatures) {
+    if (card.tapped) return undefined;
+    if (card.typeLine.includes("Creature") && card.summoningSick && !hasHaste(card)) return undefined;
+  }
+  const tappedForCost = ability.costTapCreatures ? chooseCreaturesToTapForCost(seat, ability.costTapCreatures.count, ability.costTapCreatures.subtype) : undefined;
+  if (ability.costTapCreatures && !tappedForCost) return undefined;
   if (!activateOnlyIfConditionMet(ability.clause, seat)) return undefined;
   if (ability.costRemoveCounter && counterCount(card, ability.costRemoveCounter) < 1) return undefined;
   const lifeCost = ability.costLifeCommanderColors ? commanderColorCount(seat) : 0;
   if (lifeCost > 0 && seat.life <= lifeCost) return undefined;
+  const tapIds = new Set((tappedForCost ?? []).map((creature) => creature.id));
 
   const discardCard = ability.costDiscard
     ? (chosenDiscardId ? seat.board.hand.find((handCard) => handCard.id === chosenDiscardId) : undefined) ?? chooseWorstHandCardToDiscard(seat)
@@ -11468,7 +11479,9 @@ export function payGenericTapCost(
             board: {
               ...item.board,
               battlefield: item.board.battlefield.map((c) =>
-                c.id !== cardId
+                tapIds.has(c.id)
+                  ? { ...c, tapped: true }
+                  : c.id !== cardId || ability.costTapCreatures
                   ? c
                   : {
                       ...c,
@@ -12051,6 +12064,10 @@ export function applyGenericTapEffect(
       seatId,
       `${seat.name} activates ${sourceCardName}: ${target.name} ${effect.kind === "target_unblockable" ? "can't be blocked this turn" : `gains ${keyword} until end of turn`}.`
     );
+  }
+  if (effect.kind === "draw_and_lose_life") {
+    const drawn = drawMultipleForSeat(session, seatId, effect.draw, `${seat.name} draws ${effect.draw} card${effect.draw === 1 ? "" : "s"} from ${sourceCardName}.`);
+    return rulesEvent({ ...drawn, seats: drawn.seats.map((item) => (item.id === seatId ? { ...item, life: item.life - effect.lose } : item)) }, seatId, `${seat.name} loses ${effect.lose} life from ${sourceCardName}.`);
   }
   if (effect.kind === "draw_cards") {
     return drawMultipleForSeat(session, seatId, effect.amount, `${seat.name} draws ${effect.amount} card${effect.amount === 1 ? "" : "s"} from ${sourceCardName}.`);
@@ -17989,6 +18006,14 @@ export function cycleCardInSession(session: GameSession, seatId: string, cardId:
   const discarded = moveCardBetweenVisibleZones(paid, seatId, cardId, "graveyard");
   const withEvent = rulesEvent(discarded, seatId, `${seat.name} cycles ${card.name} (${cycling.costManaText}).`);
   return { ok: true, session: drawForSeat(withEvent, seatId, `${seat.name} draws a card from cycling ${card.name}.`) };
+}
+
+// "Tap three untapped Zombies you control" — the weakest eligible creatures, so the best stay untapped. Undefined when there aren't enough.
+function chooseCreaturesToTapForCost(seat: PlayerSeat, count: number, subtype: string): VisibleCard[] | undefined {
+  const eligible = seat.board.battlefield
+    .filter((card) => card.typeLine.includes("Creature") && !card.tapped && !card.phasedOut && permanentMatchesQualifier(card, subtype))
+    .sort((a, b) => effectivePower(a) - effectivePower(b));
+  return eligible.length >= count ? eligible.slice(0, count) : undefined;
 }
 
 // "...the number of colors in your commanders' color identity" (War Room).

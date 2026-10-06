@@ -1591,7 +1591,10 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
               : undefined
           }
           tapAbilities={
-            inspectedOwner?.seat.kind === "human" && inspectedOwner.zone === "battlefield" && !props.inspectedCard.tapped
+            inspectedOwner?.seat.kind === "human" &&
+            inspectedOwner.zone === "battlefield" &&
+            // A tapped permanent can still have an ability that taps OTHER creatures instead (Cryptbreaker).
+            (!props.inspectedCard.tapped || parseGenericTapAbilities(props.inspectedCard.oracleText).some((ability) => ability.costTapCreatures))
               ? parseGenericTapAbilities(props.inspectedCard.oracleText)
               : []
           }

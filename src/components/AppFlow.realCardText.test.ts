@@ -974,3 +974,28 @@ describe("utility lands, batch 7 (real Oracle text)", () => {
     expect(paid?.session.seats[0].life).toBe(38);
   });
 });
+
+describe("Cryptbreaker's tap-three-Zombies ability (real Oracle text)", () => {
+  const zombie = (id: string, extra: Partial<VisibleCard> = {}) => bear(id, { typeLine: "Creature — Zombie", ...extra });
+  it("taps three untapped Zombies, draws a card and loses 1 life", () => {
+    const abilities = parseGenericTapAbilities(real("Cryptbreaker", "x").oracleText);
+    const index = abilities.findIndex((a) => a.costTapCreatures);
+    expect(abilities[index].costTapCreatures).toEqual({ count: 3, subtype: "zombie" });
+    expect(abilities[index].effect).toEqual({ kind: "draw_and_lose_life", draw: 1, lose: 1 });
+    const mine = seat("a", [real("Cryptbreaker", "cb", { typeLine: "Creature — Zombie Warlock", summoningSick: true }), zombie("z1"), zombie("z2"), bear("human")]);
+    mine.library = Array.from({ length: 3 }, (_, i) => bear(`l${i}`, { zone: "library" as const }));
+    mine.zones = { ...mine.zones, library: 3 };
+    const paid = payGenericTapCost(session([mine]), "a", "cb", index)!;
+    expect(paid).toBeDefined();
+    const tapped = paid.session.seats[0].board.battlefield.filter((c) => c.tapped).map((c) => c.id).sort();
+    expect(tapped).toEqual(["cb", "z1", "z2"]);
+    const done = applyGenericTapEffect(paid.session, "a", "cb", "Cryptbreaker", paid.ability.effect, paid.ability.clause);
+    expect(done.seats[0].board.hand).toHaveLength(1);
+    expect(done.seats[0].life).toBe(39);
+  });
+  it("needs three untapped Zombies", () => {
+    const index = parseGenericTapAbilities(real("Cryptbreaker", "x").oracleText).findIndex((a) => a.costTapCreatures);
+    const mine = seat("a", [real("Cryptbreaker", "cb", { typeLine: "Creature — Zombie Warlock" }), zombie("z1"), zombie("z2", { tapped: true })]);
+    expect(payGenericTapCost(session([mine]), "a", "cb", index)).toBeUndefined();
+  });
+});

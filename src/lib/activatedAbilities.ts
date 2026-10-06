@@ -281,6 +281,8 @@ export type GenericTapEffect =
   | { kind: "draw_cards"; amount: number }
   // "Target creature can't be blocked this turn." (Rogue's Passage) — your best attacker.
   | { kind: "target_unblockable" }
+  // "You draw a card and lose 1 life." (Cryptbreaker)
+  | { kind: "draw_and_lose_life"; draw: number; lose: number }
   // "Target commander gains lifelink until end of turn." (Witch's Clinic)
   | { kind: "commander_gains_keyword"; keyword: string }
   | { kind: "counter_and_transform"; targetTypeFilter?: string; power?: number; toughness?: number; addedType?: string }
@@ -322,6 +324,8 @@ export interface GenericTapAbility {
   costRemoveCounter?: string;
   // "Pay life equal to the number of colors in your commanders' color identity" (War Room).
   costLifeCommanderColors?: boolean;
+  // "Tap three untapped Zombies you control" (Cryptbreaker): tapping other creatures IS the cost, with no {T} of its own.
+  costTapCreatures?: { count: number; subtype: string };
   effect: GenericTapEffect;
   clause: string;
 }
@@ -342,6 +346,15 @@ export function parseGenericTapAbilities(oracleText: string): GenericTapAbility[
   for (const clause of clauses) {
     // Sacrifice-cost tap abilities are parseGenericSacrificeAbilities's shape, not this one.
     if (/\bsacrifice\b/i.test(clause)) continue;
+    // "Tap three untapped Zombies you control: You draw a card and lose 1 life." (Cryptbreaker)
+    const tapCreatures = clause.match(/^tap (a|one|two|three|four|\d+) untapped ([a-z]+)s you control:\s*(.+?)\.?\s*$/i);
+    if (tapCreatures) {
+      const tapEffect = parseGenericTapEffectText(tapCreatures[3].trim());
+      if (tapEffect) {
+        abilities.push({ costMana: 0, costManaText: "", costDiscard: false, untapsSelf: false, costTapCreatures: { count: numberWordToInt(tapCreatures[1]) ?? 1, subtype: tapCreatures[2].toLowerCase() }, effect: tapEffect, clause });
+      }
+      continue;
+    }
     const match = clause.match(GENERIC_TAP_CLAUSE_PATTERN);
     if (!match) continue;
 
@@ -385,6 +398,8 @@ function parseGenericTapEffectText(text: string): GenericTapEffect | undefined {
   if (/^target creature can'?t be blocked this turn\.?$/i.test(text)) return { kind: "target_unblockable" };
   const commanderKeyword = text.match(/^target commander gains ([a-z ]+?) until end of turn\.?$/i);
   if (commanderKeyword) return { kind: "commander_gains_keyword", keyword: commanderKeyword[1].toLowerCase() };
+  const drawAndLose = text.match(/^you draw (a|one|two) cards? and lose (\d+) life\.?$/i);
+  if (drawAndLose) return { kind: "draw_and_lose_life", draw: numberWordToInt(drawAndLose[1]) ?? 1, lose: Number.parseInt(drawAndLose[2], 10) };
   const plainDraw = text.match(/^draw (a|one|two|three) cards?\.?$/i);
   if (plainDraw) return { kind: "draw_cards", amount: numberWordToInt(plainDraw[1]) ?? 1 };
   const graveyardGrant = text.match(/^you may cast target ([a-z ]+?) card from your graveyard this turn\.?$/i);
