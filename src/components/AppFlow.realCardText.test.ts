@@ -737,3 +737,15 @@ describe("Firemane Commando (real Oracle text)", () => {
     expect(findMultiAttackTriggers(hit, "b").triggers).toHaveLength(0);
   });
 });
+
+describe("Thunderbreak Regent (real Oracle text)", () => {
+  it("deals 3 damage to an opponent who targets one of your Dragons, but not for other targets or your own spells", () => {
+    const dragon = bear("drag", { typeLine: "Creature — Dragon" });
+    const s = session([seat("a", [bear("mine")]), seat("b", [real("Thunderbreak Regent", "tr", { typeLine: "Creature — Dragon" }), dragon])]);
+    const burn = real("Lightning Bolt", "bolt");
+    const hitDragon = applyRemovalEffect(s, "a", "Lightning Bolt", burn, { kind: "damage", amount: 1, targetType: "creature" });
+    expect(hitDragon.seats[0].life).toBe(37);
+    const ownCast = applyRemovalEffect(s, "b", "Lightning Bolt", burn, { kind: "damage", amount: 1, targetType: "creature" });
+    expect(ownCast.seats[1].life).toBe(40);
+  });
+});

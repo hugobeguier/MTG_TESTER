@@ -14167,7 +14167,35 @@ function hasResolvableGenericCreatureTarget(session: GameSession, casterSeatId: 
 // this engine's deterministic targeting (every choice here is auto-resolved), so this mirrors that:
 // auto-attempt payment from the caster's untapped mana, same as the existing counterspell-tax
 // payment in resolvePendingAction's counterTargetId branch. Unpayable means the effect is countered.
+// Every targeted spell/ability goes through here, so it is also where "becomes the target" watchers are checked.
 function payWardIfNeeded(session: GameSession, casterSeatId: string, targetCard: VisibleCard, sourceName: string): { session: GameSession; countered: boolean } {
+  const result = payWardIfNeededCore(session, casterSeatId, targetCard, sourceName);
+  return { ...result, session: applyBecomesTargetTriggers(result.session, casterSeatId, targetCard, sourceName) };
+}
+
+// "Whenever a Dragon you control becomes the target of a spell or ability an opponent controls, this creature deals 3 damage to
+// that player." (Thunderbreak Regent)
+function applyBecomesTargetTriggers(session: GameSession, casterSeatId: string, targetCard: VisibleCard, sourceName: string): GameSession {
+  let next = session;
+  const controller = session.seats.find((seat) => seat.board.battlefield.some((card) => card.id === targetCard.id));
+  if (!controller || controller.id === casterSeatId) return session;
+  for (const watcher of controller.board.battlefield) {
+    if (watcher.abilitiesStripped) continue;
+    for (const clause of oracleClauses(watcher.oracleText)) {
+      const match = clause.match(/^whenever an? ([a-z]+) you control becomes the target of a spell or ability an opponent controls, this creature deals (\d+) damage to that player\b/i);
+      if (!match || !permanentMatchesQualifier(targetCard, match[1])) continue;
+      const amount = Number.parseInt(match[2], 10);
+      next = rulesEvent(
+        { ...next, seats: next.seats.map((seat) => (seat.id === casterSeatId ? { ...seat, life: seat.life - amount } : seat)) },
+        controller.id,
+        `${watcher.name} deals ${amount} damage to ${next.seats.find((seat) => seat.id === casterSeatId)?.name ?? "the opponent"} for targeting ${targetCard.name} with ${sourceName}.`
+      );
+    }
+  }
+  return next;
+}
+
+function payWardIfNeededCore(session: GameSession, casterSeatId: string, targetCard: VisibleCard, sourceName: string): { session: GameSession; countered: boolean } {
   const wardCost = cardWardAmount(targetCard.oracleText);
   const lifeWard = wardLifeAmount(targetCard.oracleText);
   const casterSeat = session.seats.find((seat) => seat.id === casterSeatId);
