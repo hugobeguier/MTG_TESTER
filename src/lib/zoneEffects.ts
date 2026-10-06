@@ -22,6 +22,8 @@ export interface ReanimateEffect {
   // never actually captured or enforced, a separate pre-existing gap this doesn't touch). Only this
   // one dynamic basis is modeled; a literal number ceiling is declined rather than guessed at here.
   manaValueCeiling?: "graveyard_permanent_count";
+  // "If it's an Angel, put two +1/+1 counters on it." (Defy Death)
+  counterIfType?: { typeWord: string; count: number };
 }
 
 export interface RegrowEffect {
@@ -224,7 +226,16 @@ export function parseZoneEffect(oracleText: string): ZoneEffect | undefined {
   const reanimate = text.match(
     /\b(?:put|return) target (?:\w+ )?(creature|enchantment|artifact|permanent) cards?(?: with mana value \d+ or (?:less|greater))? from (a|your) graveyard (?:onto|to) the battlefield\b/
   );
-  if (reanimate) return { kind: "reanimate", targetType: reanimate[1] as RegrowTargetType, anyGraveyard: reanimate[2] === "a" };
+  if (reanimate) {
+    const counterIf = text.match(/\bif it'?s an? ([a-z]+), put (a|one|two|three|\d+) \+1\/\+1 counters? on it\b/);
+    const counts: Record<string, number> = { a: 1, one: 1, two: 2, three: 3 };
+    return {
+      kind: "reanimate",
+      targetType: reanimate[1] as RegrowTargetType,
+      anyGraveyard: reanimate[2] === "a",
+      ...(counterIf ? { counterIfType: { typeWord: counterIf[1], count: counts[counterIf[2]] ?? Number.parseInt(counterIf[2], 10) } } : {})
+    };
+  }
 
   // "that isn't a God" (Heliod, the Radiant Dawn's own ETB: "return target enchantment card that
   // isn't a God from your graveyard to your hand") sits between "card" and "from your graveyard" —

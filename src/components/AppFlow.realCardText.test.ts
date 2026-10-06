@@ -2,8 +2,9 @@
 // the test: two earlier tests passed on invented text while the real cards stayed broken (Court of Grace, the
 // "with power N or greater" watchers). Skipped per card when the catalog doesn't have it.
 import { describe, expect, it } from "vitest";
-import { totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
+import { applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
 import { parseRemovalEffect } from "@/lib/removalSpells";
+import { parseZoneEffect } from "@/lib/zoneEffects";
 import { permanentMatchesQualifier } from "@/lib/characteristics";
 import { parseSpellExtraEffects } from "@/lib/spellExtras";
 import { etbEffectText } from "@/lib/oracleClauses";
@@ -1123,5 +1124,19 @@ describe("Archangel of Tithes (real Oracle text)", () => {
   it("no mana, no blockers", () => {
     const result = assignBlockers(session([seat("a", [archangel()]), defender(0)]), choice, ["b1"]);
     expect(result.seats[1].board.battlefield.filter((c) => c.blocking)).toHaveLength(0);
+  });
+});
+
+describe("Defy Death (real Oracle text)", () => {
+  const defy = () => parseZoneEffect(real("Defy Death", "x").oracleText)!;
+  const run = (typeLine: string) => {
+    const mine = seat("a", []);
+    mine.board.graveyard = [bear("dead", { typeLine, zone: "graveyard" as const })];
+    return applyZoneEffect(session([mine]), "a", "Defy Death", defy()).seats[0].board.battlefield.find((c) => c.id === "dead");
+  };
+  it("returns the creature; an Angel gets two +1/+1 counters, others none", () => {
+    expect(defy()).toMatchObject({ kind: "reanimate", counterIfType: { typeWord: "angel", count: 2 } });
+    expect(run("Creature — Angel")?.counters?.find((c) => c.kind === "+1/+1")?.count).toBe(2);
+    expect(run("Creature — Human")?.counters).toBeUndefined();
   });
 });

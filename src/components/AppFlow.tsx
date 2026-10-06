@@ -14989,7 +14989,17 @@ export function applyZoneEffect(session: GameSession, casterSeatId: string, sour
           : undefined;
       const target = chooseReanimationTarget(session, casterSeatId, effect.anyGraveyard, effect.targetType, maxManaValue);
       if (!target) return noLegalTargetEvent(session, casterSeatId, sourceName);
-      const { session: reanimatedSession } = moveCardAcrossSeats(session, target.seatId, target.card.id, casterSeatId, "battlefield");
+      const { session: movedSession } = moveCardAcrossSeats(session, target.seatId, target.card.id, casterSeatId, "battlefield");
+      const counterRule = effect.counterIfType;
+      const reanimatedSession: GameSession =
+        counterRule && target.card.typeLine.toLowerCase().includes(counterRule.typeWord)
+          ? {
+              ...movedSession,
+              seats: movedSession.seats.map((seat) =>
+                seat.id !== casterSeatId ? seat : { ...seat, board: { ...seat.board, battlefield: seat.board.battlefield.map((card) => (card.id === target.card.id ? applyCounterDelta(card, "+1/+1", counterRule.count) : card)) } }
+              )
+            }
+          : movedSession;
       return {
         ...reanimatedSession,
         events: [
