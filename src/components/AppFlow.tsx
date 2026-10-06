@@ -291,6 +291,8 @@ type TriggerEffect = (
   // "Untap all attacking creatures. After this phase, there is an additional combat phase." (Scourge of the Throne; Hellkite
   // Charger with payCostText: "you may pay {5}{R}{R}. If you do, ...").
   | { kind: "additional_combat"; payCostText?: string }
+  // "When enchanted creature dies, return this card to its owner's hand." (Angelic Destiny) — the Aura is already in the graveyard.
+  | { kind: "return_self_to_hand" }
   // "Proliferate." (Norn's Choirmaster) — every eligible permanent and player, same as the blanket resolveProliferate.
   | { kind: "proliferate" }
 ) & {
@@ -1872,7 +1874,14 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       queued.push(...found.triggers);
       unparsed.push(...found.unparsed);
     }
-    setSession((current) => (current.pendingAttackDeclarations === attacks ? { ...current, pendingAttackDeclarations: undefined } : current));
+    // "Whenever you attack with two or more creatures" (Firemane Commando): judged once enough creatures are attacking, once per turn.
+    const multi = [...new Set(attacks.map((attack) => attack.seatId))].map((attackerSeatId) => findMultiAttackTriggers(session, attackerSeatId));
+    queued.push(...multi.flatMap((entry) => entry.triggers));
+    const multiKeys = multi.flatMap((entry) => entry.keys);
+    setSession((current) => {
+      const cleared = current.pendingAttackDeclarations === attacks ? { ...current, pendingAttackDeclarations: undefined } : current;
+      return multiKeys.length > 0 ? { ...cleared, onceEachTurnEffectsUsed: [...(cleared.onceEachTurnEffectsUsed ?? []), ...multiKeys] } : cleared;
+    });
     if (queued.length > 0) queueCommonTriggers(queued);
     // A clause no deterministic parser understands still goes to the rules advisor, as the old sweep did.
     for (const item of unparsed) void consultRulesAdvisor(phaseEventName("declare attackers step"), item.seatId, item.source);
@@ -16764,7 +16773,9 @@ export function findCommonTriggersForPermanentDied(
 
   for (const seat of session.seats) {
     const simultaneousDeathsForSeat = simultaneousDeaths.filter((death) => death.seatId === seat.id).map((death) => death.card);
-    const sources = [...seat.board.battlefield, ...simultaneousDeathsForSeat];
+    // An Aura that fell off with the creature is already in the graveyard, but its own "when enchanted creature dies" still triggers.
+    const fallenAttachments = (seat.board.graveyard ?? []).filter((card) => attachedSourceIds?.includes(card.id));
+    const sources = [...seat.board.battlefield, ...simultaneousDeathsForSeat, ...fallenAttachments];
     for (const source of sources) {
       const dynamicCounterCount = source.id === deadCard.id ? plusOneCounterCount(deadCard) : undefined;
       const effect = modalDeathTriggerEffect(source) ?? commonTriggerEffect(source.oracleText, "died", dynamicCounterCount);
@@ -16812,6 +16823,40 @@ export function findLifeGainTriggers(
 // Angel of Vitality: "If you would gain life, you gain that much life plus 1 instead." One extra life per such permanent.
 export function lifeGainReplacementBonus(seat: PlayerSeat): number {
   return seat.board.battlefield.filter((card) => !card.abilitiesStripped && /\bif you would gain life, you gain that much life plus 1 instead\b/i.test(card.oracleText)).length;
+}
+
+// "Whenever you attack with two or more creatures, ..." for the attacker's own permanents, and "Whenever another player attacks with
+// two or more creatures, they draw a card if none of those creatures attacked you." for everyone else's. `keys` are the
+// once-each-turn markers the caller records so a later declaration in the same combat doesn't fire them again.
+export function findMultiAttackTriggers(session: GameSession, attackerSeatId: string): { triggers: Array<Extract<PendingAction, { type: "trigger" }>>; keys: string[] } {
+  const triggers: Array<Extract<PendingAction, { type: "trigger" }>> = [];
+  const keys: string[] = [];
+  const attacker = session.seats.find((seat) => seat.id === attackerSeatId);
+  const attackers = attacker?.board.battlefield.filter((card) => card.attacking) ?? [];
+  if (!attacker || attackers.length < 2) return { triggers, keys };
+  for (const sourceSeat of session.seats) {
+    if (sourceSeat.hasLost) continue;
+    for (const source of sourceSeat.board.battlefield) {
+      if (source.abilitiesStripped) continue;
+      const key = `${session.turn}:${source.id}:multi_attack:${attackerSeatId}`;
+      if (session.onceEachTurnEffectsUsed?.includes(key)) continue;
+      for (const clause of oracleClauses(source.oracleText)) {
+        if (sourceSeat.id === attackerSeatId) {
+          const own = clause.match(/^whenever you attack with two or more creatures, (.+)$/i);
+          const effect = own ? commonTriggerEffect(own[1], "clause", undefined, sourceSeat) : undefined;
+          if (effect) {
+            triggers.push(makeCommonTrigger(attackerSeatId, sourceSeat.id, source, effect, `${source.name} triggers because ${attacker.name} attacked with two or more creatures.`));
+            keys.push(key);
+          }
+        } else if (/^whenever another player attacks with two or more creatures, they draw a card if none of those creatures attacked you\b/i.test(clause)) {
+          keys.push(key);
+          if (attackers.some((card) => card.attackTargetId === sourceSeat.id)) continue;
+          triggers.push(makeCommonTrigger(attackerSeatId, sourceSeat.id, source, { kind: "actor_draws_cards", amount: 1 }, `${source.name} triggers because ${attacker.name} attacked with two or more creatures, none at ${sourceSeat.name}.`));
+        }
+      }
+    }
+  }
+  return { triggers, keys };
 }
 
 export function findAttackTriggers(
@@ -17411,6 +17456,8 @@ export function commonTriggerEffect(
   }
   const extraCombat = text.match(/(?:you may pay (\{[^.]*?\})\. if you do, )?untap all attacking creatures(?: and|\.) ?after this phase, there is an additional combat phase/);
   if (extraCombat) return extraCombat[1] ? { kind: "additional_combat", payCostText: extraCombat[1].toUpperCase(), optional: true } : { kind: "additional_combat" };
+  if (/when enchanted creature dies, return this card to its owner'?s hand/.test(text) || (mode === "died" && /^return this card to its owner'?s hand\.?$/.test(text.trim()))) return { kind: "return_self_to_hand" };
+  if (/^investigate\.?$/.test(text.replace(/\([^)]*\)/g, "").replace(/^[^,]*,\s*/, "").trim())) return { kind: "create_tokens", tokens: [{ ...predefinedTokenSpec("Clue"), count: 1 }] };
   const rummage = text.match(/\byou may discard a card\. if you do, draw (a|one|two|three) cards?\b/);
   if (rummage) return { kind: "discard_then_draw", draw: numberWordToInt(rummage[1]) ?? 1, optional: true };
   if (/\byou gain life equal to that creature'?s toughness\b/.test(text)) return { kind: "gain_life_context_toughness" };
@@ -18131,6 +18178,12 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
     return drawMultipleForSeat(session, trigger.controllerSeatId, trigger.effect.amount, `${trigger.sourceCardName} trigger resolves. ${seatName} draws ${trigger.effect.amount} card${trigger.effect.amount === 1 ? "" : "s"}.`);
   }
   if (trigger.effect.kind === "proliferate") return resolveProliferate(session);
+  if (trigger.effect.kind === "return_self_to_hand") {
+    const holder = session.seats.find((item) => (item.board.graveyard ?? []).some((card) => card.id === trigger.sourceCardId));
+    if (!holder) return session;
+    const ownerId = (holder.board.graveyard ?? []).find((card) => card.id === trigger.sourceCardId)?.ownerSeatId ?? holder.id;
+    return rulesEvent(moveCardAcrossSeats(session, holder.id, trigger.sourceCardId, ownerId, "hand").session, ownerId, `${trigger.sourceCardName} returns to its owner's hand.`);
+  }
   if (trigger.effect.kind === "additional_combat") {
     // Marks the once-each-turn gate findAttackTriggers reads for "attacks for the first time each turn".
     let next: GameSession = { ...session, onceEachTurnEffectsUsed: [...(session.onceEachTurnEffectsUsed ?? []), `${session.turn}:${trigger.sourceCardId}:first_attack`] };

@@ -2,7 +2,7 @@
 // the test: two earlier tests passed on invented text while the real cards stayed broken (Court of Grace, the
 // "with power N or greater" watchers). Skipped per card when the catalog doesn't have it.
 import { describe, expect, it } from "vitest";
-import { adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
+import { findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
 import { parseRemovalEffect } from "@/lib/removalSpells";
 import { permanentMatchesQualifier } from "@/lib/characteristics";
 import { parseSpellExtraEffects } from "@/lib/spellExtras";
@@ -691,5 +691,49 @@ describe("extra combat and dethrone (real Oracle text)", () => {
     expect(trigger.effect).toMatchObject({ kind: "additional_combat", payCostText: "{5}{R}{R}" });
     const broke = resolveTriggerEffect(session([seat("a", [real("Hellkite Charger", "hc", { attacking: true })]), seat("b", [])]), trigger);
     expect(broke.extraCombatsPending).toBeUndefined();
+  });
+});
+
+describe("death-watching cards, batch 6 (real Oracle text)", () => {
+  it("Angelic Destiny returns to its owner's hand when the enchanted creature dies", () => {
+    const aura = real("Angelic Destiny", "ad", { zone: "graveyard" });
+    const mine = seat("a", []);
+    mine.board.graveyard = [aura];
+    const s = session([mine]);
+    const dead = bear("dead");
+    const triggers = findCommonTriggersForPermanentDied(s, "a", dead, ["ad"]);
+    expect(triggers.map((t) => t.effect.kind)).toEqual(["return_self_to_hand"]);
+    const after = resolveTriggerEffect(s, triggers[0]);
+    expect(after.seats[0].board.hand.map((c) => c.id)).toEqual(["ad"]);
+    expect(after.seats[0].board.graveyard ?? []).toHaveLength(0);
+    expect(findCommonTriggersForPermanentDied(s, "a", dead, [])).toHaveLength(0);
+  });
+  it("Merchant of Truth investigates when a nontoken creature you control dies, not for tokens", () => {
+    const s = session([seat("a", [real("Merchant of Truth", "mt")])]);
+    const triggers = findCommonTriggersForPermanentDied(s, "a", bear("dead"));
+    expect(triggers).toHaveLength(1);
+    expect(resolveTriggerEffect(s, triggers[0]).seats[0].board.battlefield.some((c) => /Clue/.test(c.name))).toBe(true);
+    expect(findCommonTriggersForPermanentDied(s, "a", bear("tok", { token: true }))).toHaveLength(0);
+  });
+});
+
+describe("Firemane Commando (real Oracle text)", () => {
+  const attacking = (id: string, target: string) => bear(id, { attacking: true, attackTargetId: target });
+  it("draws for you when you attack with two or more creatures, once per turn", () => {
+    const s = session([seat("a", [real("Firemane Commando", "fc"), attacking("x1", "b"), attacking("x2", "b")]), seat("b", [])]);
+    const { triggers, keys } = findMultiAttackTriggers(s, "a");
+    expect(triggers.map((t) => t.effect.kind)).toEqual(["draw_cards"]);
+    expect(findMultiAttackTriggers({ ...s, onceEachTurnEffectsUsed: keys }, "a").triggers).toHaveLength(0);
+  });
+  it("does not trigger for a single attacker", () => {
+    const s = session([seat("a", [real("Firemane Commando", "fc"), attacking("x1", "b")]), seat("b", [])]);
+    expect(findMultiAttackTriggers(s, "a").triggers).toHaveLength(0);
+  });
+  it("lets another player's draw happen only if none of their attackers hit the Commando's controller", () => {
+    const commando = seat("a", [real("Firemane Commando", "fc")]);
+    const missed = session([commando, seat("b", [attacking("y1", "c"), attacking("y2", "c")]), seat("c", [])]);
+    expect(findMultiAttackTriggers(missed, "b").triggers.map((t) => t.effect.kind)).toEqual(["actor_draws_cards"]);
+    const hit = session([commando, seat("b", [attacking("y1", "a"), attacking("y2", "c")]), seat("c", [])]);
+    expect(findMultiAttackTriggers(hit, "b").triggers).toHaveLength(0);
   });
 });
