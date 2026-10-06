@@ -328,6 +328,8 @@ type TriggerEffect = (
   | { kind: "proliferate" }
 ) & {
   optional?: boolean;
+  // The human's pick when a trigger's effect needs a choice (modal trigger: the mode index; Bontu: how many lands to sacrifice).
+  chosenOption?: string;
   // Only resolves if this holds when the trigger resolves ("...if you control the creature with the greatest power").
   condition?: TriggerCondition;
   // "Create a 0/1 green Plant creature token, then put a +1/+1 counter on each Plant you control."
@@ -778,6 +780,32 @@ type PendingRuleChoice =
       // cost (Cryptbreaker) — on completion the activation is re-run with the picked card instead
       // of discarding it here, so the mana, tap and discard are all paid together.
       activation?: { cardId: string; abilityIndex: number };
+    }
+  // A triggered ability that needs the human to pick one of several options before it resolves — a modal trigger's mode (Elder
+  // Gargaroth, Atsushi, Parapet Thrasher) or how many lands God-Eternal Bontu sacrifices. The pick goes back onto the trigger as
+  // effect.chosenOption and the trigger resolves normally.
+  | {
+      id: string;
+      kind: "choose_trigger_option";
+      controllerSeatId: string;
+      sourceCardId: string;
+      sourceCardName: string;
+      prompt: string;
+      options: Array<{ index: number; label: string }>;
+      trigger: Extract<PendingAction, { type: "trigger" }>;
+      remainingStack: PendingAction[];
+    }
+  // "Exile target card from a graveyard" (Scavenging Ooze) — the human picks the card BEFORE paying, then the activation re-runs with
+  // that card as its target.
+  | {
+      id: string;
+      kind: "choose_ability_card_target";
+      controllerSeatId: string;
+      sourceCardId: string;
+      sourceCardName: string;
+      prompt: string;
+      cards: Array<{ seatId: string; cardId: string }>;
+      activation: { cardId: string; abilityIndex: number };
     }
   | {
       id: string;
@@ -4765,12 +4793,35 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     setSession(() => resolved.session);
   }
 
-  function activateGenericManaAbility(seatId: string, cardId: string, abilityIndex: number) {
+  function activateGenericManaAbility(seatId: string, cardId: string, abilityIndex: number, chosenCardId?: string) {
     const seat = session.seats.find((item) => item.id === seatId);
     const card = seat?.board.battlefield.find((item) => item.id === cardId);
     const ability = card ? parseGenericManaAbilities(card.oracleText)[abilityIndex] : undefined;
     const effect = ability ? parseGenericAbilityEffect(ability.effectText) : undefined;
     const humanPool = seat?.kind === "human" ? poolForSeat(seatId) : undefined;
+    // "Exile target card from a graveyard" (Scavenging Ooze): the human picks the card, then pays.
+    if (seat?.kind === "human" && card && ability && effect?.kind === "exile_graveyard_card_scavenge" && chosenCardId === undefined) {
+      const pool = session.seats.flatMap((other) => (other.board.graveyard ?? []).map((graveCard) => ({ seatId: other.id, cardId: graveCard.id })));
+      if (pool.length === 0) {
+        addEvent(`There is no card in any graveyard for ${card.name} to exile.`, seatId, "Rules action");
+        return;
+      }
+      if (!payGenericManaCost(session, seatId, cardId, abilityIndex, humanPool)) {
+        addEvent(`You don't have enough open mana to activate ${card.name} (${ability.costManaText || "no mana"}).`, seatId, "Rules action");
+        return;
+      }
+      setPendingRuleChoice({
+        id: crypto.randomUUID(),
+        kind: "choose_ability_card_target",
+        controllerSeatId: seatId,
+        sourceCardId: cardId,
+        sourceCardName: card.name,
+        prompt: `${card.name}: choose a card from a graveyard to exile.`,
+        cards: pool,
+        activation: { cardId, abilityIndex }
+      });
+      return;
+    }
     if (card && ability && effect?.kind === "search_library") {
       const paid = payGenericManaCost(session, seatId, cardId, abilityIndex, humanPool);
       if (!paid) return;
@@ -4805,7 +4856,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     // drawing (see drawCard above for the simplest example); this one never did, so drawing your
     // first card of the turn off Greed silently skipped the miracle offer a natural/granted-miracle
     // draw would have gotten.
-    const next = applyGenericAbilityEffect(paid.session, seatId, paid.card, paid.effect);
+    const next = applyGenericAbilityEffect(paid.session, seatId, paid.card, paid.effect, chosenCardId);
     setSession(next);
     checkMiracleAfterDraw(session, next);
   }
@@ -5307,6 +5358,45 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     finishTriggerResolution(trigger, remainingStack, true);
   }
 
+  // Human-controlled triggers that need a real decision: opens the prompt and returns true (the trigger resolves when they answer), or
+  // returns false to let the normal automatic resolution run (agents, or nothing to choose between).
+  function openTriggerOptionPrompt(trigger: Extract<PendingAction, { type: "trigger" }>, remainingStack: PendingAction[]): boolean {
+    const controller = session.seats.find((seat) => seat.id === trigger.controllerSeatId);
+    if (!controller || controller.kind !== "human" || trigger.effect.chosenOption !== undefined) return false;
+    const open = (prompt: string, options: Array<{ index: number; label: string }>) => {
+      setPendingRuleChoice({ id: crypto.randomUUID(), kind: "choose_trigger_option", controllerSeatId: controller.id, sourceCardId: trigger.sourceCardId, sourceCardName: trigger.sourceCardName, prompt, options, trigger, remainingStack });
+      return true;
+    };
+    if (trigger.effect.kind === "modal" && trigger.effect.modal.chooseCount === 1) {
+      const modal = trigger.effect.modal;
+      const source = session.seats.flatMap((seat) => seat.board.battlefield).find((card) => card.id === trigger.sourceCardId);
+      const options = modal.modes
+        .map((mode, index) => ({ mode, index }))
+        .filter(({ mode, index }) => genericModalModeHasLegalTarget(session, controller.id, mode) && !(modal.distinctPerTurn && session.onceEachTurnEffectsUsed?.includes(`${session.turn}:${source?.id ?? trigger.sourceCardId}:mode:${index}`)))
+        .map(({ mode, index }) => ({ index, label: mode.text ?? `Mode ${index + 1}` }));
+      if (options.length >= 2) return open(`${trigger.sourceCardName}: choose one.`, options);
+      return false;
+    }
+    if (trigger.effect.kind === "sacrifice_surplus_then_draw") {
+      const lands = controller.board.battlefield.filter((card) => isLandCard(card) && card.id !== trigger.sourceCardId).length;
+      if (lands === 0) return false;
+      return open(
+        `${trigger.sourceCardName}: sacrifice how many of your lands (tapped ones first)? You draw that many cards.`,
+        Array.from({ length: Math.min(lands, 12) + 1 }, (_, count) => ({ index: count, label: count === 0 ? "None" : `${count} land${count === 1 ? "" : "s"}` }))
+      );
+    }
+    return false;
+  }
+
+  function completeTriggerOption(index: number) {
+    const choice = pendingRuleChoice;
+    if (!choice || choice.kind !== "choose_trigger_option") return;
+    setPendingRuleChoice(undefined);
+    const chosen = { ...choice.trigger, effect: { ...choice.trigger.effect, chosenOption: String(index) } } as Extract<PendingAction, { type: "trigger" }>;
+    setSession((current) => resolveTriggerEffect(current, chosen));
+    resumeAfterTriggerChoice(choice.trigger, choice.remainingStack);
+  }
+
   function finishTriggerResolution(trigger: Extract<PendingAction, { type: "trigger" }>, remainingStack: PendingAction[], accepted: boolean) {
     if (accepted && trigger.effect.kind === "draw_then_put_back") {
       // "Draw a card, then put a card from your hand on top of your library" (Aminatou, the
@@ -5348,6 +5438,13 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         });
         return;
       }
+    } else if (accepted && openTriggerOptionPrompt(trigger, remainingStack)) {
+      return;
+    } else if (accepted && (trigger.effect.kind === "scry_cards" || trigger.effect.kind === "surveil_cards") && session.seats.find((seat) => seat.id === trigger.controllerSeatId)?.kind === "human") {
+      // The human looks at the cards and decides, instead of the automatic keep-everything-good heuristic.
+      const lookSeat = session.seats.find((seat) => seat.id === trigger.controllerSeatId)!;
+      const isSurveil = trigger.effect.kind === "surveil_cards";
+      startLibraryLook(isSurveil ? "surveil" : "scry", trigger.effect.amount + (isSurveil ? surveilBonusForSeat(lookSeat) : 0));
     } else if (accepted && trigger.effect.kind === "connive") {
       // "Draw a card, then discard a card" (Ledger Shredder, ...) needs a real choice of WHICH
       // card to discard — resolveTriggerEffect is a pure function with no access to
@@ -7539,6 +7636,12 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   // graveyard the card is actually sitting in (Virtue of Persistence's pool spans every graveyard,
   // not just the controller's own), separate from the choice's own controllerSeatId.
   function chooseGraveyardReanimationTarget(sourceSeatId: string, cardId: string) {
+    if (pendingRuleChoice?.kind === "choose_ability_card_target") {
+      const ability = pendingRuleChoice;
+      setPendingRuleChoice(undefined);
+      activateGenericManaAbility(ability.controllerSeatId, ability.activation.cardId, ability.activation.abilityIndex, cardId);
+      return;
+    }
     const choice = pendingRuleChoice;
     if (!choice || choice.kind !== "choose_creature_from_graveyards") return;
     setPendingRuleChoice(undefined);
@@ -7654,6 +7757,10 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   // immediately via the same applyRemovalEffect the deterministic/agent path already uses for those
   // shapes.
   function chooseModalOption(index: number) {
+    if (pendingRuleChoice?.kind === "choose_trigger_option") {
+      completeTriggerOption(index);
+      return;
+    }
     const choice = pendingRuleChoice;
     if (!choice || choice.kind !== "choose_modal_option") return;
     const mode = choice.modes[index];
@@ -11845,7 +11952,7 @@ function genericAbilityEffectHasLegalTarget(session: GameSession, casterSeatId: 
   return true;
 }
 
-export function applyGenericAbilityEffect(session: GameSession, casterSeatId: string, sourceCard: VisibleCard, effect: GenericAbilityEffect): GameSession {
+export function applyGenericAbilityEffect(session: GameSession, casterSeatId: string, sourceCard: VisibleCard, effect: GenericAbilityEffect, chosenCardId?: string): GameSession {
   if (effect.kind === "removal") return applyPrimitiveAction(session, casterSeatId, sourceCard, { kind: "removal", effect: effect.effect });
   if (effect.kind === "zone") return applyPrimitiveAction(session, casterSeatId, sourceCard, { kind: "zone", effect: effect.effect });
   if (effect.kind === "pump") return applyPrimitiveAction(session, casterSeatId, sourceCard, { kind: "pump_target", effect: effect.effect });
@@ -11867,7 +11974,7 @@ export function applyGenericAbilityEffect(session: GameSession, casterSeatId: st
       if (entry.seatId !== casterSeatId) return (isCreature ? 20 : 10) + entry.card.manaValue / 100;
       return isCreature ? -1 : 1;
     };
-    const pick = all.reduce<(typeof all)[number] | undefined>((best, entry) => (!best || rank(entry) > rank(best) ? entry : best), undefined);
+    const pick = (chosenCardId ? all.find((entry) => entry.card.id === chosenCardId) : undefined) ?? all.reduce<(typeof all)[number] | undefined>((best, entry) => (!best || rank(entry) > rank(best) ? entry : best), undefined);
     if (!caster || !pick) return rulesEvent(session, casterSeatId, `${sourceCard.name} has no card in any graveyard to exile.`);
     const exiled = moveCardAcrossSeats(session, pick.seatId, pick.card.id, pick.seatId, "exile").session;
     if (!pick.card.typeLine.includes("Creature")) return rulesEvent(exiled, casterSeatId, `${caster.name} exiles ${pick.card.name} with ${sourceCard.name}.`);
@@ -16037,12 +16144,13 @@ function applyPrimitiveActionPlan(session: GameSession, seatId: string, sourceCa
   }, session);
 }
 
-type GenericModalMode =
+type GenericModalMode = (
   | { kind: "trigger"; effect: TriggerEffect }
   | { kind: "zone"; effect: ZoneEffect }
   | { kind: "pump"; effect: PumpEffect }
   // A single removal-shaped bullet inside a trigger's choose-one (Parapet Thrasher's "Destroy target artifact that opponent controls.")
-  | { kind: "removal"; effect: RemovalEffect };
+  | { kind: "removal"; effect: RemovalEffect }
+) & { text?: string };
 
 interface GenericModalEffect {
   chooseCount: number;
@@ -16068,29 +16176,38 @@ export function parseGenericModalEffect(oracleText: string, chosenX: number | un
   const modes: GenericModalMode[] = [];
   for (const rawModeText of header.modeTexts) {
     const modeText = chosenX !== undefined ? substituteX(rawModeText, chosenX) : rawModeText;
+    const before = modes.length;
+    parseOneGenericMode(modeText, modes);
+    // The bullet's own wording labels the mode in the prompt a human sees.
+    if (modes.length > before) modes[modes.length - 1] = { ...modes[modes.length - 1], text: modeText.replace(/^[•*]\s*/, "").trim() };
+  }
+  return modes.length > 0 ? { chooseCount: header.chooseCount, modes, ...(/hasn'?t been chosen this turn/i.test(oracleText) ? { distinctPerTurn: true } : {}) } : undefined;
+}
+
+function parseOneGenericMode(modeText: string, modes: GenericModalMode[]): void {
+  {
     const pump = parseTargetedPump(modeText);
     if (pump) {
       modes.push({ kind: "pump", effect: pump });
-      continue;
+      return;
     }
     const zone = parseZoneEffect(modeText);
     if (zone) {
       modes.push({ kind: "zone", effect: zone });
-      continue;
+      return;
     }
     const trigger = commonTriggerEffect(modeText, "clause");
     if (trigger?.kind === "damage_each_other_opponent") {
       modes.push({ kind: "trigger", effect: trigger });
-      continue;
+      return;
     }
     const removal = parseRemovalEffect(modeText);
     if (removal && removal.kind !== "modal") {
       modes.push({ kind: "removal", effect: removal });
-      continue;
+      return;
     }
     if (trigger) modes.push({ kind: "trigger", effect: trigger });
   }
-  return modes.length > 0 ? { chooseCount: header.chooseCount, modes, ...(/hasn'?t been chosen this turn/i.test(oracleText) ? { distinctPerTurn: true } : {}) } : undefined;
 }
 
 function genericModalModeHasLegalTarget(session: GameSession, casterSeatId: string, mode: GenericModalMode): boolean {
@@ -16110,11 +16227,14 @@ function genericModalModeHasLegalTarget(session: GameSession, casterSeatId: stri
 // has no notion of declining (that only happens upstream, in the accept/decline UI a real triggered
 // ability goes through before ever reaching it), and a synthetic trigger built here skips that step
 // entirely, matching how cheaply this engine already treats "optional" ETB effects elsewhere.
-export function applyGenericModalEffect(session: GameSession, casterSeatId: string, sourceCard: VisibleCard, effect: GenericModalEffect, contextSeatId?: string): GameSession {
+export function applyGenericModalEffect(session: GameSession, casterSeatId: string, sourceCard: VisibleCard, effect: GenericModalEffect, contextSeatId?: string, forcedIndex?: number): GameSession {
   const modeKey = (index: number) => `${session.turn}:${sourceCard.id}:mode:${index}`;
   const indexed = effect.modes.map((mode, index) => ({ mode, index }));
   const viableModes = indexed.filter(
-    ({ mode, index }) => genericModalModeHasLegalTarget(session, casterSeatId, mode) && !(effect.distinctPerTurn && session.onceEachTurnEffectsUsed?.includes(modeKey(index)))
+    ({ mode, index }) =>
+      (forcedIndex === undefined || index === forcedIndex) &&
+      genericModalModeHasLegalTarget(session, casterSeatId, mode) &&
+      !(effect.distinctPerTurn && session.onceEachTurnEffectsUsed?.includes(modeKey(index)))
   );
   const chosen = viableModes.slice(0, effect.chooseCount);
   if (chosen.length === 0) return noLegalTargetEvent(session, casterSeatId, sourceCard.name);
@@ -18626,7 +18746,8 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
     const owner = session.seats.find((item) => item.id === trigger.controllerSeatId);
     if (!owner) return session;
     const lands = owner.board.battlefield.filter((card) => isLandCard(card) && card.id !== trigger.sourceCardId).sort((a, b) => Number(Boolean(b.tapped)) - Number(Boolean(a.tapped)));
-    const surplus = lands.slice(0, Math.max(0, lands.length - 7));
+    const chosenCount = trigger.effect.chosenOption !== undefined ? Number.parseInt(trigger.effect.chosenOption, 10) : undefined;
+    const surplus = lands.slice(0, chosenCount !== undefined ? Math.max(0, Math.min(chosenCount, lands.length)) : Math.max(0, lands.length - 7));
     if (surplus.length === 0) return rulesEvent(session, owner.id, `${trigger.sourceCardName}: ${owner.name} sacrifices nothing.`);
     const ids = new Set(surplus.map((card) => card.id));
     const sacrificed: GameSession = {
@@ -18980,7 +19101,7 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
     const modalSource = session.seats.flatMap((seat) => seat.board.battlefield).find((card) => card.id === trigger.sourceCardId);
     // A "when this dies" modal source has already left the battlefield; only its name is needed then.
     const source = modalSource ?? ({ id: trigger.sourceCardId, name: trigger.sourceCardName, typeLine: "", oracleText: "", colors: [], manaValue: 0, role: "permanent", zone: "graveyard" } as VisibleCard);
-    return applyGenericModalEffect(session, trigger.controllerSeatId, source, trigger.effect.modal, trigger.actorSeatId);
+    return applyGenericModalEffect(session, trigger.controllerSeatId, source, trigger.effect.modal, trigger.actorSeatId, trigger.effect.chosenOption !== undefined ? Number.parseInt(trigger.effect.chosenOption, 10) : undefined);
   }
   if (trigger.effect.kind === "scry_cards" || trigger.effect.kind === "surveil_cards") {
     return resolveAgentLibraryLookWorkflow(session, trigger.controllerSeatId, trigger.sourceCardName, trigger.effect.kind, trigger.effect.amount);
@@ -19560,6 +19681,22 @@ function ruleChoiceView(
         cards: humanSeat.board.battlefield
           .filter((card) => hasCardType(card, "Creature"))
           .map((card) => ({ card, seatId: humanSeat.id, seatName: humanSeat.name }))
+      };
+    }
+    if (choice.kind === "choose_trigger_option") {
+      return { kind: "choose_modal_option" as const, sourceCardName: choice.sourceCardName, prompt: choice.prompt, options: choice.options };
+    }
+    if (choice.kind === "choose_ability_card_target") {
+      return {
+        kind: "choose_creature_from_graveyards" as const,
+        sourceCardName: choice.sourceCardName,
+        prompt: choice.prompt,
+        actionLabel: "Exile",
+        cards: choice.cards.flatMap((entry) => {
+          const owner = session.seats.find((seat) => seat.id === entry.seatId);
+          const card = owner?.board.graveyard?.find((item) => item.id === entry.cardId);
+          return owner && card ? [{ card, seatId: owner.id, seatName: owner.name }] : [];
+        })
       };
     }
     if (choice.kind === "choose_modal_option") {

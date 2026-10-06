@@ -1244,3 +1244,41 @@ describe("Orb of Dragonkind's sacrifice ability (real Oracle text)", () => {
     expect(after.library![0].id).toBe("y2");
   });
 });
+
+describe("human choices for auto-picked effects (pure halves)", () => {
+  it("Elder Gargaroth's modes carry their own wording as labels, and a forced mode index is honoured", () => {
+    const garg = real("Elder Gargaroth", "garg", { power: "6", toughness: "6" });
+    const s = session([seat("a", [garg]), seat("b", [])]);
+    s.seats[0].library = Array.from({ length: 4 }, (_, i) => bear(`l${i}`, { zone: "library" as const }));
+    s.seats[0].zones = { ...s.seats[0].zones, library: 4 };
+    const [trigger] = findAttackTriggers(s, { seatId: "a", card: garg, defendingSeatId: "b" }).triggers;
+    if (trigger.effect.kind !== "modal") throw new Error("expected modal");
+    expect(trigger.effect.modal.modes.map((m) => m.text)).toEqual(["Create a 3/3 green Beast creature token.", "You gain 3 life.", "Draw a card."]);
+    const gain = resolveTriggerEffect(s, { ...trigger, effect: { ...trigger.effect, chosenOption: "1" } });
+    expect(gain.seats[0].life).toBe(43);
+    expect(gain.seats[0].board.battlefield.some((c) => /Beast/.test(c.name))).toBe(false);
+    const draw = resolveTriggerEffect(s, { ...trigger, effect: { ...trigger.effect, chosenOption: "2" } });
+    expect(draw.seats[0].board.hand).toHaveLength(1);
+  });
+  it("Scavenging Ooze exiles the card the human picked, not the heuristic one", () => {
+    const ooze = real("Scavenging Ooze", "ooze", { power: "2", toughness: "2" });
+    const mine = seat("a", [ooze]);
+    const theirs = seat("b", []);
+    theirs.board.graveyard = [bear("good", { zone: "graveyard" as const, manaValue: 6 }), bear("pick", { zone: "graveyard" as const, typeLine: "Land" })];
+    const effect = parseGenericAbilityEffect(parseGenericManaAbilities(ooze.oracleText)[0].effectText)!;
+    const after = applyGenericAbilityEffect(session([mine, theirs]), "a", ooze, effect, "pick");
+    expect(after.seats[1].board.graveyard!.map((c) => c.id)).toEqual(["good"]);
+    expect(after.seats[0].life).toBe(40);
+  });
+  it("Bontu sacrifices exactly the number of lands the human chose", () => {
+    const bontu = real("God-Eternal Bontu", "gb");
+    const mine = seat("a", [bontu, ...Array.from({ length: 4 }, (_, i) => real("Swamp", `sw${i}`))]);
+    mine.library = Array.from({ length: 5 }, (_, i) => bear(`l${i}`, { zone: "library" as const }));
+    mine.zones = { ...mine.zones, library: 5 };
+    const s = session([mine]);
+    const [trigger] = findCommonTriggersForPermanentEntered(s, "a", bontu);
+    const after = resolveTriggerEffect(s, { ...trigger, effect: { ...trigger.effect, chosenOption: "2" } }).seats[0];
+    expect(after.board.battlefield.filter((c) => /Swamp/.test(c.name))).toHaveLength(2);
+    expect(after.board.hand).toHaveLength(2);
+  });
+});
