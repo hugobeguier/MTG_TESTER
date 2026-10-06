@@ -324,6 +324,8 @@ type TriggerEffect = (
   | { kind: "sacrifice_surplus_then_draw" }
   // Hideaway N (Mosswort Bridge, Spinerock Knoll): look at the top N cards, exile one face down, the rest to the bottom in a random order.
   | { kind: "hideaway"; count: number }
+  // "As this enchantment enters, choose Khans or Dragons." (Outpost Siege) — records the label on the permanent (chosenOption picks it).
+  | { kind: "choose_named_mode"; options: string[] }
   // "Proliferate." (Norn's Choirmaster) — every eligible permanent and player, same as the blanket resolveProliferate.
   | { kind: "proliferate" }
 ) & {
@@ -5507,6 +5509,10 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         remainingStack
       });
       return true;
+    }
+    if (trigger.effect.kind === "choose_named_mode") {
+      const names = trigger.effect.options;
+      return open(trigger.sourceCardName + ": choose " + names.join(" or ") + ".", names.map((label, index) => ({ index, label })));
     }
     if (trigger.effect.kind === "hideaway") {
       const top = (controller.library ?? []).slice(0, trigger.effect.count);
@@ -17690,6 +17696,21 @@ export function findCommonTriggersForPermanentDied(
     }
   }
 
+  // "• Dragons — Whenever a creature you control leaves the battlefield, this enchantment deals 1 damage to any target." (Outpost Siege)
+  // Only deaths are seen here (bounce and exile don't reach this finder).
+  const deadSeat = session.seats.find((seat) => seat.id === deadSeatId);
+  for (const watcher of deadSeat?.board.battlefield ?? []) {
+    if (watcher.abilitiesStripped || watcher.id === deadCard.id) continue;
+    for (const clause of oracleClauses(watcher.oracleText)) {
+      const match = clause.match(/^(?:[•*]\s*)?(?:([A-Za-z]+)\s*[—-]\s*)?whenever a creature you control leaves the battlefield, (.+)$/i);
+      if (!match) continue;
+      if (match[1] && watcher.chosenMode && watcher.chosenMode.toLowerCase() !== match[1].toLowerCase()) continue;
+      if (match[1] && !watcher.chosenMode) continue;
+      const leaveEffect = commonTriggerEffect(match[2], "clause");
+      if (leaveEffect) triggers.push(makeCommonTrigger(deadSeatId, deadSeat!.id, watcher, leaveEffect, watcher.name + " triggers because " + deadCard.name + " left the battlefield."));
+    }
+  }
+
   return triggers;
 }
 
@@ -18238,6 +18259,8 @@ function enteredTriggerApplies(source: VisibleCard, sourceSeatId: string, entere
     subjectIsControlledBySourceController: enteredSeatId === sourceSeatId
   });
   if (parsedSubject !== undefined) return parsedSubject;
+  // "As this enchantment enters, choose Khans or Dragons." (Outpost Siege) — only ever about its own entry.
+  if (/\bas this (?:enchantment|artifact|permanent|creature) enters, choose\b/.test(text)) return source.id === enteredCard.id;
   const underYourControl = enteredSeatId === sourceSeatId;
   const isAnother = source.id !== enteredCard.id;
   const selfEntered = source.id === enteredCard.id;
@@ -18442,6 +18465,8 @@ export function commonTriggerEffect(
   if (/sacrifice any number of other permanents, then draw that many cards/.test(text)) return { kind: "sacrifice_surplus_then_draw" };
   const hideawayMatch = text.match(/(?:^|\s)hideaway (\d+)\b/);
   if (hideawayMatch && mode === "entered") return { kind: "hideaway", count: Number.parseInt(hideawayMatch[1], 10) };
+  const namedMode = text.match(/\bas this (?:enchantment|artifact|permanent|creature) enters, choose ([a-z]+) or ([a-z]+)\./);
+  if (namedMode && mode === "entered") return { kind: "choose_named_mode", options: [namedMode[1], namedMode[2]].map((label) => label.charAt(0).toUpperCase() + label.slice(1)) };
   const rummage = text.match(/\byou may discard a card\. if you do, draw (a|one|two|three) cards?\b/);
   if (rummage) return { kind: "discard_then_draw", draw: numberWordToInt(rummage[1]) ?? 1, optional: true };
   if (/\byou gain life equal to that creature'?s toughness\b/.test(text)) return { kind: "gain_life_context_toughness" };
@@ -19271,6 +19296,18 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
     return drawMultipleForSeat(session, trigger.controllerSeatId, trigger.effect.amount, `${trigger.sourceCardName} trigger resolves. ${seatName} draws ${trigger.effect.amount} card${trigger.effect.amount === 1 ? "" : "s"}.`);
   }
   if (trigger.effect.kind === "proliferate") return resolveProliferate(session);
+  if (trigger.effect.kind === "choose_named_mode") {
+    const { options } = trigger.effect;
+    const picked = (trigger.effect.chosenOption !== undefined ? options[Number.parseInt(trigger.effect.chosenOption, 10)] : undefined) ?? options[0];
+    return rulesEvent(
+      {
+        ...session,
+        seats: session.seats.map((item) => ({ ...item, board: { ...item.board, battlefield: item.board.battlefield.map((card) => (card.id === trigger.sourceCardId ? { ...card, chosenMode: picked } : card)) } }))
+      },
+      trigger.controllerSeatId,
+      trigger.sourceCardName + ": " + picked + " is chosen."
+    );
+  }
   if (trigger.effect.kind === "hideaway") {
     const owner = session.seats.find((item) => item.id === trigger.controllerSeatId);
     const library = owner?.library ?? [];
@@ -20866,6 +20903,9 @@ function targetCreatureCounterPhaseTrigger(
 export function applyDeterministicPhaseTrigger(session: GameSession, seatId: string, sourceCard: VisibleCard, phase: TurnPhase): GameSession | undefined {
   const clauseText = phaseEffectText(sourceCard.oracleText, phase);
   if (!clauseText.trim()) return undefined;
+  // "• Khans — At the beginning of your upkeep, ..." (Outpost Siege) only runs when that label was the one chosen as it entered.
+  const modeLabel = clauseText.match(/^[•*]\s*([A-Za-z]+)\s*[—-]/)?.[1];
+  if (modeLabel && (sourceCard.chosenMode ?? modeLabel).toLowerCase() !== modeLabel.toLowerCase() && sourceCard.chosenMode) return session;
 
   // "At the beginning of your upkeep, if you're the monarch, create a 5/5 red Dragon token with flying." (Skyline
   // Despot) — only does anything while you hold the monarchy.

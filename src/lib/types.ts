@@ -321,6 +321,8 @@ export interface VisibleCard {
   exiledPlayableFree?: boolean;
   // Hideaway: the land whose "look at the top N, exile one face down" put this card here.
   hideawaySourceId?: string;
+  // "As this enters, choose Khans or Dragons." (Outpost Siege): the label picked, which gates the matching bullet.
+  chosenMode?: string;
   // Set when a "gain control...until end of turn" effect (Threaten-style) moved this permanent to
   // a new controller's battlefield — cleared, and control reverted to ownerSeatId, by
   // clearTemporaryBuffs at the next turn change, same timing as temporaryPowerBonus.

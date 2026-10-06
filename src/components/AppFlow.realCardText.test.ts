@@ -1416,3 +1416,31 @@ describe("cast modal spells offer their modes to the human (pure half)", () => {
     expect(spellModePrompt(session([seat("a", []), seat("b", [bear("v")])]), "a", real("Lightning Bolt", "spell"))).toBeUndefined();
   });
 });
+
+describe("Outpost Siege modes (real Oracle text)", () => {
+  const siege = (mode?: string) => real("Outpost Siege", "os", mode ? { chosenMode: mode } : {});
+  it("choosing a mode as it enters is recorded on the permanent", () => {
+    const card = siege();
+    const s = session([seat("a", [card])]);
+    const [trigger] = findCommonTriggersForPermanentEntered(s, "a", card);
+    expect(trigger.effect).toMatchObject({ kind: "choose_named_mode", options: ["Khans", "Dragons"] });
+    const picked = resolveTriggerEffect(s, { ...trigger, effect: { ...trigger.effect, chosenOption: "1" } });
+    expect(picked.seats[0].board.battlefield[0].chosenMode).toBe("Dragons");
+    expect(resolveTriggerEffect(s, trigger).seats[0].board.battlefield[0].chosenMode).toBe("Khans");
+  });
+  it("Dragons mode: a creature leaving pings any target; Khans mode: it doesn't", () => {
+    const dead = bear("dead");
+    const dragons = session([seat("a", [siege("Dragons")]), seat("b", [bear("v", { toughness: "1" })])]);
+    const triggers = findCommonTriggersForPermanentDied(dragons, "a", dead);
+    expect(triggers.map((t) => t.effect.kind)).toEqual(["damage_effect"]);
+    const khans = session([seat("a", [siege("Khans")]), seat("b", [])]);
+    expect(findCommonTriggersForPermanentDied(khans, "a", dead)).toHaveLength(0);
+  });
+  it("Dragons mode doesn't also exile cards at upkeep", () => {
+    const mine = seat("a", [siege("Dragons")]);
+    mine.library = [bear("top", { zone: "library" as const })];
+    mine.zones = { ...mine.zones, library: 1 };
+    const after = applyDeterministicPhaseTrigger(session([mine]), "a", siege("Dragons"), "upkeep step");
+    expect(after?.seats[0].library?.length ?? 1).toBe(1);
+  });
+});
