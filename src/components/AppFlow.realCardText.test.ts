@@ -2,8 +2,9 @@
 // the test: two earlier tests passed on invented text while the real cards stayed broken (Court of Grace, the
 // "with power N or greater" watchers). Skipped per card when the catalog doesn't have it.
 import { describe, expect, it } from "vitest";
-import { resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
+import { adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
 import { parseRemovalEffect } from "@/lib/removalSpells";
+import { permanentMatchesQualifier } from "@/lib/characteristics";
 import { parseSpellExtraEffects } from "@/lib/spellExtras";
 import { etbEffectText } from "@/lib/oracleClauses";
 import { parseGenericManaAbilities, parseGenericTapAbilities } from "@/lib/activatedAbilities";
@@ -598,5 +599,54 @@ describe("static abilities, batch 5 (real Oracle text)", () => {
   it("Rishkar's enters trigger puts a +1/+1 counter on up to two creatures", () => {
     const effect = commonTriggerEffect(real("Rishkar, Peema Renegade", "x").oracleText.split("\n")[0], "clause");
     expect(effect).toEqual({ kind: "counters_on_up_to_creatures", counterKind: "+1/+1", amount: 1, count: 2 });
+  });
+});
+
+describe("modal death trigger: Atsushi (real Oracle text)", () => {
+  it("queues a modal trigger when Atsushi dies, and resolving it does something", () => {
+    const atsushi = real("Atsushi, the Blazing Sky", "ats", { power: "4", toughness: "4" });
+    const mine = seat("a", [], { });
+    mine.library = Array.from({ length: 6 }, (_, i) => bear(`l${i}`, { zone: "library" as const }));
+    mine.zones = { ...mine.zones, library: 6 };
+    const s = session([mine, seat("b", [])]);
+    const triggers = findCommonTriggersForPermanentDied(s, "a", atsushi);
+    expect(triggers).toHaveLength(1);
+    expect(triggers[0].effect.kind).toBe("modal");
+    const after = resolveTriggerEffect(s, triggers[0]);
+    expect(after.events.length).toBeGreaterThan(0);
+    expect(after.seats[0].library!.length).toBeLessThan(6);
+  });
+});
+
+describe("rummage triggers, cost reduction, changeling (real Oracle text)", () => {
+  it("Bitter Reunion and Hazoret's Monument discard a card and then draw", () => {
+    const lines = (n: string) => real(n, "x").oracleText.split("\n");
+    const reunion = commonTriggerEffect(lines("Bitter Reunion")[0], "clause");
+    expect(reunion).toMatchObject({ kind: "discard_then_draw", draw: 2 });
+    const monument = commonTriggerEffect(lines("Hazoret's Monument")[1], "clause");
+    expect(monument).toMatchObject({ kind: "discard_then_draw", draw: 1 });
+    const mine = seat("a", []);
+    mine.board.hand = [bear("h1")];
+    mine.library = Array.from({ length: 5 }, (_, i) => bear(`l${i}`, { zone: "library" as const }));
+    mine.zones = { ...mine.zones, library: 5, hand: 1 };
+    const trigger = { id: "t", type: "trigger" as const, actorSeatId: "a", controllerSeatId: "a", sourceCardId: "x", sourceCardName: "Bitter Reunion", triggerKind: "common" as const, effect: reunion!, message: "" };
+    const after = resolveTriggerEffect(session([mine]), trigger);
+    expect(after.seats[0].board.hand).toHaveLength(2);
+    expect(after.seats[0].board.graveyard).toHaveLength(1);
+    const empty = seat("a", []);
+    empty.library = mine.library;
+    expect(resolveTriggerEffect(session([empty]), trigger).seats[0].board.hand).toHaveLength(0);
+  });
+  it("Taurean Mauler counts as a Dragon (changeling)", () => {
+    expect(permanentMatchesQualifier(real("Taurean Mauler", "tm"), "dragon")).toBe(true);
+    expect(permanentMatchesQualifier(bear("b"), "dragon")).toBe(false);
+  });
+  it("Hazoret's Monument makes red creature spells cost {1} less", () => {
+    const monument = real("Hazoret's Monument", "hm");
+    const s = seat("a", [monument]);
+    const red = bear("r", { colors: ["R"], manaValue: 4, zone: "hand" as const });
+    const green = bear("g", { colors: ["G"], manaValue: 4, zone: "hand" as const });
+    expect(adjustedCastingCost(s, red, 4, "hand", "a", [s])).toBe(3);
+    expect(adjustedCastingCost(s, green, 4, "hand", "a", [s])).toBe(4);
   });
 });

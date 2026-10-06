@@ -282,6 +282,8 @@ type TriggerEffect = (
   | { kind: "counters_on_up_to_creatures"; counterKind: string; amount: number; count: number }
   // Living weapon (Tangleweave Armor): "When this Equipment enters, create a 0/0 black Phyrexian Germ creature token, then attach this to it."
   | { kind: "living_weapon" }
+  // "You may discard a card. If you do, draw a card / two cards." (Bitter Reunion, Hazoret's Monument) — only draws if a card was discarded.
+  | { kind: "discard_then_draw"; draw: number }
   // "Proliferate." (Norn's Choirmaster) — every eligible permanent and player, same as the blanket resolveProliferate.
   | { kind: "proliferate" }
 ) & {
@@ -16714,6 +16716,20 @@ function applyExtraUntapEffects(session: GameSession, activeUntapSeatId: string)
   return next;
 }
 
+// "When Atsushi dies, choose one — • ... • ..." — the modes sit on the bullet lines after the header clause.
+function modalDeathTriggerEffect(source: VisibleCard): TriggerEffect | undefined {
+  const clauses = oracleClauses(source.oracleText);
+  const headerIndex = clauses.findIndex((clause) => /^(?:when|whenever)\b[^,]*\bdies, choose (?:one|two)\b.*[—-]\s*$/i.test(clause));
+  if (headerIndex < 0) return undefined;
+  const bullets: string[] = [];
+  for (const next of clauses.slice(headerIndex + 1)) {
+    if (!/^[•*]/.test(next)) break;
+    bullets.push(next);
+  }
+  const modal = parseGenericModalEffect([clauses[headerIndex], ...bullets].join("\n"), undefined);
+  return modal ? { kind: "modal", modal } : undefined;
+}
+
 export function findCommonTriggersForPermanentDied(
   session: GameSession,
   deadSeatId: string,
@@ -16735,7 +16751,7 @@ export function findCommonTriggersForPermanentDied(
     const sources = [...seat.board.battlefield, ...simultaneousDeathsForSeat];
     for (const source of sources) {
       const dynamicCounterCount = source.id === deadCard.id ? plusOneCounterCount(deadCard) : undefined;
-      const effect = commonTriggerEffect(source.oracleText, "died", dynamicCounterCount);
+      const effect = modalDeathTriggerEffect(source) ?? commonTriggerEffect(source.oracleText, "died", dynamicCounterCount);
       if (!effect || !deathTriggerApplies(source, seat.id, deadCard, deadSeatId, attachedSourceIds)) continue;
       triggers.push(makeCommonTrigger(deadSeatId, seat.id, source, effect, `${source.name} triggers because ${deadCard.name} died.`));
     }
@@ -17358,6 +17374,8 @@ export function commonTriggerEffect(
   const optional = /\byou may\b/.test(text) || undefined;
   // Single-card shapes the generic parsers below would misread (a flat draw for a conditional one) or miss entirely.
   if (mode === "entered" && /^living weapon\b/im.test(oracleText)) return { kind: "living_weapon" };
+  const rummage = text.match(/\byou may discard a card\. if you do, draw (a|one|two|three) cards?\b/);
+  if (rummage) return { kind: "discard_then_draw", draw: numberWordToInt(rummage[1]) ?? 1, optional: true };
   if (/\byou gain life equal to that creature'?s toughness\b/.test(text)) return { kind: "gain_life_context_toughness" };
   const upToCreatures = text.match(/\bput an? (\+1\/\+1) counter on each of up to (one|two|three) target creatures\b/);
   if (upToCreatures) return { kind: "counters_on_up_to_creatures", counterKind: upToCreatures[1], amount: 1, count: numberWordToInt(upToCreatures[2]) ?? 1 };
@@ -18073,6 +18091,14 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
     return drawMultipleForSeat(session, trigger.controllerSeatId, trigger.effect.amount, `${trigger.sourceCardName} trigger resolves. ${seatName} draws ${trigger.effect.amount} card${trigger.effect.amount === 1 ? "" : "s"}.`);
   }
   if (trigger.effect.kind === "proliferate") return resolveProliferate(session);
+  if (trigger.effect.kind === "discard_then_draw") {
+    const mine = session.seats.find((item) => item.id === trigger.controllerSeatId);
+    const discard = mine ? chooseWorstHandCardToDiscard(mine) : undefined;
+    if (!mine || !discard) return rulesEvent(session, trigger.controllerSeatId, `${trigger.sourceCardName}: no card to discard, so nothing is drawn.`);
+    let next = moveCardBetweenVisibleZones(session, mine.id, discard.id, "graveyard");
+    next = rulesEvent(next, mine.id, `${mine.name} discards ${discard.name} (${trigger.sourceCardName}).`);
+    return drawMultipleForSeat(next, mine.id, trigger.effect.draw, `${mine.name} draws ${trigger.effect.draw} card${trigger.effect.draw === 1 ? "" : "s"} from ${trigger.sourceCardName}.`);
+  }
   if (trigger.effect.kind === "living_weapon") {
     const owner = session.seats.find((item) => item.id === trigger.controllerSeatId);
     const equipment = owner?.board.battlefield.find((card) => card.id === trigger.sourceCardId);
@@ -18176,7 +18202,9 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
   }
   if (trigger.effect.kind === "modal") {
     const modalSource = session.seats.flatMap((seat) => seat.board.battlefield).find((card) => card.id === trigger.sourceCardId);
-    return modalSource ? applyGenericModalEffect(session, trigger.controllerSeatId, modalSource, trigger.effect.modal) : session;
+    // A "when this dies" modal source has already left the battlefield; only its name is needed then.
+    const source = modalSource ?? ({ id: trigger.sourceCardId, name: trigger.sourceCardName, typeLine: "", oracleText: "", colors: [], manaValue: 0, role: "permanent", zone: "graveyard" } as VisibleCard);
+    return applyGenericModalEffect(session, trigger.controllerSeatId, source, trigger.effect.modal);
   }
   if (trigger.effect.kind === "scry_cards" || trigger.effect.kind === "surveil_cards") {
     return resolveAgentLibraryLookWorkflow(session, trigger.controllerSeatId, trigger.sourceCardName, trigger.effect.kind, trigger.effect.amount);

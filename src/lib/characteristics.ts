@@ -261,7 +261,7 @@ export function parseGroupAnthemBoost(oracleText: string): GroupAnthemBoost[] {
   return boosts;
 }
 
-type QualifiableCard = { typeLine: string; token?: boolean; grantedTypes?: string[]; colors?: string[] };
+type QualifiableCard = { typeLine: string; token?: boolean; grantedTypes?: string[]; colors?: string[]; oracleText?: string };
 
 // Color words in a qualifier ("black creatures", "nonwhite creatures") are checked against the card's
 // COLORS, never its type line — Bad Moon ("Black creatures get +1/+1") and Bontu's Monument ("Black
@@ -312,7 +312,9 @@ function matchesQualifierWord(card: QualifiableCard, word: string): boolean {
   const singular = /ves$/i.test(word) ? word.replace(/ves$/i, "f") : word.replace(/s$/, "");
   if (!singular) return false;
   const capitalized = singular.charAt(0).toUpperCase() + singular.slice(1);
-  return card.typeLine.includes(capitalized);
+  if (card.typeLine.includes(capitalized)) return true;
+  // Changeling (Taurean Mauler): a creature with it is every creature type.
+  return card.typeLine.includes("Creature") && /^changeling\b/im.test(card.oracleText ?? "");
 }
 
 // A qualifier can be multiple words ("artifact creatures," "creature tokens," "enchantment
