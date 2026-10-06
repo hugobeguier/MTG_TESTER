@@ -27,6 +27,7 @@ import {
 } from "@/lib/activatedAbilities";
 import { equipCost, isAura, isEquipment } from "@/lib/attachments";
 import { graveyardCastPermission } from "@/lib/graveyardCasting";
+import { parseCycling } from "@/lib/cycling";
 import { parseManlandAnimation } from "@/lib/activatedAbilities";
 import { hasKeyword as hasOracleKeyword } from "@/lib/keywords";
 import { cardMatchesTypeFilter, isBasicLandFetchAbility } from "@/lib/oracleClauses";
@@ -83,6 +84,8 @@ interface ThreeGameTableProps {
   onCastFromExile?: (seatId: string, cardId: string) => void;
   // Flashback / "you may cast this card from your graveyard" — offered as a Cast button in the graveyard pile viewer.
   onCastFromGraveyard?: (seatId: string, cardId: string) => void;
+  // "Cycling {cost}" from the selected hand card.
+  onCycleCard?: (seatId: string, cardId: string) => void;
   onPlayCardFace?: (seatId: string, cardId: string, faceIndex: number) => void;
   onUnlockRoomDoor?: (seatId: string, cardId: string, faceIndex: number) => void;
   onDeclareAttack?: (cardId: string, targetId: string) => void;
@@ -1476,6 +1479,11 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
                 Play Selected
               </button>
             )}
+            {props.selectedCardId && parseCycling(human.board.hand.find((card) => card.id === props.selectedCardId)?.oracleText ?? "") ? (
+              <button type="button" onClick={() => props.selectedCardId && props.onCycleCard?.(human.id, props.selectedCardId)}>
+                Cycle Selected
+              </button>
+            ) : null}
             <button
               type="button"
               className={props.priorityStopSettings?.fullControl ? "is-active" : undefined}

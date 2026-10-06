@@ -2,7 +2,7 @@
 // the test: two earlier tests passed on invented text while the real cards stayed broken (Court of Grace, the
 // "with power N or greater" watchers). Skipped per card when the catalog doesn't have it.
 import { describe, expect, it } from "vitest";
-import { assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
+import { cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
 import { parseRemovalEffect } from "@/lib/removalSpells";
 import { permanentMatchesQualifier } from "@/lib/characteristics";
 import { parseSpellExtraEffects } from "@/lib/spellExtras";
@@ -879,5 +879,28 @@ describe("menace (real Oracle text)", () => {
     const blockedBy = (ids: string[]) => assignBlockers(s, choice, ids).seats[1].board.battlefield.filter((c) => c.blocking).length;
     expect(blockedBy(["b1"])).toBe(0);
     expect(blockedBy(["b1", "b2"])).toBe(2);
+  });
+});
+
+describe("cycling (real Oracle text)", () => {
+  it("Barren Moor: pays {B}, discards itself, draws a card", () => {
+    const moor = real("Barren Moor", "bm");
+    const swamp = real("Swamp", "sw");
+    const mine = seat("a", [swamp]);
+    mine.board.hand = [moor];
+    mine.library = Array.from({ length: 3 }, (_, i) => bear(`l${i}`, { zone: "library" as const }));
+    mine.zones = { ...mine.zones, library: 3, hand: 1 };
+    const result = cycleCardInSession(session([mine]), "a", "bm");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const after = result.session.seats[0];
+    expect(after.board.hand.map((c) => c.id)).toEqual(["l0"]);
+    expect(after.board.graveyard!.map((c) => c.id)).toEqual(["bm"]);
+    expect(after.board.battlefield[0].tapped).toBe(true);
+  });
+  it("fails without mana", () => {
+    const mine = seat("a", []);
+    mine.board.hand = [real("Barren Moor", "bm")];
+    expect(cycleCardInSession(session([mine]), "a", "bm").ok).toBe(false);
   });
 });

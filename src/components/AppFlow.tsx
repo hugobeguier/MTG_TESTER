@@ -70,6 +70,7 @@ import { FOUNDATIONS_AGENT_DECKLISTS, FOUNDATIONS_PLAYER_DECKLIST, commanderFrom
 import { parseSpellExtraEffects, type SpellExtraEffect } from "@/lib/spellExtras";
 import { matchWatcherSubject } from "@/lib/triggerWatchers";
 import { graveyardCastPermission } from "@/lib/graveyardCasting";
+import { parseCycling } from "@/lib/cycling";
 import {
   annihilatorAmount,
   hasKeyword as hasKeywordText,
@@ -4147,6 +4148,20 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         ]
       };
     });
+  }
+
+  // "Cycling {cost}": pay the cost, discard the card from hand, draw a card. Instant speed, so only the stack being empty is checked.
+  function cycleCard(seatId: string, cardId: string) {
+    if (pendingAction) {
+      addEvent("Finish resolving what's on the stack before cycling.", seatId, "Timing");
+      return;
+    }
+    const result = cycleCardInSession(session, seatId, cardId);
+    if (!result.ok) {
+      addEvent(result.message, seatId, "Timing");
+      return;
+    }
+    setSession(() => result.session);
   }
 
   function playCard(
@@ -8646,6 +8661,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         holdPriorityOnce={holdPriorityOnce}
         onStopNext={() => setHoldPriorityOnce(true)}
         onPlayCard={playCard}
+        onCycleCard={cycleCard}
         onCastFromExile={castFromExile}
         onCastFromGraveyard={castFromGraveyard}
         onRespond={openResponseWindow}
@@ -17921,6 +17937,22 @@ function hasOnceEachTurnLimiter(oracleText: string): boolean {
 // sorcerySpeedAllowed parameter (already used for equip/loyalty) rather than adding a parallel gate.
 function hasSorcerySpeedOnlyLimiter(clause: string): boolean {
   return /\bactivate only as a sorcery\b|\band only as a sorcery\b/i.test(clause);
+}
+
+// Pure half of cycling: pays with untapped mana sources, discards the card, draws one.
+export function cycleCardInSession(session: GameSession, seatId: string, cardId: string): { ok: true; session: GameSession } | { ok: false; message: string } {
+  const seat = session.seats.find((item) => item.id === seatId);
+  const card = seat?.board.hand.find((item) => item.id === cardId);
+  if (!seat || !card) return { ok: false, message: "That card isn't in your hand." };
+  const cycling = parseCycling(card.oracleText);
+  if (!cycling) return { ok: false, message: `${card.name} doesn't have cycling.` };
+  const total = manaValueFromManaCost(cycling.costManaText);
+  const payment = chooseManaSourcesForCost(seat, genericManaAbilityCostShim({ costManaText: cycling.costManaText }), total, undefined, session.seats);
+  if (!payment.ok) return { ok: false, message: `${seat.name} can't pay ${cycling.costManaText} to cycle ${card.name}.` };
+  const paid: GameSession = { ...session, seats: session.seats.map((item) => (item.id === seatId ? spendManaSources(item, payment.sourceIds) : item)) };
+  const discarded = moveCardBetweenVisibleZones(paid, seatId, cardId, "graveyard");
+  const withEvent = rulesEvent(discarded, seatId, `${seat.name} cycles ${card.name} (${cycling.costManaText}).`);
+  return { ok: true, session: drawForSeat(withEvent, seatId, `${seat.name} draws a card from cycling ${card.name}.`) };
 }
 
 export function createTokensForSeat(session: GameSession, seatId: string, sourceCardId: string, specs: TokenSpec[]) {
