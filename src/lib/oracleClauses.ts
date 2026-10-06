@@ -250,7 +250,8 @@ export function parseEntersWithCounterReplacements(oracleText: string): EntersWi
   const replacements: EntersWithCounterReplacement[] = [];
   for (const rawClause of oracleText.split("\n")) {
     const text = rawClause.replace(/\([^)]*\)/g, "").trim().toLowerCase();
-    const match = text.match(/^each other ([a-z]+(?: [a-z]+)?) you control enters(?: the battlefield)? with an additional \+1\/\+1 counter on it(?: for each ([a-z]+(?: [a-z]+)?) you already control)?\.?$/);
+    // "Each Dragon you control enters with an additional +1/+1 counter on it." (Dragonstorm Globe) applies to the source too.
+    const match = text.match(/^each (?:other )?([a-z]+(?: [a-z]+)?) you control enters(?: the battlefield)? with an additional \+1\/\+1 counter on it(?: for each ([a-z]+(?: [a-z]+)?) you already control)?\.?$/);
     if (!match) continue;
     replacements.push({ matcher: match[1].trim(), ...(match[2] ? { perAlreadyControlled: match[2].trim() } : {}) });
   }

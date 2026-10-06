@@ -2,7 +2,7 @@
 // the test: two earlier tests passed on invented text while the real cards stayed broken (Court of Grace, the
 // "with power N or greater" watchers). Skipped per card when the catalog doesn't have it.
 import { describe, expect, it } from "vitest";
-import { activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
+import { applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
 import { parseRemovalEffect } from "@/lib/removalSpells";
 import { permanentMatchesQualifier } from "@/lib/characteristics";
 import { parseSpellExtraEffects } from "@/lib/spellExtras";
@@ -1078,5 +1078,21 @@ describe("Witch's Cottage (real Oracle text)", () => {
     };
     expect(run(false).library!.map((c) => c.id)).toEqual(["big", "l0"]);
     expect(run(true).library!.map((c) => c.id)).toEqual(["l0"]);
+  });
+});
+
+describe("chosen-type and enters-with-counter permanents (real Oracle text)", () => {
+  it("Vanquisher's Banner: +1/+1 for the chosen type only", () => {
+    const banner = real("Vanquisher's Banner", "vb", { chosenCreatureType: "Angel" });
+    const seats = settle([seat("a", [banner, bear("an", { typeLine: "Creature — Angel" }), bear("hu", { typeLine: "Creature — Human" })])]);
+    expect(find(seats, "a", "an").attachmentPowerBonus).toBe(1);
+    expect(find(seats, "a", "hu").attachmentPowerBonus).toBeUndefined();
+  });
+  it("Dragonstorm Globe: each Dragon you control enters with an additional +1/+1 counter", () => {
+    const dragon = bear("drag", { typeLine: "Creature — Dragon" });
+    const s = session([seat("a", [real("Dragonstorm Globe", "dg"), dragon, bear("elf", { typeLine: "Creature — Elf" })])]);
+    const after = applyEntersWithCounterReplacements(s, "a", "drag");
+    expect(after.seats[0].board.battlefield.find((c) => c.id === "drag")!.counters?.find((c) => c.kind === "+1/+1")?.count).toBe(1);
+    expect(applyEntersWithCounterReplacements(s, "a", "elf").seats[0].board.battlefield.find((c) => c.id === "elf")!.counters).toBeUndefined();
   });
 });
