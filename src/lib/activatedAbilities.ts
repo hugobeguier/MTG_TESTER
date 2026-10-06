@@ -286,6 +286,8 @@ export type GenericTapEffect =
   | { kind: "draw_cards"; amount: number }
   // "Target creature can't be blocked this turn." (Rogue's Passage) — your best attacker.
   | { kind: "target_unblockable" }
+  // "You may play the exiled card without paying its mana cost if <condition>." (Hideaway lands). conditionText is the text after "if".
+  | { kind: "hideaway_play"; conditionText: string }
   // "You draw a card and lose 1 life." (Cryptbreaker)
   | { kind: "draw_and_lose_life"; draw: number; lose: number }
   // "Target commander gains lifelink until end of turn." (Witch's Clinic)
@@ -401,6 +403,8 @@ function parseGenericTapEffectText(text: string): GenericTapEffect | undefined {
   if (/^draw a card, then you lose life equal to the number of cards in your hand\.?$/i.test(text)) return { kind: "draw_then_lose_life_equal_hand" };
   if (/^each player draws a card, then discards a card\.?$/i.test(text)) return { kind: "each_player_loots" };
   if (/^target creature can'?t be blocked this turn\.?$/i.test(text)) return { kind: "target_unblockable" };
+  const hideawayPlay = text.match(/^you may play the exiled card without paying its mana cost if (.+?)\.?$/i);
+  if (hideawayPlay) return { kind: "hideaway_play", conditionText: hideawayPlay[1].toLowerCase() };
   const commanderKeyword = text.match(/^target commander gains ([a-z ]+?) until end of turn\.?$/i);
   if (commanderKeyword) return { kind: "commander_gains_keyword", keyword: commanderKeyword[1].toLowerCase() };
   const drawAndLose = text.match(/^you draw (a|one|two) cards? and lose (\d+) life\.?$/i);

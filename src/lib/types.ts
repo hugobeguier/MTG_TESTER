@@ -319,6 +319,8 @@ export interface VisibleCard {
   // cast that card without paying its mana cost") — undefined/false means the normal cost still
   // applies, same as any other exile-cast permission.
   exiledPlayableFree?: boolean;
+  // Hideaway: the land whose "look at the top N, exile one face down" put this card here.
+  hideawaySourceId?: string;
   // Set when a "gain control...until end of turn" effect (Threaten-style) moved this permanent to
   // a new controller's battlefield — cleared, and control reverted to ownerSeatId, by
   // clearTemporaryBuffs at the next turn change, same timing as temporaryPowerBonus.

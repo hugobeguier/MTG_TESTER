@@ -1198,3 +1198,34 @@ describe("God-Eternal Bontu enters (real Oracle text)", () => {
     expect(after.board.hand).toHaveLength(2);
   });
 });
+
+describe("Mosswort Bridge hideaway (real Oracle text)", () => {
+  it("hides the best of the top four, then plays it free when total power is 10+", () => {
+    const bridge = real("Mosswort Bridge", "mb");
+    const mine = seat("a", [bridge]);
+    mine.library = [
+      bear("n1", { zone: "library" as const, manaValue: 1 }),
+      bear("big", { zone: "library" as const, manaValue: 7 }),
+      bear("n2", { zone: "library" as const, manaValue: 2 }),
+      bear("n3", { zone: "library" as const, manaValue: 3 }),
+      bear("deep", { zone: "library" as const })
+    ];
+    mine.zones = { ...mine.zones, library: 5 };
+    const s = session([mine]);
+    const [etb] = findCommonTriggersForPermanentEntered(s, "a", bridge);
+    expect(etb.effect.kind).toBe("hideaway");
+    const hidden = resolveTriggerEffect(s, etb);
+    expect(hidden.seats[0].board.exile!.map((c) => c.id)).toEqual(["big"]);
+    expect(hidden.seats[0].library!.length).toBe(4);
+    expect(hidden.seats[0].library![0].id).toBe("deep");
+
+    const ability = parseGenericTapAbilities(bridge.oracleText).find((a) => a.effect.kind === "hideaway_play")!;
+    expect(ability).toBeDefined();
+    const withBigBoard = { ...hidden, seats: hidden.seats.map((x) => ({ ...x, board: { ...x.board, battlefield: [...x.board.battlefield, bear("fat", { power: "10" })] } })) };
+    const played = applyGenericTapEffect(withBigBoard, "a", "mb", "Mosswort Bridge", ability.effect, ability.clause);
+    const card = played.seats[0].board.exile!.find((c) => c.id === "big")!;
+    expect(card.exiledPlayableFree).toBe(true);
+    const denied = applyGenericTapEffect(hidden, "a", "mb", "Mosswort Bridge", ability.effect, ability.clause);
+    expect(denied.seats[0].board.exile!.find((c) => c.id === "big")!.exiledPlayableFree).toBeUndefined();
+  });
+});

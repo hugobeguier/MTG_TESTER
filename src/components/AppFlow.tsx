@@ -322,6 +322,8 @@ type TriggerEffect = (
   | { kind: "graveyard_creature_to_library_top" }
   // "Sacrifice any number of other permanents, then draw that many cards." (God-Eternal Bontu) — sacrifices only lands beyond the seventh.
   | { kind: "sacrifice_surplus_then_draw" }
+  // Hideaway N (Mosswort Bridge, Spinerock Knoll): look at the top N cards, exile one face down, the rest to the bottom in a random order.
+  | { kind: "hideaway"; count: number }
   // "Proliferate." (Norn's Choirmaster) — every eligible permanent and player, same as the blanket resolveProliferate.
   | { kind: "proliferate" }
 ) & {
@@ -12161,6 +12163,22 @@ export function applyGenericTapEffect(
       `${seat.name} activates ${sourceCardName}: ${target.name} ${effect.kind === "target_unblockable" ? "can't be blocked this turn" : `gains ${keyword} until end of turn`}.`
     );
   }
+  if (effect.kind === "hideaway_play") {
+    const mine = session.seats.find((item) => item.id === seatId);
+    const hidden = (mine?.board.exile ?? []).find((card) => card.hideawaySourceId === sourceCardId);
+    if (!mine || !hidden) return rulesEvent(session, seatId, `${sourceCardName} has no hidden card.`);
+    if (!isBoardConditionMet(effect.conditionText, mine, session.seats)) return rulesEvent(session, seatId, `${seat.name} activates ${sourceCardName}, but the condition isn't met.`);
+    return rulesEvent(
+      {
+        ...session,
+        seats: session.seats.map((item) =>
+          item.id !== seatId ? item : { ...item, board: { ...item.board, exile: (item.board.exile ?? []).map((card) => (card.id === hidden.id ? { ...card, exiledPlayableBySeatId: seatId, exiledPlayableFree: true, hideawaySourceId: undefined } : card)) } }
+        )
+      },
+      seatId,
+      `${seat.name} may play ${hidden.name} from exile without paying its mana cost (${sourceCardName}).`
+    );
+  }
   if (effect.kind === "draw_and_lose_life") {
     const drawn = drawMultipleForSeat(session, seatId, effect.draw, `${seat.name} draws ${effect.draw} card${effect.draw === 1 ? "" : "s"} from ${sourceCardName}.`);
     return rulesEvent({ ...drawn, seats: drawn.seats.map((item) => (item.id === seatId ? { ...item, life: item.life - effect.lose } : item)) }, seatId, `${seat.name} loses ${effect.lose} life from ${sourceCardName}.`);
@@ -17783,6 +17801,8 @@ export function commonTriggerEffect(
     return { kind: "graveyard_creature_to_library_top", condition: { kind: "source_untapped" }, optional: true };
   }
   if (/sacrifice any number of other permanents, then draw that many cards/.test(text)) return { kind: "sacrifice_surplus_then_draw" };
+  const hideawayMatch = text.match(/(?:^|\s)hideaway (\d+)\b/);
+  if (hideawayMatch && mode === "entered") return { kind: "hideaway", count: Number.parseInt(hideawayMatch[1], 10) };
   const rummage = text.match(/\byou may discard a card\. if you do, draw (a|one|two|three) cards?\b/);
   if (rummage) return { kind: "discard_then_draw", draw: numberWordToInt(rummage[1]) ?? 1, optional: true };
   if (/\byou gain life equal to that creature'?s toughness\b/.test(text)) return { kind: "gain_life_context_toughness" };
@@ -18568,6 +18588,22 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
     return drawMultipleForSeat(session, trigger.controllerSeatId, trigger.effect.amount, `${trigger.sourceCardName} trigger resolves. ${seatName} draws ${trigger.effect.amount} card${trigger.effect.amount === 1 ? "" : "s"}.`);
   }
   if (trigger.effect.kind === "proliferate") return resolveProliferate(session);
+  if (trigger.effect.kind === "hideaway") {
+    const owner = session.seats.find((item) => item.id === trigger.controllerSeatId);
+    const library = owner?.library ?? [];
+    if (!owner || library.length === 0) return session;
+    const top = library.slice(0, trigger.effect.count);
+    // Keeps the most expensive nonland card (the best thing to play for free later), else the first card.
+    const kept = [...top].sort((a, b) => Number(!isLandCard(b)) - Number(!isLandCard(a)) || b.manaValue - a.manaValue)[0];
+    const rest = top.filter((card) => card.id !== kept.id);
+    const hidden: VisibleCard = { ...resetForZoneChange(kept, "exile"), ownerSeatId: kept.ownerSeatId ?? owner.id, hideawaySourceId: trigger.sourceCardId };
+    const seats = session.seats.map((item) => {
+      if (item.id !== owner.id) return item;
+      const remaining = [...library.slice(top.length), ...shuffleCards(rest)];
+      return { ...item, library: remaining, board: { ...item.board, exile: [...(item.board.exile ?? []), hidden] }, zones: { ...item.zones, library: remaining.length, exile: item.zones.exile + 1 } };
+    });
+    return rulesEvent({ ...session, seats }, owner.id, `${trigger.sourceCardName}: ${owner.name} exiles a card face down (hideaway).`);
+  }
   if (trigger.effect.kind === "sacrifice_surplus_then_draw") {
     const owner = session.seats.find((item) => item.id === trigger.controllerSeatId);
     if (!owner) return session;
