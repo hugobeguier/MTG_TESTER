@@ -2,7 +2,7 @@
 // the test: two earlier tests passed on invented text while the real cards stayed broken (Court of Grace, the
 // "with power N or greater" watchers). Skipped per card when the catalog doesn't have it.
 import { describe, expect, it } from "vitest";
-import { cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
+import { chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
 import { parseRemovalEffect } from "@/lib/removalSpells";
 import { permanentMatchesQualifier } from "@/lib/characteristics";
 import { parseSpellExtraEffects } from "@/lib/spellExtras";
@@ -902,5 +902,33 @@ describe("cycling (real Oracle text)", () => {
     const mine = seat("a", []);
     mine.board.hand = [real("Barren Moor", "bm")];
     expect(cycleCardInSession(session([mine]), "a", "bm").ok).toBe(false);
+  });
+});
+
+describe("restricted mana (real Oracle text)", () => {
+  it("Giada's {W} only pays for Angel spells", () => {
+    const giada = real("Giada, Font of Hope", "gi", { summoningSick: false });
+    const s = seat("a", [giada]);
+    const angel = bear("an", { typeLine: "Creature — Angel", colors: ["W"], manaCost: "{W}", manaValue: 1 });
+    const human = bear("hu", { typeLine: "Creature — Human", colors: ["W"], manaCost: "{W}", manaValue: 1 });
+    expect(chooseManaSourcesForCost(s, angel, 1, undefined, [s]).ok).toBe(true);
+    expect(chooseManaSourcesForCost(s, human, 1, undefined, [s]).ok).toBe(false);
+  });
+  it("Haven of the Spirit Dragon's any-color mana only pays for Dragon creature spells", () => {
+    const haven = real("Haven of the Spirit Dragon", "hv");
+    const s = seat("a", [haven]);
+    const dragon = bear("dr", { typeLine: "Creature — Dragon", colors: ["R"], manaCost: "{R}", manaValue: 1 });
+    const other = bear("ot", { typeLine: "Creature — Elf", colors: ["R"], manaCost: "{R}", manaValue: 1 });
+    expect(chooseManaSourcesForCost(s, dragon, 1, undefined, [s]).ok).toBe(true);
+    expect(chooseManaSourcesForCost(s, other, 1, undefined, [s]).ok).toBe(false);
+  });
+});
+
+describe("restricted mana, colorless fallback (real Oracle text)", () => {
+  it("Haven of the Spirit Dragon still pays {C} for any spell", () => {
+    const haven = real("Haven of the Spirit Dragon", "hv");
+    const s = seat("a", [haven]);
+    const generic = bear("gen", { typeLine: "Creature — Elf", colors: [], manaCost: "{1}", manaValue: 1 });
+    expect(chooseManaSourcesForCost(s, generic, 1, undefined, [s]).ok).toBe(true);
   });
 });

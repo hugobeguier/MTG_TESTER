@@ -20687,13 +20687,18 @@ function payCostFromPool(pool: ManaPool, card: VisibleCard, totalCost: number) {
 
 export function chooseManaSourcesForCost(seat: PlayerSeat, card: VisibleCard, totalCost: number, excludeCardId?: string, allSeats?: PlayerSeat[]) {
   const requirement = manaRequirementForCard(card, totalCost, anyColorManaSpendingActive(allSeats ?? [seat]));
-  const sources = seat.board.battlefield.filter((source) => source.id !== excludeCardId && isAvailableManaSource(source, seat, allSeats));
+  const sources = seat.board.battlefield.filter((source) => source.id !== excludeCardId && isAvailableManaSource(source, seat, allSeats) && manaSourceMayPayFor(source, card));
+  // A restricted source that is only here for its unrestricted colorless ability (Haven of the Spirit Dragon) can't make colors.
+  const choicesFor = (source: VisibleCard) => {
+    const choices = manaChoicesForCard(source, seat, allSeats);
+    return manaSourceRestrictionMismatch(source, card) ? choices.filter((color) => color === "C") : choices;
+  };
   const chosen = new Set<string>();
   const pool = emptyManaPool();
 
   for (const color of ["W", "U", "B", "R", "G"] as ColoredMana[]) {
     for (let needed = requirement.colors[color]; needed > 0; needed -= 1) {
-      const source = sources.find((candidate) => !chosen.has(candidate.id) && manaChoicesForCard(candidate, seat, allSeats).includes(color));
+      const source = sources.find((candidate) => !chosen.has(candidate.id) && choicesFor(candidate).includes(color));
       if (!source) return { ok: false as const, sourceIds: [...chosen], reason: `missing ${color} mana` };
       chosen.add(source.id);
       pool[color] += manaProducedBy(source, seat);
@@ -20704,12 +20709,28 @@ export function chooseManaSourcesForCost(seat: PlayerSeat, card: VisibleCard, to
     const source = sources.find((candidate) => !chosen.has(candidate.id));
     if (!source) return { ok: false as const, sourceIds: [...chosen], reason: `missing ${totalCost - manaPoolTotal(pool)} generic mana` };
     chosen.add(source.id);
-    const choices = manaChoicesForCard(source, seat, allSeats);
+    const choices = choicesFor(source);
     const color = choices.includes("C") ? "C" : choices[0] ?? "C";
     pool[color] += manaProducedBy(source, seat);
   }
 
   return { ok: true as const, sourceIds: [...chosen], pool, spent: pool };
+}
+
+// "Spend this mana only to cast an Angel spell." (Giada), "...only to cast a Dragon creature spell." (Haven of the Spirit Dragon): a
+// source with that clause can only help pay for a matching spell. A payment for anything without a type line (an activated
+// ability's cost shim) can't use it.
+function manaSourceRestrictionMismatch(source: VisibleCard, payingFor: VisibleCard): boolean {
+  const match = source.oracleText.match(/spend this mana only to cast (?:an? )?([a-z]+)(?: (creature))? spells?\b/i);
+  if (!match) return false;
+  if (!payingFor.typeLine) return true;
+  return !permanentMatchesQualifier(payingFor, match[1]) || Boolean(match[2] && !payingFor.typeLine.includes("Creature"));
+}
+
+function manaSourceMayPayFor(source: VisibleCard, payingFor: VisibleCard): boolean {
+  if (!manaSourceRestrictionMismatch(source, payingFor)) return true;
+  // Still usable if the card also has a plain, unrestricted {T}: Add ability (Haven's {C}); choicesFor limits it to colorless.
+  return oracleClauses(source.oracleText).some((clause) => /^\{t\}: add \{c\}\.?$/i.test(clause));
 }
 
 // "Players may spend mana as though it were mana of any color." (Mycosynth Lattice) — checked
