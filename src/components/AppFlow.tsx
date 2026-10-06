@@ -452,6 +452,24 @@ type LabeledContinuation =
   | { kind: "extra"; effect: SpellExtraEffect; lifeAmount?: number };
 
 type PendingRuleChoice =
+  // A cast "choose one / choose two" spell (Austere Command, Valorous Stance, Collective Resistance, Profane Command): the human picks
+  // the modes one at a time, then they all apply together (their targets are chosen automatically when more than one mode is picked).
+  | {
+      id: string;
+      kind: "choose_spell_modes";
+      controllerSeatId: string;
+      sourceCardId: string;
+      sourceCardName: string;
+      sourceCard: VisibleCard;
+      chooseCount: number;
+      chosenX?: number;
+      // Index-aligned with `labels`; exactly one of the two mode lists is set.
+      removalModes?: Array<Exclude<RemovalEffect, { kind: "modal" }>>;
+      genericModes?: GenericModalMode[];
+      distinctPerTurn?: boolean;
+      labels: string[];
+      picked: number[];
+    }
   // "Look at the top N cards... you may reveal a <type> card and put it into your hand" (Orb of Dragonkind): the human sees the cards
   // and picks which qualifying one to take (or none) after paying the cost.
   | {
@@ -6040,6 +6058,47 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       // returns undefined for that kind — the mode itself isn't chosen yet here) and "any target"
       // damage (removalEffectTargetSpec also declines that — needs a combined creature-or-player pool
       // this phase doesn't build). Only intercepts with a real decision (2+ legal targets).
+      // A cast modal spell: the human picks the mode(s).
+      const modalPrompt = actor?.kind === "human" && sourceCard ? spellModePrompt(session, action.actorSeatId, sourceCard, action.chosenX) : undefined;
+      if (actor?.kind === "human" && sourceCard && modalPrompt) {
+        const remainingStack = removeStackAction(action.id);
+        const resolutionDestination = spellResolutionDestination(session, action);
+        setSession((current) =>
+          playCardFromZone(current, action.actorSeatId, action.cardId, `${action.cardName} resolves.`, action.position, resolutionDestination, action.manaSourceIds, action.sourceZone ?? "hand", action.faceIndex)
+        );
+        if (modalPrompt.chooseCount === 1 && modalPrompt.removalModes) {
+          // A single removal mode keeps the existing flow, which also lets the human pick that mode's target.
+          setPendingRuleChoice({
+            id: crypto.randomUUID(),
+            kind: "choose_modal_option",
+            controllerSeatId: action.actorSeatId,
+            sourceCardId: sourceCard.id,
+            sourceCardName: sourceCard.name,
+            prompt: `${sourceCard.name}: choose one.`,
+            options: modalPrompt.removalModes.map((mode, index) => ({ index, label: modalPrompt.labels[index] ?? describeRemovalMode(mode) })),
+            modes: modalPrompt.removalModes,
+            sourceCard
+          });
+        } else {
+          setPendingRuleChoice({
+            id: crypto.randomUUID(),
+            kind: "choose_spell_modes",
+            controllerSeatId: action.actorSeatId,
+            sourceCardId: sourceCard.id,
+            sourceCardName: sourceCard.name,
+            sourceCard,
+            chooseCount: modalPrompt.chooseCount,
+            chosenX: action.chosenX,
+            removalModes: modalPrompt.removalModes,
+            genericModes: modalPrompt.genericModes,
+            distinctPerTurn: modalPrompt.distinctPerTurn,
+            labels: modalPrompt.labels,
+            picked: []
+          });
+        }
+        resumeTopStackAction(remainingStack);
+        return;
+      }
       // Ram Through / Bite Down / Tamiyo's Safekeeping / "any target" damage: the human picks the targets from a labeled list.
       const labeledSpell = actor?.kind === "human" && sourceCard ? spellTargetSlots(session, action.actorSeatId, sourceCard, action.chosenX) : undefined;
       if (actor?.kind === "human" && sourceCard && labeledSpell) {
@@ -8000,7 +8059,32 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     setSession((current) => applyLabeledContinuation(current, choice.controllerSeatId, choice.sourceCard, choice.continuation, picks));
   }
 
+  // One mode pick of a multi-mode spell; asks again until chooseCount modes are chosen, then applies them together.
+  function completeSpellMode(index: number) {
+    const choice = pendingRuleChoice;
+    if (!choice || choice.kind !== "choose_spell_modes" || choice.picked.includes(index) || index < 0 || index >= choice.labels.length) return;
+    const picked = [...choice.picked, index];
+    const total = (choice.removalModes ?? choice.genericModes ?? []).length;
+    if (picked.length < choice.chooseCount && picked.length < total) {
+      setPendingRuleChoice({ ...choice, id: crypto.randomUUID(), picked });
+      return;
+    }
+    setPendingRuleChoice(undefined);
+    setSession((current) => {
+      if (choice.removalModes) {
+        const modes = picked.map((pick) => choice.removalModes![pick]);
+        return applyRemovalEffect(current, choice.controllerSeatId, choice.sourceCardName, choice.sourceCard, { kind: "modal", chooseCount: modes.length, modes }, choice.chosenX);
+      }
+      const modes = picked.map((pick) => choice.genericModes![pick]);
+      return applyGenericModalEffect(current, choice.controllerSeatId, choice.sourceCard, { chooseCount: modes.length, modes, distinctPerTurn: choice.distinctPerTurn });
+    });
+  }
+
   function chooseModalOption(index: number) {
+    if (pendingRuleChoice?.kind === "choose_spell_modes") {
+      completeSpellMode(index);
+      return;
+    }
     if (pendingRuleChoice?.kind === "choose_dig_card") {
       const dig = pendingRuleChoice;
       const picked = dig.options.find((option) => option.index === index);
@@ -14179,6 +14263,29 @@ export function manaFromTappedOpponentLands(session: GameSession, casterSeatId: 
 // heuristic for every seat kind (there's no selection UI for these shapes yet).
 // The clickable list for one target slot. Opponent-side targets are filtered by hexproof/shroud/protection and player hexproof, like the
 // automatic picks are.
+// The modes a human may choose between for a cast modal spell, with the removal/generic parse that owns the card. Undefined when the card
+// isn't modal, or fewer than two modes are usable (the automatic path then does the one thing that can be done).
+export function spellModePrompt(
+  session: GameSession,
+  controllerSeatId: string,
+  source: VisibleCard,
+  chosenX?: number
+): { chooseCount: number; labels: string[]; removalModes?: Array<Exclude<RemovalEffect, { kind: "modal" }>>; genericModes?: GenericModalMode[]; distinctPerTurn?: boolean } | undefined {
+  if (!parseModalHeader(source.oracleText)) return undefined;
+  const removal = parseRemovalEffect(etbEffectText(source.oracleText));
+  if (removal?.kind === "modal") {
+    const modes = removal.modes.filter((mode) => removalEffectHasLegalTarget(session, controllerSeatId, source, mode));
+    if (modes.length < 2) return undefined;
+    return { chooseCount: Math.min(removal.chooseCount, modes.length), labels: modes.map((mode) => describeRemovalMode(mode)), removalModes: modes };
+  }
+  if (removal) return undefined;
+  const generic = parseGenericModalEffect(source.oracleText, chosenX);
+  if (!generic) return undefined;
+  const modes = generic.modes.filter((mode) => genericModalModeHasLegalTarget(session, controllerSeatId, mode));
+  if (modes.length < 2) return undefined;
+  return { chooseCount: Math.min(generic.chooseCount, modes.length), labels: modes.map((mode, index) => mode.text ?? `Mode ${index + 1}`), genericModes: modes, distinctPerTurn: generic.distinctPerTurn };
+}
+
 export function labeledTargetOptions(
   session: GameSession,
   controllerSeatId: string,
@@ -20116,6 +20223,14 @@ function ruleChoiceView(
         cards: humanSeat.board.battlefield
           .filter((card) => hasCardType(card, "Creature"))
           .map((card) => ({ card, seatId: humanSeat.id, seatName: humanSeat.name }))
+      };
+    }
+    if (choice.kind === "choose_spell_modes") {
+      return {
+        kind: "choose_modal_option" as const,
+        sourceCardName: choice.sourceCardName,
+        prompt: `${choice.sourceCardName}: choose mode ${choice.picked.length + 1} of ${choice.chooseCount}.`,
+        options: choice.labels.map((label, index) => ({ index, label })).filter((option) => !choice.picked.includes(option.index))
       };
     }
     if (choice.kind === "choose_dig_card") {

@@ -2,7 +2,7 @@
 // the test: two earlier tests passed on invented text while the real cards stayed broken (Court of Grace, the
 // "with power N or greater" watchers). Skipped per card when the catalog doesn't have it.
 import { describe, expect, it } from "vitest";
-import { applyDigPick, applyLabeledContinuation, spellTargetSlots, grantKeywordsToCreature, applyExalted, applySacrificeEffect, applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
+import { spellModePrompt, applyDigPick, applyLabeledContinuation, spellTargetSlots, grantKeywordsToCreature, applyExalted, applySacrificeEffect, applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
 import { parseRemovalEffect } from "@/lib/removalSpells";
 import { parseZoneEffect } from "@/lib/zoneEffects";
 import { permanentMatchesQualifier } from "@/lib/characteristics";
@@ -1386,5 +1386,33 @@ describe("Leyline Tyrant amount, hideaway pick, Orb pick (pure halves)", () => {
     const second = applyDigPick(session([mine]), "a", "Orb of Dragonkind", 7, "dragon", "d2").seats[0];
     expect(second.board.hand.map((c) => c.id)).toEqual(["d2"]);
     expect(applyDigPick(session([mine]), "a", "Orb of Dragonkind", 7, "dragon", "none").seats[0].board.hand).toHaveLength(0);
+  });
+});
+
+describe("cast modal spells offer their modes to the human (pure half)", () => {
+  it("Austere Command: two modes to choose, labelled; the chosen pair is what gets applied", () => {
+    const spell = real("Austere Command", "spell");
+    const art = (id: string) => bear(id, { typeLine: "Artifact", role: "permanent", manaValue: 2 });
+    const s = session([seat("a", [art("mine")]), seat("b", [art("theirs"), bear("big", { manaValue: 6, power: "6", toughness: "6" })])]);
+    const prompt = spellModePrompt(s, "a", spell)!;
+    expect(prompt.chooseCount).toBe(2);
+    expect(prompt.labels.length).toBeGreaterThanOrEqual(3);
+    const creatureMode = prompt.removalModes!.findIndex((m) => m.kind === "destroy_all_conditional" && m.comparison === "or_greater");
+    const artifactMode = prompt.removalModes!.findIndex((m) => m.kind === "destroy_all" && m.targetType === "artifact");
+    const modes = [prompt.removalModes![creatureMode], prompt.removalModes![artifactMode]];
+    const after = applyRemovalEffect(s, "a", "Austere Command", spell, { kind: "modal", chooseCount: 2, modes });
+    expect(after.seats[1].board.battlefield).toHaveLength(0);
+    expect(after.seats[0].board.battlefield).toHaveLength(0);
+  });
+  it("Valorous Stance with a legal destroy target offers both modes; with nothing to destroy there is nothing to choose", () => {
+    const spell = real("Valorous Stance", "spell");
+    const big = session([seat("a", [bear("mine")]), seat("b", [bear("big", { power: "5", toughness: "5" })])]);
+    const prompt = spellModePrompt(big, "a", spell)!;
+    expect(prompt.chooseCount).toBe(1);
+    expect(prompt.labels).toHaveLength(2);
+    expect(spellModePrompt(session([seat("a", [bear("mine")]), seat("b", [])]), "a", spell)).toBeUndefined();
+  });
+  it("a non-modal spell has no mode prompt", () => {
+    expect(spellModePrompt(session([seat("a", []), seat("b", [bear("v")])]), "a", real("Lightning Bolt", "spell"))).toBeUndefined();
   });
 });
