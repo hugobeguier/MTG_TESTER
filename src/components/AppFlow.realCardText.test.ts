@@ -2,7 +2,7 @@
 // the test: two earlier tests passed on invented text while the real cards stayed broken (Court of Grace, the
 // "with power N or greater" watchers). Skipped per card when the catalog doesn't have it.
 import { describe, expect, it } from "vitest";
-import { applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
+import { activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
 import { parseRemovalEffect } from "@/lib/removalSpells";
 import { permanentMatchesQualifier } from "@/lib/characteristics";
 import { parseSpellExtraEffects } from "@/lib/spellExtras";
@@ -997,5 +997,53 @@ describe("Cryptbreaker's tap-three-Zombies ability (real Oracle text)", () => {
     const index = parseGenericTapAbilities(real("Cryptbreaker", "x").oracleText).findIndex((a) => a.costTapCreatures);
     const mine = seat("a", [real("Cryptbreaker", "cb", { typeLine: "Creature — Zombie Warlock" }), zombie("z1"), zombie("z2", { tapped: true })]);
     expect(payGenericTapCost(session([mine]), "a", "cb", index)).toBeUndefined();
+  });
+});
+
+describe("Undead Butler (real Oracle text)", () => {
+  it("mills three when it enters", () => {
+    const butler = real("Undead Butler", "ub", { power: "3", toughness: "3" });
+    const mine = seat("a", [butler]);
+    mine.library = Array.from({ length: 6 }, (_, i) => bear(`l${i}`, { zone: "library" as const }));
+    mine.zones = { ...mine.zones, library: 6 };
+    const s = session([mine]);
+    const triggers = findCommonTriggersForPermanentEntered(s, "a", butler);
+    expect(triggers.map((t) => t.effect.kind)).toEqual(["zone_effect"]);
+    const after = resolveTriggerEffect(s, triggers[0]).seats[0];
+    expect(after.library!.length).toBe(3);
+    expect(after.board.graveyard!.length).toBe(3);
+  });
+  it("when it dies, exiles itself and returns the best creature card in the graveyard to hand", () => {
+    const mine = seat("a", []);
+    mine.board.graveyard = [real("Undead Butler", "ub", { zone: "graveyard" }), bear("small", { zone: "graveyard" as const, manaValue: 1 }), bear("big", { zone: "graveyard" as const, manaValue: 6 })];
+    const s = session([mine]);
+    const [trigger] = findCommonTriggersForPermanentDied(s, "a", mine.board.graveyard[0]);
+    expect(trigger.effect.kind).toBe("exile_self_return_creature_to_hand");
+    const after = resolveTriggerEffect(s, trigger).seats[0];
+    expect(after.board.hand.map((c) => c.id)).toEqual(["big"]);
+    expect(after.board.graveyard!.map((c) => c.id)).toEqual(["small"]);
+  });
+});
+
+describe("Razorlash Transmogrant (real Oracle text)", () => {
+  const swamps = (n: number) => Array.from({ length: n }, (_, i) => real("Swamp", `sw${i}`));
+  it("returns from the graveyard with a +1/+1 counter for {4}{B}{B}", () => {
+    const mine = seat("a", swamps(6));
+    mine.board.graveyard = [real("Razorlash Transmogrant", "rz", { zone: "graveyard" })];
+    const result = activateGraveyardReturnInSession(session([mine]), "a", "rz");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const back = result.session.seats[0].board.battlefield.find((c) => c.id === "rz")!;
+    expect(back.counters?.find((c) => c.kind === "+1/+1")?.count).toBe(1);
+    expect(result.session.seats[0].board.battlefield.filter((c) => c.tapped)).toHaveLength(6);
+    expect(result.session.seats[0].board.graveyard ?? []).toHaveLength(0);
+  });
+  it("costs {4} less when an opponent controls four or more nonbasic lands, and fails without the mana", () => {
+    const mine = seat("a", swamps(2));
+    mine.board.graveyard = [real("Razorlash Transmogrant", "rz", { zone: "graveyard" })];
+    const nonbasic = (i: number) => bear(`nb${i}`, { typeLine: "Land", role: "land" });
+    const rich = seat("b", [nonbasic(1), nonbasic(2), nonbasic(3), nonbasic(4)]);
+    expect(activateGraveyardReturnInSession(session([mine, rich]), "a", "rz").ok).toBe(true);
+    expect(activateGraveyardReturnInSession(session([mine, seat("b", [])]), "a", "rz").ok).toBe(false);
   });
 });

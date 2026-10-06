@@ -71,6 +71,7 @@ import { parseSpellExtraEffects, type SpellExtraEffect } from "@/lib/spellExtras
 import { matchWatcherSubject } from "@/lib/triggerWatchers";
 import { graveyardCastPermission } from "@/lib/graveyardCasting";
 import { parseCycling } from "@/lib/cycling";
+import { parseGraveyardReturnAbility, reduceGenericCost } from "@/lib/graveyardAbilities";
 import {
   annihilatorAmount,
   hasKeyword as hasKeywordText,
@@ -311,6 +312,10 @@ type TriggerEffect = (
   // spell's mana value is 8 or less. If you don't, put that card into your hand." (Breaching Dragonstorm) — always takes the hand
   // option, which is a legal choice and avoids casting without a stack.
   | { kind: "dig_nonland_to_hand" }
+  // A plain zone effect as a trigger's whole effect ("mill three cards", Undead Butler's enters trigger).
+  | { kind: "zone_effect"; effect: ZoneEffect }
+  // "When this creature dies, you may exile it. When you do, return target creature card from your graveyard to your hand." (Undead Butler)
+  | { kind: "exile_self_return_creature_to_hand" }
   // "Proliferate." (Norn's Choirmaster) — every eligible permanent and player, same as the blanket resolveProliferate.
   | { kind: "proliferate" }
 ) & {
@@ -5235,6 +5240,15 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   // (main-phase casting only), which used to make those buttons a dead click during a response
   // window. Route through respondWithCard instead whenever one is open.
   // The Cast button in the graveyard pile viewer (flashback, Gravecrawler, a Zul Ashur grant).
+  function activateGraveyardAbility(seatId: string, cardId: string) {
+    const result = activateGraveyardReturnInSession(session, seatId, cardId);
+    if (!result.ok) {
+      addEvent(result.message, seatId, "Timing");
+      return;
+    }
+    setSession(() => result.session);
+  }
+
   function castFromGraveyard(seatId: string, cardId: string) {
     playCard(seatId, cardId, undefined, "graveyard");
   }
@@ -8664,6 +8678,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         onCycleCard={cycleCard}
         onCastFromExile={castFromExile}
         onCastFromGraveyard={castFromGraveyard}
+        onActivateGraveyardAbility={activateGraveyardAbility}
         onRespond={openResponseWindow}
         onRespondWithSelectedCard={respondWithSelectedCard}
         onResolvePendingTrigger={resolvePendingTrigger}
@@ -17666,6 +17681,12 @@ export function commonTriggerEffect(
   if (/you may pay any amount of \{r\}\. when you do, it deals that much damage to any target/.test(text)) return { kind: "pay_red_for_damage", optional: true };
   if (/exile cards from the top of your library until you exile a nonland card\. you may cast it without paying its mana cost if that spell'?s mana value is 8 or less\. if you don'?t, put that card into your hand/.test(text)) return { kind: "dig_nonland_to_hand" };
   if (/(?:^|, )return this (?:enchantment|artifact|permanent|creature) to its owner'?s hand\.?$/.test(text.replace(/\([^)]*\)/g, "").trim())) return { kind: "return_self_to_hand" };
+  const millOnly = text.replace(/\([^)]*\)/g, "").trim().match(/^(?:when [^,]+, )?(mill (?:a|one|two|three|four|five|\d+) cards?)\.?$/);
+  if (millOnly) {
+    const millZone = parseZoneEffect(millOnly[1]);
+    if (millZone?.kind === "mill") return { kind: "zone_effect", effect: millZone };
+  }
+  if (/you may exile it\. when you do, return target creature card from your graveyard to your hand/.test(text)) return { kind: "exile_self_return_creature_to_hand", optional: true };
   const rummage = text.match(/\byou may discard a card\. if you do, draw (a|one|two|three) cards?\b/);
   if (rummage) return { kind: "discard_then_draw", draw: numberWordToInt(rummage[1]) ?? 1, optional: true };
   if (/\byou gain life equal to that creature'?s toughness\b/.test(text)) return { kind: "gain_life_context_toughness" };
@@ -17993,6 +18014,33 @@ function hasSorcerySpeedOnlyLimiter(clause: string): boolean {
 }
 
 // Pure half of cycling: pays with untapped mana sources, discards the card, draws one.
+// Razorlash Transmogrant: pay the (possibly discounted) cost and return the card from the graveyard to the battlefield.
+export function activateGraveyardReturnInSession(session: GameSession, seatId: string, cardId: string): { ok: true; session: GameSession } | { ok: false; message: string } {
+  const seat = session.seats.find((item) => item.id === seatId);
+  const card = (seat?.board.graveyard ?? []).find((item) => item.id === cardId);
+  if (!seat || !card) return { ok: false, message: "That card isn't in your graveyard." };
+  const ability = parseGraveyardReturnAbility(card.oracleText);
+  if (!ability) return { ok: false, message: `${card.name} has no ability that works from the graveyard.` };
+  const nonbasic = (other: PlayerSeat) => other.board.battlefield.filter((permanent) => permanent.typeLine.includes("Land") && !permanent.typeLine.includes("Basic")).length;
+  const discounted = ability.discount ? session.seats.some((other) => other.id !== seatId && !other.hasLost && nonbasic(other) >= ability.discount!.nonbasicLands) : false;
+  const costText = discounted && ability.discount ? reduceGenericCost(ability.costManaText, ability.discount.amount) : ability.costManaText;
+  const total = manaValueFromManaCost(costText);
+  const payment = chooseManaSourcesForCost(seat, genericManaAbilityCostShim({ costManaText: costText }), total, undefined, session.seats);
+  if (!payment.ok) return { ok: false, message: `${seat.name} can't pay ${costText || "{0}"} to return ${card.name}.` };
+  const paid: GameSession = { ...session, seats: session.seats.map((item) => (item.id === seatId ? spendManaSources(item, payment.sourceIds) : item)) };
+  const moved = moveCardAcrossSeats(paid, seatId, cardId, seatId, "battlefield");
+  if (!moved.movedCard) return { ok: false, message: `${card.name} couldn't be returned.` };
+  const withCounter: GameSession = ability.withCounter
+    ? {
+        ...moved.session,
+        seats: moved.session.seats.map((item) =>
+          item.id !== seatId ? item : { ...item, board: { ...item.board, battlefield: item.board.battlefield.map((permanent) => (permanent.id === cardId ? applyCounterDelta(permanent, "+1/+1", 1) : permanent)) } }
+        )
+      }
+    : moved.session;
+  return { ok: true, session: rulesEvent(withCounter, seatId, `${seat.name} pays ${costText || "{0}"} and returns ${card.name} from the graveyard to the battlefield${ability.withCounter ? " with a +1/+1 counter" : ""}.`) };
+}
+
 export function cycleCardInSession(session: GameSession, seatId: string, cardId: string): { ok: true; session: GameSession } | { ok: false; message: string } {
   const seat = session.seats.find((item) => item.id === seatId);
   const card = seat?.board.hand.find((item) => item.id === cardId);
@@ -18421,6 +18469,18 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
     return drawMultipleForSeat(session, trigger.controllerSeatId, trigger.effect.amount, `${trigger.sourceCardName} trigger resolves. ${seatName} draws ${trigger.effect.amount} card${trigger.effect.amount === 1 ? "" : "s"}.`);
   }
   if (trigger.effect.kind === "proliferate") return resolveProliferate(session);
+  if (trigger.effect.kind === "zone_effect") return applyZoneEffect(session, trigger.controllerSeatId, trigger.sourceCardName, trigger.effect.effect);
+  if (trigger.effect.kind === "exile_self_return_creature_to_hand") {
+    const holder = session.seats.find((item) => (item.board.graveyard ?? []).some((card) => card.id === trigger.sourceCardId));
+    const owner = session.seats.find((item) => item.id === trigger.controllerSeatId);
+    if (!holder || !owner) return session;
+    const exiled = moveCardAcrossSeats(session, holder.id, trigger.sourceCardId, holder.id, "exile").session;
+    const best = (exiled.seats.find((item) => item.id === owner.id)?.board.graveyard ?? [])
+      .filter((card) => card.typeLine.includes("Creature"))
+      .sort((a, b) => b.manaValue - a.manaValue)[0];
+    const withEvent = rulesEvent(exiled, owner.id, `${owner.name} exiles ${trigger.sourceCardName}.`);
+    return best ? rulesEvent(moveCardAcrossSeats(withEvent, owner.id, best.id, owner.id, "hand").session, owner.id, `${trigger.sourceCardName} returns ${best.name} to ${owner.name}'s hand.`) : withEvent;
+  }
   if (trigger.effect.kind === "dig_nonland_to_hand") {
     const owner = session.seats.find((item) => item.id === trigger.controllerSeatId);
     const library = owner?.library ?? [];
