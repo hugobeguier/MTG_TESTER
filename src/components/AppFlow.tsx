@@ -316,6 +316,10 @@ type TriggerEffect = (
   | { kind: "zone_effect"; effect: ZoneEffect }
   // "When this creature dies, you may exile it. When you do, return target creature card from your graveyard to your hand." (Undead Butler)
   | { kind: "exile_self_return_creature_to_hand" }
+  // "...you may put her into her owner's library third from the top." (God-Eternal Bontu) — from the graveyard or exile.
+  | { kind: "self_to_library_third" }
+  // "When this land enters untapped, you may put target creature card from your graveyard on top of your library." (Witch's Cottage)
+  | { kind: "graveyard_creature_to_library_top" }
   // "Proliferate." (Norn's Choirmaster) — every eligible permanent and player, same as the blanket resolveProliferate.
   | { kind: "proliferate" }
 ) & {
@@ -330,7 +334,7 @@ type TriggerEffect = (
   then?: TriggerEffect;
 };
 
-type TriggerCondition = { kind: "controls_greatest_power" } | { kind: "behold"; subtype: string } | { kind: "total_power_at_least"; amount: number } | { kind: "controls_no_other"; subtype: string };
+type TriggerCondition = { kind: "controls_greatest_power" } | { kind: "source_untapped" } | { kind: "behold"; subtype: string } | { kind: "total_power_at_least"; amount: number } | { kind: "controls_no_other"; subtype: string };
 
 interface TokenSpec {
   count: number;
@@ -17687,6 +17691,10 @@ export function commonTriggerEffect(
     if (millZone?.kind === "mill") return { kind: "zone_effect", effect: millZone };
   }
   if (/you may exile it\. when you do, return target creature card from your graveyard to your hand/.test(text)) return { kind: "exile_self_return_creature_to_hand", optional: true };
+  if (/you may put (?:him|her|it|them) into (?:his|her|its|their) owner'?s library third from the top/.test(text)) return { kind: "self_to_library_third", optional: true };
+  if (/when this land enters untapped, you may put target creature card from your graveyard on top of your library/.test(text)) {
+    return { kind: "graveyard_creature_to_library_top", condition: { kind: "source_untapped" }, optional: true };
+  }
   const rummage = text.match(/\byou may discard a card\. if you do, draw (a|one|two|three) cards?\b/);
   if (rummage) return { kind: "discard_then_draw", draw: numberWordToInt(rummage[1]) ?? 1, optional: true };
   if (/\byou gain life equal to that creature'?s toughness\b/.test(text)) return { kind: "gain_life_context_toughness" };
@@ -18426,6 +18434,9 @@ export function resolveTriggerEffect(session: GameSession, trigger: Extract<Pend
 function triggerConditionMet(session: GameSession, trigger: Extract<PendingAction, { type: "trigger" }>, condition: TriggerCondition): boolean {
   const seat = session.seats.find((item) => item.id === trigger.controllerSeatId);
   if (!seat) return false;
+  if (condition.kind === "source_untapped") {
+    return seat.board.battlefield.some((card) => card.id === trigger.sourceCardId && !card.tapped);
+  }
   if (condition.kind === "behold") {
     // "Behold a Dragon": control one, or reveal one from hand.
     const needle = condition.subtype.toLowerCase();
@@ -18469,6 +18480,28 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
     return drawMultipleForSeat(session, trigger.controllerSeatId, trigger.effect.amount, `${trigger.sourceCardName} trigger resolves. ${seatName} draws ${trigger.effect.amount} card${trigger.effect.amount === 1 ? "" : "s"}.`);
   }
   if (trigger.effect.kind === "proliferate") return resolveProliferate(session);
+  if (trigger.effect.kind === "graveyard_creature_to_library_top") {
+    const owner = session.seats.find((item) => item.id === trigger.controllerSeatId);
+    const best = (owner?.board.graveyard ?? []).filter((card) => card.typeLine.includes("Creature")).sort((a, b) => b.manaValue - a.manaValue)[0];
+    if (!owner || !best) return session;
+    return rulesEvent(moveCardAcrossSeats(session, owner.id, best.id, owner.id, "library", { libraryPosition: "top" }).session, owner.id, `${owner.name} puts ${best.name} on top of their library (${trigger.sourceCardName}).`);
+  }
+  if (trigger.effect.kind === "self_to_library_third") {
+    const holder = session.seats.find((item) => [...(item.board.graveyard ?? []), ...(item.board.exile ?? [])].some((card) => card.id === trigger.sourceCardId));
+    const card = holder ? [...(holder.board.graveyard ?? []), ...(holder.board.exile ?? [])].find((c) => c.id === trigger.sourceCardId) : undefined;
+    if (!holder || !card) return session;
+    const ownerId = card.ownerSeatId ?? holder.id;
+    const removed = session.seats.map((item) =>
+      item.id !== holder.id ? item : { ...item, board: { ...item.board, graveyard: (item.board.graveyard ?? []).filter((c) => c.id !== card.id), exile: (item.board.exile ?? []).filter((c) => c.id !== card.id) }, zones: { ...item.zones, graveyard: Math.max(0, item.zones.graveyard - ((item.board.graveyard ?? []).some((c) => c.id === card.id) ? 1 : 0)), exile: Math.max(0, item.zones.exile - ((item.board.exile ?? []).some((c) => c.id === card.id) ? 1 : 0)) } }
+    );
+    const placed = removed.map((item) => {
+      if (item.id !== ownerId) return item;
+      const library = [...(item.library ?? [])];
+      library.splice(Math.min(2, library.length), 0, { ...resetForZoneChange(card, "library"), zone: "library" as const });
+      return { ...item, library, zones: { ...item.zones, library: library.length } };
+    });
+    return rulesEvent({ ...session, seats: placed }, ownerId, `${trigger.sourceCardName} is put into its owner's library third from the top.`);
+  }
   if (trigger.effect.kind === "zone_effect") return applyZoneEffect(session, trigger.controllerSeatId, trigger.sourceCardName, trigger.effect.effect);
   if (trigger.effect.kind === "exile_self_return_creature_to_hand") {
     const holder = session.seats.find((item) => (item.board.graveyard ?? []).some((card) => card.id === trigger.sourceCardId));

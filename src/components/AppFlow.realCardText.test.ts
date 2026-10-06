@@ -1047,3 +1047,36 @@ describe("Razorlash Transmogrant (real Oracle text)", () => {
     expect(activateGraveyardReturnInSession(session([mine, seat("b", [])]), "a", "rz").ok).toBe(false);
   });
 });
+
+describe("God-Eternal Bontu (real Oracle text)", () => {
+  it("when it dies, goes into its owner's library third from the top", () => {
+    const bontu = real("God-Eternal Bontu", "gb", { zone: "graveyard" });
+    const mine = seat("a", []);
+    mine.board.graveyard = [bontu];
+    mine.library = Array.from({ length: 5 }, (_, i) => bear(`l${i}`, { zone: "library" as const }));
+    mine.zones = { ...mine.zones, library: 5, graveyard: 1 };
+    const s = session([mine]);
+    const triggers = findCommonTriggersForPermanentDied(s, "a", bontu);
+    expect(triggers.map((t) => t.effect.kind)).toEqual(["self_to_library_third"]);
+    const after = resolveTriggerEffect(s, triggers[0]).seats[0];
+    expect(after.library!.map((c) => c.id)).toEqual(["l0", "l1", "gb", "l2", "l3", "l4"]);
+    expect(after.board.graveyard ?? []).toHaveLength(0);
+  });
+});
+
+describe("Witch's Cottage (real Oracle text)", () => {
+  it("untapped: puts the best creature card from the graveyard on top; tapped: nothing", () => {
+    const run = (tapped: boolean) => {
+      const cottage = real("Witch's Cottage", "wc", { tapped });
+      const mine = seat("a", [cottage]);
+      mine.board.graveyard = [bear("small", { zone: "graveyard" as const, manaValue: 1 }), bear("big", { zone: "graveyard" as const, manaValue: 5 })];
+      mine.library = [bear("l0", { zone: "library" as const })];
+      mine.zones = { ...mine.zones, library: 1, graveyard: 2 };
+      const s = session([mine]);
+      const [trigger] = findCommonTriggersForPermanentEntered(s, "a", cottage);
+      return resolveTriggerEffect(s, trigger).seats[0];
+    };
+    expect(run(false).library!.map((c) => c.id)).toEqual(["big", "l0"]);
+    expect(run(true).library!.map((c) => c.id)).toEqual(["l0"]);
+  });
+});
