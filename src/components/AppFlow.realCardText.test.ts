@@ -2,7 +2,7 @@
 // the test: two earlier tests passed on invented text while the real cards stayed broken (Court of Grace, the
 // "with power N or greater" watchers). Skipped per card when the catalog doesn't have it.
 import { describe, expect, it } from "vitest";
-import { grantKeywordsToCreature, applyExalted, applySacrificeEffect, applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
+import { applyLabeledContinuation, spellTargetSlots, grantKeywordsToCreature, applyExalted, applySacrificeEffect, applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
 import { parseRemovalEffect } from "@/lib/removalSpells";
 import { parseZoneEffect } from "@/lib/zoneEffects";
 import { permanentMatchesQualifier } from "@/lib/characteristics";
@@ -1321,5 +1321,44 @@ describe("grantKeywordsToCreature", () => {
     const after = grantKeywordsToCreature(s, "a", "other", ["hexproof", "indestructible"], "Collective Resistance");
     expect(after.seats[0].board.battlefield.find((c) => c.id === "other")!.temporaryGrantedKeywords).toEqual(["hexproof", "indestructible"]);
     expect(after.seats[0].board.battlefield.find((c) => c.id === "mine")!.temporaryGrantedKeywords).toBeUndefined();
+  });
+});
+
+describe("labeled target prompts for spells (pure halves)", () => {
+  it("Ram Through: two slots, your creature then theirs; the picks decide who fights", () => {
+    const ram = real("Ram Through", "spell");
+    const s = session([seat("a", [bear("small", { power: "2" }), bear("huge", { power: "8", oracleText: "Trample" })]), seat("b", [bear("v1"), bear("v2", { toughness: "9" })])]);
+    const prompt = spellTargetSlots(s, "a", ram)!;
+    expect(prompt.slots).toHaveLength(2);
+    expect(prompt.slots[0].options.map((o) => o.label).join("|")).toContain("small");
+    const picks = [prompt.slots[0].options.find((o) => /small/.test(o.label))!.target, prompt.slots[1].options.find((o) => /v1/.test(o.label))!.target];
+    const after = applyLabeledContinuation(s, "a", ram, prompt.continuation, picks);
+    expect(after.seats[1].board.battlefield.map((c) => c.id)).toEqual(["v2"]);
+  });
+  it("Tamiyo's Safekeeping: you pick the permanent and still gain 2 life", () => {
+    const tam = real("Tamiyo's Safekeeping", "spell");
+    const s = session([seat("a", [bear("p1"), bear("p2")]), seat("b", [])]);
+    const prompt = spellTargetSlots(s, "a", tam)!;
+    const after = applyLabeledContinuation(s, "a", tam, prompt.continuation, [prompt.slots[0].options.find((o) => /Bear p2/.test(o.label))!.target]);
+    expect(after.seats[0].board.battlefield.find((c) => c.id === "p2")!.temporaryGrantedKeywords).toEqual(expect.arrayContaining(["hexproof", "indestructible"]));
+    expect(after.seats[0].board.battlefield.find((c) => c.id === "p1")!.temporaryGrantedKeywords).toBeUndefined();
+    expect(after.seats[0].life).toBe(42);
+  });
+  it("Lightning Bolt: any target lists creatures and players; the pick takes the damage", () => {
+    const bolt = real("Lightning Bolt", "spell");
+    const s = session([seat("a", []), seat("b", [bear("v", { toughness: "3" })]), seat("c", [])]);
+    const prompt = spellTargetSlots(s, "a", bolt)!;
+    const labels = prompt.slots[0].options.map((o) => o.label);
+    expect(labels.some((l) => /Bear v/.test(l))).toBe(true);
+    expect(labels.some((l) => /^c \(40 life\)|c \(40 life\)/.test(l))).toBe(true);
+    const playerC = prompt.slots[0].options.find((o) => o.target.kind === "player" && o.target.seatId === "c")!.target;
+    expect(applyLabeledContinuation(s, "a", bolt, prompt.continuation, [playerC]).seats[2].life).toBe(37);
+  });
+  it("a target that vanished fizzles instead of resolving", () => {
+    const bolt = real("Lightning Bolt", "spell");
+    const s = session([seat("a", []), seat("b", [bear("v")])]);
+    const prompt = spellTargetSlots(s, "a", bolt)!;
+    const gone = { kind: "card" as const, seatId: "b", cardId: "nope" };
+    expect(applyLabeledContinuation(s, "a", bolt, prompt.continuation, [gone]).seats[1].board.battlefield).toHaveLength(1);
   });
 });

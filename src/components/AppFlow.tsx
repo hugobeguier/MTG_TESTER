@@ -440,7 +440,32 @@ interface BasicLandFetchSearchState {
 // applier needs besides the target itself (chosenX for a variable-damage spell's already-paid X).
 type PendingTargetedEffect = { kind: "removal"; effect: RemovalEffect; chosenX?: number } | { kind: "zone"; effect: ZoneEffect; chosenX?: number };
 
+// One "pick a target from this list" step of a labeled target choice, with the picks already resolved to ChosenTargets.
+interface LabeledSlot {
+  prompt: string;
+  options: Array<{ label: string; target: ChosenTarget }>;
+}
+
+// What happens once every slot of a labeled target choice has been answered.
+type LabeledContinuation =
+  | { kind: "damage"; effect: RemovalEffect; chosenX?: number }
+  | { kind: "extra"; effect: SpellExtraEffect; lifeAmount?: number };
+
 type PendingRuleChoice =
+  // Targets that don't fit the board-click / graveyard pickers (a creature OR a player, two different targets in a row): a plain
+  // list of labeled options, one slot at a time — Ram Through (your creature, then theirs), Lightning Bolt-style "any target".
+  | {
+      id: string;
+      kind: "choose_labeled_target";
+      controllerSeatId: string;
+      sourceCardId: string;
+      sourceCardName: string;
+      sourceCard: VisibleCard;
+      slots: LabeledSlot[];
+      slotIndex: number;
+      picks: ChosenTarget[];
+      continuation: LabeledContinuation;
+    }
   | {
       id: string;
       kind: "choose_card_from_library";
@@ -5937,6 +5962,29 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       // returns undefined for that kind — the mode itself isn't chosen yet here) and "any target"
       // damage (removalEffectTargetSpec also declines that — needs a combined creature-or-player pool
       // this phase doesn't build). Only intercepts with a real decision (2+ legal targets).
+      // Ram Through / Bite Down / Tamiyo's Safekeeping / "any target" damage: the human picks the targets from a labeled list.
+      const labeledSpell = actor?.kind === "human" && sourceCard ? spellTargetSlots(session, action.actorSeatId, sourceCard, action.chosenX) : undefined;
+      if (actor?.kind === "human" && sourceCard && labeledSpell) {
+        const remainingStack = removeStackAction(action.id);
+        const resolutionDestination = spellResolutionDestination(session, action);
+        setSession((current) =>
+          playCardFromZone(current, action.actorSeatId, action.cardId, `${action.cardName} resolves.`, action.position, resolutionDestination, action.manaSourceIds, action.sourceZone ?? "hand", action.faceIndex)
+        );
+        setPendingRuleChoice({
+          id: crypto.randomUUID(),
+          kind: "choose_labeled_target",
+          controllerSeatId: action.actorSeatId,
+          sourceCardId: sourceCard.id,
+          sourceCardName: sourceCard.name,
+          sourceCard,
+          slots: labeledSpell.slots,
+          slotIndex: 0,
+          picks: [],
+          continuation: labeledSpell.continuation
+        });
+        resumeTopStackAction(remainingStack);
+        return;
+      }
       const castRemovalEffect = sourceCard && !isModalReanimateCard ? parseRemovalEffect(etbEffectText(sourceCard.oracleText)) : undefined;
       const castRemovalTargetSpec = castRemovalEffect ? removalEffectTargetSpec(castRemovalEffect, sourceCard!.id) : undefined;
       if (actor?.kind === "human" && sourceCard && castRemovalEffect && castRemovalTargetSpec) {
@@ -7859,7 +7907,26 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   // destroy_all_conditional/damage/mass_damage) has no target to choose at all, so it just applies
   // immediately via the same applyRemovalEffect the deterministic/agent path already uses for those
   // shapes.
+  // One answer to a labeled target list; reopens for the next slot, or runs the spell's effect once the last one is in.
+  function completeLabeledTarget(index: number) {
+    const choice = pendingRuleChoice;
+    if (!choice || choice.kind !== "choose_labeled_target") return;
+    const option = choice.slots[choice.slotIndex]?.options[index];
+    if (!option) return;
+    const picks = [...choice.picks, option.target];
+    if (choice.slotIndex + 1 < choice.slots.length) {
+      setPendingRuleChoice({ ...choice, id: crypto.randomUUID(), slotIndex: choice.slotIndex + 1, picks });
+      return;
+    }
+    setPendingRuleChoice(undefined);
+    setSession((current) => applyLabeledContinuation(current, choice.controllerSeatId, choice.sourceCard, choice.continuation, picks));
+  }
+
   function chooseModalOption(index: number) {
+    if (pendingRuleChoice?.kind === "choose_labeled_target") {
+      completeLabeledTarget(index);
+      return;
+    }
     if (pendingRuleChoice?.kind === "choose_trigger_option") {
       completeTriggerOption(index);
       return;
@@ -7878,6 +7945,24 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         prompt: `${choice.sourceCardName}: choose any number of permanents and/or players to proliferate.`
       });
       return;
+    }
+    if (mode.kind === "damage" && mode.targetType !== "creature") {
+      const options = labeledTargetOptions(session, choice.controllerSeatId, mode.targetType === "player" ? "player" : "any_damage", choice.sourceCard);
+      if (options.length >= 2) {
+        setPendingRuleChoice({
+          id: crypto.randomUUID(),
+          kind: "choose_labeled_target",
+          controllerSeatId: choice.controllerSeatId,
+          sourceCardId: choice.sourceCardId,
+          sourceCardName: choice.sourceCardName,
+          sourceCard: choice.sourceCard,
+          slots: [{ prompt: choice.sourceCardName + ": choose a target for the damage.", options }],
+          slotIndex: 0,
+          picks: [],
+          continuation: { kind: "damage", effect: mode }
+        });
+        return;
+      }
     }
     if (mode.kind === "grant_keywords") {
       const yours = session.seats.find((seat) => seat.id === choice.controllerSeatId)?.board.battlefield.filter((card) => card.typeLine.includes("Creature")) ?? [];
@@ -14022,7 +14107,96 @@ export function manaFromTappedOpponentLands(session: GameSession, casterSeatId: 
 // Applies one SpellExtraEffect (spellExtras.ts) for its caster. Same deterministic, no-target-prompt
 // conventions as the rest of this file's removal/pump appliers: the "best" target is picked by
 // heuristic for every seat kind (there's no selection UI for these shapes yet).
-export function applySpellExtraEffect(session: GameSession, casterSeatId: string, source: VisibleCard, effect: SpellExtraEffect, chosenX?: number): GameSession {
+// The clickable list for one target slot. Opponent-side targets are filtered by hexproof/shroud/protection and player hexproof, like the
+// automatic picks are.
+export function labeledTargetOptions(
+  session: GameSession,
+  controllerSeatId: string,
+  slot: "any_damage" | "player" | "own_creature" | "own_permanent" | "opponent_creature" | "opponent_creature_or_planeswalker",
+  source: VisibleCard
+): LabeledSlot["options"] {
+  const options: LabeledSlot["options"] = [];
+  const cardLabel = (card: VisibleCard, seat: PlayerSeat) => {
+    const stats = card.typeLine.includes("Creature") ? ` (${effectivePower(card)}/${effectiveToughness(card)})` : "";
+    return `${card.name}${stats} — ${seat.id === controllerSeatId ? "yours" : seat.name}`;
+  };
+  const targetable = (card: VisibleCard, seat: PlayerSeat) => seat.id === controllerSeatId || (!hasShroud(card) && !hasHexproof(card) && !isProtectedFrom(card, source));
+  for (const seat of session.seats) {
+    if (seat.hasLost) continue;
+    const own = seat.id === controllerSeatId;
+    if (slot === "any_damage" || slot === "player") {
+      if (slot === "player" || own || !playerHasHexproof(seat)) {
+        if (!own || slot === "any_damage") options.push({ label: `${seat.name} (${seat.life} life)`, target: { kind: "player", seatId: seat.id } });
+      }
+    }
+    for (const card of seat.board.battlefield) {
+      const isCreature = card.typeLine.includes("Creature");
+      const isPlaneswalker = card.typeLine.includes("Planeswalker");
+      const wanted =
+        slot === "any_damage" ? isCreature || isPlaneswalker :
+        slot === "own_creature" ? own && isCreature :
+        slot === "own_permanent" ? own :
+        slot === "opponent_creature" ? !own && isCreature :
+        slot === "opponent_creature_or_planeswalker" ? !own && (isCreature || isPlaneswalker) :
+        false;
+      if (wanted && targetable(card, seat)) options.push({ label: cardLabel(card, seat), target: { kind: "card", seatId: seat.id, cardId: card.id } });
+    }
+  }
+  // Opponents' things first, then by name — the likely choices lead the list; capped so the modal stays usable.
+  return options
+    .sort((a, b) => Number(a.target.seatId === controllerSeatId) - Number(b.target.seatId === controllerSeatId))
+    .slice(0, 16);
+}
+
+// The target slots a human-cast spell needs (Ram Through's two creatures, Tamiyo's Safekeeping's permanent, "any target" damage), or
+// undefined when the spell has nothing to choose between.
+export function spellTargetSlots(session: GameSession, controllerSeatId: string, source: VisibleCard, chosenX?: number): { slots: LabeledSlot[]; continuation: LabeledContinuation } | undefined {
+  const text = etbEffectText(source.oracleText);
+  const extra = parseSpellExtraEffects(text).find((effect) => effect.kind === "creature_bites" || effect.kind === "grant_keywords");
+  if (extra?.kind === "creature_bites") {
+    const mine = labeledTargetOptions(session, controllerSeatId, "own_creature", source);
+    const theirs = labeledTargetOptions(session, controllerSeatId, /creature or planeswalker you don'?t control/i.test(text) ? "opponent_creature_or_planeswalker" : "opponent_creature", source);
+    if (mine.length === 0 || theirs.length === 0 || mine.length + theirs.length < 3) return undefined;
+    return {
+      slots: [
+        { prompt: `${source.name}: choose the creature you control that deals the damage.`, options: mine },
+        { prompt: `${source.name}: choose the creature that takes it.`, options: theirs }
+      ],
+      continuation: { kind: "extra", effect: extra }
+    };
+  }
+  if (extra?.kind === "grant_keywords") {
+    const own = labeledTargetOptions(session, controllerSeatId, "own_permanent", source);
+    if (own.length < 2) return undefined;
+    return {
+      slots: [{ prompt: `${source.name}: choose a permanent you control to gain ${extra.keywords.join(" and ")} until end of turn.`, options: own }],
+      continuation: { kind: "extra", effect: extra, lifeAmount: parseSimpleLifeChange(text)?.kind === "gain_life" ? parseSimpleLifeChange(text)!.amount : undefined }
+    };
+  }
+  if (parseModalHeader(source.oracleText)) return undefined;
+  const removal = parseRemovalEffect(text);
+  if (removal?.kind === "damage" && removal.targetType !== "creature") {
+    const options = labeledTargetOptions(session, controllerSeatId, removal.targetType === "player" ? "player" : "any_damage", source);
+    if (options.length < 2) return undefined;
+    return { slots: [{ prompt: `${source.name}: choose a target for the damage.`, options }], continuation: { kind: "damage", effect: removal, chosenX } };
+  }
+  return undefined;
+}
+
+// Runs a labeled target choice's continuation once the human has answered every slot. A pick that stopped being legal fizzles.
+export function applyLabeledContinuation(session: GameSession, controllerSeatId: string, source: VisibleCard, continuation: LabeledContinuation, picks: ChosenTarget[]): GameSession {
+  const stillThere = (target: ChosenTarget | undefined) =>
+    target?.kind === "player" ? session.seats.some((seat) => seat.id === target.seatId && !seat.hasLost) : target?.kind === "card" ? Boolean(resolvePreChosenBattlefieldTarget(session, target)) : false;
+  if (!picks.every(stillThere)) return noLegalTargetEvent(session, controllerSeatId, source.name);
+  if (continuation.kind === "damage") return applyRemovalEffect(session, controllerSeatId, source.name, source, continuation.effect, continuation.chosenX, picks[0]);
+  let next = applySpellExtraEffect(session, controllerSeatId, source, continuation.effect, undefined, picks);
+  if (continuation.lifeAmount) {
+    next = rulesEvent({ ...next, seats: next.seats.map((seat) => (seat.id === controllerSeatId ? { ...seat, life: seat.life + continuation.lifeAmount! } : seat)) }, controllerSeatId, `${source.name}: ${next.seats.find((seat) => seat.id === controllerSeatId)?.name ?? "Player"} gains ${continuation.lifeAmount} life.`);
+  }
+  return next;
+}
+
+export function applySpellExtraEffect(session: GameSession, casterSeatId: string, source: VisibleCard, effect: SpellExtraEffect, chosenX?: number, chosenTargets?: ChosenTarget[]): GameSession {
   const caster = session.seats.find((seat) => seat.id === casterSeatId);
   if (!caster) return session;
   const sourceName = source.name;
@@ -14261,10 +14435,12 @@ export function applySpellExtraEffect(session: GameSession, casterSeatId: string
     }
 
     case "creature_bites": {
-      const dealer = strongestControlledCreature(caster);
+      const chosenDealer = resolvePreChosenBattlefieldTarget(session, chosenTargets?.[0]);
+      const chosenVictim = resolvePreChosenBattlefieldTarget(session, chosenTargets?.[1]);
+      const dealer = chosenDealer && chosenDealer.seatId === casterSeatId ? chosenDealer.card : strongestControlledCreature(caster);
       const power = dealer ? Math.max(0, effectivePower(dealer)) : 0;
       if (!dealer || power <= 0) return noLegalTargetEvent(session, casterSeatId, sourceName);
-      const target = chooseDamageTarget(session, casterSeatId, power, "creature", dealer);
+      const target: DamageTarget | undefined = chosenVictim ? { kind: "creature", seatId: chosenVictim.seatId, card: chosenVictim.card } : chooseDamageTarget(session, casterSeatId, power, "creature", dealer);
       if (!target || target.kind !== "creature") return noLegalTargetEvent(session, casterSeatId, sourceName);
       const warded = payWardIfNeeded(session, casterSeatId, target.card, sourceName);
       if (warded.countered) return warded.session;
@@ -14292,7 +14468,7 @@ export function applySpellExtraEffect(session: GameSession, casterSeatId: string
     }
 
     case "grant_keywords":
-      return applyRemovalEffect(session, casterSeatId, sourceName, source, { kind: "grant_keywords", keywords: effect.keywords });
+      return applyRemovalEffect(session, casterSeatId, sourceName, source, { kind: "grant_keywords", keywords: effect.keywords }, undefined, chosenTargets?.[0]);
 
     case "each_other_player_sacrifices": {
       const destructions: Array<{ seatId: string; cardId: string; message: string }> = [];
@@ -14854,7 +15030,8 @@ export function applyRemovalEffect(
       return resolveProliferate(session);
     // Protective mode: your best creature gains the keywords until end of turn (hexproof/indestructible resolve on the next state pass).
     case "grant_keywords": {
-      const target = chooseCounterTarget(session, casterSeatId, "+1/+1", false);
+      const picked = resolvePreChosenBattlefieldTarget(session, preChosenTarget);
+      const target = picked && picked.seatId === casterSeatId ? { seatId: picked.seatId, card: picked.card } : chooseCounterTarget(session, casterSeatId, "+1/+1", false);
       if (!target) return noLegalTargetEvent(session, casterSeatId, sourceName);
       return rulesEvent(
         {
@@ -19838,6 +20015,10 @@ function ruleChoiceView(
           .filter((card) => hasCardType(card, "Creature"))
           .map((card) => ({ card, seatId: humanSeat.id, seatName: humanSeat.name }))
       };
+    }
+    if (choice.kind === "choose_labeled_target") {
+      const slot = choice.slots[choice.slotIndex];
+      return { kind: "choose_modal_option" as const, sourceCardName: choice.sourceCardName, prompt: slot.prompt, options: slot.options.map((option, index) => ({ index, label: option.label })) };
     }
     if (choice.kind === "choose_creature_for_grant") {
       const owner = session.seats.find((seat) => seat.id === choice.controllerSeatId);
