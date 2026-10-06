@@ -245,7 +245,9 @@ export function parseGenericSacrificeAbilities(oracleText: string): SacrificeAbi
     const typeWord = countMatch ? undefined : targetPhrase.replace(/^(?:another|an?)\s+/i, "");
     const sacrificeTargetTypeFilter = sacrificeTarget === "creature" && typeWord !== undefined && !/^creatures?$/i.test(typeWord) ? typeWord : undefined;
 
-    const effect = parseSacrificeEffectText(effectText);
+    // "Return target Dragon creature card or Ugin planeswalker card from your graveyard to your hand." (Haven of the Spirit Dragon):
+    // the planeswalker half is dropped; the Dragon half is the whole realistic use.
+    const effect = parseSacrificeEffectText(effectText.replace(/ or [A-Z][a-z]+ planeswalker card/, ""));
     if (!effect) continue;
 
     const costManaText = (costPrefix.match(/\{[^}]+\}/g) ?? []).filter((symbol) => !/^\{t\}$/i.test(symbol)).join("");

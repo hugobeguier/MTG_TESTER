@@ -236,7 +236,7 @@ export function parseZoneEffect(oracleText: string): ZoneEffect | undefined {
   // "If the gift was promised, return target creature card ..." (Consumed by Greed) — the gift isn't modeled
   // (no promise is ever made), so the conditional return never happens rather than happening unconditionally.
   const giftConditional = /\bif the gift was promised\b/.test(text);
-  const regrow = giftConditional ? null : text.match(/\breturn target (permanent|creature|land|enchantment|artifact|[a-z]+)?\s*cards?(?: that isn'?t an? [a-z]+)? from your graveyard to your hand\b/);
+  const regrow = giftConditional ? null : text.match(/\breturn target (permanent|creature|land|enchantment|artifact|[a-z]+)?(?: creature)?\s*cards?(?: that isn'?t an? [a-z]+)? from your graveyard to your hand\b/);
   if (regrow) {
     const word = regrow[1];
     // Any word that isn't one of the card types is a creature subtype ("target Zombie card").

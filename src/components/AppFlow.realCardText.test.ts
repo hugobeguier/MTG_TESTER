@@ -7,7 +7,7 @@ import { parseRemovalEffect } from "@/lib/removalSpells";
 import { permanentMatchesQualifier } from "@/lib/characteristics";
 import { parseSpellExtraEffects } from "@/lib/spellExtras";
 import { etbEffectText } from "@/lib/oracleClauses";
-import { parseGenericManaAbilities, parseGenericTapAbilities } from "@/lib/activatedAbilities";
+import { parseGenericManaAbilities, parseGenericSacrificeAbilities, parseGenericTapAbilities } from "@/lib/activatedAbilities";
 import { loadCardCatalog, lookupCard } from "@/lib/cardCatalog";
 import type { GameSession, PlayerSeat, VisibleCard } from "@/lib/types";
 
@@ -1094,5 +1094,14 @@ describe("chosen-type and enters-with-counter permanents (real Oracle text)", ()
     const after = applyEntersWithCounterReplacements(s, "a", "drag");
     expect(after.seats[0].board.battlefield.find((c) => c.id === "drag")!.counters?.find((c) => c.kind === "+1/+1")?.count).toBe(1);
     expect(applyEntersWithCounterReplacements(s, "a", "elf").seats[0].board.battlefield.find((c) => c.id === "elf")!.counters).toBeUndefined();
+  });
+});
+
+describe("Haven of the Spirit Dragon's sacrifice ability (real Oracle text)", () => {
+  it("parses a regrow-a-Dragon sacrifice ability", () => {
+    const abilities = parseGenericSacrificeAbilities(real("Haven of the Spirit Dragon", "x").oracleText);
+    expect(abilities).toHaveLength(1);
+    expect(abilities[0].effect.kind).toBe("zone_effect");
+    expect(abilities[0].sacrificeTarget).toBe("self");
   });
 });
