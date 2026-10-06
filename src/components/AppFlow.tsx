@@ -795,6 +795,17 @@ type PendingRuleChoice =
       trigger: Extract<PendingAction, { type: "trigger" }>;
       remainingStack: PendingAction[];
     }
+  // "Target creature gains hexproof and indestructible until end of turn." (Valorous Stance, Collective Resistance) / "can't be
+  // blocked this turn" (Rogue's Passage): the human picks which of their creatures gets the keywords.
+  | {
+      id: string;
+      kind: "choose_creature_for_grant";
+      controllerSeatId: string;
+      sourceCardId: string;
+      sourceCardName: string;
+      prompt: string;
+      keywords: string[];
+    }
   // A triggered ability that targets cards (a creature to grow, a graveyard card to return, a permanent to destroy): the human clicks
   // them one at a time (picksNeeded > 1 for "up to two"), and the ids go back onto the trigger as effect.chosenOption.
   | {
@@ -4795,6 +4806,15 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       setSeatManaPool(seatId, paid.poolSpent);
       clearManaContributions(seatId);
     }
+    // "Target creature can't be blocked this turn." (Rogue's Passage): the human chooses the creature after paying.
+    if (seat?.kind === "human" && paid.ability.effect.kind === "target_unblockable") {
+      const yours = paid.session.seats.find((item) => item.id === seatId)?.board.battlefield.filter((card) => card.typeLine.includes("Creature")) ?? [];
+      if (yours.length >= 2) {
+        setSession(() => paid.session);
+        setPendingRuleChoice({ id: crypto.randomUUID(), kind: "choose_creature_for_grant", controllerSeatId: seatId, sourceCardId: cardId, sourceCardName: paid.card.name, prompt: paid.card.name + ": choose the creature that can't be blocked this turn.", keywords: ["can't be blocked"] });
+        return;
+      }
+    }
     setSession(() => applyGenericTapEffect(paid.session, seatId, cardId, paid.card.name, paid.ability.effect, paid.ability.clause));
   }
 
@@ -7859,6 +7879,13 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       });
       return;
     }
+    if (mode.kind === "grant_keywords") {
+      const yours = session.seats.find((seat) => seat.id === choice.controllerSeatId)?.board.battlefield.filter((card) => card.typeLine.includes("Creature")) ?? [];
+      if (yours.length >= 2) {
+        setPendingRuleChoice({ id: crypto.randomUUID(), kind: "choose_creature_for_grant", controllerSeatId: choice.controllerSeatId, sourceCardId: choice.sourceCardId, sourceCardName: choice.sourceCardName, prompt: choice.sourceCardName + ": choose a creature you control to gain " + mode.keywords.join(" and ") + " until end of turn.", keywords: mode.keywords });
+        return;
+      }
+    }
     if (mode.kind === "destroy" || mode.kind === "exile" || mode.kind === "bounce") {
       const spec = removalEffectTargetSpec(mode, choice.sourceCard.id);
       if (maybeRequestTarget(choice.controllerSeatId, choice.sourceCard, spec, false, { kind: "removal", effect: mode })) return;
@@ -7916,6 +7943,12 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   function chooseBattlefieldCreatureTarget(targetSeatId: string, cardId: string) {
     if (pendingRuleChoice?.kind === "choose_trigger_card") {
       completeTriggerCard(cardId);
+      return;
+    }
+    if (pendingRuleChoice?.kind === "choose_creature_for_grant") {
+      const grant = pendingRuleChoice;
+      setPendingRuleChoice(undefined);
+      setSession((current) => grantKeywordsToCreature(current, grant.controllerSeatId, cardId, grant.keywords, grant.sourceCardName));
       return;
     }
     const choice = pendingRuleChoice;
@@ -17315,6 +17348,33 @@ export function findCommonTriggersForPermanentDied(
 // (the watcher can be the attacker itself, another of its controller's permanents, or the defending
 // player's — Marchesa's Decree). `unparsed` lists attacker-side sources whose clause no deterministic
 // parser understands, which the caller sends to the rules advisor as the old phase sweep did.
+// Gives one specific creature keywords until end of turn (the human's pick for a "target creature gains ..." effect).
+export function grantKeywordsToCreature(session: GameSession, seatId: string, cardId: string, keywords: string[], sourceName: string): GameSession {
+  const owner = session.seats.find((seat) => seat.id === seatId);
+  const target = owner?.board.battlefield.find((card) => card.id === cardId);
+  if (!owner || !target) return session;
+  return rulesEvent(
+    {
+      ...session,
+      seats: session.seats.map((seat) =>
+        seat.id !== seatId
+          ? seat
+          : {
+              ...seat,
+              board: {
+                ...seat.board,
+                battlefield: seat.board.battlefield.map((card) =>
+                  card.id === cardId ? { ...card, temporaryGrantedKeywords: [...(card.temporaryGrantedKeywords ?? []), ...keywords], grantedKeywords: [...new Set([...(card.grantedKeywords ?? []), ...keywords])] } : card
+                )
+              }
+            }
+      )
+    },
+    seatId,
+    sourceName + " gives " + target.name + " " + keywords.join(" and ") + " until end of turn."
+  );
+}
+
 // "Whenever you gain life, ..." (Archangel of Thune, Exemplar of Light, Ajani's Pridemate) and "Whenever you gain life for the
 // first time each turn, ..." (Vanguard Seraph). Only the source's controller gaining life counts. `firstThisTurn` is supplied by
 // the caller, which is the one place that sees every gain.
@@ -19777,6 +19837,16 @@ function ruleChoiceView(
         cards: humanSeat.board.battlefield
           .filter((card) => hasCardType(card, "Creature"))
           .map((card) => ({ card, seatId: humanSeat.id, seatName: humanSeat.name }))
+      };
+    }
+    if (choice.kind === "choose_creature_for_grant") {
+      const owner = session.seats.find((seat) => seat.id === choice.controllerSeatId);
+      return {
+        kind: "choose_creature_on_battlefield" as const,
+        sourceCardName: choice.sourceCardName,
+        prompt: choice.prompt,
+        actionLabel: "Give " + choice.keywords.join(" and "),
+        cards: (owner?.board.battlefield ?? []).filter((card) => card.typeLine.includes("Creature")).map((card) => ({ card, seatId: owner!.id, seatName: owner!.name }))
       };
     }
     if (choice.kind === "choose_trigger_card") {

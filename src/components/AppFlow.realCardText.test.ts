@@ -2,7 +2,7 @@
 // the test: two earlier tests passed on invented text while the real cards stayed broken (Court of Grace, the
 // "with power N or greater" watchers). Skipped per card when the catalog doesn't have it.
 import { describe, expect, it } from "vitest";
-import { applyExalted, applySacrificeEffect, applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
+import { grantKeywordsToCreature, applyExalted, applySacrificeEffect, applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
 import { parseRemovalEffect } from "@/lib/removalSpells";
 import { parseZoneEffect } from "@/lib/zoneEffects";
 import { permanentMatchesQualifier } from "@/lib/characteristics";
@@ -1312,5 +1312,14 @@ describe("human card picks on triggers (pure halves)", () => {
     const after = resolveTriggerEffect(session([seat("a", [real("Scrapshooter", "src")]), theirs]), trig({ kind: "gift_destroy_artifact_or_enchantment", chosenOption: "a2" }));
     expect(after.seats[1].board.battlefield.map((c) => c.id)).toEqual(["a1"]);
     expect(after.seats[1].board.hand).toHaveLength(1);
+  });
+});
+
+describe("grantKeywordsToCreature", () => {
+  it("gives the picked creature the keywords until end of turn and nobody else", () => {
+    const s = session([seat("a", [bear("mine"), bear("other")])]);
+    const after = grantKeywordsToCreature(s, "a", "other", ["hexproof", "indestructible"], "Collective Resistance");
+    expect(after.seats[0].board.battlefield.find((c) => c.id === "other")!.temporaryGrantedKeywords).toEqual(["hexproof", "indestructible"]);
+    expect(after.seats[0].board.battlefield.find((c) => c.id === "mine")!.temporaryGrantedKeywords).toBeUndefined();
   });
 });
