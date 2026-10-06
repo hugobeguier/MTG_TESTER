@@ -670,3 +670,26 @@ describe("beginning-of-combat triggers (real Oracle text)", () => {
     expect(small.seats[0].board.battlefield.some((c) => c.temporaryGrantedKeywords?.includes("haste"))).toBe(false);
   });
 });
+
+describe("extra combat and dethrone (real Oracle text)", () => {
+  const scourge = () => real("Scourge of the Throne", "sc", { power: "5", toughness: "5", attacking: true });
+  it("Scourge of the Throne: dethrone counter and an extra combat when attacking the life leader, once per turn", () => {
+    const s = session([seat("a", [scourge()], { life: 30 }), seat("b", [], { life: 40 })]);
+    const triggers = findAttackTriggers(s, { seatId: "a", card: scourge(), defendingSeatId: "b" }).triggers;
+    expect(triggers.map((t) => t.effect.kind).sort()).toEqual(["add_counter", "additional_combat"]);
+    const extra = triggers.find((t) => t.effect.kind === "additional_combat")!;
+    const after = resolveTriggerEffect(s, extra);
+    expect(after.extraCombatsPending).toBe(1);
+    expect(findAttackTriggers(after, { seatId: "a", card: scourge(), defendingSeatId: "b" }).triggers.map((t) => t.effect.kind)).toEqual(["add_counter"]);
+  });
+  it("Scourge of the Throne does nothing special when the defender isn't the life leader", () => {
+    const s = session([seat("a", [scourge()], { life: 40 }), seat("b", [], { life: 20 })]);
+    expect(findAttackTriggers(s, { seatId: "a", card: scourge(), defendingSeatId: "b" }).triggers).toHaveLength(0);
+  });
+  it("Hellkite Charger: pays {5}{R}{R} for an extra combat, or does nothing if it can't", () => {
+    const [trigger] = findAttackTriggers(session([seat("a", [real("Hellkite Charger", "hc", { attacking: true })]), seat("b", [])]), { seatId: "a", card: real("Hellkite Charger", "hc"), defendingSeatId: "b" }).triggers;
+    expect(trigger.effect).toMatchObject({ kind: "additional_combat", payCostText: "{5}{R}{R}" });
+    const broke = resolveTriggerEffect(session([seat("a", [real("Hellkite Charger", "hc", { attacking: true })]), seat("b", [])]), trigger);
+    expect(broke.extraCombatsPending).toBeUndefined();
+  });
+});

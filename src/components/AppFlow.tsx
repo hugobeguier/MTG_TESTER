@@ -288,6 +288,9 @@ type TriggerEffect = (
   | { kind: "double_power_toughness" }
   // "Target creature you control gains haste until end of turn." (Surrak, the Hunt Caller) — the creature that benefits most.
   | { kind: "target_creature_gains_keyword"; keywords: string[] }
+  // "Untap all attacking creatures. After this phase, there is an additional combat phase." (Scourge of the Throne; Hellkite
+  // Charger with payCostText: "you may pay {5}{R}{R}. If you do, ...").
+  | { kind: "additional_combat"; payCostText?: string }
   // "Proliferate." (Norn's Choirmaster) — every eligible permanent and player, same as the blanket resolveProliferate.
   | { kind: "proliferate" }
 ) & {
@@ -3277,6 +3280,12 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     // on any other turn — this isn't a separate hand-rolled resolution path, just the same phases
     // visited twice.
     let extraBeginningPhaseActive = current.extraBeginningPhaseActive;
+    // Additional combat phase: passing end of combat loops back to beginning of combat once per owed extra combat.
+    let extraCombatsPending = current.extraCombatsPending;
+    if (current.phase === "end of combat step" && (extraCombatsPending ?? 0) > 0) {
+      nextPhase = "beginning of combat step";
+      extraCombatsPending = (extraCombatsPending ?? 0) - 1;
+    }
     if (current.phase === "postcombat main phase" && hasExtraBeginningPhaseAura(current, activeSeat.id)) {
       nextPhase = "untap step";
       extraBeginningPhaseActive = true;
@@ -3298,6 +3307,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         clearTemporaryBuffs({
           ...current,
           activePlayerId: nextSeat.id,
+          extraCombatsPending: undefined,
           turn: current.turn + 1,
           phase: TURN_PHASES[0],
           extraTurnsQueue: queue,
@@ -3329,6 +3339,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         ...current,
         phase: nextPhase,
         extraBeginningPhaseActive,
+        extraCombatsPending,
         events: [
           phaseEvent(activeSeat.id, seatVerb(activeSeat, `${activeSeat.name} passes to ${nextPhase}.`, `You pass to ${nextPhase}.`)),
           ...current.events
@@ -3368,6 +3379,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       clearTemporaryBuffs({
         ...cleaned,
         activePlayerId: nextSeat.id,
+          extraCombatsPending: undefined,
         turn: current.turn + 1,
         phase: TURN_PHASES[0],
         extraTurnsQueue: queue,
@@ -16813,6 +16825,13 @@ export function findAttackTriggers(
     if (sourceSeat.hasLost) continue;
     for (const source of sourceSeat.board.battlefield) {
       if (source.abilitiesStripped) continue;
+      // Dethrone (Scourge of the Throne): attacking the player with the most life (or tied) puts a +1/+1 counter on the attacker.
+      if (event === "attacks" && source.id === attack.card.id && hasKeywordText(source.oracleText, "dethrone")) {
+        const defending = session.seats.find((seat) => seat.id === attack.defendingSeatId);
+        if (defending && session.seats.filter((seat) => !seat.hasLost).every((seat) => defending.life >= seat.life)) {
+          triggers.push(makeCommonTrigger(attack.seatId, sourceSeat.id, source, { kind: "add_counter", counterKind: "+1/+1", amount: 1, scope: "self" }, `${source.name} triggers (dethrone).`, attack.card.id));
+        }
+      }
       const sourceClauses = oracleClauses(source.oracleText);
       for (const [clauseIndex, clause] of sourceClauses.entries()) {
         const eventPattern = event === "attacks" ? /\b(?:when|whenever)\b[^,.]*\battacks\b/i : /\b(?:when|whenever)\b[^,.]*\bblocks\b/i;
@@ -16855,6 +16874,13 @@ export function findAttackTriggers(
           }
           const modal = parseGenericModalEffect([triggerClause, ...bullets].join("\n"), undefined);
           if (modal) effect = { kind: "modal", modal };
+        }
+        // "...attacks for the first time each turn, if it's attacking the player with the most life or tied for most life, ..."
+        // (Scourge of the Throne): once per turn per source, and only against a player at the top of the life totals.
+        if (/\bfor the first time each turn\b/i.test(triggerClause) && session.onceEachTurnEffectsUsed?.includes(`${session.turn}:${source.id}:first_attack`)) continue;
+        if (/\bif it'?s attacking the player with the most life or tied for most life\b/i.test(triggerClause)) {
+          const defending = session.seats.find((seat) => seat.id === attack.defendingSeatId);
+          if (!defending || !session.seats.filter((seat) => !seat.hasLost).every((seat) => defending.life >= seat.life)) continue;
         }
         // "...attacks while you don't control another Dinosaur, ..." (Pugnacious Hammerskull)
         const noOtherOfType = triggerClause.match(/\bwhile you don'?t control another ([a-z]+)\b/i);
@@ -17383,6 +17409,8 @@ export function commonTriggerEffect(
   if (formidable) {
     return { kind: "target_creature_gains_keyword", keywords: formidable[2].split(/ and |, /), condition: { kind: "total_power_at_least", amount: Number.parseInt(formidable[1], 10) } };
   }
+  const extraCombat = text.match(/(?:you may pay (\{[^.]*?\})\. if you do, )?untap all attacking creatures(?: and|\.) ?after this phase, there is an additional combat phase/);
+  if (extraCombat) return extraCombat[1] ? { kind: "additional_combat", payCostText: extraCombat[1].toUpperCase(), optional: true } : { kind: "additional_combat" };
   const rummage = text.match(/\byou may discard a card\. if you do, draw (a|one|two|three) cards?\b/);
   if (rummage) return { kind: "discard_then_draw", draw: numberWordToInt(rummage[1]) ?? 1, optional: true };
   if (/\byou gain life equal to that creature'?s toughness\b/.test(text)) return { kind: "gain_life_context_toughness" };
@@ -18103,6 +18131,26 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
     return drawMultipleForSeat(session, trigger.controllerSeatId, trigger.effect.amount, `${trigger.sourceCardName} trigger resolves. ${seatName} draws ${trigger.effect.amount} card${trigger.effect.amount === 1 ? "" : "s"}.`);
   }
   if (trigger.effect.kind === "proliferate") return resolveProliferate(session);
+  if (trigger.effect.kind === "additional_combat") {
+    // Marks the once-each-turn gate findAttackTriggers reads for "attacks for the first time each turn".
+    let next: GameSession = { ...session, onceEachTurnEffectsUsed: [...(session.onceEachTurnEffectsUsed ?? []), `${session.turn}:${trigger.sourceCardId}:first_attack`] };
+    const payer = session.seats.find((seat) => seat.id === trigger.controllerSeatId);
+    if (!payer) return session;
+    if (trigger.effect.payCostText) {
+      const total = manaValueFromManaCost(trigger.effect.payCostText);
+      const payment = chooseManaSourcesForCost(payer, genericManaAbilityCostShim({ costManaText: trigger.effect.payCostText }), total, undefined, session.seats);
+      if (!payment.ok) return rulesEvent(session, payer.id, `${payer.name} can't pay ${trigger.effect.payCostText} for ${trigger.sourceCardName}.`);
+      next = { ...next, seats: next.seats.map((seat) => (seat.id === payer.id ? spendManaSources(seat, payment.sourceIds) : seat)) };
+    }
+    next = {
+      ...next,
+      extraCombatsPending: (next.extraCombatsPending ?? 0) + 1,
+      seats: next.seats.map((seat) =>
+        seat.id !== payer.id ? seat : { ...seat, board: { ...seat.board, battlefield: seat.board.battlefield.map((card) => (card.attacking ? { ...card, tapped: false } : card)) } }
+      )
+    };
+    return rulesEvent(next, payer.id, `${trigger.sourceCardName}: attacking creatures untap, and there will be an additional combat phase after this one.`);
+  }
   if (trigger.effect.kind === "double_power_toughness") {
     return rulesEvent(
       {

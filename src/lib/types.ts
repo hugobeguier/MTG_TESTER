@@ -432,6 +432,9 @@ export interface GameSession {
   // Same idea for blockers: filled by assignBlockers, drained by a component effect that queues "whenever this creature blocks"
   // / "attacks or blocks" triggers (Elder Gargaroth).
   pendingBlockDeclarations?: Array<{ seatId: string; card: VisibleCard; attackerSeatId: string }>;
+  // Extra combat phases still owed this turn (Hellkite Charger, Scourge of the Throne): when end of combat is passed, the turn
+  // goes back to beginning of combat instead of on to the second main phase.
+  extraCombatsPending?: number;
   pendingAttackDeclarations?: Array<{ seatId: string; card: VisibleCard; defendingSeatId: string }>;
   // Rule 724: the player who is currently the monarch (Court of Grace, Skyline Despot, Marchesa's Decree). They draw
   // an extra card at the beginning of their end step, and a creature that deals combat damage to them makes its
