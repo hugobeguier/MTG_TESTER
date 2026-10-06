@@ -293,6 +293,9 @@ type TriggerEffect = (
   | { kind: "additional_combat"; payCostText?: string }
   // "When enchanted creature dies, return this card to its owner's hand." (Angelic Destiny) — the Aura is already in the graveyard.
   | { kind: "return_self_to_hand" }
+  // "This creature deals 4 damage to each other opponent." (Parapet Thrasher) — every opponent except the one named by actorSeatId
+  // (the player the Dragon just hit).
+  | { kind: "damage_each_other_opponent"; amount: number }
   // "Proliferate." (Norn's Choirmaster) — every eligible permanent and player, same as the blanket resolveProliferate.
   | { kind: "proliferate" }
 ) & {
@@ -1778,10 +1781,19 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     const hits = session.pendingCombatDamageToPlayer;
     if (!hits || hits.length === 0 || hits === processedCombatDamageToPlayerBatchRef.current) return;
     processedCombatDamageToPlayerBatchRef.current = hits;
-    const damageTriggers = hits.flatMap((hit) => [
-      ...findCombatDamageToPlayerTriggers(session, hit.seatId, hit.card, hit.damagedSeatId),
-      ...findAnyCombatDamageToOpponentTriggers(session, hit.seatId, hit.card, hit.damagedSeatId)
-    ]);
+    // "One or more" group triggers (Parapet Thrasher's modal) fire once per source per damage step, however many creatures connected.
+    const groupSeen = new Set<string>();
+    const damageTriggers = hits
+      .flatMap((hit) => [
+        ...findCombatDamageToPlayerTriggers(session, hit.seatId, hit.card, hit.damagedSeatId),
+        ...findAnyCombatDamageToOpponentTriggers(session, hit.seatId, hit.card, hit.damagedSeatId)
+      ])
+      .filter((trigger) => {
+        if (trigger.effect.kind !== "modal") return true;
+        if (groupSeen.has(trigger.sourceCardId)) return false;
+        groupSeen.add(trigger.sourceCardId);
+        return true;
+      });
     // Monarch: a creature that deals combat damage to the monarch makes its controller the monarch.
     const stealingHit = hits.find((hit) => session.monarchSeatId && hit.damagedSeatId === session.monarchSeatId && hit.seatId !== session.monarchSeatId);
     setSession((current) => {
@@ -15785,11 +15797,18 @@ function applyPrimitiveActionPlan(session: GameSession, seatId: string, sourceCa
   }, session);
 }
 
-type GenericModalMode = { kind: "trigger"; effect: TriggerEffect } | { kind: "zone"; effect: ZoneEffect } | { kind: "pump"; effect: PumpEffect };
+type GenericModalMode =
+  | { kind: "trigger"; effect: TriggerEffect }
+  | { kind: "zone"; effect: ZoneEffect }
+  | { kind: "pump"; effect: PumpEffect }
+  // A single removal-shaped bullet inside a trigger's choose-one (Parapet Thrasher's "Destroy target artifact that opponent controls.")
+  | { kind: "removal"; effect: RemovalEffect };
 
 interface GenericModalEffect {
   chooseCount: number;
   modes: GenericModalMode[];
+  // "choose one that hasn't been chosen this turn" (Parapet Thrasher): each mode can be picked once per turn per source.
+  distinctPerTurn?: boolean;
 }
 
 // "Choose one/two/three —\n• mode.\n• mode. ..." (Profane Command, Behold the Beyond, ...) for the
@@ -15820,12 +15839,22 @@ export function parseGenericModalEffect(oracleText: string, chosenX: number | un
       continue;
     }
     const trigger = commonTriggerEffect(modeText, "clause");
+    if (trigger?.kind === "damage_each_other_opponent") {
+      modes.push({ kind: "trigger", effect: trigger });
+      continue;
+    }
+    const removal = parseRemovalEffect(modeText);
+    if (removal && removal.kind !== "modal") {
+      modes.push({ kind: "removal", effect: removal });
+      continue;
+    }
     if (trigger) modes.push({ kind: "trigger", effect: trigger });
   }
-  return modes.length > 0 ? { chooseCount: header.chooseCount, modes } : undefined;
+  return modes.length > 0 ? { chooseCount: header.chooseCount, modes, ...(/hasn'?t been chosen this turn/i.test(oracleText) ? { distinctPerTurn: true } : {}) } : undefined;
 }
 
 function genericModalModeHasLegalTarget(session: GameSession, casterSeatId: string, mode: GenericModalMode): boolean {
+  if (mode.kind === "removal") return removalEffectHasLegalTarget(session, casterSeatId, { id: "", name: "", typeLine: "", oracleText: "", colors: [], manaValue: 0, role: "permanent", zone: "battlefield" } as VisibleCard, mode.effect);
   if (mode.kind === "zone") return zoneEffectHasLegalTarget(session, casterSeatId, mode.effect);
   if (mode.kind === "pump") return choosePumpTarget(session, casterSeatId, mode.effect) !== undefined;
   if (mode.effect.kind === "add_counter" && mode.effect.scope !== "self" && mode.effect.scope !== "context") {
@@ -15841,17 +15870,23 @@ function genericModalModeHasLegalTarget(session: GameSession, casterSeatId: stri
 // has no notion of declining (that only happens upstream, in the accept/decline UI a real triggered
 // ability goes through before ever reaching it), and a synthetic trigger built here skips that step
 // entirely, matching how cheaply this engine already treats "optional" ETB effects elsewhere.
-export function applyGenericModalEffect(session: GameSession, casterSeatId: string, sourceCard: VisibleCard, effect: GenericModalEffect): GameSession {
-  const viableModes = effect.modes.filter((mode) => genericModalModeHasLegalTarget(session, casterSeatId, mode));
-  const chosenModes = viableModes.slice(0, effect.chooseCount);
-  if (chosenModes.length === 0) return noLegalTargetEvent(session, casterSeatId, sourceCard.name);
-  return chosenModes.reduce((current, mode) => {
+export function applyGenericModalEffect(session: GameSession, casterSeatId: string, sourceCard: VisibleCard, effect: GenericModalEffect, contextSeatId?: string): GameSession {
+  const modeKey = (index: number) => `${session.turn}:${sourceCard.id}:mode:${index}`;
+  const indexed = effect.modes.map((mode, index) => ({ mode, index }));
+  const viableModes = indexed.filter(
+    ({ mode, index }) => genericModalModeHasLegalTarget(session, casterSeatId, mode) && !(effect.distinctPerTurn && session.onceEachTurnEffectsUsed?.includes(modeKey(index)))
+  );
+  const chosen = viableModes.slice(0, effect.chooseCount);
+  if (chosen.length === 0) return noLegalTargetEvent(session, casterSeatId, sourceCard.name);
+  const marked: GameSession = effect.distinctPerTurn ? { ...session, onceEachTurnEffectsUsed: [...(session.onceEachTurnEffectsUsed ?? []), ...chosen.map(({ index }) => modeKey(index))] } : session;
+  return chosen.map(({ mode }) => mode).reduce((current, mode) => {
     if (mode.kind === "zone") return applyZoneEffect(current, casterSeatId, sourceCard.name, mode.effect);
     if (mode.kind === "pump") return applyTargetedPumpEffect(current, casterSeatId, sourceCard, mode.effect);
+    if (mode.kind === "removal") return applyRemovalEffect(current, casterSeatId, sourceCard.name, sourceCard, mode.effect);
     const syntheticTrigger: Extract<PendingAction, { type: "trigger" }> = {
       id: crypto.randomUUID(),
       type: "trigger",
-      actorSeatId: casterSeatId,
+      actorSeatId: contextSeatId ?? casterSeatId,
       controllerSeatId: casterSeatId,
       sourceCardId: sourceCard.id,
       sourceCardName: sourceCard.name,
@@ -15860,7 +15895,7 @@ export function applyGenericModalEffect(session: GameSession, casterSeatId: stri
       message: ""
     };
     return resolveTriggerEffect(current, syntheticTrigger);
-  }, session);
+  }, marked);
 }
 
 interface CounterAccumulationEffect {
@@ -16988,7 +17023,25 @@ export function findCombatDamageToPlayerTriggers(
     if (damageSubject && (/^this\b/.test(damageSubject) || damageSubject === source.name.toLowerCase() || damageSubject === shortName) && source.id !== dealingCard.id) continue;
     const rawEffect = commonTriggerEffect(source.oracleText, "combat_damage_to_player");
     const effect = rawEffect && rawEffect.then?.kind === "seat_discards" && damagedSeatId ? { ...rawEffect, then: { ...rawEffect.then, seatId: damagedSeatId } } : rawEffect;
-    if (!effect) continue;
+    if (!effect) {
+      // "Whenever one or more Dragons you control deal combat damage to an opponent, choose one that hasn't been chosen this turn —"
+      // (Parapet Thrasher). The damaged player rides along as the trigger's actor so "each other opponent" can exclude them.
+      const sourceClauses = oracleClauses(source.oracleText);
+      const groupIndex = sourceClauses.findIndex((clause) => /^whenever one or more [a-z]+s you control deal combat damage to an opponent, choose one\b.*[—-]\s*$/i.test(clause));
+      const groupSubject = groupIndex >= 0 ? sourceClauses[groupIndex].match(/^whenever one or more ([a-z]+)s you control/i)?.[1] : undefined;
+      if (groupIndex >= 0 && groupSubject && permanentMatchesQualifier(dealingCard, groupSubject)) {
+        const bullets: string[] = [];
+        for (const next of sourceClauses.slice(groupIndex + 1)) {
+          if (!/^[•*]/.test(next)) break;
+          bullets.push(next);
+        }
+        const modal = parseGenericModalEffect([sourceClauses[groupIndex], ...bullets].join("\n"), undefined);
+        if (modal) {
+          triggers.push(makeCommonTrigger(damagedSeatId ?? dealingSeatId, seat.id, source, { kind: "modal", modal }, `${source.name} triggers because ${dealingCard.name} dealt combat damage to an opponent.`));
+        }
+      }
+      continue;
+    }
     triggers.push(makeCommonTrigger(dealingSeatId, seat.id, source, effect, `${source.name} triggers because ${dealingCard.name} dealt combat damage to a player.`));
   }
   return triggers;
@@ -17486,6 +17539,8 @@ export function commonTriggerEffect(
   if (extraCombat) return extraCombat[1] ? { kind: "additional_combat", payCostText: extraCombat[1].toUpperCase(), optional: true } : { kind: "additional_combat" };
   if (/when enchanted creature dies, return this card to its owner'?s hand/.test(text) || (mode === "died" && /^return this card to its owner'?s hand\.?$/.test(text.trim()))) return { kind: "return_self_to_hand" };
   if (/^investigate\.?$/.test(text.replace(/\([^)]*\)/g, "").replace(/^[^,]*,\s*/, "").trim())) return { kind: "create_tokens", tokens: [{ ...predefinedTokenSpec("Clue"), count: 1 }] };
+  const otherOpponents = text.match(/^(?:this creature|it) deals (\d+) damage to each other opponent\.?$/);
+  if (otherOpponents) return { kind: "damage_each_other_opponent", amount: Number.parseInt(otherOpponents[1], 10) };
   const rummage = text.match(/\byou may discard a card\. if you do, draw (a|one|two|three) cards?\b/);
   if (rummage) return { kind: "discard_then_draw", draw: numberWordToInt(rummage[1]) ?? 1, optional: true };
   if (/\byou gain life equal to that creature'?s toughness\b/.test(text)) return { kind: "gain_life_context_toughness" };
@@ -18206,6 +18261,17 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
     return drawMultipleForSeat(session, trigger.controllerSeatId, trigger.effect.amount, `${trigger.sourceCardName} trigger resolves. ${seatName} draws ${trigger.effect.amount} card${trigger.effect.amount === 1 ? "" : "s"}.`);
   }
   if (trigger.effect.kind === "proliferate") return resolveProliferate(session);
+  if (trigger.effect.kind === "damage_each_other_opponent") {
+    const { amount } = trigger.effect;
+    const victims = session.seats.filter((item) => item.id !== trigger.controllerSeatId && item.id !== trigger.actorSeatId && !item.hasLost && !playerHasHexproof({ ...item, board: { ...item.board, battlefield: [] } }));
+    if (victims.length === 0) return session;
+    const ids = new Set(victims.map((item) => item.id));
+    return rulesEvent(
+      { ...session, seats: session.seats.map((item) => (ids.has(item.id) ? { ...item, life: item.life - amount } : item)) },
+      trigger.controllerSeatId,
+      `${trigger.sourceCardName} deals ${amount} damage to ${victims.map((item) => item.name).join(", ")}.`
+    );
+  }
   if (trigger.effect.kind === "return_self_to_hand") {
     const holder = session.seats.find((item) => (item.board.graveyard ?? []).some((card) => card.id === trigger.sourceCardId));
     if (!holder) return session;
@@ -18400,7 +18466,7 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
     const modalSource = session.seats.flatMap((seat) => seat.board.battlefield).find((card) => card.id === trigger.sourceCardId);
     // A "when this dies" modal source has already left the battlefield; only its name is needed then.
     const source = modalSource ?? ({ id: trigger.sourceCardId, name: trigger.sourceCardName, typeLine: "", oracleText: "", colors: [], manaValue: 0, role: "permanent", zone: "graveyard" } as VisibleCard);
-    return applyGenericModalEffect(session, trigger.controllerSeatId, source, trigger.effect.modal);
+    return applyGenericModalEffect(session, trigger.controllerSeatId, source, trigger.effect.modal, trigger.actorSeatId);
   }
   if (trigger.effect.kind === "scry_cards" || trigger.effect.kind === "surveil_cards") {
     return resolveAgentLibraryLookWorkflow(session, trigger.controllerSeatId, trigger.sourceCardName, trigger.effect.kind, trigger.effect.amount);

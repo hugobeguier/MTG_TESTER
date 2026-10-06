@@ -2,7 +2,7 @@
 // the test: two earlier tests passed on invented text while the real cards stayed broken (Court of Grace, the
 // "with power N or greater" watchers). Skipped per card when the catalog doesn't have it.
 import { describe, expect, it } from "vitest";
-import { findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
+import { findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
 import { parseRemovalEffect } from "@/lib/removalSpells";
 import { permanentMatchesQualifier } from "@/lib/characteristics";
 import { parseSpellExtraEffects } from "@/lib/spellExtras";
@@ -747,5 +747,32 @@ describe("Thunderbreak Regent (real Oracle text)", () => {
     expect(hitDragon.seats[0].life).toBe(37);
     const ownCast = applyRemovalEffect(s, "b", "Lightning Bolt", burn, { kind: "damage", amount: 1, targetType: "creature" });
     expect(ownCast.seats[1].life).toBe(40);
+  });
+});
+
+describe("Parapet Thrasher (real Oracle text)", () => {
+  const dragon = () => real("Parapet Thrasher", "pt", { power: "4", toughness: "3" });
+  it("casting it doesn't resolve the combat-damage modes", () => {
+    expect(etbEffectText(dragon().oracleText)).toBe("Flying");
+  });
+  it("triggers when a Dragon deals combat damage to an opponent, picking a different mode each time this turn", () => {
+    const s0 = session([seat("a", [dragon()]), seat("b", [], { life: 40 }), seat("c", [], { life: 40 })]);
+    s0.seats[0].library = Array.from({ length: 6 }, (_, i) => bear(`l${i}`, { zone: "library" as const }));
+    s0.seats[0].zones = { ...s0.seats[0].zones, library: 6 };
+    const [first] = findCombatDamageToPlayerTriggers(s0, "a", dragon(), "b");
+    expect(first.effect.kind).toBe("modal");
+    expect(first.actorSeatId).toBe("b");
+    const afterFirst = resolveTriggerEffect(s0, first);
+    // First viable mode: no artifact to destroy, so 4 damage to each OTHER opponent (c, not b).
+    expect(afterFirst.seats[1].life).toBe(40);
+    expect(afterFirst.seats[2].life).toBe(36);
+    const [second] = findCombatDamageToPlayerTriggers(afterFirst, "a", dragon(), "b");
+    const afterSecond = resolveTriggerEffect(afterFirst, second);
+    expect(afterSecond.seats[2].life).toBe(36);
+    expect(afterSecond.seats[0].library!.length).toBeLessThan(6);
+  });
+  it("a non-Dragon connecting does not trigger it", () => {
+    const s0 = session([seat("a", [dragon(), bear("goblin")]), seat("b", [])]);
+    expect(findCombatDamageToPlayerTriggers(s0, "a", bear("goblin"), "b")).toHaveLength(0);
   });
 });

@@ -304,7 +304,7 @@ export function mergeModalBulletClauses(clauses: string[]): string[] {
   let i = 0;
   while (i < clauses.length) {
     const clause = clauses[i];
-    if (/choose (one|two|three)\s*[—-]\s*$/i.test(clause)) {
+    if (/choose (?:one|two|three|one or more|one or both)(?: that hasn'?t been chosen this turn)?\s*[—-]\s*$/i.test(clause)) {
       let combined = clause;
       let j = i + 1;
       while (j < clauses.length && /^[••]/.test(clauses[j])) {
@@ -334,7 +334,7 @@ export interface ModalHeader {
 // own modal handling and by AppFlow.tsx's generic (non-removal) modal handling, so both recognize
 // the same header shapes instead of drifting apart.
 export function parseModalHeader(oracleText: string): ModalHeader | undefined {
-  const header = oracleText.match(/\bchoose (one or more|one or both|one|two|three)\s*[—-]\s*/i);
+  const header = oracleText.match(/\bchoose (one or more|one or both|one|two|three)(?: that hasn'?t been chosen this turn)?\s*[—-]\s*/i);
   if (!header || header.index === undefined) return undefined;
   const word = header[1].toLowerCase();
   const modeTexts = oracleText
