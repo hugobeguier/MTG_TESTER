@@ -47,6 +47,7 @@ import {
   combatDamageToPlayerEffectText,
   deathEffectText,
   etbEffectText,
+  isEntersWatcherClause,
   etbTriggerEffectText,
   hasGraveyardShuffleReplacement,
   isActivatedAbilityClause,
@@ -301,6 +302,8 @@ type TriggerEffect = (
   | { kind: "reveal_until_land_to_battlefield" }
   // Gift a card (Scrapshooter): promised whenever there is something worth destroying; the opponent whose permanent is destroyed draws.
   | { kind: "gift_destroy_artifact_or_enchantment" }
+  // "Until end of turn, Sarkhan ... gains flying." (Sarkhan, Dragon Ascendant) — the source itself gains keywords until end of turn.
+  | { kind: "self_gains_keywords"; keywords: string[] }
   // "Proliferate." (Norn's Choirmaster) — every eligible permanent and player, same as the blanket resolveProliferate.
   | { kind: "proliferate" }
 ) & {
@@ -315,7 +318,7 @@ type TriggerEffect = (
   then?: TriggerEffect;
 };
 
-type TriggerCondition = { kind: "controls_greatest_power" } | { kind: "total_power_at_least"; amount: number } | { kind: "controls_no_other"; subtype: string };
+type TriggerCondition = { kind: "controls_greatest_power" } | { kind: "behold"; subtype: string } | { kind: "total_power_at_least"; amount: number } | { kind: "controls_no_other"; subtype: string };
 
 interface TokenSpec {
   count: number;
@@ -16681,7 +16684,16 @@ export function findCommonTriggersForPermanentEntered(session: GameSession, ente
           continue;
         }
       }
-      const effect = commonTriggerEffect(source.oracleText, "entered", undefined, seat);
+      // A card with BOTH its own enters effect and a watcher on other permanents (Sarkhan, Dragon Ascendant): parse each side from
+      // its own clause, or the first effect found would be applied for both.
+      const watcherClauses = oracleClauses(source.oracleText).filter((clause) => isEntersWatcherClause(clause) && !/\bthis\b[^,.]*\bor another\b/i.test(clause));
+      const ownEnterText = etbEffectText(source.oracleText).trim();
+      const effect =
+        watcherClauses.length > 0 && ownEnterText
+          ? source.id === enteredPermanent.id
+            ? commonTriggerEffect(ownEnterText, "entered", undefined, seat)
+            : commonTriggerEffect(watcherClauses.join(" "), "clause", undefined, seat)
+          : commonTriggerEffect(source.oracleText, "entered", undefined, seat);
       if (!effect || !enteredTriggerApplies(source, seat.id, enteredPermanent, enteringSeatId)) continue;
       // "When ~ enters, if he was kicked, ..." (Josu Vess) only fires for a kicked cast.
       if (source.id === enteredPermanent.id && /\bif (?:he|she|it|this creature|this permanent) was kicked\b/i.test(source.oracleText) && !source.kicked) continue;
@@ -17550,6 +17562,17 @@ export function commonTriggerEffect(
     return { kind: "reveal_until_land_to_battlefield" };
   }
   if (/if the gift was promised, destroy target artifact or enchantment an opponent controls/.test(text)) return { kind: "gift_destroy_artifact_or_enchantment" };
+  // "You may behold a Dragon. If you do, create a Treasure token." (Sarkhan, Dragon Ascendant): the rest only if you can behold.
+  const behold = text.match(/\byou may behold an? ([a-z]+)\. if you do, ([^.]+)\.?/);
+  if (behold) {
+    const inner = commonTriggerEffect(behold[2], "clause", dynamicCounterCount, controllerSeat);
+    if (inner) return { ...inner, condition: { kind: "behold", subtype: behold[1] }, optional: true };
+  }
+  // "Put a +1/+1 counter on Sarkhan. Until end of turn, Sarkhan becomes a Dragon in addition to his other types and gains flying."
+  const counterAndFly = text.match(/\bput a \+1\/\+1 counter on [a-z',-]+\. until end of turn, [a-z',-]+ becomes an? [a-z]+ in addition to (?:his|her|its|their) other types and gains ([a-z ]+?)\.?$/);
+  if (counterAndFly) {
+    return { kind: "add_counter", counterKind: "+1/+1", amount: 1, scope: "self", then: { kind: "self_gains_keywords", keywords: counterAndFly[1].split(/ and |, /) } };
+  }
   const rummage = text.match(/\byou may discard a card\. if you do, draw (a|one|two|three) cards?\b/);
   if (rummage) return { kind: "discard_then_draw", draw: numberWordToInt(rummage[1]) ?? 1, optional: true };
   if (/\byou gain life equal to that creature'?s toughness\b/.test(text)) return { kind: "gain_life_context_toughness" };
@@ -18232,6 +18255,11 @@ export function resolveTriggerEffect(session: GameSession, trigger: Extract<Pend
 function triggerConditionMet(session: GameSession, trigger: Extract<PendingAction, { type: "trigger" }>, condition: TriggerCondition): boolean {
   const seat = session.seats.find((item) => item.id === trigger.controllerSeatId);
   if (!seat) return false;
+  if (condition.kind === "behold") {
+    // "Behold a Dragon": control one, or reveal one from hand.
+    const needle = condition.subtype.toLowerCase();
+    return seat.board.battlefield.some((card) => card.typeLine.toLowerCase().includes(needle)) || seat.board.hand.some((card) => card.typeLine.toLowerCase().includes(needle));
+  }
   if (condition.kind === "total_power_at_least") {
     return seat.board.battlefield.filter((card) => card.typeLine.includes("Creature")).reduce((total, card) => total + Math.max(0, effectivePower(card)), 0) >= condition.amount;
   }
@@ -18270,6 +18298,21 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
     return drawMultipleForSeat(session, trigger.controllerSeatId, trigger.effect.amount, `${trigger.sourceCardName} trigger resolves. ${seatName} draws ${trigger.effect.amount} card${trigger.effect.amount === 1 ? "" : "s"}.`);
   }
   if (trigger.effect.kind === "proliferate") return resolveProliferate(session);
+  if (trigger.effect.kind === "self_gains_keywords") {
+    const keywords = trigger.effect.keywords;
+    return {
+      ...session,
+      seats: session.seats.map((item) => ({
+        ...item,
+        board: {
+          ...item.board,
+          battlefield: item.board.battlefield.map((card) =>
+            card.id === trigger.sourceCardId ? { ...card, temporaryGrantedKeywords: [...(card.temporaryGrantedKeywords ?? []), ...keywords], grantedKeywords: [...new Set([...(card.grantedKeywords ?? []), ...keywords])] } : card
+          )
+        }
+      }))
+    };
+  }
   if (trigger.effect.kind === "gift_destroy_artifact_or_enchantment") {
     const source = session.seats.flatMap((item) => item.board.battlefield).find((card) => card.id === trigger.sourceCardId);
     const before = new Map(session.seats.map((item) => [item.id, item.board.battlefield.length]));

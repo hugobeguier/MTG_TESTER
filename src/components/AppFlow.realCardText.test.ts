@@ -806,3 +806,29 @@ describe("Clifftop Lookout and Scrapshooter (real Oracle text)", () => {
     expect(nothing.seats[1].board.hand).toHaveLength(0);
   });
 });
+
+describe("Sarkhan, Dragon Ascendant (real Oracle text)", () => {
+  const dragonCard = (id: string) => bear(id, { typeLine: "Creature — Dragon" });
+  it("behold: a Treasure only if you control or hold a Dragon", () => {
+    const sarkhan = real("Sarkhan, Dragon Ascendant", "sk", { power: "1", toughness: "1" });
+    const [etb] = findCommonTriggersForPermanentEntered(session([seat("a", [sarkhan])]), "a", sarkhan);
+    expect(etb.effect).toMatchObject({ kind: "create_tokens", condition: { kind: "behold" } });
+    const withDragon = resolveTriggerEffect(session([seat("a", [sarkhan, dragonCard("d")])]), etb);
+    expect(withDragon.seats[0].board.battlefield.some((c) => /Treasure/.test(c.name))).toBe(true);
+    const inHand = seat("a", [sarkhan]);
+    inHand.board.hand = [dragonCard("h")];
+    expect(resolveTriggerEffect(session([inHand]), etb).seats[0].board.battlefield.some((c) => /Treasure/.test(c.name))).toBe(true);
+    expect(resolveTriggerEffect(session([seat("a", [sarkhan])]), etb).seats[0].board.battlefield.some((c) => /Treasure/.test(c.name))).toBe(false);
+  });
+  it("grows and flies when another Dragon enters", () => {
+    const sarkhan = real("Sarkhan, Dragon Ascendant", "sk", { power: "1", toughness: "1" });
+    const entering = dragonCard("newdrag");
+    const s = session([seat("a", [sarkhan, entering])]);
+    const triggers = findCommonTriggersForPermanentEntered(s, "a", entering);
+    expect(triggers).toHaveLength(1);
+    const after = resolveTriggerEffect(s, triggers[0]);
+    const sk = after.seats[0].board.battlefield.find((c) => c.id === "sk")!;
+    expect(sk.counters?.find((c) => c.kind === "+1/+1")?.count).toBe(1);
+    expect(sk.temporaryGrantedKeywords).toContain("flying");
+  });
+});
