@@ -284,6 +284,10 @@ type TriggerEffect = (
   | { kind: "living_weapon" }
   // "You may discard a card. If you do, draw a card / two cards." (Bitter Reunion, Hazoret's Monument) — only draws if a card was discarded.
   | { kind: "discard_then_draw"; draw: number }
+  // "Double the power and toughness of each creature you control until end of turn." (Unnatural Growth)
+  | { kind: "double_power_toughness" }
+  // "Target creature you control gains haste until end of turn." (Surrak, the Hunt Caller) — the creature that benefits most.
+  | { kind: "target_creature_gains_keyword"; keywords: string[] }
   // "Proliferate." (Norn's Choirmaster) — every eligible permanent and player, same as the blanket resolveProliferate.
   | { kind: "proliferate" }
 ) & {
@@ -298,7 +302,7 @@ type TriggerEffect = (
   then?: TriggerEffect;
 };
 
-type TriggerCondition = { kind: "controls_greatest_power" } | { kind: "controls_no_other"; subtype: string };
+type TriggerCondition = { kind: "controls_greatest_power" } | { kind: "total_power_at_least"; amount: number } | { kind: "controls_no_other"; subtype: string };
 
 interface TokenSpec {
   count: number;
@@ -17374,6 +17378,11 @@ export function commonTriggerEffect(
   const optional = /\byou may\b/.test(text) || undefined;
   // Single-card shapes the generic parsers below would misread (a flat draw for a conditional one) or miss entirely.
   if (mode === "entered" && /^living weapon\b/im.test(oracleText)) return { kind: "living_weapon" };
+  if (/\bdouble the power and toughness of each creature you control until end of turn\b/.test(text)) return { kind: "double_power_toughness" };
+  const formidable = text.match(/if creatures you control have total power (\d+) or greater, target creature you control gains ([a-z ]+?) until end of turn/);
+  if (formidable) {
+    return { kind: "target_creature_gains_keyword", keywords: formidable[2].split(/ and |, /), condition: { kind: "total_power_at_least", amount: Number.parseInt(formidable[1], 10) } };
+  }
   const rummage = text.match(/\byou may discard a card\. if you do, draw (a|one|two|three) cards?\b/);
   if (rummage) return { kind: "discard_then_draw", draw: numberWordToInt(rummage[1]) ?? 1, optional: true };
   if (/\byou gain life equal to that creature'?s toughness\b/.test(text)) return { kind: "gain_life_context_toughness" };
@@ -18056,6 +18065,9 @@ export function resolveTriggerEffect(session: GameSession, trigger: Extract<Pend
 function triggerConditionMet(session: GameSession, trigger: Extract<PendingAction, { type: "trigger" }>, condition: TriggerCondition): boolean {
   const seat = session.seats.find((item) => item.id === trigger.controllerSeatId);
   if (!seat) return false;
+  if (condition.kind === "total_power_at_least") {
+    return seat.board.battlefield.filter((card) => card.typeLine.includes("Creature")).reduce((total, card) => total + Math.max(0, effectivePower(card)), 0) >= condition.amount;
+  }
   if (condition.kind === "controls_no_other") {
     return !seat.board.battlefield.some((card) => card.id !== trigger.sourceCardId && card.typeLine.toLowerCase().includes(condition.subtype.toLowerCase()));
   }
@@ -18091,6 +18103,61 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
     return drawMultipleForSeat(session, trigger.controllerSeatId, trigger.effect.amount, `${trigger.sourceCardName} trigger resolves. ${seatName} draws ${trigger.effect.amount} card${trigger.effect.amount === 1 ? "" : "s"}.`);
   }
   if (trigger.effect.kind === "proliferate") return resolveProliferate(session);
+  if (trigger.effect.kind === "double_power_toughness") {
+    return rulesEvent(
+      {
+        ...session,
+        seats: session.seats.map((item) =>
+          item.id !== trigger.controllerSeatId
+            ? item
+            : {
+                ...item,
+                board: {
+                  ...item.board,
+                  battlefield: item.board.battlefield.map((card) =>
+                    card.typeLine.includes("Creature")
+                      ? { ...card, temporaryPowerBonus: (card.temporaryPowerBonus ?? 0) + Math.max(0, effectivePower(card)), temporaryToughnessBonus: (card.temporaryToughnessBonus ?? 0) + Math.max(0, effectiveToughness(card)) }
+                      : card
+                  )
+                }
+              }
+        )
+      },
+      trigger.controllerSeatId,
+      `${trigger.sourceCardName}: the power and toughness of each creature ${seatName} controls is doubled until end of turn.`
+    );
+  }
+  if (trigger.effect.kind === "target_creature_gains_keyword") {
+    const keywords = trigger.effect.keywords;
+    const mine = session.seats.find((item) => item.id === trigger.controllerSeatId);
+    // Best beneficiary: the strongest creature that doesn't already have the keyword (a hasty attacker, in practice).
+    const target = (mine?.board.battlefield ?? [])
+      .filter((card) => card.typeLine.includes("Creature") && !keywords.every((keyword) => hasKeyword(card, keyword)))
+      .sort((a, b) => Number(Boolean(b.summoningSick)) - Number(Boolean(a.summoningSick)) || effectivePower(b) - effectivePower(a))[0];
+    if (!mine || !target) return session;
+    return rulesEvent(
+      {
+        ...session,
+        seats: session.seats.map((item) =>
+          item.id !== mine.id
+            ? item
+            : {
+                ...item,
+                board: {
+                  ...item.board,
+                  battlefield: item.board.battlefield.map((card) =>
+                    card.id === target.id
+                      ? { ...card, summoningSick: keywords.includes("haste") ? false : card.summoningSick, temporaryGrantedKeywords: [...(card.temporaryGrantedKeywords ?? []), ...keywords], grantedKeywords: [...new Set([...(card.grantedKeywords ?? []), ...keywords])] }
+                      : card
+                  )
+                }
+              }
+        )
+      },
+      mine.id,
+      `${trigger.sourceCardName}: ${target.name} gains ${keywords.join(" and ")} until end of turn.`
+    );
+  }
   if (trigger.effect.kind === "discard_then_draw") {
     const mine = session.seats.find((item) => item.id === trigger.controllerSeatId);
     const discard = mine ? chooseWorstHandCardToDiscard(mine) : undefined;
@@ -19270,7 +19337,8 @@ function phaseTriggerTextMatches(text: string, phase: TurnPhase) {
   if (phase === "upkeep step") return text.includes("at the beginning of your upkeep") || text.includes("at the beginning of each upkeep") || text.includes("cumulative upkeep");
   if (phase === "draw step") return text.includes("at the beginning of your draw step");
   if (phase === "precombat main phase") return text.includes("at the beginning of your precombat main phase") || text.includes("first main phase");
-  if (phase === "beginning of combat step") return text.includes("at the beginning of combat") || text.includes("beginning of combat on your turn");
+  // "each combat" (Unnatural Growth) only fires on its controller's own combat here — the sweep walks the active seat's permanents.
+  if (phase === "beginning of combat step") return text.includes("at the beginning of combat") || text.includes("at the beginning of each combat") || text.includes("beginning of combat on your turn");
   // Vedalken Humiliator's Metalcraft attack trigger is deliberately excluded here — it's owned by
   // declareAttack instead (see parseMetalcraftAttackDebuff's own comment for why this generic,
   // once-per-phase-entry sweep can't express it correctly), and this loose "whenever...attacks"
@@ -20817,6 +20885,11 @@ function isBoardConditionMet(conditionRaw: string, seat: PlayerSeat, allSeats?: 
     for (const land of seat.board.battlefield.filter((c) => isLandCard(c))) counts.set(land.name, (counts.get(land.name) ?? 0) + 1);
     return Math.max(0, ...counts.values()) >= (numberWordToInt(sameNameMatch[1]) ?? Infinity);
   }
+  // "creatures you control have total power 8 or greater" (Surrak, the Hunt Caller's formidable)
+  const totalPowerMatch = condition.match(/^creatures you control have total power (\d+) or greater$/);
+  if (totalPowerMatch) {
+    return seat.board.battlefield.filter((c) => c.typeLine.includes("Creature")).reduce((total, c) => total + Math.max(0, effectivePower(c)), 0) >= Number.parseInt(totalPowerMatch[1], 10);
+  }
   // "you have at least 7 life more than your starting life total" (Speaker of the Heavens)
   const lifeOverMatch = condition.match(/^you have at least (\d+) life more than your starting life total$/);
   if (lifeOverMatch) return seat.life >= COMMANDER_STARTING_LIFE + Number.parseInt(lifeOverMatch[1], 10);
@@ -20857,6 +20930,7 @@ export function isRecognizedBoardCondition(conditionRaw: string): boolean {
   if (/^you control an? ([a-z]+)$/.test(condition)) return true;
   if (/^you control (\d+|two|three|four|five|six|seven|eight|nine|ten) or more lands with the same name$/.test(condition)) return true;
   if (/^you have at least (\d+) life more than your starting life total$/.test(condition)) return true;
+  if (/^creatures you control have total power (\d+) or greater$/.test(condition)) return true;
   return false;
 }
 

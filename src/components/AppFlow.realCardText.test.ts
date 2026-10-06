@@ -650,3 +650,23 @@ describe("rummage triggers, cost reduction, changeling (real Oracle text)", () =
     expect(adjustedCastingCost(s, green, 4, "hand", "a", [s])).toBe(4);
   });
 });
+
+describe("beginning-of-combat triggers (real Oracle text)", () => {
+  it("Unnatural Growth doubles each of your creatures", () => {
+    const s = session([seat("a", [real("Unnatural Growth", "ug"), bear("b1", { power: "3", toughness: "3" })])]);
+    const after = applyDeterministicPhaseTrigger(s, "a", real("Unnatural Growth", "ug"), "beginning of combat step")!;
+    expect(after.seats[0].board.battlefield.find((c) => c.id === "b1")!.temporaryPowerBonus).toBe(3);
+    expect(after.seats[0].board.battlefield.find((c) => c.id === "b1")!.temporaryToughnessBonus).toBe(3);
+  });
+  it("Surrak gives haste only when your creatures have total power 8 or more", () => {
+    const run = (powers: string[]) => {
+      const creatures = powers.map((p, i) => bear(`c${i}`, { power: p, summoningSick: true }));
+      const s = session([seat("a", [real("Surrak, the Hunt Caller", "sur", { power: "5", toughness: "4" }), ...creatures])]);
+      return applyDeterministicPhaseTrigger(s, "a", real("Surrak, the Hunt Caller", "sur"), "beginning of combat step")!;
+    };
+    const big = run(["4"]);
+    expect(big.seats[0].board.battlefield.some((c) => c.temporaryGrantedKeywords?.includes("haste"))).toBe(true);
+    const small = run(["1"]);
+    expect(small.seats[0].board.battlefield.some((c) => c.temporaryGrantedKeywords?.includes("haste"))).toBe(false);
+  });
+});
