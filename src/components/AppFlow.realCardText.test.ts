@@ -1282,3 +1282,35 @@ describe("human choices for auto-picked effects (pure halves)", () => {
     expect(after.board.hand).toHaveLength(2);
   });
 });
+
+describe("human card picks on triggers (pure halves)", () => {
+  const trig = (effect: unknown, controller = "a") => ({ id: "t", type: "trigger" as const, actorSeatId: controller, controllerSeatId: controller, sourceCardId: "src", sourceCardName: "Src", triggerKind: "common" as const, effect: effect as never, message: "" });
+  it("Rishkar's counters go on the two creatures the human picked", () => {
+    const s = session([seat("a", [bear("x1", { power: "9" }), bear("x2"), bear("x3")])]);
+    const after = resolveTriggerEffect(s, trig({ kind: "counters_on_up_to_creatures", counterKind: "+1/+1", amount: 1, count: 2, chosenOption: "x2,x3" }));
+    const counted = after.seats[0].board.battlefield.filter((c) => c.counters?.length).map((c) => c.id).sort();
+    expect(counted).toEqual(["x2", "x3"]);
+  });
+  it("Thickest in the Thicket and Surrak use the picked creature", () => {
+    const s = session([seat("a", [bear("big", { power: "9" }), bear("pick", { power: "2" })])]);
+    const grown = resolveTriggerEffect(s, trig({ kind: "double_power_counters", chosenOption: "pick" }));
+    expect(grown.seats[0].board.battlefield.find((c) => c.id === "pick")!.counters?.find((c) => c.kind === "+1/+1")?.count).toBe(2);
+    expect(grown.seats[0].board.battlefield.find((c) => c.id === "big")!.counters).toBeUndefined();
+    const hasty = resolveTriggerEffect(s, trig({ kind: "target_creature_gains_keyword", keywords: ["haste"], chosenOption: "pick" }));
+    expect(hasty.seats[0].board.battlefield.find((c) => c.id === "pick")!.temporaryGrantedKeywords).toContain("haste");
+  });
+  it("Undead Butler returns the graveyard creature the human picked", () => {
+    const mine = seat("a", []);
+    mine.board.graveyard = [real("Undead Butler", "src", { zone: "graveyard" }), bear("small", { zone: "graveyard" as const, manaValue: 1 }), bear("big", { zone: "graveyard" as const, manaValue: 6 })];
+    const after = resolveTriggerEffect(session([mine]), trig({ kind: "exile_self_return_creature_to_hand", chosenOption: "small" })).seats[0];
+    expect(after.board.hand.map((c) => c.id)).toEqual(["small"]);
+  });
+  it("Scrapshooter destroys the artifact the human picked", () => {
+    const theirs = seat("b", [bear("a1", { typeLine: "Artifact", role: "permanent", manaValue: 5 }), bear("a2", { typeLine: "Artifact", role: "permanent", manaValue: 1 })]);
+    theirs.library = Array.from({ length: 2 }, (_, i) => bear(`l${i}`, { zone: "library" as const }));
+    theirs.zones = { ...theirs.zones, library: 2 };
+    const after = resolveTriggerEffect(session([seat("a", [real("Scrapshooter", "src")]), theirs]), trig({ kind: "gift_destroy_artifact_or_enchantment", chosenOption: "a2" }));
+    expect(after.seats[1].board.battlefield.map((c) => c.id)).toEqual(["a1"]);
+    expect(after.seats[1].board.hand).toHaveLength(1);
+  });
+});

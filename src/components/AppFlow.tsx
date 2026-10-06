@@ -795,6 +795,22 @@ type PendingRuleChoice =
       trigger: Extract<PendingAction, { type: "trigger" }>;
       remainingStack: PendingAction[];
     }
+  // A triggered ability that targets cards (a creature to grow, a graveyard card to return, a permanent to destroy): the human clicks
+  // them one at a time (picksNeeded > 1 for "up to two"), and the ids go back onto the trigger as effect.chosenOption.
+  | {
+      id: string;
+      kind: "choose_trigger_card";
+      controllerSeatId: string;
+      sourceCardId: string;
+      sourceCardName: string;
+      prompt: string;
+      zone: "battlefield" | "graveyard";
+      cards: Array<{ seatId: string; cardId: string }>;
+      picksNeeded: number;
+      picked: string[];
+      trigger: Extract<PendingAction, { type: "trigger" }>;
+      remainingStack: PendingAction[];
+    }
   // "Exile target card from a graveyard" (Scavenging Ooze) — the human picks the card BEFORE paying, then the activation re-runs with
   // that card as its target.
   | {
@@ -5377,6 +5393,24 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       if (options.length >= 2) return open(`${trigger.sourceCardName}: choose one.`, options);
       return false;
     }
+    const cardPrompt = triggerCardPrompt(trigger, controller);
+    if (cardPrompt && cardPrompt.cards.length >= 2) {
+      setPendingRuleChoice({
+        id: crypto.randomUUID(),
+        kind: "choose_trigger_card",
+        controllerSeatId: controller.id,
+        sourceCardId: trigger.sourceCardId,
+        sourceCardName: trigger.sourceCardName,
+        prompt: cardPrompt.prompt,
+        zone: cardPrompt.zone,
+        cards: cardPrompt.cards,
+        picksNeeded: cardPrompt.picksNeeded,
+        picked: [],
+        trigger,
+        remainingStack
+      });
+      return true;
+    }
     if (trigger.effect.kind === "sacrifice_surplus_then_draw") {
       const lands = controller.board.battlefield.filter((card) => isLandCard(card) && card.id !== trigger.sourceCardId).length;
       if (lands === 0) return false;
@@ -5386,6 +5420,51 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       );
     }
     return false;
+  }
+
+  // Which cards a human-controlled trigger asks them to pick, and from where. Undefined for triggers that need no card choice.
+  function triggerCardPrompt(trigger: Extract<PendingAction, { type: "trigger" }>, controller: PlayerSeat): { prompt: string; zone: "battlefield" | "graveyard"; cards: Array<{ seatId: string; cardId: string }>; picksNeeded: number } | undefined {
+    const ownCreatures = controller.board.battlefield.filter((card) => card.typeLine.includes("Creature")).map((card) => ({ seatId: controller.id, cardId: card.id }));
+    const ownGraveyardCreatures = (controller.board.graveyard ?? []).filter((card) => card.typeLine.includes("Creature") && card.id !== trigger.sourceCardId).map((card) => ({ seatId: controller.id, cardId: card.id }));
+    switch (trigger.effect.kind) {
+      case "target_creature_gains_keyword":
+        return { prompt: `${trigger.sourceCardName}: choose a creature you control to gain ${trigger.effect.keywords.join(" and ")} until end of turn.`, zone: "battlefield", cards: ownCreatures, picksNeeded: 1 };
+      case "double_power_counters":
+        return { prompt: `${trigger.sourceCardName}: choose a creature to put counters on equal to its power.`, zone: "battlefield", cards: ownCreatures, picksNeeded: 1 };
+      case "counters_on_up_to_creatures":
+        return { prompt: `${trigger.sourceCardName}: choose up to ${trigger.effect.count} creatures to put a ${trigger.effect.counterKind} counter on.`, zone: "battlefield", cards: ownCreatures, picksNeeded: trigger.effect.count };
+      case "gift_destroy_artifact_or_enchantment":
+        return {
+          prompt: `${trigger.sourceCardName}: choose an artifact or enchantment an opponent controls to destroy.`,
+          zone: "battlefield",
+          cards: session.seats
+            .filter((seat) => seat.id !== controller.id && !seat.hasLost)
+            .flatMap((seat) => seat.board.battlefield.filter((card) => card.typeLine.includes("Artifact") || card.typeLine.includes("Enchantment")).map((card) => ({ seatId: seat.id, cardId: card.id }))),
+          picksNeeded: 1
+        };
+      case "graveyard_creature_to_library_top":
+        return { prompt: `${trigger.sourceCardName}: choose a creature card in your graveyard to put on top of your library.`, zone: "graveyard", cards: ownGraveyardCreatures, picksNeeded: 1 };
+      case "exile_self_return_creature_to_hand":
+        return { prompt: `${trigger.sourceCardName}: choose a creature card in your graveyard to return to your hand.`, zone: "graveyard", cards: ownGraveyardCreatures, picksNeeded: 1 };
+      default:
+        return undefined;
+    }
+  }
+
+  // One click of a trigger's card pick (battlefield or graveyard); reopens for the next pick of an "up to N", otherwise resolves.
+  function completeTriggerCard(cardId: string) {
+    const choice = pendingRuleChoice;
+    if (!choice || choice.kind !== "choose_trigger_card") return;
+    const picked = [...choice.picked, cardId];
+    const remaining = choice.cards.filter((entry) => !picked.includes(entry.cardId));
+    if (picked.length < choice.picksNeeded && remaining.length > 0) {
+      setPendingRuleChoice({ ...choice, id: crypto.randomUUID(), picked, cards: remaining, prompt: `${choice.trigger.sourceCardName}: choose another (${picked.length} of up to ${choice.picksNeeded} chosen).` });
+      return;
+    }
+    setPendingRuleChoice(undefined);
+    const chosen = { ...choice.trigger, effect: { ...choice.trigger.effect, chosenOption: picked.join(",") } } as Extract<PendingAction, { type: "trigger" }>;
+    setSession((current) => resolveTriggerEffect(current, chosen));
+    resumeAfterTriggerChoice(choice.trigger, choice.remainingStack);
   }
 
   function completeTriggerOption(index: number) {
@@ -7636,6 +7715,10 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   // graveyard the card is actually sitting in (Virtue of Persistence's pool spans every graveyard,
   // not just the controller's own), separate from the choice's own controllerSeatId.
   function chooseGraveyardReanimationTarget(sourceSeatId: string, cardId: string) {
+    if (pendingRuleChoice?.kind === "choose_trigger_card") {
+      completeTriggerCard(cardId);
+      return;
+    }
     if (pendingRuleChoice?.kind === "choose_ability_card_target") {
       const ability = pendingRuleChoice;
       setPendingRuleChoice(undefined);
@@ -7831,6 +7914,10 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   // "add_counter" branch (used for the agent/deterministic path via chooseCounterTarget), just
   // with the target already picked by the player instead of the heuristic.
   function chooseBattlefieldCreatureTarget(targetSeatId: string, cardId: string) {
+    if (pendingRuleChoice?.kind === "choose_trigger_card") {
+      completeTriggerCard(cardId);
+      return;
+    }
     const choice = pendingRuleChoice;
     if (!choice || choice.kind !== "choose_creature_on_battlefield") return;
     setPendingRuleChoice(undefined);
@@ -18677,6 +18764,11 @@ export function resolveTriggerEffect(session: GameSession, trigger: Extract<Pend
   return resolveTriggerEffect(resolved, { ...trigger, id: crypto.randomUUID(), effect: trigger.effect.then, message: "" });
 }
 
+function findPermanentOwnerTarget(session: GameSession, cardId: string): ChosenTarget | undefined {
+  const owner = session.seats.find((seat) => seat.board.battlefield.some((card) => card.id === cardId));
+  return owner ? { kind: "card", seatId: owner.id, cardId } : undefined;
+}
+
 function triggerConditionMet(session: GameSession, trigger: Extract<PendingAction, { type: "trigger" }>, condition: TriggerCondition): boolean {
   const seat = session.seats.find((item) => item.id === trigger.controllerSeatId);
   if (!seat) return false;
@@ -18770,7 +18862,7 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
   }
   if (trigger.effect.kind === "graveyard_creature_to_library_top") {
     const owner = session.seats.find((item) => item.id === trigger.controllerSeatId);
-    const best = (owner?.board.graveyard ?? []).filter((card) => card.typeLine.includes("Creature")).sort((a, b) => b.manaValue - a.manaValue)[0];
+    const best = (trigger.effect.chosenOption ? owner?.board.graveyard?.find((card) => card.id === trigger.effect.chosenOption) : undefined) ?? (owner?.board.graveyard ?? []).filter((card) => card.typeLine.includes("Creature")).sort((a, b) => b.manaValue - a.manaValue)[0];
     if (!owner || !best) return session;
     return rulesEvent(moveCardAcrossSeats(session, owner.id, best.id, owner.id, "library", { libraryPosition: "top" }).session, owner.id, `${owner.name} puts ${best.name} on top of their library (${trigger.sourceCardName}).`);
   }
@@ -18796,9 +18888,8 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
     const owner = session.seats.find((item) => item.id === trigger.controllerSeatId);
     if (!holder || !owner) return session;
     const exiled = moveCardAcrossSeats(session, holder.id, trigger.sourceCardId, holder.id, "exile").session;
-    const best = (exiled.seats.find((item) => item.id === owner.id)?.board.graveyard ?? [])
-      .filter((card) => card.typeLine.includes("Creature"))
-      .sort((a, b) => b.manaValue - a.manaValue)[0];
+    const ownGraveyard = exiled.seats.find((item) => item.id === owner.id)?.board.graveyard ?? [];
+    const best = (trigger.effect.chosenOption ? ownGraveyard.find((card) => card.id === trigger.effect.chosenOption) : undefined) ?? ownGraveyard.filter((card) => card.typeLine.includes("Creature")).sort((a, b) => b.manaValue - a.manaValue)[0];
     const withEvent = rulesEvent(exiled, owner.id, `${owner.name} exiles ${trigger.sourceCardName}.`);
     return best ? rulesEvent(moveCardAcrossSeats(withEvent, owner.id, best.id, owner.id, "hand").session, owner.id, `${trigger.sourceCardName} returns ${best.name} to ${owner.name}'s hand.`) : withEvent;
   }
@@ -18865,7 +18956,7 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
       excludedColors: [],
       artifactsExcluded: false,
       basicsExcluded: false
-    });
+    }, undefined, trigger.effect.chosenOption ? findPermanentOwnerTarget(session, trigger.effect.chosenOption) : undefined);
     const victim = destroyed.seats.find((item) => item.id !== trigger.controllerSeatId && item.board.battlefield.length < (before.get(item.id) ?? 0));
     if (!victim) return session;
     return drawForSeat(destroyed, victim.id, `${victim.name} draws a card (the gift promised with ${trigger.sourceCardName}).`);
@@ -18961,9 +19052,11 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
     const keywords = trigger.effect.keywords;
     const mine = session.seats.find((item) => item.id === trigger.controllerSeatId);
     // Best beneficiary: the strongest creature that doesn't already have the keyword (a hasty attacker, in practice).
-    const target = (mine?.board.battlefield ?? [])
-      .filter((card) => card.typeLine.includes("Creature") && !keywords.every((keyword) => hasKeyword(card, keyword)))
-      .sort((a, b) => Number(Boolean(b.summoningSick)) - Number(Boolean(a.summoningSick)) || effectivePower(b) - effectivePower(a))[0];
+    const target =
+      (trigger.effect.chosenOption ? mine?.board.battlefield.find((card) => card.id === trigger.effect.chosenOption) : undefined) ??
+      (mine?.board.battlefield ?? [])
+        .filter((card) => card.typeLine.includes("Creature") && !keywords.every((keyword) => hasKeyword(card, keyword)))
+        .sort((a, b) => Number(Boolean(b.summoningSick)) - Number(Boolean(a.summoningSick)) || effectivePower(b) - effectivePower(a))[0];
     if (!mine || !target) return session;
     return rulesEvent(
       {
@@ -19027,10 +19120,13 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
   if (trigger.effect.kind === "counters_on_up_to_creatures") {
     const { counterKind, amount, count } = trigger.effect;
     const mine = session.seats.find((item) => item.id === trigger.controllerSeatId);
-    const chosen = (mine?.board.battlefield ?? [])
-      .filter((card) => card.typeLine.includes("Creature"))
-      .sort((a, b) => effectivePower(b) - effectivePower(a))
-      .slice(0, count);
+    const pickedIds = trigger.effect.chosenOption?.split(",") ?? [];
+    const chosen = pickedIds.length > 0
+      ? (mine?.board.battlefield ?? []).filter((card) => pickedIds.includes(card.id))
+      : (mine?.board.battlefield ?? [])
+          .filter((card) => card.typeLine.includes("Creature"))
+          .sort((a, b) => effectivePower(b) - effectivePower(a))
+          .slice(0, count);
     if (!mine || chosen.length === 0) return session;
     const ids = new Set(chosen.map((card) => card.id));
     return rulesEvent(
@@ -19081,7 +19177,7 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
   }
   if (trigger.effect.kind === "double_power_counters") {
     const mine = session.seats.find((item) => item.id === trigger.controllerSeatId);
-    const target = strongestControlledCreature(mine);
+    const target = (trigger.effect.chosenOption ? mine?.board.battlefield.find((card) => card.id === trigger.effect.chosenOption) : undefined) ?? strongestControlledCreature(mine);
     const amount = target ? Math.max(0, effectivePower(target)) : 0;
     if (!mine || !target || amount === 0) return session;
     return rulesEvent(
@@ -19682,6 +19778,16 @@ function ruleChoiceView(
           .filter((card) => hasCardType(card, "Creature"))
           .map((card) => ({ card, seatId: humanSeat.id, seatName: humanSeat.name }))
       };
+    }
+    if (choice.kind === "choose_trigger_card") {
+      const cards = choice.cards.flatMap((entry) => {
+        const owner = session.seats.find((seat) => seat.id === entry.seatId);
+        const card = choice.zone === "graveyard" ? owner?.board.graveyard?.find((item) => item.id === entry.cardId) : owner?.board.battlefield.find((item) => item.id === entry.cardId);
+        return owner && card ? [{ card, seatId: owner.id, seatName: owner.name }] : [];
+      });
+      return choice.zone === "graveyard"
+        ? { kind: "choose_creature_from_graveyards" as const, sourceCardName: choice.sourceCardName, prompt: choice.prompt, actionLabel: "Choose", cards }
+        : { kind: "choose_creature_on_battlefield" as const, sourceCardName: choice.sourceCardName, prompt: choice.prompt, actionLabel: "Choose", cards };
     }
     if (choice.kind === "choose_trigger_option") {
       return { kind: "choose_modal_option" as const, sourceCardName: choice.sourceCardName, prompt: choice.prompt, options: choice.options };
