@@ -324,6 +324,8 @@ type TriggerEffect = (
   | { kind: "renown"; amount: number }
   // The human's echo decision (pay it, or sacrifice the permanent).
   | { kind: "echo_choice"; costText: string }
+  // One repetition of a punisher effect for a human victim.
+  | { kind: "punisher_prompt"; lifeAmount: number; remaining: number }
   // Discover: cast the found card for free, or put it into hand.
   | { kind: "discover_choice"; cardName: string }
   // "If this card is in your opening hand, you may begin the game with it on the battlefield." (the Leylines): the human's yes/no; the other
@@ -2083,6 +2085,35 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   // planeswalker you control, ..." — queued per DECLARED attacker (see pendingAttackDeclarations on
   // GameSession) instead of by the old once-per-phase sweep that fired for every creature with
   // "attacks" text whether or not it attacked.
+  // Punisher effects: a human victim chooses, each time, between losing the life, sacrificing, and discarding.
+  useEffect(() => {
+    const queue = session.pendingPunisherChoices;
+    if (!queue || queue.length === 0 || pendingAction || pendingRuleChoice) return;
+    const [next, ...rest] = queue;
+    setSession((current) => ({ ...current, pendingPunisherChoices: rest.length > 0 ? rest : undefined }));
+    openPunisherPrompt(next.seatId, next.sourceName, next.lifeAmount, next.times);
+  }, [session.pendingPunisherChoices, pendingAction, pendingRuleChoice]);
+
+  function openPunisherPrompt(seatId: string, sourceName: string, lifeAmount: number, remaining: number) {
+    if (remaining <= 0) return;
+    const victim = session.seats.find((seat) => seat.id === seatId);
+    const shim = { id: "punisher-" + sourceName, name: sourceName, typeLine: "", oracleText: "", manaValue: 0, colors: [], role: "effect", zone: "battlefield" } as VisibleCard;
+    const canSacrifice = Boolean(victim?.board.battlefield.some((card) => !card.typeLine.includes("Land")));
+    const canDiscard = Boolean(victim && victim.board.hand.length > 0);
+    const options = [{ index: 0, label: "Lose " + lifeAmount + " life" }, ...(canSacrifice ? [{ index: 1, label: "Sacrifice a nonland permanent" }] : []), ...(canDiscard ? [{ index: 2, label: "Discard a card" }] : [])];
+    setPendingRuleChoice({
+      id: crypto.randomUUID(),
+      kind: "choose_trigger_option",
+      controllerSeatId: seatId,
+      sourceCardId: shim.id,
+      sourceCardName: sourceName,
+      prompt: sourceName + ": lose " + lifeAmount + " life unless you sacrifice a nonland permanent or discard a card (" + remaining + " to go).",
+      options,
+      trigger: makeCommonTrigger(seatId, seatId, shim, { kind: "punisher_prompt", lifeAmount, remaining }, sourceName + " punisher."),
+      remainingStack: []
+    });
+  }
+
   // Discover: cast the exiled card free, or put it into hand.
   useEffect(() => {
     const queue = session.pendingDiscoverChoices;
@@ -6416,6 +6447,21 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         }
       }
       resumeAfterTriggerChoice(choice.trigger, choice.remainingStack);
+      return;
+    }
+    // Punisher: the victim's pick, then the next repetition.
+    if (choice.trigger.effect.kind === "punisher_prompt") {
+      const { lifeAmount, remaining } = choice.trigger.effect;
+      const victimId = choice.controllerSeatId;
+      const sourceName = choice.sourceCardName;
+      if (index === 0) {
+        setSession((current) => rulesEvent({ ...current, seats: current.seats.map((seat) => (seat.id === victimId ? { ...seat, life: Math.max(0, seat.life - lifeAmount) } : seat)) }, victimId, `${current.seats.find((seat) => seat.id === victimId)?.name ?? "Player"} loses ${lifeAmount} life to ${sourceName}.`));
+      } else if (index === 1) {
+        setSession((current) => ({ ...current, pendingSacrificeChoices: [...(current.pendingSacrificeChoices ?? []), { seatId: victimId, sourceCardId: "punisher", sourceCardName: sourceName, count: 1, typeFilter: "nonland permanent" }] }));
+      } else {
+        setSession((current) => ({ ...current, pendingDiscardChoices: [...(current.pendingDiscardChoices ?? []), { seatId: victimId, count: 1, sourceName }] }));
+      }
+      if (remaining > 1) window.setTimeout(() => setSession((current) => ({ ...current, pendingPunisherChoices: [...(current.pendingPunisherChoices ?? []), { seatId: victimId, sourceName, lifeAmount, times: remaining - 1 }] })), 300);
       return;
     }
     // Discover: cast it free (it is in exile with the permission), or take it into hand.
@@ -12812,6 +12858,7 @@ function matchesEachPlayerSacrificeFilter(card: VisibleCard, typeFilter: string)
     if (trimmed === "enchantment") return card.typeLine.includes("Enchantment");
     if (trimmed === "land") return card.typeLine.includes("Land");
     if (trimmed === "permanent") return true;
+    if (trimmed === "nonland permanent") return !card.typeLine.includes("Land");
     return false;
   });
 }
@@ -23413,9 +23460,14 @@ export function parsePunisherChoiceEffect(text: string): { lifeAmount: number } 
 // live as no choice ever being offered to the affected opponent for what the effect actually did.
 export function applyPunisherChoiceEffect(session: GameSession, casterSeatId: string, sourceCardName: string, effect: { lifeAmount: number }, times: number): GameSession {
   let next = session;
+  // A human victim chooses (lose the life, sacrifice, or discard) each time; their repetitions are queued for the picker.
+  const humanVictims = session.seats.filter((seat) => seat.id !== casterSeatId && !seat.hasLost && seat.kind === "human");
+  if (humanVictims.length > 0 && times > 0) {
+    next = { ...next, pendingPunisherChoices: [...(next.pendingPunisherChoices ?? []), ...humanVictims.map((seat) => ({ seatId: seat.id, sourceName: sourceCardName, lifeAmount: effect.lifeAmount, times }))] };
+  }
   for (let iteration = 0; iteration < times; iteration++) {
     for (const seat of next.seats) {
-      if (seat.id === casterSeatId || seat.hasLost) continue;
+      if (seat.id === casterSeatId || seat.hasLost || seat.kind === "human") continue;
       const current = next.seats.find((item) => item.id === seat.id);
       if (!current) continue;
       const survivesComfortably = current.life - effect.lifeAmount > 10;

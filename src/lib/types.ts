@@ -478,6 +478,9 @@ export interface GameSession {
   // Discover: a human chooses between casting the found card for free and putting it into their hand. The card waits in exile with a free-cast
   // permission until they answer.
   pendingDiscoverChoices?: Array<{ seatId: string; cardId: string; cardName: string; sourceName: string }>;
+  // Punisher effects ("loses N life unless that player sacrifices a nonland permanent or discards a card", repeated): a human victim chooses
+  // each time; the resolver records the remaining repetitions here.
+  pendingPunisherChoices?: Array<{ seatId: string; sourceName: string; lifeAmount: number; times: number }>;
   pendingSacrificeChoices?: Array<{ seatId: string; sourceCardId: string; sourceCardName: string; count: number; typeFilter?: string }>;
   pendingAttackDeclarations?: Array<{ seatId: string; card: VisibleCard; defendingSeatId: string }>;
   // Rule 724: the player who is currently the monarch (Court of Grace, Skyline Despot, Marchesa's Decree). They draw
