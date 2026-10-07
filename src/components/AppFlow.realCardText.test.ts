@@ -2,7 +2,7 @@
 // the test: two earlier tests passed on invented text while the real cards stayed broken (Court of Grace, the
 // "with power N or greater" watchers). Skipped per card when the catalog doesn't have it.
 import { describe, expect, it } from "vitest";
-import { seatHasFlashGrant, findLeavesBattlefieldTriggers, hideawayDamageConditionMet, legalMainPhaseActions, tapCreaturesAltCostFor, applyCastRemoval, nextCastPrompt, type CastChoices, spellModePrompt, applyDigPick, applyLabeledContinuation, spellTargetSlots, grantKeywordsToCreature, applyExalted, applySacrificeEffect, applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
+import { findCastTriggers, seatHasFlashGrant, findLeavesBattlefieldTriggers, hideawayDamageConditionMet, legalMainPhaseActions, tapCreaturesAltCostFor, applyCastRemoval, nextCastPrompt, type CastChoices, spellModePrompt, applyDigPick, applyLabeledContinuation, spellTargetSlots, grantKeywordsToCreature, applyExalted, applySacrificeEffect, applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
 import { parseRemovalEffect } from "@/lib/removalSpells";
 import { parseZoneEffect } from "@/lib/zoneEffects";
 import { permanentMatchesQualifier } from "@/lib/characteristics";
@@ -1635,5 +1635,31 @@ describe("flash grants (real Oracle text)", () => {
     expect(seatHasFlashGrant(yeva)).toBe(false);
     const justFlash = seat("a", [real("Herald of Eternal Dawn", "h")]);
     expect(seatHasFlashGrant(justFlash, red)).toBe(false);
+  });
+});
+
+describe("cast triggers: Firespitter Whelp and Rhonas's Monument (real Oracle text)", () => {
+  const resolveAll = (s: GameSession, triggers: ReturnType<typeof findCastTriggers>) => triggers.reduce((acc, t) => resolveTriggerEffect(acc, t), s);
+  it("Whelp pings each opponent for a noncreature or Dragon spell, but not for another creature spell", () => {
+    const s = session([seat("a", [real("Firespitter Whelp", "fw")]), seat("b", []), seat("c", [])]);
+    const noncreature = findCastTriggers(s, "a", real("Lightning Bolt", "bolt"), 1);
+    expect(noncreature).toHaveLength(1);
+    const after = resolveAll(s, noncreature);
+    expect(after.seats[1].life).toBe(39);
+    expect(after.seats[2].life).toBe(39);
+    expect(after.seats[0].life).toBe(40);
+    expect(findCastTriggers(s, "a", bear("drag", { typeLine: "Creature — Dragon" }), 1)).toHaveLength(1);
+    expect(findCastTriggers(s, "a", bear("elf", { typeLine: "Creature — Elf" }), 1)).toHaveLength(0);
+    expect(findCastTriggers(s, "b", real("Lightning Bolt", "bolt"), 1)).toHaveLength(0);
+  });
+  it("Monument pumps the creature you choose when you cast a creature spell", () => {
+    const s = session([seat("a", [real("Rhonas's Monument", "rm"), bear("x"), bear("y")]), seat("b", [])]);
+    const [trigger] = findCastTriggers(s, "a", bear("c", { typeLine: "Creature — Elf" }), 1);
+    expect(trigger.effect).toMatchObject({ kind: "pump_target_creature", power: 2, toughness: 2, keywords: ["trample"] });
+    const after = resolveTriggerEffect(s, { ...trigger, effect: { ...trigger.effect, chosenOption: "y" } });
+    expect(after.seats[0].board.battlefield.find((c) => c.id === "y")!.temporaryPowerBonus).toBe(2);
+    expect(after.seats[0].board.battlefield.find((c) => c.id === "y")!.temporaryGrantedKeywords).toContain("trample");
+    expect(after.seats[0].board.battlefield.find((c) => c.id === "x")!.temporaryPowerBonus).toBeUndefined();
+    expect(findCastTriggers(s, "a", real("Lightning Bolt", "bolt"), 1)).toHaveLength(0);
   });
 });

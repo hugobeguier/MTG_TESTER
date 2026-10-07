@@ -327,6 +327,10 @@ type TriggerEffect = (
   | { kind: "hideaway"; count: number }
   // "As this enchantment enters, choose Khans or Dragons." (Outpost Siege) — records the label on the permanent (chosenOption picks it).
   | { kind: "choose_named_mode"; options: string[] }
+  // "This creature deals 1 damage to each opponent." (Firespitter Whelp)
+  | { kind: "damage_each_opponent"; amount: number }
+  // "Target creature you control gets +2/+2 and gains trample until end of turn." (Rhonas's Monument)
+  | { kind: "pump_target_creature"; power: number; toughness: number; keywords: string[] }
   // "Proliferate." (Norn's Choirmaster) — every eligible permanent and player, same as the blanket resolveProliferate.
   | { kind: "proliferate" }
 ) & {
@@ -5712,6 +5716,8 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     switch (trigger.effect.kind) {
       case "target_creature_gains_keyword":
         return { prompt: `${trigger.sourceCardName}: choose a creature you control to gain ${trigger.effect.keywords.join(" and ")} until end of turn.`, zone: "battlefield", cards: ownCreatures, picksNeeded: 1 };
+      case "pump_target_creature":
+        return { prompt: `${trigger.sourceCardName}: choose a creature you control to get the bonus.`, zone: "battlefield", cards: ownCreatures, picksNeeded: 1 };
       case "double_power_counters":
         return { prompt: `${trigger.sourceCardName}: choose a creature to put counters on equal to its power.`, zone: "battlefield", cards: ownCreatures, picksNeeded: 1 };
       case "counters_on_up_to_creatures":
@@ -18605,6 +18611,8 @@ interface CastTriggerCondition {
   // Any other descriptor word before "spell" — a creature subtype ("Zombie spell", Diregraf Colossus) or color,
   // matched with the shared qualifier matcher.
   spellDescriptor?: string;
+  // "noncreature or Dragon spell" (Firespitter Whelp): also matches this descriptor (the type filter above is then "noncreature").
+  alsoDescriptor?: string;
   effectClause: string;
 }
 
@@ -18621,7 +18629,7 @@ const ORDINAL_WORDS: Record<string, number> = { first: 1, second: 2, third: 3, f
 // creature/planeswalker/land) — declined rather than guessed at for anything else, same as every
 // other parser here.
 const CAST_TRIGGER_PATTERN =
-  /^whenever (you cast|an opponent casts|a player casts) (?:an?|(?:your|their) (first|second|third|fourth|fifth))\s*((?:instant or sorcery|[a-z]+)\s+)?spells?(?: each turn)?,\s*(.+)$/i;
+  /^whenever (you cast|an opponent casts|a player casts) (?:an?|(?:your|their) (first|second|third|fourth|fifth))\s*((?:instant or sorcery|noncreature or [a-z]+|[a-z]+)\s+)?spells?(?: each turn)?,\s*(.+)$/i;
 
 function parseCastTriggerCondition(clause: string): CastTriggerCondition | undefined {
   const match = clause.match(CAST_TRIGGER_PATTERN);
@@ -18629,6 +18637,8 @@ function parseCastTriggerCondition(clause: string): CastTriggerCondition | undef
   const relativity = /^you/i.test(match[1]) ? "you" : /^a player/i.test(match[1]) ? "any" : "opponent";
   const requiredOrdinal = match[2] ? ORDINAL_WORDS[match[2].toLowerCase()] : undefined;
   const typeWord = match[3]?.trim().toLowerCase();
+  const orMatch = typeWord?.match(/^noncreature or ([a-z]+)$/);
+  if (orMatch) return { relativity, requiredOrdinal, spellTypeFilter: "noncreature", alsoDescriptor: orMatch[1], effectClause: match[4].trim() };
   const spellTypeFilter =
     typeWord === "noncreature" ||
     typeWord === "enchantment" ||
@@ -18685,7 +18695,9 @@ export function findCastTriggers(
         if (condition.relativity === "you" && seat.id !== casterSeatId) continue;
         if (condition.relativity === "opponent" && seat.id === casterSeatId) continue;
         if (condition.requiredOrdinal !== undefined && condition.requiredOrdinal !== castOrdinalThisTurnForCaster) continue;
-        if (!spellMatchesCastTriggerFilter(castCard, condition.spellTypeFilter)) continue;
+        const matchesFilter = spellMatchesCastTriggerFilter(castCard, condition.spellTypeFilter);
+        const matchesAlso = condition.alsoDescriptor ? permanentMatchesQualifier(castCard, condition.alsoDescriptor) : false;
+        if (!matchesFilter && !matchesAlso) continue;
         if (condition.spellDescriptor && !permanentMatchesQualifier(castCard, condition.spellDescriptor)) continue;
         // "... unless that player pays {N}." (Mystic Remora, Esper Sentinel, ...) is a tax-
         // conditional effect this generic scan has no way to model — the tax itself is dropped, same
@@ -18989,6 +19001,12 @@ export function commonTriggerEffect(
   if (hideawayMatch && mode === "entered") return { kind: "hideaway", count: Number.parseInt(hideawayMatch[1], 10) };
   const namedMode = text.match(/\bas this (?:enchantment|artifact|permanent|creature) enters, choose ([a-z]+) or ([a-z]+)\./);
   if (namedMode && mode === "entered") return { kind: "choose_named_mode", options: [namedMode[1], namedMode[2]].map((label) => label.charAt(0).toUpperCase() + label.slice(1)) };
+  const eachOpponentDamage = text.match(/^(?:this creature|it) deals (\d+) damage to each opponent\.?$/);
+  if (eachOpponentDamage) return { kind: "damage_each_opponent", amount: Number.parseInt(eachOpponentDamage[1], 10) };
+  const targetPump = text.match(/^target creature you control gets ([+-]\d+)\/([+-]\d+)(?: and gains ([a-z ]+?))? until end of turn\.?$/);
+  if (targetPump) {
+    return { kind: "pump_target_creature", power: Number.parseInt(targetPump[1], 10), toughness: Number.parseInt(targetPump[2], 10), keywords: targetPump[3] ? targetPump[3].split(/ and |, /) : [] };
+  }
   const rummage = text.match(/\byou may discard a card\. if you do, draw (a|one|two|three) cards?\b/);
   if (rummage) return { kind: "discard_then_draw", draw: numberWordToInt(rummage[1]) ?? 1, optional: true };
   if (/\byou gain life equal to that creature'?s toughness\b/.test(text)) return { kind: "gain_life_context_toughness" };
@@ -19837,6 +19855,50 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
     return drawMultipleForSeat(session, trigger.controllerSeatId, trigger.effect.amount, `${trigger.sourceCardName} trigger resolves. ${seatName} draws ${trigger.effect.amount} card${trigger.effect.amount === 1 ? "" : "s"}.`);
   }
   if (trigger.effect.kind === "proliferate") return resolveProliferate(session);
+  if (trigger.effect.kind === "damage_each_opponent") {
+    const { amount } = trigger.effect;
+    const sourceCard = session.seats.flatMap((item) => item.board.battlefield).find((card) => card.id === trigger.sourceCardId);
+    let next = session;
+    for (const opponent of session.seats) {
+      if (opponent.id === trigger.controllerSeatId || opponent.hasLost) continue;
+      next = applyCombatDamageToTarget(next, trigger.sourceCardName, { seat: next.seats.find((item) => item.id === opponent.id)! }, amount, sourceCard, trigger.controllerSeatId, "noncombat");
+    }
+    return next;
+  }
+  if (trigger.effect.kind === "pump_target_creature") {
+    const { power, toughness, keywords } = trigger.effect;
+    const mine = session.seats.find((item) => item.id === trigger.controllerSeatId);
+    const target = (trigger.effect.chosenOption ? mine?.board.battlefield.find((card) => card.id === trigger.effect.chosenOption) : undefined) ?? strongestControlledCreature(mine);
+    if (!mine || !target) return session;
+    return rulesEvent(
+      {
+        ...session,
+        seats: session.seats.map((item) =>
+          item.id !== mine.id
+            ? item
+            : {
+                ...item,
+                board: {
+                  ...item.board,
+                  battlefield: item.board.battlefield.map((card) =>
+                    card.id === target.id
+                      ? {
+                          ...card,
+                          temporaryPowerBonus: (card.temporaryPowerBonus ?? 0) + power,
+                          temporaryToughnessBonus: (card.temporaryToughnessBonus ?? 0) + toughness,
+                          temporaryGrantedKeywords: [...(card.temporaryGrantedKeywords ?? []), ...keywords],
+                          grantedKeywords: [...new Set([...(card.grantedKeywords ?? []), ...keywords])]
+                        }
+                      : card
+                  )
+                }
+              }
+        )
+      },
+      mine.id,
+      `${trigger.sourceCardName}: ${target.name} gets ${power >= 0 ? "+" : ""}${power}/${toughness >= 0 ? "+" : ""}${toughness}${keywords.length ? " and gains " + keywords.join(" and ") : ""} until end of turn.`
+    );
+  }
   if (trigger.effect.kind === "choose_named_mode") {
     const { options } = trigger.effect;
     const picked = (trigger.effect.chosenOption !== undefined ? options[Number.parseInt(trigger.effect.chosenOption, 10)] : undefined) ?? options[0];
