@@ -1472,6 +1472,13 @@ describe("human choices for Wretched Ranks cards (pure halves)", () => {
     expect(after.board.battlefield.map((c) => c.id).sort()).toEqual(["gb", "s1"]);
     expect(after.board.hand).toHaveLength(2);
   });
+  it("Triggered damage goes where the human aimed it (a chosen player, not the heuristic's creature)", () => {
+    const t = { id: "t", type: "trigger" as const, actorSeatId: "a", controllerSeatId: "a", sourceCardId: "src", sourceCardName: "Src", triggerKind: "common" as const, effect: { kind: "damage_effect", effect: { kind: "damage", amount: 3, targetType: "any" }, chosenOption: "p:b" } as never, message: "" };
+    const s = session([seat("a", [], { kind: "human" }), seat("b", [bear("victim", { power: "2", toughness: "2" })])]);
+    const after = resolveTriggerEffect(s, t);
+    expect(after.seats[1].life).toBe(37);
+    expect(after.seats[1].board.battlefield.map((c) => c.id)).toEqual(["victim"]);
+  });
   it("Bojuka Bog exiles the graveyard of the player the human picked", () => {
     const bog = real("Bojuka Bog", "bog");
     const effect = parseZoneEffect(etbEffectText(bog.oracleText))!;

@@ -6079,6 +6079,16 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       if (max === 0) return false;
       return open(`${trigger.sourceCardName}: pay how much {R}? It deals that much damage to a target.`, Array.from({ length: max + 1 }, (_, count) => ({ index: count, label: count === 0 ? "Don't pay" : "{R} x" + count + " — " + count + " damage" })));
     }
+    // "You may put a land card from your hand onto the battlefield" (Archaeomancer's Map): the human picks which land.
+    if (trigger.effect.kind === "put_land_from_hand") {
+      const lands = controller.board.hand.filter((card) => card.typeLine.includes("Land"));
+      if (lands.length >= 2) return open(`${trigger.sourceCardName}: choose a land card from your hand to put onto the battlefield.`, lands.map((card, index) => ({ index, label: card.name })));
+    }
+    // "Deals N damage to any target" triggers: the human aims the damage.
+    if (trigger.effect.kind === "damage_effect" || trigger.effect.kind === "context_power_damage") {
+      const aiming = triggerDamageAiming(session, trigger, controller.id);
+      if (aiming && aiming.options.length >= 2) return open(`${trigger.sourceCardName}: choose a target for ${aiming.effect.kind === "damage" ? aiming.effect.amount : ""} damage.`, aiming.options.map((option, index) => ({ index, label: option.label })));
+    }
     // God-Eternal Bontu: "sacrifice any number of other permanents, then draw that many cards" — the human picks which ones, one at a time.
     if (trigger.effect.kind === "sacrifice_surplus_then_draw") {
       if (controller.board.battlefield.filter((card) => card.id !== trigger.sourceCardId).length === 0) return false;
@@ -6103,6 +6113,19 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
           prompt: `${trigger.sourceCardName}: choose the card to return.`,
           zone: "graveyard",
           cards: legalTargets(session, controller.id, zoneSpec, sourceForTargets).filter((target): target is Extract<ReturnType<typeof legalTargets>[number], { kind: "card" }> => target.kind === "card").map((target) => ({ seatId: target.seatId, cardId: target.card.id })),
+          picksNeeded: 1
+        };
+      }
+      // "Put a +1/+1 counter on target creature (you control)": the human picks it.
+      case "add_counter": {
+        const counterEffect = trigger.effect;
+        if (counterEffect.scope !== "target_creature" && counterEffect.scope !== "target_creature_you_control") return undefined;
+        return {
+          prompt: `${trigger.sourceCardName}: choose a creature to put ${counterEffect.amount === 1 ? "a" : counterEffect.amount} ${counterEffect.counterKind} counter${counterEffect.amount === 1 ? "" : "s"} on.`,
+          zone: "battlefield",
+          cards: session.seats
+            .filter((seat) => !seat.hasLost && (counterEffect.scope !== "target_creature_you_control" || seat.id === controller.id))
+            .flatMap((seat) => seat.board.battlefield.filter((card) => card.typeLine.includes("Creature") && (seat.id === controller.id || (!hasShroud(card) && !hasHexproof(card)))).map((card) => ({ seatId: seat.id, cardId: card.id }))),
           picksNeeded: 1
         };
       }
@@ -6302,7 +6325,14 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       resumeAfterTriggerChoice(choice.trigger, choice.remainingStack);
       return;
     }
-    const chosen = { ...choice.trigger, effect: { ...choice.trigger.effect, chosenOption: String(index) } } as Extract<PendingAction, { type: "trigger" }>;
+    // Aimed damage: remember WHAT was picked (not its position in a list that may have changed by resolution).
+    let encodedOption: string | undefined;
+    if (choice.trigger.effect.kind === "damage_effect" || choice.trigger.effect.kind === "context_power_damage") {
+      const aiming = triggerDamageAiming(session, choice.trigger, choice.controllerSeatId);
+      const picked = aiming?.options[index]?.target;
+      if (picked) encodedOption = encodeChosenTarget(picked);
+    }
+    const chosen = { ...choice.trigger, effect: { ...choice.trigger.effect, chosenOption: encodedOption ?? String(index) } } as Extract<PendingAction, { type: "trigger" }>;
     if (choice.queueing) {
       queueCommonTriggers(choice.queueing.map((queued) => (queued.id === choice.trigger.id ? chosen : queued)));
       return;
@@ -6352,6 +6382,18 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         });
         return;
       }
+    } else if (accepted && trigger.effect.kind === "proliferate" && session.seats.find((seat) => seat.id === trigger.controllerSeatId)?.kind === "human") {
+      // Proliferate (Norn's Choirmaster): the human chooses which permanents and players get another counter.
+      setPendingRuleChoice({
+        id: crypto.randomUUID(),
+        kind: "choose_proliferate_targets",
+        controllerSeatId: trigger.controllerSeatId,
+        sourceCardId: trigger.sourceCardId,
+        sourceCardName: trigger.sourceCardName,
+        prompt: `${trigger.sourceCardName}: choose any number of permanents and/or players to proliferate.`
+      });
+      resumeAfterTriggerChoice(trigger, remainingStack);
+      return;
     } else if (accepted && openTriggerOptionPrompt(trigger, remainingStack)) {
       return;
     } else if (accepted && (trigger.effect.kind === "scry_cards" || trigger.effect.kind === "surveil_cards") && session.seats.find((seat) => seat.id === trigger.controllerSeatId)?.kind === "human") {
@@ -13891,6 +13933,37 @@ function returnLinkedExiles(session: GameSession): GameSession {
     }
   }
   return next;
+}
+
+// Triggered "deals N damage to any target" (Dragon Tempest-style, Scourge of Valkas, Warstorm Surge, Outpost Siege's Dragons): the damage the
+// human aims, the source for legality checks, and the target pool. Undefined when the trigger isn't a single-target damage trigger.
+function triggerDamageAiming(session: GameSession, trigger: Extract<PendingAction, { type: "trigger" }>, controllerSeatId: string): { effect: RemovalEffect; options: LabeledSlot["options"] } | undefined {
+  const fallbackSource = { id: trigger.sourceCardId, name: trigger.sourceCardName, typeLine: "", oracleText: "", manaValue: 0, colors: [], role: "effect", zone: "battlefield" } as VisibleCard;
+  const source = findPermanentById(session, trigger.sourceCardId) ?? fallbackSource;
+  if (trigger.effect.kind === "damage_effect" && trigger.effect.effect.kind === "damage" && typeof trigger.effect.effect.amount === "number") {
+    const dmg = trigger.effect.effect;
+    const slot = dmg.targetType === "player" ? "player" : dmg.targetType === "creature" ? "any_creature" : "any_damage";
+    return { effect: dmg, options: labeledTargetOptions(session, controllerSeatId, slot, source) };
+  }
+  if (trigger.effect.kind === "context_power_damage") {
+    const entering = trigger.contextCardId ? findPermanentById(session, trigger.contextCardId) : undefined;
+    const power = entering ? Math.max(0, effectivePower(entering)) : 0;
+    if (!entering || power <= 0) return undefined;
+    return { effect: { kind: "damage", amount: power, targetType: "any" }, options: labeledTargetOptions(session, controllerSeatId, "any_damage", entering) };
+  }
+  return undefined;
+}
+
+function encodeChosenTarget(target: ChosenTarget): string {
+  return target.kind === "player" ? "p:" + target.seatId : "c:" + target.seatId + ":" + target.cardId;
+}
+
+function decodeChosenTarget(value: string | undefined): ChosenTarget | undefined {
+  if (!value) return undefined;
+  const parts = value.split(":");
+  if (parts[0] === "p" && parts[1]) return { kind: "player", seatId: parts[1] };
+  if (parts[0] === "c" && parts[1] && parts[2]) return { kind: "card", seatId: parts[1], cardId: parts[2] };
+  return undefined;
 }
 
 // The other permanents still available to sacrifice (God-Eternal Bontu), plus a final "done" entry.
@@ -21483,7 +21556,8 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
     const landsInHand = controllerSeat?.board.hand.filter((card) => card.typeLine.includes("Land")) ?? [];
     // Prefer a nonbasic (a utility land is generically the more valuable thing to ramp into) —
     // falls back to a basic if that's all there is.
-    const chosenLand = landsInHand.find((card) => !isBasicLandCard(card)) ?? landsInHand[0];
+    const chosenIndex = trigger.effect.chosenOption !== undefined ? Number.parseInt(trigger.effect.chosenOption, 10) : undefined;
+    const chosenLand = (chosenIndex !== undefined ? landsInHand[chosenIndex] : undefined) ?? landsInHand.find((card) => !isBasicLandCard(card)) ?? landsInHand[0];
     if (!controllerSeat || !chosenLand) {
       return {
         ...session,
@@ -21599,7 +21673,8 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
         }
       }
     } else {
-      target = chooseCounterTarget(session, trigger.controllerSeatId, counterKind, scope === "target_creature_you_control");
+      const pickedTarget = trigger.effect.chosenOption ? session.seats.flatMap((seat) => seat.board.battlefield.filter((card) => card.id === trigger.effect.chosenOption).map((card) => ({ seatId: seat.id, card })))[0] : undefined;
+      target = pickedTarget ?? chooseCounterTarget(session, trigger.controllerSeatId, counterKind, scope === "target_creature_you_control");
     }
     if (!target) {
       return {
@@ -21814,13 +21889,14 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
   }
   if (trigger.effect.kind === "damage_effect") {
     const source = findPermanentById(session, trigger.sourceCardId) ?? ({ id: trigger.sourceCardId, name: trigger.sourceCardName, typeLine: "", oracleText: "", manaValue: 0, colors: [], role: "effect", zone: "battlefield" } as VisibleCard);
-    return applyRemovalEffect(session, trigger.controllerSeatId, trigger.sourceCardName, source, trigger.effect.effect);
+    const aimed = decodeChosenTarget(trigger.effect.chosenOption);
+    return applyRemovalEffect(session, trigger.controllerSeatId, trigger.sourceCardName, source, trigger.effect.effect, undefined, aimed);
   }
   if (trigger.effect.kind === "context_power_damage") {
     const entering = trigger.contextCardId ? findPermanentById(session, trigger.contextCardId) : undefined;
     const power = entering ? Math.max(0, effectivePower(entering)) : 0;
     if (power <= 0 || !entering) return noLegalTargetEvent(session, trigger.controllerSeatId, trigger.sourceCardName);
-    return applyRemovalEffect(session, trigger.controllerSeatId, trigger.sourceCardName, entering, { kind: "damage", amount: power, targetType: "any" });
+    return applyRemovalEffect(session, trigger.controllerSeatId, trigger.sourceCardName, entering, { kind: "damage", amount: power, targetType: "any" }, undefined, decodeChosenTarget(trigger.effect.chosenOption));
   }
   if (trigger.effect.kind === "become_monarch") {
     const newMonarch = session.seats.find((seat) => seat.id === trigger.controllerSeatId);
