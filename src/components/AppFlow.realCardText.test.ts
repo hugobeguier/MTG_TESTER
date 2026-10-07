@@ -2,7 +2,7 @@
 // the test: two earlier tests passed on invented text while the real cards stayed broken (Court of Grace, the
 // "with power N or greater" watchers). Skipped per card when the catalog doesn't have it.
 import { describe, expect, it } from "vitest";
-import { hideawayDamageConditionMet, legalMainPhaseActions, tapCreaturesAltCostFor, applyCastRemoval, nextCastPrompt, type CastChoices, spellModePrompt, applyDigPick, applyLabeledContinuation, spellTargetSlots, grantKeywordsToCreature, applyExalted, applySacrificeEffect, applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
+import { findLeavesBattlefieldTriggers, hideawayDamageConditionMet, legalMainPhaseActions, tapCreaturesAltCostFor, applyCastRemoval, nextCastPrompt, type CastChoices, spellModePrompt, applyDigPick, applyLabeledContinuation, spellTargetSlots, grantKeywordsToCreature, applyExalted, applySacrificeEffect, applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
 import { parseRemovalEffect } from "@/lib/removalSpells";
 import { parseZoneEffect } from "@/lib/zoneEffects";
 import { permanentMatchesQualifier } from "@/lib/characteristics";
@@ -1601,5 +1601,26 @@ describe("the AI cycles surplus lands (real Oracle text)", () => {
     expect(withLands(4, true)).toBe(true);
     expect(withLands(3, true)).toBe(false);
     expect(withLands(4, false)).toBe(false);
+  });
+});
+
+describe("leaving the battlefield without dying (Outpost Siege, Dragons)", () => {
+  const siege = () => real("Outpost Siege", "os", { chosenMode: "Dragons" });
+  it("bounced and exiled creatures are recorded as leaving, and the Dragons mode reacts to both", () => {
+    const s = session([seat("a", [siege(), bear("mine")]), seat("b", [bear("theirs")])]);
+    const spell = real("Lightning Bolt", "spell");
+    const bounced = applyRemovalEffect(s, "b", "Unsummon", spell, { kind: "bounce", targetType: "creature" }, undefined, { kind: "card", seatId: "a", cardId: "mine" });
+    expect(bounced.pendingLeaves?.map((l) => l.card.id)).toEqual(["mine"]);
+    const triggers = findLeavesBattlefieldTriggers(bounced, "a", bounced.pendingLeaves![0].card);
+    expect(triggers.map((t) => t.effect.kind)).toEqual(["damage_effect"]);
+    const exiled = applyRemovalEffect(s, "b", "Path", spell, { kind: "exile", targetType: "creature", lifeGainToControllerEqualToPower: false }, undefined, { kind: "card", seatId: "a", cardId: "mine" });
+    expect(exiled.pendingLeaves?.map((l) => l.card.id)).toEqual(["mine"]);
+  });
+  it("only your own creatures, only in Dragons mode, and not for the Siege itself", () => {
+    const s = session([seat("a", [siege()]), seat("b", [])]);
+    expect(findLeavesBattlefieldTriggers(s, "a", bear("x"))).toHaveLength(1);
+    expect(findLeavesBattlefieldTriggers(s, "b", bear("x"))).toHaveLength(0);
+    const khans = session([seat("a", [real("Outpost Siege", "os", { chosenMode: "Khans" })]), seat("b", [])]);
+    expect(findLeavesBattlefieldTriggers(khans, "a", bear("x"))).toHaveLength(0);
   });
 });

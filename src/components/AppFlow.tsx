@@ -1579,6 +1579,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   const CAST_DISPATCH_STALE_MS = 500;
   const processedDeathBatchRef = useRef<GameSession["pendingDeaths"]>(undefined);
   const processedEntryBatchRef = useRef<GameSession["pendingEntries"]>(undefined);
+  const processedLeaveBatchRef = useRef<GameSession["pendingLeaves"]>(undefined);
   const processedCombatDamageToPlayerBatchRef = useRef<GameSession["pendingCombatDamageToPlayer"]>(undefined);
   const processedGraveyardDepartureBatchRef = useRef<GameSession["pendingGraveyardDepartures"]>(undefined);
   // Card ids already offered (or auto-resolved) the "move to the command zone instead?" choice —
@@ -2140,6 +2141,18 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       return;
     }
   }, [session, mode, gameStage, pendingAction, pendingRuleChoice, libraryLook]);
+
+  // Creatures that left the battlefield without dying (bounced, exiled): queue their "whenever a creature you control leaves the
+  // battlefield" triggers. Waits for an idle stack, like the death and entry drains.
+  useEffect(() => {
+    if (pendingAction) return;
+    const leaves = session.pendingLeaves;
+    if (!leaves || leaves.length === 0 || leaves === processedLeaveBatchRef.current) return;
+    processedLeaveBatchRef.current = leaves;
+    const triggers = leaves.flatMap((leave) => findLeavesBattlefieldTriggers(session, leave.seatId, leave.card));
+    setSession((current) => (current.pendingLeaves === leaves ? { ...current, pendingLeaves: undefined } : current));
+    if (triggers.length > 0) queueCommonTriggers(triggers);
+  }, [session.pendingLeaves, pendingAction]);
 
   // "At the beginning of each combat, ..." (Unnatural Growth) also fires on OTHER players' combats. The phase sweep walks only the
   // active seat's permanents, so the permanents of every other seat get their "each combat" clauses resolved here, once per turn.
@@ -13932,6 +13945,18 @@ export function moveCardAcrossSeats(
   destinationZone: CrossSeatZone,
   options: { tapped?: boolean; libraryPosition?: "top" | "bottom" } = {}
 ): { session: GameSession; movedCard?: VisibleCard } {
+  const result = moveCardAcrossSeatsCore(session, sourceSeatId, cardId, destinationSeatId, destinationZone, options);
+  return { ...result, session: withLeaveRecord(session, result.session, sourceSeatId, cardId, destinationZone === "graveyard") };
+}
+
+function moveCardAcrossSeatsCore(
+  session: GameSession,
+  sourceSeatId: string,
+  cardId: string,
+  destinationSeatId: string,
+  destinationZone: CrossSeatZone,
+  options: { tapped?: boolean; libraryPosition?: "top" | "bottom" } = {}
+): { session: GameSession; movedCard?: VisibleCard } {
   const sourceSeat = session.seats.find((seat) => seat.id === sourceSeatId);
   if (!sourceSeat) return { session };
   const handCard = sourceSeat.board.hand.find((card) => card.id === cardId);
@@ -18186,21 +18211,28 @@ export function findCommonTriggersForPermanentDied(
     }
   }
 
-  // "• Dragons — Whenever a creature you control leaves the battlefield, this enchantment deals 1 damage to any target." (Outpost Siege)
-  // Only deaths are seen here (bounce and exile don't reach this finder).
-  const deadSeat = session.seats.find((seat) => seat.id === deadSeatId);
-  for (const watcher of deadSeat?.board.battlefield ?? []) {
-    if (watcher.abilitiesStripped || watcher.id === deadCard.id) continue;
+  // Dying is one way to leave the battlefield; the others (bounce, exile) arrive through pendingLeaves.
+  triggers.push(...findLeavesBattlefieldTriggers(session, deadSeatId, deadCard));
+
+  return triggers;
+}
+
+// "• Dragons — Whenever a creature you control leaves the battlefield, this enchantment deals 1 damage to any target." (Outpost Siege)
+export function findLeavesBattlefieldTriggers(session: GameSession, leavingSeatId: string, leavingCard: VisibleCard): Array<Extract<PendingAction, { type: "trigger" }>> {
+  const triggers: Array<Extract<PendingAction, { type: "trigger" }>> = [];
+  if (!leavingCard.typeLine.includes("Creature")) return triggers;
+  const watcherSeat = session.seats.find((seat) => seat.id === leavingSeatId);
+  for (const watcher of watcherSeat?.board.battlefield ?? []) {
+    if (watcher.abilitiesStripped || watcher.id === leavingCard.id) continue;
     for (const clause of oracleClauses(watcher.oracleText)) {
       const match = clause.match(/^(?:[•*]\s*)?(?:([A-Za-z]+)\s*[—-]\s*)?whenever a creature you control leaves the battlefield, (.+)$/i);
       if (!match) continue;
-      if (match[1] && watcher.chosenMode && watcher.chosenMode.toLowerCase() !== match[1].toLowerCase()) continue;
       if (match[1] && !watcher.chosenMode) continue;
+      if (match[1] && watcher.chosenMode && watcher.chosenMode.toLowerCase() !== match[1].toLowerCase()) continue;
       const leaveEffect = commonTriggerEffect(match[2], "clause");
-      if (leaveEffect) triggers.push(makeCommonTrigger(deadSeatId, deadSeat!.id, watcher, leaveEffect, watcher.name + " triggers because " + deadCard.name + " left the battlefield."));
+      if (leaveEffect) triggers.push(makeCommonTrigger(leavingSeatId, leavingSeatId, watcher, leaveEffect, watcher.name + " triggers because " + leavingCard.name + " left the battlefield."));
     }
   }
-
   return triggers;
 }
 
@@ -24238,7 +24270,22 @@ export function canReceivePriorityForPendingAction(
   );
 }
 
+// A creature that leaves the battlefield for somewhere other than the graveyard (deaths are recorded through pendingDeaths) is queued in
+// pendingLeaves, so "whenever a creature you control leaves the battlefield" triggers see bounce and exile too.
+function withLeaveRecord(before: GameSession, after: GameSession, seatId: string, cardId: string, destinationIsGraveyard: boolean): GameSession {
+  if (destinationIsGraveyard || after === before) return after;
+  const card = before.seats.find((seat) => seat.id === seatId)?.board.battlefield.find((item) => item.id === cardId);
+  if (!card || !card.typeLine.includes("Creature")) return after;
+  const stillThere = after.seats.some((seat) => seat.board.battlefield.some((item) => item.id === cardId));
+  if (stillThere) return after;
+  return { ...after, pendingLeaves: [...(after.pendingLeaves ?? []), { seatId, card }] };
+}
+
 export function moveCardBetweenVisibleZones(session: GameSession, seatId: string, cardId: string, destination: "hand" | "graveyard" | "exile"): GameSession {
+  return withLeaveRecord(session, moveCardBetweenVisibleZonesCore(session, seatId, cardId, destination), seatId, cardId, destination === "graveyard");
+}
+
+function moveCardBetweenVisibleZonesCore(session: GameSession, seatId: string, cardId: string, destination: "hand" | "graveyard" | "exile"): GameSession {
   const controllerSeat = session.seats.find((seat) => seat.id === seatId);
   if (!controllerSeat) return session;
   const graveyard = controllerSeat.board.graveyard ?? [];

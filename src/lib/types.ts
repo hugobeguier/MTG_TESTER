@@ -441,6 +441,9 @@ export interface GameSession {
   // Extra combat phases still owed this turn (Hellkite Charger, Scourge of the Throne): when end of combat is passed, the turn
   // goes back to beginning of combat instead of on to the second main phase.
   extraCombatsPending?: number;
+  // Creatures that left the battlefield WITHOUT dying (bounced, exiled, put into a library): "whenever a creature you control leaves the
+  // battlefield" watchers react to these. Deaths come through pendingDeaths instead. Drained by a component effect.
+  pendingLeaves?: Array<{ seatId: string; card: VisibleCard }>;
   pendingAttackDeclarations?: Array<{ seatId: string; card: VisibleCard; defendingSeatId: string }>;
   // Rule 724: the player who is currently the monarch (Court of Grace, Skyline Despot, Marchesa's Decree). They draw
   // an extra card at the beginning of their end step, and a creature that deals combat damage to them makes its
