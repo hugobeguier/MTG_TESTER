@@ -289,6 +289,9 @@ export type GenericTapEffect =
   | { kind: "draw_cards"; amount: number }
   // "Target creature can't be blocked this turn." (Rogue's Passage) — your best attacker.
   | { kind: "target_unblockable" }
+  // "Look at the top six cards of your library. You may reveal a creature card with mana value less than or equal to the number of lands
+  // you control from among them and put it onto the battlefield. Put the rest on the bottom in a random order." (Loot, Exuberant Explorer)
+  | { kind: "dig_creature_to_battlefield"; count: number }
   // "You may play the exiled card without paying its mana cost if <condition>." (Hideaway lands). conditionText is the text after "if".
   | { kind: "hideaway_play"; conditionText: string }
   // "You draw a card and lose 1 life." (Cryptbreaker)
@@ -406,6 +409,8 @@ function parseGenericTapEffectText(text: string): GenericTapEffect | undefined {
   if (/^draw a card, then you lose life equal to the number of cards in your hand\.?$/i.test(text)) return { kind: "draw_then_lose_life_equal_hand" };
   if (/^each player draws a card, then discards a card\.?$/i.test(text)) return { kind: "each_player_loots" };
   if (/^target creature can'?t be blocked this turn\.?$/i.test(text)) return { kind: "target_unblockable" };
+  const digCreature = text.match(/^look at the top (\w+) cards of your library\.\s*you may reveal a creature card with mana value less than or equal to the number of lands you control from among them and put it onto the battlefield\./i);
+  if (digCreature) return { kind: "dig_creature_to_battlefield", count: numberWordToInt(digCreature[1]) ?? 6 };
   const hideawayPlay = text.match(/^you may play the exiled card without paying its mana cost if (.+?)\.?$/i);
   if (hideawayPlay) return { kind: "hideaway_play", conditionText: hideawayPlay[1].toLowerCase() };
   const commanderKeyword = text.match(/^target commander gains ([a-z ]+?) until end of turn\.?$/i);

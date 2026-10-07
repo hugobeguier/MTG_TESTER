@@ -527,6 +527,8 @@ type PendingRuleChoice =
       prompt: string;
       count: number;
       typeWord: string;
+      // Loot: the pick enters the battlefield, capped at this mana value, instead of going to hand.
+      toBattlefieldMaxManaValue?: number;
       options: Array<{ index: number; label: string; cardId: string }>;
     }
   // Targets that don't fit the board-click / graveyard pickers (a creature OR a player, two different targets in a row): a plain
@@ -5043,6 +5045,30 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       setSeatManaPool(seatId, paid.poolSpent);
       clearManaContributions(seatId);
     }
+    // Loot, Exuberant Explorer: after paying, the human sees the top cards and picks which creature (if any) enters.
+    if (seat?.kind === "human" && paid.ability.effect.kind === "dig_creature_to_battlefield") {
+      const digEffect = paid.ability.effect;
+      const owner = paid.session.seats.find((item) => item.id === seatId);
+      const landCount = owner?.board.battlefield.filter((permanent) => isLandCard(permanent)).length ?? 0;
+      const top = (owner?.library ?? []).slice(0, digEffect.count);
+      const candidates = top.filter((candidate) => candidate.typeLine.includes("Creature") && candidate.manaValue <= landCount);
+      if (candidates.length >= 1) {
+        setSession(() => paid.session);
+        setPendingRuleChoice({
+          id: crypto.randomUUID(),
+          kind: "choose_dig_card",
+          controllerSeatId: seatId,
+          sourceCardId: cardId,
+          sourceCardName: paid.card.name,
+          prompt: paid.card.name + ": you look at the top " + top.length + " cards. Put a creature with mana value " + landCount + " or less onto the battlefield?",
+          count: digEffect.count,
+          typeWord: "creature",
+          toBattlefieldMaxManaValue: landCount,
+          options: [...candidates.map((candidate, index) => ({ index, label: candidate.name + " (mana value " + candidate.manaValue + ")", cardId: candidate.id })), { index: candidates.length, label: "Take nothing", cardId: "none" }]
+        });
+        return;
+      }
+    }
     // "Target creature can't be blocked this turn." (Rogue's Passage): the human chooses the creature after paying.
     if (seat?.kind === "human" && paid.ability.effect.kind === "target_unblockable") {
       const yours = paid.session.seats.find((item) => item.id === seatId)?.board.battlefield.filter((card) => card.typeLine.includes("Creature")) ?? [];
@@ -8367,7 +8393,11 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       const picked = dig.options.find((option) => option.index === index);
       if (!picked) return;
       setPendingRuleChoice(undefined);
-      setSession((current) => applyDigPick(current, dig.controllerSeatId, dig.sourceCardName, dig.count, dig.typeWord, picked.cardId));
+      setSession((current) =>
+        dig.toBattlefieldMaxManaValue !== undefined
+          ? applyDigToBattlefield(current, dig.controllerSeatId, dig.sourceCardName, dig.count, dig.toBattlefieldMaxManaValue, picked.cardId)
+          : applyDigPick(current, dig.controllerSeatId, dig.sourceCardName, dig.count, dig.typeWord, picked.cardId)
+      );
       return;
     }
     if (pendingRuleChoice?.kind === "choose_labeled_target") {
@@ -12973,6 +13003,10 @@ export function applyGenericTapEffect(
       `${seat.name} may play ${hidden.name} from exile without paying its mana cost (${sourceCardName}).`
     );
   }
+  if (effect.kind === "dig_creature_to_battlefield") {
+    const lands = seat.board.battlefield.filter((card) => isLandCard(card)).length;
+    return applyDigToBattlefield(session, seatId, sourceCardName, effect.count, lands);
+  }
   if (effect.kind === "draw_and_lose_life") {
     const drawn = drawMultipleForSeat(session, seatId, effect.draw, `${seat.name} draws ${effect.draw} card${effect.draw === 1 ? "" : "s"} from ${sourceCardName}.`);
     return rulesEvent({ ...drawn, seats: drawn.seats.map((item) => (item.id === seatId ? { ...item, life: item.life - effect.lose } : item)) }, seatId, `${seat.name} loses ${effect.lose} life from ${sourceCardName}.`);
@@ -16696,6 +16730,10 @@ export function applySimpleLifeChange(
 interface PumpEffect {
   power: number;
   toughness: number;
+  // "gains trample" (Rhonas the Indomitable): keywords granted until end of turn.
+  keywords?: string[];
+  // "Another target creature": the source itself is not a legal target.
+  another?: boolean;
 }
 
 // "Target creature gets +N/+N or -N/-N until end of turn." (Giant Growth-style tricks, Afflict-
@@ -16705,23 +16743,27 @@ interface PumpEffect {
 // existing temporaryPowerBonus/temporaryToughnessBonus fields (already used for prowess) rather
 // than adding a parallel mechanism.
 export function parseTargetedPump(text: string): PumpEffect | undefined {
-  const match = text.match(/\btarget creature gets ([+-]\d+)\/([+-]\d+) until end of turn\b/i);
+  const match = text.match(/\b(another )?target creature gets ([+-]\d+)\/([+-]\d+)(?: and gains ([a-z, ]+?))? until end of turn\b/i);
   if (!match) return undefined;
-  return { power: Number.parseInt(match[1], 10), toughness: Number.parseInt(match[2], 10) };
+  const keywords = match[4] ? match[4].split(/,| and /).map((word) => word.trim().toLowerCase()).filter(Boolean) : [];
+  return { power: Number.parseInt(match[2], 10), toughness: Number.parseInt(match[3], 10), ...(keywords.length ? { keywords } : {}), ...(match[1] ? { another: true } : {}) };
 }
 
 // Reuses chooseCounterTarget's existing polarity-aware heuristic (a positive change prefers the
 // caster's own best creature; a negative one prefers the biggest threat among opponents) rather
 // than writing a parallel targeting heuristic — the "which creature" question is identical whether
 // the +N/-N is being applied via counters or a temporary bonus.
-function choosePumpTarget(session: GameSession, casterSeatId: string, effect: PumpEffect) {
-  return chooseCounterTarget(session, casterSeatId, effect.power >= 0 ? "+1/+1" : "-1/-1", false);
+function choosePumpTarget(session: GameSession, casterSeatId: string, effect: PumpEffect, excludeCardId?: string) {
+  const hidden = excludeCardId
+    ? { ...session, seats: session.seats.map((seat) => ({ ...seat, board: { ...seat.board, battlefield: seat.board.battlefield.filter((card) => card.id !== excludeCardId) } })) }
+    : session;
+  return chooseCounterTarget(hidden, casterSeatId, effect.power >= 0 ? "+1/+1" : "-1/-1", false);
 }
 
 export function applyTargetedPumpEffect(session: GameSession, casterSeatId: string, sourceCard: VisibleCard, effect: PumpEffect, preChosenTarget?: ChosenTarget): GameSession {
   const picked = resolvePreChosenBattlefieldTarget(session, preChosenTarget);
-  const target = picked ?? choosePumpTarget(session, casterSeatId, effect);
-  if (!target) return noLegalTargetEvent(session, casterSeatId, sourceCard.name);
+  const target = picked ?? choosePumpTarget(session, casterSeatId, effect, effect.another ? sourceCard.id : undefined);
+  if (!target || (effect.another && target.card.id === sourceCard.id)) return noLegalTargetEvent(session, casterSeatId, sourceCard.name);
   const powerText = `${effect.power >= 0 ? "+" : ""}${effect.power}`;
   const toughnessText = `${effect.toughness >= 0 ? "+" : ""}${effect.toughness}`;
   return {
@@ -16734,7 +16776,17 @@ export function applyTargetedPumpEffect(session: GameSession, casterSeatId: stri
               ...seat.board,
               battlefield: seat.board.battlefield.map((card) =>
                 card.id === target.card.id
-                  ? { ...card, temporaryPowerBonus: (card.temporaryPowerBonus ?? 0) + effect.power, temporaryToughnessBonus: (card.temporaryToughnessBonus ?? 0) + effect.toughness }
+                  ? {
+                      ...card,
+                      temporaryPowerBonus: (card.temporaryPowerBonus ?? 0) + effect.power,
+                      temporaryToughnessBonus: (card.temporaryToughnessBonus ?? 0) + effect.toughness,
+                      ...(effect.keywords?.length
+                        ? {
+                            temporaryGrantedKeywords: [...(card.temporaryGrantedKeywords ?? []), ...effect.keywords],
+                            grantedKeywords: [...new Set([...(card.grantedKeywords ?? []), ...effect.keywords])]
+                          }
+                        : {})
+                    }
                   : card
               )
             }
@@ -16746,7 +16798,7 @@ export function applyTargetedPumpEffect(session: GameSession, casterSeatId: stri
         id: crypto.randomUUID(),
         at: new Date().toISOString(),
         seatId: casterSeatId,
-        message: `${sourceCard.name} gives ${target.card.name} ${powerText}/${toughnessText} until end of turn.`,
+        message: `${sourceCard.name} gives ${target.card.name} ${powerText}/${toughnessText}${effect.keywords?.length ? " and " + effect.keywords.join(" and ") : ""} until end of turn.`,
         detail: "Rules action"
       },
       ...session.events
@@ -19781,6 +19833,27 @@ function payRedMana(session: GameSession, seatId: string, exact?: number): { ses
 
 // "Look at the top N cards of your library. You may reveal a <type> card from among them and put it into your hand. Put the rest on
 // the bottom in a random order." pickedId is the human's choice; omitted, the first qualifying card is taken. "none" takes nothing.
+// Loot's version: the found creature enters the battlefield (its enters triggers follow through pendingEntries), subject to a mana value cap.
+export function applyDigToBattlefield(session: GameSession, seatId: string, sourceName: string, count: number, maxManaValue: number, pickedId?: string): GameSession {
+  const seat = session.seats.find((item) => item.id === seatId);
+  if (!seat) return session;
+  const library = seat.library ?? [];
+  const top = library.slice(0, count);
+  const qualifies = (card: VisibleCard) => card.typeLine.includes("Creature") && card.manaValue <= maxManaValue;
+  const found = pickedId === "none" ? undefined : pickedId ? top.find((card) => card.id === pickedId && qualifies(card)) : [...top].filter(qualifies).sort((a, b) => b.manaValue - a.manaValue)[0];
+  const rest = top.filter((card) => card.id !== found?.id);
+  const bottomed: GameSession = {
+    ...session,
+    seats: session.seats.map((item) => {
+      if (item.id !== seatId) return item;
+      const remaining = [...library.slice(top.length), ...shuffleCards(rest), ...(found ? [found] : [])];
+      return { ...item, library: remaining, zones: { ...item.zones, library: remaining.length } };
+    })
+  };
+  const placed = found ? moveLibraryCardToDestination(bottomed, seatId, found.id, "battlefield", false) : bottomed;
+  return rulesEvent(placed, seatId, found ? `${seat.name} uses ${sourceName} and puts ${found.name} onto the battlefield.` : `${seat.name} uses ${sourceName} but finds no creature that can enter.`);
+}
+
 export function applyDigPick(session: GameSession, seatId: string, sourceName: string, count: number, typeWord: string, pickedId?: string): GameSession {
   const seat = session.seats.find((item) => item.id === seatId);
   if (!seat) return session;

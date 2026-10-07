@@ -2,7 +2,7 @@
 // the test: two earlier tests passed on invented text while the real cards stayed broken (Court of Grace, the
 // "with power N or greater" watchers). Skipped per card when the catalog doesn't have it.
 import { describe, expect, it } from "vitest";
-import { landDropsAllowed, landPlaysMade, recordLandPlay, findCastTriggers, seatHasFlashGrant, findLeavesBattlefieldTriggers, hideawayDamageConditionMet, legalMainPhaseActions, tapCreaturesAltCostFor, applyCastRemoval, nextCastPrompt, type CastChoices, spellModePrompt, applyDigPick, applyLabeledContinuation, spellTargetSlots, grantKeywordsToCreature, applyExalted, applySacrificeEffect, applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
+import { landDropsAllowed, landPlaysMade, recordLandPlay, findCastTriggers, seatHasFlashGrant, findLeavesBattlefieldTriggers, hideawayDamageConditionMet, legalMainPhaseActions, tapCreaturesAltCostFor, applyCastRemoval, nextCastPrompt, type CastChoices, spellModePrompt, applyDigPick, applyDigToBattlefield, applyLabeledContinuation, spellTargetSlots, grantKeywordsToCreature, applyExalted, applySacrificeEffect, applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
 import { parseRemovalEffect } from "@/lib/removalSpells";
 import { parseZoneEffect } from "@/lib/zoneEffects";
 import { permanentMatchesQualifier } from "@/lib/characteristics";
@@ -1387,6 +1387,36 @@ describe("Leyline Tyrant amount, hideaway pick, Orb pick (pure halves)", () => {
     const second = applyDigPick(session([mine]), "a", "Orb of Dragonkind", 7, "dragon", "d2").seats[0];
     expect(second.board.hand.map((c) => c.id)).toEqual(["d2"]);
     expect(applyDigPick(session([mine]), "a", "Orb of Dragonkind", 7, "dragon", "none").seats[0].board.hand).toHaveLength(0);
+  });
+});
+
+describe("Rhonas the Indomitable pump", () => {
+  it("gives ANOTHER creature +2/+0 and trample, never itself", () => {
+    const rhonas = real("Rhonas the Indomitable", "rh", { power: "5", toughness: "5" });
+    const abilities = parseGenericManaAbilities(rhonas.oracleText);
+    const effect = parseGenericAbilityEffect(abilities.find((a) => /another target creature/i.test(a.effectText))!.effectText)!;
+    expect(effect.kind).toBe("pump");
+    const mine = seat("a", [rhonas, bear("b1")]);
+    const after = applyGenericAbilityEffect(session([mine, seat("b", [])]), "a", rhonas, effect).seats[0].board.battlefield;
+    const bearAfter = after.find((c) => c.id === "b1")!;
+    expect(bearAfter.temporaryPowerBonus).toBe(2);
+    expect(bearAfter.grantedKeywords).toContain("trample");
+    expect(after.find((c) => c.id === "rh")!.temporaryPowerBonus ?? 0).toBe(0);
+  });
+});
+
+describe("Loot, Exuberant Explorer dig", () => {
+  it("parses its tap ability and puts the picked creature (mana value within land count) onto the battlefield", () => {
+    const loot = real("Loot, Exuberant Explorer", "loot");
+    const abilities = parseGenericTapAbilities(loot.oracleText);
+    expect(abilities.some((a) => a.effect.kind === "dig_creature_to_battlefield")).toBe(true);
+    const mine = seat("a", [loot, real("Forest", "f1"), real("Forest", "f2"), real("Forest", "f3")]);
+    mine.library = [bear("big", { zone: "library" as const, manaValue: 9 }), bear("ok", { zone: "library" as const, manaValue: 3 }), bear("z", { zone: "library" as const })];
+    mine.zones = { ...mine.zones, library: 3 };
+    const after = applyDigToBattlefield(session([mine]), "a", "Loot", 6, 4, "ok").seats[0];
+    expect(after.board.battlefield.map((c) => c.id)).toContain("ok");
+    expect(after.library!.map((c) => c.id)).not.toContain("ok");
+    expect(applyDigToBattlefield(session([mine]), "a", "Loot", 6, 4, "big").seats[0].board.battlefield.map((c) => c.id)).not.toContain("big");
   });
 });
 
