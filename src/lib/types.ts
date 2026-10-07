@@ -458,6 +458,9 @@ export interface GameSession {
   // Creatures that left the battlefield WITHOUT dying (bounced, exiled, put into a library): "whenever a creature you control leaves the
   // battlefield" watchers react to these. Deaths come through pendingDeaths instead. Drained by a component effect.
   pendingLeaves?: Array<{ seatId: string; card: VisibleCard }>;
+  // "Each player sacrifices N creatures" (Necrotic Hex): a human with more candidates than N chooses which; the pure resolver leaves their
+  // sacrifice undone and records it here, and a component effect opens the picker.
+  pendingSacrificeChoices?: Array<{ seatId: string; sourceCardId: string; sourceCardName: string; count: number }>;
   pendingAttackDeclarations?: Array<{ seatId: string; card: VisibleCard; defendingSeatId: string }>;
   // Rule 724: the player who is currently the monarch (Court of Grace, Skyline Despot, Marchesa's Decree). They draw
   // an extra card at the beginning of their end step, and a creature that deals combat damage to them makes its

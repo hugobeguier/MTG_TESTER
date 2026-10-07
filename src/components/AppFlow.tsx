@@ -689,6 +689,9 @@ type PendingRuleChoice =
       sourceCardName: string;
       prompt: string;
       typeFilter: string;
+      // "Each player sacrifices six creatures" (Necrotic Hex): how many are still to be chosen, and tokens this spell made are not eligible.
+      remaining?: number;
+      excludeTokensFromSourceId?: string;
     }
   // "As an additional cost to cast this spell, sacrifice a creature." (Village Rites, Altar's Reap,
   // ...) — the human controller's own pick of WHICH creature to sacrifice to pay this cost, opened
@@ -976,7 +979,7 @@ type PendingRuleChoice =
       sourceCardName: string;
       prompt: string;
       cards: Array<{ seatId: string; cardId: string }>;
-      activation: { cardId: string; abilityIndex: number };
+      activation: { cardId: string; abilityIndex: number; via?: "mana" | "tap" };
     }
   | {
       id: string;
@@ -2040,6 +2043,25 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   // planeswalker you control, ..." — queued per DECLARED attacker (see pendingAttackDeclarations on
   // GameSession) instead of by the old once-per-phase sweep that fired for every creature with
   // "attacks" text whether or not it attacked.
+  // "Each player sacrifices N creatures" (Necrotic Hex): opens the human's picker for the sacrifices the resolver deferred.
+  useEffect(() => {
+    const queue = session.pendingSacrificeChoices;
+    if (!queue || queue.length === 0 || pendingAction || pendingRuleChoice) return;
+    const [next, ...rest] = queue;
+    setSession((current) => ({ ...current, pendingSacrificeChoices: rest.length > 0 ? rest : undefined }));
+    setPendingRuleChoice({
+      id: crypto.randomUUID(),
+      kind: "choose_each_player_sacrifice",
+      controllerSeatId: next.seatId,
+      sourceCardId: next.sourceCardId,
+      sourceCardName: next.sourceCardName,
+      prompt: next.sourceCardName + ": choose a creature to sacrifice (" + next.count + " to go).",
+      typeFilter: "creature",
+      remaining: next.count,
+      excludeTokensFromSourceId: next.sourceCardId
+    });
+  }, [session.pendingSacrificeChoices, pendingAction, pendingRuleChoice]);
+
   // Monarch (rule 724): the monarch draws an extra card at the beginning of their own end step.
   const monarchDrawChecked = useRef<Set<string>>(new Set());
   useEffect(() => {
@@ -2418,6 +2440,27 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         setSeatManaPool(activeSeat.id, pool);
         addEvent(`${sourceCard.name} adds ${phaseMana[1]} to ${activeSeat.name}'s mana pool.`, activeSeat.id, "Rules action");
         return;
+      }
+      // A human whose upkeep/end-step trigger returns a card from their own graveyard picks the card (and gets the "you may").
+      if (activeSeat.kind === "human") {
+        const graveyardChoice = humanPhaseGraveyardChoice(session, activeSeat.id, sourceCard, phase);
+        if (graveyardChoice === "skip") return;
+        if (graveyardChoice) {
+          if (graveyardChoice.effect.kind === "regrow") {
+            if (maybeRequestTarget(activeSeat.id, sourceCard, zoneEffectTargetSpec(graveyardChoice.effect), graveyardChoice.optional, { kind: "zone", effect: graveyardChoice.effect })) return;
+          } else if ((activeSeat.board.graveyard ?? []).some((card) => card.typeLine.includes("Creature"))) {
+            setPendingRuleChoice({
+              id: crypto.randomUUID(),
+              kind: "choose_creature_from_graveyards",
+              controllerSeatId: activeSeat.id,
+              sourceCardId: sourceCard.id,
+              sourceCardName: sourceCard.name,
+              prompt: `${sourceCard.name}: choose a creature card in your graveyard to return to the battlefield.`,
+              restrictToYourGraveyard: true
+            });
+            return;
+          }
+        }
       }
       // Decide synchronously against the current render's session (consistent with the same kind
       // of pre-check already used to skip the advisor for ETB triggers) — consultRulesAdvisor has
@@ -4601,6 +4644,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       // setSession returns, using whichever invocation's triggers were captured last — since both
       // invocations compute the same triggers from the same `current`, which one "wins" doesn't matter.
       let capturedTriggers: Array<Extract<PendingAction, { type: "trigger" }>> = [];
+      let landZoneChoice: ZoneEffect | undefined;
       setSession((current) => {
         const playedSession = playCardFromZone(current, seatId, cardId, `${seat.name} plays ${playedName}.`, position, "battlefield", [], "hand", faceIndex);
         // playCardFromZone returns the same session reference, untouched, when the card was already
@@ -4621,7 +4665,10 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         // target player's graveyard," ...) had nowhere deterministic to resolve, and fell straight
         // to consultRulesAdvisor for every single one. shouldConsultRulesAdvisor now declines the
         // "land_played" event once this already covers it, so the two don't double up.
-        const zoneResolvedSession = zoneEffect ? applyZoneEffect(nextSession, seatId, playedName, zoneEffect) : nextSession;
+        // A human with a real choice (Bojuka Bog's player, a regrow land) is asked instead; the prompt opens right after this update.
+        const humanLandChoice = zoneEffect && seat.kind === "human" && zoneChoiceSpecFor(nextSession, seatId, zoneEffect, card) !== undefined;
+        landZoneChoice = humanLandChoice ? zoneEffect : undefined;
+        const zoneResolvedSession = zoneEffect && !humanLandChoice ? applyZoneEffect(nextSession, seatId, playedName, zoneEffect) : nextSession;
         capturedTriggers = [
           ...findCommonTriggersForPermanentEntered(zoneResolvedSession, seatId, card),
           ...findLandRaidTriggers(zoneResolvedSession, seatId, card)
@@ -4630,6 +4677,25 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       });
       if (capturedTriggers.length > 0) {
         window.setTimeout(() => queueCommonTriggers(capturedTriggers), 0);
+      }
+      if (landZoneChoice) {
+        const pendingLandEffect = landZoneChoice;
+        window.setTimeout(() => {
+          const spec = zoneEffectTargetSpec(pendingLandEffect);
+          if (!spec) return;
+          setPendingRuleChoice({
+            id: crypto.randomUUID(),
+            kind: "choose_effect_target",
+            controllerSeatId: seatId,
+            sourceCardId: cardId,
+            sourceCardName: playedName,
+            sourceCard: { ...card, name: playedName },
+            prompt: spec.prompt,
+            spec,
+            optional: false,
+            pending: { kind: "zone", effect: pendingLandEffect }
+          });
+        }, 0);
       }
       if (seat.kind === "human") {
         if (choosesCreatureType) {
@@ -5096,10 +5162,16 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         return;
       }
     }
+    // "Return target Zombie card from your graveyard to your hand" (Memorial to Folly, Haven of the Spirit Dragon): the human picks the card.
+    if (seat?.kind === "human" && paid.ability.effect.kind === "zone_effect") {
+      const zoneEff = paid.ability.effect.effect;
+      setSession(() => paid.session);
+      if (maybeRequestTarget(seatId, paid.card, zoneChoiceSpecFor(session, seatId, zoneEff, paid.card), false, { kind: "zone", effect: zoneEff })) return;
+    }
     setSession(() => applySacrificeEffect(paid.session, seatId, paid.card, paid.ability.effect, paid.ability.clause, paid.sacrificed));
   }
 
-  function activateGenericTapAbility(seatId: string, cardId: string, abilityIndex: number, chosenDiscardId?: string) {
+  function activateGenericTapAbility(seatId: string, cardId: string, abilityIndex: number, chosenDiscardId?: string, chosenCardId?: string) {
     const seat = session.seats.find((item) => item.id === seatId);
     const card = seat?.board.battlefield.find((item) => item.id === cardId);
     const ability = card ? parseGenericTapAbilities(card.oracleText)[abilityIndex] : undefined;
@@ -5129,6 +5201,30 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
           prompt: `${card.name}: choose a card to discard as part of the cost.`,
           requiredDiscards: 1,
           activation: { cardId, abilityIndex }
+        });
+        return;
+      }
+    }
+    // Cemetery Reaper ("exile target creature card from a graveyard") and Zul Ashur ("choose target Zombie card in your graveyard"): the human
+    // picks the card before paying; the activation then re-runs with that card.
+    if (seat?.kind === "human" && card && ability && chosenCardId === undefined) {
+      const effect = ability.effect;
+      const pool =
+        effect.kind === "exile_graveyard_creature_then_tokens"
+          ? session.seats.flatMap((other) => (other.board.graveyard ?? []).filter((graveCard) => graveCard.typeLine.includes("Creature")).map((graveCard) => ({ seatId: other.id, cardId: graveCard.id })))
+          : effect.kind === "grant_graveyard_cast"
+            ? (seat.board.graveyard ?? []).filter((graveCard) => permanentMatchesQualifier(graveCard, effect.cardMatcher)).map((graveCard) => ({ seatId: seat.id, cardId: graveCard.id }))
+            : undefined;
+      if (pool && pool.length >= 2) {
+        setPendingRuleChoice({
+          id: crypto.randomUUID(),
+          kind: "choose_ability_card_target",
+          controllerSeatId: seatId,
+          sourceCardId: cardId,
+          sourceCardName: card.name,
+          prompt: effect.kind === "grant_graveyard_cast" ? card.name + ": choose a card in your graveyard you may cast this turn." : card.name + ": choose a creature card from a graveyard to exile.",
+          cards: pool,
+          activation: { cardId, abilityIndex, via: "tap" }
         });
         return;
       }
@@ -5195,7 +5291,29 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         return;
       }
     }
-    setSession(() => applyGenericTapEffect(paid.session, seatId, cardId, paid.card.name, paid.ability.effect, paid.ability.clause));
+    // Lord of the Undead and friends: "return target Zombie card from your graveyard to your hand" — the human picks the card.
+    if (seat?.kind === "human" && paid.ability.effect.kind === "zone_effect") {
+      const zoneEff = paid.ability.effect.effect;
+      setSession(() => paid.session);
+      if (maybeRequestTarget(seatId, paid.card, zoneChoiceSpecFor(session, seatId, zoneEff, paid.card), false, { kind: "zone", effect: zoneEff })) return;
+    }
+    // Geier Reach Sanitarium: everyone draws, then discards; the human's own discard is their choice.
+    if (seat?.kind === "human" && paid.ability.effect.kind === "each_player_loots") {
+      setSession(() => applyGenericTapEffect(paid.session, seatId, cardId, paid.card.name, paid.ability.effect, paid.ability.clause, undefined, { skipDiscardSeatId: seatId }));
+      const owner = paid.session.seats.find((item) => item.id === seatId);
+      if (owner && owner.board.hand.length + ((owner.library ?? []).length > 0 ? 1 : 0) >= 1) {
+        setPendingRuleChoice({
+          id: crypto.randomUUID(),
+          kind: "discard_to_hand_size",
+          controllerSeatId: seatId,
+          sourceCardName: paid.card.name,
+          prompt: paid.card.name + ": choose a card to discard.",
+          requiredDiscards: 1
+        });
+      }
+      return;
+    }
+    setSession(() => applyGenericTapEffect(paid.session, seatId, cardId, paid.card.name, paid.ability.effect, paid.ability.clause, chosenCardId));
   }
 
   function activateSelfUntapAbility(seatId: string, cardId: string, abilityIndex: number) {
@@ -8392,7 +8510,8 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     if (pendingRuleChoice?.kind === "choose_ability_card_target") {
       const ability = pendingRuleChoice;
       setPendingRuleChoice(undefined);
-      activateGenericManaAbility(ability.controllerSeatId, ability.activation.cardId, ability.activation.abilityIndex, cardId);
+      if (ability.activation.via === "tap") activateGenericTapAbility(ability.controllerSeatId, ability.activation.cardId, ability.activation.abilityIndex, undefined, cardId);
+      else activateGenericManaAbility(ability.controllerSeatId, ability.activation.cardId, ability.activation.abilityIndex, cardId);
       return;
     }
     const choice = pendingRuleChoice;
@@ -8478,6 +8597,22 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     if (!seat || !chosenCard) return;
     setPendingRuleChoice(undefined);
     setSession((current) => applyChosenEachPlayerSacrifice(current, choice.controllerSeatId, chosenCard.id, choice.sourceCardName));
+    // More to choose (Necrotic Hex's six): reopen with the card just picked gone.
+    const left = (choice.remaining ?? 1) - 1;
+    if (left > 0) {
+      const stillThere = seat.board.battlefield.filter(
+        (card) => card.id !== chosenCard.id && matchesEachPlayerSacrificeFilter(card, choice.typeFilter) && !(choice.excludeTokensFromSourceId && card.token && card.tokenSourceCardId === choice.excludeTokensFromSourceId)
+      );
+      if (stillThere.length > left) {
+        window.setTimeout(
+          () => setPendingRuleChoice({ ...choice, id: crypto.randomUUID(), remaining: left, prompt: choice.sourceCardName + ": choose a creature to sacrifice (" + left + " to go)." }),
+          0
+        );
+      } else {
+        // Exactly as many left as must go: no choice remains.
+        for (const card of stillThere) setSession((current) => applyChosenEachPlayerSacrifice(current, choice.controllerSeatId, card.id, choice.sourceCardName));
+      }
+    }
   }
 
   // Human resolution for choose_creature_to_sacrifice_for_cast — the human already picked which
@@ -12793,6 +12928,13 @@ function parseEnterAsCopyEffect(
 // battlefield" shape (Mirrormade) searches everyone's — the caster's own permanents first (matching
 // the "prefer your own stuff" bias other unmodeled-choice heuristics in this file already use, e.g.
 // chooseNonAuraEnchantmentTarget for Zur), then every other seat's in turn order.
+// The target spec for a zone effect only when the human really has more than one thing to choose between.
+function zoneChoiceSpecFor(session: GameSession, seatId: string, effect: ZoneEffect, sourceCard: VisibleCard): TargetSpec | undefined {
+  const spec = zoneEffectTargetSpec(effect);
+  if (!spec) return undefined;
+  return legalTargets(session, seatId, spec, sourceCard).length > 1 ? spec : undefined;
+}
+
 // Every permanent the copy could legally be of (what the human chooses between).
 function enterAsCopyCandidates(session: GameSession, actingSeatId: string, effect: { controlledOnly: boolean; allowedTypes: Array<"artifact" | "enchantment" | "creature"> }): VisibleCard[] {
   const matchesType = (card: VisibleCard) => effect.allowedTypes.some((type) => card.typeLine.includes(type === "artifact" ? "Artifact" : type === "creature" ? "Creature" : "Enchantment"));
@@ -13192,7 +13334,10 @@ export function applyGenericTapEffect(
   sourceCardId: string,
   sourceCardName: string,
   effect: GenericTapEffect,
-  clause: string
+  clause: string,
+  // The human's pick for "exile/choose target card in a graveyard" effects (Cemetery Reaper, Zul Ashur).
+  chosenCardId?: string,
+  options?: { skipDiscardSeatId?: string }
 ): GameSession {
   const seat = session.seats.find((item) => item.id === seatId);
   if (!seat) return session;
@@ -13342,7 +13487,7 @@ export function applyGenericTapEffect(
       if (player.hasLost) continue;
       next = drawForSeat(next, player.id, `${player.name} draws a card from ${sourceCardName}.`);
       const current = next.seats.find((item) => item.id === player.id);
-      const discard = current ? chooseWorstHandCardToDiscard(current) : undefined;
+      const discard = current && player.id !== options?.skipDiscardSeatId ? chooseWorstHandCardToDiscard(current) : undefined;
       if (discard) {
         next = moveCardBetweenVisibleZones(next, player.id, discard.id, "graveyard");
         next = rulesEvent(next, player.id, `${player.name} discards ${discard.name} (${sourceCardName}).`);
@@ -13370,7 +13515,8 @@ export function applyGenericTapEffect(
     const candidates = session.seats.flatMap((item) => (item.board.graveyard ?? []).filter((c) => c.typeLine.includes("Creature")).map((c) => ({ seatId: item.id, card: c })));
     // Prefers an opponent's best card (graveyard hate), otherwise the weakest card of its own.
     const opposing = candidates.filter((entry) => entry.seatId !== seatId);
-    const pick = opposing.length > 0 ? opposing.reduce((a, b) => (b.card.manaValue > a.card.manaValue ? b : a)) : candidates.reduce((a, b) => (b.card.manaValue < a.card.manaValue ? b : a), candidates[0]);
+    const heuristicPick = opposing.length > 0 ? opposing.reduce((a, b) => (b.card.manaValue > a.card.manaValue ? b : a)) : candidates.reduce((a, b) => (b.card.manaValue < a.card.manaValue ? b : a), candidates[0]);
+    const pick = candidates.find((entry) => entry.card.id === chosenCardId) ?? heuristicPick;
     if (!pick) return rulesEvent(session, seatId, `${sourceCardName} has no creature card in any graveyard to exile.`);
     const exiled = moveCardAcrossSeats(session, pick.seatId, pick.card.id, pick.seatId, "exile").session;
     const specs = parseCreateTokenSpecs(clause);
@@ -13381,7 +13527,7 @@ export function applyGenericTapEffect(
   // Zul Ashur: pick the best matching creature card in the graveyard and let its controller cast it this turn.
   if (effect.kind === "grant_graveyard_cast") {
     const options = (seat.board.graveyard ?? []).filter((c) => permanentMatchesQualifier(c, effect.cardMatcher));
-    const best = options.length > 0 ? options.reduce((a, b) => (b.manaValue > a.manaValue ? b : a)) : undefined;
+    const best = options.find((c) => c.id === chosenCardId) ?? (options.length > 0 ? options.reduce((a, b) => (b.manaValue > a.manaValue ? b : a)) : undefined);
     if (!best) return rulesEvent(session, seatId, `${sourceCardName} has no ${effect.cardMatcher} card in your graveyard to cast.`);
     return rulesEvent(
       {
@@ -15370,16 +15516,23 @@ export function applySpellExtraEffect(session: GameSession, casterSeatId: string
       // The tokens this same spell creates ("You create six tapped 2/2 Zombie tokens") come AFTER the
       // sacrifice, so they're excluded from what a player can be made to sacrifice.
       const destructions: Array<{ seatId: string; cardId: string; message: string }> = [];
+      const humanChoices: Array<{ seatId: string; sourceCardId: string; sourceCardName: string; count: number }> = [];
       for (const seat of session.seats) {
         if (seat.hasLost) continue;
         const candidates = seat.board.battlefield
           .filter((card) => card.typeLine.includes("Creature") && !(card.token && card.tokenSourceCardId === source.id))
           .sort((a, b) => Number(Boolean(b.token)) - Number(Boolean(a.token)) || effectivePower(a) + effectiveToughness(a) - (effectivePower(b) + effectiveToughness(b)));
+        // A human with more candidates than they must sacrifice chooses which; the picker opens from pendingSacrificeChoices.
+        if (seat.kind === "human" && candidates.length > effect.count) {
+          humanChoices.push({ seatId: seat.id, sourceCardId: source.id, sourceCardName: sourceName, count: effect.count });
+          continue;
+        }
         for (const card of candidates.slice(0, effect.count)) {
           destructions.push({ seatId: seat.id, cardId: card.id, message: `${seat.name} sacrifices ${card.name} to ${sourceName}.` });
         }
       }
-      return destroyCreatures(session, destructions, "Rules action");
+      const sacrificed = destroyCreatures(session, destructions, "Rules action");
+      return humanChoices.length > 0 ? { ...sacrificed, pendingSacrificeChoices: [...(sacrificed.pendingSacrificeChoices ?? []), ...humanChoices] } : sacrificed;
     }
 
     case "divided_damage_greatest_power": {
@@ -16710,7 +16863,7 @@ export function applyZoneEffect(session: GameSession, casterSeatId: string, sour
         effect.scope === "you"
           ? [casterSeatId]
           : effect.scope === "target_player"
-            ? [chooseGraveyardExileTarget(session, casterSeatId)]
+            ? [preChosenTarget?.kind === "player" ? preChosenTarget.seatId : chooseGraveyardExileTarget(session, casterSeatId)]
             : effect.scope === "each_opponent"
               ? session.seats.filter((seat) => seat.id !== casterSeatId).map((seat) => seat.id)
               : session.seats.map((seat) => seat.id);
@@ -21568,7 +21721,7 @@ function ruleChoiceView(
         prompt: choice.prompt,
         actionLabel: "Sacrifice",
         cards: humanSeat.board.battlefield
-          .filter((card) => matchesEachPlayerSacrificeFilter(card, choice.typeFilter))
+          .filter((card) => matchesEachPlayerSacrificeFilter(card, choice.typeFilter) && !(choice.excludeTokensFromSourceId && card.token && card.tokenSourceCardId === choice.excludeTokensFromSourceId))
           .map((card) => ({ card, seatId: humanSeat.id, seatName: humanSeat.name }))
       };
     }
@@ -22193,6 +22346,22 @@ function phaseEffectText(oracleText: string, phase: TurnPhase): string {
   return mergeModalBulletClauses(oracleClauses(oracleText))
     .filter((clause) => !isActivatedAbilityClause(clause) && phaseTriggerTextMatches(clause.toLowerCase(), phase))
     .join(" ");
+}
+
+// "At the beginning of your upkeep, if you have four or more creature cards in your graveyard, you may return target creature card from your
+// graveyard to your hand." (Oversold Cemetery, Reya Dawnbringer, ...): what a human is asked at the phase, or "skip" when its "if" isn't met.
+export function humanPhaseGraveyardChoice(session: GameSession, seatId: string, sourceCard: VisibleCard, phase: TurnPhase): "skip" | { effect: ZoneEffect; optional: boolean } | undefined {
+  const clauseText = phaseEffectText(sourceCard.oracleText, phase);
+  if (!clauseText.trim()) return undefined;
+  const effect = parseZoneEffect(clauseText);
+  if (!effect || (effect.kind !== "regrow" && !(effect.kind === "reanimate" && !effect.anyGraveyard))) return undefined;
+  const condition = clauseText.replace(/^.*?\bat the beginning of[^,]*,\s*/i, "").match(/^if\s+(.+?),/i);
+  if (condition) {
+    if (!isRecognizedBoardCondition(condition[1])) return undefined;
+    const seat = session.seats.find((item) => item.id === seatId);
+    if (!seat || !isBoardConditionMet(condition[1], seat, session.seats)) return "skip";
+  }
+  return { effect, optional: /\byou may\b/i.test(clauseText) };
 }
 
 function phaseEventName(phase: TurnPhase) {

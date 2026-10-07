@@ -2,13 +2,14 @@
 // the test: two earlier tests passed on invented text while the real cards stayed broken (Court of Grace, the
 // "with power N or greater" watchers). Skipped per card when the catalog doesn't have it.
 import { describe, expect, it } from "vitest";
-import { landDropsAllowed, landPlaysMade, recordLandPlay, findCastTriggers, seatHasFlashGrant, findLeavesBattlefieldTriggers, hideawayDamageConditionMet, legalMainPhaseActions, tapCreaturesAltCostFor, applyCastRemoval, nextCastPrompt, type CastChoices, spellModePrompt, applyDigPick, applyDigToBattlefield, clearTemporaryBuffs, playCardFromZone, resolveEndStepExileDamage, cleanupCombat, staticCostReduction, applyLabeledContinuation, spellTargetSlots, grantKeywordsToCreature, applyExalted, applySacrificeEffect, applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
+import { landDropsAllowed, landPlaysMade, recordLandPlay, findCastTriggers, seatHasFlashGrant, findLeavesBattlefieldTriggers, hideawayDamageConditionMet, legalMainPhaseActions, tapCreaturesAltCostFor, applyCastRemoval, nextCastPrompt, type CastChoices, spellModePrompt, applyDigPick, applyDigToBattlefield, humanPhaseGraveyardChoice, clearTemporaryBuffs, playCardFromZone, resolveEndStepExileDamage, cleanupCombat, staticCostReduction, applyLabeledContinuation, spellTargetSlots, grantKeywordsToCreature, applyExalted, applySacrificeEffect, applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
 import { parseRemovalEffect } from "@/lib/removalSpells";
 import { parseZoneEffect } from "@/lib/zoneEffects";
 import { permanentMatchesQualifier } from "@/lib/characteristics";
 import { parseSpellExtraEffects } from "@/lib/spellExtras";
 import { etbEffectText, parseSagaChapters } from "@/lib/oracleClauses";
 import { parseGenericManaAbilities, parseGenericSacrificeAbilities, parseGenericTapAbilities } from "@/lib/activatedAbilities";
+import { zoneEffectTargetSpec } from "@/lib/targetSpecs";
 import { loadCardCatalog, lookupCard } from "@/lib/cardCatalog";
 import type { GameSession, PlayerSeat, VisibleCard } from "@/lib/types";
 import type { ChosenTarget } from "@/lib/targeting";
@@ -1421,6 +1422,65 @@ describe("Herald's Horn and Nogi", () => {
     const triad = real("Goldlust Triad", "g");
     expect(staticCostReduction(seat("a", [horn, nogi]), triad)).toBe(2);
     expect(staticCostReduction(seat("a", [nogi]), real("Spit Flame", "s"))).toBe(0);
+  });
+});
+
+describe("human choices for Wretched Ranks cards (pure halves)", () => {
+  it("Necrotic Hex defers the human's sacrifice (when they have a choice) and still makes the agent sacrifice", () => {
+    const hex = real("Necrotic Hex", "hex");
+    const eight = (prefix: string) => Array.from({ length: 8 }, (_, i) => bear(prefix + i));
+    const s = session([seat("a", eight("h"), { kind: "human" }), seat("b", eight("o"))]);
+    const after = parseSpellExtraEffects(etbEffectText(hex.oracleText)).reduce((acc, effect) => applySpellExtraEffect(acc, "a", hex, effect), s);
+    expect(after.pendingSacrificeChoices).toEqual([{ seatId: "a", sourceCardId: "hex", sourceCardName: "Necrotic Hex", count: 6 }]);
+    expect(after.seats[0].board.battlefield.filter((c) => !c.token)).toHaveLength(8);
+    expect(after.seats[1].board.battlefield.filter((c) => !c.token)).toHaveLength(2);
+  });
+  it("Cemetery Reaper and Zul Ashur use the card the human chose", () => {
+    const mine = seat("a", [], { kind: "human" });
+    mine.board.graveyard = [bear("z1", { zone: "graveyard" as const, typeLine: "Creature — Zombie", manaValue: 1 }), bear("z2", { zone: "graveyard" as const, typeLine: "Creature — Zombie", manaValue: 6 })];
+    const theirs = seat("b", []);
+    theirs.board.graveyard = [bear("big", { zone: "graveyard" as const, manaValue: 7 }), bear("pick", { zone: "graveyard" as const, manaValue: 1 })];
+    const reaper = real("Cemetery Reaper", "cr");
+    const reaperAbility = parseGenericTapAbilities(reaper.oracleText).find((a) => a.effect.kind === "exile_graveyard_creature_then_tokens")!;
+    const after = applyGenericTapEffect(session([mine, theirs]), "a", "cr", "Cemetery Reaper", reaperAbility.effect, reaperAbility.clause, "pick");
+    expect(after.seats[1].board.graveyard!.map((c) => c.id)).toEqual(["big"]);
+    const zul = real("Zul Ashur, Lich Lord", "zu");
+    const zulAbility = parseGenericTapAbilities(zul.oracleText).find((a) => a.effect.kind === "grant_graveyard_cast")!;
+    const granted = applyGenericTapEffect(session([mine, theirs]), "a", "zu", "Zul Ashur", zulAbility.effect, zulAbility.clause, "z1");
+    expect(granted.seats[0].board.graveyard!.find((c) => c.id === "z1")!.graveyardCastGrant).toBeTruthy();
+    expect(granted.seats[0].board.graveyard!.find((c) => c.id === "z2")!.graveyardCastGrant).toBeUndefined();
+  });
+  it("Geier Reach Sanitarium leaves the human's own discard to them", () => {
+    const geier = real("Geier Reach Sanitarium", "gr");
+    const ability = parseGenericTapAbilities(geier.oracleText).find((a) => a.effect.kind === "each_player_loots")!;
+    const mine = seat("a", [], { kind: "human" });
+    mine.board.hand = [bear("h1", { zone: "hand" as const })];
+    mine.library = [bear("l0", { zone: "library" as const })];
+    mine.zones = { ...mine.zones, hand: 1, library: 1 };
+    const after = applyGenericTapEffect(session([mine, seat("b", [])]), "a", "gr", "Geier Reach Sanitarium", ability.effect, ability.clause, undefined, { skipDiscardSeatId: "a" });
+    expect(after.seats[0].board.hand).toHaveLength(2);
+    expect(after.seats[0].board.graveyard ?? []).toHaveLength(0);
+  });
+  it("Bojuka Bog exiles the graveyard of the player the human picked", () => {
+    const bog = real("Bojuka Bog", "bog");
+    const effect = parseZoneEffect(etbEffectText(bog.oracleText))!;
+    expect(zoneEffectTargetSpec(effect)?.zone).toBe("player");
+    const a = seat("a", []);
+    a.board.graveyard = [bear("mine", { zone: "graveyard" as const })];
+    const b = seat("b", []);
+    b.board.graveyard = [bear("theirs1", { zone: "graveyard" as const }), bear("theirs2", { zone: "graveyard" as const })];
+    const after = applyZoneEffect(session([a, b]), "a", "Bojuka Bog", effect, undefined, { kind: "player", seatId: "a" });
+    expect(after.seats[0].board.graveyard ?? []).toHaveLength(0);
+    expect(after.seats[1].board.graveyard).toHaveLength(2);
+  });
+  it("Oversold Cemetery asks a human (with the 'you may') only once the four-creature condition holds", () => {
+    const cemetery = real("Oversold Cemetery", "oc");
+    const mine = seat("a", [cemetery], { kind: "human" });
+    mine.board.graveyard = [1, 2, 3].map((n) => bear("g" + n, { zone: "graveyard" as const }));
+    expect(humanPhaseGraveyardChoice(session([mine]), "a", cemetery, "upkeep step")).toBe("skip");
+    mine.board.graveyard.push(bear("g4", { zone: "graveyard" as const }));
+    const choice = humanPhaseGraveyardChoice(session([mine]), "a", cemetery, "upkeep step");
+    expect(choice).toMatchObject({ optional: true });
   });
 });
 
