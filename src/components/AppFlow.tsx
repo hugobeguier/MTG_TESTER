@@ -71,7 +71,7 @@ import { parseSpellExtraEffects, type SpellExtraEffect } from "@/lib/spellExtras
 import { matchWatcherSubject } from "@/lib/triggerWatchers";
 import { graveyardCastPermission } from "@/lib/graveyardCasting";
 import { libraryTopCastPermission } from "@/lib/libraryCasting";
-import { bushidoAmount, canBlockOnlyFliers, cantUntap, landwalkEvades } from "@/lib/combatRestrictions";
+import { bushidoAmount, canBlockAdditionalCreature, canBlockOnlyFliers, cantUntap, landwalkEvades, mustAttackEachCombat } from "@/lib/combatRestrictions";
 import { UNDERCITY_ROOM_NAMES, UNDERCITY_ROOM_TEXT, isUndercityRoom, nextUndercityRooms, preferredUndercityRoom, type UndercityRoom } from "@/lib/undercity";
 import { parseCycling } from "@/lib/cycling";
 import { parseTapCreaturesAltCost } from "@/lib/altCosts";
@@ -325,6 +325,8 @@ type TriggerEffect = (
   | { kind: "renown"; amount: number }
   // The human's echo decision (pay it, or sacrifice the permanent).
   | { kind: "echo_choice"; costText: string }
+  // A creature that must attack, and the choice of whom.
+  | { kind: "forced_attack"; cardId: string; targetIds: string[] }
   // Initiative: "you take the initiative" (the holder ventures into the Undercity), the room effect that was entered, and the human's branch choice.
   | { kind: "take_initiative" }
   | { kind: "venture_room"; room: string }
@@ -2983,6 +2985,12 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         };
         recordAgentReasoning(seat.id, { label: legal.label, reason: action?.reason ?? "", purpose: "declare_attackers", at: new Date().toISOString() });
       }
+      // Whatever the agent chose, creatures that must attack do (goaded ones not at the player who goaded them).
+      const agentSeat = workingSession.seats.find((item) => item.id === seat.id);
+      for (const forced of agentSeat ? forcedAttackers(workingSession, agentSeat) : []) {
+        const forcedTarget = forced.targetIds.map((id) => workingSession.seats.find((item) => item.id === id)).filter((item): item is PlayerSeat => Boolean(item)).sort((a, b) => a.life - b.life)[0];
+        if (forcedTarget) workingSession = declareAttack(workingSession, seat.id, forced.cardId, forcedTarget.id);
+      }
     } catch (error) {
       workingSession = {
         ...workingSession,
@@ -3759,6 +3767,33 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     if (pendingAction) return;
     const activeSeat = session.seats.find((seat) => seat.id === activeSeatId);
     if (!activeSeat) return;
+    // "Attacks each combat if able" / goaded: a human can't pass the declare attackers step with such a creature still home.
+    if (activeSeat.kind === "human" && session.phase === "declare attackers step" && !pendingRuleChoice) {
+      const forced = forcedAttackers(session, activeSeat)[0];
+      if (forced) {
+        const card = activeSeat.board.battlefield.find((entry) => entry.id === forced.cardId);
+        if (card && forced.targetIds.length === 1) {
+          const targetName = session.seats.find((entry) => entry.id === forced.targetIds[0])?.name ?? "the defender";
+          setSession((current) => declareAttack(current, activeSeat.id, forced.cardId, forced.targetIds[0]));
+          addEvent(`${card.name} must attack each combat; it attacks ${targetName}.`, activeSeat.id, "Rules action");
+          return;
+        }
+        if (card) {
+          setPendingRuleChoice({
+            id: crypto.randomUUID(),
+            kind: "choose_trigger_option",
+            controllerSeatId: activeSeat.id,
+            sourceCardId: card.id,
+            sourceCardName: card.name,
+            prompt: `${card.name} must attack each combat: whom does it attack?`,
+            options: forced.targetIds.map((id, index) => ({ index, label: "Attack " + (session.seats.find((entry) => entry.id === id)?.name ?? id) })),
+            trigger: makeCommonTrigger(activeSeat.id, activeSeat.id, card, { kind: "forced_attack", cardId: card.id, targetIds: forced.targetIds }, card.name + " must attack."),
+            remainingStack: []
+          });
+          return;
+        }
+      }
+    }
     const action: PendingAction = {
       id: crypto.randomUUID(),
       type: "phase",
@@ -3777,6 +3812,15 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     // shortcut this button takes skips straight past the cleanup step (where that normally
     // happens) to the next player's untap step, so it has to check for this itself instead of
     // relying on the cleanup-step effect ever getting a chance to run.
+    // The shortcut would skip combat entirely, which a creature that must attack doesn't allow.
+    if (["untap step", "upkeep step", "draw step", "precombat main phase", "beginning of combat step"].includes(session.phase)) {
+      const mustAttack = forcedAttackers(session, activeSeat)[0];
+      const mustAttackCard = mustAttack ? activeSeat.board.battlefield.find((entry) => entry.id === mustAttack.cardId) : undefined;
+      if (mustAttackCard) {
+        addEvent(`${mustAttackCard.name} must attack each combat; move to combat instead of ending the turn.`, activeSeat.id, "Rules action");
+        return;
+      }
+    }
     const maxHandSize = effectiveMaxHandSize(activeSeat);
     const requiredDiscards = activeSeat.board.hand.length - maxHandSize;
     if (requiredDiscards > 0) {
@@ -6543,6 +6587,13 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       const rest = choice.trigger.effect.remainingIds;
       if (index === 0) setSession((current) => putOpeningHandCardOnBattlefield(current, choice.controllerSeatId, choice.sourceCardId));
       if (rest.length > 0) window.setTimeout(() => askOpeningHandBattlefield(choice.controllerSeatId, rest), 100);
+      return;
+    }
+    // A creature that must attack: attack the chosen opponent.
+    if (choice.trigger.effect.kind === "forced_attack") {
+      const forced = choice.trigger.effect;
+      const targetId = forced.targetIds[index];
+      if (targetId) setSession((current) => declareAttack(current, choice.controllerSeatId, forced.cardId, targetId));
       return;
     }
     // Echo: pay or sacrifice, as chosen.
@@ -10748,7 +10799,7 @@ export function resolveCombatDamage(inputSession: GameSession, attackerId: strin
     if (!attackingCard) continue;
     const target = resolveAttackTarget(result, attackingCard.attackTargetId);
     if (!target) continue;
-    const allBlockers = target.seat.board.battlefield.filter((card) => card.blocking && card.blockingTargetId === attackingCard.id);
+    const allBlockers = target.seat.board.battlefield.filter((card) => card.blocking && (card.blockingTargetId === attackingCard.id || card.extraBlockingTargetId === attackingCard.id));
     const orderedBlockers = attackingCard.damageAssignmentOrder
       ? attackingCard.damageAssignmentOrder.map((blockerId) => allBlockers.find((card) => card.id === blockerId)).filter((card): card is VisibleCard => Boolean(card))
       : allBlockers;
@@ -10838,7 +10889,7 @@ export function assignBlockers(session: GameSession, choice: BlockChoiceState, b
                 ? {
                     ...card,
                     blocking: true,
-                    blockingTargetId: attackingCard.id,
+                    ...(card.blocking ? { extraBlockingTargetId: attackingCard.id } : { blockingTargetId: attackingCard.id }),
                     // Flanking: a blocker without flanking gets -1/-1 until end of turn.
                     ...(hasKeywordText(attackingCard.oracleText, "flanking") && !hasKeywordText(card.oracleText, "flanking") ? { temporaryPowerBonus: (card.temporaryPowerBonus ?? 0) - 1, temporaryToughnessBonus: (card.temporaryToughnessBonus ?? 0) - 1 } : {}),
                     // Bushido N: +N/+N until end of turn whenever it blocks.
@@ -11186,7 +11237,9 @@ function attackerEvadesBlocker(attacker: VisibleCard, blocker: VisibleCard): boo
 }
 
 function canBlock(card: VisibleCard, attacker?: VisibleCard, controllerBattlefield?: VisibleCard[]) {
-  if (!hasCardType(card, "Creature") || card.tapped || card.phasedOut || card.blocking) return false;
+  if (!hasCardType(card, "Creature") || card.tapped || card.phasedOut) return false;
+  // A creature that already blocks can block one more attacker when its text allows ("can block an additional creature each combat").
+  if (card.blocking && !(canBlockAdditionalCreature(card) && !card.extraBlockingTargetId && attacker && attacker.id !== card.blockingTargetId)) return false;
   if (creatureCantBlock(card)) return false;
   if (!attackBlockRestrictionMet(card, controllerBattlefield)) return false;
   if (attacker && attackerEvadesBlocker(attacker, card)) return false;
@@ -12202,7 +12255,8 @@ function clearCombatState(session: GameSession): GameSession {
           attackTargetId: undefined,
           blockDecided: false,
           blocking: false,
-          blockingTargetId: undefined
+          blockingTargetId: undefined,
+          extraBlockingTargetId: undefined
         }))
       }
     }))
@@ -14996,6 +15050,7 @@ function resetForZoneChange<T extends VisibleCard>(card: T, zone: VisibleCard["z
     blockDecided: false,
     blocking: false,
     blockingTargetId: undefined,
+    extraBlockingTargetId: undefined,
     battlefieldPosition: undefined,
     chosenCopyTargetId: undefined,
     chosenCastX: undefined,
@@ -19055,8 +19110,10 @@ function resolveBlockedCombatDamage(
   attackerSeatId: string,
   attackingCard: VisibleCard,
   target: { seat: PlayerSeat; planeswalker?: VisibleCard },
-  blockers: VisibleCard[]
+  rawBlockers: VisibleCard[]
 ): GameSession {
+  // A creature blocking two attackers deals its damage to the first one only.
+  const blockers = rawBlockers.map((blocker) => (blocker.extraBlockingTargetId === attackingCard.id ? { ...blocker, temporaryPowerBonus: (blocker.temporaryPowerBonus ?? 0) - Math.max(0, effectivePower(blocker)) } : blocker));
   const outcome = simulateMultiBlockedCombat(attackingCard, blockers);
 
   const destructions: Array<{ seatId: string; cardId: string; message: string }> = [];
@@ -23261,6 +23318,24 @@ export function takeInitiative(session: GameSession, seatId: string): GameSessio
   const seat = session.seats.find((item) => item.id === seatId);
   if (!seat || seat.hasLost) return session;
   return ventureIntoUndercity(rulesEvent({ ...session, initiativeSeatId: seatId }, seatId, `${seat.name} takes the initiative.`), seatId);
+}
+
+// Creatures that must attack ("attacks each combat if able", or goaded) and the opponents each may legally attack. A goaded creature can't attack
+// the player who goaded it unless that player is the only one it can attack.
+export function forcedAttackers(session: GameSession, seat: PlayerSeat): Array<{ cardId: string; targetIds: string[] }> {
+  const opponents = session.seats.filter((other) => other.id !== seat.id && !other.hasLost);
+  const byCard = new Map<string, string[]>();
+  for (const action of legalAttackActions(seat, opponents)) {
+    if (action.actionType !== "attack" || !action.cardId) continue;
+    const card = seat.board.battlefield.find((entry) => entry.id === action.cardId);
+    if (!card || !mustAttackEachCombat(card)) continue;
+    byCard.set(card.id, [...(byCard.get(card.id) ?? []), action.targetIds[0]]);
+  }
+  return [...byCard.entries()].map(([cardId, targetIds]) => {
+    const goader = seat.board.battlefield.find((entry) => entry.id === cardId)?.goaded?.bySeatId;
+    const others = goader ? targetIds.filter((id) => id !== goader) : targetIds;
+    return { cardId, targetIds: others.length > 0 ? others : targetIds };
+  });
 }
 
 export function echoCostText(raw: string): string {

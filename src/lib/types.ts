@@ -293,6 +293,8 @@ export interface VisibleCard {
   blockDecided?: boolean;
   blocking?: boolean;
   blockingTargetId?: string;
+  // "Can block an additional creature each combat": the second attacker it blocks.
+  extraBlockingTargetId?: string;
   // Set on the ATTACKING creature when it has two or more blockers: the order (blocker card ids)
   // its controller assigns combat damage in — first entry gets lethal before any excess moves to
   // the next (rule 509.2/510.1c). Undefined/single-blocker attacks don't need it.

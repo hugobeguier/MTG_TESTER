@@ -48,6 +48,11 @@ export function mustAttackEachCombat(card: TextCard): boolean {
   return ruleLines(card).some((line) => /^(?:this creature|[a-z',\- ]+) attacks each (?:combat|turn) if able$/.test(line));
 }
 
+// "This creature can block an additional creature each combat."
+export function canBlockAdditionalCreature(card: TextCard): boolean {
+  return ruleLines(card).some((line) => /^(?:this creature|[a-z',\- ]+) can block an additional creature each combat$/.test(line));
+}
+
 // "Bushido N": +N/+N until end of turn whenever the creature blocks or becomes blocked.
 export function bushidoAmount(card: TextCard): number {
   for (const line of ruleLines(card)) {

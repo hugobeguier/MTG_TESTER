@@ -2,7 +2,7 @@
 // the test: two earlier tests passed on invented text while the real cards stayed broken (Court of Grace, the
 // "with power N or greater" watchers). Skipped per card when the catalog doesn't have it.
 import { describe, expect, it } from "vitest";
-import { landDropsAllowed, landPlaysMade, recordLandPlay, findCastTriggers, seatHasFlashGrant, findLeavesBattlefieldTriggers, hideawayDamageConditionMet, legalMainPhaseActions, tapCreaturesAltCostFor, applyCastRemoval, nextCastPrompt, type CastChoices, spellModePrompt, applyDigPick, applyDigToBattlefield, ventureIntoUndercity, applyPunisherChoiceEffect, openingHandBattlefieldCards, putOpeningHandCardOnBattlefield, untapForSeat, humanPhaseGraveyardChoice, clearTemporaryBuffs, playCardFromZone, resolveEndStepExileDamage, cleanupCombat, staticCostReduction, applyLabeledContinuation, spellTargetSlots, grantKeywordsToCreature, applyExalted, applySacrificeEffect, applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
+import { landDropsAllowed, landPlaysMade, recordLandPlay, findCastTriggers, seatHasFlashGrant, findLeavesBattlefieldTriggers, hideawayDamageConditionMet, legalMainPhaseActions, tapCreaturesAltCostFor, applyCastRemoval, nextCastPrompt, type CastChoices, spellModePrompt, applyDigPick, applyDigToBattlefield, forcedAttackers, ventureIntoUndercity, applyPunisherChoiceEffect, openingHandBattlefieldCards, putOpeningHandCardOnBattlefield, untapForSeat, humanPhaseGraveyardChoice, clearTemporaryBuffs, playCardFromZone, resolveEndStepExileDamage, cleanupCombat, staticCostReduction, applyLabeledContinuation, spellTargetSlots, grantKeywordsToCreature, applyExalted, applySacrificeEffect, applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
 import { parseRemovalEffect } from "@/lib/removalSpells";
 import { canLegallyBlock } from "@/lib/combatSim";
 import { parseZoneEffect } from "@/lib/zoneEffects";
@@ -1497,6 +1497,32 @@ describe("rules gaps: afflict, flanking, lure, phasing, echo, turn-limited first
     expect(onTurn.grantedKeywords ?? []).toContain("first strike");
     const offTurn = runStateBasedActionsPass({ ...mine, activePlayerId: "b" }).session.seats[0].board.battlefield[0];
     expect(offTurn.grantedKeywords ?? []).not.toContain("first strike");
+  });
+});
+
+describe("forced attacks and additional blockers", () => {
+  it("a creature that attacks each combat is forced, and a goaded one avoids the goader when it can", () => {
+    const firebird = real("Akoum Firebird", "fb", { power: "4", toughness: "3" });
+    const mine = seat("a", [firebird, bear("calm")]);
+    const s = session([mine, seat("b", []), seat("c", [])]);
+    const forced = forcedAttackers(s, s.seats[0]);
+    expect(forced.map((f) => f.cardId)).toEqual(["fb"]);
+    expect(forced[0].targetIds.sort()).toEqual(["b", "c"]);
+    const goadedMine = seat("a", [bear("g1", { goaded: { bySeatId: "b" } } as never)]);
+    expect(forcedAttackers(session([goadedMine, seat("b", []), seat("c", [])]), goadedMine)[0].targetIds).toEqual(["c"]);
+    expect(forcedAttackers(session([goadedMine, seat("b", [])]), goadedMine)[0].targetIds).toEqual(["b"]);
+  });
+  it("Foriysian Brigade blocks a second attacker, but only one extra", () => {
+    const brigade = real("Foriysian Brigade", "fbr");
+    const attackers = ["x1", "x2", "x3"].map((id) => bear(id, { attacking: true }));
+    let s = session([seat("a", attackers), seat("b", [brigade])]);
+    const choiceFor = (id: string) => ({ attackerSeatId: "a", defenderSeatId: "b", attackerCardId: id } as never);
+    s = assignBlockers(s, choiceFor("x1"), ["fbr"]);
+    s = assignBlockers(s, choiceFor("x2"), ["fbr"]);
+    s = assignBlockers(s, choiceFor("x3"), ["fbr"]);
+    const after = s.seats[1].board.battlefield[0];
+    expect(after.blockingTargetId).toBe("x1");
+    expect(after.extraBlockingTargetId).toBe("x2");
   });
 });
 
