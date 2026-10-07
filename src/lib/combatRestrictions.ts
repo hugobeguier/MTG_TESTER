@@ -14,7 +14,7 @@ const LANDWALK_TYPES = ["plains", "island", "swamp", "mountain", "forest", "dese
 
 function ruleLines(card: TextCard): string[] {
   if (card.abilitiesStripped) return [];
-  return card.oracleText.split("\n").map((line) => line.replace(/\([^)]*\)/g, "").trim().toLowerCase().replace(/\.$/, ""));
+  return (card.oracleText ?? "").split("\n").map((line) => line.replace(/\([^)]*\)/g, "").trim().toLowerCase().replace(/\.$/, ""));
 }
 
 // "Swampwalk" (this creature can't be blocked as long as defending player controls a Swamp): the land types it walks.
