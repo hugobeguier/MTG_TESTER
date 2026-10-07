@@ -12127,7 +12127,7 @@ function matchesSacrificeFilter(card: VisibleCard, filter: string | undefined): 
   if (!filter) return true;
   return filter
     .toLowerCase()
-    .split(/s+ors+/)
+    .split(/\s+or\s+/)
     .some((alternative) => permanentMatchesQualifier(card, alternative.trim()));
 }
 
