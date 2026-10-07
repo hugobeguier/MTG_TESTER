@@ -1461,6 +1461,17 @@ describe("human choices for Wretched Ranks cards (pure halves)", () => {
     expect(after.seats[0].board.hand).toHaveLength(2);
     expect(after.seats[0].board.graveyard ?? []).toHaveLength(0);
   });
+  it("God-Eternal Bontu sacrifices exactly the permanents the human picked (not just lands) and draws that many", () => {
+    const bontu = real("God-Eternal Bontu", "gb");
+    const mine = seat("a", [bontu, real("Swamp", "s1"), real("Sol Ring", "sr"), bear("keep")], { kind: "human" });
+    mine.library = ["l0", "l1", "l2"].map((id) => bear(id, { zone: "library" as const }));
+    mine.zones = { ...mine.zones, library: 3 };
+    const s = session([mine]);
+    const [trigger] = findCommonTriggersForPermanentEntered(s, "a", bontu);
+    const after = resolveTriggerEffect(s, { ...trigger, effect: { ...trigger.effect, chosenOption: "sr,keep" } as never }).seats[0];
+    expect(after.board.battlefield.map((c) => c.id).sort()).toEqual(["gb", "s1"]);
+    expect(after.board.hand).toHaveLength(2);
+  });
   it("Bojuka Bog exiles the graveyard of the player the human picked", () => {
     const bog = real("Bojuka Bog", "bog");
     const effect = parseZoneEffect(etbEffectText(bog.oracleText))!;

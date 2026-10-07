@@ -340,7 +340,7 @@ type TriggerEffect = (
   // "When this land enters untapped, you may put target creature card from your graveyard on top of your library." (Witch's Cottage)
   | { kind: "graveyard_creature_to_library_top" }
   // "Sacrifice any number of other permanents, then draw that many cards." (God-Eternal Bontu) — sacrifices only lands beyond the seventh.
-  | { kind: "sacrifice_surplus_then_draw" }
+  | { kind: "sacrifice_surplus_then_draw"; sacrificeIds?: string[] }
   // Hideaway N (Mosswort Bridge, Spinerock Knoll): look at the top N cards, exile one face down, the rest to the bottom in a random order.
   | { kind: "hideaway"; count: number }
   // "As this enchantment enters, choose Khans or Dragons." (Outpost Siege) — records the label on the permanent (chosenOption picks it).
@@ -683,6 +683,10 @@ type PendingRuleChoice =
       // How many creatures must be sacrificed — almost always 1; carried through so multi-select
       // (Westvale Abbey's "Sacrifice five creatures") isn't silently capped at one pick.
       count: number;
+      // Picks so far when count > 1.
+      pickedIds?: string[];
+      // Set when this picks creatures to TAP as a cost ("Tap three untapped Zombies you control"): the qualifier they must match.
+      tapSubtype?: string;
     }
   // "Each player sacrifices a creature or planeswalker of their choice." (Plaguecrafter, Accursed
   // Marauder, ...) — every OTHER seat's sacrifice is already resolved deterministically by
@@ -5158,7 +5162,14 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     // need a multi-select UI this doesn't build, so it stays on the deterministic heuristic
     // unchanged rather than only interactively picking one of the five. Reported live as "Viscera
     // Seer does not let me choose a creature, it just sacrifices itself."
-    if (card && ability && seat?.kind === "human" && ability.sacrificeTarget === "creature" && ability.sacrificeCount === 1) {
+    if (
+      card &&
+      ability &&
+      seat?.kind === "human" &&
+      ability.sacrificeTarget === "creature" &&
+      (ability.sacrificeCount === 1 ||
+        seat.board.battlefield.filter((creature) => creature.typeLine.includes("Creature") && creature.id !== (ability.sacrificeExcludesSelf ? cardId : undefined) && matchesSacrificeFilter(creature, ability.sacrificeTargetTypeFilter)).length > ability.sacrificeCount)
+    ) {
       setPendingRuleChoice({
         id: crypto.randomUUID(),
         kind: "choose_creature_to_sacrifice",
@@ -5241,7 +5252,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     setSession(() => applySacrificeEffect(paid.session, seatId, paid.card, paid.ability.effect, paid.ability.clause, paid.sacrificed));
   }
 
-  function activateGenericTapAbility(seatId: string, cardId: string, abilityIndex: number, chosenDiscardId?: string, chosenCardId?: string) {
+  function activateGenericTapAbility(seatId: string, cardId: string, abilityIndex: number, chosenDiscardId?: string, chosenCardId?: string, chosenTapIds?: string[]) {
     const seat = session.seats.find((item) => item.id === seatId);
     const card = seat?.board.battlefield.find((item) => item.id === cardId);
     const ability = card ? parseGenericTapAbilities(card.oracleText)[abilityIndex] : undefined;
@@ -5250,7 +5261,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       // Dry run of the whole cost first, so a human who can't pay gets told why instead of a click
       // that silently does nothing — and so the discard prompt below is only ever offered for an
       // activation that will actually go through once they've picked.
-      if (!payGenericTapCost(session, seatId, cardId, abilityIndex, humanPool, chosenDiscardId)) {
+      if (!payGenericTapCost(session, seatId, cardId, abilityIndex, humanPool, chosenDiscardId, chosenTapIds)) {
         addEvent(
           ability.costDiscard && seat.board.hand.length === 0
             ? `You have no card in hand to discard, so you can't activate ${card.name}.`
@@ -5271,6 +5282,25 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
           prompt: `${card.name}: choose a card to discard as part of the cost.`,
           requiredDiscards: 1,
           activation: { cardId, abilityIndex }
+        });
+        return;
+      }
+    }
+    // "Tap three untapped Zombies you control" (Cryptbreaker): the human chooses which ones.
+    if (seat?.kind === "human" && card && ability?.costTapCreatures && !chosenTapIds) {
+      const tapCost = ability.costTapCreatures;
+      const eligible = seat.board.battlefield.filter((creature) => creature.typeLine.includes("Creature") && !creature.tapped && !creature.phasedOut && permanentMatchesQualifier(creature, tapCost.subtype));
+      if (eligible.length > tapCost.count) {
+        setPendingRuleChoice({
+          id: crypto.randomUUID(),
+          kind: "choose_creature_to_sacrifice",
+          controllerSeatId: seatId,
+          sourceCardId: cardId,
+          sourceCardName: card.name,
+          prompt: `${card.name}: choose ${tapCost.count} untapped ${tapCost.subtype}s to tap.`,
+          abilityIndex,
+          count: tapCost.count,
+          tapSubtype: tapCost.subtype
         });
         return;
       }
@@ -5300,7 +5330,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       }
     }
     if (card && ability?.effect.kind === "search_library") {
-      const paid = payGenericTapCost(session, seatId, cardId, abilityIndex, humanPool, chosenDiscardId);
+      const paid = payGenericTapCost(session, seatId, cardId, abilityIndex, humanPool, chosenDiscardId, chosenTapIds);
       if (!paid) return;
       if (paid.poolSpent) {
         setSeatManaPool(seatId, paid.poolSpent);
@@ -5322,7 +5352,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       });
       return;
     }
-    const paid = payGenericTapCost(session, seatId, cardId, abilityIndex, humanPool, chosenDiscardId);
+    const paid = payGenericTapCost(session, seatId, cardId, abilityIndex, humanPool, chosenDiscardId, chosenTapIds);
     if (!paid) return;
     if (paid.poolSpent) {
       setSeatManaPool(seatId, paid.poolSpent);
@@ -6049,13 +6079,10 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       if (max === 0) return false;
       return open(`${trigger.sourceCardName}: pay how much {R}? It deals that much damage to a target.`, Array.from({ length: max + 1 }, (_, count) => ({ index: count, label: count === 0 ? "Don't pay" : "{R} x" + count + " — " + count + " damage" })));
     }
+    // God-Eternal Bontu: "sacrifice any number of other permanents, then draw that many cards" — the human picks which ones, one at a time.
     if (trigger.effect.kind === "sacrifice_surplus_then_draw") {
-      const lands = controller.board.battlefield.filter((card) => isLandCard(card) && card.id !== trigger.sourceCardId).length;
-      if (lands === 0) return false;
-      return open(
-        `${trigger.sourceCardName}: sacrifice how many of your lands (tapped ones first)? You draw that many cards.`,
-        Array.from({ length: Math.min(lands, 12) + 1 }, (_, count) => ({ index: count, label: count === 0 ? "None" : `${count} land${count === 1 ? "" : "s"}` }))
-      );
+      if (controller.board.battlefield.filter((card) => card.id !== trigger.sourceCardId).length === 0) return false;
+      return open(`${trigger.sourceCardName}: sacrifice which other permanents? You draw that many cards.`, sacrificeOptions(controller, trigger.sourceCardId, []));
     }
     return false;
   }
@@ -6200,6 +6227,41 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       const chapters = saga ? parseSagaChapters(saga.oracleText) : undefined;
       if (saga && chapters) setSession((current) => applySagaReadAhead(current, choice.controllerSeatId, saga, chapters, index + 1));
       resumeAfterTriggerChoice(choice.trigger, choice.remainingStack);
+      return;
+    }
+    // Bontu: each click adds a permanent to sacrifice; the last option finishes.
+    if (choice.trigger.effect.kind === "sacrifice_surplus_then_draw") {
+      const effect = choice.trigger.effect;
+      const owner = session.seats.find((seat) => seat.id === choice.controllerSeatId);
+      const already = effect.sacrificeIds ?? [];
+      const remaining = (owner?.board.battlefield ?? []).filter((card) => card.id !== choice.sourceCardId && !already.includes(card.id));
+      const finish = (ids: string[]) => {
+        const done = { ...choice.trigger, effect: { ...effect, sacrificeIds: ids, chosenOption: ids.join(",") } } as Extract<PendingAction, { type: "trigger" }>;
+        if (choice.queueing) {
+          queueCommonTriggers(choice.queueing.map((queued) => (queued.id === choice.trigger.id ? done : queued)));
+          return;
+        }
+        setSession((current) => resolveTriggerEffect(current, done));
+        resumeAfterTriggerChoice(choice.trigger, choice.remainingStack);
+      };
+      if (owner && index < remaining.length) {
+        const picked = [...already, remaining[index].id];
+        if (picked.length < owner.board.battlefield.filter((card) => card.id !== choice.sourceCardId).length) {
+          const nextTrigger = { ...choice.trigger, effect: { ...effect, sacrificeIds: picked } } as Extract<PendingAction, { type: "trigger" }>;
+          setPendingRuleChoice({
+            ...choice,
+            id: crypto.randomUUID(),
+            trigger: nextTrigger,
+            prompt: choice.sourceCardName + ": sacrifice which other permanents? (" + picked.length + " chosen)",
+            options: sacrificeOptions(owner, choice.sourceCardId, picked),
+            queueing: choice.queueing?.map((queued) => (queued.id === choice.trigger.id ? nextTrigger : queued))
+          });
+          return;
+        }
+        finish(picked);
+        return;
+      }
+      finish(already);
       return;
     }
     // Discard any number: each click adds a card; the last option finishes.
@@ -8656,9 +8718,29 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     const seat = session.seats.find((item) => item.id === seatId);
     const chosenCard = seat?.board.battlefield.find((item) => item.id === cardId);
     if (!seat || !chosenCard) return;
+    // Several creatures to choose (Westvale Abbey's five, Cryptbreaker's three Zombies): collect picks one at a time.
+    const isEligible = (card: VisibleCard) =>
+      choice.tapSubtype
+        ? card.typeLine.includes("Creature") && !card.tapped && !card.phasedOut && permanentMatchesQualifier(card, choice.tapSubtype)
+        : hasCardType(card, "Creature") && card.id !== choice.excludeCardId && matchesSacrificeFilter(card, choice.typeFilter?.toLowerCase());
+    const pickedIds = [...(choice.pickedIds ?? []), cardId];
+    const needed = choice.count - pickedIds.length;
+    if (needed > 0) {
+      const left = seat.board.battlefield.filter((card) => isEligible(card) && !pickedIds.includes(card.id));
+      if (left.length > needed) {
+        setPendingRuleChoice({ ...choice, id: crypto.randomUUID(), pickedIds, prompt: choice.prompt.replace(/ \(\d+ chosen\)$/, "") + " (" + pickedIds.length + " chosen)" });
+        return;
+      }
+      pickedIds.push(...left.slice(0, needed).map((card) => card.id));
+    }
     setPendingRuleChoice(undefined);
+    if (choice.tapSubtype) {
+      activateGenericTapAbility(choice.controllerSeatId, choice.sourceCardId, choice.abilityIndex, undefined, undefined, pickedIds);
+      return;
+    }
     const humanPool = seat.kind === "human" ? poolForSeat(seatId) : undefined;
-    const paid = payGenericSacrificeCost(session, choice.controllerSeatId, choice.sourceCardId, choice.abilityIndex, humanPool, [chosenCard]);
+    const chosenCards = pickedIds.map((id) => seat.board.battlefield.find((card) => card.id === id)).filter((card): card is VisibleCard => Boolean(card));
+    const paid = payGenericSacrificeCost(session, choice.controllerSeatId, choice.sourceCardId, choice.abilityIndex, humanPool, chosenCards);
     if (!paid) return;
     if (paid.poolSpent) {
       setSeatManaPool(choice.controllerSeatId, paid.poolSpent);
@@ -12867,7 +12949,9 @@ export function payGenericTapCost(
   humanPool?: ManaPool,
   // A human's own pick for a "Discard a card" cost (Cryptbreaker, ...) — chooseWorstHandCardToDiscard
   // is only the fallback for agents and callers with no prompt of their own.
-  chosenDiscardId?: string
+  chosenDiscardId?: string,
+  // A human's own picks for "Tap N untapped Zombies you control" (Cryptbreaker).
+  chosenTapCreatureIds?: string[]
 ): { session: GameSession; ability: GenericTapAbility; card: VisibleCard; poolSpent?: ManaPool } | undefined {
   const seat = session.seats.find((item) => item.id === seatId);
   const card = seat?.board.battlefield.find((item) => item.id === cardId);
@@ -12879,7 +12963,14 @@ export function payGenericTapCost(
     if (card.tapped) return undefined;
     if (card.typeLine.includes("Creature") && card.summoningSick && !hasHaste(card)) return undefined;
   }
-  const tappedForCost = ability.costTapCreatures ? chooseCreaturesToTapForCost(seat, ability.costTapCreatures.count, ability.costTapCreatures.subtype) : undefined;
+  const chosenTaps = ability.costTapCreatures && chosenTapCreatureIds && chosenTapCreatureIds.length === ability.costTapCreatures.count
+    ? chosenTapCreatureIds.map((id) => seat.board.battlefield.find((creature) => creature.id === id && !creature.tapped)).filter((creature): creature is VisibleCard => Boolean(creature))
+    : undefined;
+  const tappedForCost = ability.costTapCreatures
+    ? chosenTaps && chosenTaps.length === ability.costTapCreatures.count
+      ? chosenTaps
+      : chooseCreaturesToTapForCost(seat, ability.costTapCreatures.count, ability.costTapCreatures.subtype)
+    : undefined;
   if (ability.costTapCreatures && !tappedForCost) return undefined;
   if (!activateOnlyIfConditionMet(ability.clause, seat)) return undefined;
   if (ability.costRemoveCounter && counterCount(card, ability.costRemoveCounter) < 1) return undefined;
@@ -13800,6 +13891,12 @@ function returnLinkedExiles(session: GameSession): GameSession {
     }
   }
   return next;
+}
+
+// The other permanents still available to sacrifice (God-Eternal Bontu), plus a final "done" entry.
+function sacrificeOptions(seat: PlayerSeat, sourceCardId: string, alreadyPicked: string[]): Array<{ index: number; label: string }> {
+  const remaining = seat.board.battlefield.filter((card) => card.id !== sourceCardId && !alreadyPicked.includes(card.id));
+  return [...remaining.map((card, index) => ({ index, label: "Sacrifice " + card.name + (card.tapped ? " (tapped)" : "") })), { index: remaining.length, label: alreadyPicked.length === 0 ? "Sacrifice nothing" : "Done (sacrifice " + alreadyPicked.length + ", draw " + alreadyPicked.length + ")" }];
 }
 
 // The hand cards still available to discard, plus a final "done" entry (The Elder Dragon War's chapter II).
@@ -20810,8 +20907,13 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
     const owner = session.seats.find((item) => item.id === trigger.controllerSeatId);
     if (!owner) return session;
     const lands = owner.board.battlefield.filter((card) => isLandCard(card) && card.id !== trigger.sourceCardId).sort((a, b) => Number(Boolean(b.tapped)) - Number(Boolean(a.tapped)));
-    const chosenCount = trigger.effect.chosenOption !== undefined ? Number.parseInt(trigger.effect.chosenOption, 10) : undefined;
-    const surplus = lands.slice(0, chosenCount !== undefined ? Math.max(0, Math.min(chosenCount, lands.length)) : Math.max(0, lands.length - 7));
+    const option = trigger.effect.chosenOption;
+    const chosenCount = option !== undefined && /^\d+$/.test(option) ? Number.parseInt(option, 10) : undefined;
+    // The human's own picks (any permanents); agents sacrifice surplus lands beyond seven.
+    const pickedIds = option !== undefined && chosenCount === undefined ? option.split(",").filter(Boolean) : undefined;
+    const surplus = pickedIds
+      ? owner.board.battlefield.filter((card) => pickedIds.includes(card.id) && card.id !== trigger.sourceCardId)
+      : lands.slice(0, chosenCount !== undefined ? Math.max(0, Math.min(chosenCount, lands.length)) : Math.max(0, lands.length - 7));
     if (surplus.length === 0) return rulesEvent(session, owner.id, `${trigger.sourceCardName}: ${owner.name} sacrifices nothing.`);
     const ids = new Set(surplus.map((card) => card.id));
     const sacrificed: GameSession = {
@@ -21836,14 +21938,19 @@ function ruleChoiceView(
         kind: "choose_creature_to_sacrifice" as const,
         sourceCardName: choice.sourceCardName,
         prompt: choice.prompt,
-        actionLabel: "Sacrifice",
+        actionLabel: choice.tapSubtype ? "Tap" : "Sacrifice",
         // Always the controller's own board — a sacrifice cost has no "sacrifice an opponent's
         // creature" shape, unlike choose_creature_on_battlefield's restrictToYourControl (which
         // varies per targeted effect) or choose_creature_from_graveyards' any-graveyard pool.
         // The source permanent itself is a legal choice ("a creature", not "another creature") —
         // deliberately not excluded, unlike choose_creature_on_battlefield's own sourceCardId filter.
         cards: humanSeat.board.battlefield
-          .filter((card) => hasCardType(card, "Creature") && card.id !== choice.excludeCardId && matchesSacrificeFilter(card, filter))
+          .filter((card) =>
+            !choice.pickedIds?.includes(card.id) &&
+            (choice.tapSubtype
+              ? card.typeLine.includes("Creature") && !card.tapped && !card.phasedOut && permanentMatchesQualifier(card, choice.tapSubtype)
+              : hasCardType(card, "Creature") && card.id !== choice.excludeCardId && matchesSacrificeFilter(card, filter))
+          )
           .map((card) => ({ card, seatId: humanSeat.id, seatName: humanSeat.name }))
       };
     }
