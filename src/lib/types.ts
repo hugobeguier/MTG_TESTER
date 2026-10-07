@@ -326,6 +326,8 @@ export interface VisibleCard {
   exiledUntilSourceLeaves?: string;
   // Myriad token copies: "Exile the tokens at end of combat."
   exileAtEndOfCombat?: boolean;
+  // The human's pick for an "enter as a copy of ..." replacement (Cursed Mirror, Mirrormade), set on the hand card before it is cast; "none" declines.
+  chosenCopyTargetId?: string;
   // Cursed Mirror: what this permanent was before it became a copy of a creature until end of turn; restored when the turn ends.
   temporaryCopyOriginal?: Pick<VisibleCard, "name" | "typeLine" | "oracleText" | "manaCost" | "manaValue" | "colors" | "colorIdentity" | "power" | "toughness" | "imageUris">;
   // Dragonhawk, Fate's Tempest: a card exiled by it that is still in exile at the beginning of its controller's next end step costs

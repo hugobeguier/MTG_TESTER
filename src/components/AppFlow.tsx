@@ -334,7 +334,7 @@ type TriggerEffect = (
   | { kind: "dragon_from_hand_attacking"; subtype: string }
   // "Landfall — Whenever a land you control enters, you may return target nonland permanent card from your graveyard to your hand. If that
   // land is a Plains, you may return that card to the battlefield instead." (Emeria Shepherd)
-  | { kind: "landfall_return_nonland_permanent"; plainsToBattlefield: boolean }
+  | { kind: "landfall_return_nonland_permanent"; plainsToBattlefield: boolean; toHand?: boolean }
   // "...you may put her into her owner's library third from the top." (God-Eternal Bontu) — from the graveyard or exile.
   | { kind: "self_to_library_third" }
   // "When this land enters untapped, you may put target creature card from your graveyard on top of your library." (Witch's Cottage)
@@ -495,6 +495,17 @@ type LabeledContinuation =
 type PendingRuleChoice =
   // "You may pay {W} and tap four untapped creatures you control with flying rather than pay this spell's mana cost." (Sephara): the human
   // chooses between the alternative and the normal cost before anything is paid; the cast is then replayed with that choice.
+  // "You may have this enter as a copy of ..." (Cursed Mirror, Mirrormade): the human picks what to copy (or declines) before the cast is replayed.
+  | {
+      id: string;
+      kind: "choose_cast_copy";
+      controllerSeatId: string;
+      sourceCardId: string;
+      sourceCardName: string;
+      prompt: string;
+      options: Array<{ cardId: string; label: string }>;
+      resume: { seatId: string; cardId: string; position?: { x: number; z: number }; sourceZone: "hand" | "command" | "exile" | "graveyard" | "library"; faceIndex?: number; sacrificeTargets?: VisibleCard[] };
+    }
   | {
       id: string;
       kind: "choose_cast_alt";
@@ -4735,6 +4746,25 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       setSelectedHandCardId(undefined);
       return;
     }
+    // "You may have this enter as a copy of ...": a human picks what to copy (or declines) first.
+    const copyEffectForPrompt = sourceZone === "hand" && seat.kind === "human" && card.chosenCopyTargetId === undefined ? parseEnterAsCopyEffect(card.oracleText) : undefined;
+    if (copyEffectForPrompt) {
+      const candidates = enterAsCopyCandidates(session, seatId, copyEffectForPrompt);
+      if (candidates.length > 0) {
+        setPendingRuleChoice({
+          id: crypto.randomUUID(),
+          kind: "choose_cast_copy",
+          controllerSeatId: seatId,
+          sourceCardId: cardId,
+          sourceCardName: card.name,
+          prompt: `${card.name}: choose what it enters as a copy of.`,
+          options: [...candidates.map((candidate) => ({ cardId: candidate.id, label: `${candidate.name} (${session.seats.find((item) => item.board.battlefield.some((entry) => entry.id === candidate.id))?.name ?? "?"})` })), { cardId: "none", label: "Don't copy anything" }],
+          resume: { seatId, cardId, position, sourceZone, faceIndex, sacrificeTargets: preChosenSacrificeTargets }
+        });
+        setSelectedHandCardId(undefined);
+        return;
+      }
+    }
     const useTapAlt = Boolean(tapAlt) && (seat.kind !== "human" || altChoice === "alt");
     const costCard = useTapAlt && tapAlt
       ? cardWithFaceManaCost(card, tapAlt.costManaText)
@@ -5772,6 +5802,13 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       if (options.length >= 2) return open(`${trigger.sourceCardName}: choose one.`, options);
       return false;
     }
+    // Emeria Shepherd: a Plains lets you choose the battlefield instead of the hand, asked before the card itself.
+    if (trigger.effect.kind === "landfall_return_nonland_permanent" && trigger.effect.plainsToBattlefield && trigger.effect.toHand === undefined) {
+      const entered = session.seats.flatMap((seat) => seat.board.battlefield).find((card) => card.id === trigger.contextCardId);
+      if (entered?.typeLine.includes("Plains") && controller.board.graveyard?.some((card) => !isLandCard(card) && /Creature|Artifact|Enchantment|Planeswalker|Battle/.test(card.typeLine))) {
+        return open(`${trigger.sourceCardName}: return the card to the battlefield instead of your hand?`, [{ index: 0, label: "Battlefield (the land is a Plains)" }, { index: 1, label: "Hand" }]);
+      }
+    }
     const cardPrompt = triggerCardPrompt(trigger, controller);
     if (cardPrompt && cardPrompt.cards.length >= 2) {
       setPendingRuleChoice({
@@ -5941,6 +5978,19 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
           setSession(() => applyRemovalEffect(paid.session, choice.controllerSeatId, choice.sourceCardName, source, damage));
         }
       }
+      resumeAfterTriggerChoice(choice.trigger, choice.remainingStack);
+      return;
+    }
+    // Emeria Shepherd: remember battlefield-or-hand, then go on to pick the card.
+    if (choice.trigger.effect.kind === "landfall_return_nonland_permanent" && choice.trigger.effect.toHand === undefined) {
+      const updated = { ...choice.trigger, effect: { ...choice.trigger.effect, toHand: index === 1 } } as Extract<PendingAction, { type: "trigger" }>;
+      const updatedQueue = choice.queueing?.map((queued) => (queued.id === choice.trigger.id ? updated : queued));
+      if (openTriggerOptionPrompt(updated, choice.remainingStack, updatedQueue)) return;
+      if (updatedQueue) {
+        queueCommonTriggers(updatedQueue);
+        return;
+      }
+      setSession((current) => resolveTriggerEffect(current, updated));
       resumeAfterTriggerChoice(choice.trigger, choice.remainingStack);
       return;
     }
@@ -8459,6 +8509,19 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   // destroy_all_conditional/damage/mass_damage) has no target to choose at all, so it just applies
   // immediately via the same applyRemovalEffect the deterministic/agent path already uses for those
   // shapes.
+  function completeCastCopy(index: number) {
+    const choice = pendingRuleChoice;
+    if (!choice || choice.kind !== "choose_cast_copy") return;
+    setPendingRuleChoice(undefined);
+    const picked = choice.options[index]?.cardId ?? "none";
+    const resume = choice.resume;
+    setSession((current) => ({
+      ...current,
+      seats: current.seats.map((item) => (item.id === resume.seatId ? { ...item, board: { ...item.board, hand: item.board.hand.map((card) => (card.id === resume.cardId ? { ...card, chosenCopyTargetId: picked } : card)) } } : item))
+    }));
+    window.setTimeout(() => playCard(resume.seatId, resume.cardId, resume.position, resume.sourceZone, resume.faceIndex, resume.sacrificeTargets), 50);
+  }
+
   function completeCastAlt(index: number) {
     const choice = pendingRuleChoice;
     if (!choice || choice.kind !== "choose_cast_alt") return;
@@ -8550,6 +8613,10 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   function chooseModalOption(index: number) {
     if (pendingRuleChoice?.kind === "choose_cast_alt") {
       completeCastAlt(index);
+      return;
+    }
+    if (pendingRuleChoice?.kind === "choose_cast_copy") {
+      completeCastCopy(index);
       return;
     }
     if (pendingRuleChoice?.kind === "choose_cast_targets") {
@@ -12726,11 +12793,24 @@ function parseEnterAsCopyEffect(
 // battlefield" shape (Mirrormade) searches everyone's — the caster's own permanents first (matching
 // the "prefer your own stuff" bias other unmodeled-choice heuristics in this file already use, e.g.
 // chooseNonAuraEnchantmentTarget for Zur), then every other seat's in turn order.
+// Every permanent the copy could legally be of (what the human chooses between).
+function enterAsCopyCandidates(session: GameSession, actingSeatId: string, effect: { controlledOnly: boolean; allowedTypes: Array<"artifact" | "enchantment" | "creature"> }): VisibleCard[] {
+  const matchesType = (card: VisibleCard) => effect.allowedTypes.some((type) => card.typeLine.includes(type === "artifact" ? "Artifact" : type === "creature" ? "Creature" : "Enchantment"));
+  return session.seats.filter((seat) => !effect.controlledOnly || seat.id === actingSeatId).flatMap((seat) => seat.board.battlefield).filter((card) => matchesType(card) && !card.phasedOut);
+}
+
 function findEnterAsCopyTarget(
   session: GameSession,
   actingSeatId: string,
-  effect: { controlledOnly: boolean; allowedTypes: Array<"artifact" | "enchantment" | "creature"> }
+  effect: { controlledOnly: boolean; allowedTypes: Array<"artifact" | "enchantment" | "creature"> },
+  chosenId?: string
 ): VisibleCard | undefined {
+  // The human's own pick ("none" = they declined to copy anything).
+  if (chosenId === "none") return undefined;
+  if (chosenId) {
+    const picked = enterAsCopyCandidates(session, actingSeatId, effect).find((card) => card.id === chosenId);
+    if (picked) return picked;
+  }
   const matchesType = (card: VisibleCard) => effect.allowedTypes.some((type) => card.typeLine.includes(type === "artifact" ? "Artifact" : type === "creature" ? "Creature" : "Enchantment"));
   const actingSeat = session.seats.find((seat) => seat.id === actingSeatId);
   // "Any creature on the battlefield" (Cursed Mirror): the strongest one, whoever controls it.
@@ -14062,6 +14142,7 @@ function resetForZoneChange<T extends VisibleCard>(card: T, zone: VisibleCard["z
     blocking: false,
     blockingTargetId: undefined,
     battlefieldPosition: undefined,
+    chosenCopyTargetId: undefined,
     counters: undefined,
     interpretedEffects: undefined,
     attachedToId: undefined,
@@ -18751,7 +18832,7 @@ export function findAttackTriggers(
       }
       // Myriad: a token copy of the attacker for every opponent other than the defending player.
       if (event === "attacks" && source.id === attack.card.id && hasKeywordText(source.oracleText, "myriad")) {
-        triggers.push(makeCommonTrigger(attack.seatId, sourceSeat.id, source, { kind: "myriad", defendingSeatId: attack.defendingSeatId }, `${source.name} triggers (myriad).`, attack.card.id));
+        triggers.push(makeCommonTrigger(attack.seatId, sourceSeat.id, source, { kind: "myriad", defendingSeatId: attack.defendingSeatId, optional: true }, `${source.name} triggers (myriad).`, attack.card.id));
       }
       const sourceClauses = oracleClauses(source.oracleText);
       for (const [clauseIndex, clause] of sourceClauses.entries()) {
@@ -20500,7 +20581,7 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
       (trigger.effect.chosenOption ? undefined : [...(owner?.board.graveyard ?? [])].filter(permanentCard).sort((a, b) => b.manaValue - a.manaValue)[0]);
     if (!owner || !pick) return session;
     const land = session.seats.flatMap((item) => item.board.battlefield).find((card) => card.id === trigger.contextCardId);
-    const toBattlefield = trigger.effect.plainsToBattlefield && Boolean(land?.typeLine.includes("Plains"));
+    const toBattlefield = trigger.effect.plainsToBattlefield && !trigger.effect.toHand && Boolean(land?.typeLine.includes("Plains"));
     const moved = moveCardAcrossSeats(session, owner.id, pick.id, owner.id, toBattlefield ? "battlefield" : "hand");
     return rulesEvent(moved.session, owner.id, `${trigger.sourceCardName}: ${owner.name} returns ${pick.name} from their graveyard to ${toBattlefield ? "the battlefield" : "their hand"}.`);
   }
@@ -21501,6 +21582,9 @@ function ruleChoiceView(
           .filter((card) => hasCardType(card, "Creature"))
           .map((card) => ({ card, seatId: humanSeat.id, seatName: humanSeat.name }))
       };
+    }
+    if (choice.kind === "choose_cast_copy") {
+      return { kind: "choose_modal_option" as const, sourceCardName: choice.sourceCardName, prompt: choice.prompt, options: choice.options.map((option, index) => ({ index, label: option.label })) };
     }
     if (choice.kind === "choose_cast_alt") {
       return { kind: "choose_modal_option" as const, sourceCardName: choice.sourceCardName, prompt: choice.prompt, options: [{ index: 0, label: choice.altLabel }, { index: 1, label: "Pay the normal mana cost" }] };
@@ -24753,7 +24837,7 @@ export function playCardFromZone(
     // beneficial choice" policy for unmodeled optional decisions) since entering with no copy target
     // just leaves it a blank enchantment with no text, strictly worse in every real case.
     const copyEffect = destination === "battlefield" ? parseEnterAsCopyEffect(enteredCard.oracleText) : undefined;
-    const copyTarget = copyEffect ? findEnterAsCopyTarget(session, seatId, copyEffect) : undefined;
+    const copyTarget = copyEffect ? findEnterAsCopyTarget(session, seatId, copyEffect, enteredCard.chosenCopyTargetId) : undefined;
     if (copyTarget) copiedFromName = copyTarget.name;
     const played: VisibleCard = copyTarget
       ? {

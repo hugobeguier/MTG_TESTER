@@ -1449,6 +1449,12 @@ describe("Cursed Mirror", () => {
     const copy = cast.seats[0].board.battlefield.find((c) => c.id === "cm")!;
     expect(copy.name).toBe("Goldlust Triad");
     expect(copy.grantedKeywords).toContain("haste");
+    const pickedSmall = { ...mirror, chosenCopyTargetId: "small" };
+    const mine2 = { ...mine, board: { ...mine.board, hand: [pickedSmall] } };
+    const chosen = playCardFromZone(session([mine2, theirs]), "a", "cm", "cast", undefined, "battlefield", ["m1", "m2", "m3"], "hand").seats[0].board.battlefield.find((c) => c.id === "cm")!;
+    expect(chosen.name).not.toBe("Goldlust Triad");
+    const declined = playCardFromZone(session([{ ...mine, board: { ...mine.board, hand: [{ ...mirror, chosenCopyTargetId: "none" }] } }, theirs]), "a", "cm", "cast", undefined, "battlefield", ["m1", "m2", "m3"], "hand").seats[0].board.battlefield.find((c) => c.id === "cm")!;
+    expect(declined.name).toBe("Cursed Mirror");
     const reverted = clearTemporaryBuffs(cast).seats[0].board.battlefield.find((c) => c.id === "cm")!;
     expect(reverted.name).toBe("Cursed Mirror");
     expect(reverted.typeLine).toContain("Artifact");
