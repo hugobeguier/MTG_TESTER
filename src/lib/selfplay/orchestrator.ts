@@ -88,6 +88,9 @@ import {
   independentlyCastableSpellFaces,
   isAvailableManaSource,
   isLandCard,
+  landDropsAllowed,
+  landPlaysMade,
+  recordLandPlay,
   isLivingDeathEffect,
   legalAttackActions,
   legalBlockActions,
@@ -722,7 +725,7 @@ async function runMainPhase(
     guard += 1;
     const seat = session.seats.find((item) => item.id === seatId);
     if (!seat || seat.hasLost) break;
-    const hasPlayedLand = landPlaysThisTurn.has(`${seatId}:${session.turn}`);
+    const hasPlayedLand = landPlaysMade(landPlaysThisTurn, `${seatId}:${session.turn}`) >= landDropsAllowed(seat);
     const rawActions = legalMainPhaseActions(seat, hasPlayedLand, session.activePlayerId, session.turn, activatedLoyaltyKeys, session);
     const legalActions = filterSupportedMainPhaseActions(rawActions, seat);
     const context = buildScoringContext(session, seatId, "main_phase");
@@ -739,7 +742,7 @@ async function runMainPhase(
       // re-offering the same dead option; treat this decision as a pass instead.
       break;
     }
-    if (legal.actionType === "play_land") landPlaysThisTurn.add(`${seatId}:${session.turn}`);
+    if (legal.actionType === "play_land") recordLandPlay(landPlaysThisTurn, `${seatId}:${session.turn}`);
     if (applied.spellEffectMatched !== undefined && applied.spellEffectCardName !== undefined) {
       recordSpellCoverage(applied.spellEffectMatched, applied.spellEffectCardName);
     }

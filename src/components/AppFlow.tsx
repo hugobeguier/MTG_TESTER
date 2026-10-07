@@ -4473,7 +4473,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         addEvent(`${seat.name} already played a land this turn.`, seatId, "Mana");
         return;
       }
-      landPlaysThisTurn.current.add(landTurnKey(seatId, session.turn));
+      recordLandPlay(landPlaysThisTurn.current, landTurnKey(seatId, session.turn));
       const playedFaceCard = applyChosenFaceToCard(card, faceIndex);
       const playedName = playedFaceCard.name;
       // "As this land enters, choose a color[/creature type]" (the Thriving cycle, the Gate cycle,
@@ -7560,7 +7560,8 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   }
 
   function hasPlayedLandThisTurn(seatId: string, turn: number) {
-    return landPlaysThisTurn.current.has(landTurnKey(seatId, turn));
+    const seat = session.seats.find((item) => item.id === seatId);
+    return landPlaysMade(landPlaysThisTurn.current, landTurnKey(seatId, turn)) >= (seat ? landDropsAllowed(seat) : 1);
   }
 
   function changeLife(seatId: string, delta: number) {
@@ -23608,6 +23609,23 @@ function tapVisibleCard(session: GameSession, seatId: string, cardId: string, lo
 
 function landTurnKey(seatId: string, turn: number) {
   return `${turn}:${seatId}`;
+}
+
+// Land drops: one per turn, plus one for each "You may play an additional land on each of your turns." (Loot, Exuberant Explorer, Exploration).
+export function landDropsAllowed(seat: PlayerSeat): number {
+  return 1 + seat.board.battlefield.filter((card) => !card.abilitiesStripped && /\byou may play an additional land on each of your turns\b/i.test(card.oracleText)).length;
+}
+
+// How many lands a seat has played this turn, kept in a set of keys: the base key for the first, then "<key>:2", "<key>:3", ...
+export function landPlaysMade(plays: Set<string>, key: string): number {
+  let made = plays.has(key) ? 1 : 0;
+  while (plays.has(`${key}:${made + 1}`)) made += 1;
+  return made;
+}
+
+export function recordLandPlay(plays: Set<string>, key: string): void {
+  const made = landPlaysMade(plays, key);
+  plays.add(made === 0 ? key : `${key}:${made + 1}`);
 }
 
 function chooseAgentMainPhaseCard(seat: PlayerSeat, hasPlayedLand: boolean) {
