@@ -332,6 +332,8 @@ export interface VisibleCard {
   timeCountersInitialized?: boolean;
   // Renown: the creature has become renowned.
   renowned?: boolean;
+  // Goaded (the Undercity's Arena): attacks each combat if able until the goading player's next turn.
+  goaded?: { bySeatId: string };
   // Echo: this permanent's echo cost has been dealt with (paid, or it was sacrificed).
   echoResolved?: boolean;
   // The human's picks for which creatures to tap for an alternative cost (Sephara, Sky's Blade), set on the hand card before the cast.
@@ -481,6 +483,13 @@ export interface GameSession {
   // Punisher effects ("loses N life unless that player sacrifices a nonland permanent or discards a card", repeated): a human victim chooses
   // each time; the resolver records the remaining repetitions here.
   pendingPunisherChoices?: Array<{ seatId: string; sourceName: string; lifeAmount: number; times: number }>;
+  // Initiative (rule 725): the player who has it ventures into the Undercity at each of their upkeeps; combat damage to them takes it.
+  initiativeSeatId?: string;
+  // Each player's progress through the Undercity: the room they are in (the last room means it was completed and the next venture starts over).
+  undercityRooms?: Record<string, string>;
+  // Rooms just entered whose effect still has to be put on the stack, and branches a human has to choose between.
+  pendingVentureRooms?: Array<{ seatId: string; room: string }>;
+  pendingVentureChoices?: Array<{ seatId: string; options: string[] }>;
   pendingSacrificeChoices?: Array<{ seatId: string; sourceCardId: string; sourceCardName: string; count: number; typeFilter?: string }>;
   pendingAttackDeclarations?: Array<{ seatId: string; card: VisibleCard; defendingSeatId: string }>;
   // Rule 724: the player who is currently the monarch (Court of Grace, Skyline Despot, Marchesa's Decree). They draw

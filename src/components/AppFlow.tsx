@@ -72,6 +72,7 @@ import { matchWatcherSubject } from "@/lib/triggerWatchers";
 import { graveyardCastPermission } from "@/lib/graveyardCasting";
 import { libraryTopCastPermission } from "@/lib/libraryCasting";
 import { bushidoAmount, canBlockOnlyFliers, cantUntap, landwalkEvades } from "@/lib/combatRestrictions";
+import { UNDERCITY_ROOM_NAMES, UNDERCITY_ROOM_TEXT, isUndercityRoom, nextUndercityRooms, preferredUndercityRoom, type UndercityRoom } from "@/lib/undercity";
 import { parseCycling } from "@/lib/cycling";
 import { parseTapCreaturesAltCost } from "@/lib/altCosts";
 import { parseGraveyardReturnAbility, reduceGenericCost } from "@/lib/graveyardAbilities";
@@ -324,6 +325,10 @@ type TriggerEffect = (
   | { kind: "renown"; amount: number }
   // The human's echo decision (pay it, or sacrifice the permanent).
   | { kind: "echo_choice"; costText: string }
+  // Initiative: "you take the initiative" (the holder ventures into the Undercity), the room effect that was entered, and the human's branch choice.
+  | { kind: "take_initiative" }
+  | { kind: "venture_room"; room: string }
+  | { kind: "venture_choice"; options: string[] }
   // One repetition of a punisher effect for a human victim.
   | { kind: "punisher_prompt"; lifeAmount: number; remaining: number }
   // Discover: cast the found card for free, or put it into hand.
@@ -596,6 +601,8 @@ type PendingRuleChoice =
       typeWord: string;
       // Loot: the pick enters the battlefield, capped at this mana value, instead of going to hand.
       toBattlefieldMaxManaValue?: number;
+      // Throne of the Dead Three: the creature also gets three +1/+1 counters and hexproof.
+      throneBonus?: boolean;
       options: Array<{ index: number; label: string; cardId: string }>;
     }
   // Targets that don't fit the board-click / graveyard pickers (a creature OR a player, two different targets in a row): a plain
@@ -2070,6 +2077,11 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         groupSeen.add(trigger.sourceCardId);
         return true;
       });
+    // Initiative: a creature that deals combat damage to the player with the initiative makes its controller take it.
+    const initiativeHit = hits.find((hit) => session.initiativeSeatId && hit.damagedSeatId === session.initiativeSeatId && hit.seatId !== session.initiativeSeatId);
+    if (initiativeHit) {
+      setSession((current) => (current.initiativeSeatId === initiativeHit.damagedSeatId ? takeInitiative(current, initiativeHit.seatId) : current));
+    }
     // Monarch: a creature that deals combat damage to the monarch makes its controller the monarch.
     const stealingHit = hits.find((hit) => session.monarchSeatId && hit.damagedSeatId === session.monarchSeatId && hit.seatId !== session.monarchSeatId);
     setSession((current) => {
@@ -2085,6 +2097,37 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   // planeswalker you control, ..." — queued per DECLARED attacker (see pendingAttackDeclarations on
   // GameSession) instead of by the old once-per-phase sweep that fired for every creature with
   // "attacks" text whether or not it attacked.
+  // Initiative: a room that was just entered puts its effect on the stack (so targets and choices work like any other trigger).
+  useEffect(() => {
+    const rooms = session.pendingVentureRooms;
+    if (!rooms || rooms.length === 0 || pendingAction || pendingRuleChoice) return;
+    const [next, ...rest] = rooms;
+    setSession((current) => ({ ...current, pendingVentureRooms: rest.length > 0 ? rest : undefined }));
+    if (!isUndercityRoom(next.room)) return;
+    const shim = { id: "undercity-" + next.room, name: "Undercity: " + UNDERCITY_ROOM_NAMES[next.room], typeLine: "", oracleText: "", manaValue: 0, colors: [], role: "effect", zone: "battlefield" } as VisibleCard;
+    queueCommonTriggers([makeCommonTrigger(next.seatId, next.seatId, shim, { kind: "venture_room", room: next.room }, shim.name + ": " + UNDERCITY_ROOM_TEXT[next.room])]);
+  }, [session.pendingVentureRooms, pendingAction, pendingRuleChoice]);
+
+  // Initiative: a human chooses which room to enter next when the Undercity branches.
+  useEffect(() => {
+    const choices = session.pendingVentureChoices;
+    if (!choices || choices.length === 0 || pendingAction || pendingRuleChoice) return;
+    const [next, ...rest] = choices;
+    setSession((current) => ({ ...current, pendingVentureChoices: rest.length > 0 ? rest : undefined }));
+    const shim = { id: "undercity", name: "Undercity", typeLine: "", oracleText: "", manaValue: 0, colors: [], role: "effect", zone: "battlefield" } as VisibleCard;
+    setPendingRuleChoice({
+      id: crypto.randomUUID(),
+      kind: "choose_trigger_option",
+      controllerSeatId: next.seatId,
+      sourceCardId: shim.id,
+      sourceCardName: "Undercity",
+      prompt: "Venture into the Undercity: choose the next room.",
+      options: next.options.map((room, index) => ({ index, label: isUndercityRoom(room) ? UNDERCITY_ROOM_NAMES[room] + " — " + UNDERCITY_ROOM_TEXT[room] : room })),
+      trigger: makeCommonTrigger(next.seatId, next.seatId, shim, { kind: "venture_choice", options: next.options }, "Undercity branch."),
+      remainingStack: []
+    });
+  }, [session.pendingVentureChoices, pendingAction, pendingRuleChoice]);
+
   // Punisher effects: a human victim chooses, each time, between losing the life, sacrificing, and discarding.
   useEffect(() => {
     const queue = session.pendingPunisherChoices;
@@ -3927,6 +3970,8 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
 
     if (phase === "upkeep step") {
       session = resolvePendingUpkeepDraws(session);
+      // Initiative: the player who has it ventures into the Undercity at the beginning of their upkeep.
+      if (session.initiativeSeatId === seatId) session = ventureIntoUndercity(session, seatId);
     }
 
     if (phase === "draw step") {
@@ -6297,6 +6342,13 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       if (max === 0) return false;
       return open(`${trigger.sourceCardName}: pay how much {R}? It deals that much damage to a target.`, Array.from({ length: max + 1 }, (_, count) => ({ index: count, label: count === 0 ? "Don't pay" : "{R} x" + count + " — " + count + " damage" })));
     }
+    // The Undercity's Trap! (a player loses 5 life) and Arena (goad a creature): the human aims them.
+    if (trigger.effect.kind === "venture_room" && (trigger.effect.room === "trap" || trigger.effect.room === "arena")) {
+      const slot = trigger.effect.room === "trap" ? "player" : "opponent_creature";
+      const aimSource = { id: trigger.sourceCardId, name: trigger.sourceCardName, typeLine: "", oracleText: "", manaValue: 0, colors: [], role: "effect", zone: "battlefield" } as VisibleCard;
+      const aimOptions = labeledTargetOptions(session, controller.id, slot, aimSource);
+      if (aimOptions.length >= 2) return open(trigger.sourceCardName + ": choose a " + (slot === "player" ? "player" : "creature") + ".", aimOptions.map((option, index) => ({ index, label: option.label })));
+    }
     // "You may put a land card from your hand onto the battlefield" (Archaeomancer's Map): the human picks which land.
     if (trigger.effect.kind === "put_land_from_hand") {
       const lands = controller.board.hand.filter((card) => card.typeLine.includes("Land"));
@@ -6334,6 +6386,10 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
           picksNeeded: 1
         };
       }
+      // The Undercity's Forge: two +1/+1 counters on a creature you control.
+      case "venture_room":
+        if (trigger.effect.room !== "forge") return undefined;
+        return { prompt: "Forge: choose a creature to put two +1/+1 counters on.", zone: "battlefield", cards: ownCreatures, picksNeeded: 1 };
       // "Put a +1/+1 counter on target creature (you control)": the human picks it.
       case "add_counter": {
         const counterEffect = trigger.effect;
@@ -6447,6 +6503,12 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         }
       }
       resumeAfterTriggerChoice(choice.trigger, choice.remainingStack);
+      return;
+    }
+    // Undercity branch: enter the chosen room.
+    if (choice.trigger.effect.kind === "venture_choice") {
+      const room = choice.trigger.effect.options[index];
+      if (isUndercityRoom(room)) setSession((current) => enterUndercityRoom(current, choice.controllerSeatId, room));
       return;
     }
     // Punisher: the victim's pick, then the next repetition.
@@ -6585,6 +6647,12 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     }
     // Aimed damage: remember WHAT was picked (not its position in a list that may have changed by resolution).
     let encodedOption: string | undefined;
+    if (choice.trigger.effect.kind === "venture_room" && (choice.trigger.effect.room === "trap" || choice.trigger.effect.room === "arena")) {
+      const slot = choice.trigger.effect.room === "trap" ? "player" : "opponent_creature";
+      const aimSource = { id: choice.trigger.sourceCardId, name: choice.trigger.sourceCardName, typeLine: "", oracleText: "", manaValue: 0, colors: [], role: "effect", zone: "battlefield" } as VisibleCard;
+      const picked = labeledTargetOptions(session, choice.controllerSeatId, slot, aimSource)[index]?.target;
+      if (picked) encodedOption = picked.kind === "player" ? encodeChosenTarget(picked) : picked.cardId;
+    }
     if (choice.trigger.effect.kind === "damage_effect" || choice.trigger.effect.kind === "context_power_damage") {
       const aiming = triggerDamageAiming(session, choice.trigger, choice.controllerSeatId);
       const picked = aiming?.options[index]?.target;
@@ -6640,6 +6708,47 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         });
         return;
       }
+    } else if (accepted && trigger.effect.kind === "venture_room" && session.seats.find((seat) => seat.id === trigger.controllerSeatId)?.kind === "human" && ["secret_entrance", "lost_well", "throne"].includes(trigger.effect.room)) {
+      // Rooms that look at the library: the human searches, scries or picks the creature themselves.
+      const roomOwner = session.seats.find((seat) => seat.id === trigger.controllerSeatId)!;
+      const room = trigger.effect.room;
+      if (room === "secret_entrance") {
+        setPendingRuleChoice({
+          id: crypto.randomUUID(),
+          kind: "choose_card_from_library",
+          controllerSeatId: roomOwner.id,
+          sourceCardId: trigger.sourceCardId,
+          sourceCardName: trigger.sourceCardName,
+          prompt: "Secret Entrance: search your library for a basic land card.",
+          destination: "hand",
+          maxChoices: 1,
+          allowedCardFilter: "basic land"
+        });
+      } else if (room === "lost_well") {
+        startLibraryLook("scry", 2);
+      } else {
+        const top = (roomOwner.library ?? []).slice(0, 10);
+        const candidates = top.filter((card) => card.typeLine.includes("Creature"));
+        if (candidates.length === 0) {
+          setSession((current) => resolveTriggerEffect(current, trigger));
+        } else {
+          setPendingRuleChoice({
+            id: crypto.randomUUID(),
+            kind: "choose_dig_card",
+            controllerSeatId: roomOwner.id,
+            sourceCardId: trigger.sourceCardId,
+            sourceCardName: trigger.sourceCardName,
+            prompt: "Throne of the Dead Three: put a creature from the top ten onto the battlefield with three +1/+1 counters and hexproof?",
+            count: 10,
+            typeWord: "creature",
+            toBattlefieldMaxManaValue: 999,
+            throneBonus: true,
+            options: [...candidates.map((card, index) => ({ index, label: card.name + " (mana value " + card.manaValue + ")", cardId: card.id })), { index: candidates.length, label: "Take nothing", cardId: "none" }]
+          });
+        }
+      }
+      resumeAfterTriggerChoice(trigger, remainingStack);
+      return;
     } else if (accepted && trigger.effect.kind === "proliferate" && session.seats.find((seat) => seat.id === trigger.controllerSeatId)?.kind === "human") {
       // Proliferate (Norn's Choirmaster): the human chooses which permanents and players get another counter.
       setPendingRuleChoice({
@@ -9262,7 +9371,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       setPendingRuleChoice(undefined);
       setSession((current) =>
         dig.toBattlefieldMaxManaValue !== undefined
-          ? applyDigToBattlefield(current, dig.controllerSeatId, dig.sourceCardName, dig.count, dig.toBattlefieldMaxManaValue, picked.cardId)
+          ? applyDigToBattlefield(current, dig.controllerSeatId, dig.sourceCardName, dig.count, dig.toBattlefieldMaxManaValue, picked.cardId, dig.throneBonus ? { throne: true } : undefined)
           : applyDigPick(current, dig.controllerSeatId, dig.sourceCardName, dig.count, dig.typeWord, picked.cardId)
       );
       return;
@@ -10517,6 +10626,8 @@ export function untapForSeat(session: GameSession, seatId: string): GameSession 
     (other) => other.id !== seatId && other.board.battlefield.some((card) => /stun counters can'?t be removed from permanents your opponents control/i.test(card.oracleText))
   );
   const everyPermanent = session.seats.flatMap((other) => other.board.battlefield);
+  // Goad lasts until the goading player's next turn.
+  session = { ...session, seats: session.seats.map((other) => ({ ...other, board: { ...other.board, battlefield: other.board.battlefield.map((card) => (card.goaded?.bySeatId === seatId ? { ...card, goaded: undefined } : card)) } })) };
   const untapOrRemoveStun = (card: VisibleCard): VisibleCard => {
     // Phasing: a phased-in permanent with it phases out as its controller's untap step begins (phased-out ones phase in, just below).
     if (!card.phasedOut && !card.abilitiesStripped && /^phasing\b/im.test(card.oracleText)) return { ...card, phasedOut: true, attacking: false, blocking: false, tapped: card.tapped };
@@ -19169,6 +19280,7 @@ function agentCardSnapshot(card: VisibleCard) {
     blocking: card.blocking,
     counters: card.counters,
     oracleText: card.oracleText,
+    goaded: card.goaded ? true : undefined,
     // What the card can actually do right now in combat terms (printed, granted, until end of turn) — read this rather than the text.
     keywords: describeKeywords(card),
     faces: card.faces?.map((face) => ({ name: face.name, typeLine: face.typeLine, manaCost: face.manaCost, oracleText: face.oracleText })),
@@ -20384,6 +20496,7 @@ export function commonTriggerEffect(
   }
 
   if (/\byou become the monarch\b/.test(text)) return { kind: "become_monarch", optional };
+  if (/^(?:[^,]*,\s*)?you take the initiative\.?$/.test(noReminder)) return { kind: "take_initiative" };
 
   const payThen = relevantText.match(/\byou may pay ((?:\{[^}]+\})+)\.\s*if you do,\s*([^.]+\.?)/i);
   if (payThen) {
@@ -21080,7 +21193,7 @@ function payRedMana(session: GameSession, seatId: string, exact?: number): { ses
 // "Look at the top N cards of your library. You may reveal a <type> card from among them and put it into your hand. Put the rest on
 // the bottom in a random order." pickedId is the human's choice; omitted, the first qualifying card is taken. "none" takes nothing.
 // Loot's version: the found creature enters the battlefield (its enters triggers follow through pendingEntries), subject to a mana value cap.
-export function applyDigToBattlefield(session: GameSession, seatId: string, sourceName: string, count: number, maxManaValue: number, pickedId?: string): GameSession {
+export function applyDigToBattlefield(session: GameSession, seatId: string, sourceName: string, count: number, maxManaValue: number, pickedId?: string, options?: { throne?: boolean }): GameSession {
   const seat = session.seats.find((item) => item.id === seatId);
   if (!seat) return session;
   const library = seat.library ?? [];
@@ -21096,7 +21209,12 @@ export function applyDigToBattlefield(session: GameSession, seatId: string, sour
       return { ...item, library: remaining, zones: { ...item.zones, library: remaining.length } };
     })
   };
-  const placed = found ? moveLibraryCardToDestination(bottomed, seatId, found.id, "battlefield", false) : bottomed;
+  const entered = found ? moveLibraryCardToDestination(bottomed, seatId, found.id, "battlefield", false) : bottomed;
+  // Throne of the Dead Three: three +1/+1 counters and hexproof (until your next turn — modelled as until end of turn).
+  const placed =
+    found && options?.throne
+      ? { ...entered, seats: entered.seats.map((seat) => (seat.id !== seatId ? seat : { ...seat, board: { ...seat.board, battlefield: seat.board.battlefield.map((card) => (card.id === found.id ? { ...applyCounterDelta(card, "+1/+1", 3), temporaryGrantedKeywords: [...(card.temporaryGrantedKeywords ?? []), "hexproof"], grantedKeywords: [...(card.grantedKeywords ?? []), "hexproof"] } : card)) } })) }
+      : entered;
   return rulesEvent(placed, seatId, found ? `${seat.name} uses ${sourceName} and puts ${found.name} onto the battlefield.` : `${seat.name} uses ${sourceName} but finds no creature that can enter.`);
 }
 
@@ -22272,6 +22390,63 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
     if (power <= 0 || !entering) return noLegalTargetEvent(session, trigger.controllerSeatId, trigger.sourceCardName);
     return applyRemovalEffect(session, trigger.controllerSeatId, trigger.sourceCardName, entering, { kind: "damage", amount: power, targetType: "any" }, undefined, decodeChosenTarget(trigger.effect.chosenOption));
   }
+  if (trigger.effect.kind === "take_initiative") return takeInitiative(session, trigger.controllerSeatId);
+  if (trigger.effect.kind === "venture_room") {
+    const room = trigger.effect.room;
+    const option = trigger.effect.chosenOption;
+    const owner = session.seats.find((item) => item.id === trigger.controllerSeatId);
+    if (!owner || !isUndercityRoom(room)) return session;
+    const roomName = UNDERCITY_ROOM_NAMES[room];
+    switch (room) {
+      case "secret_entrance": {
+        const land = (option ? owner.library?.find((card) => card.id === option) : undefined) ?? owner.library?.find((card) => isBasicLandCard(card));
+        const fetched = land ? moveLibraryCardToDestination(session, owner.id, land.id, "hand", false) : session;
+        const shuffled = { ...fetched, seats: fetched.seats.map((seat) => (seat.id === owner.id ? { ...seat, library: shuffleCards(seat.library ?? []) } : seat)) };
+        return rulesEvent(shuffled, owner.id, land ? `${owner.name} puts ${land.name} into their hand (${roomName}).` : `${owner.name} finds no basic land (${roomName}).`);
+      }
+      case "forge": {
+        const target = (option ? owner.board.battlefield.find((card) => card.id === option) : undefined) ?? strongestControlledCreature(owner);
+        if (!target) return rulesEvent(session, owner.id, `${roomName}: no creature to put counters on.`);
+        return rulesEvent(
+          { ...session, seats: session.seats.map((seat) => (seat.id === owner.id ? { ...seat, board: { ...seat.board, battlefield: seat.board.battlefield.map((card) => (card.id === target.id ? applyCounterDelta(card, "+1/+1", 2) : card)) } } : seat)) },
+          owner.id,
+          `${roomName}: ${target.name} gets two +1/+1 counters.`
+        );
+      }
+      case "lost_well":
+        return resolveAgentLibraryLookWorkflow(session, owner.id, roomName, "scry_cards", 2);
+      case "trap": {
+        const picked = decodeChosenTarget(option);
+        const victim =
+          (picked?.kind === "player" ? session.seats.find((seat) => seat.id === picked.seatId) : undefined) ??
+          session.seats.filter((seat) => seat.id !== owner.id && !seat.hasLost).sort((a, b) => b.life - a.life)[0];
+        if (!victim) return session;
+        return rulesEvent({ ...session, seats: session.seats.map((seat) => (seat.id === victim.id ? { ...seat, life: seat.life - 5 } : seat)) }, owner.id, `${roomName}: ${victim.name} loses 5 life.`);
+      }
+      case "arena": {
+        const candidates = session.seats.filter((seat) => seat.id !== owner.id && !seat.hasLost).flatMap((seat) => seat.board.battlefield.filter((card) => card.typeLine.includes("Creature") && !hasShroud(card) && !hasHexproof(card)));
+        const goaded = (option ? candidates.find((card) => card.id === option) : undefined) ?? [...candidates].sort((a, b) => effectivePower(b) - effectivePower(a))[0];
+        if (!goaded) return rulesEvent(session, owner.id, `${roomName}: no creature to goad.`);
+        return rulesEvent(
+          { ...session, seats: session.seats.map((seat) => ({ ...seat, board: { ...seat.board, battlefield: seat.board.battlefield.map((card) => (card.id === goaded.id ? { ...card, goaded: { bySeatId: owner.id } } : card)) } })) },
+          owner.id,
+          `${roomName}: ${goaded.name} is goaded.`
+        );
+      }
+      case "stash":
+        return rulesEvent(createTokensForSeat(session, owner.id, trigger.sourceCardId, [{ ...predefinedTokenSpec("Treasure"), count: 1 }]).session, owner.id, `${roomName}: ${owner.name} creates a Treasure.`);
+      case "archives":
+        return drawForSeat(session, owner.id, `${owner.name} draws a card (${roomName}).`);
+      case "catacombs":
+        return rulesEvent(
+          createTokensForSeat(session, owner.id, trigger.sourceCardId, [{ count: 1, name: "Skeleton Token", colors: ["B"], typeLine: "Token Creature - Skeleton", power: "4", toughness: "1", oracleText: "Menace", role: "creature" }]).session,
+          owner.id,
+          `${roomName}: ${owner.name} creates a 4/1 Skeleton with menace.`
+        );
+      case "throne":
+        return applyDigToBattlefield(session, owner.id, roomName, 10, 999, option, { throne: true });
+    }
+  }
   if (trigger.effect.kind === "become_monarch") {
     const newMonarch = session.seats.find((seat) => seat.id === trigger.controllerSeatId);
     if (!newMonarch || newMonarch.hasLost) return session;
@@ -23057,6 +23232,35 @@ export function humanPhaseGraveyardChoice(session: GameSession, seatId: string, 
     if (!seat || !isBoardConditionMet(condition[1], seat, session.seats)) return "skip";
   }
   return { effect, optional: /\byou may\b/i.test(clauseText) };
+}
+
+// Enters an Undercity room: records the progress and queues its effect (pendingVentureRooms) for the component to put on the stack.
+export function enterUndercityRoom(session: GameSession, seatId: string, room: UndercityRoom): GameSession {
+  const seat = session.seats.find((item) => item.id === seatId);
+  if (!seat) return session;
+  return rulesEvent(
+    { ...session, undercityRooms: { ...(session.undercityRooms ?? {}), [seatId]: room }, pendingVentureRooms: [...(session.pendingVentureRooms ?? []), { seatId, room }] },
+    seatId,
+    `${seat.name} ventures into the Undercity: ${UNDERCITY_ROOM_NAMES[room]}. ${UNDERCITY_ROOM_TEXT[room]}`
+  );
+}
+
+// Venture into the Undercity: the next room (a human picks between branches; an agent takes the better one).
+export function ventureIntoUndercity(session: GameSession, seatId: string): GameSession {
+  const seat = session.seats.find((item) => item.id === seatId);
+  if (!seat || seat.hasLost) return session;
+  const options = nextUndercityRooms(session.undercityRooms?.[seatId]);
+  if (options.length > 1 && seat.kind === "human") {
+    return { ...session, pendingVentureChoices: [...(session.pendingVentureChoices ?? []), { seatId, options }] };
+  }
+  return enterUndercityRoom(session, seatId, options.length === 1 ? options[0] : preferredUndercityRoom(options));
+}
+
+// "You take the initiative": you have it from now on, and you venture into the Undercity.
+export function takeInitiative(session: GameSession, seatId: string): GameSession {
+  const seat = session.seats.find((item) => item.id === seatId);
+  if (!seat || seat.hasLost) return session;
+  return ventureIntoUndercity(rulesEvent({ ...session, initiativeSeatId: seatId }, seatId, `${seat.name} takes the initiative.`), seatId);
 }
 
 export function echoCostText(raw: string): string {

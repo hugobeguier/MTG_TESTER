@@ -8,6 +8,7 @@ interface TextCard {
   // Aura/Equipment bookkeeping for "enchanted creature doesn't untap".
   id?: string;
   attachedToId?: string;
+  goaded?: unknown;
 }
 
 const LANDWALK_TYPES = ["plains", "island", "swamp", "mountain", "forest", "desert", "snow"];
@@ -43,6 +44,7 @@ export function canBlockOnlyFliers(blocker: TextCard): boolean {
 
 // "This creature attacks each combat if able."
 export function mustAttackEachCombat(card: TextCard): boolean {
+  if (card.goaded) return true;
   return ruleLines(card).some((line) => /^(?:this creature|[a-z',\- ]+) attacks each (?:combat|turn) if able$/.test(line));
 }
 

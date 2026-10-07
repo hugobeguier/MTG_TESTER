@@ -2,7 +2,7 @@
 // the test: two earlier tests passed on invented text while the real cards stayed broken (Court of Grace, the
 // "with power N or greater" watchers). Skipped per card when the catalog doesn't have it.
 import { describe, expect, it } from "vitest";
-import { landDropsAllowed, landPlaysMade, recordLandPlay, findCastTriggers, seatHasFlashGrant, findLeavesBattlefieldTriggers, hideawayDamageConditionMet, legalMainPhaseActions, tapCreaturesAltCostFor, applyCastRemoval, nextCastPrompt, type CastChoices, spellModePrompt, applyDigPick, applyDigToBattlefield, applyPunisherChoiceEffect, openingHandBattlefieldCards, putOpeningHandCardOnBattlefield, untapForSeat, humanPhaseGraveyardChoice, clearTemporaryBuffs, playCardFromZone, resolveEndStepExileDamage, cleanupCombat, staticCostReduction, applyLabeledContinuation, spellTargetSlots, grantKeywordsToCreature, applyExalted, applySacrificeEffect, applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
+import { landDropsAllowed, landPlaysMade, recordLandPlay, findCastTriggers, seatHasFlashGrant, findLeavesBattlefieldTriggers, hideawayDamageConditionMet, legalMainPhaseActions, tapCreaturesAltCostFor, applyCastRemoval, nextCastPrompt, type CastChoices, spellModePrompt, applyDigPick, applyDigToBattlefield, ventureIntoUndercity, applyPunisherChoiceEffect, openingHandBattlefieldCards, putOpeningHandCardOnBattlefield, untapForSeat, humanPhaseGraveyardChoice, clearTemporaryBuffs, playCardFromZone, resolveEndStepExileDamage, cleanupCombat, staticCostReduction, applyLabeledContinuation, spellTargetSlots, grantKeywordsToCreature, applyExalted, applySacrificeEffect, applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
 import { parseRemovalEffect } from "@/lib/removalSpells";
 import { canLegallyBlock } from "@/lib/combatSim";
 import { parseZoneEffect } from "@/lib/zoneEffects";
@@ -1497,6 +1497,49 @@ describe("rules gaps: afflict, flanking, lure, phasing, echo, turn-limited first
     expect(onTurn.grantedKeywords ?? []).toContain("first strike");
     const offTurn = runStateBasedActionsPass({ ...mine, activePlayerId: "b" }).session.seats[0].board.battlefield[0];
     expect(offTurn.grantedKeywords ?? []).not.toContain("first strike");
+  });
+});
+
+describe("initiative and the Undercity", () => {
+  const room = (s: GameSession, seatId: string, name: string, option?: string) => {
+    const trigger = { id: "t", type: "trigger" as const, actorSeatId: seatId, controllerSeatId: seatId, sourceCardId: "undercity", sourceCardName: "Undercity", triggerKind: "common" as const, effect: { kind: "venture_room", room: name, chosenOption: option } as never, message: "" };
+    return resolveTriggerEffect(s, trigger);
+  };
+  it("'you take the initiative' parses, takes it, and ventures into the Secret Entrance", () => {
+    const sneak = real("Aarakocra Sneak", "sn");
+    const s = session([seat("a", [sneak]), seat("b", [])]);
+    const [trigger] = findCommonTriggersForPermanentEntered(s, "a", sneak);
+    expect(trigger.effect.kind).toBe("take_initiative");
+    const after = resolveTriggerEffect(s, trigger);
+    expect(after.initiativeSeatId).toBe("a");
+    expect(after.undercityRooms).toEqual({ a: "secret_entrance" });
+    expect(after.pendingVentureRooms).toEqual([{ seatId: "a", room: "secret_entrance" }]);
+  });
+  it("walks the dungeon: agents pick a branch, humans are asked, and a finished dungeon starts over", () => {
+    const agent = ventureIntoUndercity(session([seat("a", []), seat("b", [])]), "a");
+    const second = ventureIntoUndercity({ ...agent, pendingVentureRooms: undefined }, "a");
+    expect(second.undercityRooms!.a).toBe("forge");
+    const human = ventureIntoUndercity({ ...agent, seats: agent.seats.map((x) => (x.id === "a" ? { ...x, kind: "human" as const } : x)), pendingVentureRooms: undefined }, "a");
+    expect(human.pendingVentureChoices).toEqual([{ seatId: "a", options: ["forge", "lost_well"] }]);
+    const done = ventureIntoUndercity({ ...agent, undercityRooms: { a: "throne" } }, "a");
+    expect(done.undercityRooms!.a).toBe("secret_entrance");
+  });
+  it("room effects: land to hand, counters, treasure, skeleton, trap, goad, card draw, throne", () => {
+    const mine = seat("a", [bear("b1", { power: "2", toughness: "2" })]);
+    mine.library = [real("Forest", "fo", { zone: "library" as const }), bear("lib", { zone: "library" as const, manaValue: 3 })];
+    mine.zones = { ...mine.zones, library: 2 };
+    const theirs = seat("b", [bear("foe", { power: "5", toughness: "5" })]);
+    const s = session([mine, theirs]);
+    expect(room(s, "a", "secret_entrance").seats[0].board.hand.map((c) => c.id)).toEqual(["fo"]);
+    expect(room(s, "a", "forge").seats[0].board.battlefield[0].counters?.find((c) => c.kind === "+1/+1")?.count).toBe(2);
+    expect(room(s, "a", "stash").seats[0].board.battlefield.some((c) => c.name === "Treasure")).toBe(true);
+    expect(room(s, "a", "catacombs").seats[0].board.battlefield.some((c) => c.name.includes("Skeleton"))).toBe(true);
+    expect(room(s, "a", "trap").seats[1].life).toBe(35);
+    expect(room(s, "a", "arena").seats[1].board.battlefield[0].goaded).toEqual({ bySeatId: "a" });
+    expect(room(s, "a", "archives").seats[0].board.hand).toHaveLength(1);
+    const throne = room(s, "a", "throne").seats[0].board.battlefield.find((c) => c.id === "lib")!;
+    expect(throne.counters?.find((c) => c.kind === "+1/+1")?.count).toBe(3);
+    expect(throne.grantedKeywords).toContain("hexproof");
   });
 });
 

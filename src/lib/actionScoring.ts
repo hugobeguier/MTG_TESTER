@@ -36,6 +36,8 @@ export interface CardLike {
   role?: string;
   tapped?: boolean;
   oracleText?: string;
+  // Goaded: must attack each combat if able.
+  goaded?: unknown;
   // The keywords the card actually has right now (printed, granted by other permanents, until-end-of-turn). When present this is the
   // authority; without it, only the card's keyword lines are read, never rules text that merely mentions a keyword.
   keywords?: string[];
@@ -191,7 +193,7 @@ function scoreAttackProfitability(action: ScorableAction, context: ScoringContex
   if (!attacker || parseNum(attacker.power) === undefined) return;
 
   // "Attacks each combat if able": the engine forces it, so don't weigh it as a choice.
-  if (mustAttackEachCombat({ oracleText: attacker.oracleText ?? "" })) delta(8, "must attack each combat if able");
+  if (mustAttackEachCombat({ oracleText: attacker.oracleText ?? "", goaded: attacker.goaded })) delta(8, "must attack each combat if able");
 
   const defender = defendingOpponent(context, action.targetIds[0]);
   const share = defender?.id ? threatShares(context).get(defender.id)?.share ?? 0 : 0;
