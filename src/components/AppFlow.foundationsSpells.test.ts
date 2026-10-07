@@ -169,7 +169,7 @@ describe("applySpellExtraEffect", () => {
     expect(after.life).toBe(38);
   });
 
-  it("Hit the Mother Lode: puts the discovered card in hand and makes tapped Treasures for the difference", () => {
+  it("Hit the Mother Lode: an agent puts the discovered card in hand; a human gets the free-cast choice; Treasures for the difference", () => {
     const text = "Discover 10. If the discovered card's mana value is less than 10, create a number of tapped Treasure tokens equal to the difference.";
     const library = [
       card({ id: "land", name: "Forest", typeLine: "Basic Land — Forest", zone: "library" }),
@@ -177,8 +177,8 @@ describe("applySpellExtraEffect", () => {
       card({ id: "hit", name: "Hit", typeLine: "Creature", manaValue: 6, zone: "library" }),
       card({ id: "rest", name: "Rest", typeLine: "Creature", manaValue: 1, zone: "library" })
     ];
-    const you = seat({ id: "a", name: "You", kind: "human", library });
-    const after = run(text, you, []).seats.find((s) => s.id === "a")!;
+    const agent = seat({ id: "a", name: "You", kind: "agent", library });
+    const after = run(text, agent, []).seats.find((s) => s.id === "a")!;
     expect(after.board.hand.map((c) => c.id)).toEqual(["hit"]);
     const treasures = after.board.battlefield.filter((c) => c.name === "Treasure");
     expect(treasures).toHaveLength(4);
@@ -186,6 +186,13 @@ describe("applySpellExtraEffect", () => {
     // Revealed cards go to the bottom: only the untouched "rest" card stays above them.
     expect(after.library![0].id).toBe("rest");
     expect(after.library).toHaveLength(3);
+    // A human decides: the card waits in exile with a free-cast permission until they answer.
+    const human = run(text, seat({ id: "a", name: "You", kind: "human", library }), []);
+    const mine = human.seats.find((s) => s.id === "a")!;
+    expect(mine.board.hand).toHaveLength(0);
+    expect(mine.board.exile!.map((c) => c.id)).toEqual(["hit"]);
+    expect(mine.board.exile![0].exiledPlayableFree).toBe(true);
+    expect(human.pendingDiscoverChoices).toEqual([{ seatId: "a", cardId: "hit", cardName: "Hit", sourceName: expect.any(String) }]);
   });
 
   it("Necrotic Hex: each player sacrifices up to six creatures, but not the Zombies this spell makes", () => {

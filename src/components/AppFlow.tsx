@@ -324,6 +324,8 @@ type TriggerEffect = (
   | { kind: "renown"; amount: number }
   // The human's echo decision (pay it, or sacrifice the permanent).
   | { kind: "echo_choice"; costText: string }
+  // Discover: cast the found card for free, or put it into hand.
+  | { kind: "discover_choice"; cardName: string }
   // "If this card is in your opening hand, you may begin the game with it on the battlefield." (the Leylines): the human's yes/no; the other
   // such cards still to ask about ride along.
   | { kind: "opening_hand_battlefield"; remainingIds: string[] }
@@ -2081,6 +2083,27 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   // planeswalker you control, ..." — queued per DECLARED attacker (see pendingAttackDeclarations on
   // GameSession) instead of by the old once-per-phase sweep that fired for every creature with
   // "attacks" text whether or not it attacked.
+  // Discover: cast the exiled card free, or put it into hand.
+  useEffect(() => {
+    const queue = session.pendingDiscoverChoices;
+    if (!queue || queue.length === 0 || pendingAction || pendingRuleChoice) return;
+    const [next, ...rest] = queue;
+    setSession((current) => ({ ...current, pendingDiscoverChoices: rest.length > 0 ? rest : undefined }));
+    const exiledCard = session.seats.find((seat) => seat.id === next.seatId)?.board.exile?.find((card) => card.id === next.cardId);
+    const shim = exiledCard ?? ({ id: next.cardId, name: next.cardName, typeLine: "", oracleText: "", manaValue: 0, colors: [], role: "permanent", zone: "exile" } as VisibleCard);
+    setPendingRuleChoice({
+      id: crypto.randomUUID(),
+      kind: "choose_trigger_option",
+      controllerSeatId: next.seatId,
+      sourceCardId: next.cardId,
+      sourceCardName: next.sourceName,
+      prompt: next.sourceName + ": " + next.cardName + " — cast it without paying its mana cost, or put it into your hand?",
+      options: [{ index: 0, label: "Cast " + next.cardName + " for free" }, { index: 1, label: "Put it into my hand" }],
+      trigger: makeCommonTrigger(next.seatId, next.seatId, shim, { kind: "discover_choice", cardName: next.cardName }, next.sourceName + " discover."),
+      remainingStack: []
+    });
+  }, [session.pendingDiscoverChoices, pendingAction, pendingRuleChoice]);
+
   // A discard the human chooses for themselves (forced discards, rummage effects): opens the picker for what the resolver deferred.
   useEffect(() => {
     const queue = session.pendingDiscardChoices;
@@ -6393,6 +6416,18 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         }
       }
       resumeAfterTriggerChoice(choice.trigger, choice.remainingStack);
+      return;
+    }
+    // Discover: cast it free (it is in exile with the permission), or take it into hand.
+    if (choice.trigger.effect.kind === "discover_choice") {
+      if (index === 0) {
+        window.setTimeout(() => playCard(choice.controllerSeatId, choice.sourceCardId, undefined, "exile"), 50);
+      } else {
+        setSession((current) => {
+          const moved = moveCardAcrossSeats(current, choice.controllerSeatId, choice.sourceCardId, choice.controllerSeatId, "hand");
+          return moved.session;
+        });
+      }
       return;
     }
     // Leylines: begin the game on the battlefield (or not), then ask about the next one.
@@ -16008,7 +16043,18 @@ export function applySpellExtraEffect(session: GameSession, casterSeatId: string
         revealed.push(card);
       }
       let next = session;
-      if (found) next = moveCardAcrossSeats(next, casterSeatId, found.id, casterSeatId, "hand").session;
+      // A human may instead cast it free: it waits in exile, with a free-cast permission, until they answer (pendingDiscoverChoices).
+      const humanChoosesDiscover = Boolean(found && caster.kind === "human");
+      if (found && humanChoosesDiscover) {
+        const exiled = moveCardAcrossSeats(next, casterSeatId, found.id, casterSeatId, "exile").session;
+        next = {
+          ...exiled,
+          seats: exiled.seats.map((seat) =>
+            seat.id !== casterSeatId ? seat : { ...seat, board: { ...seat.board, exile: (seat.board.exile ?? []).map((card) => (card.id === found!.id ? { ...card, exiledPlayableBySeatId: casterSeatId, exiledPlayableFree: true, exiledPlayableAnyTime: true } : card)) } }
+          ),
+          pendingDiscoverChoices: [...(exiled.pendingDiscoverChoices ?? []), { seatId: casterSeatId, cardId: found.id, cardName: found.name, sourceName }]
+        };
+      } else if (found) next = moveCardAcrossSeats(next, casterSeatId, found.id, casterSeatId, "hand").session;
       const revealedIds = new Set(revealed.map((card) => card.id));
       next = {
         ...next,
@@ -16022,7 +16068,7 @@ export function applySpellExtraEffect(session: GameSession, casterSeatId: string
       next = rulesEvent(
         next,
         casterSeatId,
-        found ? `${caster.name} discovers ${effect.amount} with ${sourceName} and puts ${found.name} into their hand.` : `${caster.name} discovers ${effect.amount} with ${sourceName} but finds no card.`
+        found ? (humanChoosesDiscover ? `${caster.name} discovers ${effect.amount} with ${sourceName} and exiles ${found.name}.` : `${caster.name} discovers ${effect.amount} with ${sourceName} and puts ${found.name} into their hand.`) : `${caster.name} discovers ${effect.amount} with ${sourceName} but finds no card.`
       );
       if (found && effect.treasuresForDifference && found.manaValue < effect.amount) {
         const difference = effect.amount - found.manaValue;
