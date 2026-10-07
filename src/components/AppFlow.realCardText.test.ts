@@ -2,7 +2,7 @@
 // the test: two earlier tests passed on invented text while the real cards stayed broken (Court of Grace, the
 // "with power N or greater" watchers). Skipped per card when the catalog doesn't have it.
 import { describe, expect, it } from "vitest";
-import { findLeavesBattlefieldTriggers, hideawayDamageConditionMet, legalMainPhaseActions, tapCreaturesAltCostFor, applyCastRemoval, nextCastPrompt, type CastChoices, spellModePrompt, applyDigPick, applyLabeledContinuation, spellTargetSlots, grantKeywordsToCreature, applyExalted, applySacrificeEffect, applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
+import { seatHasFlashGrant, findLeavesBattlefieldTriggers, hideawayDamageConditionMet, legalMainPhaseActions, tapCreaturesAltCostFor, applyCastRemoval, nextCastPrompt, type CastChoices, spellModePrompt, applyDigPick, applyLabeledContinuation, spellTargetSlots, grantKeywordsToCreature, applyExalted, applySacrificeEffect, applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
 import { parseRemovalEffect } from "@/lib/removalSpells";
 import { parseZoneEffect } from "@/lib/zoneEffects";
 import { permanentMatchesQualifier } from "@/lib/characteristics";
@@ -1622,5 +1622,18 @@ describe("leaving the battlefield without dying (Outpost Siege, Dragons)", () =>
     expect(findLeavesBattlefieldTriggers(s, "b", bear("x"))).toHaveLength(0);
     const khans = session([seat("a", [real("Outpost Siege", "os", { chosenMode: "Khans" })]), seat("b", [])]);
     expect(findLeavesBattlefieldTriggers(khans, "a", bear("x"))).toHaveLength(0);
+  });
+});
+
+describe("flash grants (real Oracle text)", () => {
+  it("Yeva grants flash to green creature spells only, and a creature that merely has flash grants nothing", () => {
+    const yeva = seat("a", [real("Yeva, Nature's Herald", "yeva")]);
+    const green = bear("g", { colors: ["G"], typeLine: "Creature — Elf", zone: "hand" as const });
+    const red = bear("r", { colors: ["R"], typeLine: "Creature — Goblin", zone: "hand" as const });
+    expect(seatHasFlashGrant(yeva, green)).toBe(true);
+    expect(seatHasFlashGrant(yeva, red)).toBe(false);
+    expect(seatHasFlashGrant(yeva)).toBe(false);
+    const justFlash = seat("a", [real("Herald of Eternal Dawn", "h")]);
+    expect(seatHasFlashGrant(justFlash, red)).toBe(false);
   });
 });

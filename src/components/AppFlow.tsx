@@ -1615,7 +1615,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     );
   })();
   const selectedCardCanRespond = selectedHandCard
-    ? canCastAtInstantSpeed(selectedHandCard, seatHasFlashGrant(humanSeat)) &&
+    ? canCastAtInstantSpeed(selectedHandCard, seatHasFlashGrant(humanSeat, selectedHandCard)) &&
       selectedCardCanLegallyCounter &&
       (payCostFromPool(poolForSeat(humanSeat.id), selectedHandCard, selectedHandCard.manaValue).ok ||
         chooseManaSourcesForCost(humanSeat, selectedHandCard, selectedHandCard.manaValue, undefined, session.seats).ok)
@@ -2964,7 +2964,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     // can't be flashed in, only an exiled instant/flash card can. flashGranted mirrors
     // legalPriorityActions' own check (a battlefield Vedalken Orrery/Leyline of Anticipation), so an
     // agent offered this response as legal there doesn't get silently refused here.
-    if (!card || !(canCastAtInstantSpeed(card, seatHasFlashGrant(seat)) || (sourceZone === "exile" && card.exiledPlayableAnyTime))) {
+    if (!card || !(canCastAtInstantSpeed(card, seatHasFlashGrant(seat, card)) || (sourceZone === "exile" && card.exiledPlayableAnyTime))) {
       passPriority();
       return;
     }
@@ -4445,7 +4445,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     // battlefield during e.g. the draw step (or an opponent's turn) would silently succeed: the
     // card moves, and for lands it also burns the turn's one-land allowance with nothing to show
     // for it, leaving the player unable to play a land later in their real main phase.
-    if ((playingAsLand || !(canCastAtInstantSpeed(card) || (sourceZone === "exile" && card.exiledPlayableAnyTime))) && (activeSeatId !== seatId || !isMainPhase(session.phase))) {
+    if ((playingAsLand || !(canCastAtInstantSpeed(card, seatHasFlashGrant(seat, card)) || (sourceZone === "exile" && card.exiledPlayableAnyTime))) && (activeSeatId !== seatId || !isMainPhase(session.phase))) {
       addEvent(
         `${seat.name} can only ${playingAsLand ? "play a land" : `cast ${card.name}`} during a main phase on their own turn.`,
         seatId,
@@ -5471,7 +5471,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     ) {
       return;
     }
-    if (!canCastAtInstantSpeed(card, seatHasFlashGrant(humanSeat)) && !(sourceZone === "exile" && card.exiledPlayableAnyTime)) {
+    if (!canCastAtInstantSpeed(card, seatHasFlashGrant(humanSeat, card)) && !(sourceZone === "exile" && card.exiledPlayableAnyTime)) {
       addEvent(`${humanSeat.name} cannot respond with ${card.name}; it is not playable at instant speed.`, humanSeat.id, "Mana");
       return;
     }
@@ -11296,7 +11296,7 @@ export function legalPriorityActions(seat: PlayerSeat, pendingAction: PendingAct
   ];
   const flashGranted = seatHasFlashGrant(seat);
   const actions: LegalAgentAction[] = respondableCards
-    .filter(({ card, sourceZone }) => canCastAtInstantSpeed(card, flashGranted) || (sourceZone === "exile" && Boolean(card.exiledPlayableAnyTime)))
+    .filter(({ card, sourceZone }) => canCastAtInstantSpeed(card, flashGranted || seatHasFlashGrant(seat, card)) || (sourceZone === "exile" && Boolean(card.exiledPlayableAnyTime)))
     .filter(({ card }) => {
       const counterAbility = parseCounterSpellAbility(card.oracleText);
       if (!counterAbility || parseModalHeader(card.oracleText)) return true;
@@ -22229,10 +22229,17 @@ function canCastAtInstantSpeed(card: VisibleCard, flashGranted = false) {
 // Scoped narrowly to what a priority-response decision needs: battlefield-only, no "spells of the
 // chosen type" variants, no layer-system involvement. A card's own printed Flash is still handled
 // entirely by canCastAtInstantSpeed itself; this only covers a SEPARATE permanent granting it.
-function seatHasFlashGrant(seat: PlayerSeat): boolean {
-  return seat.board.battlefield.some(
-    (card) => /as though (it|they) had flash/i.test(card.oracleText) || /any time you could cast an instant/i.test(card.oracleText)
-  );
+// "You may cast spells as though they had flash." (Leyline of Anticipation, Vedalken Orrery) grants every spell; "You may cast green creature
+// spells as though they had flash." (Yeva, Nature's Herald) only the ones it describes (pass the card to check). Reminder text is ignored:
+// a creature that merely HAS flash ("(You may cast this spell any time you could cast an instant.)") grants nothing to anything else.
+export function seatHasFlashGrant(seat: PlayerSeat, card?: VisibleCard): boolean {
+  return seat.board.battlefield.some((source) => {
+    if (source.abilitiesStripped) return false;
+    const text = source.oracleText.replace(/\([^)]*\)/g, "");
+    if (/\byou may cast spells as though they had flash\b/i.test(text)) return true;
+    const scoped = text.match(/\byou may cast ([a-z ]+?) spells as though they had flash\b/i);
+    return Boolean(scoped && card && permanentMatchesQualifier(card, scoped[1]) && !card.typeLine.includes("Land"));
+  });
 }
 
 // Is any seat's attacking creature currently declared against this seat — as the defending player
@@ -24213,7 +24220,7 @@ export function canReceivePriorityForPendingAction(
   const hasLegalResponse =
     legalActivatedAbilityActions(seat, false, session.turn, EMPTY_LOYALTY_KEYS, session).length > 0 ||
     seat.board.hand.some((card) => {
-    if (!canCastAtInstantSpeed(card, flashGranted)) return false;
+    if (!canCastAtInstantSpeed(card, flashGranted || seatHasFlashGrant(seat, card))) return false;
     // A type-restricted counterspell ("counter target creature/noncreature/commander spell") isn't
     // a real response option if it can't legally target what's actually on the stack — without this,
     // a human whose only instant-speed card was e.g. Negate got offered a priority window (and the
