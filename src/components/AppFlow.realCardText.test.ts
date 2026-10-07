@@ -2,7 +2,7 @@
 // the test: two earlier tests passed on invented text while the real cards stayed broken (Court of Grace, the
 // "with power N or greater" watchers). Skipped per card when the catalog doesn't have it.
 import { describe, expect, it } from "vitest";
-import { landDropsAllowed, landPlaysMade, recordLandPlay, findCastTriggers, seatHasFlashGrant, findLeavesBattlefieldTriggers, hideawayDamageConditionMet, legalMainPhaseActions, tapCreaturesAltCostFor, applyCastRemoval, nextCastPrompt, type CastChoices, spellModePrompt, applyDigPick, applyDigToBattlefield, untapForSeat, humanPhaseGraveyardChoice, clearTemporaryBuffs, playCardFromZone, resolveEndStepExileDamage, cleanupCombat, staticCostReduction, applyLabeledContinuation, spellTargetSlots, grantKeywordsToCreature, applyExalted, applySacrificeEffect, applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
+import { landDropsAllowed, landPlaysMade, recordLandPlay, findCastTriggers, seatHasFlashGrant, findLeavesBattlefieldTriggers, hideawayDamageConditionMet, legalMainPhaseActions, tapCreaturesAltCostFor, applyCastRemoval, nextCastPrompt, type CastChoices, spellModePrompt, applyDigPick, applyDigToBattlefield, openingHandBattlefieldCards, putOpeningHandCardOnBattlefield, untapForSeat, humanPhaseGraveyardChoice, clearTemporaryBuffs, playCardFromZone, resolveEndStepExileDamage, cleanupCombat, staticCostReduction, applyLabeledContinuation, spellTargetSlots, grantKeywordsToCreature, applyExalted, applySacrificeEffect, applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
 import { parseRemovalEffect } from "@/lib/removalSpells";
 import { canLegallyBlock } from "@/lib/combatSim";
 import { parseZoneEffect } from "@/lib/zoneEffects";
@@ -1458,6 +1458,58 @@ describe("combat keywords from the backlog (real Oracle text)", () => {
     expect(after.find((c) => c.id === "ag")!.tapped).toBe(true);
     expect(after.find((c) => c.id === "free")!.tapped).toBe(false);
     expect(runStateBasedActionsPass(session([seat("a", [real("Hellkite Whelp", "hw", { colors: ["R"], oracleText: "Devoid" })])])).session.seats[0].board.battlefield[0].colors).toEqual([]);
+  });
+});
+
+describe("rules gaps: afflict, flanking, lure, phasing, echo, turn-limited first strike", () => {
+  const blockWith = (attacker: VisibleCard, blockers: VisibleCard[], chosen: string[]) =>
+    assignBlockers(session([seat("a", [{ ...attacker, attacking: true }]), seat("b", blockers)]), { attackerSeatId: "a", defenderSeatId: "b", attackerCardId: attacker.id } as never, chosen);
+  it("afflict: the defender loses life when the creature is blocked", () => {
+    const after = blockWith(real("Ammit Eternal", "am"), [bear("blk")], ["blk"]);
+    expect(after.seats[1].life).toBeLessThan(40);
+  });
+  it("flanking shrinks a non-flanking blocker", () => {
+    const after = blockWith(real("Benalish Cavalry", "bc"), [bear("blk")], ["blk"]);
+    expect(after.seats[1].board.battlefield[0].temporaryPowerBonus).toBe(-1);
+  });
+  it("lure forces every able creature to block", () => {
+    const after = blockWith(real("Breaker of Armies", "br"), [bear("b1"), bear("b2")], []);
+    expect(after.seats[1].board.battlefield.every((c) => c.blocking)).toBe(true);
+  });
+  it("phasing creatures phase out at their untap step and back in at the next", () => {
+    const keeper = real("Breezekeeper", "bk");
+    const once = untapForSeat(session([seat("a", [keeper]), seat("b", [])]), "a");
+    expect(once.seats[0].board.battlefield[0].phasedOut).toBe(true);
+    expect(untapForSeat(once, "a").seats[0].board.battlefield[0].phasedOut).toBeFalsy();
+  });
+  it("echo is paid with available mana, else the permanent is sacrificed, and only once", () => {
+    const troll = real("Albino Troll", "at");
+    const paid = applyDeterministicPhaseTrigger(session([seat("a", [troll, real("Forest", "f1"), real("Forest", "f2"), real("Forest", "f3"), real("Forest", "f4")]), seat("b", [])]), "a", troll, "upkeep step")!;
+    expect(paid.seats[0].board.battlefield.some((c) => c.id === "at")).toBe(true);
+    expect(paid.seats[0].board.battlefield.filter((c) => c.tapped).length).toBeGreaterThan(0);
+    const broke = applyDeterministicPhaseTrigger(session([seat("a", [troll]), seat("b", [])]), "a", troll, "upkeep step")!;
+    expect(broke.seats[0].board.battlefield.some((c) => c.id === "at")).toBe(false);
+  });
+  it("Duelist of Deep Faith has first strike only during its controller's turn", () => {
+    const duelist = real("Duelist of Deep Faith", "du");
+    const mine = session([seat("a", [duelist]), seat("b", [])]);
+    const onTurn = runStateBasedActionsPass({ ...mine, activePlayerId: "a" }).session.seats[0].board.battlefield[0];
+    expect(onTurn.grantedKeywords ?? []).toContain("first strike");
+    const offTurn = runStateBasedActionsPass({ ...mine, activePlayerId: "b" }).session.seats[0].board.battlefield[0];
+    expect(offTurn.grantedKeywords ?? []).not.toContain("first strike");
+  });
+});
+
+describe("Leylines begin on the battlefield", () => {
+  it("finds the opening-hand cards and puts the chosen one onto the battlefield", () => {
+    const leyline = real("Leyline of Abundance", "ley", { zone: "hand" as const });
+    const mine = seat("a", []);
+    mine.board.hand = [leyline, bear("other", { zone: "hand" as const })];
+    mine.zones = { ...mine.zones, hand: 2 };
+    expect(openingHandBattlefieldCards(mine).map((c) => c.id)).toEqual(["ley"]);
+    const after = putOpeningHandCardOnBattlefield(session([mine]), "a", "ley").seats[0];
+    expect(after.board.battlefield.map((c) => c.id)).toEqual(["ley"]);
+    expect(after.board.hand.map((c) => c.id)).toEqual(["other"]);
   });
 });
 

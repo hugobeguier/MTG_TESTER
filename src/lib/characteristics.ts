@@ -415,7 +415,7 @@ export function parseGroupKeywordGrant(oracleText: string): GroupKeywordGrant[] 
 //   "Lieutenant — As long as you control your commander, this creature gets +2/+2 and creatures you control have
 //     vigilance." (Angelic Field Marshal)
 // Evaluated live against the controller's board/life by the characteristics pass.
-export type StaticCondition = { kind: "life_at_least"; amount: number } | { kind: "life_over_starting"; amount: number } | { kind: "controls_commander" } | { kind: "self_untapped" };
+export type StaticCondition = { kind: "life_at_least"; amount: number } | { kind: "life_over_starting"; amount: number } | { kind: "controls_commander" } | { kind: "self_untapped" } | { kind: "your_turn" };
 
 export interface ConditionalStaticBoost {
   condition: StaticCondition;
@@ -432,6 +432,12 @@ export function parseConditionalStaticBoosts(oracleText: string): ConditionalSta
     const selfLife = text.match(/^this creature gets \+(\d+)\/\+(\d+) as long as you have (\d+) or more life\.?$/);
     if (selfLife) {
       boosts.push({ condition: { kind: "life_at_least", amount: Number.parseInt(selfLife[3], 10) }, scope: "self", power: Number.parseInt(selfLife[1], 10), toughness: Number.parseInt(selfLife[2], 10) });
+      continue;
+    }
+    // "During your turn, this creature has first strike." (Duelist of Deep Faith-style)
+    const yourTurnKeyword = text.match(/^during your turn, this creature has ([a-z ]+?)\.?$/);
+    if (yourTurnKeyword) {
+      boosts.push({ condition: { kind: "your_turn" }, scope: "self", power: 0, toughness: 0, keyword: yourTurnKeyword[1].trim() });
       continue;
     }
     const untappedKeyword = text.match(/^this creature has ([a-z ]+?) as long as it'?s untapped\.?$/);

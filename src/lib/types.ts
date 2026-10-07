@@ -332,6 +332,8 @@ export interface VisibleCard {
   timeCountersInitialized?: boolean;
   // Renown: the creature has become renowned.
   renowned?: boolean;
+  // Echo: this permanent's echo cost has been dealt with (paid, or it was sacrificed).
+  echoResolved?: boolean;
   // The human's picks for which creatures to tap for an alternative cost (Sephara, Sky's Blade), set on the hand card before the cast.
   chosenTapAltIds?: string[];
   // The human's pick for X (or how many times a multikicker is paid / whether a kicker is paid), set on the hand card before the cast.

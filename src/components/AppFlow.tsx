@@ -322,6 +322,11 @@ type TriggerEffect = (
   // Battle cry: "Whenever this creature attacks, each other attacking creature gets +1/+0 until end of turn."
   // Renown N: "When this creature deals combat damage to a player, if it isn't renowned, put N +1/+1 counters on it and it becomes renowned."
   | { kind: "renown"; amount: number }
+  // The human's echo decision (pay it, or sacrifice the permanent).
+  | { kind: "echo_choice"; costText: string }
+  // "If this card is in your opening hand, you may begin the game with it on the battlefield." (the Leylines): the human's yes/no; the other
+  // such cards still to ask about ride along.
+  | { kind: "opening_hand_battlefield"; remainingIds: string[] }
   | { kind: "battle_cry" }
   // Melee: "Whenever this creature attacks, it gets +1/+1 until end of turn for each opponent you attacked this combat."
   | { kind: "melee" }
@@ -2491,6 +2496,25 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         addEvent(`${sourceCard.name} adds ${phaseMana[1]} to ${activeSeat.name}'s mana pool.`, activeSeat.id, "Rules action");
         return;
       }
+      // Echo: a human decides whether to pay it.
+      if (activeSeat.kind === "human") {
+        const echoMatch = phaseEffectText(sourceCard.oracleText, phase).match(/^echo ((?:\{[^}]+\})+|\d+)/i);
+        if (echoMatch && !sourceCard.echoResolved) {
+          const costText = echoCostText(echoMatch[1]);
+          setPendingRuleChoice({
+            id: crypto.randomUUID(),
+            kind: "choose_trigger_option",
+            controllerSeatId: activeSeat.id,
+            sourceCardId: sourceCard.id,
+            sourceCardName: sourceCard.name,
+            prompt: `${sourceCard.name}: pay echo ${costText}, or sacrifice it?`,
+            options: [{ index: 0, label: `Pay ${costText}` }, { index: 1, label: "Sacrifice it" }],
+            trigger: makeCommonTrigger(activeSeat.id, activeSeat.id, sourceCard, { kind: "echo_choice", costText }, sourceCard.name + " echo."),
+            remainingStack: []
+          });
+          return;
+        }
+      }
       // A human whose upkeep/end-step trigger returns a card from their own graveyard picks the card (and gets the "you may").
       if (activeSeat.kind === "human") {
         const graveyardChoice = humanPhaseGraveyardChoice(session, activeSeat.id, sourceCard, phase);
@@ -3536,7 +3560,8 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     setGameStage("playing");
     setActiveSeatId(firstSeatId);
     setPrioritySeatId(nextSeatId(session.seats, firstSeatId));
-    setSession((current) => ({
+    setSession((current) => {
+      const started: GameSession = {
       ...current,
       status: "playing",
       activePlayerId: firstSeatId,
@@ -3567,7 +3592,37 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         },
         ...current.events
       ]
-    }));
+      };
+      // Leylines and friends: agents always begin the game with them on the battlefield.
+      return started.seats.filter((seat) => seat.kind !== "human").reduce(
+        (next, seat) => openingHandBattlefieldCards(seat).reduce((inner, card) => putOpeningHandCardOnBattlefield(inner, seat.id, card.id), next),
+        started
+      );
+    });
+    // ...and the human is asked about each one in their opening hand.
+    const humanLeylines = openingHandBattlefieldCards({ ...humanSeat, board: { ...humanSeat.board, hand: humanSeat.board.hand.filter((card) => !mulliganReturnCardIds.includes(card.id)) } });
+    if (humanLeylines.length > 0) {
+      window.setTimeout(() => askOpeningHandBattlefield(humanSeat.id, humanLeylines.map((card) => card.id)), 100);
+    }
+  }
+
+  function askOpeningHandBattlefield(seatId: string, remainingIds: string[]) {
+    const [cardId, ...rest] = remainingIds;
+    const card = session.seats.find((item) => item.id === seatId)?.board.hand.find((entry) => entry.id === cardId);
+    if (!cardId) return;
+    // Not found in the (possibly stale) closure: ask by id anyway through the trigger's own source info.
+    const shim = card ?? ({ id: cardId, name: "Opening-hand card", typeLine: "", oracleText: "", manaValue: 0, colors: [], role: "permanent", zone: "hand" } as VisibleCard);
+    setPendingRuleChoice({
+      id: crypto.randomUUID(),
+      kind: "choose_trigger_option",
+      controllerSeatId: seatId,
+      sourceCardId: cardId,
+      sourceCardName: shim.name,
+      prompt: `${shim.name}: begin the game with it on the battlefield?`,
+      options: [{ index: 0, label: "Yes, put it onto the battlefield" }, { index: 1, label: "No, keep it in hand" }],
+      trigger: makeCommonTrigger(seatId, seatId, shim, { kind: "opening_hand_battlefield", remainingIds: rest }, shim.name + " opening hand."),
+      remainingStack: []
+    });
   }
 
   function mulliganOpeningHand() {
@@ -6338,6 +6393,19 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         }
       }
       resumeAfterTriggerChoice(choice.trigger, choice.remainingStack);
+      return;
+    }
+    // Leylines: begin the game on the battlefield (or not), then ask about the next one.
+    if (choice.trigger.effect.kind === "opening_hand_battlefield") {
+      const rest = choice.trigger.effect.remainingIds;
+      if (index === 0) setSession((current) => putOpeningHandCardOnBattlefield(current, choice.controllerSeatId, choice.sourceCardId));
+      if (rest.length > 0) window.setTimeout(() => askOpeningHandBattlefield(choice.controllerSeatId, rest), 100);
+      return;
+    }
+    // Echo: pay or sacrifice, as chosen.
+    if (choice.trigger.effect.kind === "echo_choice") {
+      const costText = choice.trigger.effect.costText;
+      setSession((current) => resolveEcho(current, choice.controllerSeatId, choice.sourceCardId, costText, index === 0 ? "pay" : "sacrifice"));
       return;
     }
     // Emeria Shepherd: remember battlefield-or-hand, then go on to pick the card.
@@ -10369,6 +10437,8 @@ export function untapForSeat(session: GameSession, seatId: string): GameSession 
   );
   const everyPermanent = session.seats.flatMap((other) => other.board.battlefield);
   const untapOrRemoveStun = (card: VisibleCard): VisibleCard => {
+    // Phasing: a phased-in permanent with it phases out as its controller's untap step begins (phased-out ones phase in, just below).
+    if (!card.phasedOut && !card.abilitiesStripped && /^phasing\b/im.test(card.oracleText)) return { ...card, phasedOut: true, attacking: false, blocking: false, tapped: card.tapped };
     // "This creature doesn't untap during your untap step." / "Enchanted creature doesn't untap during its controller's untap step."
     if (card.tapped && cantUntap(card, everyPermanent)) return { ...card, summoningSick: false, attacking: false, blocking: false };
     if (card.phasedOut) return { ...card, phasedOut: false, tapped: false, summoningSick: false, attacking: false, blocking: false };
@@ -10517,7 +10587,11 @@ export function assignBlockers(session: GameSession, choice: BlockChoiceState, b
   const defender = session.seats.find((seat) => seat.id === choice.defenderSeatId);
   const attackingCard = attacker?.board.battlefield.find((card) => card.id === choice.attackerCardId && card.attacking);
   if (!attacker || !defender || !attackingCard) return session;
-  const blockers = blockerCardIds
+  // Lure ("All creatures able to block this creature do so."): every creature that can block it must.
+  const lureForced = !attackingCard.abilitiesStripped && /^all creatures able to block (?:this creature|[a-z',\- ]+) do so\.?$/im.test(attackingCard.oracleText)
+    ? defender.board.battlefield.filter((card) => canBlock(card, attackingCard, defender.board.battlefield)).map((card) => card.id)
+    : undefined;
+  const blockers = (lureForced ?? blockerCardIds)
     .map((id) => defender.board.battlefield.find((card) => card.id === id && canBlock(card, attackingCard, defender.board.battlefield)))
     .filter((card): card is VisibleCard => Boolean(card))
     // Challenger Troll: its controller's power-4-or-greater creatures can't be blocked by more than one creature.
@@ -10563,6 +10637,8 @@ export function assignBlockers(session: GameSession, choice: BlockChoiceState, b
       if (seat.id === defender.id) {
         return {
           ...seat,
+          // Afflict N: whenever this creature becomes blocked, the defending player loses N life.
+          life: seat.life - (attackingCard.abilitiesStripped ? 0 : Number.parseInt(attackingCard.oracleText.match(/^afflict (\d+)/im)?.[1] ?? "0", 10)),
           board: {
             ...seat.board,
             battlefield: seat.board.battlefield.map((card) =>
@@ -10571,6 +10647,8 @@ export function assignBlockers(session: GameSession, choice: BlockChoiceState, b
                     ...card,
                     blocking: true,
                     blockingTargetId: attackingCard.id,
+                    // Flanking: a blocker without flanking gets -1/-1 until end of turn.
+                    ...(hasKeywordText(attackingCard.oracleText, "flanking") && !hasKeywordText(card.oracleText, "flanking") ? { temporaryPowerBonus: (card.temporaryPowerBonus ?? 0) - 1, temporaryToughnessBonus: (card.temporaryToughnessBonus ?? 0) - 1 } : {}),
                     // Bushido N: +N/+N until end of turn whenever it blocks.
                     ...(bushidoAmount(card) > 0 ? { temporaryPowerBonus: (card.temporaryPowerBonus ?? 0) + bushidoAmount(card), temporaryToughnessBonus: (card.temporaryToughnessBonus ?? 0) + bushidoAmount(card) } : {})
                   }
@@ -14521,7 +14599,7 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
           for (const conditionalSource of seat.board.battlefield) {
             if (conditionalSource.abilitiesStripped) continue;
             for (const boost of parseConditionalStaticBoosts(conditionalSource.oracleText)) {
-              if (!staticConditionMet(boost.condition, seat, conditionalSource)) continue;
+              if (!staticConditionMet(boost.condition, seat, conditionalSource, next.activePlayerId)) continue;
               if (boost.scope === "self" && conditionalSource.id !== card.id) continue;
               power += boost.power;
               toughness += boost.toughness;
@@ -22801,7 +22879,7 @@ function phaseTriggeredCards(seat: PlayerSeat, phase: TurnPhase) {
 
 function phaseTriggerTextMatches(text: string, phase: TurnPhase) {
   if (phase === "untap step") return text.includes("at the beginning of your untap") || text.includes("during your untap") || text.includes("phasing");
-  if (phase === "upkeep step") return /^(?:vanishing|fading) \d+/.test(text) || text.includes("at the beginning of your upkeep") || text.includes("at the beginning of each upkeep") || text.includes("cumulative upkeep");
+  if (phase === "upkeep step") return /^(?:vanishing|fading) \d+/.test(text) || /^echo (?:\{|\d)/.test(text) || text.includes("at the beginning of your upkeep") || text.includes("at the beginning of each upkeep") || text.includes("cumulative upkeep");
   if (phase === "draw step") return text.includes("at the beginning of your draw step");
   if (phase === "precombat main phase") return text.includes("at the beginning of your precombat main phase") || text.includes("first main phase");
   // "each combat" (Unnatural Growth) only fires on its controller's own combat here — the sweep walks the active seat's permanents.
@@ -22888,6 +22966,38 @@ export function humanPhaseGraveyardChoice(session: GameSession, seatId: string, 
   return { effect, optional: /\byou may\b/i.test(clauseText) };
 }
 
+export function echoCostText(raw: string): string {
+  return /^\d+$/.test(raw) ? `{${raw}}` : raw.toUpperCase();
+}
+
+// Echo: pay the cost (choice "pay"), sacrifice (choice "sacrifice"), or pay when affordable and sacrifice otherwise ("if_affordable", agents).
+export function resolveEcho(session: GameSession, seatId: string, cardId: string, costText: string, choice: "pay" | "sacrifice" | "if_affordable"): GameSession {
+  const seat = session.seats.find((item) => item.id === seatId);
+  const live = seat?.board.battlefield.find((card) => card.id === cardId);
+  if (!seat || !live) return session;
+  const marked: GameSession = { ...session, seats: session.seats.map((item) => (item.id !== seatId ? item : { ...item, board: { ...item.board, battlefield: item.board.battlefield.map((card) => (card.id === cardId ? { ...card, echoResolved: true } : card)) } })) };
+  const payment = choice === "sacrifice" ? undefined : chooseManaSourcesForCost(seat, genericManaAbilityCostShim({ costManaText: costText }), manaValueFromManaCost(costText), cardId, session.seats);
+  if (payment?.ok) {
+    const paidSession = { ...marked, seats: marked.seats.map((item) => (item.id === seatId ? spendManaSources(item, payment.sourceIds) : item)) };
+    return rulesEvent(paidSession, seatId, `${seat.name} pays echo ${costText} for ${live.name}.`);
+  }
+  return live.typeLine.includes("Creature")
+    ? destroyCreatures(marked, [{ seatId, cardId, message: `${live.name} is sacrificed (echo not paid).` }], "Rules action")
+    : rulesEvent(moveCardBetweenVisibleZones(marked, seatId, cardId, "graveyard"), seatId, `${live.name} is sacrificed (echo not paid).`);
+}
+
+// Cards in an opening hand that may begin the game on the battlefield (Leyline of Abundance, ...).
+export function openingHandBattlefieldCards(seat: PlayerSeat): VisibleCard[] {
+  return seat.board.hand.filter((card) => /if this card is in your opening hand, you may begin the game with it on the battlefield/i.test(card.oracleText));
+}
+
+export function putOpeningHandCardOnBattlefield(session: GameSession, seatId: string, cardId: string): GameSession {
+  const card = session.seats.find((item) => item.id === seatId)?.board.hand.find((entry) => entry.id === cardId);
+  if (!card) return session;
+  const moved = moveCardAcrossSeats(session, seatId, cardId, seatId, "battlefield");
+  return rulesEvent(moved.session, seatId, `${card.name} begins the game on the battlefield.`);
+}
+
 function phaseEventName(phase: TurnPhase) {
   return `${phase.replace(/ /g, "_")}_trigger`;
 }
@@ -22929,6 +23039,14 @@ export function applyDeterministicPhaseTrigger(session: GameSession, seatId: str
   // "• Khans — At the beginning of your upkeep, ..." (Outpost Siege) only runs when that label was the one chosen as it entered.
   const modeLabel = clauseText.match(/^[•*]\s*([A-Za-z]+)\s*[—-]/)?.[1];
   if (modeLabel && (sourceCard.chosenMode ?? modeLabel).toLowerCase() !== modeLabel.toLowerCase() && sourceCard.chosenMode) return session;
+
+  // Echo {cost}: the first upkeep after it came under your control, pay it or sacrifice the permanent (agents pay when they can).
+  const echoKeyword = clauseText.match(/^echo ((?:\{[^}]+\})+|\d+)/i);
+  if (echoKeyword) {
+    const live = session.seats.find((item) => item.id === seatId)?.board.battlefield.find((card) => card.id === sourceCard.id);
+    if (!live || live.echoResolved) return session;
+    return resolveEcho(session, seatId, live.id, echoCostText(echoKeyword[1]), "if_affordable");
+  }
 
   // Vanishing N / Fading N: N time/fade counters (put on at the first upkeep), one removed each upkeep; vanishing sacrifices when the last
   // is removed, fading when one can't be removed.
@@ -23101,7 +23219,8 @@ export function applyDeterministicPhaseTrigger(session: GameSession, seatId: str
 
 const COMMANDER_STARTING_LIFE = 40;
 
-function staticConditionMet(condition: StaticCondition, seat: PlayerSeat, source?: VisibleCard): boolean {
+function staticConditionMet(condition: StaticCondition, seat: PlayerSeat, source?: VisibleCard, activePlayerId?: string): boolean {
+  if (condition.kind === "your_turn") return activePlayerId === seat.id;
   if (condition.kind === "self_untapped") return source !== undefined && !source.tapped;
   if (condition.kind === "life_at_least") return seat.life >= condition.amount;
   if (condition.kind === "life_over_starting") return seat.life >= COMMANDER_STARTING_LIFE + condition.amount;
