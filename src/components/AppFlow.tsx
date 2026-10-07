@@ -2946,7 +2946,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     // can't be flashed in, only an exiled instant/flash card can. flashGranted mirrors
     // legalPriorityActions' own check (a battlefield Vedalken Orrery/Leyline of Anticipation), so an
     // agent offered this response as legal there doesn't get silently refused here.
-    if (!card || !canCastAtInstantSpeed(card, seatHasFlashGrant(seat))) {
+    if (!card || !(canCastAtInstantSpeed(card, seatHasFlashGrant(seat)) || (sourceZone === "exile" && card.exiledPlayableAnyTime))) {
       passPriority();
       return;
     }
@@ -4427,7 +4427,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     // battlefield during e.g. the draw step (or an opponent's turn) would silently succeed: the
     // card moves, and for lands it also burns the turn's one-land allowance with nothing to show
     // for it, leaving the player unable to play a land later in their real main phase.
-    if ((playingAsLand || !canCastAtInstantSpeed(card)) && (activeSeatId !== seatId || !isMainPhase(session.phase))) {
+    if ((playingAsLand || !(canCastAtInstantSpeed(card) || (sourceZone === "exile" && card.exiledPlayableAnyTime))) && (activeSeatId !== seatId || !isMainPhase(session.phase))) {
       addEvent(
         `${seat.name} can only ${playingAsLand ? "play a land" : `cast ${card.name}`} during a main phase on their own turn.`,
         seatId,
@@ -5453,7 +5453,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     ) {
       return;
     }
-    if (!canCastAtInstantSpeed(card, seatHasFlashGrant(humanSeat))) {
+    if (!canCastAtInstantSpeed(card, seatHasFlashGrant(humanSeat)) && !(sourceZone === "exile" && card.exiledPlayableAnyTime)) {
       addEvent(`${humanSeat.name} cannot respond with ${card.name}; it is not playable at instant speed.`, humanSeat.id, "Mana");
       return;
     }
@@ -11259,7 +11259,7 @@ export function legalPriorityActions(seat: PlayerSeat, pendingAction: PendingAct
   ];
   const flashGranted = seatHasFlashGrant(seat);
   const actions: LegalAgentAction[] = respondableCards
-    .filter(({ card }) => canCastAtInstantSpeed(card, flashGranted))
+    .filter(({ card, sourceZone }) => canCastAtInstantSpeed(card, flashGranted) || (sourceZone === "exile" && Boolean(card.exiledPlayableAnyTime)))
     .filter(({ card }) => {
       const counterAbility = parseCounterSpellAbility(card.oracleText);
       if (!counterAbility || parseModalHeader(card.oracleText)) return true;
@@ -11385,6 +11385,12 @@ function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllowed: boo
       if (hasSorcerySpeedOnlyLimiter(ability.clause) && !sorcerySpeedAllowed) return;
       if (ability.costRemoveCounter && counterCount(card, ability.costRemoveCounter) < 1) return;
       if (ability.costLifeCommanderColors && seat.life <= commanderColorCount(seat)) return;
+      // Hideaway lands (Spinerock Knoll, Mosswort Bridge): worth activating only with a hidden card and the condition already true.
+      if (ability.effect.kind === "hideaway_play") {
+        if (!seat.board.exile?.some((hidden) => hidden.hideawaySourceId === card.id)) return;
+        const damageMet = hideawayDamageConditionMet(session, seat.id, ability.effect.conditionText);
+        if (!(damageMet !== undefined ? damageMet : isBoardConditionMet(ability.effect.conditionText, seat, session.seats))) return;
+      }
       if (ability.costTapCreatures) {
         if (!chooseCreaturesToTapForCost(seat, ability.costTapCreatures.count, ability.costTapCreatures.subtype)) return;
       } else {
@@ -12909,12 +12915,14 @@ export function applyGenericTapEffect(
     const mine = session.seats.find((item) => item.id === seatId);
     const hidden = (mine?.board.exile ?? []).find((card) => card.hideawaySourceId === sourceCardId);
     if (!mine || !hidden) return rulesEvent(session, seatId, `${sourceCardName} has no hidden card.`);
-    if (!isBoardConditionMet(effect.conditionText, mine, session.seats)) return rulesEvent(session, seatId, `${seat.name} activates ${sourceCardName}, but the condition isn't met.`);
+    const damageCondition = hideawayDamageConditionMet(session, seatId, effect.conditionText);
+    const conditionMet = damageCondition !== undefined ? damageCondition : isBoardConditionMet(effect.conditionText, mine, session.seats);
+    if (!conditionMet) return rulesEvent(session, seatId, `${seat.name} activates ${sourceCardName}, but the condition isn't met.`);
     return rulesEvent(
       {
         ...session,
         seats: session.seats.map((item) =>
-          item.id !== seatId ? item : { ...item, board: { ...item.board, exile: (item.board.exile ?? []).map((card) => (card.id === hidden.id ? { ...card, exiledPlayableBySeatId: seatId, exiledPlayableFree: true, hideawaySourceId: undefined } : card)) } }
+          item.id !== seatId ? item : { ...item, board: { ...item.board, exile: (item.board.exile ?? []).map((card) => (card.id === hidden.id ? { ...card, exiledPlayableBySeatId: seatId, exiledPlayableFree: true, exiledPlayableAnyTime: !isLandCard(card), hideawaySourceId: undefined } : card)) } }
         )
       },
       seatId,
@@ -14156,6 +14164,10 @@ function applyCombatDamageToTarget(
         : seat
     ),
     pendingCombatDamageToPlayer: [...(base.pendingCombatDamageToPlayer ?? []), ...combatDamageToPlayerEntry],
+    damageThisTurn: {
+      turn: base.turn,
+      bySeat: { ...(base.damageThisTurn?.turn === base.turn ? base.damageThisTurn.bySeat : {}), [target.seat.id]: ((base.damageThisTurn?.turn === base.turn ? base.damageThisTurn.bySeat[target.seat.id] : 0) ?? 0) + amount }
+    },
     events: [
       {
         id: crypto.randomUUID(),
@@ -19663,6 +19675,15 @@ export function resolveTriggerEffect(session: GameSession, trigger: Extract<Pend
   const resolved = resolveTriggerEffectOnce(session, trigger);
   if (!trigger.effect.then) return resolved;
   return resolveTriggerEffect(resolved, { ...trigger, id: crypto.randomUUID(), effect: trigger.effect.then, message: "" });
+}
+
+// "an opponent was dealt 7 or more damage this turn" (Spinerock Knoll): any damage from any source to any one of the controller's opponents.
+export function hideawayDamageConditionMet(session: GameSession, controllerSeatId: string, conditionText: string): boolean | undefined {
+  const match = conditionText.match(/^an opponent was dealt (\d+) or more damage this turn$/);
+  if (!match) return undefined;
+  const needed = Number.parseInt(match[1], 10);
+  if (session.damageThisTurn?.turn !== session.turn) return false;
+  return Object.entries(session.damageThisTurn.bySeat).some(([seatId, dealt]) => seatId !== controllerSeatId && dealt >= needed);
 }
 
 // Pays {R} for each of `exact` (or as many as possible, up to twelve) from untapped sources. Undefined if none can be paid.

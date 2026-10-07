@@ -2,7 +2,7 @@
 // the test: two earlier tests passed on invented text while the real cards stayed broken (Court of Grace, the
 // "with power N or greater" watchers). Skipped per card when the catalog doesn't have it.
 import { describe, expect, it } from "vitest";
-import { legalMainPhaseActions, tapCreaturesAltCostFor, applyCastRemoval, nextCastPrompt, type CastChoices, spellModePrompt, applyDigPick, applyLabeledContinuation, spellTargetSlots, grantKeywordsToCreature, applyExalted, applySacrificeEffect, applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
+import { hideawayDamageConditionMet, legalMainPhaseActions, tapCreaturesAltCostFor, applyCastRemoval, nextCastPrompt, type CastChoices, spellModePrompt, applyDigPick, applyLabeledContinuation, spellTargetSlots, grantKeywordsToCreature, applyExalted, applySacrificeEffect, applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
 import { parseRemovalEffect } from "@/lib/removalSpells";
 import { parseZoneEffect } from "@/lib/zoneEffects";
 import { permanentMatchesQualifier } from "@/lib/characteristics";
@@ -1544,5 +1544,47 @@ describe("Orb of Dragonkind's mana ability (real Oracle text)", () => {
     expect(adjustedCastingCost(withOrb, elf, 3, "hand", "a", [withOrb])).toBe(3);
     const tappedOrb = seat("a", [real("Orb of Dragonkind", "orb", { tapped: true })]);
     expect(adjustedCastingCost(tappedOrb, dragon, 4, "hand", "a", [tappedOrb])).toBe(4);
+  });
+});
+
+describe("Spinerock Knoll (real Oracle text)", () => {
+  const setup = (damageToB: number) => {
+    const knoll = real("Spinerock Knoll", "sk");
+    const mine = seat("a", [knoll, real("Mountain", "m1")]);
+    mine.board.exile = [bear("hidden", { zone: "exile" as const, hideawaySourceId: "sk", typeLine: "Sorcery", role: "spell" })];
+    const s = session([mine, seat("b", []), seat("c", [])]);
+    s.damageThisTurn = { turn: s.turn, bySeat: { b: damageToB } };
+    return { s, knoll };
+  };
+  const ability = (knoll: VisibleCard) => parseGenericTapAbilities(knoll.oracleText).find((a) => a.effect.kind === "hideaway_play")!;
+
+  it("counts damage dealt to any opponent from any source this turn", () => {
+    expect(hideawayDamageConditionMet(setup(7).s, "a", "an opponent was dealt 7 or more damage this turn")).toBe(true);
+    expect(hideawayDamageConditionMet(setup(6).s, "a", "an opponent was dealt 7 or more damage this turn")).toBe(false);
+    const stale = setup(9).s;
+    stale.turn += 1;
+    expect(hideawayDamageConditionMet(stale, "a", "an opponent was dealt 7 or more damage this turn")).toBe(false);
+  });
+  it("damage to a player is recorded as it lands, per player, and resets next turn", () => {
+    const s = session([seat("a", []), seat("b", []), seat("c", [])]);
+    const burn = real("Lightning Bolt", "bolt");
+    let next = applyRemovalEffect(s, "a", "Lightning Bolt", burn, { kind: "damage", amount: 3, targetType: "player" }, undefined, { kind: "player", seatId: "b" });
+    next = applyRemovalEffect(next, "a", "Lightning Bolt", burn, { kind: "damage", amount: 3, targetType: "player" }, undefined, { kind: "player", seatId: "b" });
+    expect(next.damageThisTurn?.bySeat.b).toBe(6);
+  });
+  it("activating it with enough damage makes the hidden spell castable at any time", () => {
+    const { s, knoll } = setup(7);
+    const after = applyGenericTapEffect(s, "a", "sk", "Spinerock Knoll", ability(knoll).effect, ability(knoll).clause);
+    const hidden = after.seats[0].board.exile!.find((c) => c.id === "hidden")!;
+    expect(hidden.exiledPlayableFree).toBe(true);
+    expect(hidden.exiledPlayableAnyTime).toBe(true);
+    const tooEarly = setup(3);
+    expect(applyGenericTapEffect(tooEarly.s, "a", "sk", "Spinerock Knoll", ability(tooEarly.knoll).effect, ability(tooEarly.knoll).clause).seats[0].board.exile![0].exiledPlayableFree).toBeUndefined();
+  });
+  it("the AI is only offered the activation once the condition holds and a card is hidden", () => {
+    const withDamage = setup(7);
+    const offered = (state: { s: GameSession }) => legalMainPhaseActions(state.s.seats[0], true, "a", state.s.turn, new Set(), state.s).some((a) => a.id.startsWith("activate-generic-tap:sk"));
+    expect(offered(withDamage)).toBe(true);
+    expect(offered(setup(2))).toBe(false);
   });
 });

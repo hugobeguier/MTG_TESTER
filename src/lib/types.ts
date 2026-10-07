@@ -319,6 +319,8 @@ export interface VisibleCard {
   // cast that card without paying its mana cost") — undefined/false means the normal cost still
   // applies, same as any other exile-cast permission.
   exiledPlayableFree?: boolean;
+  // A hideaway card may be cast at any time it becomes playable, ignoring normal timing (but a land still needs its land drop).
+  exiledPlayableAnyTime?: boolean;
   // Hideaway: the land whose "look at the top N, exile one face down" put this card here.
   hideawaySourceId?: string;
   // "As this enters, choose Khans or Dragons." (Outpost Siege): the label picked, which gates the matching bullet.
@@ -463,6 +465,9 @@ export interface GameSession {
   // damage normally, while everyone else's is blocked. undefined keeps Spore Frog's original
   // all-or-nothing behavior unchanged.
   combatDamagePrevented?: { turn: number; exceptType?: string };
+  // Damage dealt to each player so far this turn (any source, combat or not): Spinerock Knoll's "an opponent was dealt 7 or more
+  // damage this turn". Starts over whenever the turn number changes.
+  damageThisTurn?: { turn: number; bySeat: Record<string, number> };
   // Rule 500.7: "Take an extra turn after this one." (Temporal Mastery, Time Warp, ...) — a FIFO
   // queue of seatIds, consumed one entry per turn-change instead of the normal rotation. Queuing
   // rather than mutating activePlayerId/turn order directly means the two turn-change call sites
