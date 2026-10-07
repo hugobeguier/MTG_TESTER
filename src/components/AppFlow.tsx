@@ -472,7 +472,11 @@ interface BasicLandFetchSearchState {
 // The continuation choose_effect_target resolves into once a human picks a target — names which
 // pure applier owns re-entry (applyRemovalEffect/applyZoneEffect), carrying exactly what that
 // applier needs besides the target itself (chosenX for a variable-damage spell's already-paid X).
-type PendingTargetedEffect = { kind: "removal"; effect: RemovalEffect; chosenX?: number } | { kind: "zone"; effect: ZoneEffect; chosenX?: number };
+type PendingTargetedEffect =
+  | { kind: "removal"; effect: RemovalEffect; chosenX?: number }
+  | { kind: "zone"; effect: ZoneEffect; chosenX?: number }
+  // "Another target creature gets +2/+0 and gains trample until end of turn." (Rhonas the Indomitable): the human aims the pump.
+  | { kind: "pump"; effect: PumpEffect };
 
 // The human's answers to a spell's cast-time choices: which modes (indices into the card's own mode list) and which targets, in the
 // order the spell's effects consume them. Attached to the spell on the stack so resolution uses exactly what the opponents saw.
@@ -5243,6 +5247,13 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         return;
       }
     }
+    // "Destroy target creature" and friends after a sacrifice (Thrashing Brontodon): the human aims it.
+    if (seat?.kind === "human" && paid.ability.effect.kind === "removal" && paid.ability.effect.effect.kind !== "modal") {
+      const removalEff = paid.ability.effect.effect;
+      setSession(() => paid.session);
+      if (maybeRequestTarget(seatId, paid.card, removalEffectTargetSpec(removalEff, cardId), false, { kind: "removal", effect: removalEff })) return;
+      if (openAbilityDamageAim(seatId, paid.card, removalEff, paid.session)) return;
+    }
     // "Return target Zombie card from your graveyard to your hand" (Memorial to Folly, Haven of the Spirit Dragon): the human picks the card.
     if (seat?.kind === "human" && paid.ability.effect.kind === "zone_effect") {
       const zoneEff = paid.ability.effect.effect;
@@ -5427,6 +5438,27 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     setSession(() => resolved.session);
   }
 
+  // "Deals N damage to any target" from an activated ability (Prodigal Pyromancer-style): the human aims it. True when the prompt opened.
+  function openAbilityDamageAim(seatId: string, sourceCard: VisibleCard, effect: RemovalEffect, afterPaymentSession: GameSession): boolean {
+    if (effect.kind !== "damage" || typeof effect.amount !== "number" || effect.targetType === "creature") return false;
+    const options = labeledTargetOptions(afterPaymentSession, seatId, effect.targetType === "player" ? "player" : "any_damage", sourceCard);
+    if (options.length < 2) return false;
+    setSession(() => afterPaymentSession);
+    setPendingRuleChoice({
+      id: crypto.randomUUID(),
+      kind: "choose_labeled_target",
+      controllerSeatId: seatId,
+      sourceCardId: sourceCard.id,
+      sourceCardName: sourceCard.name,
+      sourceCard,
+      slots: [{ prompt: sourceCard.name + ": choose a target for " + effect.amount + " damage.", options }],
+      slotIndex: 0,
+      picks: [],
+      continuation: { kind: "damage", effect }
+    });
+    return true;
+  }
+
   function activateGenericManaAbility(seatId: string, cardId: string, abilityIndex: number, chosenCardId?: string) {
     const seat = session.seats.find((item) => item.id === seatId);
     const card = seat?.board.battlefield.find((item) => item.id === cardId);
@@ -5490,6 +5522,22 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     // drawing (see drawCard above for the simplest example); this one never did, so drawing your
     // first card of the turn off Greed silently skipped the miracle offer a natural/granted-miracle
     // draw would have gotten.
+    // The human aims a targeted pump (Rhonas the Indomitable) or removal ability instead of the heuristic picking.
+    if (seat?.kind === "human" && chosenCardId === undefined) {
+      const aimEffect = paid.effect;
+      const aimSpec =
+        aimEffect.kind === "pump"
+          ? ({ id: "target", zone: "battlefield", permanentType: "creature", controller: "any", min: 1, max: 1, excludedCardIds: aimEffect.effect.another ? [cardId] : [], prompt: `${paid.card.name}: choose a target creature.` } as TargetSpec)
+          : aimEffect.kind === "removal" && aimEffect.effect.kind !== "modal"
+            ? removalEffectTargetSpec(aimEffect.effect, cardId)
+            : undefined;
+      if (aimSpec) {
+        setSession(() => paid.session);
+        const pending: PendingTargetedEffect | undefined = aimEffect.kind === "pump" ? { kind: "pump", effect: aimEffect.effect } : aimEffect.kind === "removal" ? { kind: "removal", effect: aimEffect.effect } : undefined;
+        if (pending && maybeRequestTarget(seatId, paid.card, aimSpec, false, pending)) return;
+      }
+      if (aimEffect.kind === "removal" && openAbilityDamageAim(seatId, paid.card, aimEffect.effect, paid.session)) return;
+    }
     const next = applyGenericAbilityEffect(paid.session, seatId, paid.card, paid.effect, chosenCardId);
     setSession(next);
     checkMiracleAfterDraw(session, next);
@@ -8670,6 +8718,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       if (choice.pending.kind === "removal") {
         return applyRemovalEffect(current, choice.controllerSeatId, choice.sourceCardName, choice.sourceCard, choice.pending.effect, choice.pending.chosenX, target);
       }
+      if (choice.pending.kind === "pump") return applyTargetedPumpEffect(current, choice.controllerSeatId, choice.sourceCard, choice.pending.effect, target);
       return applyZoneEffect(current, choice.controllerSeatId, choice.sourceCardName, choice.pending.effect, choice.pending.chosenX, target);
     });
   }
