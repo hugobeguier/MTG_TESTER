@@ -70,6 +70,7 @@ import { FOUNDATIONS_AGENT_DECKLISTS, FOUNDATIONS_PLAYER_DECKLIST, commanderFrom
 import { parseSpellExtraEffects, type SpellExtraEffect } from "@/lib/spellExtras";
 import { matchWatcherSubject } from "@/lib/triggerWatchers";
 import { graveyardCastPermission } from "@/lib/graveyardCasting";
+import { libraryTopCastPermission } from "@/lib/libraryCasting";
 import { parseCycling } from "@/lib/cycling";
 import { parseTapCreaturesAltCost } from "@/lib/altCosts";
 import { parseGraveyardReturnAbility, reduceGenericCost } from "@/lib/graveyardAbilities";
@@ -317,6 +318,20 @@ type TriggerEffect = (
   | { kind: "zone_effect"; effect: ZoneEffect }
   // "When this creature dies, you may exile it. When you do, return target creature card from your graveyard to your hand." (Undead Butler)
   | { kind: "exile_self_return_creature_to_hand" }
+  // "Discard any number of cards, then draw that many cards." (The Elder Dragon War, chapter II). discardIds accumulates the human's picks.
+  | { kind: "discard_any_then_draw"; discardIds?: string[] }
+  // "Read ahead" (The Elder Dragon War): the controller picks the chapter a Saga starts on as it enters.
+  | { kind: "read_ahead"; chapterCount: number }
+  // "Exile the top X cards of your library, where X is the number of creatures you control with power 4 or greater. You may play those cards
+  // until your next end step. At the beginning of your next end step, [it] deals 2 damage to each opponent for each of those cards that are
+  // still exiled." (Dragonhawk, Fate's Tempest)
+  | { kind: "exile_top_by_power_then_damage"; minPower: number; damagePerCard: number }
+  // Myriad (Goldlust Triad): a token copy tapped and attacking each opponent other than the defending player, exiled at end of combat.
+  | { kind: "myriad"; defendingSeatId: string }
+  // "Until end of turn, Nogi becomes a Dragon with base power and toughness 5/5 and gains flying." (Nogi, Draco-Zealot)
+  | { kind: "self_becomes_dragon"; power: number; toughness: number; keywords: string[] }
+  // "...you may put a Dragon creature card from your hand onto the battlefield tapped and attacking." (Minion of the Mighty)
+  | { kind: "dragon_from_hand_attacking"; subtype: string }
   // "Landfall — Whenever a land you control enters, you may return target nonland permanent card from your graveyard to your hand. If that
   // land is a Plains, you may return that card to the battlefield instead." (Emeria Shepherd)
   | { kind: "landfall_return_nonland_permanent"; plainsToBattlefield: boolean }
@@ -357,7 +372,7 @@ type TriggerEffect = (
   then?: TriggerEffect;
 };
 
-type TriggerCondition = { kind: "controls_greatest_power" } | { kind: "source_untapped" } | { kind: "behold"; subtype: string } | { kind: "total_power_at_least"; amount: number } | { kind: "controls_no_other"; subtype: string };
+type TriggerCondition = { kind: "controls_greatest_power" } | { kind: "source_untapped" } | { kind: "behold"; subtype: string } | { kind: "total_power_at_least"; amount: number } | { kind: "controls_no_other"; subtype: string } | { kind: "controls_subtype_count"; subtype: string; amount: number } | { kind: "attacking_power_at_least"; amount: number };
 
 interface TokenSpec {
   count: number;
@@ -386,7 +401,7 @@ type PendingAction =
       cardId: string;
       cardName: string;
       cardTypeLine?: string;
-      sourceZone?: "hand" | "command" | "exile" | "graveyard";
+      sourceZone?: "hand" | "command" | "exile" | "graveyard" | "library";
       // Cast from the graveyard via flashback: the spell is exiled instead of returning to the graveyard.
       flashback?: boolean;
       manaSourceIds: string[];
@@ -488,7 +503,7 @@ type PendingRuleChoice =
       sourceCardName: string;
       prompt: string;
       altLabel: string;
-      resume: { seatId: string; cardId: string; position?: { x: number; z: number }; sourceZone: "hand" | "command" | "exile" | "graveyard"; faceIndex?: number; sacrificeTargets?: VisibleCard[] };
+      resume: { seatId: string; cardId: string; position?: { x: number; z: number }; sourceZone: "hand" | "command" | "exile" | "graveyard" | "library"; faceIndex?: number; sacrificeTargets?: VisibleCard[] };
     }
   // The cast-time questions of a spell (modes, then targets): answered one at a time BEFORE the cost is paid; then the cast is replayed
   // with the answers attached (see playCard / respondWithCard's castChoices parameter).
@@ -505,7 +520,7 @@ type PendingRuleChoice =
       options: Array<{ label: string; mode?: number; target?: ChosenTarget }>;
       answers: CastChoices;
       resume:
-        | { via: "playCard"; seatId: string; cardId: string; position?: { x: number; z: number }; sourceZone: "hand" | "command" | "exile" | "graveyard"; faceIndex?: number; sacrificeTargets?: VisibleCard[]; altChoice?: "alt" | "normal" }
+        | { via: "playCard"; seatId: string; cardId: string; position?: { x: number; z: number }; sourceZone: "hand" | "command" | "exile" | "graveyard" | "library"; faceIndex?: number; sacrificeTargets?: VisibleCard[]; altChoice?: "alt" | "normal" }
         | { via: "respondWithCard"; cardId: string; sourceZone: "hand" | "exile"; sacrificeTargets?: VisibleCard[] };
     }
   // A cast "choose one / choose two" spell (Austere Command, Valorous Stance, Collective Resistance, Profane Command): the human picks
@@ -683,7 +698,7 @@ type PendingRuleChoice =
       sourceCardName: string;
       prompt: string;
       resumeVia: "playCard" | "respondWithCard";
-      sourceZone: "hand" | "command" | "exile" | "graveyard";
+      sourceZone: "hand" | "command" | "exile" | "graveyard" | "library";
       faceIndex?: number;
       position?: { x: number; z: number };
     }
@@ -1096,7 +1111,7 @@ export interface LegalAgentAction {
   loyaltyCost?: number;
   // Set only for a cast_spell action sourced from exile (impulse-draw/steal-and-play effects) or from the
   // graveyard (flashback, "you may cast this card from your graveyard") — absent means the normal "from hand" path.
-  sourceZone?: "exile" | "graveyard";
+  sourceZone?: "exile" | "graveyard" | "library";
   targetIds: string[];
   label: string;
   detail?: string;
@@ -2027,6 +2042,19 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     setSession((current) => drawForSeat(current, monarch.id, `${monarch.name} draws a card as the monarch.`));
   }, [mode, gameStage, pendingAction, pendingRuleChoice, session.phase, session.turn, session.monarchSeatId, activeSeatId, session.seats]);
 
+  // Dragonhawk, Fate's Tempest: at the beginning of its controller's end step, damage for every impulse-exiled card still in exile.
+  const exileDamageChecked = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (mode !== "game" || gameStage !== "playing" || pendingAction || pendingRuleChoice) return;
+    if (session.phase !== "end step") return;
+    const active = session.seats.find((seat) => seat.id === activeSeatId);
+    if (!active || !(active.board.exile ?? []).some((card) => card.exileEndStepDamage?.controllerSeatId === activeSeatId)) return;
+    const key = `${session.turn}:${activeSeatId}`;
+    if (exileDamageChecked.current.has(key)) return;
+    exileDamageChecked.current.add(key);
+    setSession((current) => resolveEndStepExileDamage(current, activeSeatId));
+  }, [mode, gameStage, pendingAction, pendingRuleChoice, session.phase, session.turn, activeSeatId, session.seats]);
+
   // Life gain has a dozen separate call sites that each just add to seat.life, so instead of hooking each one this watches every
   // seat's life total and treats any rise as "you gained life": applies Angel of Vitality's +1, then queues the
   // "whenever you gain life" triggers. (Manual +/- life edits count too — acceptable for a table that is also a sandbox.)
@@ -2849,7 +2877,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     }
     if ((action.actionType === "cast_spell" || action.actionType === "cast_commander") && action.cardId) {
       agentMainActions.current.add(`${session.turn}:${seat.id}:${session.phase}`);
-      playCard(seat.id, action.cardId, undefined, action.actionType === "cast_commander" ? "command" : action.sourceZone === "exile" ? "exile" : action.sourceZone === "graveyard" ? "graveyard" : "hand", action.faceIndex);
+      playCard(seat.id, action.cardId, undefined, action.actionType === "cast_commander" ? "command" : action.sourceZone === "exile" ? "exile" : action.sourceZone === "graveyard" ? "graveyard" : action.sourceZone === "library" ? "library" : "hand", action.faceIndex);
       return;
     }
     if (action.actionType === "activate_ability" && action.cardId && action.abilityKind === "basic_land_fetch") {
@@ -3736,9 +3764,51 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   // real, freshly-placed permanent's own counters (always 0 here, but this keeps the same single
   // source of truth applySagaLoreCounter's other caller uses). A no-op for a non-Saga or a card not
   // actually on this seat's battlefield.
+  // Read ahead: the Saga starts with the chosen number of lore counters and only THAT chapter triggers (skipped chapters don't).
+  function applySagaReadAhead(session: GameSession, seatId: string, saga: VisibleCard, chapters: SagaChapters, chapter: number): GameSession {
+    let next = session;
+    for (let index = 0; index < chapter; index += 1) next = applyLoreCounterEtb(next, seatId, saga.id);
+    const chapterText = chapters.effectByChapter.get(chapter);
+    if (chapterText) next = triggerSagaChapter(next, seatId, saga, chapterText);
+    if (chapter >= chapters.chapterCount && chapters.sacrificesOnFinalChapter) next = moveCardBetweenVisibleZones(next, seatId, saga.id, "graveyard");
+    return next;
+  }
+
+  // The agent's read-ahead pick: the sweeper chapter only when the opponents' boards are clearly bigger than its own; otherwise the
+  // last chapter (usually the payoff) right away.
+  function chooseReadAheadChapter(session: GameSession, seatId: string, chapters: SagaChapters): number {
+    const mine = session.seats.find((seat) => seat.id === seatId)?.board.battlefield.filter((card) => card.typeLine.includes("Creature")).length ?? 0;
+    const theirs = session.seats.filter((seat) => seat.id !== seatId && !seat.hasLost).reduce((total, seat) => total + seat.board.battlefield.filter((card) => card.typeLine.includes("Creature")).length, 0);
+    const firstText = chapters.effectByChapter.get(1) ?? "";
+    if (/deals \d+ damage to each creature/i.test(firstText) && theirs >= mine * 2 + 2) return 1;
+    return chapters.chapterCount;
+  }
+
   function applySagaEntryLoreCounter(session: GameSession, seatId: string, cardId: string): GameSession {
     const saga = session.seats.find((seat) => seat.id === seatId)?.board.battlefield.find((card) => card.id === cardId);
     const chapters = saga ? parseSagaChapters(saga.oracleText) : undefined;
+    if (saga && chapters && /^read ahead\b/im.test(saga.oracleText)) {
+      const controller = session.seats.find((seat) => seat.id === seatId);
+      if (controller?.kind === "human") {
+        window.setTimeout(
+          () =>
+            setPendingRuleChoice({
+              id: crypto.randomUUID(),
+              kind: "choose_trigger_option",
+              controllerSeatId: seatId,
+              sourceCardId: saga.id,
+              sourceCardName: saga.name,
+              prompt: saga.name + ": read ahead — choose the chapter to start on.",
+              options: Array.from({ length: chapters.chapterCount }, (_, index) => ({ index, label: "Chapter " + (index + 1) + " — " + (chapters.effectByChapter.get(index + 1) ?? "").slice(0, 90) })),
+              trigger: makeCommonTrigger(seatId, seatId, saga, { kind: "read_ahead", chapterCount: chapters.chapterCount }, saga.name + " read ahead."),
+              remainingStack: []
+            }),
+          0
+        );
+        return session;
+      }
+      return applySagaReadAhead(session, seatId, saga, chapters, chooseReadAheadChapter(session, seatId, chapters));
+    }
     return saga && chapters ? applySagaLoreCounter(session, seatId, saga, chapters) : session;
   }
 
@@ -4396,7 +4466,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     seatId: string,
     cardId: string,
     position?: { x: number; z: number },
-    sourceZone: "hand" | "command" | "exile" | "graveyard" = "hand",
+    sourceZone: "hand" | "command" | "exile" | "graveyard" | "library" = "hand",
     faceIndex?: number,
     preChosenSacrificeTargets?: VisibleCard[],
     castChoices?: CastChoices,
@@ -4422,7 +4492,9 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
           ? findExiledCardAnySeat(session, cardId)
           : sourceZone === "graveyard"
             ? seat?.board.graveyard?.find((item) => item.id === cardId)
-            : seat?.board.hand.find((item) => item.id === cardId);
+            : sourceZone === "library"
+              ? seat?.library?.find((item, index) => index === 0 && item.id === cardId)
+              : seat?.board.hand.find((item) => item.id === cardId);
     if (!seat || !card) return;
 
     if (sourceZone === "command" && card.id !== cardId) return;
@@ -4439,6 +4511,11 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         : undefined;
     if (sourceZone === "graveyard" && !graveyardPermission) {
       addEvent(`${seat.name} can't cast ${card.name} from the graveyard right now.`, seatId, "Timing");
+      return;
+    }
+    // The top card of the library can only be cast while a permanent says so (Thundermane Dragon).
+    if (sourceZone === "library" && !libraryTopCastPermission(card, seat.board.battlefield)) {
+      addEvent(`${seat.name} can't cast ${card.name} from the top of their library right now.`, seatId, "Timing");
       return;
     }
     // Defense-in-depth: this should already be true whenever this path is reachable (the legal
@@ -4787,7 +4864,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         doorFace ? faceIndex : spellFace ? faceIndex : dfcSplit ? dfcSplit.spellIndex : !doors && card.faces?.length === 2 ? 0 : undefined,
       chosenX: chosenX > 0 ? chosenX : undefined,
       castChoices,
-      message: `${seat.name} casts ${castName}${xText}${sourceZone === "command" ? " from the command zone" : sourceZone === "exile" ? " from exile" : sourceZone === "graveyard" ? (flashbackCostText ? " with flashback" : " from the graveyard") : ""}${spentManaText}.`
+      message: `${seat.name} casts ${castName}${xText}${sourceZone === "command" ? " from the command zone" : sourceZone === "exile" ? " from exile" : sourceZone === "graveyard" ? (flashbackCostText ? " with flashback" : " from the graveyard") : sourceZone === "library" ? " from the top of their library" : ""}${spentManaText}.`
     };
     if (usesOnceEachTurnFreeCast) {
       setSession((current) => ({
@@ -5714,6 +5791,19 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       });
       return true;
     }
+    if (trigger.effect.kind === "dragon_from_hand_attacking") {
+      const word = trigger.effect.subtype.toLowerCase();
+      const candidates = controller.board.hand.filter((card) => card.typeLine.includes("Creature") && card.typeLine.toLowerCase().includes(word));
+      if (candidates.length === 0) return false;
+      return open(
+        `${trigger.sourceCardName}: put a ${trigger.effect.subtype} creature card from your hand onto the battlefield tapped and attacking?`,
+        [...candidates.map((card, index) => ({ index, label: `${card.name} (${card.power ?? "?"}/${card.toughness ?? "?"})` })), { index: candidates.length, label: "No thanks" }]
+      );
+    }
+    if (trigger.effect.kind === "discard_any_then_draw") {
+      if (controller.board.hand.length === 0) return false;
+      return open(`${trigger.sourceCardName}: discard which cards? You draw that many.`, discardOptions(controller, []));
+    }
     if (trigger.effect.kind === "choose_named_mode") {
       const names = trigger.effect.options;
       return open(trigger.sourceCardName + ": choose " + names.join(" or ") + ".", names.map((label, index) => ({ index, label })));
@@ -5851,6 +5941,52 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
           setSession(() => applyRemovalEffect(paid.session, choice.controllerSeatId, choice.sourceCardName, source, damage));
         }
       }
+      resumeAfterTriggerChoice(choice.trigger, choice.remainingStack);
+      return;
+    }
+    // Read ahead: start the Saga on the chosen chapter.
+    if (choice.trigger.effect.kind === "read_ahead") {
+      const saga = session.seats.find((seat) => seat.id === choice.controllerSeatId)?.board.battlefield.find((card) => card.id === choice.sourceCardId);
+      const chapters = saga ? parseSagaChapters(saga.oracleText) : undefined;
+      if (saga && chapters) setSession((current) => applySagaReadAhead(current, choice.controllerSeatId, saga, chapters, index + 1));
+      resumeAfterTriggerChoice(choice.trigger, choice.remainingStack);
+      return;
+    }
+    // Discard any number: each click adds a card; the last option finishes.
+    if (choice.trigger.effect.kind === "discard_any_then_draw") {
+      const effect = choice.trigger.effect;
+      const owner = session.seats.find((seat) => seat.id === choice.controllerSeatId);
+      const already = effect.discardIds ?? [];
+      const remaining = (owner?.board.hand ?? []).filter((card) => !already.includes(card.id));
+      if (owner && index < remaining.length) {
+        const picked = [...already, remaining[index].id];
+        const nextTrigger = { ...choice.trigger, effect: { ...effect, discardIds: picked } } as Extract<PendingAction, { type: "trigger" }>;
+        if (picked.length < owner.board.hand.length) {
+          setPendingRuleChoice({
+            ...choice,
+            id: crypto.randomUUID(),
+            trigger: nextTrigger,
+            prompt: choice.sourceCardName + ": discard which cards? (" + picked.length + " chosen) You draw that many.",
+            options: discardOptions(owner, picked),
+            queueing: choice.queueing?.map((queued) => (queued.id === choice.trigger.id ? nextTrigger : queued))
+          });
+          return;
+        }
+        const done = { ...nextTrigger, effect: { ...effect, discardIds: picked, chosenOption: picked.join(",") } } as Extract<PendingAction, { type: "trigger" }>;
+        if (choice.queueing) {
+          queueCommonTriggers(choice.queueing.map((queued) => (queued.id === choice.trigger.id ? done : queued)));
+          return;
+        }
+        setSession((current) => resolveTriggerEffect(current, done));
+        resumeAfterTriggerChoice(choice.trigger, choice.remainingStack);
+        return;
+      }
+      const finished = { ...choice.trigger, effect: { ...effect, chosenOption: already.join(",") } } as Extract<PendingAction, { type: "trigger" }>;
+      if (choice.queueing) {
+        queueCommonTriggers(choice.queueing.map((queued) => (queued.id === choice.trigger.id ? finished : queued)));
+        return;
+      }
+      setSession((current) => resolveTriggerEffect(current, finished));
       resumeAfterTriggerChoice(choice.trigger, choice.remainingStack);
       return;
     }
@@ -8311,7 +8447,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     if (choice.resumeVia === "playCard") {
       playCard(choice.controllerSeatId, choice.sourceCardId, choice.position, choice.sourceZone, choice.faceIndex, [chosenCard]);
     } else {
-      respondWithCard(choice.sourceCardId, choice.sourceZone === "command" || choice.sourceZone === "graveyard" ? "hand" : choice.sourceZone, [chosenCard]);
+      respondWithCard(choice.sourceCardId, choice.sourceZone === "command" || choice.sourceZone === "graveyard" || choice.sourceZone === "library" ? "hand" : choice.sourceZone, [chosenCard]);
     }
   }
 
@@ -10707,6 +10843,7 @@ export function applyEntersWithCounterReplacements(session: GameSession, seatId:
     if (source.abilitiesStripped) continue;
     for (const replacement of parseEntersWithCounterReplacements(source.oracleText)) {
       if (!permanentMatchesQualifier(entering, replacement.matcher)) continue;
+      if (replacement.requiresChosenType && (!source.chosenCreatureType || !entering.typeLine.includes(source.chosenCreatureType))) continue;
       const count = replacement.perAlreadyControlled ? countMatchingPermanents(others, replacement.perAlreadyControlled) : 1;
       if (count <= 0) continue;
       extra += count;
@@ -11112,6 +11249,26 @@ export function legalMainPhaseActions(
       role: card.role
     });
   }
+  // The top card of the library, when a permanent lets it be cast from there (Thundermane Dragon).
+  const topCard = (seat.library ?? [])[0];
+  if (topCard && libraryTopCastPermission(topCard, seat.board.battlefield)) {
+    const fixedCost = adjustedCastingCost(seat, topCard, topCard.manaValue, "library", activeSeatId, session.seats);
+    const chosenX = maxAffordableX(seat, topCard, fixedCost);
+    const totalCost = totalCastingCost(seat, topCard, topCard.manaValue, chosenX);
+    const payment = chooseManaSourcesForCost(seat, topCard, totalCost, undefined, session.seats);
+    if (payment.ok && hasResolvableTarget(session, seat.id, topCard)) {
+      actions.push({
+        id: `cast-library:${topCard.id}`,
+        actionType: "cast_spell",
+        cardId: topCard.id,
+        sourceZone: "library",
+        targetIds: [],
+        label: `cast ${topCard.name} from the top of the library`,
+        detail: `${topCard.manaCost ?? ""} ${topCard.typeLine}. ${topCard.oracleText} It gains haste. Payable with ${formatManaPoolPayment(payment.spent)}.`.trim(),
+        role: topCard.role
+      });
+    }
+  }
   actions.push(...legalRoomUnlockActions(seat, session.seats));
   const commander = seat.board.commander;
   if (commander) {
@@ -11183,9 +11340,11 @@ function clearCombatState(session: GameSession): GameSession {
     ...session,
     seats: session.seats.map((seat) => ({
       ...seat,
+      zones: seat.board.battlefield.some((card) => card.exileAtEndOfCombat) ? { ...seat.zones, battlefield: seat.zones.battlefield - seat.board.battlefield.filter((card) => card.exileAtEndOfCombat).length } : seat.zones,
       board: {
         ...seat.board,
-        battlefield: seat.board.battlefield.map((card) => ({
+        // Myriad tokens are exiled at end of combat.
+        battlefield: seat.board.battlefield.filter((card) => !card.exileAtEndOfCombat).map((card) => ({
           ...card,
           attacking: false,
           attackTargetId: undefined,
@@ -11226,7 +11385,7 @@ function resolveProliferate(session: GameSession): GameSession {
 }
 
 // "Until end of turn" effects (prowess, combat pumps, ...) expire when the turn ends.
-function clearTemporaryBuffs(session: GameSession): GameSession {
+export function clearTemporaryBuffs(session: GameSession): GameSession {
   const withBuffsCleared: GameSession = {
     ...session,
     seats: session.seats.map((seat) => ({
@@ -11236,14 +11395,33 @@ function clearTemporaryBuffs(session: GameSession): GameSession {
       nextSpellHasArtifactAffinity: undefined,
       board: {
         ...seat.board,
+        // Every until-end-of-turn field is cleared together: a creature can carry several at once (a pump that also grants trample,
+        // Nogi's temporary Dragon P/T plus a keyword), and clearing only the first kind found left the rest on all game.
         battlefield: seat.board.battlefield.map((card) =>
-          card.temporaryPowerBonus || card.temporaryToughnessBonus
-            ? { ...card, temporaryPowerBonus: undefined, temporaryToughnessBonus: undefined }
-            : card.temporaryBasePower !== undefined || card.temporaryBaseToughness !== undefined || card.temporaryAbilitiesStripped
-              ? { ...card, temporaryBasePower: undefined, temporaryBaseToughness: undefined, temporaryAbilitiesStripped: undefined }
-              : card.temporaryAnimatedAsCreature || card.temporaryGrantedKeywords
-                ? { ...card, temporaryAnimatedAsCreature: undefined, temporaryGrantedKeywords: undefined }
-                : card
+          card.temporaryPowerBonus ||
+          card.temporaryToughnessBonus ||
+          card.temporaryBasePower !== undefined ||
+          card.temporaryBaseToughness !== undefined ||
+          card.temporaryAbilitiesStripped ||
+          card.temporaryAnimatedAsCreature ||
+          card.temporaryGrantedKeywords ||
+          card.temporaryOriginalTypeLine !== undefined ||
+          card.temporaryCopyOriginal
+            ? {
+                ...card,
+                ...(card.temporaryCopyOriginal ? { ...card.temporaryCopyOriginal, temporaryCopyOriginal: undefined } : {}),
+                temporaryPowerBonus: undefined,
+                temporaryToughnessBonus: undefined,
+                temporaryBasePower: undefined,
+                temporaryBaseToughness: undefined,
+                temporaryAbilitiesStripped: undefined,
+                temporaryAnimatedAsCreature: undefined,
+                temporaryGrantedKeywords: undefined,
+                // The layer pass recomputes grantedKeywords on the next state check; dropping the temporary ones now keeps it right in between.
+                ...(card.temporaryGrantedKeywords?.length ? { grantedKeywords: card.grantedKeywords?.filter((keyword) => !card.temporaryGrantedKeywords!.includes(keyword)) } : {}),
+                ...(card.temporaryOriginalTypeLine !== undefined ? { typeLine: card.temporaryOriginalTypeLine, temporaryOriginalTypeLine: undefined } : {})
+              }
+            : card
         )
       }
     }))
@@ -12524,7 +12702,11 @@ function parsePhaseOutEffect(effectText: string): boolean {
 // neither restriction, so it silently entered as a blank, uncopied enchantment instead.
 function parseEnterAsCopyEffect(
   oracleText: string
-): { extraAbilityText?: string; controlledOnly: boolean; allowedTypes: Array<"artifact" | "enchantment"> } | undefined {
+): { extraAbilityText?: string; controlledOnly: boolean; allowedTypes: Array<"artifact" | "enchantment" | "creature">; temporary?: boolean; extraKeyword?: string } | undefined {
+  // "As this artifact enters, you may have it become a copy of any creature on the battlefield until end of turn, except it has haste."
+  // (Cursed Mirror) — the same replacement effect, but it wears off at end of turn and the copy gets an extra keyword.
+  const temporaryMatch = oracleText.match(/\byou may have it become a copy of any creature on the battlefield until end of turn, except it has ([a-z]+)\b/i);
+  if (temporaryMatch) return { controlledOnly: false, allowedTypes: ["creature"], temporary: true, extraKeyword: temporaryMatch[1].toLowerCase() };
   const controlledMatch = oracleText.match(
     /\byou may have this enchantment enter as a copy of an enchantment you control(?:,?\s*except it has\s*"([^"]+)")?/i
   );
@@ -12547,10 +12729,14 @@ function parseEnterAsCopyEffect(
 function findEnterAsCopyTarget(
   session: GameSession,
   actingSeatId: string,
-  effect: { controlledOnly: boolean; allowedTypes: Array<"artifact" | "enchantment"> }
+  effect: { controlledOnly: boolean; allowedTypes: Array<"artifact" | "enchantment" | "creature"> }
 ): VisibleCard | undefined {
-  const matchesType = (card: VisibleCard) => effect.allowedTypes.some((type) => card.typeLine.includes(type === "artifact" ? "Artifact" : "Enchantment"));
+  const matchesType = (card: VisibleCard) => effect.allowedTypes.some((type) => card.typeLine.includes(type === "artifact" ? "Artifact" : type === "creature" ? "Creature" : "Enchantment"));
   const actingSeat = session.seats.find((seat) => seat.id === actingSeatId);
+  // "Any creature on the battlefield" (Cursed Mirror): the strongest one, whoever controls it.
+  if (effect.allowedTypes.length === 1 && effect.allowedTypes[0] === "creature") {
+    return session.seats.flatMap((seat) => seat.board.battlefield).filter((card) => matchesType(card) && !card.phasedOut).sort((a, b) => effectivePower(b) + effectiveToughness(b) - (effectivePower(a) + effectiveToughness(a)))[0];
+  }
   const ownMatch = actingSeat?.board.battlefield.find(matchesType);
   if (ownMatch || effect.controlledOnly) return ownMatch;
   for (const candidateSeat of session.seats) {
@@ -13269,6 +13455,32 @@ function returnLinkedExiles(session: GameSession): GameSession {
     }
   }
   return next;
+}
+
+// The hand cards still available to discard, plus a final "done" entry (The Elder Dragon War's chapter II).
+function discardOptions(seat: PlayerSeat, alreadyPicked: string[]): Array<{ index: number; label: string }> {
+  const remaining = seat.board.hand.filter((card) => !alreadyPicked.includes(card.id));
+  return [...remaining.map((card, index) => ({ index, label: "Discard " + card.name })), { index: remaining.length, label: alreadyPicked.length === 0 ? "Discard nothing" : "Done (discard " + alreadyPicked.length + ", draw " + alreadyPicked.length + ")" }];
+}
+
+// Dragonhawk's delayed trigger, at the beginning of its controller's end step: 2 damage to each opponent for each exiled card not played.
+export function resolveEndStepExileDamage(session: GameSession, activeSeatId: string): GameSession {
+  const active = session.seats.find((seat) => seat.id === activeSeatId);
+  const marked = (active?.board.exile ?? []).filter((card) => card.exileEndStepDamage?.controllerSeatId === activeSeatId);
+  if (!active || marked.length === 0) return session;
+  const { sourceName, amount } = marked[0].exileEndStepDamage!;
+  let next: GameSession = {
+    ...session,
+    seats: session.seats.map((seat) =>
+      seat.id !== activeSeatId ? seat : { ...seat, board: { ...seat.board, exile: (seat.board.exile ?? []).map((card) => (card.exileEndStepDamage?.controllerSeatId === activeSeatId ? { ...card, exileEndStepDamage: undefined } : card)) } }
+    )
+  };
+  const source = next.seats.flatMap((seat) => seat.board.battlefield).find((card) => card.name === sourceName);
+  for (const opponent of session.seats) {
+    if (opponent.id === activeSeatId || opponent.hasLost) continue;
+    next = applyCombatDamageToTarget(next, sourceName, { seat: next.seats.find((item) => item.id === opponent.id)! }, amount * marked.length, source, activeSeatId, "noncombat");
+  }
+  return rulesEvent(next, activeSeatId, `${sourceName}: ${marked.length} exiled card${marked.length === 1 ? " was" : "s were"} not played, so each opponent takes ${amount * marked.length} damage.`);
 }
 
 export function runStateBasedActionsPass(session: GameSession): { session: GameSession; changed: boolean } {
@@ -15812,15 +16024,21 @@ export function applyRemovalEffect(
           targets.push({ seatId: seat.id, cardId: card.id });
         }
       }
-      if (targets.length === 0 && planeswalkerTargets.length === 0) return noLegalTargetEvent(session, casterSeatId, sourceName);
+      if (targets.length === 0 && planeswalkerTargets.length === 0 && !effect.includePlayers) return noLegalTargetEvent(session, casterSeatId, sourceName);
       // No payWardIfNeeded here (unlike the single-"target creature" damage case below) — a mass
       // effect like this never targets any individual creature (rule 601.2c doesn't apply), so ward
       // — which only triggers on being targeted — never fires for it.
       const creaturesDamaged = targets.reduce((current, target) => dealDamageToCreature(current, sourceName, target.seatId, target.cardId, amount, source, casterSeatId), session);
-      const damaged = planeswalkerTargets.reduce(
+      const withPlaneswalkers = planeswalkerTargets.reduce(
         (current, target) => applyCombatDamageToTarget(current, sourceName, { seat: target.seat, planeswalker: target.card }, amount, source, casterSeatId, "noncombat"),
         creaturesDamaged
       );
+      // "...and each opponent": the players take it too.
+      const damaged = effect.includePlayers
+        ? session.seats
+            .filter((seat) => !seat.hasLost && (effect.includePlayers === "all" || seat.id !== casterSeatId))
+            .reduce((current, seat) => applyCombatDamageToTarget(current, sourceName, { seat: current.seats.find((item) => item.id === seat.id)! }, amount, source, casterSeatId, "noncombat"), withPlaneswalkers)
+        : withPlaneswalkers;
       return {
         ...damaged,
         events: [
@@ -18017,7 +18235,9 @@ function pendingActionSourceCard(session: GameSession, action: PendingAction): V
         ? seat?.board.exile?.find((card) => card.id === action.cardId)
         : action.sourceZone === "graveyard"
           ? seat?.board.graveyard?.find((card) => card.id === action.cardId)
-          : seat?.board.hand.find((card) => card.id === action.cardId);
+          : action.sourceZone === "library"
+            ? seat?.library?.find((card) => card.id === action.cardId)
+            : seat?.board.hand.find((card) => card.id === action.cardId);
   }
   if (action.type === "trigger") {
     const seat = session.seats.find((item) => item.id === action.controllerSeatId);
@@ -18175,6 +18395,15 @@ export function findCommonTriggersForPermanentEntered(session: GameSession, ente
             if (!clauseEffect) continue;
             triggers.push(makeCommonTrigger(enteringSeatId, seat.id, source, clauseEffect, `${source.name} triggers because it entered the battlefield.`, enteredPermanent.id));
           }
+          continue;
+        }
+      }
+      // "Whenever this creature enters or attacks, ..." (Dragonhawk, Fate's Tempest): the entering half; the attack half is findAttackTriggers'.
+      if (source.id === enteredPermanent.id) {
+        const entersOrAttacks = oracleClauses(source.oracleText).find((clause) => /^(?:when|whenever) [^,]*\benters? or attacks\b/i.test(clause));
+        const entersOrAttacksEffect = entersOrAttacks ? commonTriggerEffect(entersOrAttacks, "clause", undefined, seat) : undefined;
+        if (entersOrAttacksEffect) {
+          triggers.push(makeCommonTrigger(enteringSeatId, seat.id, source, entersOrAttacksEffect, `${source.name} triggers because it entered the battlefield.`, enteredPermanent.id));
           continue;
         }
       }
@@ -18520,10 +18749,16 @@ export function findAttackTriggers(
           triggers.push(makeCommonTrigger(attack.seatId, sourceSeat.id, source, { kind: "add_counter", counterKind: "+1/+1", amount: 1, scope: "self" }, `${source.name} triggers (dethrone).`, attack.card.id));
         }
       }
+      // Myriad: a token copy of the attacker for every opponent other than the defending player.
+      if (event === "attacks" && source.id === attack.card.id && hasKeywordText(source.oracleText, "myriad")) {
+        triggers.push(makeCommonTrigger(attack.seatId, sourceSeat.id, source, { kind: "myriad", defendingSeatId: attack.defendingSeatId }, `${source.name} triggers (myriad).`, attack.card.id));
+      }
       const sourceClauses = oracleClauses(source.oracleText);
       for (const [clauseIndex, clause] of sourceClauses.entries()) {
         const eventPattern = event === "attacks" ? /\b(?:when|whenever)\b[^,.]*\battacks\b/i : /\b(?:when|whenever)\b[^,.]*\bblocks\b/i;
         if (isActivatedAbilityClause(clause) || !eventPattern.test(clause)) continue;
+        // Myriad's reminder text ("Myriad (Whenever this creature attacks, ...)") is handled above by the keyword itself.
+        if (/^myriad\b/i.test(clause)) continue;
         // Owned by declareAttack's own inline handling.
         if (isAttackTriggerAddManaClause(clause) || parseMetalcraftAttackDebuff(clause)) continue;
         // "Lieutenant — As long as you control your commander, this creature gets +2/+2 and has \"Whenever this
@@ -19160,6 +19395,21 @@ export function commonTriggerEffect(
   if (/whenever a land you control enters, you may return target nonland permanent card from your graveyard to your hand\./.test(text)) {
     return { kind: "landfall_return_nonland_permanent", plainsToBattlefield: /if that land is a plains, you may return that (?:nonland permanent )?card to the battlefield instead/.test(text), optional: true };
   }
+  const nogi = text.match(/if you control (one|two|three|four|five) or more ([a-z]+)s, until end of turn, [a-z',-]+ becomes an? ([a-z]+) with base power and toughness (\d+)\/(\d+) and gains ([a-z ]+?)\./);
+  if (nogi) {
+    return {
+      kind: "self_becomes_dragon",
+      power: Number.parseInt(nogi[4], 10),
+      toughness: Number.parseInt(nogi[5], 10),
+      keywords: nogi[6].split(/ and |, /),
+      condition: { kind: "controls_subtype_count", subtype: nogi[2], amount: numberWordToInt(nogi[1]) ?? 1 }
+    };
+  }
+  const packTactics = text.match(/if you attacked with creatures with total power (\d+) or greater this combat, you may put an? ([a-z]+) creature card from your hand onto the battlefield tapped and attacking/);
+  if (packTactics) return { kind: "dragon_from_hand_attacking", subtype: packTactics[2], condition: { kind: "attacking_power_at_least", amount: Number.parseInt(packTactics[1], 10) } };
+  if (/^(?:[^,]*,\s*)?discard any number of cards, then draw that many cards\.?$/.test(noReminder)) return { kind: "discard_any_then_draw" };
+  const hawk = text.match(/exile the top x cards of your library, where x is the number of creatures you control with power (\d+) or greater\. you may play those cards until your next end step\..*?deals (\d+) damage to each opponent for each of those cards that are still exiled/);
+  if (hawk) return { kind: "exile_top_by_power_then_damage", minPower: Number.parseInt(hawk[1], 10), damagePerCard: Number.parseInt(hawk[2], 10) };
   if (/you may exile it\. when you do, return target creature card from your graveyard to your hand/.test(text)) return { kind: "exile_self_return_creature_to_hand", optional: true };
   if (/you may put (?:him|her|it|them) into (?:his|her|its|their) owner'?s library third from the top/.test(text)) return { kind: "self_to_library_third", optional: true };
   if (/when this land enters untapped, you may put target creature card from your graveyard on top of your library/.test(text)) {
@@ -20022,6 +20272,12 @@ function triggerConditionMet(session: GameSession, trigger: Extract<PendingActio
   if (condition.kind === "total_power_at_least") {
     return seat.board.battlefield.filter((card) => card.typeLine.includes("Creature")).reduce((total, card) => total + Math.max(0, effectivePower(card)), 0) >= condition.amount;
   }
+  if (condition.kind === "controls_subtype_count") {
+    return seat.board.battlefield.filter((card) => card.typeLine.toLowerCase().includes(condition.subtype.toLowerCase())).length >= condition.amount;
+  }
+  if (condition.kind === "attacking_power_at_least") {
+    return seat.board.battlefield.filter((card) => card.attacking && card.typeLine.includes("Creature")).reduce((total, card) => total + Math.max(0, effectivePower(card)), 0) >= condition.amount;
+  }
   if (condition.kind === "controls_no_other") {
     return !seat.board.battlefield.some((card) => card.id !== trigger.sourceCardId && card.typeLine.toLowerCase().includes(condition.subtype.toLowerCase()));
   }
@@ -20247,6 +20503,114 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
     const toBattlefield = trigger.effect.plainsToBattlefield && Boolean(land?.typeLine.includes("Plains"));
     const moved = moveCardAcrossSeats(session, owner.id, pick.id, owner.id, toBattlefield ? "battlefield" : "hand");
     return rulesEvent(moved.session, owner.id, `${trigger.sourceCardName}: ${owner.name} returns ${pick.name} from their graveyard to ${toBattlefield ? "the battlefield" : "their hand"}.`);
+  }
+  if (trigger.effect.kind === "self_becomes_dragon") {
+    const { power, toughness, keywords } = trigger.effect;
+    return {
+      ...session,
+      seats: session.seats.map((item) => ({
+        ...item,
+        board: {
+          ...item.board,
+          battlefield: item.board.battlefield.map((card) =>
+            card.id !== trigger.sourceCardId
+              ? card
+              : {
+                  ...card,
+                  temporaryOriginalTypeLine: card.temporaryOriginalTypeLine ?? card.typeLine,
+                  typeLine: card.typeLine.includes("Dragon") ? card.typeLine : card.typeLine + " Dragon",
+                  temporaryBasePower: power,
+                  temporaryBaseToughness: toughness,
+                  temporaryGrantedKeywords: [...(card.temporaryGrantedKeywords ?? []), ...keywords],
+                  grantedKeywords: [...new Set([...(card.grantedKeywords ?? []), ...keywords])]
+                }
+          )
+        }
+      }))
+    };
+  }
+  if (trigger.effect.kind === "dragon_from_hand_attacking") {
+    const owner = session.seats.find((item) => item.id === trigger.controllerSeatId);
+    if (!owner) return session;
+    const word = trigger.effect.subtype.toLowerCase();
+    const candidates = owner.board.hand.filter((card) => card.typeLine.includes("Creature") && card.typeLine.toLowerCase().includes(word));
+    const chosenIndex = trigger.effect.chosenOption !== undefined ? Number.parseInt(trigger.effect.chosenOption, 10) : undefined;
+    const pick = chosenIndex !== undefined ? candidates[chosenIndex] : [...candidates].sort((a, b) => effectivePower(b) - effectivePower(a))[0];
+    if (!pick) return session;
+    const attacker = owner.board.battlefield.find((card) => card.id === trigger.contextCardId && card.attacking) ?? owner.board.battlefield.find((card) => card.attacking);
+    const moved = moveCardAcrossSeats(session, owner.id, pick.id, owner.id, "battlefield", { tapped: true });
+    if (!moved.movedCard) return session;
+    return rulesEvent(
+      {
+        ...moved.session,
+        seats: moved.session.seats.map((item) =>
+          item.id !== owner.id ? item : { ...item, board: { ...item.board, battlefield: item.board.battlefield.map((card) => (card.id === pick.id ? { ...card, attacking: true, attackTargetId: attacker?.attackTargetId, tapped: true } : card)) } }
+        )
+      },
+      owner.id,
+      `${trigger.sourceCardName}: ${owner.name} puts ${pick.name} onto the battlefield tapped and attacking.`
+    );
+  }
+  if (trigger.effect.kind === "myriad") {
+    const { defendingSeatId } = trigger.effect;
+    const original = session.seats.flatMap((item) => item.board.battlefield).find((card) => card.id === trigger.sourceCardId);
+    if (!original) return session;
+    let next = session;
+    for (const opponent of session.seats) {
+      if (opponent.id === trigger.controllerSeatId || opponent.id === defendingSeatId || opponent.hasLost) continue;
+      const created = createCopyTokenForSeat(next, trigger.controllerSeatId, original);
+      next = {
+        ...created.session,
+        seats: created.session.seats.map((item) =>
+          item.id !== trigger.controllerSeatId
+            ? item
+            : { ...item, board: { ...item.board, battlefield: item.board.battlefield.map((card) => (card.id === created.token.id ? { ...card, tapped: true, attacking: true, attackTargetId: opponent.id, summoningSick: false, exileAtEndOfCombat: true } : card)) } }
+        )
+      };
+      next = rulesEvent(next, trigger.controllerSeatId, `${trigger.sourceCardName} (myriad): a token copy enters tapped and attacking ${opponent.name}.`);
+    }
+    return next;
+  }
+  if (trigger.effect.kind === "exile_top_by_power_then_damage") {
+    const { minPower, damagePerCard } = trigger.effect;
+    const owner = session.seats.find((item) => item.id === trigger.controllerSeatId);
+    if (!owner) return session;
+    const amount = owner.board.battlefield.filter((card) => card.typeLine.includes("Creature") && effectivePower(card) >= minPower).length;
+    const topIds = (owner.library ?? []).slice(0, amount).map((card) => card.id);
+    let next = session;
+    for (const id of topIds) next = moveCardAcrossSeats(next, owner.id, id, owner.id, "exile").session;
+    next = {
+      ...next,
+      seats: next.seats.map((item) =>
+        item.id !== owner.id
+          ? item
+          : {
+              ...item,
+              board: {
+                ...item.board,
+                exile: (item.board.exile ?? []).map((card) =>
+                  topIds.includes(card.id)
+                    ? { ...card, exiledPlayableBySeatId: owner.id, exiledPlayableUntilTurn: session.turn, exileEndStepDamage: { sourceName: trigger.sourceCardName, controllerSeatId: owner.id, amount: damagePerCard } }
+                    : card
+                )
+              }
+            }
+      )
+    };
+    return rulesEvent(next, owner.id, `${trigger.sourceCardName}: ${owner.name} exiles the top ${topIds.length} card${topIds.length === 1 ? "" : "s"} of their library and may play them until their end step.`);
+  }
+  if (trigger.effect.kind === "discard_any_then_draw") {
+    const owner = session.seats.find((item) => item.id === trigger.controllerSeatId);
+    if (!owner) return session;
+    const lands = owner.board.battlefield.filter((card) => isLandCard(card)).length;
+    // Agents discard what they can't use: extra lands once they have plenty, and spells far above their mana.
+    const aiPicks = owner.board.hand.filter((card) => (isLandCard(card) ? lands >= 6 : card.manaValue >= lands + 4)).map((card) => card.id);
+    const ids = (trigger.effect.chosenOption !== undefined ? trigger.effect.chosenOption.split(",").filter(Boolean) : aiPicks).filter((id) => owner.board.hand.some((card) => card.id === id));
+    if (ids.length === 0) return rulesEvent(session, owner.id, `${trigger.sourceCardName}: ${owner.name} discards nothing.`);
+    let next = session;
+    for (const id of ids) next = moveCardBetweenVisibleZones(next, owner.id, id, "graveyard");
+    next = rulesEvent(next, owner.id, `${trigger.sourceCardName}: ${owner.name} discards ${ids.length} card${ids.length === 1 ? "" : "s"}.`);
+    return drawMultipleForSeat(next, owner.id, ids.length, `${owner.name} draws ${ids.length} card${ids.length === 1 ? "" : "s"} from ${trigger.sourceCardName}.`);
   }
   if (trigger.effect.kind === "exile_self_return_creature_to_hand") {
     const holder = session.seats.find((item) => (item.board.graveyard ?? []).some((card) => card.id === trigger.sourceCardId));
@@ -21058,7 +21422,9 @@ function findSpellSourceCard(session: GameSession, action: Extract<PendingAction
       ? actor?.board.exile?.find((card) => card.id === action.cardId)
       : action.sourceZone === "graveyard"
         ? actor?.board.graveyard?.find((card) => card.id === action.cardId)
-        : actor?.board.hand.find((card) => card.id === action.cardId);
+        : action.sourceZone === "library"
+          ? actor?.library?.find((card) => card.id === action.cardId)
+          : actor?.board.hand.find((card) => card.id === action.cardId);
 }
 
 function ruleChoiceView(
@@ -22253,7 +22619,9 @@ function spellResolutionDestination(session: GameSession, action: Extract<Pendin
         ? actor?.board.exile?.find((item) => item.id === action.cardId)
         : action.sourceZone === "graveyard"
           ? actor?.board.graveyard?.find((item) => item.id === action.cardId)
-          : actor?.board.hand.find((item) => item.id === action.cardId);
+          : action.sourceZone === "library"
+            ? actor?.library?.find((item) => item.id === action.cardId)
+            : actor?.board.hand.find((item) => item.id === action.cardId);
   if (!card) return "graveyard";
   // A two-faced card's own typeLine is the combined "Creature — Dragon // Sorcery — Omen" string,
   // which contains "Sorcery" regardless of which face was actually cast — checking it directly here
@@ -22799,7 +23167,7 @@ export function adjustedCastingCost(
   seat: PlayerSeat,
   card: VisibleCard,
   baseCost: number,
-  sourceZone: "hand" | "command" | "exile" | "graveyard",
+  sourceZone: "hand" | "command" | "exile" | "graveyard" | "library",
   activeSeatId: string | undefined,
   allSeats: PlayerSeat[] = [seat],
   turn?: number,
@@ -24274,7 +24642,7 @@ export function playCardFromZone(
   position?: { x: number; z: number },
   destination: "battlefield" | "graveyard" | "exile" | "library" = "battlefield",
   manaSourceIds: string[] = [],
-  sourceZone: "hand" | "command" | "exile" | "graveyard" = "hand",
+  sourceZone: "hand" | "command" | "exile" | "graveyard" | "library" = "hand",
   faceIndex?: number
 ): GameSession {
   let playedName = "";
@@ -24319,7 +24687,9 @@ export function playCardFromZone(
           ? (ownExileCard ?? session.seats.find((s) => s.id === exileOwnerSeatId)?.board.exile?.find((item) => item.id === cardId))
           : sourceZone === "graveyard"
             ? (seat.board.graveyard ?? []).find((item) => item.id === cardId)
-            : seat.board.hand.find((item) => item.id === cardId);
+            : sourceZone === "library"
+              ? (seat.library ?? []).find((item) => item.id === cardId)
+              : seat.board.hand.find((item) => item.id === cardId);
     if (!sourceCard) return seat;
     const card = applyChosenFaceToCard(sourceCard, faceIndex);
     playedName = card.name;
@@ -24403,13 +24773,34 @@ export function playCardFromZone(
           // than sit there under its original art with a different name in small text. Reported
           // live: even Estrid's Invocation's existing (narrower) copy support left the permanent
           // showing its own card image no matter what it copied.
-          imageUris: copyTarget.imageUris ?? enteredCard.imageUris
+          imageUris: copyTarget.imageUris ?? enteredCard.imageUris,
+          // Cursed Mirror: only until end of turn, with an extra keyword; remember what it really is so it can change back.
+          ...(copyEffect?.temporary
+            ? {
+                temporaryCopyOriginal: {
+                  name: enteredCard.name,
+                  typeLine: enteredCard.typeLine,
+                  oracleText: enteredCard.oracleText,
+                  manaCost: enteredCard.manaCost,
+                  manaValue: enteredCard.manaValue,
+                  colors: enteredCard.colors,
+                  colorIdentity: enteredCard.colorIdentity,
+                  power: enteredCard.power,
+                  toughness: enteredCard.toughness,
+                  imageUris: enteredCard.imageUris
+                },
+                ...(copyEffect.extraKeyword ? { temporaryGrantedKeywords: [copyEffect.extraKeyword], grantedKeywords: [copyEffect.extraKeyword] } : {})
+              }
+            : {})
         }
       : enteredCard;
     const spentSeat = spendManaSources(seat, manaSourceIds);
     // Casting from the graveyard takes the card out of it first (it re-enters only if it resolves back there).
     const graveyard = sourceZone === "graveyard" ? (spentSeat.board.graveyard ?? []).filter((item) => item.id !== cardId) : (spentSeat.board.graveyard ?? []);
-    const library = spentSeat.library ?? [];
+    // Casting from the top of the library takes the card out of it (Thundermane Dragon); the cast creature gains haste until end of turn.
+    const library = sourceZone === "library" ? (spentSeat.library ?? []).filter((item) => item.id !== cardId) : (spentSeat.library ?? []);
+    const libraryHaste = sourceZone === "library" && destination === "battlefield" && Boolean(libraryTopCastPermission(card, seat.board.battlefield)?.grantsHaste);
+    const playedOnBattlefield: VisibleCard = libraryHaste ? { ...played, temporaryGrantedKeywords: [...(played.temporaryGrantedKeywords ?? []), "haste"], grantedKeywords: [...(played.grantedKeywords ?? []), "haste"] } : played;
     const exile = spentSeat.board.exile ?? [];
     const commanderLeavesCommand = sourceZone === "command" && seat.board.commander?.id === cardId;
     // Only relevant when a card is cast FROM exile and resolves somewhere other than back into
@@ -24423,13 +24814,13 @@ export function playCardFromZone(
     return {
       ...spentSeat,
       life: lifePaidForUntapped > 0 ? Math.max(0, spentSeat.life - lifePaidForUntapped) : spentSeat.life,
-      library: destination === "library" ? [played, ...library] : spentSeat.library,
+      library: destination === "library" ? [played, ...library] : sourceZone === "library" ? library : spentSeat.library,
       board: {
         ...spentSeat.board,
         commander: commanderLeavesCommand ? undefined : spentSeat.board.commander,
         hand: sourceZone === "hand" ? spentSeat.board.hand.filter((item) => item.id !== cardId) : spentSeat.board.hand,
         exile: destination === "exile" ? [...exile.filter((item) => item.id !== cardId), played] : leavesExileZone ? exile.filter((item) => item.id !== cardId) : spentSeat.board.exile,
-        battlefield: destination === "battlefield" ? [...spentSeat.board.battlefield, played] : spentSeat.board.battlefield,
+        battlefield: destination === "battlefield" ? [...spentSeat.board.battlefield, playedOnBattlefield] : spentSeat.board.battlefield,
         graveyard: destination === "graveyard" ? [...graveyard, played] : graveyard
       },
       zones: {
@@ -24439,7 +24830,7 @@ export function playCardFromZone(
         graveyard: Math.max(0, spentSeat.zones.graveyard + (destination === "graveyard" ? 1 : 0) - (sourceZone === "graveyard" ? 1 : 0)),
         hand: sourceZone === "hand" ? Math.max(0, spentSeat.zones.hand - 1) : spentSeat.zones.hand,
         exile: Math.max(0, spentSeat.zones.exile + (destination === "exile" && sourceZone !== "exile" ? 1 : 0) - (leavesExileZone ? 1 : 0)),
-        library: spentSeat.zones.library + (destination === "library" ? 1 : 0)
+        library: Math.max(0, spentSeat.zones.library + (destination === "library" ? 1 : 0) - (sourceZone === "library" ? 1 : 0))
       }
     };
   });

@@ -132,6 +132,8 @@ export interface MassDamageEffect {
   // planeswalkers are hit too.
   excludeFlying?: boolean;
   includePlaneswalkers?: boolean;
+  // "...to each creature and each opponent" (The Elder Dragon War) / "...and each player": the players take the damage too.
+  includePlayers?: "opponents" | "all";
   excludeType?: string;
   scope: "all" | "opponents";
 }
@@ -343,6 +345,8 @@ function parseMassDamage(text: string): MassDamageEffect | undefined {
   if (!match) return undefined;
   const excludeFlying = /\bdeals (?:x|\d+) damage to each creature without flying\b/i.test(text);
   const includePlaneswalkers = /\band each planeswalker\b/i.test(text);
+  const playersMatch = text.match(/\bto each creature(?: without flying)?(?: you don'?t control)?,? and each (opponent|player)\b/i);
+  const includePlayers = playersMatch ? (playersMatch[1].toLowerCase() === "player" ? ("all" as const) : ("opponents" as const)) : undefined;
   const xDefinition = parseWhereX(text);
   const qualifier = match[2]?.toLowerCase();
   // A color-word qualifier ("nonwhite") would need to check the card's colors, not its type line —
@@ -356,6 +360,7 @@ function parseMassDamage(text: string): MassDamageEffect | undefined {
     ...(xDefinition ? { xDefinition } : {}),
     ...(excludeFlying ? { excludeFlying } : {}),
     ...(includePlaneswalkers ? { includePlaneswalkers } : {}),
+    ...(includePlayers ? { includePlayers } : {}),
     excludeType: qualifier,
     scope: match[3] ? "opponents" : "all"
   };

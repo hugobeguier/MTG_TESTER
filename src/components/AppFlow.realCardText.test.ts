@@ -2,12 +2,12 @@
 // the test: two earlier tests passed on invented text while the real cards stayed broken (Court of Grace, the
 // "with power N or greater" watchers). Skipped per card when the catalog doesn't have it.
 import { describe, expect, it } from "vitest";
-import { landDropsAllowed, landPlaysMade, recordLandPlay, findCastTriggers, seatHasFlashGrant, findLeavesBattlefieldTriggers, hideawayDamageConditionMet, legalMainPhaseActions, tapCreaturesAltCostFor, applyCastRemoval, nextCastPrompt, type CastChoices, spellModePrompt, applyDigPick, applyDigToBattlefield, staticCostReduction, applyLabeledContinuation, spellTargetSlots, grantKeywordsToCreature, applyExalted, applySacrificeEffect, applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
+import { landDropsAllowed, landPlaysMade, recordLandPlay, findCastTriggers, seatHasFlashGrant, findLeavesBattlefieldTriggers, hideawayDamageConditionMet, legalMainPhaseActions, tapCreaturesAltCostFor, applyCastRemoval, nextCastPrompt, type CastChoices, spellModePrompt, applyDigPick, applyDigToBattlefield, clearTemporaryBuffs, playCardFromZone, resolveEndStepExileDamage, cleanupCombat, staticCostReduction, applyLabeledContinuation, spellTargetSlots, grantKeywordsToCreature, applyExalted, applySacrificeEffect, applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
 import { parseRemovalEffect } from "@/lib/removalSpells";
 import { parseZoneEffect } from "@/lib/zoneEffects";
 import { permanentMatchesQualifier } from "@/lib/characteristics";
 import { parseSpellExtraEffects } from "@/lib/spellExtras";
-import { etbEffectText } from "@/lib/oracleClauses";
+import { etbEffectText, parseSagaChapters } from "@/lib/oracleClauses";
 import { parseGenericManaAbilities, parseGenericSacrificeAbilities, parseGenericTapAbilities } from "@/lib/activatedAbilities";
 import { loadCardCatalog, lookupCard } from "@/lib/cardCatalog";
 import type { GameSession, PlayerSeat, VisibleCard } from "@/lib/types";
@@ -1421,6 +1421,165 @@ describe("Herald's Horn and Nogi", () => {
     const triad = real("Goldlust Triad", "g");
     expect(staticCostReduction(seat("a", [horn, nogi]), triad)).toBe(2);
     expect(staticCostReduction(seat("a", [nogi]), real("Spit Flame", "s"))).toBe(0);
+  });
+});
+
+describe("Metallic Mimic", () => {
+  it("gives an additional +1/+1 counter to entering creatures of the chosen type only", () => {
+    const mimic = real("Metallic Mimic", "mm", { chosenCreatureType: "Dragon" });
+    const dragon = real("Goldlust Triad", "tri");
+    const mine = seat("a", [mimic, dragon, bear("other")]);
+    const s = session([mine, seat("b", [])]);
+    const withCounter = applyEntersWithCounterReplacements(s, "a", "tri").seats[0].board.battlefield.find((c) => c.id === "tri")!;
+    expect(withCounter.counters?.find((c) => c.kind === "+1/+1")?.count).toBe(1);
+    const plain = applyEntersWithCounterReplacements(s, "a", "other").seats[0].board.battlefield.find((c) => c.id === "other")!;
+    expect(plain.counters?.find((c) => c.kind === "+1/+1")?.count ?? 0).toBe(0);
+  });
+});
+
+describe("Cursed Mirror", () => {
+  it("enters as a copy of the strongest creature with haste, and turns back into the artifact at end of turn", () => {
+    const mirror = real("Cursed Mirror", "cm", { zone: "hand" as const });
+    const mine = seat("a", [real("Mountain", "m1"), real("Mountain", "m2"), real("Mountain", "m3")]);
+    mine.board.hand = [mirror];
+    mine.zones = { ...mine.zones, hand: 1 };
+    const theirs = seat("b", [bear("small", { power: "1", toughness: "1" }), real("Goldlust Triad", "tri", { power: "4", toughness: "4" })]);
+    const s = session([mine, theirs]);
+    const cast = playCardFromZone(s, "a", "cm", "cast", undefined, "battlefield", ["m1", "m2", "m3"], "hand");
+    const copy = cast.seats[0].board.battlefield.find((c) => c.id === "cm")!;
+    expect(copy.name).toBe("Goldlust Triad");
+    expect(copy.grantedKeywords).toContain("haste");
+    const reverted = clearTemporaryBuffs(cast).seats[0].board.battlefield.find((c) => c.id === "cm")!;
+    expect(reverted.name).toBe("Cursed Mirror");
+    expect(reverted.typeLine).toContain("Artifact");
+    expect(reverted.temporaryCopyOriginal).toBeUndefined();
+    expect(reverted.grantedKeywords ?? []).not.toContain("haste");
+  });
+});
+
+describe("Thundermane Dragon casts from the top of the library", () => {
+  it("offers a power-4+ creature on top (not a small one), casts it onto the battlefield with haste and takes it off the library", () => {
+    const dragon = real("Thundermane Dragon", "td");
+    const mk = (topCard: VisibleCard) => {
+      const mine = seat("a", [dragon, ...Array.from({ length: 5 }, (_, i) => real("Mountain", `m${i}`))]);
+      mine.library = [topCard, bear("next", { zone: "library" as const })];
+      mine.zones = { ...mine.zones, library: 2 };
+      return session([mine, seat("b", [])]);
+    };
+    const big = mk(real("Goldlust Triad", "tri", { zone: "library" as const }));
+    const offered = legalMainPhaseActions(big.seats[0], true, "a", 1, new Set(), big).find((a) => a.id === "cast-library:tri");
+    expect(offered).toBeTruthy();
+    const small = mk(bear("tiny", { zone: "library" as const, power: "2", toughness: "2" }));
+    expect(legalMainPhaseActions(small.seats[0], true, "a", 1, new Set(), small).some((a) => a.id.startsWith("cast-library"))).toBe(false);
+    const cast = playCardFromZone(big, "a", "tri", "cast", undefined, "battlefield", big.seats[0].board.battlefield.filter((c) => c.typeLine.includes("Land")).slice(0, 5).map((c) => c.id), "library");
+    const after = cast.seats[0];
+    const triad = after.board.battlefield.find((c) => c.id === "tri")!;
+    expect(triad).toBeTruthy();
+    expect(triad.grantedKeywords).toContain("haste");
+    expect(after.library!.map((c) => c.id)).toEqual(["next"]);
+    expect(after.zones.library).toBe(1);
+  });
+});
+
+describe("The Elder Dragon War chapters", () => {
+  it("chapter I hits every creature AND each opponent; chapter II discards what the human picked and draws that many; chapter III is a 4/4 Dragon", () => {
+    const war = real("The Elder Dragon War", "edw");
+    const chapters = parseSagaChapters(war.oracleText)!;
+    expect(chapters.chapterCount).toBe(3);
+    const one = parseRemovalEffect(chapters.effectByChapter.get(1)!)!;
+    expect(one).toMatchObject({ kind: "mass_damage", amount: 2, includePlayers: "opponents" });
+    const mine = seat("a", [war, bear("mine", { power: "2", toughness: "2" })]);
+    const theirs = seat("b", [bear("theirs", { power: "2", toughness: "2" })]);
+    const hit = applyRemovalEffect(session([mine, theirs]), "a", "The Elder Dragon War", war, one);
+    expect(hit.seats[1].life).toBe(38);
+    expect(hit.seats[0].life).toBe(40);
+    const two = commonTriggerEffect(chapters.effectByChapter.get(2)!, "clause")!;
+    expect(two.kind).toBe("discard_any_then_draw");
+    const hand = seat("a", []);
+    hand.board.hand = [bear("h1", { zone: "hand" as const }), bear("h2", { zone: "hand" as const }), bear("h3", { zone: "hand" as const })];
+    hand.library = ["l0", "l1", "l2"].map((id) => bear(id, { zone: "library" as const }));
+    hand.zones = { ...hand.zones, hand: 3, library: 3 };
+    const t = { id: "t", type: "trigger" as const, actorSeatId: "a", controllerSeatId: "a", sourceCardId: "edw", sourceCardName: "The Elder Dragon War", triggerKind: "common" as const, effect: { ...two, chosenOption: "h1,h3" } as never, message: "" };
+    const after = resolveTriggerEffect(session([hand]), t).seats[0];
+    expect(after.board.graveyard!.map((c) => c.id).sort()).toEqual(["h1", "h3"]);
+    expect(after.board.hand.map((c) => c.id).sort()).toEqual(["h2", "l0", "l1"]);
+    expect(commonTriggerEffect(chapters.effectByChapter.get(3)!, "clause")!.kind).toBe("create_tokens");
+  });
+});
+
+describe("Dragonhawk, Fate's Tempest", () => {
+  it("on enter and on attack exiles one card per power-4 creature, and burns for the unplayed ones at end step", () => {
+    const hawk = real("Dragonhawk, Fate's Tempest", "hw", { power: "5", toughness: "5", attacking: true });
+    const mine = seat("a", [hawk, bear("big", { power: "4", toughness: "4" }), bear("small")]);
+    mine.library = ["l0", "l1", "l2", "l3"].map((id) => bear(id, { zone: "library" as const }));
+    mine.zones = { ...mine.zones, library: 4 };
+    const s = session([mine, seat("b", [])]);
+    const entered = findCommonTriggersForPermanentEntered(s, "a", hawk).find((t) => t.sourceCardId === "hw")!;
+    expect(entered.effect.kind).toBe("exile_top_by_power_then_damage");
+    const attacked = findAttackTriggers(s, { seatId: "a", card: hawk, defendingSeatId: "b" });
+    expect(attacked.unparsed).toHaveLength(0);
+    expect(attacked.triggers.some((t) => t.effect.kind === "exile_top_by_power_then_damage")).toBe(true);
+    const after = resolveTriggerEffect(s, entered);
+    expect(after.seats[0].board.exile!.map((c) => c.id)).toEqual(["l0", "l1"]);
+    expect(after.seats[0].board.exile![0].exiledPlayableBySeatId).toBe("a");
+    expect(after.seats[0].library).toHaveLength(2);
+    const burned = resolveEndStepExileDamage(after, "a");
+    expect(burned.seats[1].life).toBe(36);
+    expect(resolveEndStepExileDamage(burned, "a").seats[1].life).toBe(36);
+  });
+});
+
+describe("Goldlust Triad myriad", () => {
+  it("copies itself tapped and attacking each other opponent, and the copies leave at end of combat", () => {
+    const triad = real("Goldlust Triad", "tr", { attacking: true, attackTargetId: "b", power: "3", toughness: "3" });
+    const s = session([seat("a", [triad]), seat("b", []), seat("c", []), seat("d", [])]);
+    const found = findAttackTriggers(s, { seatId: "a", card: triad, defendingSeatId: "b" });
+    expect(found.unparsed).toHaveLength(0);
+    const myriad = found.triggers.find((t) => t.effect.kind === "myriad")!;
+    expect(myriad).toBeTruthy();
+    const after = resolveTriggerEffect(s, myriad).seats[0].board.battlefield;
+    const copies = after.filter((c) => c.token);
+    expect(copies.map((c) => c.attackTargetId).sort()).toEqual(["c", "d"]);
+    expect(copies.every((c) => c.attacking && c.tapped)).toBe(true);
+    const cleared = cleanupCombat(resolveTriggerEffect(s, myriad), "a").seats[0].board.battlefield;
+    expect(cleared.map((c) => c.id)).toEqual(["tr"]);
+  });
+});
+
+describe("Nogi and Minion of the Mighty attack triggers", () => {
+  it("Nogi becomes a 5/5 flying Dragon only with three Dragons, and it ends with the turn", () => {
+    const nogi = real("Nogi, Draco-Zealot", "no", { attacking: true, power: "3", toughness: "3" });
+    const dragons = ["d1", "d2", "d3"].map((id) => real("Goldlust Triad", id));
+    const withDragons = session([seat("a", [nogi, ...dragons]), seat("b", [])]);
+    const t = findAttackTriggers(withDragons, { seatId: "a", card: nogi, defendingSeatId: "b" }).triggers.find((x) => x.sourceCardId === "no")!;
+    expect(t.effect.kind).toBe("self_becomes_dragon");
+    const after = resolveTriggerEffect(withDragons, t).seats[0].board.battlefield.find((c) => c.id === "no")!;
+    expect(after.typeLine).toContain("Dragon");
+    expect(after.temporaryBasePower).toBe(5);
+    expect(after.grantedKeywords).toContain("flying");
+    const few = session([seat("a", [nogi, dragons[0]]), seat("b", [])]);
+    const t2 = findAttackTriggers(few, { seatId: "a", card: nogi, defendingSeatId: "b" }).triggers.find((x) => x.sourceCardId === "no")!;
+    expect(resolveTriggerEffect(few, t2).seats[0].board.battlefield.find((c) => c.id === "no")!.typeLine).not.toContain("Dragon");
+  });
+  it("Minion of the Mighty puts a Dragon from hand in attacking only when attackers have 6+ power", () => {
+    const minion = real("Minion of the Mighty", "mm", { attacking: true, attackTargetId: "b", power: "1", toughness: "1" });
+    const big = bear("big", { attacking: true, power: "5", toughness: "5" });
+    const mine = seat("a", [minion, big]);
+    mine.board.hand = [real("Goldlust Triad", "tri", { zone: "hand" as const, power: "4", toughness: "4" })];
+    mine.zones = { ...mine.zones, hand: 1 };
+    const s = session([mine, seat("b", [])]);
+    const t = findAttackTriggers(s, { seatId: "a", card: minion, defendingSeatId: "b" }).triggers.find((x) => x.sourceCardId === "mm")!;
+    expect(t.effect.kind).toBe("dragon_from_hand_attacking");
+    const after = resolveTriggerEffect(s, t).seats[0];
+    const tri = after.board.battlefield.find((c) => c.id === "tri")!;
+    expect(tri.attacking).toBe(true);
+    expect(tri.tapped).toBe(true);
+    expect(tri.attackTargetId).toBe("b");
+    const weak = seat("a", [minion, bear("sm", { attacking: true, power: "2", toughness: "2" })]);
+    weak.board.hand = mine.board.hand;
+    const s2 = session([weak, seat("b", [])]);
+    const t2 = findAttackTriggers(s2, { seatId: "a", card: minion, defendingSeatId: "b" }).triggers.find((x) => x.sourceCardId === "mm")!;
+    expect(resolveTriggerEffect(s2, t2).seats[0].board.hand).toHaveLength(1);
   });
 });
 

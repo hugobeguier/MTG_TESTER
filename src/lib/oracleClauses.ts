@@ -236,6 +236,8 @@ export interface EntersWithCounterReplacement {
   // Qualifier the ENTERING permanent must match ("angel", "creature", ...), checked with
   // permanentMatchesQualifier — the replacement's source is a different permanent already in play.
   matcher: string;
+  // "Each other creature you control of the chosen type..." (Metallic Mimic): only creatures of the type chosen as the source entered.
+  requiresChosenType?: boolean;
   // "...for each Angel you already control" — counters scale with how many matching permanents the
   // controller already has (the entering one doesn't count). Undefined means exactly one counter.
   perAlreadyControlled?: string;
@@ -251,9 +253,9 @@ export function parseEntersWithCounterReplacements(oracleText: string): EntersWi
   for (const rawClause of oracleText.split("\n")) {
     const text = rawClause.replace(/\([^)]*\)/g, "").trim().toLowerCase();
     // "Each Dragon you control enters with an additional +1/+1 counter on it." (Dragonstorm Globe) applies to the source too.
-    const match = text.match(/^each (?:other )?([a-z]+(?: [a-z]+)?) you control enters(?: the battlefield)? with an additional \+1\/\+1 counter on it(?: for each ([a-z]+(?: [a-z]+)?) you already control)?\.?$/);
+    const match = text.match(/^each (?:other )?([a-z]+(?: [a-z]+)?) you control( of the chosen type)? enters(?: the battlefield)? with an additional \+1\/\+1 counter on it(?: for each ([a-z]+(?: [a-z]+)?) you already control)?\.?$/);
     if (!match) continue;
-    replacements.push({ matcher: match[1].trim(), ...(match[2] ? { perAlreadyControlled: match[2].trim() } : {}) });
+    replacements.push({ matcher: match[1].trim(), ...(match[2] ? { requiresChosenType: true } : {}), ...(match[3] ? { perAlreadyControlled: match[3].trim() } : {}) });
   }
   return replacements;
 }

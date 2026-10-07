@@ -27,6 +27,7 @@ import {
 } from "@/lib/activatedAbilities";
 import { equipCost, isAura, isEquipment } from "@/lib/attachments";
 import { graveyardCastPermission } from "@/lib/graveyardCasting";
+import { libraryTopCastPermission } from "@/lib/libraryCasting";
 import { parseCycling } from "@/lib/cycling";
 import { parseGraveyardReturnAbility } from "@/lib/graveyardAbilities";
 import { parseManlandAnimation } from "@/lib/activatedAbilities";
@@ -79,7 +80,7 @@ interface ThreeGameTableProps {
   onCloseInspectCard?: () => void;
   onSelectHandCard?: (card: VisibleCard) => void;
   onDrawCard?: (seatId: string) => void;
-  onPlayCard?: (seatId: string, cardId: string, position?: { x: number; z: number }, sourceZone?: "hand" | "exile") => void;
+  onPlayCard?: (seatId: string, cardId: string, position?: { x: number; z: number }, sourceZone?: "hand" | "exile" | "library") => void;
   // Routes through AppFlow's respondWithCard when a response window is open, instead of onPlayCard
   // (which only handles main-phase casting and silently no-ops if something's already on the stack).
   onCastFromExile?: (seatId: string, cardId: string) => void;
@@ -1482,6 +1483,15 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
                 Play Selected
               </button>
             )}
+            {(() => {
+              // Thundermane Dragon: the top card of the library can be cast while a permanent allows it.
+              const top = (human.library ?? [])[0];
+              return top && libraryTopCastPermission(top, human.board.battlefield) ? (
+                <button type="button" title="You may look at and cast this card from the top of your library" onClick={() => props.onPlayCard?.(human.id, top.id, undefined, "library")}>
+                  Cast top of library: {top.name}
+                </button>
+              ) : null;
+            })()}
             {props.selectedCardId && parseCycling(human.board.hand.find((card) => card.id === props.selectedCardId)?.oracleText ?? "") ? (
               <button type="button" onClick={() => props.selectedCardId && props.onCycleCard?.(human.id, props.selectedCardId)}>
                 Cycle Selected

@@ -180,12 +180,19 @@ describe("parseRemovalEffect — mass damage", () => {
   });
 
   it("parses a variable (X) mass-damage sweeper (Earthquake)", () => {
-    expect(parseRemovalEffect("Earthquake deals X damage to each creature and each player without flying.")).toEqual({
+    expect(parseRemovalEffect("Earthquake deals X damage to each creature without flying and each player.")).toEqual({
       kind: "mass_damage",
       amount: "X",
+      excludeFlying: true,
+      includePlayers: "all",
       excludeType: undefined,
       scope: "all"
     });
+  });
+
+  it("reads 'each creature and each opponent' / 'each player' so the players take the damage too", () => {
+    expect(parseRemovalEffect("This Saga deals 2 damage to each creature and each opponent.")).toMatchObject({ kind: "mass_damage", amount: 2, includePlayers: "opponents" });
+    expect(parseRemovalEffect("Cave-In deals 2 damage to each creature and each player.")).toMatchObject({ includePlayers: "all" });
   });
 });
 

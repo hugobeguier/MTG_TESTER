@@ -335,7 +335,7 @@ function filterSupportedMainPhaseActions(actions: LegalAgentAction[], seat: Play
   return actions.filter((action) => {
     if (action.actionType === "activate_ability") return false;
     if (action.actionType === "cast_spell") {
-      if (action.sourceZone === "exile") return false;
+      if (action.sourceZone === "exile" || action.sourceZone === "library") return false;
       if (action.faceIndex !== undefined) return false;
       const card = seat.board.hand.find((item) => item.id === action.cardId);
       if (card && (modalDoubleFacedLandSplit(card) || roomDoorFaces(card) || independentlyCastableSpellFaces(card))) return false;

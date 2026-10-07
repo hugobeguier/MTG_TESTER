@@ -324,6 +324,15 @@ export interface VisibleCard {
   // "Exile ... until this enchantment leaves the battlefield." (Grasp of Fate): the id of the permanent that holds this card in exile;
   // when that permanent is no longer on the battlefield the card returns to the battlefield under its owner's control.
   exiledUntilSourceLeaves?: string;
+  // Myriad token copies: "Exile the tokens at end of combat."
+  exileAtEndOfCombat?: boolean;
+  // Cursed Mirror: what this permanent was before it became a copy of a creature until end of turn; restored when the turn ends.
+  temporaryCopyOriginal?: Pick<VisibleCard, "name" | "typeLine" | "oracleText" | "manaCost" | "manaValue" | "colors" | "colorIdentity" | "power" | "toughness" | "imageUris">;
+  // Dragonhawk, Fate's Tempest: a card exiled by it that is still in exile at the beginning of its controller's next end step costs
+  // each opponent this much life (the damage dealer is named for the log).
+  exileEndStepDamage?: { sourceName: string; controllerSeatId: string; amount: number };
+  // "Until end of turn, Nogi becomes a Dragon ..." — the type line before the temporary change, restored at end of turn.
+  temporaryOriginalTypeLine?: string;
   // Hideaway: the land whose "look at the top N, exile one face down" put this card here.
   hideawaySourceId?: string;
   // "As this enters, choose Khans or Dragons." (Outpost Siege): the label picked, which gates the matching bullet.
