@@ -71,6 +71,7 @@ import { parseSpellExtraEffects, type SpellExtraEffect } from "@/lib/spellExtras
 import { matchWatcherSubject } from "@/lib/triggerWatchers";
 import { graveyardCastPermission } from "@/lib/graveyardCasting";
 import { parseCycling } from "@/lib/cycling";
+import { parseTapCreaturesAltCost } from "@/lib/altCosts";
 import { parseGraveyardReturnAbility, reduceGenericCost } from "@/lib/graveyardAbilities";
 import {
   annihilatorAmount,
@@ -463,6 +464,18 @@ type LabeledContinuation =
   | { kind: "extra"; effect: SpellExtraEffect; lifeAmount?: number };
 
 type PendingRuleChoice =
+  // "You may pay {W} and tap four untapped creatures you control with flying rather than pay this spell's mana cost." (Sephara): the human
+  // chooses between the alternative and the normal cost before anything is paid; the cast is then replayed with that choice.
+  | {
+      id: string;
+      kind: "choose_cast_alt";
+      controllerSeatId: string;
+      sourceCardId: string;
+      sourceCardName: string;
+      prompt: string;
+      altLabel: string;
+      resume: { seatId: string; cardId: string; position?: { x: number; z: number }; sourceZone: "hand" | "command" | "exile" | "graveyard"; faceIndex?: number; sacrificeTargets?: VisibleCard[] };
+    }
   // The cast-time questions of a spell (modes, then targets): answered one at a time BEFORE the cost is paid; then the cast is replayed
   // with the answers attached (see playCard / respondWithCard's castChoices parameter).
   | {
@@ -478,7 +491,7 @@ type PendingRuleChoice =
       options: Array<{ label: string; mode?: number; target?: ChosenTarget }>;
       answers: CastChoices;
       resume:
-        | { via: "playCard"; seatId: string; cardId: string; position?: { x: number; z: number }; sourceZone: "hand" | "command" | "exile" | "graveyard"; faceIndex?: number; sacrificeTargets?: VisibleCard[] }
+        | { via: "playCard"; seatId: string; cardId: string; position?: { x: number; z: number }; sourceZone: "hand" | "command" | "exile" | "graveyard"; faceIndex?: number; sacrificeTargets?: VisibleCard[]; altChoice?: "alt" | "normal" }
         | { via: "respondWithCard"; cardId: string; sourceZone: "hand" | "exile"; sacrificeTargets?: VisibleCard[] };
     }
   // A cast "choose one / choose two" spell (Austere Command, Valorous Stance, Collective Resistance, Profane Command): the human picks
@@ -4352,7 +4365,8 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     sourceZone: "hand" | "command" | "exile" | "graveyard" = "hand",
     faceIndex?: number,
     preChosenSacrificeTargets?: VisibleCard[],
-    castChoices?: CastChoices
+    castChoices?: CastChoices,
+    altChoice?: "alt" | "normal"
   ) {
     if (pendingAction) return;
     if (castDispatchInFlight.current !== null) {
@@ -4593,14 +4607,36 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     const spellFace = spellFaces && faceIndex !== undefined ? spellFaces[faceIndex] : undefined;
     // Flashback replaces the mana cost with the flashback cost (the same override mechanism an Adventure face uses).
     const flashbackCostText = graveyardPermission?.kind === "flashback" ? graveyardPermission.costText : undefined;
-    const costCard = flashbackCostText
+    // Sephara's "pay {W} and tap four flyers rather than pay this spell's mana cost": offered whenever the creatures exist. A human is asked;
+    // an agent always takes it, since it is the cheaper way.
+    const tapAlt = sourceZone === "hand" && !flashbackCostText && !doorFace && !spellFace ? tapCreaturesAltCostFor(seat, card) : undefined;
+    if (tapAlt && seat.kind === "human" && altChoice === undefined && !castChoices) {
+      setPendingRuleChoice({
+        id: crypto.randomUUID(),
+        kind: "choose_cast_alt",
+        controllerSeatId: seatId,
+        sourceCardId: cardId,
+        sourceCardName: card.name,
+        prompt: `${card.name}: pay the alternative cost instead of its mana cost?`,
+        altLabel: `Pay ${tapAlt.costManaText} and tap ${tapAlt.creatureIds.length >= tapAlt.count ? tapAlt.count : tapAlt.creatureIds.length} untapped creature${tapAlt.count === 1 ? "" : "s"}${tapAlt.withKeyword ? ` with ${tapAlt.withKeyword}` : ""}`,
+        resume: { seatId, cardId, position, sourceZone, faceIndex, sacrificeTargets: preChosenSacrificeTargets }
+      });
+      setSelectedHandCardId(undefined);
+      return;
+    }
+    const useTapAlt = Boolean(tapAlt) && (seat.kind !== "human" || altChoice === "alt");
+    const costCard = useTapAlt && tapAlt
+      ? cardWithFaceManaCost(card, tapAlt.costManaText)
+      : flashbackCostText
       ? cardWithFaceManaCost(card, flashbackCostText)
       : doorFace
         ? cardWithFaceManaCost(card, doorFace.manaCost)
         : spellFace
           ? cardWithFaceManaCost(card, spellFace.manaCost)
           : card;
-    const baseCost = flashbackCostText
+    const baseCost = useTapAlt && tapAlt
+      ? manaValueFromManaCost(tapAlt.costManaText)
+      : flashbackCostText
       ? manaValueFromManaCost(flashbackCostText)
       : doorFace
         ? manaValueFromManaCost(doorFace.manaCost)
@@ -4659,13 +4695,23 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       const answers: CastChoices = { targets: [] };
       const firstPrompt = nextCastPrompt(session, seatId, planCard, chosenX > 0 ? chosenX : undefined, answers);
       if (firstPrompt) {
-        openCastPrompt(firstPrompt, { planCard, chosenX: chosenX > 0 ? chosenX : undefined, answers, resume: { via: "playCard", seatId, cardId, position, sourceZone, faceIndex, sacrificeTargets: preChosenSacrificeTargets } });
+        openCastPrompt(firstPrompt, { planCard, chosenX: chosenX > 0 ? chosenX : undefined, answers, resume: { via: "playCard", seatId, cardId, position, sourceZone, faceIndex, sacrificeTargets: preChosenSacrificeTargets, altChoice } });
         setSelectedHandCardId(undefined);
         return;
       }
     }
 
     applyCastingCostPaymentSideEffect(seatId, payment);
+    if (useTapAlt && tapAlt) {
+      const toTap = new Set(tapAlt.creatureIds.slice(0, tapAlt.count));
+      setSession((current) => ({
+        ...current,
+        seats: current.seats.map((item) =>
+          item.id !== seatId ? item : { ...item, board: { ...item.board, battlefield: item.board.battlefield.map((permanent) => (toTap.has(permanent.id) ? { ...permanent, tapped: true } : permanent)) } }
+        ),
+        events: [{ id: crypto.randomUUID(), at: new Date().toISOString(), seatId, message: `${seat.name} pays ${tapAlt.costManaText} and taps ${toTap.size} creatures instead of ${card.name}'s mana cost.`, detail: "Rules action" }, ...current.events]
+      }));
+    }
 
     const castName = doorFace?.name ?? spellFace?.name ?? (dfcSplit ? dfcSplit.spellFace.name : card.name);
     const castTypeLine = doorFace?.typeLine ?? spellFace?.typeLine ?? (dfcSplit ? dfcSplit.spellFace.typeLine : card.typeLine);
@@ -8175,6 +8221,14 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   // destroy_all_conditional/damage/mass_damage) has no target to choose at all, so it just applies
   // immediately via the same applyRemovalEffect the deterministic/agent path already uses for those
   // shapes.
+  function completeCastAlt(index: number) {
+    const choice = pendingRuleChoice;
+    if (!choice || choice.kind !== "choose_cast_alt") return;
+    setPendingRuleChoice(undefined);
+    const resume = choice.resume;
+    window.setTimeout(() => playCard(resume.seatId, resume.cardId, resume.position, resume.sourceZone, resume.faceIndex, resume.sacrificeTargets, undefined, index === 0 ? "alt" : "normal"), 0);
+  }
+
   function openCastPrompt(
     prompt: NonNullable<ReturnType<typeof nextCastPrompt>>,
     base: { planCard: VisibleCard; chosenX?: number; answers: CastChoices; resume: Extract<PendingRuleChoice, { kind: "choose_cast_targets" }>["resume"] }
@@ -8214,7 +8268,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     setPendingRuleChoice(undefined);
     const resume = choice.resume;
     window.setTimeout(() => {
-      if (resume.via === "playCard") playCard(resume.seatId, resume.cardId, resume.position, resume.sourceZone, resume.faceIndex, resume.sacrificeTargets, answers);
+      if (resume.via === "playCard") playCard(resume.seatId, resume.cardId, resume.position, resume.sourceZone, resume.faceIndex, resume.sacrificeTargets, answers, resume.altChoice);
       else respondWithCard(resume.cardId, resume.sourceZone, resume.sacrificeTargets, answers);
     }, 0);
   }
@@ -8256,6 +8310,10 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   }
 
   function chooseModalOption(index: number) {
+    if (pendingRuleChoice?.kind === "choose_cast_alt") {
+      completeCastAlt(index);
+      return;
+    }
     if (pendingRuleChoice?.kind === "choose_cast_targets") {
       completeCastPrompt(index);
       return;
@@ -10860,7 +10918,13 @@ export function legalMainPhaseActions(
     const fixedCost = adjustedCastingCost(seat, card, card.manaValue, "hand", activeSeatId, session.seats);
     const chosenX = maxAffordableX(seat, card, fixedCost);
     const totalCost = totalCastingCost(seat, card, card.manaValue, chosenX);
-    const payment = chooseManaSourcesForCost(seat, card, totalCost, undefined, session.seats);
+    let payment = chooseManaSourcesForCost(seat, card, totalCost, undefined, session.seats);
+    // An alternative cost (Sephara) that lets an otherwise unaffordable spell be cast.
+    const legalTapAlt = tapCreaturesAltCostFor(seat, card);
+    if (legalTapAlt) {
+      const altPayment = chooseManaSourcesForCost(seat, cardWithFaceManaCost(card, legalTapAlt.costManaText), manaValueFromManaCost(legalTapAlt.costManaText), undefined, session.seats);
+      if (altPayment.ok) payment = altPayment;
+    }
     if (!payment.ok) continue;
     if (!hasResolvableTarget(session, seat.id, card)) continue;
     const xNote = chosenX > 0 ? ` Casting for X=${chosenX}.` : "";
@@ -19217,6 +19281,16 @@ function chooseCreaturesToTapForCost(seat: PlayerSeat, count: number, subtype: s
   return eligible.length >= count ? eligible.slice(0, count) : undefined;
 }
 
+// Sephara-style "pay {W} and tap four flyers": the cost and which creatures would be tapped, when that many untapped ones exist.
+export function tapCreaturesAltCostFor(seat: PlayerSeat, card: VisibleCard): { costManaText: string; count: number; withKeyword?: string; creatureIds: string[] } | undefined {
+  const alt = parseTapCreaturesAltCost(card.oracleText);
+  if (!alt) return undefined;
+  const creatures = seat.board.battlefield
+    .filter((permanent) => permanent.typeLine.includes("Creature") && !permanent.tapped && !permanent.phasedOut && permanent.id !== card.id && (!alt.withKeyword || hasKeyword(permanent, alt.withKeyword)))
+    .sort((a, b) => effectivePower(a) - effectivePower(b));
+  return creatures.length >= alt.count ? { ...alt, creatureIds: creatures.map((permanent) => permanent.id) } : undefined;
+}
+
 // "...the number of colors in your commanders' color identity" (War Room).
 function commanderColorCount(seat: PlayerSeat): number {
   const commanders = [...seat.board.battlefield.filter((card) => card.commander), ...(seat.board.commander ? [seat.board.commander] : [])];
@@ -20634,6 +20708,9 @@ function ruleChoiceView(
           .filter((card) => hasCardType(card, "Creature"))
           .map((card) => ({ card, seatId: humanSeat.id, seatName: humanSeat.name }))
       };
+    }
+    if (choice.kind === "choose_cast_alt") {
+      return { kind: "choose_modal_option" as const, sourceCardName: choice.sourceCardName, prompt: choice.prompt, options: [{ index: 0, label: choice.altLabel }, { index: 1, label: "Pay the normal mana cost" }] };
     }
     if (choice.kind === "choose_cast_targets") {
       return { kind: "choose_modal_option" as const, sourceCardName: choice.sourceCardName, prompt: choice.prompt, options: choice.options.map((option, index) => ({ index, label: option.label })) };

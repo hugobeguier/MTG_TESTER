@@ -2,7 +2,7 @@
 // the test: two earlier tests passed on invented text while the real cards stayed broken (Court of Grace, the
 // "with power N or greater" watchers). Skipped per card when the catalog doesn't have it.
 import { describe, expect, it } from "vitest";
-import { applyCastRemoval, nextCastPrompt, type CastChoices, spellModePrompt, applyDigPick, applyLabeledContinuation, spellTargetSlots, grantKeywordsToCreature, applyExalted, applySacrificeEffect, applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
+import { legalMainPhaseActions, tapCreaturesAltCostFor, applyCastRemoval, nextCastPrompt, type CastChoices, spellModePrompt, applyDigPick, applyLabeledContinuation, spellTargetSlots, grantKeywordsToCreature, applyExalted, applySacrificeEffect, applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
 import { parseRemovalEffect } from "@/lib/removalSpells";
 import { parseZoneEffect } from "@/lib/zoneEffects";
 import { permanentMatchesQualifier } from "@/lib/characteristics";
@@ -1507,5 +1507,30 @@ describe("cast-time modes and targets (pure halves)", () => {
     const gone: CastChoices = { targets: [{ kind: "card", seatId: "b", cardId: "nope" }] };
     expect(applyCastRemoval(s, "a", bolt, parseRemovalEffect(bolt.oracleText)!, undefined, gone).seats[1].board.battlefield).toHaveLength(1);
     expect(nextCastPrompt(s, "a", real("Elder Gargaroth", "c"), undefined, { targets: [] })).toBeUndefined();
+  });
+});
+
+describe("Sephara's alternative cost (real Oracle text)", () => {
+  const flyer = (id: string, extra: Partial<VisibleCard> = {}) => bear(id, { oracleText: "Flying", ...extra });
+  it("is available only with four untapped flyers, and taps the weakest ones", () => {
+    const sephara = real("Sephara, Sky's Blade", "seph");
+    const four = seat("a", [flyer("f1", { power: "1" }), flyer("f2", { power: "5" }), flyer("f3", { power: "2" }), flyer("f4", { power: "3" }), flyer("f5", { power: "9" })]);
+    const alt = tapCreaturesAltCostFor(four, sephara)!;
+    expect(alt).toMatchObject({ costManaText: "{W}", count: 4 });
+    expect(alt.creatureIds.slice(0, 4).sort()).toEqual(["f1", "f3", "f4", "f2"].sort());
+    const three = seat("a", [flyer("f1"), flyer("f2"), flyer("f3"), flyer("f4", { tapped: true })]);
+    expect(tapCreaturesAltCostFor(three, sephara)).toBeUndefined();
+  });
+  it("lets an agent with one Plains and four flyers cast it, where the normal {4}{W}{W}{W} is out of reach", () => {
+    const sephara = real("Sephara, Sky's Blade", "seph");
+    const mine = seat("a", [real("Plains", "p1"), flyer("f1"), flyer("f2"), flyer("f3"), flyer("f4")]);
+    mine.board.hand = [sephara];
+    const s = session([mine, seat("b", [])]);
+    const actions = legalMainPhaseActions(s.seats[0], true, "a", 1, new Set(), s);
+    expect(actions.some((action) => action.id === "cast:seph")).toBe(true);
+    const poor = seat("a", [real("Plains", "p1"), flyer("f1"), flyer("f2")]);
+    poor.board.hand = [sephara];
+    const s2 = session([poor, seat("b", [])]);
+    expect(legalMainPhaseActions(s2.seats[0], true, "a", 1, new Set(), s2).some((action) => action.id === "cast:seph")).toBe(false);
   });
 });
