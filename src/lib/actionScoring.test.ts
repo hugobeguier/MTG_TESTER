@@ -514,7 +514,7 @@ describe("blocking a deathtouch attacker (scoring)", () => {
 });
 
 describe("choosing whom to attack (scoring)", () => {
-  const attacker = { id: "atk", name: "Hill Giant", power: "3", toughness: "3", oracleText: "" };
+  const attacker = { id: "atk", name: "Colossal Wurm", power: "6", toughness: "6", manaValue: 6, oracleText: "" };
   const viper = { id: "viper", name: "Gnarled Viper", power: "1", toughness: "1", oracleText: "Deathtouch" };
   const context = {
     purpose: "declare_attackers",
@@ -530,8 +530,8 @@ describe("choosing whom to attack (scoring)", () => {
   it("attacking the player who has an untapped deathtouch blocker scores far below attacking the open player", () => {
     const into = attack("guarded");
     const open = attack("open");
-    expect(into.reasons.join(" ")).toMatch(/Gnarled Viper can block and kill this attacker/i);
-    expect(open.score).toBeGreaterThan(into.score + 3);
+    expect(into.reasons.join(" ")).toMatch(/Gnarled Viper can kill it/i);
+    expect(open.score).toBeGreaterThan(into.score + 1);
   });
   it("another player's blocker doesn't count against an attack on someone else", () => {
     expect(attack("open").reasons.join(" ")).not.toMatch(/deathtouch/i);

@@ -1,4 +1,7 @@
-import { hasKeyword as keywordLineHas } from "./keywords";
+import { attackEconomics, defenderOf, threatShares } from "./strategy";
+import { canLegallyBlock, hasDeathtouch, hasDoubleStrike, hasFirstStrike, hasFlying, hasIndestructible, hasInfect, hasKeyword, hasLifelink, hasMenace, hasReach, hasTrample, parseNum, simulateDuel } from "./combatSim";
+
+export { simulateDuel };
 
 export type ScorableActionType =
   | "keep_hand"
@@ -35,6 +38,8 @@ export interface CardLike {
   // The keywords the card actually has right now (printed, granted by other permanents, until-end-of-turn). When present this is the
   // authority; without it, only the card's keyword lines are read, never rules text that merely mentions a keyword.
   keywords?: string[];
+  // True for the owner's commander (the deck's engine — losing it costs more than its stats say).
+  commander?: boolean;
 }
 
 export interface ScoringContext {
@@ -60,6 +65,9 @@ export interface ScoringContext {
     commanderDamage?: Record<string, number>;
     battlefield?: CardLike[];
     availableMana?: { total?: number };
+    commander?: CardLike;
+    // For an opponent only the size of the hand is known.
+    hand?: CardLike[] | { count?: number };
   }>;
   stack?: Array<{ id?: string; cardName?: string; oracleText?: string }>;
   // The item currently awaiting a response (as opposed to `stack`, which holds everything already
@@ -89,12 +97,6 @@ const BASELINE_SCORE_BY_ACTION_TYPE: Record<ScorableActionType, number> = {
 const EARLY_RAMP_TURN_CUTOFF = 4;
 const MID_RAMP_TURN_CUTOFF = 8;
 
-function parseNum(value: string | undefined): number | undefined {
-  if (value === undefined) return undefined;
-  const parsed = Number.parseInt(value, 10);
-  return Number.isNaN(parsed) ? undefined : parsed;
-}
-
 function findCard(cards: CardLike[] | undefined, id: string | undefined): CardLike | undefined {
   if (!id) return undefined;
   return cards?.find((card) => card.id === id);
@@ -108,110 +110,6 @@ function defendingOpponent(context: ScoringContext, targetId: string | undefined
 
 function opponentBattlefields(context: ScoringContext): CardLike[] {
   return (context.opponents ?? []).flatMap((opponent) => opponent.battlefield ?? []);
-}
-
-function hasKeyword(card: CardLike, keyword: string): boolean {
-  if (card.keywords) return card.keywords.includes(keyword);
-  return keywordLineHas(card.oracleText ?? "", keyword);
-}
-
-function hasLifelink(card: CardLike) {
-  return hasKeyword(card, "lifelink");
-}
-
-// What a one-on-one fight does, with the keyword rules applied in the order the rules apply them: first strikers deal damage in an
-// earlier step (and a creature that dies in it deals none afterwards); double strikers deal in both; deathtouch makes any damage lethal;
-// indestructible creatures survive lethal damage and deathtouch. Returns who dies and how much damage each side got in.
-export function simulateDuel(attacker: CardLike, blocker: CardLike): { attackerDies: boolean; blockerDies: boolean; attackerDealt: number; blockerDealt: number; firstStrikeKillsBlocker: boolean } {
-  const aPower = Math.max(0, parseNum(attacker.power) ?? 0);
-  const bPower = Math.max(0, parseNum(blocker.power) ?? 0);
-  const aToughness = parseNum(attacker.toughness) ?? Number.POSITIVE_INFINITY;
-  const bToughness = parseNum(blocker.toughness) ?? Number.POSITIVE_INFINITY;
-  const aFirst = hasFirstStrike(attacker) || hasDoubleStrike(attacker);
-  const bFirst = hasFirstStrike(blocker) || hasDoubleStrike(blocker);
-  const aRegular = !hasFirstStrike(attacker) || hasDoubleStrike(attacker);
-  const bRegular = !hasFirstStrike(blocker) || hasDoubleStrike(blocker);
-  let aDamage = 0;
-  let bDamage = 0;
-  let attackerDealt = 0;
-  let blockerDealt = 0;
-  let aAlive = true;
-  let bAlive = true;
-  const lethal = (source: CardLike, dealt: number, toughness: number, target: CardLike) => dealt > 0 && !hasIndestructible(target) && (hasDeathtouch(source) || dealt >= toughness);
-  let firstStrikeKillsBlocker = false;
-  // First-strike step.
-  if (aFirst) {
-    blockerDealt += 0;
-    bDamage += aPower;
-    attackerDealt += aPower;
-  }
-  if (bFirst) {
-    aDamage += bPower;
-    blockerDealt += bPower;
-  }
-  if (aFirst && lethal(attacker, bDamage, bToughness, blocker)) {
-    bAlive = false;
-    firstStrikeKillsBlocker = true;
-  }
-  if (bFirst && lethal(blocker, aDamage, aToughness, attacker)) aAlive = false;
-  // Regular step: only creatures still alive after the first-strike step deal damage.
-  if (aAlive && aRegular) {
-    bDamage += aPower;
-    attackerDealt += aPower;
-  }
-  if (bAlive && bRegular) {
-    aDamage += bPower;
-    blockerDealt += bPower;
-  }
-  if (lethal(attacker, bDamage, bToughness, blocker)) bAlive = false;
-  if (lethal(blocker, aDamage, aToughness, attacker)) aAlive = false;
-  return { attackerDies: !aAlive, blockerDies: !bAlive, attackerDealt, blockerDealt, firstStrikeKillsBlocker };
-}
-
-function hasFlying(card: CardLike) {
-  return hasKeyword(card, "flying");
-}
-
-function hasReach(card: CardLike) {
-  return hasKeyword(card, "reach");
-}
-
-function hasDeathtouch(card: CardLike) {
-  return hasKeyword(card, "deathtouch");
-}
-
-function hasTrample(card: CardLike) {
-  return hasKeyword(card, "trample");
-}
-
-function hasFirstStrike(card: CardLike) {
-  return hasKeyword(card, "first strike");
-}
-
-function hasDoubleStrike(card: CardLike) {
-  return hasKeyword(card, "double strike");
-}
-
-function hasIndestructible(card: CardLike) {
-  return hasKeyword(card, "indestructible");
-}
-
-function hasInfect(card: CardLike) {
-  return hasKeyword(card, "infect");
-}
-
-function hasMenace(card: CardLike) {
-  return hasKeyword(card, "menace");
-}
-
-// Mirrors AppFlow.tsx's canBlock: a menace attacker needs two-or-more blockers assigned at once,
-// which this engine's single-blocker-per-attacker model can never offer — so no single candidate
-// here is ever a legal block for one. Without this, attack-profitability scoring would think a
-// menace attacker "has a potential blocker" and hold back an attack the engine will actually just
-// wave through unblocked.
-function canLegallyBlock(attacker: CardLike, blocker: CardLike): boolean {
-  if (hasMenace(attacker)) return false;
-  return !hasFlying(attacker) || hasFlying(blocker) || hasReach(blocker);
 }
 
 function isLethalTo(source: CardLike, damage: number, targetToughness: number): boolean {
@@ -283,52 +181,27 @@ function scoreRemovalTargeting(action: ScorableAction, context: ScoringContext, 
   }
 }
 
+// What an attack gains against what it risks (see strategy.ts' attackEconomics): expected damage, weighted by how much that player matters;
+// a blocker it could kill; against the attacker dying to the best blocker (priced at its value to the deck, so engines and the commander
+// stay home) and the crack-back when it is tapped. Only the defending player's creatures count as blockers.
 function scoreAttackProfitability(action: ScorableAction, context: ScoringContext, delta: (amount: number, reason: string) => void) {
   if (action.actionType !== "attack") return;
   const attacker = findCard(context.you?.battlefield, action.cardId);
-  const attackerPower = parseNum(attacker?.power);
-  const attackerToughness = parseNum(attacker?.toughness);
-  if (!attacker || attackerPower === undefined) return;
+  if (!attacker || parseNum(attacker.power) === undefined) return;
 
-  // Only the creatures of the player (or planeswalker's controller) actually being attacked can block, not every opponent's.
   const defender = defendingOpponent(context, action.targetIds[0]);
+  const share = defender?.id ? threatShares(context).get(defender.id)?.share ?? 0 : 0;
+  const economics = attackEconomics(attacker, defender, context, share);
   const defenderCreatures = defender ? defender.battlefield ?? [] : opponentBattlefields(context);
   const potentialBlockers = defenderCreatures.filter((card) => !card.tapped && parseNum(card.power) !== undefined && canLegallyBlock(attacker, card));
+
   if (potentialBlockers.length === 0) {
     delta(3, defender ? `${defender.name ?? "the defender"} has no untapped creature that can block this attacker` : "no untapped, legally-able blockers across opponents");
+    if (economics.risk > 0.5) delta(-Math.min(5, Math.round(economics.risk)), `but tapping it has a cost: ${economics.reasons.filter((reason) => /crack-back/.test(reason)).join("; ") || "it leaves the defence thin"}`);
     return;
   }
-
-  // A blocker that kills the attacker and either survives the fight or is worth much less than the attacker (a cheap deathtouch creature):
-  // attacking into it just loses the creature.
-  const worth = (card: CardLike) => (card.manaValue ?? 0) + (parseNum(card.power) ?? 0) + (parseNum(card.toughness) ?? 0);
-  const killers = potentialBlockers.filter((blocker) => {
-    const duel = simulateDuel(attacker, blocker);
-    return duel.attackerDies && (!duel.blockerDies || worth(attacker) > worth(blocker) + 2);
-  });
-  if (killers.length > 0) {
-    const named = killers[0].name ?? "a blocker";
-    delta(-3, `${named} can block and kill this attacker for little or nothing in return${hasDeathtouch(killers[0]) ? " (deathtouch)" : ""}`);
-  }
-
-  const survivesEveryBlock = potentialBlockers.every((blocker) => !simulateDuel(attacker, blocker).attackerDies);
-  const killsAtLeastOneBlocker = potentialBlockers.some((blocker) => simulateDuel(attacker, blocker).blockerDies);
-
-  if (hasDeathtouch(attacker)) {
-    delta(1, "deathtouch threatens any blocker regardless of toughness");
-  }
-  if (hasTrample(attacker) && killsAtLeastOneBlocker) {
-    delta(1, "trample carries excess damage through a dying blocker");
-  }
-  if ((hasFirstStrike(attacker) || hasDoubleStrike(attacker)) && killsAtLeastOneBlocker) {
-    delta(1, "first/double strike can kill a blocker before it deals damage back");
-  }
-
-  if (survivesEveryBlock && killsAtLeastOneBlocker) {
-    delta(2, "attacker favorably trades or survives against likely blockers");
-  } else if (!survivesEveryBlock && !killsAtLeastOneBlocker) {
-    delta(-2, "attacker likely dies without killing a blocker");
-  }
+  const net = Math.max(-6, Math.min(5, Math.round(economics.net * 0.7)));
+  delta(net, `attack economics: gain ~${economics.gain.toFixed(1)} vs risk ~${economics.risk.toFixed(1)} — ${economics.reasons.join("; ")}`);
 }
 
 // Without this, every opponent an attacker could legally hit scores identically (scoreAttackProfitability
@@ -372,22 +245,55 @@ function scoreAttackTargetSelection(action: ScorableAction, context: ScoringCont
   const opponents = context.opponents ?? [];
   if (!targetId || opponents.length < 2) return;
 
-  const targetOpponent = opponents.find((opponent) => opponent.id === targetId) ?? opponents.find((opponent) => (opponent.battlefield ?? []).some((card) => card.id === targetId));
+  const targetOpponent = defenderOf(context, targetId);
   if (!targetOpponent) return;
+  const name = targetOpponent.name ?? "this opponent";
 
   const lifeTotals = opponents.map((opponent) => opponent.life ?? 40);
   const lowestLife = Math.min(...lifeTotals);
   const targetLife = targetOpponent.life ?? 40;
   if (targetLife <= lowestLife && lifeTotals.some((life) => life !== targetLife)) {
-    delta(2, `${targetOpponent.name ?? "this opponent"} has the lowest life among opponents (${targetLife})`);
+    delta(2, `${name} has the lowest life among opponents (${targetLife})`);
   }
 
-  const boardValues = opponents.map((opponent) => boardValue(opponent.battlefield));
-  const highestBoardValue = Math.max(...boardValues);
-  const targetBoardValue = boardValue(targetOpponent.battlefield);
-  if (targetBoardValue >= highestBoardValue && boardValues.some((value) => value !== targetBoardValue)) {
-    delta(2, `${targetOpponent.name ?? "this opponent"} has the most board presence among opponents and looks like the biggest threat`);
+  // Who is the biggest threat: their damage against my life, commander pressure, engine strength, reserves.
+  const shares = threatShares(context);
+  const mine = targetOpponent.id ? shares.get(targetOpponent.id) : undefined;
+  const REAL_THREAT = 4; // below this an opponent's board is too small for "biggest threat" to mean anything
+  const strongestOther = Math.max(0, ...opponents.filter((opponent) => opponent.id !== targetOpponent.id).map((opponent) => (opponent.id ? shares.get(opponent.id)?.threat.score ?? 0 : 0)));
+  if (mine) {
+    const fair = 1 / opponents.length;
+    if (mine.share >= fair * 1.4 && mine.threat.score >= REAL_THREAT) {
+      delta(2, `${name} is the biggest threat (${Math.round(mine.share * 100)}% of the table's threat${mine.threat.reasons.length ? ": " + mine.threat.reasons.join(", ") : ""})`);
+    } else if (mine.share <= fair * 0.6 && strongestOther >= REAL_THREAT) {
+      delta(-1, `${name} is a minor threat compared with the others (${Math.round(mine.share * 100)}%)`);
+    }
   }
+
+  // Within reach: this player could be dropped (or nearly) by what I can send.
+  const myPower = (context.you?.battlefield ?? []).filter((card) => !card.tapped).reduce((total, card) => total + Math.max(0, parseNum(card.power) ?? 0), 0);
+  if (myPower > 0 && targetLife <= myPower * 1.5) {
+    delta(1, `${name} is within reach of my ${myPower} power (at ${targetLife} life)`);
+  }
+}
+
+// Plays that grow the deck's engine are worth more than their stats suggest — but only while they have time to pay off, and an anthem
+// only matters with creatures to boost. Kept small so it balances with (never overrides) the attack and survival signals.
+function scoreDevelopment(action: ScorableAction, context: ScoringContext, delta: (amount: number, reason: string) => void) {
+  if (action.actionType !== "cast_spell" && action.actionType !== "cast_commander") return;
+  const text = (action.detail ?? "").replace(/\([^)]*\)/g, "").toLowerCase();
+  const turn = context.turn ?? 1;
+  const myCreatures = (context.you?.battlefield ?? []).filter((card) => (card.typeLine ?? "").includes("Creature")).length;
+  const handSize = context.you?.hand?.length ?? 0;
+  const permanent = /\b(?:creature|artifact|enchantment|planeswalker)\b/.test(text) && !/\b(?:instant|sorcery)\b/.test(text);
+  if (action.actionType === "cast_commander" && turn <= 8) delta(2, "casting the commander gets the deck's engine online");
+  if (permanent && /\b(?:other )?[a-z ]*creatures? you control (?:get|have)\b|\bother [a-z]+s? you control get\b/.test(text) && myCreatures >= 2) {
+    delta(Math.min(3, Math.floor(myCreatures / 2) + 1), `an anthem now boosts ${myCreatures} creatures`);
+  }
+  if (permanent && turn <= 6 && /\bwhenever you (?:cast|draw|gain|attack)|\bat the beginning of your (?:upkeep|end step)\b/.test(text)) {
+    delta(1, "an engine pays off the longer it is in play");
+  }
+  if (/\bdraw (?:two|three|\d+) cards\b/.test(text) && handSize <= 2) delta(1, "refuels a nearly empty hand");
 }
 
 function scoreHoldInstants(action: ScorableAction, context: ScoringContext, delta: (amount: number, reason: string) => void) {
@@ -762,6 +668,7 @@ export function scoreLegalAction(action: ScorableAction, context: ScoringContext
   scoreMulliganDecision(action, context, delta);
   scoreImmediateWinThreats(action, context, delta);
   scoreStackResponse(action, context, delta);
+  scoreDevelopment(action, context, delta);
 
   return { score, reasons };
 }

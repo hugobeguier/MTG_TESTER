@@ -116,3 +116,20 @@ Read a creature's `keywords` array in the context, not its rules text: it lists 
 - **Defender:** can block but can't attack.
 
 Before blocking, work out the fight with these rules: who deals damage first, who dies, who survives. Do not block just because the blocker has more power or toughness; check whether the attacker has deathtouch or first strike. A trade is only good when the creature you lose is worth no more than the creature you kill.
+
+## Strategy: weigh what an attack gains against what it risks
+
+Every attack is a trade. Before attacking, and when choosing whom to attack, put numbers on both sides and compare them:
+
+- **What it gains:** the damage you expect to connect (less if the defender has untapped creatures that can block, more if the target is low on life or is the biggest threat), a blocker you would kill, and attack/damage triggers on your creature.
+- **What it risks:** losing the attacker to the best blocker the defender has. Price it at its worth to YOUR deck, not its stats: your commander, card-draw and token engines, anthems and mana creatures are worth far more than a vanilla creature of the same size, so keep them home unless the attack is safe. Cheap, expendable creatures can attack into bad blockers.
+- **The crack-back:** a tapped creature can't block. If the opponents' creatures would get through to you for a lot, or for lethal, after you tap out your defenders, the attack is wrong however good it looks.
+- **Only the defending player's untapped creatures can block.** A deathtouch or first-strike creature standing ready on one side makes attacking THAT player costly; attack someone without such a blocker instead, or send only creatures you can afford to lose.
+
+Choosing whom to attack — look at all opponents together:
+
+- **Biggest threat:** who could hurt you or win soonest — their damage on board against your life, their commander closing in on 21 damage, a strong engine, a full hand and open mana. Pressure and remove the threat before it kills you, as long as the attack is safe.
+- **Within reach:** a player your attackers can nearly finish is worth pressure; lethal always wins.
+- **Do not feed the winner:** if one opponent is far ahead, attacking a weaker opponent can help the leader. Prefer the line that lowers the leader's power.
+
+Balance aggression with development. Casting your commander, anthems when you have creatures to boost, card-draw engines early and ramp are how the deck gets stronger — do not trade away the pieces that make it work for a few points of damage, and do not sit back so long that the opponents' engines outgrow yours.
