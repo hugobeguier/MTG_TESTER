@@ -72,7 +72,8 @@ describe("scoreLegalActions", () => {
 
   it("prefers attacking the opponent with the most board presence (imminent-winner signal)", () => {
     const attacker: CardLike = { id: "atk", power: "3", toughness: "3" };
-    const bigBoard: CardLike[] = [{ id: "c1", power: "8", toughness: "8" }];
+    // Tapped: it cannot block, so the attack is not walking into it and only the imminent-winner signal differs.
+    const bigBoard: CardLike[] = [{ id: "c1", power: "8", toughness: "8", tapped: true }];
     const context = baseContext({
       you: { battlefield: [attacker] },
       opponents: [
@@ -509,5 +510,35 @@ describe("blocking a deathtouch attacker (scoring)", () => {
     const scored = scoreLegalAction({ id: "b", actionType: "block", cardId: "blk", targetIds: ["atk"], label: "block" }, context);
     expect(scored.reasons.join(" ")).toMatch(/deathtouch/i);
     expect(scored.score).toBeLessThan(2);
+  });
+});
+
+describe("choosing whom to attack (scoring)", () => {
+  const attacker = { id: "atk", name: "Hill Giant", power: "3", toughness: "3", oracleText: "" };
+  const viper = { id: "viper", name: "Gnarled Viper", power: "1", toughness: "1", oracleText: "Deathtouch" };
+  const context = {
+    purpose: "declare_attackers",
+    turn: 5,
+    you: { life: 40, battlefield: [attacker] },
+    opponents: [
+      { id: "guarded", name: "Guarded", life: 30, battlefield: [viper] },
+      { id: "open", name: "Open", life: 30, battlefield: [] }
+    ]
+  };
+  const attack = (target: string) => scoreLegalAction({ id: `a-${target}`, actionType: "attack", cardId: "atk", targetIds: [target], label: "attack" }, context);
+
+  it("attacking the player who has an untapped deathtouch blocker scores far below attacking the open player", () => {
+    const into = attack("guarded");
+    const open = attack("open");
+    expect(into.reasons.join(" ")).toMatch(/Gnarled Viper can block and kill this attacker/i);
+    expect(open.score).toBeGreaterThan(into.score + 3);
+  });
+  it("another player's blocker doesn't count against an attack on someone else", () => {
+    expect(attack("open").reasons.join(" ")).not.toMatch(/deathtouch/i);
+  });
+  it("a tapped deathtouch creature is no deterrent", () => {
+    const tapped = { ...context, opponents: [{ ...context.opponents[0], battlefield: [{ ...viper, tapped: true }] }, context.opponents[1]] };
+    const result = scoreLegalAction({ id: "a", actionType: "attack", cardId: "atk", targetIds: ["guarded"], label: "attack" }, tapped);
+    expect(result.reasons.join(" ")).not.toMatch(/kill this attacker/i);
   });
 });

@@ -100,6 +100,12 @@ function findCard(cards: CardLike[] | undefined, id: string | undefined): CardLi
   return cards?.find((card) => card.id === id);
 }
 
+// The opponent a "targetIds[0]" refers to: a player's own seat id, or a planeswalker on their battlefield.
+function defendingOpponent(context: ScoringContext, targetId: string | undefined) {
+  if (!targetId) return undefined;
+  return (context.opponents ?? []).find((opponent) => opponent.id === targetId || (opponent.battlefield ?? []).some((card) => card.id === targetId));
+}
+
 function opponentBattlefields(context: ScoringContext): CardLike[] {
   return (context.opponents ?? []).flatMap((opponent) => opponent.battlefield ?? []);
 }
@@ -284,12 +290,25 @@ function scoreAttackProfitability(action: ScorableAction, context: ScoringContex
   const attackerToughness = parseNum(attacker?.toughness);
   if (!attacker || attackerPower === undefined) return;
 
-  const potentialBlockers = opponentBattlefields(context).filter(
-    (card) => !card.tapped && parseNum(card.power) !== undefined && canLegallyBlock(attacker, card)
-  );
+  // Only the creatures of the player (or planeswalker's controller) actually being attacked can block, not every opponent's.
+  const defender = defendingOpponent(context, action.targetIds[0]);
+  const defenderCreatures = defender ? defender.battlefield ?? [] : opponentBattlefields(context);
+  const potentialBlockers = defenderCreatures.filter((card) => !card.tapped && parseNum(card.power) !== undefined && canLegallyBlock(attacker, card));
   if (potentialBlockers.length === 0) {
-    delta(3, "no untapped, legally-able blockers across opponents");
+    delta(3, defender ? `${defender.name ?? "the defender"} has no untapped creature that can block this attacker` : "no untapped, legally-able blockers across opponents");
     return;
+  }
+
+  // A blocker that kills the attacker and either survives the fight or is worth much less than the attacker (a cheap deathtouch creature):
+  // attacking into it just loses the creature.
+  const worth = (card: CardLike) => (card.manaValue ?? 0) + (parseNum(card.power) ?? 0) + (parseNum(card.toughness) ?? 0);
+  const killers = potentialBlockers.filter((blocker) => {
+    const duel = simulateDuel(attacker, blocker);
+    return duel.attackerDies && (!duel.blockerDies || worth(attacker) > worth(blocker) + 2);
+  });
+  if (killers.length > 0) {
+    const named = killers[0].name ?? "a blocker";
+    delta(-3, `${named} can block and kill this attacker for little or nothing in return${hasDeathtouch(killers[0]) ? " (deathtouch)" : ""}`);
   }
 
   const survivesEveryBlock = potentialBlockers.every((blocker) => !simulateDuel(attacker, blocker).attackerDies);
