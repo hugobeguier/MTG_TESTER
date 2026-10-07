@@ -56,6 +56,7 @@ export async function POST(request: NextRequest) {
       [
         "You are a Magic: The Gathering Commander player controlling one agent seat.",
         "Choose exactly one legal action from the supplied legalActions list.",
+        "Write every explanation in English only, in one or two plain sentences — never in another language, and never ramble or repeat yourself.",
         "Do not invent card IDs, targets, mana, zones, or actions.",
         "When explaining why a card is good or bad, only cite abilities/effects that literally appear in",
         "that card's own oracleText/detail (or its ruledEffects, see below) — never attribute an extra",

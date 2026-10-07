@@ -2937,14 +2937,35 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     return result.action;
   }
 
+  // An agent that keeps choosing the same cast without it ever happening is stuck (the cast is offered as payable but the real cast refuses):
+  // after three identical picks in a row that action is dropped for the rest of the phase so the agent can do something else or pass.
+  const agentCastAttempts = useRef<{ key: string; count: number }>({ key: "", count: 0 });
+  const agentBannedCasts = useRef<Set<string>>(new Set());
+
   async function decideAgentTurnAction(seat: PlayerSeat, requestKey: string) {
     try {
-      const legalActions = legalMainPhaseActions(seat, hasPlayedLandThisTurn(seat.id, session.turn), activeSeatId, session.turn, loyaltyActivationsThisTurn.current, session);
+      const phaseKey = `${session.turn}:${seat.id}:${session.phase}`;
+      const legalActions = legalMainPhaseActions(seat, hasPlayedLandThisTurn(seat.id, session.turn), activeSeatId, session.turn, loyaltyActivationsThisTurn.current, session).filter(
+        (candidate) => !agentBannedCasts.current.has(`${phaseKey}:${candidate.id}`)
+      );
       const action = await requestAgentDecision(seat, "main_phase", legalActions);
       const legal = legalActions.find((item) => item.id === action?.legalActionId) ?? fallbackLegalAction(legalActions);
       if (!legal) {
         advanceTurn();
         return;
+      }
+      if (legal.actionType === "cast_spell" || legal.actionType === "cast_commander") {
+        const attemptKey = `${phaseKey}:${legal.id}`;
+        agentCastAttempts.current = agentCastAttempts.current.key === attemptKey ? { key: attemptKey, count: agentCastAttempts.current.count + 1 } : { key: attemptKey, count: 1 };
+        if (agentCastAttempts.current.count >= 3) {
+          agentBannedCasts.current.add(attemptKey);
+          addEvent(`${seat.name} could not complete ${legal.label} after several tries; it will do something else this phase.`, seat.id, "Rules action");
+          agentCastAttempts.current = { key: "", count: 0 };
+          window.setTimeout(() => advanceTurn(), 0);
+          return;
+        }
+      } else {
+        agentCastAttempts.current = { key: "", count: 0 };
       }
       addEvent(`${seat.name} chooses ${legal.label}. ${action?.reason ?? ""}`.trim(), seat.id, "Agent decision");
       recordAgentReasoning(seat.id, { label: legal.label, reason: action?.reason ?? "", deliberation: action?.deliberation, purpose: "main_phase", at: new Date().toISOString() });
