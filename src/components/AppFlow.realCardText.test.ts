@@ -2,7 +2,7 @@
 // the test: two earlier tests passed on invented text while the real cards stayed broken (Court of Grace, the
 // "with power N or greater" watchers). Skipped per card when the catalog doesn't have it.
 import { describe, expect, it } from "vitest";
-import { spellModePrompt, applyDigPick, applyLabeledContinuation, spellTargetSlots, grantKeywordsToCreature, applyExalted, applySacrificeEffect, applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
+import { applyCastRemoval, nextCastPrompt, type CastChoices, spellModePrompt, applyDigPick, applyLabeledContinuation, spellTargetSlots, grantKeywordsToCreature, applyExalted, applySacrificeEffect, applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
 import { parseRemovalEffect } from "@/lib/removalSpells";
 import { parseZoneEffect } from "@/lib/zoneEffects";
 import { permanentMatchesQualifier } from "@/lib/characteristics";
@@ -11,6 +11,7 @@ import { etbEffectText } from "@/lib/oracleClauses";
 import { parseGenericManaAbilities, parseGenericSacrificeAbilities, parseGenericTapAbilities } from "@/lib/activatedAbilities";
 import { loadCardCatalog, lookupCard } from "@/lib/cardCatalog";
 import type { GameSession, PlayerSeat, VisibleCard } from "@/lib/types";
+import type { ChosenTarget } from "@/lib/targeting";
 
 const catalog = loadCardCatalog();
 
@@ -1442,5 +1443,69 @@ describe("Outpost Siege modes (real Oracle text)", () => {
     mine.zones = { ...mine.zones, library: 1 };
     const after = applyDeterministicPhaseTrigger(session([mine]), "a", siege("Dragons"), "upkeep step");
     expect(after?.seats[0].library?.length ?? 1).toBe(1);
+  });
+});
+
+describe("cast-time modes and targets (pure halves)", () => {
+  const walk = (s: GameSession, card: VisibleCard, picks: Array<(options: Array<{ label: string; mode?: number; target?: ChosenTarget }>) => number>) => {
+    const answers: CastChoices = { targets: [] };
+    const asked: string[] = [];
+    let step = 0;
+    for (let guard = 0; guard < 8; guard += 1) {
+      const prompt = nextCastPrompt(s, "a", card, undefined, answers);
+      if (!prompt) break;
+      asked.push(prompt.kind);
+      const options = prompt.options as Array<{ label: string; mode?: number; target?: ChosenTarget }>;
+      const choice = options[picks[step](options)];
+      step += 1;
+      if (prompt.kind === "modes") answers.modes = [...(answers.modes ?? []), choice.mode!];
+      else answers.targets.push(choice.target!);
+    }
+    return { answers, asked };
+  };
+  const label = (re: RegExp) => (options: Array<{ label: string }>) => options.findIndex((o) => re.test(o.label));
+
+  it("Lightning Bolt asks for one target, listing creatures and players", () => {
+    const bolt = real("Lightning Bolt", "spell");
+    const s = session([seat("a", []), seat("b", [bear("v", { toughness: "3" })])]);
+    const { answers, asked } = walk(s, bolt, [label(/Bear v/)]);
+    expect(asked).toEqual(["target"]);
+    expect(answers.targets).toEqual([{ kind: "card", seatId: "b", cardId: "v" }]);
+    const after = applyCastRemoval(s, "a", bolt, parseRemovalEffect(bolt.oracleText)!, undefined, answers);
+    expect(after.seats[1].board.battlefield).toHaveLength(0);
+  });
+
+  it("Valorous Stance: first the mode, then (for the destroy mode) its target", () => {
+    const spell = real("Valorous Stance", "spell");
+    const s = session([seat("a", [bear("mine")]), seat("b", [bear("big1", { power: "5", toughness: "5" }), bear("big2", { power: "6", toughness: "6" })])]);
+    const { answers, asked } = walk(s, spell, [label(/destroy/i), label(/big2/)]);
+    expect(asked).toEqual(["modes", "target"]);
+    const after = applyCastRemoval(s, "a", spell, parseRemovalEffect(etbEffectText(spell.oracleText))!, undefined, answers);
+    expect(after.seats[1].board.battlefield.map((c) => c.id)).toEqual(["big1"]);
+  });
+
+  it("Austere Command: two mode questions and no targets", () => {
+    const spell = real("Austere Command", "spell");
+    const s = session([seat("a", []), seat("b", [bear("v", { manaValue: 5 })])]);
+    const { answers, asked } = walk(s, spell, [(o) => 0, (o) => 0]);
+    expect(asked).toEqual(["modes", "modes"]);
+    expect(answers.modes).toHaveLength(2);
+    expect(answers.targets).toHaveLength(0);
+  });
+
+  it("Ram Through: two target questions in order", () => {
+    const spell = real("Ram Through", "spell");
+    const s = session([seat("a", [bear("small", { power: "2" }), bear("huge", { power: "8" })]), seat("b", [bear("v1"), bear("v2")])]);
+    const { answers, asked } = walk(s, spell, [label(/huge/), label(/v2/)]);
+    expect(asked).toEqual(["target", "target"]);
+    expect(answers.targets.map((t) => (t.kind === "card" ? t.cardId : ""))).toEqual(["huge", "v2"]);
+  });
+
+  it("a target that became illegal by resolution fizzles, and a creature spell with no spell effect asks nothing", () => {
+    const bolt = real("Lightning Bolt", "spell");
+    const s = session([seat("a", []), seat("b", [bear("v")])]);
+    const gone: CastChoices = { targets: [{ kind: "card", seatId: "b", cardId: "nope" }] };
+    expect(applyCastRemoval(s, "a", bolt, parseRemovalEffect(bolt.oracleText)!, undefined, gone).seats[1].board.battlefield).toHaveLength(1);
+    expect(nextCastPrompt(s, "a", real("Elder Gargaroth", "c"), undefined, { targets: [] })).toBeUndefined();
   });
 });

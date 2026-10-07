@@ -379,6 +379,8 @@ type PendingAction =
       faceIndex?: number;
       chosenX?: number;
       counterTargetId?: string;
+      // Modes and targets the caster chose as the spell was cast (rule 601.2c).
+      castChoices?: CastChoices;
       message: string;
     }
   | {
@@ -442,6 +444,13 @@ interface BasicLandFetchSearchState {
 // applier needs besides the target itself (chosenX for a variable-damage spell's already-paid X).
 type PendingTargetedEffect = { kind: "removal"; effect: RemovalEffect; chosenX?: number } | { kind: "zone"; effect: ZoneEffect; chosenX?: number };
 
+// The human's answers to a spell's cast-time choices: which modes (indices into the card's own mode list) and which targets, in the
+// order the spell's effects consume them. Attached to the spell on the stack so resolution uses exactly what the opponents saw.
+export interface CastChoices {
+  modes?: number[];
+  targets: ChosenTarget[];
+}
+
 // One "pick a target from this list" step of a labeled target choice, with the picks already resolved to ChosenTargets.
 interface LabeledSlot {
   prompt: string;
@@ -454,6 +463,24 @@ type LabeledContinuation =
   | { kind: "extra"; effect: SpellExtraEffect; lifeAmount?: number };
 
 type PendingRuleChoice =
+  // The cast-time questions of a spell (modes, then targets): answered one at a time BEFORE the cost is paid; then the cast is replayed
+  // with the answers attached (see playCard / respondWithCard's castChoices parameter).
+  | {
+      id: string;
+      kind: "choose_cast_targets";
+      controllerSeatId: string;
+      sourceCardId: string;
+      sourceCardName: string;
+      planCard: VisibleCard;
+      chosenX?: number;
+      prompt: string;
+      promptKind: "modes" | "target";
+      options: Array<{ label: string; mode?: number; target?: ChosenTarget }>;
+      answers: CastChoices;
+      resume:
+        | { via: "playCard"; seatId: string; cardId: string; position?: { x: number; z: number }; sourceZone: "hand" | "command" | "exile" | "graveyard"; faceIndex?: number; sacrificeTargets?: VisibleCard[] }
+        | { via: "respondWithCard"; cardId: string; sourceZone: "hand" | "exile"; sacrificeTargets?: VisibleCard[] };
+    }
   // A cast "choose one / choose two" spell (Austere Command, Valorous Stance, Collective Resistance, Profane Command): the human picks
   // the modes one at a time, then they all apply together (their targets are chosen automatically when more than one mode is picked).
   | {
@@ -4320,7 +4347,8 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     position?: { x: number; z: number },
     sourceZone: "hand" | "command" | "exile" | "graveyard" = "hand",
     faceIndex?: number,
-    preChosenSacrificeTargets?: VisibleCard[]
+    preChosenSacrificeTargets?: VisibleCard[],
+    castChoices?: CastChoices
   ) {
     if (pendingAction) return;
     if (castDispatchInFlight.current !== null) {
@@ -4615,6 +4643,24 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       return;
     }
 
+    // Modes and targets are chosen as the spell is cast (rule 601.2c), after we know it can be paid for but before anything is spent.
+    if (seat.kind === "human" && !castChoices) {
+      const planCard: VisibleCard = doorFace
+        ? { ...card, name: doorFace.name, typeLine: doorFace.typeLine, oracleText: doorFace.oracleText }
+        : spellFace
+          ? { ...card, name: spellFace.name, typeLine: spellFace.typeLine, oracleText: spellFace.oracleText }
+          : dfcSplit
+            ? { ...card, name: dfcSplit.spellFace.name, typeLine: dfcSplit.spellFace.typeLine, oracleText: dfcSplit.spellFace.oracleText }
+            : card;
+      const answers: CastChoices = { targets: [] };
+      const firstPrompt = nextCastPrompt(session, seatId, planCard, chosenX > 0 ? chosenX : undefined, answers);
+      if (firstPrompt) {
+        openCastPrompt(firstPrompt, { planCard, chosenX: chosenX > 0 ? chosenX : undefined, answers, resume: { via: "playCard", seatId, cardId, position, sourceZone, faceIndex, sacrificeTargets: preChosenSacrificeTargets } });
+        setSelectedHandCardId(undefined);
+        return;
+      }
+    }
+
     applyCastingCostPaymentSideEffect(seatId, payment);
 
     const castName = doorFace?.name ?? spellFace?.name ?? (dfcSplit ? dfcSplit.spellFace.name : card.name);
@@ -4641,6 +4687,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       faceIndex:
         doorFace ? faceIndex : spellFace ? faceIndex : dfcSplit ? dfcSplit.spellIndex : !doors && card.faces?.length === 2 ? 0 : undefined,
       chosenX: chosenX > 0 ? chosenX : undefined,
+      castChoices,
       message: `${seat.name} casts ${castName}${xText}${sourceZone === "command" ? " from the command zone" : sourceZone === "exile" ? " from exile" : sourceZone === "graveyard" ? (flashbackCostText ? " with flashback" : " from the graveyard") : ""}${spentManaText}.`
     };
     if (usesOnceEachTurnFreeCast) {
@@ -5331,7 +5378,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   // a response window" flow) or an exiled card they currently have play permission for — gated by
   // the same canCastAtInstantSpeed check either way, so an exiled sorcery still isn't offered as a
   // response, only an exiled instant/flash card is.
-  function respondWithCard(cardId: string, sourceZone: "hand" | "exile", preChosenSacrificeTargets?: VisibleCard[]) {
+  function respondWithCard(cardId: string, sourceZone: "hand" | "exile", preChosenSacrificeTargets?: VisibleCard[], castChoices?: CastChoices) {
     if (!pendingAction || prioritySeatId !== humanSeat.id) return;
     const card = sourceZone === "exile" ? findExiledCardAnySeat(session, cardId) : humanSeat.board.hand.find((item) => item.id === cardId);
     if (!card) return;
@@ -5412,6 +5459,14 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       return;
     }
     const manaSourceIds = isLandCard(card) ? [] : payment.sourceIds;
+    if (!castChoices && !isLandCard(card)) {
+      const answers: CastChoices = { targets: [] };
+      const firstPrompt = nextCastPrompt(session, humanSeat.id, card, chosenX > 0 ? chosenX : undefined, answers);
+      if (firstPrompt) {
+        openCastPrompt(firstPrompt, { planCard: card, chosenX: chosenX > 0 ? chosenX : undefined, answers, resume: { via: "respondWithCard", cardId, sourceZone, sacrificeTargets: preChosenSacrificeTargets } });
+        return;
+      }
+    }
     if (!isLandCard(card) && payment.ok) {
       applyCastingCostPaymentSideEffect(humanSeat.id, payment);
     }
@@ -5427,6 +5482,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       manaSourceIds,
       chosenX: chosenX > 0 ? chosenX : undefined,
       counterTargetId,
+      castChoices,
       message: `${humanSeat.name} responds with ${card.name}${chosenX > 0 ? ` (X=${chosenX})` : ""}${sourceZone === "exile" ? " from exile" : ""}.`
     };
     if (sourceZone === "hand") setSelectedHandCardId(undefined);
@@ -6017,7 +6073,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       // simultaneous effect the same card also has.
       const isModalReanimateCard = sourceCard ? Boolean(parseModalHeader(sourceCard.oracleText)) : false;
       const reanimateZoneEffect = sourceCard && !isModalReanimateCard ? parseZoneEffect(etbEffectText(sourceCard.oracleText)) : undefined;
-      if (actor?.kind === "human" && sourceCard && reanimateZoneEffect?.kind === "reanimate" && reanimateZoneEffect.anyGraveyard) {
+      if (actor?.kind === "human" && !action.castChoices && sourceCard && reanimateZoneEffect?.kind === "reanimate" && reanimateZoneEffect.anyGraveyard) {
         const remainingStack = removeStackAction(action.id);
         setSession((current) => moveCardBetweenVisibleZones(current, action.actorSeatId, action.cardId, "graveyard"));
         setPendingRuleChoice({
@@ -6041,7 +6097,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       // needs those. Only intercepts when there's an actual decision (2+ legal targets) — see
       // maybeRequestTarget's own doc comment. Reported live: Eternal Witness returned via Living Death
       // (and the same gap applies to casting it directly) picked "some card" with no say from the human.
-      if (actor?.kind === "human" && sourceCard && reanimateZoneEffect?.kind === "regrow") {
+      if (actor?.kind === "human" && !action.castChoices && sourceCard && reanimateZoneEffect?.kind === "regrow") {
         const regrowSpec = zoneEffectTargetSpec(reanimateZoneEffect);
         const regrowPool = regrowSpec ? legalTargets(session, action.actorSeatId, regrowSpec, sourceCard) : [];
         if (regrowSpec && regrowPool.length > 1) {
@@ -6089,7 +6145,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       // damage (removalEffectTargetSpec also declines that — needs a combined creature-or-player pool
       // this phase doesn't build). Only intercepts with a real decision (2+ legal targets).
       // A cast modal spell: the human picks the mode(s).
-      const modalPrompt = actor?.kind === "human" && sourceCard ? spellModePrompt(session, action.actorSeatId, sourceCard, action.chosenX) : undefined;
+      const modalPrompt = actor?.kind === "human" && !action.castChoices && sourceCard ? spellModePrompt(session, action.actorSeatId, sourceCard, action.chosenX) : undefined;
       if (actor?.kind === "human" && sourceCard && modalPrompt) {
         const remainingStack = removeStackAction(action.id);
         const resolutionDestination = spellResolutionDestination(session, action);
@@ -6130,7 +6186,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         return;
       }
       // Ram Through / Bite Down / Tamiyo's Safekeeping / "any target" damage: the human picks the targets from a labeled list.
-      const labeledSpell = actor?.kind === "human" && sourceCard ? spellTargetSlots(session, action.actorSeatId, sourceCard, action.chosenX) : undefined;
+      const labeledSpell = actor?.kind === "human" && !action.castChoices && sourceCard ? spellTargetSlots(session, action.actorSeatId, sourceCard, action.chosenX) : undefined;
       if (actor?.kind === "human" && sourceCard && labeledSpell) {
         const remainingStack = removeStackAction(action.id);
         const resolutionDestination = spellResolutionDestination(session, action);
@@ -6154,7 +6210,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       }
       const castRemovalEffect = sourceCard && !isModalReanimateCard ? parseRemovalEffect(etbEffectText(sourceCard.oracleText)) : undefined;
       const castRemovalTargetSpec = castRemovalEffect ? removalEffectTargetSpec(castRemovalEffect, sourceCard!.id) : undefined;
-      if (actor?.kind === "human" && sourceCard && castRemovalEffect && castRemovalTargetSpec) {
+      if (actor?.kind === "human" && !action.castChoices && sourceCard && castRemovalEffect && castRemovalTargetSpec) {
         const removalPool = legalTargets(session, action.actorSeatId, castRemovalTargetSpec, sourceCard);
         if (removalPool.length > 1) {
           const remainingStack = removeStackAction(action.id);
@@ -6523,9 +6579,12 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         sourceCard !== undefined &&
         commonTriggerEffect(sourceCard.oracleText, "entered", undefined, playedSession.seats.find((s) => s.id === action.actorSeatId))?.kind === "damage_effect";
       const removalEffect = sourceCard && !etbDamageOwnedByTrigger ? parseRemovalEffect(etbEffectText(sourceCard.oracleText)) : undefined;
+      const castStruct = action.castChoices && sourceCard ? castStructure(sourceCard, action.chosenX) : undefined;
       const removalResolvedSession =
         removalEffect && sourceCard
-          ? applyPrimitiveAction(exploredSession, action.actorSeatId, sourceCard, { kind: "removal", effect: removalEffect, chosenX: action.chosenX })
+          ? action.castChoices && (castStruct?.kind === "removal" || castStruct?.kind === "removal_modal")
+            ? applyCastRemoval(exploredSession, action.actorSeatId, sourceCard, removalEffect, action.chosenX, action.castChoices)
+            : applyPrimitiveAction(exploredSession, action.actorSeatId, sourceCard, { kind: "removal", effect: removalEffect, chosenX: action.chosenX })
           : exploredSession;
       // "Choose one/two —" cards are fully owned by removalEffect above (if a removal-shaped mode
       // exists) or genericModalEffect below (otherwise) — the whole-text zoneEffect scan a few
@@ -6538,8 +6597,13 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       // Reanimate/mill/regrow/steal-control spells (Reanimate, Regrowth, Threaten, ...) — same
       // "applies regardless of the spell's own destination" reasoning as removal effects above.
       const zoneEffect = sourceCard && !isModalCard ? parseZoneEffect(etbEffectText(sourceCard.oracleText)) : undefined;
+      const castZoneTarget = castStruct?.kind === "zone" ? action.castChoices?.targets[0] : undefined;
       const zoneResolvedSession =
-        zoneEffect && sourceCard ? applyZoneEffect(removalResolvedSession, action.actorSeatId, sourceCard.name, zoneEffect, action.chosenX) : removalResolvedSession;
+        zoneEffect && sourceCard
+          ? castStruct?.kind === "zone" && (!castZoneTarget || !castTargetLegal(removalResolvedSession, action.actorSeatId, sourceCard, castZoneTarget))
+            ? rulesEvent(removalResolvedSession, action.actorSeatId, `${sourceCard.name}'s target is no longer legal; it does nothing.`)
+            : applyZoneEffect(removalResolvedSession, action.actorSeatId, sourceCard.name, zoneEffect, action.chosenX, castZoneTarget)
+          : removalResolvedSession;
       // "When this artifact enters, search your library for up to two basic Plains cards, ..."
       // (Archaeomancer's Map, and the same ETB-tutor shape on plenty of other permanents) — this
       // parser already exists for activated-ability search effects (parseGenericAbilityEffect); an
@@ -6610,8 +6674,13 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         sourceCard && !isModalCard
           ? parseTargetedPump(action.chosenX !== undefined ? substituteX(etbEffectText(sourceCard.oracleText), action.chosenX) : etbEffectText(sourceCard.oracleText))
           : undefined;
+      const castPumpTarget = castStruct?.kind === "pump" ? action.castChoices?.targets[0] : undefined;
       const pumpResolvedSession =
-        pumpEffect && sourceCard ? applyTargetedPumpEffect(eachPlayerSacrificeResolvedSession, action.actorSeatId, sourceCard, pumpEffect) : eachPlayerSacrificeResolvedSession;
+        pumpEffect && sourceCard
+          ? castStruct?.kind === "pump" && (!castPumpTarget || !castTargetLegal(eachPlayerSacrificeResolvedSession, action.actorSeatId, sourceCard, castPumpTarget))
+            ? rulesEvent(eachPlayerSacrificeResolvedSession, action.actorSeatId, `${sourceCard.name}'s target is no longer legal; it does nothing.`)
+            : applyTargetedPumpEffect(eachPlayerSacrificeResolvedSession, action.actorSeatId, sourceCard, pumpEffect, castPumpTarget)
+          : eachPlayerSacrificeResolvedSession;
       // Board-wide sibling of the single-target pump above: "Each non-Dragon creature gets -X/-X
       // until end of turn." (Exude Toxin, ...) — same X-substitution-first handling, just no single
       // "target creature" to find, so it needed its own parser/applier instead of reusing pumpEffect.
@@ -6685,7 +6754,13 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       const spellExtraEffects =
         sourceCard && !isModalCard && destination !== "battlefield" ? parseSpellExtraEffects(etbEffectText(sourceCard.oracleText)) : [];
       const spellExtrasResolvedSession = sourceCard
-        ? spellExtraEffects.reduce((acc, effect) => applySpellExtraEffect(acc, action.actorSeatId, sourceCard, effect, action.chosenX), simpleDrawResolvedSession)
+        ? spellExtraEffects.reduce((acc, effect) => {
+            const chosen = castStruct?.kind === "extra" && castStruct.effect.kind === effect.kind ? action.castChoices?.targets : undefined;
+            if (chosen && !chosen.every((target) => castTargetLegal(acc, action.actorSeatId, sourceCard, target))) {
+              return rulesEvent(acc, action.actorSeatId, `${sourceCard.name}'s target is no longer legal; it does nothing.`);
+            }
+            return applySpellExtraEffect(acc, action.actorSeatId, sourceCard, effect, action.chosenX, chosen);
+          }, simpleDrawResolvedSession)
         : simpleDrawResolvedSession;
       const manaExtra = spellExtraEffects.find((effect) => effect.kind === "add_mana_per_tapped_opponent_land");
       if (manaExtra && manaExtra.kind === "add_mana_per_tapped_opponent_land") {
@@ -6703,7 +6778,11 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
           : spellExtrasResolvedSession;
       const genericModalEffect = sourceCard && isModalCard && !removalEffect ? parseGenericModalEffect(sourceCard.oracleText, action.chosenX) : undefined;
       const preTriggerSession =
-        genericModalEffect && sourceCard ? applyGenericModalEffect(extraTurnGrantedSession, action.actorSeatId, sourceCard, genericModalEffect) : extraTurnGrantedSession;
+        genericModalEffect && sourceCard
+          ? castStruct?.kind === "generic_modal" && action.castChoices
+            ? applyCastGenericModes(extraTurnGrantedSession, action.actorSeatId, sourceCard, genericModalEffect, action.castChoices)
+            : applyGenericModalEffect(extraTurnGrantedSession, action.actorSeatId, sourceCard, genericModalEffect)
+          : extraTurnGrantedSession;
       // "As this enters, choose a creature type" (Cavern of Souls, Urza's Incubator, Morophon, ...)
       // — locked in immediately, before SBAs recompute anthems/cost reducers that read it back off
       // chosenCreatureType. Not routed through the trigger-queue/accept-decline UI: it's a
@@ -8074,6 +8153,50 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   // destroy_all_conditional/damage/mass_damage) has no target to choose at all, so it just applies
   // immediately via the same applyRemovalEffect the deterministic/agent path already uses for those
   // shapes.
+  function openCastPrompt(
+    prompt: NonNullable<ReturnType<typeof nextCastPrompt>>,
+    base: { planCard: VisibleCard; chosenX?: number; answers: CastChoices; resume: Extract<PendingRuleChoice, { kind: "choose_cast_targets" }>["resume"] }
+  ) {
+    const options = prompt.options.map((option) => ("mode" in option ? { label: option.label, mode: option.mode } : { label: option.label, target: option.target }));
+    setPendingRuleChoice({
+      id: crypto.randomUUID(),
+      kind: "choose_cast_targets",
+      controllerSeatId: base.resume.via === "playCard" ? base.resume.seatId : humanSeat.id,
+      sourceCardId: base.planCard.id,
+      sourceCardName: base.planCard.name,
+      planCard: base.planCard,
+      chosenX: base.chosenX,
+      prompt: prompt.prompt,
+      promptKind: prompt.kind,
+      options,
+      answers: { modes: base.answers.modes ? [...base.answers.modes] : undefined, targets: [...base.answers.targets] },
+      resume: base.resume
+    });
+  }
+
+  // One answer to a cast-time question; asks the next one, or replays the cast with every answer attached.
+  function completeCastPrompt(index: number) {
+    const choice = pendingRuleChoice;
+    if (!choice || choice.kind !== "choose_cast_targets") return;
+    const option = choice.options[index];
+    if (!option) return;
+    const answers: CastChoices = { modes: [...(choice.answers.modes ?? [])], targets: [...choice.answers.targets] };
+    if (choice.promptKind === "modes" && option.mode !== undefined) answers.modes!.push(option.mode);
+    else if (option.target) answers.targets.push(option.target);
+    if (!answers.modes?.length) delete answers.modes;
+    const next = nextCastPrompt(session, choice.controllerSeatId, choice.planCard, choice.chosenX, answers);
+    if (next) {
+      openCastPrompt(next, { planCard: choice.planCard, chosenX: choice.chosenX, answers, resume: choice.resume });
+      return;
+    }
+    setPendingRuleChoice(undefined);
+    const resume = choice.resume;
+    window.setTimeout(() => {
+      if (resume.via === "playCard") playCard(resume.seatId, resume.cardId, resume.position, resume.sourceZone, resume.faceIndex, resume.sacrificeTargets, answers);
+      else respondWithCard(resume.cardId, resume.sourceZone, resume.sacrificeTargets, answers);
+    }, 0);
+  }
+
   // One answer to a labeled target list; reopens for the next slot, or runs the spell's effect once the last one is in.
   function completeLabeledTarget(index: number) {
     const choice = pendingRuleChoice;
@@ -8111,6 +8234,10 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   }
 
   function chooseModalOption(index: number) {
+    if (pendingRuleChoice?.kind === "choose_cast_targets") {
+      completeCastPrompt(index);
+      return;
+    }
     if (pendingRuleChoice?.kind === "choose_spell_modes") {
       completeSpellMode(index);
       return;
@@ -14319,7 +14446,7 @@ export function spellModePrompt(
 export function labeledTargetOptions(
   session: GameSession,
   controllerSeatId: string,
-  slot: "any_damage" | "player" | "own_creature" | "own_permanent" | "opponent_creature" | "opponent_creature_or_planeswalker",
+  slot: "any_damage" | "player" | "own_creature" | "own_permanent" | "opponent_creature" | "opponent_creature_or_planeswalker" | "any_creature",
   source: VisibleCard
 ): LabeledSlot["options"] {
   const options: LabeledSlot["options"] = [];
@@ -14343,6 +14470,7 @@ export function labeledTargetOptions(
         slot === "any_damage" ? isCreature || isPlaneswalker :
         slot === "own_creature" ? own && isCreature :
         slot === "own_permanent" ? own :
+        slot === "any_creature" ? isCreature :
         slot === "opponent_creature" ? !own && isCreature :
         slot === "opponent_creature_or_planeswalker" ? !own && (isCreature || isPlaneswalker) :
         false;
@@ -14353,6 +14481,204 @@ export function labeledTargetOptions(
   return options
     .sort((a, b) => Number(a.target.seatId === controllerSeatId) - Number(b.target.seatId === controllerSeatId))
     .slice(0, 16);
+}
+
+// ---- Cast-time targeting (rule 601.2c): modes and targets are chosen as the spell is cast, so opponents see them on the stack.
+
+function optionsFromSpec(session: GameSession, seatId: string, spec: TargetSpec, source: VisibleCard): LabeledSlot["options"] {
+  return legalTargets(session, seatId, spec, source)
+    .map((target) => {
+      if (target.kind === "player") {
+        const seat = session.seats.find((item) => item.id === target.seatId);
+        return { label: `${seat?.name ?? "Player"} (${seat?.life ?? 0} life)`, target: { kind: "player" as const, seatId: target.seatId } };
+      }
+      const owner = session.seats.find((item) => item.id === target.seatId);
+      const stats = target.card.typeLine.includes("Creature") ? ` (${effectivePower(target.card)}/${effectiveToughness(target.card)})` : "";
+      const where = spec.zone === "graveyard" ? `${owner?.id === seatId ? "your" : owner?.name + "'s"} graveyard` : owner?.id === seatId ? "yours" : owner?.name;
+      return { label: `${target.card.name}${stats} — ${where}`, target: { kind: "card" as const, seatId: target.seatId, cardId: target.card.id } };
+    })
+    .slice(0, 24);
+}
+
+// The target slots one removal-shaped effect (or mode) asks for.
+function removalSlots(session: GameSession, seatId: string, source: VisibleCard, effect: RemovalEffect): LabeledSlot[] {
+  const named = (prompt: string, options: LabeledSlot["options"]): LabeledSlot[] => [{ prompt: `${source.name}: ${prompt}`, options }];
+  switch (effect.kind) {
+    case "destroy":
+    case "exile":
+    case "bounce": {
+      const spec = removalEffectTargetSpec(effect, source.id);
+      return spec ? named(spec.prompt.replace(/^./, (c) => c.toLowerCase()).replace(/^/, "choose a target — "), optionsFromSpec(session, seatId, spec, source)) : [];
+    }
+    case "damage": {
+      if (effect.targetType === "creature") {
+        const spec = removalEffectTargetSpec(effect, source.id);
+        return spec ? named("choose a creature to damage.", optionsFromSpec(session, seatId, spec, source)) : [];
+      }
+      return named("choose a target for the damage.", labeledTargetOptions(session, seatId, effect.targetType === "player" ? "player" : "any_damage", source));
+    }
+    case "grant_keywords":
+      return named("choose a creature you control to gain " + effect.keywords.join(" and ") + " until end of turn.", labeledTargetOptions(session, seatId, "own_creature", source));
+    default:
+      return [];
+  }
+}
+
+function zoneSlots(session: GameSession, seatId: string, source: VisibleCard, effect: ZoneEffect): LabeledSlot[] {
+  const spec = zoneEffectTargetSpec(effect);
+  return spec ? [{ prompt: `${source.name}: ${spec.prompt}`, options: optionsFromSpec(session, seatId, spec, source) }] : [];
+}
+
+type CastStructure =
+  | { kind: "removal"; effect: Exclude<RemovalEffect, { kind: "modal" }> }
+  | { kind: "removal_modal"; modal: Extract<RemovalEffect, { kind: "modal" }> }
+  | { kind: "generic_modal"; modal: GenericModalEffect }
+  | { kind: "zone"; effect: ZoneEffect }
+  | { kind: "extra"; effect: SpellExtraEffect }
+  | { kind: "pump"; effect: PumpEffect };
+
+// What a spell does that needs the caster's decisions — only for instants and sorceries (a permanent's enters effect is a trigger, whose
+// targets are chosen when it triggers).
+export function castStructure(card: VisibleCard, chosenX?: number): CastStructure | undefined {
+  if (!card.typeLine.includes("Instant") && !card.typeLine.includes("Sorcery")) return undefined;
+  const text = etbEffectText(card.oracleText);
+  if (parseModalHeader(card.oracleText)) {
+    const removal = parseRemovalEffect(text);
+    if (removal?.kind === "modal") return { kind: "removal_modal", modal: removal };
+    if (removal) return undefined;
+    const generic = parseGenericModalEffect(card.oracleText, chosenX);
+    return generic ? { kind: "generic_modal", modal: generic } : undefined;
+  }
+  const removal = parseRemovalEffect(text);
+  if (removal && removal.kind !== "modal") return { kind: "removal", effect: removal };
+  const zone = parseZoneEffect(text);
+  if (zone) return { kind: "zone", effect: zone };
+  const extra = parseSpellExtraEffects(text).find((effect) => effect.kind === "creature_bites" || effect.kind === "grant_keywords");
+  if (extra) return { kind: "extra", effect: extra };
+  const pump = parseTargetedPump(chosenX !== undefined ? substituteX(text, chosenX) : text);
+  if (pump) return { kind: "pump", effect: pump };
+  return undefined;
+}
+
+function extraSlots(session: GameSession, seatId: string, source: VisibleCard, effect: SpellExtraEffect): LabeledSlot[] {
+  const text = etbEffectText(source.oracleText);
+  if (effect.kind === "creature_bites") {
+    return [
+      { prompt: `${source.name}: choose the creature you control that deals the damage.`, options: labeledTargetOptions(session, seatId, "own_creature", source) },
+      { prompt: `${source.name}: choose the creature that takes it.`, options: labeledTargetOptions(session, seatId, /creature or planeswalker you don'?t control/i.test(text) ? "opponent_creature_or_planeswalker" : "opponent_creature", source) }
+    ];
+  }
+  if (effect.kind === "grant_keywords") {
+    return [{ prompt: `${source.name}: choose a permanent you control to gain ${effect.keywords.join(" and ")} until end of turn.`, options: labeledTargetOptions(session, seatId, "own_permanent", source) }];
+  }
+  return [];
+}
+
+function genericModeSlots(session: GameSession, seatId: string, source: VisibleCard, mode: GenericModalMode): LabeledSlot[] {
+  if (mode.kind === "zone") return zoneSlots(session, seatId, source, mode.effect);
+  if (mode.kind === "removal") return removalSlots(session, seatId, source, mode.effect);
+  if (mode.kind === "pump") return [{ prompt: `${source.name}: choose a creature.`, options: labeledTargetOptions(session, seatId, "any_creature", source) }];
+  return [];
+}
+
+// The next question to put to the caster, given what they have already answered; undefined when nothing is left to ask.
+export function nextCastPrompt(
+  session: GameSession,
+  seatId: string,
+  card: VisibleCard,
+  chosenX: number | undefined,
+  answers: CastChoices
+): { kind: "modes"; prompt: string; options: Array<{ label: string; mode: number }> } | { kind: "target"; prompt: string; options: LabeledSlot["options"] } | undefined {
+  const structure = castStructure(card, chosenX);
+  if (!structure) return undefined;
+  let slots: LabeledSlot[] = [];
+  if (structure.kind === "removal_modal" || structure.kind === "generic_modal") {
+    const all = structure.kind === "removal_modal" ? structure.modal.modes : structure.modal.modes;
+    const viable = all
+      .map((mode, index) => ({ mode, index }))
+      .filter(({ mode }) => (structure.kind === "removal_modal" ? removalEffectHasLegalTarget(session, seatId, card, mode as Exclude<RemovalEffect, { kind: "modal" }>) : genericModalModeHasLegalTarget(session, seatId, mode as GenericModalMode)));
+    const wanted = Math.min(structure.modal.chooseCount, viable.length);
+    const picked = answers.modes ?? [];
+    if (picked.length < wanted) {
+      const remaining = viable.filter(({ index }) => !picked.includes(index));
+      // Nothing to decide when every viable mode has to be picked anyway.
+      if (remaining.length === wanted - picked.length) {
+        answers.modes = [...picked, ...remaining.map(({ index }) => index)];
+      } else {
+        return {
+          kind: "modes",
+          prompt: `${card.name}: choose mode ${picked.length + 1} of ${wanted}.`,
+          options: remaining.map(({ mode, index }) => ({
+            label: structure.kind === "removal_modal" ? describeRemovalMode(mode as Exclude<RemovalEffect, { kind: "modal" }>) : (mode as GenericModalMode).text ?? `Mode ${index + 1}`,
+            mode: index
+          }))
+        };
+      }
+    }
+    const chosen = answers.modes ?? [];
+    slots = chosen.flatMap((index) => (structure.kind === "removal_modal" ? removalSlots(session, seatId, card, structure.modal.modes[index]) : genericModeSlots(session, seatId, card, structure.modal.modes[index] as GenericModalMode)));
+  } else if (structure.kind === "removal") {
+    slots = removalSlots(session, seatId, card, structure.effect);
+  } else if (structure.kind === "zone") {
+    slots = zoneSlots(session, seatId, card, structure.effect);
+  } else if (structure.kind === "extra") {
+    slots = extraSlots(session, seatId, card, structure.effect);
+  } else {
+    slots = [{ prompt: `${card.name}: choose a creature.`, options: labeledTargetOptions(session, seatId, "any_creature", card) }];
+  }
+  const slot = slots[answers.targets.length];
+  if (!slot || slot.options.length === 0) return undefined;
+  return { kind: "target", prompt: slot.prompt, options: slot.options };
+}
+
+// Is a target chosen at cast time still legal as the spell resolves? An illegal one makes the spell fizzle (rule 608.2b).
+export function castTargetLegal(session: GameSession, controllerSeatId: string, source: VisibleCard, target: ChosenTarget): boolean {
+  if (target.kind === "player") {
+    const seat = session.seats.find((item) => item.id === target.seatId);
+    return Boolean(seat && !seat.hasLost && (seat.id === controllerSeatId || !playerHasHexproof(seat)));
+  }
+  const seat = session.seats.find((item) => item.id === target.seatId);
+  const onBattlefield = seat?.board.battlefield.find((card) => card.id === target.cardId);
+  if (onBattlefield) return seat!.id === controllerSeatId || (!hasShroud(onBattlefield) && !hasHexproof(onBattlefield) && !isProtectedFrom(onBattlefield, source));
+  return Boolean(seat?.board.graveyard?.some((card) => card.id === target.cardId));
+}
+
+// Applies a removal-shaped effect (or modal's chosen modes) using the targets chosen at cast time; modes/targets that became illegal fizzle.
+export function applyCastRemoval(session: GameSession, casterSeatId: string, source: VisibleCard, effect: RemovalEffect, chosenX: number | undefined, choices: CastChoices): GameSession {
+  const modes = effect.kind === "modal" ? (choices.modes ?? []).map((index) => effect.modes[index]).filter(Boolean) : [effect];
+  let next = session;
+  let used = 0;
+  for (const mode of modes) {
+    const needsTarget = removalSlots(session, casterSeatId, source, mode).length > 0;
+    const target = needsTarget ? choices.targets[used++] : undefined;
+    if (needsTarget && (!target || !castTargetLegal(next, casterSeatId, source, target))) {
+      next = rulesEvent(next, casterSeatId, `${source.name}'s target is no longer legal; that part of the spell does nothing.`);
+      continue;
+    }
+    next = applyRemovalEffect(next, casterSeatId, source.name, source, mode, chosenX, target);
+  }
+  return next;
+}
+
+// Same for a non-removal modal spell's chosen modes.
+export function applyCastGenericModes(session: GameSession, casterSeatId: string, source: VisibleCard, modal: GenericModalEffect, choices: CastChoices): GameSession {
+  let next = session;
+  let used = 0;
+  for (const index of choices.modes ?? []) {
+    const mode = modal.modes[index];
+    if (!mode) continue;
+    const needsTarget = genericModeSlots(session, casterSeatId, source, mode).length > 0;
+    const target = needsTarget ? choices.targets[used++] : undefined;
+    if (needsTarget && (!target || !castTargetLegal(next, casterSeatId, source, target))) {
+      next = rulesEvent(next, casterSeatId, `${source.name}'s target is no longer legal; that mode does nothing.`);
+      continue;
+    }
+    if (mode.kind === "zone") next = applyZoneEffect(next, casterSeatId, source.name, mode.effect, undefined, target);
+    else if (mode.kind === "pump") next = applyTargetedPumpEffect(next, casterSeatId, source, mode.effect, target);
+    else if (mode.kind === "removal") next = applyRemovalEffect(next, casterSeatId, source.name, source, mode.effect, undefined, target);
+    else next = applyGenericModalEffect(next, casterSeatId, source, { chooseCount: 1, modes: [mode] });
+  }
+  return next;
 }
 
 // The target slots a human-cast spell needs (Ram Through's two creatures, Tamiyo's Safekeeping's permanent, "any target" damage), or
@@ -16223,8 +16549,9 @@ function choosePumpTarget(session: GameSession, casterSeatId: string, effect: Pu
   return chooseCounterTarget(session, casterSeatId, effect.power >= 0 ? "+1/+1" : "-1/-1", false);
 }
 
-export function applyTargetedPumpEffect(session: GameSession, casterSeatId: string, sourceCard: VisibleCard, effect: PumpEffect): GameSession {
-  const target = choosePumpTarget(session, casterSeatId, effect);
+export function applyTargetedPumpEffect(session: GameSession, casterSeatId: string, sourceCard: VisibleCard, effect: PumpEffect, preChosenTarget?: ChosenTarget): GameSession {
+  const picked = resolvePreChosenBattlefieldTarget(session, preChosenTarget);
+  const target = picked ?? choosePumpTarget(session, casterSeatId, effect);
   if (!target) return noLegalTargetEvent(session, casterSeatId, sourceCard.name);
   const powerText = `${effect.power >= 0 ? "+" : ""}${effect.power}`;
   const toughnessText = `${effect.toughness >= 0 ? "+" : ""}${effect.toughness}`;
@@ -20285,6 +20612,9 @@ function ruleChoiceView(
           .filter((card) => hasCardType(card, "Creature"))
           .map((card) => ({ card, seatId: humanSeat.id, seatName: humanSeat.name }))
       };
+    }
+    if (choice.kind === "choose_cast_targets") {
+      return { kind: "choose_modal_option" as const, sourceCardName: choice.sourceCardName, prompt: choice.prompt, options: choice.options.map((option, index) => ({ index, label: option.label })) };
     }
     if (choice.kind === "choose_spell_modes") {
       return {
