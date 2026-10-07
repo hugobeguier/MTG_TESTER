@@ -3804,6 +3804,8 @@ function FallbackHandCard({ card }: { card: VisibleCard }) {
 function buildTableRenderKey(session: GameSession, selectedCardId: string | undefined) {
   return JSON.stringify({
     active: session.activePlayerId,
+    monarch: session.monarchSeatId,
+    initiative: session.initiativeSeatId,
     selected: selectedCardId,
     seats: session.seats.map((seat) => ({
       id: seat.id,
@@ -3917,7 +3919,10 @@ function rebuildDynamicScene(
     // reintroduces relative to a screen-space overlay). A full-width per-seat plate on the table
     // surface was tried and removed once already for a similar "bothered by the camera" report; kept
     // small and clustered at center this time to keep any perspective skew as minor as possible.
-    addLifeTotalPlate(group, seat, area.x > 0 ? 0.38 : -0.38, area.z > 0 ? 0.27 : -0.27, showCommanderDamage, cardMeshesRef);
+    addLifeTotalPlate(group, seat, area.x > 0 ? 0.38 : -0.38, area.z > 0 ? 0.27 : -0.27, showCommanderDamage, cardMeshesRef, {
+      monarch: session.monarchSeatId === seat.id,
+      initiative: session.initiativeSeatId === seat.id
+    });
   });
 }
 
@@ -4358,7 +4363,8 @@ function addLifeTotalPlate(
   x: number,
   z: number,
   showCommanderDamage: boolean,
-  cardMeshesRef: MutableRefObject<THREE.Object3D[]>
+  cardMeshesRef: MutableRefObject<THREE.Object3D[]>,
+  tokens: { monarch: boolean; initiative: boolean } = { monarch: false, initiative: false }
 ) {
   const canvas = document.createElement("canvas");
   canvas.width = 220;
@@ -4388,6 +4394,29 @@ function addLifeTotalPlate(
   // reported live as wanting to actually see whose commander has handed out how many. A small
   // corner badge, shown only when the count is nonzero, keeps it out of the way for the far more
   // common case of a deck that never grants any.
+  // The monarch and initiative tokens: whoever holds them wears the badge; it moves when someone steals it.
+  let badgeY = 8;
+  if (tokens.monarch) {
+    context.fillStyle = "rgba(215,179,90,0.95)";
+    roundRect(context, 8, badgeY, 92, 26, 8);
+    context.fill();
+    context.fillStyle = "#2a2108";
+    context.font = "bold 15px Arial";
+    context.textAlign = "left";
+    context.fillText("♛ MONARCH", 14, badgeY + 19);
+    context.textAlign = "center";
+    badgeY += 30;
+  }
+  if (tokens.initiative) {
+    context.fillStyle = "rgba(86,140,214,0.95)";
+    roundRect(context, 8, badgeY, 104, 26, 8);
+    context.fill();
+    context.fillStyle = "#f2f0e8";
+    context.font = "bold 15px Arial";
+    context.textAlign = "left";
+    context.fillText("INITIATIVE", 14, badgeY + 19);
+    context.textAlign = "center";
+  }
   const experienceCounters = seat.experienceCounters ?? 0;
   if (experienceCounters > 0) {
     context.fillStyle = "rgba(122,74,184,0.92)";

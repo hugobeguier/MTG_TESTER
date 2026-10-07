@@ -492,6 +492,8 @@ export interface GameSession {
   // Rooms just entered whose effect still has to be put on the stack, and branches a human has to choose between.
   pendingVentureRooms?: Array<{ seatId: string; room: string }>;
   pendingVentureChoices?: Array<{ seatId: string; options: string[] }>;
+  // The turn the monarch's end-step card was already drawn (so the End Turn shortcut and the end step itself never both draw).
+  monarchDrawTurn?: number;
   pendingSacrificeChoices?: Array<{ seatId: string; sourceCardId: string; sourceCardName: string; count: number; typeFilter?: string }>;
   pendingAttackDeclarations?: Array<{ seatId: string; card: VisibleCard; defendingSeatId: string }>;
   // Rule 724: the player who is currently the monarch (Court of Grace, Skyline Despot, Marchesa's Decree). They draw

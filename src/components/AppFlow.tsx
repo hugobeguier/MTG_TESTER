@@ -325,6 +325,8 @@ type TriggerEffect = (
   | { kind: "renown"; amount: number }
   // The human's echo decision (pay it, or sacrifice the permanent).
   | { kind: "echo_choice"; costText: string }
+  // "Destroy all creatures with flying. Put a +1/+1 counter on this creature for each creature destroyed this way." (Whiptongue Hydra)
+  | { kind: "destroy_fliers_then_counters" }
   // A creature that must attack, and the choice of whom.
   | { kind: "forced_attack"; cardId: string; targetIds: string[] }
   // Initiative: "you take the initiative" (the holder ventures into the Undercity), the room effect that was entered, and the human's branch choice.
@@ -2165,6 +2167,11 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     if (!queue || queue.length === 0 || pendingAction || pendingRuleChoice) return;
     const [next, ...rest] = queue;
     setSession((current) => ({ ...current, pendingDiscoverChoices: rest.length > 0 ? rest : undefined }));
+    // An agent always takes the free cast (it is the better option).
+    if (session.seats.find((seat) => seat.id === next.seatId)?.kind !== "human") {
+      window.setTimeout(() => playCard(next.seatId, next.cardId, undefined, "exile"), 150);
+      return;
+    }
     const exiledCard = session.seats.find((seat) => seat.id === next.seatId)?.board.exile?.find((card) => card.id === next.cardId);
     const shim = exiledCard ?? ({ id: next.cardId, name: next.cardName, typeLine: "", oracleText: "", manaValue: 0, colors: [], role: "permanent", zone: "exile" } as VisibleCard);
     setPendingRuleChoice({
@@ -2224,9 +2231,8 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     const key = `${session.turn}:${session.monarchSeatId}`;
     if (monarchDrawChecked.current.has(key)) return;
     monarchDrawChecked.current.add(key);
-    const monarch = session.seats.find((seat) => seat.id === session.monarchSeatId);
-    if (!monarch || monarch.hasLost) return;
-    setSession((current) => drawForSeat(current, monarch.id, `${monarch.name} draws a card as the monarch.`));
+    const monarchSeatId = session.monarchSeatId;
+    setSession((current) => applyEndStepEffects(current, monarchSeatId));
   }, [mode, gameStage, pendingAction, pendingRuleChoice, session.phase, session.turn, session.monarchSeatId, activeSeatId, session.seats]);
 
   // Dragonhawk, Fate's Tempest: at the beginning of its controller's end step, damage for every impulse-exiled card still in exile.
@@ -3953,7 +3959,9 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     );
   }
 
-  function resolveEndTurn(current: GameSession, seatId: string) {
+  function resolveEndTurn(rawCurrent: GameSession, seatId: string) {
+    // The End Turn shortcut skips the end step, so its "beginning of your end step" effects happen here instead.
+    const current = applyEndStepEffects(rawCurrent, seatId);
     const activeIndex = Math.max(0, current.seats.findIndex((seat) => seat.id === seatId));
     const activeSeat = current.seats[activeIndex];
     if (!activeSeat) return current;
@@ -20553,6 +20561,7 @@ export function commonTriggerEffect(
   }
 
   if (/\byou become the monarch\b/.test(text)) return { kind: "become_monarch", optional };
+  if (/destroy all creatures with flying\. put a \+1\/\+1 counter on (?:this creature|[a-z',\- ]+) for each creature destroyed this way/.test(noReminder)) return { kind: "destroy_fliers_then_counters" };
   if (/^(?:[^,]*,\s*)?you take the initiative\.?$/.test(noReminder)) return { kind: "take_initiative" };
 
   const payThen = relevantText.match(/\byou may pay ((?:\{[^}]+\})+)\.\s*if you do,\s*([^.]+\.?)/i);
@@ -21717,16 +21726,31 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
     const exiledLands = (index < 0 ? library : library.slice(0, index)).map((card) => ({ ...resetForZoneChange(card, "exile"), ownerSeatId: card.ownerSeatId ?? owner.id }));
     const found = index >= 0 ? library[index] : undefined;
     const cut = index < 0 ? library.length : index + 1;
+    // "You may cast it without paying its mana cost if that spell's mana value is 8 or less. If you don't, put that card into your hand."
+    // The card waits in exile with a free-cast permission; a cast-or-hand decision (pendingDiscoverChoices) follows.
+    const castable = Boolean(found && found.manaValue <= 8);
+    const foundInExile = found && castable ? { ...resetForZoneChange(found, "exile"), ownerSeatId: found.ownerSeatId ?? owner.id, exiledPlayableBySeatId: owner.id, exiledPlayableFree: true, exiledPlayableAnyTime: true } : undefined;
     const seats = session.seats.map((item) =>
       item.id !== owner.id
         ? item
         : {
             ...item,
             library: library.slice(cut),
-            board: { ...item.board, exile: [...(item.board.exile ?? []), ...exiledLands], hand: found ? [...item.board.hand, { ...found, zone: "hand" as const }] : item.board.hand },
-            zones: { ...item.zones, library: library.length - cut, exile: item.zones.exile + exiledLands.length, hand: item.zones.hand + (found ? 1 : 0) }
+            board: {
+              ...item.board,
+              exile: [...(item.board.exile ?? []), ...exiledLands, ...(foundInExile ? [foundInExile] : [])],
+              hand: found && !castable ? [...item.board.hand, { ...found, zone: "hand" as const }] : item.board.hand
+            },
+            zones: { ...item.zones, library: library.length - cut, exile: item.zones.exile + exiledLands.length + (foundInExile ? 1 : 0), hand: item.zones.hand + (found && !castable ? 1 : 0) }
           }
     );
+    if (found && castable) {
+      return rulesEvent(
+        { ...session, seats, pendingDiscoverChoices: [...(session.pendingDiscoverChoices ?? []), { seatId: owner.id, cardId: found.id, cardName: found.name, sourceName: trigger.sourceCardName }] },
+        owner.id,
+        `${trigger.sourceCardName}: ${owner.name} exiles ${exiledLands.length} land${exiledLands.length === 1 ? "" : "s"} and ${found.name}, which may be cast without paying its mana cost.`
+      );
+    }
     return rulesEvent({ ...session, seats }, owner.id, found ? `${trigger.sourceCardName}: ${owner.name} exiles ${exiledLands.length} land${exiledLands.length === 1 ? "" : "s"} and puts ${found.name} into their hand.` : `${trigger.sourceCardName}: no nonland card to find.`);
   }
   if (trigger.effect.kind === "pay_red_for_damage") {
@@ -22446,6 +22470,16 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
     const power = entering ? Math.max(0, effectivePower(entering)) : 0;
     if (power <= 0 || !entering) return noLegalTargetEvent(session, trigger.controllerSeatId, trigger.sourceCardName);
     return applyRemovalEffect(session, trigger.controllerSeatId, trigger.sourceCardName, entering, { kind: "damage", amount: power, targetType: "any" }, undefined, decodeChosenTarget(trigger.effect.chosenOption));
+  }
+  if (trigger.effect.kind === "destroy_fliers_then_counters") {
+    const victims = session.seats.flatMap((seat) => seat.board.battlefield.filter((card) => card.typeLine.includes("Creature") && hasFlying(card) && !hasIndestructible(card) && !card.phasedOut).map((card) => ({ seatId: seat.id, card })));
+    const destroyed = destroyCreatures(session, victims.map((victim) => ({ seatId: victim.seatId, cardId: victim.card.id, message: `${victim.card.name} is destroyed by ${trigger.sourceCardName}.` })), "Rules action");
+    if (victims.length === 0) return destroyed;
+    return rulesEvent(
+      { ...destroyed, seats: destroyed.seats.map((seat) => ({ ...seat, board: { ...seat.board, battlefield: seat.board.battlefield.map((card) => (card.id === trigger.sourceCardId ? applyCounterDelta(card, "+1/+1", victims.length) : card)) } })) },
+      trigger.controllerSeatId,
+      `${trigger.sourceCardName} gets ${victims.length} +1/+1 counter${victims.length === 1 ? "" : "s"}.`
+    );
   }
   if (trigger.effect.kind === "take_initiative") return takeInitiative(session, trigger.controllerSeatId);
   if (trigger.effect.kind === "venture_room") {
@@ -23336,6 +23370,17 @@ export function forcedAttackers(session: GameSession, seat: PlayerSeat): Array<{
     const others = goader ? targetIds.filter((id) => id !== goader) : targetIds;
     return { cardId, targetIds: others.length > 0 ? others : targetIds };
   });
+}
+
+// Effects that happen "at the beginning of your end step" and must not be lost when the End Turn shortcut skips the step: the monarch's draw
+// and Dragonhawk's delayed damage. Safe to call twice in a turn.
+export function applyEndStepEffects(session: GameSession, seatId: string): GameSession {
+  let next = session;
+  const monarch = next.seats.find((seat) => seat.id === seatId);
+  if (next.monarchSeatId === seatId && next.monarchDrawTurn !== next.turn && monarch && !monarch.hasLost) {
+    next = drawForSeat({ ...next, monarchDrawTurn: next.turn }, seatId, `${monarch.name} draws a card as the monarch.`);
+  }
+  return resolveEndStepExileDamage(next, seatId);
 }
 
 export function echoCostText(raw: string): string {

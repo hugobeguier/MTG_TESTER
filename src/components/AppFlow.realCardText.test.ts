@@ -852,7 +852,7 @@ describe("Leyline Tyrant (real Oracle text)", () => {
 });
 
 describe("Breaching Dragonstorm (real Oracle text)", () => {
-  it("enters: exiles lands then puts the first nonland card in hand; a Dragon entering bounces it", () => {
+  it("enters: exiles lands, the first nonland card waits in exile for a FREE cast (hand only if its mana value is over 8); a Dragon entering bounces it", () => {
     const storm = real("Breaching Dragonstorm", "bd");
     const mine = seat("a", [storm]);
     mine.library = [bear("l1", { zone: "library" as const, typeLine: "Basic Land — Forest", role: "land" }), bear("spell", { zone: "library" as const }), bear("after", { zone: "library" as const })];
@@ -860,9 +860,12 @@ describe("Breaching Dragonstorm (real Oracle text)", () => {
     const s = session([mine]);
     const triggers = findCommonTriggersForPermanentEntered(s, "a", storm);
     expect(triggers.map((t) => t.effect.kind)).toEqual(["dig_nonland_to_hand"]);
-    const after = resolveTriggerEffect(s, triggers[0]).seats[0];
-    expect(after.board.hand.map((c) => c.id)).toEqual(["spell"]);
-    expect(after.board.exile!.map((c) => c.id)).toEqual(["l1"]);
+    const resolved = resolveTriggerEffect(s, triggers[0]);
+    const after = resolved.seats[0];
+    expect(after.board.hand).toHaveLength(0);
+    expect(after.board.exile!.map((c) => c.id)).toEqual(["l1", "spell"]);
+    expect(after.board.exile!.find((c) => c.id === "spell")).toMatchObject({ exiledPlayableBySeatId: "a", exiledPlayableFree: true });
+    expect(resolved.pendingDiscoverChoices).toEqual([{ seatId: "a", cardId: "spell", cardName: expect.any(String), sourceName: expect.any(String) }]);
     expect(after.library!.map((c) => c.id)).toEqual(["after"]);
 
     const dragon = bear("drag", { typeLine: "Creature — Dragon" });
