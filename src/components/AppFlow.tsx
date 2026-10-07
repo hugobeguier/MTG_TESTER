@@ -4702,6 +4702,21 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     }
 
     applyCastingCostPaymentSideEffect(seatId, payment);
+    // Orb of Dragonkind's discount on a Dragon spell: the Orb(s) that gave it get tapped.
+    if (sourceZone === "hand" && card.typeLine.includes("Dragon") && !useTapAlt) {
+      const orbs = seat.board.battlefield.filter((permanent) => isDragonMana(permanent));
+      const genericRoom = Math.max(0, card.manaValue - coloredPipCount(card));
+      const toTapOrbs = new Set(orbs.slice(0, Math.min(orbs.length, genericRoom)).map((permanent) => permanent.id));
+      if (toTapOrbs.size > 0) {
+        setSession((current) => ({
+          ...current,
+          seats: current.seats.map((item) =>
+            item.id !== seatId ? item : { ...item, board: { ...item.board, battlefield: item.board.battlefield.map((permanent) => (toTapOrbs.has(permanent.id) ? { ...permanent, tapped: true } : permanent)) } }
+          ),
+          events: [{ id: crypto.randomUUID(), at: new Date().toISOString(), seatId, message: `${seat.name} pays {1} and taps Orb of Dragonkind for two mana toward ${card.name}.`, detail: "Rules action" }, ...current.events]
+        }));
+      }
+    }
     if (useTapAlt && tapAlt) {
       const toTap = new Set(tapAlt.creatureIds.slice(0, tapAlt.count));
       setSession((current) => ({
@@ -22515,7 +22530,15 @@ function selfScalingCostReduction(card: VisibleCard, caster: PlayerSeat, allSeat
 // but the reduction sentence. Without this, an Eminence card's reduction never matched at all (not
 // a colored-vs-generic-mana issue — rule 601.2f generic-only scope is still correct and unchanged,
 // the clause was silently declined outright regardless of the cast card's cost).
+// "{1}, {T}: Add two mana in any combination of colors. Spend this mana only to cast Dragon spells or activate abilities of Dragons."
+// (Orb of Dragonkind): paying {1} and tapping it turns into two mana for a Dragon spell, which is a net one mana cheaper. Modelled as that
+// discount (any colours, so it only ever lowers the generic part) on a Dragon spell while the Orb is untapped; playCard taps the Orb.
+export function isDragonMana(source: VisibleCard): boolean {
+  return !source.abilitiesStripped && !source.tapped && /\{1\}, \{t\}: add two mana in any combination of colors\. spend this mana only to cast dragon spells/i.test(source.oracleText);
+}
+
 function parseGrantedCostReduction(source: VisibleCard, castCard: VisibleCard): number {
+  if (isDragonMana(source) && castCard.typeLine.includes("Dragon")) return 1;
   const clauses = source.oracleText.split("\n").map((line) => line.trim()).filter(Boolean);
   let total = 0;
   for (const clause of clauses) {

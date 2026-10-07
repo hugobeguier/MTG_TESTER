@@ -1534,3 +1534,15 @@ describe("Sephara's alternative cost (real Oracle text)", () => {
     expect(legalMainPhaseActions(s2.seats[0], true, "a", 1, new Set(), s2).some((action) => action.id === "cast:seph")).toBe(false);
   });
 });
+
+describe("Orb of Dragonkind's mana ability (real Oracle text)", () => {
+  it("makes a Dragon spell one cheaper while the Orb is untapped, and does nothing for other spells or when tapped", () => {
+    const dragon = bear("dr", { typeLine: "Creature — Dragon", manaCost: "{2}{R}{R}", manaValue: 4, zone: "hand" as const });
+    const elf = bear("elf", { typeLine: "Creature — Elf", manaCost: "{2}{G}", manaValue: 3, zone: "hand" as const });
+    const withOrb = seat("a", [real("Orb of Dragonkind", "orb")]);
+    expect(adjustedCastingCost(withOrb, dragon, 4, "hand", "a", [withOrb])).toBe(3);
+    expect(adjustedCastingCost(withOrb, elf, 3, "hand", "a", [withOrb])).toBe(3);
+    const tappedOrb = seat("a", [real("Orb of Dragonkind", "orb", { tapped: true })]);
+    expect(adjustedCastingCost(tappedOrb, dragon, 4, "hand", "a", [tappedOrb])).toBe(4);
+  });
+});
