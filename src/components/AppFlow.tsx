@@ -691,6 +691,9 @@ type PendingRuleChoice =
       pickedIds?: string[];
       // Set when this picks creatures to TAP as a cost ("Tap three untapped Zombies you control"): the qualifier they must match.
       tapSubtype?: string;
+      // Sephara's alternative cost: only these creatures may be picked, and the cast is replayed (with the alternative chosen) afterwards.
+      eligibleIds?: string[];
+      castResume?: { seatId: string; cardId: string; position?: { x: number; z: number }; sourceZone: "hand" | "command" | "exile" | "graveyard" | "library"; faceIndex?: number };
     }
   // "Each player sacrifices a creature or planeswalker of their choice." (Plaguecrafter, Accursed
   // Marauder, ...) — every OTHER seat's sacrifice is already resolved deterministically by
@@ -2095,8 +2098,8 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       controllerSeatId: next.seatId,
       sourceCardId: next.sourceCardId,
       sourceCardName: next.sourceCardName,
-      prompt: next.sourceCardName + ": choose a creature to sacrifice (" + next.count + " to go).",
-      typeFilter: "creature",
+      prompt: next.sourceCardName + ": choose a " + (next.typeFilter ?? "creature") + " to sacrifice (" + next.count + " to go).",
+      typeFilter: next.typeFilter ?? "creature",
       remaining: next.count,
       excludeTokensFromSourceId: next.sourceCardId
     });
@@ -4202,6 +4205,10 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
 
     const annihilatorN = annihilatorAmount(attackingCard.oracleText);
     if (!annihilatorN) return attackTriggeredSession;
+    // A human defender chooses which permanents to sacrifice (the picker opens from pendingSacrificeChoices).
+    if (target.seat.kind === "human" && target.seat.board.battlefield.length > annihilatorN) {
+      return { ...attackTriggeredSession, pendingSacrificeChoices: [...(attackTriggeredSession.pendingSacrificeChoices ?? []), { seatId: target.seat.id, sourceCardId: attackingCard.id, sourceCardName: attackingCard.name + "'s annihilator", count: annihilatorN, typeFilter: "permanent" }] };
+    }
     const sacrifices = chooseAnnihilatorSacrifices(target.seat, annihilatorN);
     if (sacrifices.length === 0) return attackTriggeredSession;
     return destroyCreatures(
@@ -4886,6 +4893,24 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         return;
       }
     }
+    // Sephara's alternative cost: the human chooses which creatures to tap.
+    if (tapAlt && seat.kind === "human" && altChoice === "alt" && card.chosenTapAltIds === undefined && tapAlt.creatureIds.length > tapAlt.count) {
+      setPendingRuleChoice({
+        id: crypto.randomUUID(),
+        kind: "choose_creature_to_sacrifice",
+        controllerSeatId: seatId,
+        sourceCardId: cardId,
+        sourceCardName: card.name,
+        prompt: `${card.name}: choose ${tapAlt.count} untapped creatures to tap${tapAlt.withKeyword ? " with " + tapAlt.withKeyword : ""}.`,
+        abilityIndex: -1,
+        count: tapAlt.count,
+        tapSubtype: "creature",
+        eligibleIds: tapAlt.creatureIds,
+        castResume: { seatId, cardId, position, sourceZone, faceIndex }
+      });
+      setSelectedHandCardId(undefined);
+      return;
+    }
     const useTapAlt = Boolean(tapAlt) && (seat.kind !== "human" || altChoice === "alt");
     const costCard = useTapAlt && tapAlt
       ? cardWithFaceManaCost(card, tapAlt.costManaText)
@@ -5003,7 +5028,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       }
     }
     if (useTapAlt && tapAlt) {
-      const toTap = new Set(tapAlt.creatureIds.slice(0, tapAlt.count));
+      const toTap = new Set(card.chosenTapAltIds && card.chosenTapAltIds.length === tapAlt.count ? card.chosenTapAltIds : tapAlt.creatureIds.slice(0, tapAlt.count));
       setSession((current) => ({
         ...current,
         seats: current.seats.map((item) =>
@@ -8811,7 +8836,9 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     if (!seat || !chosenCard) return;
     // Several creatures to choose (Westvale Abbey's five, Cryptbreaker's three Zombies): collect picks one at a time.
     const isEligible = (card: VisibleCard) =>
-      choice.tapSubtype
+      choice.eligibleIds
+        ? choice.eligibleIds.includes(card.id) && !card.tapped
+        : choice.tapSubtype
         ? card.typeLine.includes("Creature") && !card.tapped && !card.phasedOut && permanentMatchesQualifier(card, choice.tapSubtype)
         : hasCardType(card, "Creature") && card.id !== choice.excludeCardId && matchesSacrificeFilter(card, choice.typeFilter?.toLowerCase());
     const pickedIds = [...(choice.pickedIds ?? []), cardId];
@@ -8825,6 +8852,15 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       pickedIds.push(...left.slice(0, needed).map((card) => card.id));
     }
     setPendingRuleChoice(undefined);
+    if (choice.castResume) {
+      const resume = choice.castResume;
+      setSession((current) => ({
+        ...current,
+        seats: current.seats.map((item) => (item.id === resume.seatId ? { ...item, board: { ...item.board, hand: item.board.hand.map((card) => (card.id === resume.cardId ? { ...card, chosenTapAltIds: pickedIds } : card)) } } : item))
+      }));
+      window.setTimeout(() => playCard(resume.seatId, resume.cardId, resume.position, resume.sourceZone, resume.faceIndex, undefined, undefined, "alt"), 50);
+      return;
+    }
     if (choice.tapSubtype) {
       activateGenericTapAbility(choice.controllerSeatId, choice.sourceCardId, choice.abilityIndex, undefined, undefined, pickedIds);
       return;
@@ -14628,6 +14664,7 @@ function resetForZoneChange<T extends VisibleCard>(card: T, zone: VisibleCard["z
     battlefieldPosition: undefined,
     chosenCopyTargetId: undefined,
     chosenCastX: undefined,
+    chosenTapAltIds: undefined,
     chosenAdditionalDiscardIds: undefined,
     counters: undefined,
     interpretedEffects: undefined,
@@ -17157,7 +17194,7 @@ export function applyZoneEffect(session: GameSession, casterSeatId: string, sour
         effect.scope === "you"
           ? [casterSeatId]
           : effect.scope === "target_player"
-            ? [session.seats.find((seat) => seat.id !== casterSeatId)?.id ?? casterSeatId]
+            ? [preChosenTarget?.kind === "player" ? preChosenTarget.seatId : session.seats.find((seat) => seat.id !== casterSeatId)?.id ?? casterSeatId]
             : effect.scope === "each_opponent"
               ? session.seats.filter((seat) => seat.id !== casterSeatId).map((seat) => seat.id)
               : session.seats.map((seat) => seat.id);
@@ -17196,7 +17233,7 @@ export function applyZoneEffect(session: GameSession, casterSeatId: string, sour
       return session;
     case "graveyard_to_library": {
       const seatId =
-        effect.scope === "you" ? casterSeatId : session.seats.find((seat) => seat.id !== casterSeatId && (seat.board.graveyard ?? []).length > 0)?.id ?? casterSeatId;
+        effect.scope === "you" ? casterSeatId : preChosenTarget?.kind === "player" ? preChosenTarget.seatId : session.seats.find((seat) => seat.id !== casterSeatId && (seat.board.graveyard ?? []).length > 0)?.id ?? casterSeatId;
       return applyGraveyardToLibrary(session, seatId, sourceName);
     }
     case "exile_graveyard": {
@@ -22072,7 +22109,9 @@ function ruleChoiceView(
         cards: humanSeat.board.battlefield
           .filter((card) =>
             !choice.pickedIds?.includes(card.id) &&
-            (choice.tapSubtype
+            (choice.eligibleIds
+              ? choice.eligibleIds.includes(card.id) && !card.tapped
+              : choice.tapSubtype
               ? card.typeLine.includes("Creature") && !card.tapped && !card.phasedOut && permanentMatchesQualifier(card, choice.tapSubtype)
               : hasCardType(card, "Creature") && card.id !== choice.excludeCardId && matchesSacrificeFilter(card, filter))
           )

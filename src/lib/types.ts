@@ -328,6 +328,8 @@ export interface VisibleCard {
   exileAtEndOfCombat?: boolean;
   // The human's pick for an "enter as a copy of ..." replacement (Cursed Mirror, Mirrormade), set on the hand card before it is cast; "none" declines.
   chosenCopyTargetId?: string;
+  // The human's picks for which creatures to tap for an alternative cost (Sephara, Sky's Blade), set on the hand card before the cast.
+  chosenTapAltIds?: string[];
   // The human's pick for X (or how many times a multikicker is paid / whether a kicker is paid), set on the hand card before the cast.
   chosenCastX?: number;
   // The human's picks for "As an additional cost to cast this spell, discard a card" (Thrill of Possibility), set on the hand card before the cast.
@@ -467,7 +469,7 @@ export interface GameSession {
   // A discard the human must choose themselves (forced discards, "discard a card, then draw"): the pure resolver records it here instead of
   // discarding the heuristic worst card, and a component effect opens the picker. thenDraw: cards drawn after the discard.
   pendingDiscardChoices?: Array<{ seatId: string; count: number; sourceName: string; thenDraw?: number }>;
-  pendingSacrificeChoices?: Array<{ seatId: string; sourceCardId: string; sourceCardName: string; count: number }>;
+  pendingSacrificeChoices?: Array<{ seatId: string; sourceCardId: string; sourceCardName: string; count: number; typeFilter?: string }>;
   pendingAttackDeclarations?: Array<{ seatId: string; card: VisibleCard; defendingSeatId: string }>;
   // Rule 724: the player who is currently the monarch (Court of Grace, Skyline Despot, Marchesa's Decree). They draw
   // an extra card at the beginning of their end step, and a creature that deals combat damage to them makes its

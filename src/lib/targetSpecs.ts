@@ -100,6 +100,12 @@ export function zoneEffectTargetSpec(effect: ZoneEffect): TargetSpec | undefined
     };
   }
   // "Exile target player's graveyard." (Bojuka Bog): the player is chosen, not picked by a heuristic.
+  if (effect.kind === "mill" && effect.scope === "target_player") {
+    return { id: "target", zone: "player", controller: "any", min: 1, max: 1, prompt: `Target player mills ${effect.amount} card${effect.amount === 1 ? "" : "s"}.` };
+  }
+  if (effect.kind === "graveyard_to_library" && effect.scope === "target_player") {
+    return { id: "target", zone: "player", controller: "any", min: 1, max: 1, prompt: "Shuffle target player's graveyard into their library." };
+  }
   if (effect.kind === "exile_graveyard" && effect.scope === "target_player") {
     return { id: "target", zone: "player", controller: "any", min: 1, max: 1, prompt: "Exile target player's graveyard." };
   }
