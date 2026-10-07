@@ -1073,7 +1073,8 @@ export interface LegalAgentAction {
     | "myriad_landscape"
     | "equip"
     | "loyalty_ability"
-    | "animate_manland";
+    | "animate_manland"
+    | "cycling";
   abilityIndex?: number;
   faceIndex?: number;
   loyaltyCost?: number;
@@ -2840,6 +2841,10 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     }
     if (action.actionType === "activate_ability" && action.cardId && action.abilityKind === "self_untap" && action.abilityIndex !== undefined) {
       activateSelfUntapAbility(seat.id, action.cardId, action.abilityIndex);
+      return;
+    }
+    if (action.actionType === "activate_ability" && action.cardId && action.abilityKind === "cycling") {
+      cycleCard(seat.id, action.cardId);
       return;
     }
     if (action.actionType === "activate_ability" && action.cardId && action.abilityKind === "generic_mana" && action.abilityIndex !== undefined) {
@@ -11035,6 +11040,25 @@ export function legalMainPhaseActions(
         label: `cast commander ${commander.name}`,
         detail: `${commander.manaCost ?? ""} commander tax ${commander.commanderTax ?? 0}. ${commander.oracleText} Payable with ${formatManaPoolPayment(payment.spent)}.`.trim(),
         role: commander.role
+      });
+    }
+  }
+  // Cycling (Barren Moor, Forgotten Cave, Tranquil Thicket): trade a surplus land for a fresh card. Offered only when the seat is already
+  // flooded — six or more lands in play, or four-plus with this turn's land drop used.
+  const landsInPlay = seat.board.battlefield.filter((permanent) => isLandCard(permanent)).length;
+  if (landsInPlay >= 6 || (hasPlayedLand && landsInPlay >= 4)) {
+    for (const card of seat.board.hand) {
+      const cycling = parseCycling(card.oracleText);
+      if (!cycling || !chooseManaSourcesForCost(seat, genericManaAbilityCostShim({ costManaText: cycling.costManaText }), manaValueFromManaCost(cycling.costManaText), undefined, session.seats).ok) continue;
+      actions.push({
+        id: `cycle:${card.id}`,
+        actionType: "activate_ability",
+        abilityKind: "cycling",
+        cardId: card.id,
+        targetIds: [],
+        label: `cycle ${card.name}`,
+        detail: `Cycling ${cycling.costManaText}: discard this card to draw a card (you have ${landsInPlay} lands in play).`,
+        role: card.role
       });
     }
   }

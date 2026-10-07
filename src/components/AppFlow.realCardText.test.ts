@@ -1588,3 +1588,18 @@ describe("Spinerock Knoll (real Oracle text)", () => {
     expect(offered(setup(2))).toBe(false);
   });
 });
+
+describe("the AI cycles surplus lands (real Oracle text)", () => {
+  const withLands = (count: number, hasPlayedLand: boolean) => {
+    const mine = seat("a", Array.from({ length: count }, (_, i) => real("Swamp", `sw${i}`)));
+    mine.board.hand = [real("Barren Moor", "bm")];
+    const s = session([mine, seat("b", [])]);
+    return legalMainPhaseActions(s.seats[0], hasPlayedLand, "a", 1, new Set(), s).some((action) => action.id === "cycle:bm");
+  };
+  it("offers cycling when flooded and not when short on lands", () => {
+    expect(withLands(6, false)).toBe(true);
+    expect(withLands(4, true)).toBe(true);
+    expect(withLands(3, true)).toBe(false);
+    expect(withLands(4, false)).toBe(false);
+  });
+});
