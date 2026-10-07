@@ -4555,12 +4555,30 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       addEvent("Finish resolving what's on the stack before cycling.", seatId, "Timing");
       return;
     }
-    const result = cycleCardInSession(session, seatId, cardId);
+    const cyclingSeat = session.seats.find((item) => item.id === seatId);
+    const cyclingCard = cyclingSeat?.board.hand.find((item) => item.id === cardId);
+    const cyclingInfo = cyclingCard ? parseCycling(cyclingCard.oracleText) : undefined;
+    const humanSearch = Boolean(cyclingSeat?.kind === "human" && cyclingInfo?.searchType);
+    const result = cycleCardInSession(session, seatId, cardId, { skipSearch: humanSearch });
     if (!result.ok) {
       addEvent(result.message, seatId, "Timing");
       return;
     }
     setSession(() => result.session);
+    // Plainscycling and friends: the human chooses the card to search for.
+    if (humanSearch && cyclingCard && cyclingInfo?.searchType) {
+      setPendingRuleChoice({
+        id: crypto.randomUUID(),
+        kind: "choose_card_from_library",
+        controllerSeatId: seatId,
+        sourceCardId: cardId,
+        sourceCardName: cyclingCard.name,
+        prompt: `Search your library for a ${cyclingInfo.basicOnly ? "basic " : ""}${cyclingInfo.searchType} card.`,
+        destination: "hand",
+        maxChoices: 1,
+        allowedCardFilter: (cyclingInfo.basicOnly ? "basic " : "") + cyclingInfo.searchType.toLowerCase()
+      });
+    }
   }
 
   function playCard(
@@ -5271,6 +5289,13 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         });
         return;
       }
+    }
+    // Scry/surveil from a sacrifice ability: the human looks at the cards and decides.
+    if (seat?.kind === "human" && (paid.ability.effect.kind === "scry" || paid.ability.effect.kind === "surveil")) {
+      const lookEffect = paid.ability.effect;
+      setSession(() => paid.session);
+      startLibraryLook(lookEffect.kind as LibraryLookMode, lookEffect.amount + (lookEffect.kind === "surveil" ? surveilBonusForSeat(seat) : 0));
+      return;
     }
     // "Destroy target creature" and friends after a sacrifice (Thrashing Brontodon): the human aims it.
     if (seat?.kind === "human" && paid.ability.effect.kind === "removal" && paid.ability.effect.effect.kind !== "modal") {
@@ -20399,7 +20424,7 @@ export function activateGraveyardReturnInSession(session: GameSession, seatId: s
   return { ok: true, session: rulesEvent(withCounter, seatId, `${seat.name} pays ${costText || "{0}"} and returns ${card.name} from the graveyard to the battlefield${ability.withCounter ? " with a +1/+1 counter" : ""}.`) };
 }
 
-export function cycleCardInSession(session: GameSession, seatId: string, cardId: string): { ok: true; session: GameSession } | { ok: false; message: string } {
+export function cycleCardInSession(session: GameSession, seatId: string, cardId: string, options?: { skipSearch?: boolean }): { ok: true; session: GameSession } | { ok: false; message: string } {
   const seat = session.seats.find((item) => item.id === seatId);
   const card = seat?.board.hand.find((item) => item.id === cardId);
   if (!seat || !card) return { ok: false, message: "That card isn't in your hand." };
@@ -20411,6 +20436,8 @@ export function cycleCardInSession(session: GameSession, seatId: string, cardId:
   const paid: GameSession = { ...session, seats: session.seats.map((item) => (item.id === seatId ? spendManaSources(item, payment.sourceIds) : item)) };
   const discarded = moveCardBetweenVisibleZones(paid, seatId, cardId, "graveyard");
   const withEvent = rulesEvent(discarded, seatId, `${seat.name} cycles ${card.name} (${cycling.costManaText}).`);
+  // A human picks the card to fetch themselves (the caller opens the library search): pay and discard only.
+  if (cycling.searchType && options?.skipSearch) return { ok: true, session: withEvent };
   if (cycling.searchType) {
     // Plainscycling and friends: fetch the first matching card (basic only for "basic landcycling") and shuffle.
     const wanted = cycling.searchType;
