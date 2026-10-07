@@ -328,6 +328,10 @@ export interface VisibleCard {
   exileAtEndOfCombat?: boolean;
   // The human's pick for an "enter as a copy of ..." replacement (Cursed Mirror, Mirrormade), set on the hand card before it is cast; "none" declines.
   chosenCopyTargetId?: string;
+  // The human's pick for X (or how many times a multikicker is paid / whether a kicker is paid), set on the hand card before the cast.
+  chosenCastX?: number;
+  // The human's picks for "As an additional cost to cast this spell, discard a card" (Thrill of Possibility), set on the hand card before the cast.
+  chosenAdditionalDiscardIds?: string[];
   // Cursed Mirror: what this permanent was before it became a copy of a creature until end of turn; restored when the turn ends.
   temporaryCopyOriginal?: Pick<VisibleCard, "name" | "typeLine" | "oracleText" | "manaCost" | "manaValue" | "colors" | "colorIdentity" | "power" | "toughness" | "imageUris">;
   // Dragonhawk, Fate's Tempest: a card exiled by it that is still in exile at the beginning of its controller's next end step costs
@@ -460,6 +464,9 @@ export interface GameSession {
   pendingLeaves?: Array<{ seatId: string; card: VisibleCard }>;
   // "Each player sacrifices N creatures" (Necrotic Hex): a human with more candidates than N chooses which; the pure resolver leaves their
   // sacrifice undone and records it here, and a component effect opens the picker.
+  // A discard the human must choose themselves (forced discards, "discard a card, then draw"): the pure resolver records it here instead of
+  // discarding the heuristic worst card, and a component effect opens the picker. thenDraw: cards drawn after the discard.
+  pendingDiscardChoices?: Array<{ seatId: string; count: number; sourceName: string; thenDraw?: number }>;
   pendingSacrificeChoices?: Array<{ seatId: string; sourceCardId: string; sourceCardName: string; count: number }>;
   pendingAttackDeclarations?: Array<{ seatId: string; card: VisibleCard; defendingSeatId: string }>;
   // Rule 724: the player who is currently the monarch (Court of Grace, Skyline Despot, Marchesa's Decree). They draw

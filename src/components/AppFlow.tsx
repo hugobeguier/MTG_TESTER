@@ -506,6 +506,17 @@ type PendingRuleChoice =
       options: Array<{ cardId: string; label: string }>;
       resume: { seatId: string; cardId: string; position?: { x: number; z: number }; sourceZone: "hand" | "command" | "exile" | "graveyard" | "library"; faceIndex?: number; sacrificeTargets?: VisibleCard[] };
     }
+  // X spells, kicker and multikicker: the human chooses X (or kicked / not kicked) before the cast is replayed.
+  | {
+      id: string;
+      kind: "choose_cast_x";
+      controllerSeatId: string;
+      sourceCardId: string;
+      sourceCardName: string;
+      prompt: string;
+      options: Array<{ value: number; label: string }>;
+      resume: { seatId: string; cardId: string; position?: { x: number; z: number }; sourceZone: "hand" | "command" | "exile" | "graveyard" | "library"; faceIndex?: number; sacrificeTargets?: VisibleCard[] };
+    }
   | {
       id: string;
       kind: "choose_cast_alt";
@@ -914,6 +925,10 @@ type PendingRuleChoice =
       controllerSeatId: string;
       prompt: string;
       requiredDiscards: number;
+      // Cards the controller draws once the discard is done ("discard a card, then draw a card").
+      thenDraw?: number;
+      // The discard is an additional COST of casting this card: the picks go onto it and the cast is replayed (Thrill of Possibility).
+      castResume?: { seatId: string; cardId: string; position?: { x: number; z: number }; sourceZone: "hand" | "command" | "exile" | "graveyard" | "library"; faceIndex?: number };
       // Set when this same "choose N cards to discard" picker is reused for a trigger other than
       // the real cleanup-step hand-size rule (e.g. Plaguecrafter's "if a player can't, they discard
       // a card instead") — lets the modal header and event-log message name the actual source
@@ -2043,6 +2058,23 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   // planeswalker you control, ..." — queued per DECLARED attacker (see pendingAttackDeclarations on
   // GameSession) instead of by the old once-per-phase sweep that fired for every creature with
   // "attacks" text whether or not it attacked.
+  // A discard the human chooses for themselves (forced discards, rummage effects): opens the picker for what the resolver deferred.
+  useEffect(() => {
+    const queue = session.pendingDiscardChoices;
+    if (!queue || queue.length === 0 || pendingAction || pendingRuleChoice) return;
+    const [next, ...rest] = queue;
+    setSession((current) => ({ ...current, pendingDiscardChoices: rest.length > 0 ? rest : undefined }));
+    setPendingRuleChoice({
+      id: crypto.randomUUID(),
+      kind: "discard_to_hand_size",
+      controllerSeatId: next.seatId,
+      sourceCardName: next.sourceName,
+      prompt: next.sourceName + ": choose " + (next.count === 1 ? "a card" : next.count + " cards") + " to discard." + (next.thenDraw ? " You then draw " + next.thenDraw + "." : ""),
+      requiredDiscards: next.count,
+      thenDraw: next.thenDraw
+    });
+  }, [session.pendingDiscardChoices, pendingAction, pendingRuleChoice]);
+
   // "Each player sacrifices N creatures" (Necrotic Hex): opens the human's picker for the sacrifices the resolver deferred.
   useEffect(() => {
     const queue = session.pendingSacrificeChoices;
@@ -4812,6 +4844,21 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       setSelectedHandCardId(undefined);
       return;
     }
+    // "As an additional cost to cast this spell, discard a card": a human picks the card(s) before anything is paid.
+    const additionalDiscard = sourceZone === "hand" && seat.kind === "human" && card.chosenAdditionalDiscardIds === undefined ? parseAdditionalDiscardCost(card.oracleText) : undefined;
+    if (additionalDiscard && seat.board.hand.filter((handCard) => handCard.id !== cardId).length > additionalDiscard.count) {
+      setPendingRuleChoice({
+        id: crypto.randomUUID(),
+        kind: "discard_to_hand_size",
+        controllerSeatId: seatId,
+        sourceCardName: card.name,
+        prompt: `${card.name}: choose ${additionalDiscard.count === 1 ? "a card" : additionalDiscard.count + " cards"} to discard as an additional cost.`,
+        requiredDiscards: additionalDiscard.count,
+        castResume: { seatId, cardId, position, sourceZone, faceIndex }
+      });
+      setSelectedHandCardId(undefined);
+      return;
+    }
     // "You may have this enter as a copy of ...": a human picks what to copy (or declines) first.
     const copyEffectForPrompt = sourceZone === "hand" && seat.kind === "human" && card.chosenCopyTargetId === undefined ? parseEnterAsCopyEffect(card.oracleText) : undefined;
     if (copyEffectForPrompt) {
@@ -4878,7 +4925,27 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     // never a live bug — but an Adventure/Omen spell face (Exude Toxin's {X}{B}{B}) needs the same
     // X-affordability logic every other X spell gets, so spellFace goes through maxAffordableX
     // instead of being forced to 0 the way doorFace is.
-    const chosenX = doorFace ? 0 : maxAffordableX(seat, costCard, fixedCost, seat.kind === "human" ? poolForSeat(seatId) : undefined);
+    const maxX = doorFace ? 0 : maxAffordableX(seat, costCard, fixedCost, seat.kind === "human" ? poolForSeat(seatId) : undefined);
+    // X, kicker and multikicker: a human chooses how much to pay instead of always paying the maximum.
+    if (seat.kind === "human" && maxX >= 1 && sourceZone === "hand" && card.chosenCastX === undefined) {
+      const single = hasSingleKicker(card.oracleText);
+      const hasX = xSymbolCount(costCard.manaCost) > 0;
+      setPendingRuleChoice({
+        id: crypto.randomUUID(),
+        kind: "choose_cast_x",
+        controllerSeatId: seatId,
+        sourceCardId: cardId,
+        sourceCardName: card.name,
+        prompt: single ? `${card.name}: pay the kicker?` : hasX ? `${card.name}: choose X (you can afford up to ${maxX}).` : `${card.name}: how many times do you pay the multikicker (up to ${maxX})?`,
+        options: single
+          ? [{ value: 1, label: "Pay the kicker" }, { value: 0, label: "Don't kick it" }]
+          : Array.from({ length: Math.min(maxX, 25) + 1 }, (_, value) => ({ value, label: hasX ? "X = " + value : value + " time" + (value === 1 ? "" : "s") })).reverse(),
+        resume: { seatId, cardId, position, sourceZone, faceIndex, sacrificeTargets: preChosenSacrificeTargets }
+      });
+      setSelectedHandCardId(undefined);
+      return;
+    }
+    const chosenX = Math.min(maxX, card.chosenCastX ?? maxX);
     const totalCost = totalCastingCost(seat, costCard, baseCost, chosenX) + (sourceZone === "command" ? card.commanderTax ?? 0 : 0);
     // payCastingCost tries a seat's restricted mana (Klauth's floating batch, if any) before the
     // normal pool-then-auto-tap payment every other cost uses — see its own doc comment.
@@ -4886,6 +4953,9 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     const availableMana = payment.ok ? manaPoolTotal(payment.spent) : seat.kind === "human" ? manaPoolTotal(poolForSeat(seatId)) : selectedManaTotal(seat, payment.sourceIds);
     if (!payment.ok) {
       addEvent(cannotPayMessage(seat, costCard, availableMana, totalCost, payment.reason), seatId, "Mana");
+      if (card.chosenCastX !== undefined) {
+        setSession((current) => ({ ...current, seats: current.seats.map((item) => (item.id === seatId ? { ...item, board: { ...item.board, hand: item.board.hand.map((handCard) => (handCard.id === cardId ? { ...handCard, chosenCastX: undefined } : handCard)) } } : item)) }));
+      }
       setSelectedHandCardId(undefined);
       return;
     }
@@ -5997,6 +6067,18 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     switch (trigger.effect.kind) {
       case "target_creature_gains_keyword":
         return { prompt: `${trigger.sourceCardName}: choose a creature you control to gain ${trigger.effect.keywords.join(" and ")} until end of turn.`, zone: "battlefield", cards: ownCreatures, picksNeeded: 1 };
+      // Eternal Taskmaster: "pay {2}{B}. If you do, return target creature card from your graveyard to your hand": the human picks the card.
+      case "pay_then_zone": {
+        const zoneSpec = zoneEffectTargetSpec(trigger.effect.zoneEffect);
+        const sourceForTargets = session.seats.flatMap((seat) => seat.board.battlefield).find((card) => card.id === trigger.sourceCardId);
+        if (!zoneSpec || !sourceForTargets) return undefined;
+        return {
+          prompt: `${trigger.sourceCardName}: choose the card to return.`,
+          zone: "graveyard",
+          cards: legalTargets(session, controller.id, zoneSpec, sourceForTargets).filter((target): target is Extract<ReturnType<typeof legalTargets>[number], { kind: "card" }> => target.kind === "card").map((target) => ({ seatId: target.seatId, cardId: target.card.id })),
+          picksNeeded: 1
+        };
+      }
       case "exile_up_to_artifacts_enchantments":
         return {
           prompt: `${trigger.sourceCardName}: choose up to ${trigger.effect.count} artifacts and/or enchantments to exile.`,
@@ -8644,6 +8726,19 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   // destroy_all_conditional/damage/mass_damage) has no target to choose at all, so it just applies
   // immediately via the same applyRemovalEffect the deterministic/agent path already uses for those
   // shapes.
+  function completeCastX(index: number) {
+    const choice = pendingRuleChoice;
+    if (!choice || choice.kind !== "choose_cast_x") return;
+    setPendingRuleChoice(undefined);
+    const value = choice.options[index]?.value ?? 0;
+    const resume = choice.resume;
+    setSession((current) => ({
+      ...current,
+      seats: current.seats.map((item) => (item.id === resume.seatId ? { ...item, board: { ...item.board, hand: item.board.hand.map((card) => (card.id === resume.cardId ? { ...card, chosenCastX: value } : card)) } } : item))
+    }));
+    window.setTimeout(() => playCard(resume.seatId, resume.cardId, resume.position, resume.sourceZone, resume.faceIndex, resume.sacrificeTargets), 50);
+  }
+
   function completeCastCopy(index: number) {
     const choice = pendingRuleChoice;
     if (!choice || choice.kind !== "choose_cast_copy") return;
@@ -8752,6 +8847,10 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     }
     if (pendingRuleChoice?.kind === "choose_cast_copy") {
       completeCastCopy(index);
+      return;
+    }
+    if (pendingRuleChoice?.kind === "choose_cast_x") {
+      completeCastX(index);
       return;
     }
     if (pendingRuleChoice?.kind === "choose_cast_targets") {
@@ -9019,6 +9118,18 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       return;
     }
 
+    if (choice.kind === "discard_to_hand_size" && choice.castResume) {
+      const resume = choice.castResume;
+      const picks = cardIds.slice(0, choice.requiredDiscards).filter((id) => id !== resume.cardId);
+      setPendingRuleChoice(undefined);
+      setSession((current) => ({
+        ...current,
+        seats: current.seats.map((item) => (item.id === resume.seatId ? { ...item, board: { ...item.board, hand: item.board.hand.map((card) => (card.id === resume.cardId ? { ...card, chosenAdditionalDiscardIds: picks } : card)) } } : item))
+      }));
+      window.setTimeout(() => playCard(resume.seatId, resume.cardId, resume.position, resume.sourceZone, resume.faceIndex), 50);
+      return;
+    }
+
     if (choice.kind === "discard_to_hand_size" && choice.activation && cardIds[0]) {
       setPendingRuleChoice(undefined);
       activateGenericTapAbility(choice.controllerSeatId, choice.activation.cardId, choice.activation.abilityIndex, cardIds[0]);
@@ -9036,7 +9147,8 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       pendingEndTurnAfterDiscard.current = undefined;
       setSession((current) => {
         const discarded = discardIds.reduce((next, cardId) => moveCardBetweenVisibleZones(next, choice.controllerSeatId, cardId, "graveyard"), current);
-        return endTurnAfter ? resolveEndTurn(discarded, choice.controllerSeatId) : discarded;
+        const drawn = choice.thenDraw ? drawMultipleForSeat(discarded, choice.controllerSeatId, choice.thenDraw, `${seat?.name ?? "Player"} draws ${choice.thenDraw} card${choice.thenDraw === 1 ? "" : "s"} from ${choice.sourceCardName ?? "the discard"}.`) : discarded;
+        return endTurnAfter ? resolveEndTurn(drawn, choice.controllerSeatId) : drawn;
       });
       addEvent(
         `${seat?.name ?? "Player"} discards ${discardIds.length} card${discardIds.length === 1 ? "" : "s"}${choice.sourceCardName ? ` to ${choice.sourceCardName}.` : " to hand size."}`,
@@ -12336,6 +12448,13 @@ function choosePlaguecrafterSacrifice(seat: PlayerSeat, typeFilter: string): Vis
   });
 }
 
+// A human who must discard with a real choice (more cards than the discard) chooses; the resolver records it and a component effect asks.
+function deferHumanDiscard(session: GameSession, seatId: string, count: number, sourceName: string, thenDraw?: number): GameSession | undefined {
+  const seat = session.seats.find((item) => item.id === seatId);
+  if (!seat || seat.kind !== "human" || seat.board.hand.length <= count) return undefined;
+  return { ...session, pendingDiscardChoices: [...(session.pendingDiscardChoices ?? []), { seatId, count, sourceName, thenDraw }] };
+}
+
 function chooseWorstHandCardToDiscard(seat: PlayerSeat): VisibleCard | undefined {
   if (seat.board.hand.length === 0) return undefined;
   return seat.board.hand.reduce((worst, card) => (card.manaValue > worst.manaValue ? card : worst));
@@ -14289,6 +14408,8 @@ function resetForZoneChange<T extends VisibleCard>(card: T, zone: VisibleCard["z
     blockingTargetId: undefined,
     battlefieldPosition: undefined,
     chosenCopyTargetId: undefined,
+    chosenCastX: undefined,
+    chosenAdditionalDiscardIds: undefined,
     counters: undefined,
     interpretedEffects: undefined,
     attachedToId: undefined,
@@ -16028,7 +16149,8 @@ export function payAdditionalDiscardCost(session: GameSession, seatId: string, s
   for (let paid = 0; paid < cost.count; paid += 1) {
     const current = next.seats.find((item) => item.id === seatId);
     if (!current) break;
-    const discard = chooseWorstHandCardToDiscard({ ...current, board: { ...current.board, hand: current.board.hand.filter((card) => card.id !== spell.id) } });
+    const chosenDiscard = spell.chosenAdditionalDiscardIds?.[paid] ? current.board.hand.find((card) => card.id === spell.chosenAdditionalDiscardIds![paid] && card.id !== spell.id) : undefined;
+    const discard = chosenDiscard ?? chooseWorstHandCardToDiscard({ ...current, board: { ...current.board, hand: current.board.hand.filter((card) => card.id !== spell.id) } });
     if (!discard) break;
     next = moveCardBetweenVisibleZones(next, seatId, discard.id, "graveyard");
     next = rulesEvent(next, seatId, `${seat.name} discards ${discard.name} as an additional cost to cast ${spell.name}.`);
@@ -17216,8 +17338,15 @@ function applyDiscardEffect(
 
   let nextSession = session;
   const discardedBySeat = new Map<string, string[]>();
+  let deferredAny = false;
   for (const target of targets) {
     const discarded: string[] = [];
+    const deferredSession = deferHumanDiscard(nextSession, target.id, amount, sourceName);
+    if (deferredSession) {
+      nextSession = deferredSession;
+      deferredAny = true;
+      continue;
+    }
     for (let i = 0; i < amount; i += 1) {
       const seat = nextSession.seats.find((item) => item.id === target.id);
       const card = seat ? chooseWorstHandCardToDiscard(seat) : undefined;
@@ -17227,7 +17356,7 @@ function applyDiscardEffect(
     }
     if (discarded.length > 0) discardedBySeat.set(target.id, discarded);
   }
-  if (discardedBySeat.size === 0) return noLegalTargetEvent(nextSession, casterSeatId, sourceName);
+  if (discardedBySeat.size === 0) return deferredAny ? nextSession : noLegalTargetEvent(nextSession, casterSeatId, sourceName);
 
   const summary = Array.from(discardedBySeat.entries())
     .map(([seatId, cards]) => {
@@ -21038,6 +21167,8 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
   }
   if (trigger.effect.kind === "discard_then_draw") {
     const mine = session.seats.find((item) => item.id === trigger.controllerSeatId);
+    const deferred = deferHumanDiscard(session, trigger.controllerSeatId, 1, trigger.sourceCardName, trigger.effect.draw);
+    if (deferred) return deferred;
     const discard = mine ? chooseWorstHandCardToDiscard(mine) : undefined;
     if (!mine || !discard) return rulesEvent(session, trigger.controllerSeatId, `${trigger.sourceCardName}: no card to discard, so nothing is drawn.`);
     let next = moveCardBetweenVisibleZones(session, mine.id, discard.id, "graveyard");
@@ -21603,11 +21734,13 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
       return rulesEvent(session, payer.id, `${payer.name} can't pay ${trigger.effect.costText} for ${trigger.sourceCardName}.`);
     }
     const paid = { ...session, seats: session.seats.map((seat) => (seat.id === payer.id ? spendManaSources(seat, payment.sourceIds) : seat)) };
-    return applyZoneEffect(rulesEvent(paid, payer.id, `${payer.name} pays ${trigger.effect.costText} for ${trigger.sourceCardName}.`), payer.id, trigger.sourceCardName, trigger.effect.zoneEffect);
+    return applyZoneEffect(rulesEvent(paid, payer.id, `${payer.name} pays ${trigger.effect.costText} for ${trigger.sourceCardName}.`), payer.id, trigger.sourceCardName, trigger.effect.zoneEffect, undefined, trigger.effect.chosenOption ? { kind: "card", seatId: payer.id, cardId: trigger.effect.chosenOption } : undefined);
   }
   if (trigger.effect.kind === "seat_discards") {
     const { amount } = trigger.effect;
     const discarderId = trigger.effect.seatId ?? trigger.actorSeatId;
+    const deferredDiscard = deferHumanDiscard(session, discarderId, amount, trigger.sourceCardName);
+    if (deferredDiscard) return deferredDiscard;
     let next = session;
     for (let i = 0; i < amount; i += 1) {
       const discarder = next.seats.find((seat) => seat.id === discarderId);
@@ -21735,6 +21868,9 @@ function ruleChoiceView(
           .filter((card) => hasCardType(card, "Creature"))
           .map((card) => ({ card, seatId: humanSeat.id, seatName: humanSeat.name }))
       };
+    }
+    if (choice.kind === "choose_cast_x") {
+      return { kind: "choose_modal_option" as const, sourceCardName: choice.sourceCardName, prompt: choice.prompt, options: choice.options.map((option, index) => ({ index, label: option.label })) };
     }
     if (choice.kind === "choose_cast_copy") {
       return { kind: "choose_modal_option" as const, sourceCardName: choice.sourceCardName, prompt: choice.prompt, options: choice.options.map((option, index) => ({ index, label: option.label })) };
