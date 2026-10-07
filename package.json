@@ -13,6 +13,7 @@
     "xmage:ingest": "node scripts/ingest-xmage-cards.mjs",
     "bench:agents": "node scripts/agent-bench.mjs",
     "selfplay": "vite-node -c vitest.config.ts scripts/self-play.ts --",
+    "backlog": "vite-node -c vitest.config.ts scripts/card-backlog.ts",
     "test": "vitest run"
   },
   "dependencies": {
