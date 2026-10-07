@@ -879,6 +879,9 @@ type PendingRuleChoice =
       options: Array<{ index: number; label: string }>;
       trigger: Extract<PendingAction, { type: "trigger" }>;
       remainingStack: PendingAction[];
+      // Set when the question is asked as the trigger goes onto the stack (modes and targets are chosen then, rule 603.3c): the whole
+      // batch being queued, so the answer can be attached and queueing can continue.
+      queueing?: Array<Extract<PendingAction, { type: "trigger" }>>;
     }
   // "Target creature gains hexproof and indestructible until end of turn." (Valorous Stance, Collective Resistance) / "can't be
   // blocked this turn" (Rogue's Passage): the human picks which of their creatures gets the keywords.
@@ -906,6 +909,7 @@ type PendingRuleChoice =
       picked: string[];
       trigger: Extract<PendingAction, { type: "trigger" }>;
       remainingStack: PendingAction[];
+      queueing?: Array<Extract<PendingAction, { type: "trigger" }>>;
     }
   // "Exile target card from a graveyard" (Scavenging Ooze) — the human picks the card BEFORE paying, then the activation re-runs with
   // that card as its target.
@@ -5555,11 +5559,11 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
 
   // Human-controlled triggers that need a real decision: opens the prompt and returns true (the trigger resolves when they answer), or
   // returns false to let the normal automatic resolution run (agents, or nothing to choose between).
-  function openTriggerOptionPrompt(trigger: Extract<PendingAction, { type: "trigger" }>, remainingStack: PendingAction[]): boolean {
+  function openTriggerOptionPrompt(trigger: Extract<PendingAction, { type: "trigger" }>, remainingStack: PendingAction[], queueing?: Array<Extract<PendingAction, { type: "trigger" }>>): boolean {
     const controller = session.seats.find((seat) => seat.id === trigger.controllerSeatId);
     if (!controller || controller.kind !== "human" || trigger.effect.chosenOption !== undefined) return false;
     const open = (prompt: string, options: Array<{ index: number; label: string }>) => {
-      setPendingRuleChoice({ id: crypto.randomUUID(), kind: "choose_trigger_option", controllerSeatId: controller.id, sourceCardId: trigger.sourceCardId, sourceCardName: trigger.sourceCardName, prompt, options, trigger, remainingStack });
+      setPendingRuleChoice({ id: crypto.randomUUID(), kind: "choose_trigger_option", controllerSeatId: controller.id, sourceCardId: trigger.sourceCardId, sourceCardName: trigger.sourceCardName, prompt, options, trigger, remainingStack, queueing });
       return true;
     };
     if (trigger.effect.kind === "modal" && trigger.effect.modal.chooseCount === 1) {
@@ -5586,7 +5590,8 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         picksNeeded: cardPrompt.picksNeeded,
         picked: [],
         trigger,
-        remainingStack
+        remainingStack,
+        queueing
       });
       return true;
     }
@@ -5662,6 +5667,10 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     }
     setPendingRuleChoice(undefined);
     const chosen = { ...choice.trigger, effect: { ...choice.trigger.effect, chosenOption: picked.join(",") } } as Extract<PendingAction, { type: "trigger" }>;
+    if (choice.queueing) {
+      queueCommonTriggers(choice.queueing.map((queued) => (queued.id === choice.trigger.id ? chosen : queued)));
+      return;
+    }
     setSession((current) => resolveTriggerEffect(current, chosen));
     resumeAfterTriggerChoice(choice.trigger, choice.remainingStack);
   }
@@ -5699,6 +5708,10 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       return;
     }
     const chosen = { ...choice.trigger, effect: { ...choice.trigger.effect, chosenOption: String(index) } } as Extract<PendingAction, { type: "trigger" }>;
+    if (choice.queueing) {
+      queueCommonTriggers(choice.queueing.map((queued) => (queued.id === choice.trigger.id ? chosen : queued)));
+      return;
+    }
     setSession((current) => resolveTriggerEffect(current, chosen));
     resumeAfterTriggerChoice(choice.trigger, choice.remainingStack);
   }
@@ -7003,6 +7016,15 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
 
   function queueCommonTriggers(triggers: Array<Extract<PendingAction, { type: "trigger" }>>) {
     if (triggers.length === 0) return;
+    // A human's modal trigger (its mode) and targeted triggers (their targets) are decided as the trigger goes onto the stack, so the
+    // opponents see the choice before they respond. Only modes and targets: costs and "you may" amounts are still settled on resolution.
+    for (const trigger of triggers) {
+      if (trigger.effect.chosenOption !== undefined) continue;
+      const controller = session.seats.find((seat) => seat.id === trigger.controllerSeatId);
+      if (controller?.kind !== "human") continue;
+      const asksAtQueueTime = (trigger.effect.kind === "modal" && trigger.effect.modal.chooseCount === 1) || triggerCardPrompt(trigger, controller) !== undefined;
+      if (asksAtQueueTime && openTriggerOptionPrompt(trigger, [], triggers)) return;
+    }
     const [firstTrigger, ...laterTriggers] = triggers;
     if (laterTriggers.length > 0) {
       replaceStackActions([...stackActionsRef.current, ...laterTriggers]);
