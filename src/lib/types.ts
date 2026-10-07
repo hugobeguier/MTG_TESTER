@@ -321,6 +321,9 @@ export interface VisibleCard {
   exiledPlayableFree?: boolean;
   // A hideaway card may be cast at any time it becomes playable, ignoring normal timing (but a land still needs its land drop).
   exiledPlayableAnyTime?: boolean;
+  // "Exile ... until this enchantment leaves the battlefield." (Grasp of Fate): the id of the permanent that holds this card in exile;
+  // when that permanent is no longer on the battlefield the card returns to the battlefield under its owner's control.
+  exiledUntilSourceLeaves?: string;
   // Hideaway: the land whose "look at the top N, exile one face down" put this card here.
   hideawaySourceId?: string;
   // "As this enters, choose Khans or Dragons." (Outpost Siege): the label picked, which gates the matching bullet.

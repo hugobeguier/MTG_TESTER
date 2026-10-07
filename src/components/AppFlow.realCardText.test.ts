@@ -2,7 +2,7 @@
 // the test: two earlier tests passed on invented text while the real cards stayed broken (Court of Grace, the
 // "with power N or greater" watchers). Skipped per card when the catalog doesn't have it.
 import { describe, expect, it } from "vitest";
-import { landDropsAllowed, landPlaysMade, recordLandPlay, findCastTriggers, seatHasFlashGrant, findLeavesBattlefieldTriggers, hideawayDamageConditionMet, legalMainPhaseActions, tapCreaturesAltCostFor, applyCastRemoval, nextCastPrompt, type CastChoices, spellModePrompt, applyDigPick, applyDigToBattlefield, applyLabeledContinuation, spellTargetSlots, grantKeywordsToCreature, applyExalted, applySacrificeEffect, applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
+import { landDropsAllowed, landPlaysMade, recordLandPlay, findCastTriggers, seatHasFlashGrant, findLeavesBattlefieldTriggers, hideawayDamageConditionMet, legalMainPhaseActions, tapCreaturesAltCostFor, applyCastRemoval, nextCastPrompt, type CastChoices, spellModePrompt, applyDigPick, applyDigToBattlefield, staticCostReduction, applyLabeledContinuation, spellTargetSlots, grantKeywordsToCreature, applyExalted, applySacrificeEffect, applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
 import { parseRemovalEffect } from "@/lib/removalSpells";
 import { parseZoneEffect } from "@/lib/zoneEffects";
 import { permanentMatchesQualifier } from "@/lib/characteristics";
@@ -885,6 +885,19 @@ describe("menace (real Oracle text)", () => {
 });
 
 describe("cycling (real Oracle text)", () => {
+  it("Angel of the Ruins: Plainscycling {2} fetches a Plains instead of drawing", () => {
+    const angel = real("Angel of the Ruins", "an");
+    const mine = seat("a", [real("Swamp", "s1"), real("Swamp", "s2")]);
+    mine.board.hand = [angel];
+    mine.library = [bear("l0", { zone: "library" as const }), real("Plains", "pl", { zone: "library" as const })];
+    mine.zones = { ...mine.zones, library: 2, hand: 1 };
+    const result = cycleCardInSession(session([mine]), "a", "an");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const after = result.session.seats[0];
+    expect(after.board.hand.map((c) => c.id)).toEqual(["pl"]);
+    expect(after.board.graveyard!.map((c) => c.id)).toEqual(["an"]);
+  });
   it("Barren Moor: pays {B}, discards itself, draws a card", () => {
     const moor = real("Barren Moor", "bm");
     const swamp = real("Swamp", "sw");
@@ -1387,6 +1400,123 @@ describe("Leyline Tyrant amount, hideaway pick, Orb pick (pure halves)", () => {
     const second = applyDigPick(session([mine]), "a", "Orb of Dragonkind", 7, "dragon", "d2").seats[0];
     expect(second.board.hand.map((c) => c.id)).toEqual(["d2"]);
     expect(applyDigPick(session([mine]), "a", "Orb of Dragonkind", 7, "dragon", "none").seats[0].board.hand).toHaveLength(0);
+  });
+});
+
+describe("Herald's Horn and Nogi", () => {
+  it("Horn upkeep: takes the top card only when it is a creature of the chosen type", () => {
+    const horn = real("Herald's Horn", "h", { chosenCreatureType: "Dragon" });
+    const mine = seat("a", [horn]);
+    mine.library = [bear("d", { zone: "library" as const, typeLine: "Creature — Dragon" }), bear("x", { zone: "library" as const })];
+    mine.zones = { ...mine.zones, library: 2 };
+    const hit = applyDeterministicPhaseTrigger(session([mine]), "a", horn, "upkeep step")!.seats[0];
+    expect(hit.board.hand.map((c) => c.id)).toEqual(["d"]);
+    expect(hit.library!.map((c) => c.id)).toEqual(["x"]);
+    const mine2 = { ...mine, library: [mine.library[1], mine.library[0]] };
+    expect(applyDeterministicPhaseTrigger(session([mine2]), "a", horn, "upkeep step")!.seats[0].board.hand).toHaveLength(0);
+  });
+  it("Horn and Nogi each take {1} off a Dragon spell", () => {
+    const horn = real("Herald's Horn", "h", { chosenCreatureType: "Dragon" });
+    const nogi = real("Nogi, Draco-Zealot", "n");
+    const triad = real("Goldlust Triad", "g");
+    expect(staticCostReduction(seat("a", [horn, nogi]), triad)).toBe(2);
+    expect(staticCostReduction(seat("a", [nogi]), real("Spit Flame", "s"))).toBe(0);
+  });
+});
+
+describe("Emeria Shepherd landfall", () => {
+  it("returns a nonland permanent card to hand, or to the battlefield when the land is a Plains", () => {
+    const emeria = real("Emeria Shepherd", "em");
+    const mk = (landName: string) => {
+      const land = real(landName, "ld");
+      const mine = seat("a", [emeria, land]);
+      mine.board.graveyard = [bear("gy1", { zone: "graveyard" as const, manaValue: 2 }), bear("gy2", { zone: "graveyard" as const, manaValue: 5 }), real("Forest", "gl", { zone: "graveyard" as const })];
+      mine.zones = { ...mine.zones, graveyard: 3 };
+      const s = session([mine, seat("b", [])]);
+      const [t] = findCommonTriggersForPermanentEntered(s, "a", land);
+      return { s, t };
+    };
+    const plains = mk("Plains");
+    expect(plains.t.effect.kind).toBe("landfall_return_nonland_permanent");
+    const onField = resolveTriggerEffect(plains.s, plains.t).seats[0];
+    expect(onField.board.battlefield.map((c) => c.id)).toContain("gy2");
+    const forest = mk("Forest");
+    const toHand = resolveTriggerEffect(forest.s, { ...forest.t, effect: { ...forest.t.effect, chosenOption: "gy1" } as never }).seats[0];
+    expect(toHand.board.hand.map((c) => c.id)).toEqual(["gy1"]);
+  });
+});
+
+describe("Angelic Sleuth", () => {
+  it("investigates only when another permanent that had counters leaves", () => {
+    const sleuth = real("Angelic Sleuth", "sl");
+    const s = session([seat("a", [sleuth]), seat("b", [])]);
+    const counted = bear("c1", { counters: [{ kind: "+1/+1", count: 2 }] } as never);
+    expect(findLeavesBattlefieldTriggers(s, "a", counted).map((t) => t.effect.kind)).toEqual(["create_tokens"]);
+    expect(findLeavesBattlefieldTriggers(s, "a", bear("c2"))).toHaveLength(0);
+    expect(findLeavesBattlefieldTriggers(s, "a", { ...sleuth, counters: [{ kind: "+1/+1", count: 1 }] } as never)).toHaveLength(0);
+  });
+});
+
+describe("Angel of the Ruins and Grasp of Fate exile", () => {
+  it("Angel exiles up to two artifacts/enchantments (the human's picks, never a land)", () => {
+    const angel = real("Angel of the Ruins", "an");
+    const theirs = seat("b", [real("Sol Ring", "sr"), real("Mind Stone", "ms"), real("Plains", "pl")]);
+    const s = session([seat("a", [angel]), theirs]);
+    const [t] = findCommonTriggersForPermanentEntered(s, "a", angel);
+    expect(t.effect.kind).toBe("exile_up_to_artifacts_enchantments");
+    const after = resolveTriggerEffect(s, { ...t, effect: { ...t.effect, chosenOption: "ms" } as never });
+    expect(after.seats[1].board.battlefield.map((c) => c.id)).toEqual(["sr", "pl"]);
+    const auto = resolveTriggerEffect(s, t);
+    expect(auto.seats[1].board.battlefield.map((c) => c.id)).toEqual(["pl"]);
+  });
+  it("Grasp exiles one nonland permanent per opponent, and they return when it leaves", () => {
+    const grasp = real("Grasp of Fate", "gr");
+    const bigB = bear("bb", { manaValue: 5 });
+    const s = session([seat("a", [grasp]), seat("b", [real("Plains", "pl"), bigB, bear("small")]), seat("c", [bear("cc", { manaValue: 2 })])]);
+    const [t] = findCommonTriggersForPermanentEntered(s, "a", grasp);
+    expect(t.effect.kind).toBe("exile_until_leaves_each_opponent");
+    const after = resolveTriggerEffect(s, t);
+    expect(after.seats[1].board.exile!.map((c) => c.id)).toEqual(["bb"]);
+    expect(after.seats[2].board.exile!.map((c) => c.id)).toEqual(["cc"]);
+    expect(runStateBasedActionsPass(after).session.seats[1].board.exile ?? []).toHaveLength(1);
+    const gone = { ...after, seats: after.seats.map((x) => (x.id === "a" ? { ...x, board: { ...x.board, battlefield: [] } } : x)) };
+    const back = runStateBasedActionsPass(gone).session;
+    expect(back.seats[1].board.battlefield.map((c) => c.id)).toContain("bb");
+    expect(back.seats[2].board.battlefield.map((c) => c.id)).toContain("cc");
+    expect(back.seats[1].board.exile ?? []).toHaveLength(0);
+  });
+});
+
+describe("Spit Flame returns from the graveyard", () => {
+  it("a Dragon entering lets you pay {R} to return it to hand", () => {
+    const spit = real("Spit Flame", "sf", { zone: "graveyard" as const });
+    const dragon = real("Goldlust Triad", "dr");
+    const mine = seat("a", [real("Mountain", "m"), dragon]);
+    mine.board.graveyard = [spit];
+    mine.zones = { ...mine.zones, graveyard: 1 };
+    const s = session([mine, seat("b", [])]);
+    const triggers = findCommonTriggersForPermanentEntered(s, "a", dragon);
+    const t = triggers.find((x) => x.sourceCardId === "sf")!;
+    expect(t).toBeTruthy();
+    const after = resolveTriggerEffect(s, t).seats[0];
+    expect(after.board.hand.map((c) => c.id)).toEqual(["sf"]);
+    expect(after.board.graveyard).toHaveLength(0);
+    expect(after.board.battlefield.find((c) => c.id === "m")!.tapped).toBe(true);
+    expect(findCommonTriggersForPermanentEntered(s, "a", bear("zz")).find((x) => x.sourceCardId === "sf")).toBeUndefined();
+  });
+});
+
+describe("Anger in the graveyard", () => {
+  it("gives your creatures haste only while it is in the graveyard and you control a Mountain", () => {
+    const anger = real("Anger", "ang", { zone: "graveyard" as const });
+    const withMountain = seat("a", [real("Mountain", "m"), bear("b1")]);
+    withMountain.board.graveyard = [anger];
+    const on = runStateBasedActionsPass(session([withMountain, seat("b", [])])).session.seats[0].board.battlefield.find((c) => c.id === "b1")!;
+    expect(on.grantedKeywords).toContain("haste");
+    const noMountain = seat("a", [real("Forest", "f"), bear("b1")]);
+    noMountain.board.graveyard = [anger];
+    const off = runStateBasedActionsPass(session([noMountain, seat("b", [])])).session.seats[0].board.battlefield.find((c) => c.id === "b1")!;
+    expect(off.grantedKeywords ?? []).not.toContain("haste");
   });
 });
 
