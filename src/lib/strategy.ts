@@ -107,7 +107,7 @@ export function attackEconomics(attacker: CardLike, defender: Opponent | undefin
   const attackersAvailable = Math.max(1, myCreatures.length);
   // With no identified defender, assume any opponent's creatures could be in the way.
   const defenderBoard = defender ? defender.battlefield : (context.opponents ?? []).flatMap((opponent) => opponent.battlefield ?? []);
-  const blockers = creatures(defenderBoard).filter((card) => !card.tapped && canLegallyBlock(attacker, card));
+  const blockers = creatures(defenderBoard).filter((card) => !card.tapped && canLegallyBlock(attacker, card, defenderBoard));
   const pBlocked = blockers.length === 0 ? 0 : Math.min(0.95, blockers.length / attackersAvailable);
 
   const duels = blockers.map((blocker) => ({ blocker, duel: simulateDuel(attacker, blocker) }));

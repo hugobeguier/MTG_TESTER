@@ -1,4 +1,5 @@
 import { attackEconomics, defenderOf, threatShares } from "./strategy";
+import { mustAttackEachCombat } from "./combatRestrictions";
 import { canLegallyBlock, hasDeathtouch, hasDoubleStrike, hasFirstStrike, hasFlying, hasIndestructible, hasInfect, hasKeyword, hasLifelink, hasMenace, hasReach, hasTrample, parseNum, simulateDuel } from "./combatSim";
 
 export { simulateDuel };
@@ -189,11 +190,14 @@ function scoreAttackProfitability(action: ScorableAction, context: ScoringContex
   const attacker = findCard(context.you?.battlefield, action.cardId);
   if (!attacker || parseNum(attacker.power) === undefined) return;
 
+  // "Attacks each combat if able": the engine forces it, so don't weigh it as a choice.
+  if (mustAttackEachCombat({ oracleText: attacker.oracleText ?? "" })) delta(8, "must attack each combat if able");
+
   const defender = defendingOpponent(context, action.targetIds[0]);
   const share = defender?.id ? threatShares(context).get(defender.id)?.share ?? 0 : 0;
   const economics = attackEconomics(attacker, defender, context, share);
   const defenderCreatures = defender ? defender.battlefield ?? [] : opponentBattlefields(context);
-  const potentialBlockers = defenderCreatures.filter((card) => !card.tapped && parseNum(card.power) !== undefined && canLegallyBlock(attacker, card));
+  const potentialBlockers = defenderCreatures.filter((card) => !card.tapped && parseNum(card.power) !== undefined && canLegallyBlock(attacker, card, defender?.battlefield));
 
   if (potentialBlockers.length === 0) {
     delta(3, defender ? `${defender.name ?? "the defender"} has no untapped creature that can block this attacker` : "no untapped, legally-able blockers across opponents");

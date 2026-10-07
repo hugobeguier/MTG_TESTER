@@ -1,6 +1,7 @@
 // Keyword-aware combat helpers shared by the action scorer and the strategy evaluator: which keywords a creature has, whether a block is
 // legal, and what a one-on-one fight does once first strike, double strike, deathtouch and indestructible are applied.
 import { hasKeyword as keywordLineHas } from "./keywords";
+import { canBlockOnlyFliers, landwalkEvades } from "./combatRestrictions";
 import type { CardLike } from "./actionScoring";
 
 export function parseNum(value: string | undefined): number | undefined {
@@ -108,7 +109,9 @@ export function hasMenace(card: CardLike) {
 // here is ever a legal block for one. Without this, attack-profitability scoring would think a
 // menace attacker "has a potential blocker" and hold back an attack the engine will actually just
 // wave through unblocked.
-export function canLegallyBlock(attacker: CardLike, blocker: CardLike): boolean {
+export function canLegallyBlock(attacker: CardLike, blocker: CardLike, defenderBoard?: CardLike[]): boolean {
   if (hasMenace(attacker)) return false;
+  if (landwalkEvades(attacker as never, defenderBoard as never)) return false;
+  if (canBlockOnlyFliers(blocker as never) && !hasFlying(attacker)) return false;
   return !hasFlying(attacker) || hasFlying(blocker) || hasReach(blocker);
 }

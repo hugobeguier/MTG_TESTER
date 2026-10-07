@@ -71,6 +71,7 @@ import { parseSpellExtraEffects, type SpellExtraEffect } from "@/lib/spellExtras
 import { matchWatcherSubject } from "@/lib/triggerWatchers";
 import { graveyardCastPermission } from "@/lib/graveyardCasting";
 import { libraryTopCastPermission } from "@/lib/libraryCasting";
+import { bushidoAmount, canBlockOnlyFliers, cantUntap, landwalkEvades } from "@/lib/combatRestrictions";
 import { parseCycling } from "@/lib/cycling";
 import { parseTapCreaturesAltCost } from "@/lib/altCosts";
 import { parseGraveyardReturnAbility, reduceGenericCost } from "@/lib/graveyardAbilities";
@@ -318,6 +319,10 @@ type TriggerEffect = (
   | { kind: "zone_effect"; effect: ZoneEffect }
   // "When this creature dies, you may exile it. When you do, return target creature card from your graveyard to your hand." (Undead Butler)
   | { kind: "exile_self_return_creature_to_hand" }
+  // Battle cry: "Whenever this creature attacks, each other attacking creature gets +1/+0 until end of turn."
+  | { kind: "battle_cry" }
+  // Melee: "Whenever this creature attacks, it gets +1/+1 until end of turn for each opponent you attacked this combat."
+  | { kind: "melee" }
   // "Discard any number of cards, then draw that many cards." (The Elder Dragon War, chapter II). discardIds accumulates the human's picks.
   | { kind: "discard_any_then_draw"; discardIds?: string[] }
   // "Read ahead" (The Elder Dragon War): the controller picks the chapter a Saga starts on as it enters.
@@ -3814,6 +3819,10 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     }
 
     if (phase === "draw step") {
+      // "Skip your draw step." (Dragon Appeasement, Damia, Colfenor's Plans)
+      if (seat.board.battlefield.some((card) => !card.abilitiesStripped && /^skip your draw step\.?$/im.test(card.oracleText.replace(/\([^)]*\)/g, "")))) {
+        return rulesEvent(advanceSagaLoreCounters(session, seatId), seatId, `${seat.name} skips their draw step.`);
+      }
       const drawnSession = drawForSeat(session, seatId, seatVerb(seat, `${seat.name} draws for turn.`, "You draw for turn."));
       return advanceSagaLoreCounters(drawnSession, seatId);
     }
@@ -10356,7 +10365,10 @@ export function untapForSeat(session: GameSession, seatId: string): GameSession 
   const opponentStunLockActive = session.seats.some(
     (other) => other.id !== seatId && other.board.battlefield.some((card) => /stun counters can'?t be removed from permanents your opponents control/i.test(card.oracleText))
   );
+  const everyPermanent = session.seats.flatMap((other) => other.board.battlefield);
   const untapOrRemoveStun = (card: VisibleCard): VisibleCard => {
+    // "This creature doesn't untap during your untap step." / "Enchanted creature doesn't untap during its controller's untap step."
+    if (card.tapped && cantUntap(card, everyPermanent)) return { ...card, summoningSick: false, attacking: false, blocking: false };
     if (card.phasedOut) return { ...card, phasedOut: false, tapped: false, summoningSick: false, attacking: false, blocking: false };
     if (counterCount(card, "stun") > 0) {
       return opponentStunLockActive
@@ -10551,17 +10563,34 @@ export function assignBlockers(session: GameSession, choice: BlockChoiceState, b
           ...seat,
           board: {
             ...seat.board,
-            battlefield: seat.board.battlefield.map((card) => (blockerIds.has(card.id) ? { ...card, blocking: true, blockingTargetId: attackingCard.id } : card))
+            battlefield: seat.board.battlefield.map((card) =>
+              blockerIds.has(card.id)
+                ? {
+                    ...card,
+                    blocking: true,
+                    blockingTargetId: attackingCard.id,
+                    // Bushido N: +N/+N until end of turn whenever it blocks.
+                    ...(bushidoAmount(card) > 0 ? { temporaryPowerBonus: (card.temporaryPowerBonus ?? 0) + bushidoAmount(card), temporaryToughnessBonus: (card.temporaryToughnessBonus ?? 0) + bushidoAmount(card) } : {})
+                  }
+                : card
+            )
           }
         };
       }
-      if (seat.id === attacker.id && blockers.length > 1) {
+      if (seat.id === attacker.id && (blockers.length > 1 || bushidoAmount(attackingCard) > 0)) {
         return {
           ...seat,
           board: {
             ...seat.board,
             battlefield: seat.board.battlefield.map((card) =>
-              card.id === attackingCard.id ? { ...card, damageAssignmentOrder: blockers.map((blocker) => blocker.id) } : card
+              card.id === attackingCard.id
+                ? {
+                    ...card,
+                    ...(blockers.length > 1 ? { damageAssignmentOrder: blockers.map((blocker) => blocker.id) } : {}),
+                    // Bushido N: +N/+N until end of turn whenever it becomes blocked.
+                    ...(bushidoAmount(card) > 0 ? { temporaryPowerBonus: (card.temporaryPowerBonus ?? 0) + bushidoAmount(card), temporaryToughnessBonus: (card.temporaryToughnessBonus ?? 0) + bushidoAmount(card) } : {})
+                  }
+                : card
             )
           }
         };
@@ -10890,6 +10919,9 @@ function canBlock(card: VisibleCard, attacker?: VisibleCard, controllerBattlefie
   if (!attackBlockRestrictionMet(card, controllerBattlefield)) return false;
   if (attacker && attackerEvadesBlocker(attacker, card)) return false;
   if (attacker && hasFlying(attacker) && !hasFlying(card) && !hasReach(card)) return false;
+  // Landwalk: unblockable while the defending player controls a land of that type; "can block only creatures with flying".
+  if (attacker && landwalkEvades(attacker, controllerBattlefield)) return false;
+  if (attacker && canBlockOnlyFliers(card) && !hasFlying(attacker)) return false;
   if (attacker && isProtectedFrom(attacker, card)) return false;
   // Rule 702.111b: menace requires two or more blockers — enforced where the blockers are assigned together (assignBlockers),
   // since a single creature is only illegal as the WHOLE block, not as one member of a gang block.
@@ -14111,6 +14143,11 @@ export function resolveEndStepExileDamage(session: GameSession, activeSeatId: st
 export function runStateBasedActionsPass(session: GameSession): { session: GameSession; changed: boolean } {
   let changed = false;
   let next = session;
+  // Devoid: a permanent with it is colorless.
+  if (next.seats.some((seat) => seat.board.battlefield.some((card) => card.colors.length > 0 && !card.abilitiesStripped && /^devoid\b/im.test(card.oracleText)))) {
+    next = { ...next, seats: next.seats.map((seat) => ({ ...seat, board: { ...seat.board, battlefield: seat.board.battlefield.map((card) => (card.colors.length > 0 && !card.abilitiesStripped && /^devoid\b/im.test(card.oracleText) ? { ...card, colors: [] } : card)) } })) };
+    changed = true;
+  }
   const afterLinked = returnLinkedExiles(next);
   if (afterLinked !== next) {
     next = afterLinked;
@@ -19393,6 +19430,12 @@ export function findAttackTriggers(
           triggers.push(makeCommonTrigger(attack.seatId, sourceSeat.id, source, { kind: "add_counter", counterKind: "+1/+1", amount: 1, scope: "self" }, `${source.name} triggers (dethrone).`, attack.card.id));
         }
       }
+      if (event === "attacks" && source.id === attack.card.id && hasKeywordText(source.oracleText, "battle cry")) {
+        triggers.push(makeCommonTrigger(attack.seatId, sourceSeat.id, source, { kind: "battle_cry" }, `${source.name} triggers (battle cry).`, attack.card.id));
+      }
+      if (event === "attacks" && source.id === attack.card.id && hasKeywordText(source.oracleText, "melee")) {
+        triggers.push(makeCommonTrigger(attack.seatId, sourceSeat.id, source, { kind: "melee" }, `${source.name} triggers (melee).`, attack.card.id));
+      }
       // Myriad: a token copy of the attacker for every opponent other than the defending player.
       if (event === "attacks" && source.id === attack.card.id && hasKeywordText(source.oracleText, "myriad")) {
         triggers.push(makeCommonTrigger(attack.seatId, sourceSeat.id, source, { kind: "myriad", defendingSeatId: attack.defendingSeatId, optional: true }, `${source.name} triggers (myriad).`, attack.card.id));
@@ -19402,7 +19445,7 @@ export function findAttackTriggers(
         const eventPattern = event === "attacks" ? /\b(?:when|whenever)\b[^,.]*\battacks\b/i : /\b(?:when|whenever)\b[^,.]*\bblocks\b/i;
         if (isActivatedAbilityClause(clause) || !eventPattern.test(clause)) continue;
         // Myriad's reminder text ("Myriad (Whenever this creature attacks, ...)") is handled above by the keyword itself.
-        if (/^myriad\b/i.test(clause)) continue;
+        if (/^(?:myriad|battle cry|melee)\b/i.test(clause)) continue;
         // Owned by declareAttack's own inline handling.
         if (isAttackTriggerAddManaClause(clause) || parseMetalcraftAttackDebuff(clause)) continue;
         // "Lieutenant — As long as you control your commander, this creature gets +2/+2 and has \"Whenever this
@@ -21202,6 +21245,34 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
       `${trigger.sourceCardName}: ${owner.name} puts ${pick.name} onto the battlefield tapped and attacking.`
     );
   }
+  if (trigger.effect.kind === "battle_cry") {
+    const owner = session.seats.find((item) => item.id === trigger.controllerSeatId);
+    if (!owner) return session;
+    const others = owner.board.battlefield.filter((card) => card.attacking && card.id !== trigger.sourceCardId);
+    if (others.length === 0) return session;
+    const ids = new Set(others.map((card) => card.id));
+    return rulesEvent(
+      { ...session, seats: session.seats.map((item) => (item.id !== owner.id ? item : { ...item, board: { ...item.board, battlefield: item.board.battlefield.map((card) => (ids.has(card.id) ? { ...card, temporaryPowerBonus: (card.temporaryPowerBonus ?? 0) + 1 } : card)) } })) },
+      owner.id,
+      `${trigger.sourceCardName} (battle cry): ${others.length} other attacking creature${others.length === 1 ? " gets" : "s get"} +1/+0.`
+    );
+  }
+  if (trigger.effect.kind === "melee") {
+    const owner = session.seats.find((item) => item.id === trigger.controllerSeatId);
+    if (!owner) return session;
+    // One per different opponent being attacked this combat (a planeswalker counts for its controller).
+    const attacked = new Set<string>();
+    for (const attacker of owner.board.battlefield.filter((card) => card.attacking)) {
+      const targetSeat = session.seats.find((item) => item.id === attacker.attackTargetId) ?? session.seats.find((item) => item.board.battlefield.some((card) => card.id === attacker.attackTargetId));
+      if (targetSeat && targetSeat.id !== owner.id) attacked.add(targetSeat.id);
+    }
+    if (attacked.size === 0) return session;
+    return rulesEvent(
+      { ...session, seats: session.seats.map((item) => (item.id !== owner.id ? item : { ...item, board: { ...item.board, battlefield: item.board.battlefield.map((card) => (card.id === trigger.sourceCardId ? { ...card, temporaryPowerBonus: (card.temporaryPowerBonus ?? 0) + attacked.size, temporaryToughnessBonus: (card.temporaryToughnessBonus ?? 0) + attacked.size } : card)) } })) },
+      owner.id,
+      `${trigger.sourceCardName} (melee): +${attacked.size}/+${attacked.size} until end of turn.`
+    );
+  }
   if (trigger.effect.kind === "myriad") {
     const { defendingSeatId } = trigger.effect;
     const original = session.seats.flatMap((item) => item.board.battlefield).find((card) => card.id === trigger.sourceCardId);
@@ -22746,7 +22817,7 @@ function phaseTriggerTextMatches(text: string, phase: TurnPhase) {
   }
   if (phase === "end of combat step") return text.includes("at end of combat") || text.includes("at the end of combat") || text.includes("until end of combat");
   if (phase === "postcombat main phase") return text.includes("at the beginning of your postcombat main phase") || text.includes("second main phase");
-  if (phase === "end step") return text.includes("at the beginning of your end step") || text.includes("at the beginning of each end step");
+  if (phase === "end step") return text.includes("at the beginning of your end step") || text.includes("at the beginning of each end step") || text.includes("at the beginning of the end step");
   if (phase === "cleanup step") return text.includes("at the beginning of your cleanup step") || text.includes("cleanup step");
   return false;
 }
@@ -22906,6 +22977,11 @@ export function applyDeterministicPhaseTrigger(session: GameSession, seatId: str
       seatId,
       `${seatForHorn.name} reveals ${topCard.name} with ${sourceCard.name} and puts it into their hand.`
     );
+  }
+
+  // "At the beginning of the end step, sacrifice this creature." (Ball Lightning, Blistering Firecat, ...)
+  if (/^at the beginning of (?:the|your|each) end step, sacrifice (?:this creature|this permanent)\.?$/i.test(clauseText.trim())) {
+    return destroyCreatures(session, [{ seatId, cardId: sourceCard.id, message: `${sourceCard.name} is sacrificed at the end step.` }], "Rules action");
   }
 
   const removalEffect = parseRemovalEffect(clauseText);

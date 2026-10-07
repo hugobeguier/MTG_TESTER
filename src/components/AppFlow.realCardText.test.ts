@@ -2,8 +2,9 @@
 // the test: two earlier tests passed on invented text while the real cards stayed broken (Court of Grace, the
 // "with power N or greater" watchers). Skipped per card when the catalog doesn't have it.
 import { describe, expect, it } from "vitest";
-import { landDropsAllowed, landPlaysMade, recordLandPlay, findCastTriggers, seatHasFlashGrant, findLeavesBattlefieldTriggers, hideawayDamageConditionMet, legalMainPhaseActions, tapCreaturesAltCostFor, applyCastRemoval, nextCastPrompt, type CastChoices, spellModePrompt, applyDigPick, applyDigToBattlefield, humanPhaseGraveyardChoice, clearTemporaryBuffs, playCardFromZone, resolveEndStepExileDamage, cleanupCombat, staticCostReduction, applyLabeledContinuation, spellTargetSlots, grantKeywordsToCreature, applyExalted, applySacrificeEffect, applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
+import { landDropsAllowed, landPlaysMade, recordLandPlay, findCastTriggers, seatHasFlashGrant, findLeavesBattlefieldTriggers, hideawayDamageConditionMet, legalMainPhaseActions, tapCreaturesAltCostFor, applyCastRemoval, nextCastPrompt, type CastChoices, spellModePrompt, applyDigPick, applyDigToBattlefield, untapForSeat, humanPhaseGraveyardChoice, clearTemporaryBuffs, playCardFromZone, resolveEndStepExileDamage, cleanupCombat, staticCostReduction, applyLabeledContinuation, spellTargetSlots, grantKeywordsToCreature, applyExalted, applySacrificeEffect, applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
 import { parseRemovalEffect } from "@/lib/removalSpells";
+import { canLegallyBlock } from "@/lib/combatSim";
 import { parseZoneEffect } from "@/lib/zoneEffects";
 import { permanentMatchesQualifier } from "@/lib/characteristics";
 import { parseSpellExtraEffects } from "@/lib/spellExtras";
@@ -1422,6 +1423,41 @@ describe("Herald's Horn and Nogi", () => {
     const triad = real("Goldlust Triad", "g");
     expect(staticCostReduction(seat("a", [horn, nogi]), triad)).toBe(2);
     expect(staticCostReduction(seat("a", [nogi]), real("Spit Flame", "s"))).toBe(0);
+  });
+});
+
+describe("combat keywords from the backlog (real Oracle text)", () => {
+  const attackCard = (name: string, id: string) => real(name, id, { attacking: true });
+  it("landwalk: unblockable only while the defender controls that land type", () => {
+    const anaconda = real("Anaconda", "an");
+    const swamp = seat("b", [bear("blk"), real("Swamp", "sw")]);
+    const forest = seat("b", [bear("blk"), real("Forest", "fo")]);
+    const blk = bear("blk");
+    expect(canLegallyBlock(anaconda, blk, swamp.board.battlefield)).toBe(false);
+    expect(canLegallyBlock(anaconda, blk, forest.board.battlefield)).toBe(true);
+  });
+  it("Ascending Aven can block only fliers", () => {
+    const aven = real("Ascending Aven", "av");
+    const ground = bear("g", { attacking: true });
+    expect(assignBlockers(session([seat("a", [ground]), seat("b", [aven])]), { attackerSeatId: "a", defenderSeatId: "b", attackerCardId: "g" } as never, ["av"]).seats[1].board.battlefield.find((c) => c.id === "av")!.blocking).toBeFalsy();
+  });
+  it("bushido gives +N/+N when it blocks; battle cry pumps the other attackers", () => {
+    const ronin = real("Battle-Mad Ronin", "ro");
+    const attacker = bear("g", { attacking: true });
+    const after = assignBlockers(session([seat("a", [attacker]), seat("b", [ronin])]), { attackerSeatId: "a", defenderSeatId: "b", attackerCardId: "g" } as never, ["ro"]);
+    expect(after.seats[1].board.battlefield.find((c) => c.id === "ro")!.temporaryPowerBonus).toBeGreaterThan(0);
+    const wardriver = real("Goblin Wardriver", "gw", { attacking: true });
+    const mates = seat("a", [wardriver, bear("x", { attacking: true })]);
+    const s = session([mates, seat("b", [])]);
+    const t = findAttackTriggers(s, { seatId: "a", card: wardriver, defendingSeatId: "b" }).triggers.find((x) => x.effect.kind === "battle_cry")!;
+    expect(resolveTriggerEffect(s, t).seats[0].board.battlefield.find((c) => c.id === "x")!.temporaryPowerBonus).toBe(1);
+  });
+  it("a creature that doesn't untap stays tapped; devoid makes a permanent colorless", () => {
+    const golem = real("Altar Golem", "ag", { tapped: true });
+    const after = untapForSeat(session([seat("a", [golem, bear("free", { tapped: true })])]), "a").seats[0].board.battlefield;
+    expect(after.find((c) => c.id === "ag")!.tapped).toBe(true);
+    expect(after.find((c) => c.id === "free")!.tapped).toBe(false);
+    expect(runStateBasedActionsPass(session([seat("a", [real("Hellkite Whelp", "hw", { colors: ["R"], oracleText: "Devoid" })])])).session.seats[0].board.battlefield[0].colors).toEqual([]);
   });
 });
 
