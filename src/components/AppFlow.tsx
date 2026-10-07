@@ -320,6 +320,8 @@ type TriggerEffect = (
   // "When this creature dies, you may exile it. When you do, return target creature card from your graveyard to your hand." (Undead Butler)
   | { kind: "exile_self_return_creature_to_hand" }
   // Battle cry: "Whenever this creature attacks, each other attacking creature gets +1/+0 until end of turn."
+  // Renown N: "When this creature deals combat damage to a player, if it isn't renowned, put N +1/+1 counters on it and it becomes renowned."
+  | { kind: "renown"; amount: number }
   | { kind: "battle_cry" }
   // Melee: "Whenever this creature attacks, it gets +1/+1 until end of turn for each opponent you attacked this combat."
   | { kind: "melee" }
@@ -19517,6 +19519,12 @@ export function findCombatDamageToPlayerTriggers(
   if (!seat) return [];
   const triggers: Array<Extract<PendingAction, { type: "trigger" }>> = [];
   for (const source of seat.board.battlefield) {
+    // Renown N (the keyword itself, with its own once-only rule) replaces whatever the reminder text would otherwise parse as.
+    const renownMatch = source.id === dealingCard.id && !source.abilitiesStripped ? source.oracleText.match(/^renown (\d+)/im) : null;
+    if (renownMatch) {
+      if (!source.renowned) triggers.push(makeCommonTrigger(dealingSeatId, seat.id, source, { kind: "renown", amount: Number.parseInt(renownMatch[1], 10) }, `${source.name} triggers (renown).`));
+      continue;
+    }
     // "Whenever THIS creature deals combat damage to a player" (Liliana's Reaver) only applies to the source's
     // own damage; "a creature you control" (Toski) applies to any. This used to fire for every creature.
     const damageClause = oracleClauses(source.oracleText).find((clause) => /\b(?:when|whenever)\b[^,.]*\bdeals combat damage to a player\b/i.test(clause));
@@ -21245,6 +21253,17 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
       `${trigger.sourceCardName}: ${owner.name} puts ${pick.name} onto the battlefield tapped and attacking.`
     );
   }
+  if (trigger.effect.kind === "renown") {
+    const amount = trigger.effect.amount;
+    const owner = session.seats.find((item) => item.id === trigger.controllerSeatId);
+    const card = owner?.board.battlefield.find((entry) => entry.id === trigger.sourceCardId);
+    if (!owner || !card || card.renowned) return session;
+    return rulesEvent(
+      { ...session, seats: session.seats.map((item) => (item.id !== owner.id ? item : { ...item, board: { ...item.board, battlefield: item.board.battlefield.map((entry) => (entry.id === card.id ? { ...applyCounterDelta(entry, "+1/+1", amount), renowned: true } : entry)) } })) },
+      owner.id,
+      `${card.name} becomes renowned and gets ${amount} +1/+1 counter${amount === 1 ? "" : "s"}.`
+    );
+  }
   if (trigger.effect.kind === "battle_cry") {
     const owner = session.seats.find((item) => item.id === trigger.controllerSeatId);
     if (!owner) return session;
@@ -22782,7 +22801,7 @@ function phaseTriggeredCards(seat: PlayerSeat, phase: TurnPhase) {
 
 function phaseTriggerTextMatches(text: string, phase: TurnPhase) {
   if (phase === "untap step") return text.includes("at the beginning of your untap") || text.includes("during your untap") || text.includes("phasing");
-  if (phase === "upkeep step") return text.includes("at the beginning of your upkeep") || text.includes("at the beginning of each upkeep") || text.includes("cumulative upkeep");
+  if (phase === "upkeep step") return /^(?:vanishing|fading) \d+/.test(text) || text.includes("at the beginning of your upkeep") || text.includes("at the beginning of each upkeep") || text.includes("cumulative upkeep");
   if (phase === "draw step") return text.includes("at the beginning of your draw step");
   if (phase === "precombat main phase") return text.includes("at the beginning of your precombat main phase") || text.includes("first main phase");
   // "each combat" (Unnatural Growth) only fires on its controller's own combat here — the sweep walks the active seat's permanents.
@@ -22910,6 +22929,24 @@ export function applyDeterministicPhaseTrigger(session: GameSession, seatId: str
   // "• Khans — At the beginning of your upkeep, ..." (Outpost Siege) only runs when that label was the one chosen as it entered.
   const modeLabel = clauseText.match(/^[•*]\s*([A-Za-z]+)\s*[—-]/)?.[1];
   if (modeLabel && (sourceCard.chosenMode ?? modeLabel).toLowerCase() !== modeLabel.toLowerCase() && sourceCard.chosenMode) return session;
+
+  // Vanishing N / Fading N: N time/fade counters (put on at the first upkeep), one removed each upkeep; vanishing sacrifices when the last
+  // is removed, fading when one can't be removed.
+  const timeKeyword = clauseText.match(/^(vanishing|fading) (\d+)/i);
+  if (timeKeyword) {
+    const kind = timeKeyword[1].toLowerCase() === "vanishing" ? "time" : "fade";
+    const live = session.seats.find((item) => item.id === seatId)?.board.battlefield.find((card) => card.id === sourceCard.id);
+    if (!live) return session;
+    let card = live.timeCountersInitialized ? live : { ...applyCounterDelta(live, kind, Number.parseInt(timeKeyword[2], 10)), timeCountersInitialized: true };
+    const sacrificeNow = kind === "time" ? counterCount(card, kind) - 1 <= 0 : counterCount(card, kind) <= 0;
+    if (counterCount(card, kind) > 0) card = applyCounterDelta(card, kind, -1);
+    const updated: GameSession = { ...session, seats: session.seats.map((item) => (item.id !== seatId ? item : { ...item, board: { ...item.board, battlefield: item.board.battlefield.map((entry) => (entry.id === card.id ? card : entry)) } })) };
+    if (!sacrificeNow) return updated;
+    const gone = card.typeLine.includes("Creature")
+      ? destroyCreatures(updated, [{ seatId, cardId: card.id, message: `${card.name} is sacrificed (${timeKeyword[1].toLowerCase()}).` }], "Rules action")
+      : rulesEvent(moveCardBetweenVisibleZones(updated, seatId, card.id, "graveyard"), seatId, `${card.name} is sacrificed (${timeKeyword[1].toLowerCase()}).`);
+    return gone;
+  }
 
   // "At the beginning of your upkeep, if you're the monarch, create a 5/5 red Dragon token with flying." (Skyline
   // Despot) — only does anything while you hold the monarchy.

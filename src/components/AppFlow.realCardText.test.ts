@@ -1461,6 +1461,38 @@ describe("combat keywords from the backlog (real Oracle text)", () => {
   });
 });
 
+describe("renown (real Oracle text)", () => {
+  it("grows once, then never again", () => {
+    const knight = real("Citadel Castellan", "cc", { power: "2", toughness: "2" });
+    const s = session([seat("a", [knight]), seat("b", [])]);
+    const first = findCombatDamageToPlayerTriggers(s, "a", knight, "b").filter((t) => t.effect.kind === "renown");
+    expect(first).toHaveLength(1);
+    const after = resolveTriggerEffect(s, first[0]);
+    const grown = after.seats[0].board.battlefield[0];
+    expect(grown.renowned).toBe(true);
+    expect(grown.counters?.find((c) => c.kind === "+1/+1")?.count).toBe(2);
+    expect(findCombatDamageToPlayerTriggers(after, "a", grown, "b").filter((t) => t.effect.kind === "renown")).toHaveLength(0);
+  });
+});
+
+describe("vanishing and fading (real Oracle text)", () => {
+  it("fading 3 survives three upkeeps and is sacrificed on the fourth; vanishing 4 is gone on its fourth upkeep", () => {
+    const run = (name: string, upkeeps: number) => {
+      let s = session([seat("a", [real(name, "x")]), seat("b", [])]);
+      for (let i = 0; i < upkeeps; i += 1) {
+        const card = s.seats[0].board.battlefield.find((c) => c.id === "x");
+        if (!card) break;
+        s = applyDeterministicPhaseTrigger(s, "a", card, "upkeep step") ?? s;
+      }
+      return s.seats[0].board.battlefield.some((c) => c.id === "x");
+    };
+    expect(run("Blastoderm", 3)).toBe(true);
+    expect(run("Blastoderm", 4)).toBe(false);
+    expect(run("Calciderm", 3)).toBe(true);
+    expect(run("Calciderm", 4)).toBe(false);
+  });
+});
+
 describe("human choices for Wretched Ranks cards (pure halves)", () => {
   it("Necrotic Hex defers the human's sacrifice (when they have a choice) and still makes the agent sacrifice", () => {
     const hex = real("Necrotic Hex", "hex");

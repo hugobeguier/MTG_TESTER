@@ -328,6 +328,10 @@ export interface VisibleCard {
   exileAtEndOfCombat?: boolean;
   // The human's pick for an "enter as a copy of ..." replacement (Cursed Mirror, Mirrormade), set on the hand card before it is cast; "none" declines.
   chosenCopyTargetId?: string;
+  // Vanishing / fading: the time or fade counters have been put on (done lazily at the first upkeep).
+  timeCountersInitialized?: boolean;
+  // Renown: the creature has become renowned.
+  renowned?: boolean;
   // The human's picks for which creatures to tap for an alternative cost (Sephara, Sky's Blade), set on the hand card before the cast.
   chosenTapAltIds?: string[];
   // The human's pick for X (or how many times a multikicker is paid / whether a kicker is paid), set on the hand card before the cast.
