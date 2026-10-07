@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { scoreLegalAction, scoreLegalActions, type CardLike, type ScorableAction, type ScoringContext } from "./actionScoring";
+import { scoreLegalAction, scoreLegalActions, simulateDuel, type CardLike, type ScorableAction, type ScoringContext } from "./actionScoring";
 
 function action(overrides: Partial<ScorableAction> & Pick<ScorableAction, "id" | "actionType">): ScorableAction {
   return { targetIds: [], label: overrides.id, ...overrides };
@@ -475,5 +475,39 @@ describe("scoreTransformSacrifice", () => {
     const context = baseContext({ you: { battlefield: [westvale, ...creatures] } });
     const scored = scoreLegalAction(transformAction, context);
     expect(scored.reasons.some((reason) => reason.includes("entire board"))).toBe(true);
+  });
+});
+
+describe("simulateDuel (keyword-aware combat)", () => {
+  const c = (power: string, toughness: string, oracleText = "", extra: Record<string, unknown> = {}) => ({ id: "x", power, toughness, oracleText, ...extra });
+  it("a deathtouch attacker kills any blocker that survives its damage, and the blocker's size doesn't matter", () => {
+    const result = simulateDuel(c("1", "1", "Deathtouch"), c("0", "9"));
+    expect(result.blockerDies).toBe(true);
+    expect(result.attackerDies).toBe(false);
+  });
+  it("a deathtouch blocker kills the attacker; an indestructible attacker ignores it", () => {
+    expect(simulateDuel(c("5", "5"), c("1", "1", "Deathtouch")).attackerDies).toBe(true);
+    expect(simulateDuel(c("5", "5", "Indestructible"), c("1", "1", "Deathtouch")).attackerDies).toBe(false);
+  });
+  it("first strike kills the blocker before it deals damage back; double strike too, and a first-strike blocker does the same to the attacker", () => {
+    expect(simulateDuel(c("3", "3", "First strike"), c("3", "3"))).toMatchObject({ blockerDies: true, attackerDies: false });
+    expect(simulateDuel(c("3", "3", "Double strike"), c("3", "3"))).toMatchObject({ blockerDies: true, attackerDies: false });
+    expect(simulateDuel(c("3", "3"), c("3", "3", "First strike"))).toMatchObject({ blockerDies: false, attackerDies: true });
+    expect(simulateDuel(c("3", "3", "First strike"), c("3", "3", "First strike"))).toMatchObject({ blockerDies: true, attackerDies: true });
+  });
+  it("granted keywords count, and rules text that only mentions a keyword does not", () => {
+    expect(simulateDuel(c("1", "1", "", { keywords: ["deathtouch"] }), c("2", "9")).blockerDies).toBe(true);
+    expect(simulateDuel(c("1", "1", "Whenever this deals damage to a creature with deathtouch, draw a card."), c("2", "9")).blockerDies).toBe(false);
+  });
+});
+
+describe("blocking a deathtouch attacker (scoring)", () => {
+  it("scores a block against a deathtouch attacker as losing the blocker, below not blocking", () => {
+    const attacker = { id: "atk", name: "Gnarled Viper", power: "1", toughness: "1", oracleText: "Deathtouch" };
+    const blocker = { id: "blk", name: "Big Bear", power: "6", toughness: "6", oracleText: "" };
+    const context = { purpose: "declare_blockers", you: { life: 40, battlefield: [blocker] }, opponents: [{ id: "o", battlefield: [attacker] }] };
+    const scored = scoreLegalAction({ id: "b", actionType: "block", cardId: "blk", targetIds: ["atk"], label: "block" }, context);
+    expect(scored.reasons.join(" ")).toMatch(/deathtouch/i);
+    expect(scored.score).toBeLessThan(2);
   });
 });

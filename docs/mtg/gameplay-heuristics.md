@@ -96,3 +96,23 @@ legalActions: [
 turn. Board Baron having a bigger board is real, but "biggest threat" reasoning is for turns where
 nobody is dying — it does not outweigh an actual kill sitting on the table right now.
 -> legalActionId: "a1", reason: "5 damage is lethal to Priest of Low Life at 3 life; take the kill instead of the bigger-board target."
+
+## Combat keywords — what they actually do
+
+Read a creature's `keywords` array in the context, not its rules text: it lists what the creature can do right now, including keywords granted by other permanents or until end of turn. Use it when deciding attacks and blocks.
+
+- **Deathtouch:** any damage it deals to a creature destroys that creature, whatever its toughness. Blocking a deathtouch attacker with a big creature loses that creature (unless it is indestructible, or it has first strike and kills the attacker first). A deathtouch blocker kills what it blocks even if it is tiny.
+- **First strike:** deals its damage before creatures without it. If that damage kills the other creature, the other creature deals no damage back. Two first strikers hit each other at the same time.
+- **Double strike:** deals damage in the first-strike step AND again in the regular step. It kills blockers early, and a surviving double striker deals its damage twice (twice the lifelink and twice the damage to a player).
+- **Indestructible:** is not destroyed by lethal damage or deathtouch. It can still be exiled, sacrificed or shrunk to 0 toughness.
+- **Lifelink:** damage it deals also gains its controller that much life, including combat damage dealt to blockers.
+- **Trample:** damage beyond what a blocker needs to be lethal goes through to the player. Chump-blocking a trampler barely helps.
+- **Flying / reach:** only flying or reach creatures can block a flier.
+- **Menace:** can't be blocked except by two or more creatures. One blocker alone is not a legal block.
+- **Vigilance:** attacking doesn't tap it, so it still defends on the opponent's turn.
+- **Haste:** can attack the turn it arrives.
+- **Hexproof / shroud / ward:** hexproof stops opponents targeting it; ward taxes them when they do.
+- **Infect / wither:** damage is dealt as -1/-1 counters (infect also gives players poison counters instead of life loss).
+- **Defender:** can block but can't attack.
+
+Before blocking, work out the fight with these rules: who deals damage first, who dies, who survives. Do not block just because the blocker has more power or toughness; check whether the attacker has deathtouch or first strike. A trade is only good when the creature you lose is worth no more than the creature you kill.

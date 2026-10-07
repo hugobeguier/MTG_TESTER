@@ -1,3 +1,5 @@
+import { hasKeyword as keywordLineHas } from "./keywords";
+
 export type ScorableActionType =
   | "keep_hand"
   | "mulligan"
@@ -30,6 +32,9 @@ export interface CardLike {
   role?: string;
   tapped?: boolean;
   oracleText?: string;
+  // The keywords the card actually has right now (printed, granted by other permanents, until-end-of-turn). When present this is the
+  // authority; without it, only the card's keyword lines are read, never rules text that merely mentions a keyword.
+  keywords?: string[];
 }
 
 export interface ScoringContext {
@@ -100,7 +105,61 @@ function opponentBattlefields(context: ScoringContext): CardLike[] {
 }
 
 function hasKeyword(card: CardLike, keyword: string): boolean {
-  return new RegExp(`\\b${keyword}\\b`, "i").test(card.oracleText ?? "");
+  if (card.keywords) return card.keywords.includes(keyword);
+  return keywordLineHas(card.oracleText ?? "", keyword);
+}
+
+function hasLifelink(card: CardLike) {
+  return hasKeyword(card, "lifelink");
+}
+
+// What a one-on-one fight does, with the keyword rules applied in the order the rules apply them: first strikers deal damage in an
+// earlier step (and a creature that dies in it deals none afterwards); double strikers deal in both; deathtouch makes any damage lethal;
+// indestructible creatures survive lethal damage and deathtouch. Returns who dies and how much damage each side got in.
+export function simulateDuel(attacker: CardLike, blocker: CardLike): { attackerDies: boolean; blockerDies: boolean; attackerDealt: number; blockerDealt: number; firstStrikeKillsBlocker: boolean } {
+  const aPower = Math.max(0, parseNum(attacker.power) ?? 0);
+  const bPower = Math.max(0, parseNum(blocker.power) ?? 0);
+  const aToughness = parseNum(attacker.toughness) ?? Number.POSITIVE_INFINITY;
+  const bToughness = parseNum(blocker.toughness) ?? Number.POSITIVE_INFINITY;
+  const aFirst = hasFirstStrike(attacker) || hasDoubleStrike(attacker);
+  const bFirst = hasFirstStrike(blocker) || hasDoubleStrike(blocker);
+  const aRegular = !hasFirstStrike(attacker) || hasDoubleStrike(attacker);
+  const bRegular = !hasFirstStrike(blocker) || hasDoubleStrike(blocker);
+  let aDamage = 0;
+  let bDamage = 0;
+  let attackerDealt = 0;
+  let blockerDealt = 0;
+  let aAlive = true;
+  let bAlive = true;
+  const lethal = (source: CardLike, dealt: number, toughness: number, target: CardLike) => dealt > 0 && !hasIndestructible(target) && (hasDeathtouch(source) || dealt >= toughness);
+  let firstStrikeKillsBlocker = false;
+  // First-strike step.
+  if (aFirst) {
+    blockerDealt += 0;
+    bDamage += aPower;
+    attackerDealt += aPower;
+  }
+  if (bFirst) {
+    aDamage += bPower;
+    blockerDealt += bPower;
+  }
+  if (aFirst && lethal(attacker, bDamage, bToughness, blocker)) {
+    bAlive = false;
+    firstStrikeKillsBlocker = true;
+  }
+  if (bFirst && lethal(blocker, aDamage, aToughness, attacker)) aAlive = false;
+  // Regular step: only creatures still alive after the first-strike step deal damage.
+  if (aAlive && aRegular) {
+    bDamage += aPower;
+    attackerDealt += aPower;
+  }
+  if (bAlive && bRegular) {
+    aDamage += bPower;
+    blockerDealt += bPower;
+  }
+  if (lethal(attacker, bDamage, bToughness, blocker)) bAlive = false;
+  if (lethal(blocker, aDamage, aToughness, attacker)) aAlive = false;
+  return { attackerDies: !aAlive, blockerDies: !bAlive, attackerDealt, blockerDealt, firstStrikeKillsBlocker };
 }
 
 function hasFlying(card: CardLike) {
@@ -233,16 +292,8 @@ function scoreAttackProfitability(action: ScorableAction, context: ScoringContex
     return;
   }
 
-  const survivesEveryBlock = potentialBlockers.every((blocker) => {
-    if (hasIndestructible(attacker)) return true;
-    const blockerPower = parseNum(blocker.power) ?? 0;
-    return attackerToughness === undefined || !isLethalTo(blocker, blockerPower, attackerToughness);
-  });
-  const killsAtLeastOneBlocker = potentialBlockers.some((blocker) => {
-    if (hasIndestructible(blocker)) return false;
-    const blockerToughness = parseNum(blocker.toughness);
-    return blockerToughness !== undefined && isLethalTo(attacker, attackerPower, blockerToughness);
-  });
+  const survivesEveryBlock = potentialBlockers.every((blocker) => !simulateDuel(attacker, blocker).attackerDies);
+  const killsAtLeastOneBlocker = potentialBlockers.some((blocker) => simulateDuel(attacker, blocker).blockerDies);
 
   if (hasDeathtouch(attacker)) {
     delta(1, "deathtouch threatens any blocker regardless of toughness");
@@ -437,18 +488,24 @@ function scoreBlockDecision(action: ScorableAction, context: ScoringContext, del
   const attacker = findCard(opponentBattlefields(context), action.targetIds[0]);
   if (!blocker || !attacker) return;
 
-  const blockerPower = parseNum(blocker.power) ?? 0;
-  const blockerToughness = parseNum(blocker.toughness);
   const attackerPower = parseNum(attacker.power) ?? 0;
-  const attackerToughness = parseNum(attacker.toughness);
-
-  const blockerDies = blockerToughness !== undefined && !hasIndestructible(blocker) && isLethalTo(attacker, attackerPower, blockerToughness);
-  const attackerDies = attackerToughness !== undefined && !hasIndestructible(attacker) && isLethalTo(blocker, blockerPower, attackerToughness);
+  const duel = simulateDuel(attacker, blocker);
+  const blockerDies = duel.blockerDies;
+  const attackerDies = duel.attackerDies;
+  if (hasDeathtouch(attacker) && blockerDies) delta(-1, "the attacker has deathtouch: any damage it deals kills the blocker, whatever its toughness");
+  if (duel.firstStrikeKillsBlocker && !hasFirstStrike(blocker) && !hasDoubleStrike(blocker)) delta(-1, "first strike kills the blocker before it can deal damage back");
 
   if (attackerDies && !blockerDies) {
     delta(3, "block kills the attacker while the blocker survives");
   } else if (attackerDies && blockerDies) {
-    delta(1, "block trades with the attacker");
+    // A trade is only good if what you lose is worth no more than what you take: a 6/6 into a 1/1 deathtouch is a bad trade.
+    const worth = (card: CardLike) => (card.manaValue ?? 0) + (parseNum(card.power) ?? 0) + (parseNum(card.toughness) ?? 0);
+    const life = context.you?.life ?? 40;
+    if (worth(blocker) > worth(attacker) + 3 && life > attackerPower * 2) {
+      delta(-3, "block trades a much more valuable creature for a cheap one");
+    } else {
+      delta(1, "block trades with the attacker");
+    }
   } else if (!attackerDies && blockerDies) {
     const life = context.you?.life ?? 40;
     if (life <= attackerPower) {
@@ -462,9 +519,11 @@ function scoreBlockDecision(action: ScorableAction, context: ScoringContext, del
     delta(1, "block absorbs damage with no losses on either side");
   }
 
-  if (hasDeathtouch(blocker) && !attackerDies) {
-    delta(1, "deathtouch blocker threatens the attacker regardless of toughness");
+  if (hasDeathtouch(blocker) && !attackerDies && duel.blockerDealt === 0) {
+    delta(0, "the blocker deals no damage in this fight, so its deathtouch never applies");
   }
+  if (hasLifelink(blocker) && duel.blockerDealt > 0) delta(1, "lifelink blocker gains life from the damage it deals");
+  if (hasIndestructible(blocker) && !blockerDies) delta(1, "indestructible blocker takes the hit for free");
 }
 
 const IDEAL_MAX_LANDS = 4;

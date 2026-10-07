@@ -17923,6 +17923,8 @@ function agentCardSnapshot(card: VisibleCard) {
     blocking: card.blocking,
     counters: card.counters,
     oracleText: card.oracleText,
+    // What the card can actually do right now in combat terms (printed, granted, until end of turn) — read this rather than the text.
+    keywords: describeKeywords(card),
     faces: card.faces?.map((face) => ({ name: face.name, typeLine: face.typeLine, manaCost: face.manaCost, oracleText: face.oracleText })),
     unlockedFaceIndices: card.unlockedFaceIndices,
     interpretedEffects: card.interpretedEffects,
