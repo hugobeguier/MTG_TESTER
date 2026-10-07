@@ -100,6 +100,9 @@ export function zoneEffectTargetSpec(effect: ZoneEffect): TargetSpec | undefined
     };
   }
   // "Exile target player's graveyard." (Bojuka Bog): the player is chosen, not picked by a heuristic.
+  if (effect.kind === "gain_control") {
+    return { id: "target", zone: "battlefield", permanentType: "creature", controller: "any", min: 1, max: 1, prompt: effect.untilEndOfTurn ? "Gain control of target creature until end of turn." : "Gain control of target creature." };
+  }
   if (effect.kind === "mill" && effect.scope === "target_player") {
     return { id: "target", zone: "player", controller: "any", min: 1, max: 1, prompt: `Target player mills ${effect.amount} card${effect.amount === 1 ? "" : "s"}.` };
   }

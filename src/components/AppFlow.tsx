@@ -17273,7 +17273,7 @@ export function applyZoneEffect(session: GameSession, casterSeatId: string, sour
       return seatIds.reduce((next, seatId) => applyGraveyardExile(next, seatId, sourceName), session);
     }
     case "gain_control": {
-      const target = chooseControlTarget(session, casterSeatId);
+      const target = resolvePreChosenBattlefieldTarget(session, preChosenTarget) ?? chooseControlTarget(session, casterSeatId);
       if (!target) return noLegalTargetEvent(session, casterSeatId, sourceName);
       const controlledSession = changeControlWithinBattlefield(session, target.card.id, target.seatId, casterSeatId, effect.untilEndOfTurn);
       return {

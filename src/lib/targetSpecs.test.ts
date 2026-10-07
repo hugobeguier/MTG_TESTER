@@ -87,7 +87,12 @@ describe("zoneEffectTargetSpec", () => {
 
   it("declines effects this phase doesn't cover", () => {
     expect(zoneEffectTargetSpec({ kind: "reanimate", anyGraveyard: true, targetType: "creature" })).toBeUndefined();
-    expect(zoneEffectTargetSpec({ kind: "gain_control", untilEndOfTurn: false })).toBeUndefined();
     expect(zoneEffectTargetSpec({ kind: "mill", amount: 3, scope: "you" })).toBeUndefined();
+  });
+
+  it("aims gain-control effects at a creature and mill/shuffle/exile-graveyard at a player", () => {
+    expect(zoneEffectTargetSpec({ kind: "gain_control", untilEndOfTurn: true })).toMatchObject({ zone: "battlefield", permanentType: "creature" });
+    expect(zoneEffectTargetSpec({ kind: "mill", amount: 3, scope: "target_player" })).toMatchObject({ zone: "player" });
+    expect(zoneEffectTargetSpec({ kind: "exile_graveyard", scope: "target_player" })).toMatchObject({ zone: "player" });
   });
 });
