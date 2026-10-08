@@ -1503,6 +1503,28 @@ describe("rules gaps: afflict, flanking, lure, phasing, echo, turn-limited first
   });
 });
 
+describe("Orb of Dragonkind and Syphon Flesh arithmetic", () => {
+  it("an Orb plus three lands cannot cast the six-mana Lathliss (the Orb is a one-mana discount, not two free mana on top of it)", () => {
+    const lathliss = real("Lathliss, Dragon Queen", "lq", { zone: "command" as const });
+    const lands = ["m1", "m2", "m3"].map((id) => real("Mountain", id));
+    const mine = seat("a", [real("Orb of Dragonkind", "orb"), ...lands]);
+    mine.board.commander = lathliss;
+    const s = session([mine, seat("b", [])]);
+    expect(adjustedCastingCost(mine, lathliss, 6, "command", "a", s.seats)).toBe(5);
+    expect(legalMainPhaseActions(mine, true, "a", 1, new Set(), s).some((a) => a.id.startsWith("cast-commander"))).toBe(false);
+    const five = seat("a", [real("Orb of Dragonkind", "orb"), ...["m1", "m2", "m3", "m4", "m5"].map((id) => real("Mountain", id))]);
+    five.board.commander = lathliss;
+    expect(legalMainPhaseActions(five, true, "a", 1, new Set(), session([five, seat("b", [])])).some((a) => a.id.startsWith("cast-commander"))).toBe(true);
+  });
+  it("Syphon Flesh makes one Zombie per creature actually sacrificed (three opponents, three Zombies)", () => {
+    const flesh = real("Syphon Flesh", "sf");
+    const s = session([seat("a", []), seat("b", [bear("b1")]), seat("c", [bear("c1")]), seat("d", [bear("d1")])]);
+    const effects = parseSpellExtraEffects(etbEffectText(flesh.oracleText));
+    const after = effects.reduce((acc, effect) => applySpellExtraEffect(acc, "a", flesh, effect), s);
+    expect(after.seats[0].board.battlefield.filter((c) => c.token && c.name.includes("Zombie"))).toHaveLength(3);
+  });
+});
+
 describe("tokens made by abilities still trigger 'whenever a Zombie enters'", () => {
   it("Ghoulcaller Gisa sacrificing a 5/5 Zombie makes five Zombies, each queued as an entry so Champion of the Perished triggers five times", () => {
     const gisa = real("Ghoulcaller Gisa", "gisa");

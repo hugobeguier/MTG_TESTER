@@ -409,6 +409,8 @@ export interface AgentReasoning {
   chosenId?: string;
   turn?: number;
   phase?: string;
+  // This agent's own earlier decisions (oldest first, at most 12), so it can be asked about something it did a few moves ago.
+  history?: Array<{ turn?: number; phase?: string; purpose: string; label: string; reason: string }>;
 }
 
 export interface GameSession {

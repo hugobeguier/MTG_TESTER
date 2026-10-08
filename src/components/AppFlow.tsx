@@ -3424,6 +3424,27 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       phase: "opening hand",
       turn: 0,
       seats: agentResolved.seats,
+      // Nothing from a previous game carries over: monarch, initiative, dungeon progress, queued triggers and per-turn bookkeeping all start fresh.
+      monarchSeatId: undefined,
+      monarchDrawTurn: undefined,
+      initiativeSeatId: undefined,
+      undercityRooms: undefined,
+      pendingVentureRooms: undefined,
+      pendingVentureChoices: undefined,
+      pendingEntries: undefined,
+      pendingDeaths: undefined,
+      pendingLeaves: undefined,
+      pendingSacrificeChoices: undefined,
+      pendingDiscardChoices: undefined,
+      pendingDiscoverChoices: undefined,
+      pendingPunisherChoices: undefined,
+      pendingCombatDamageToPlayer: undefined,
+      pendingAttackDeclarations: undefined,
+      pendingBlockDeclarations: undefined,
+      extraCombatsPending: undefined,
+      extraTurnsQueue: undefined,
+      extraBeginningPhaseActive: undefined,
+      onceEachTurnEffectsUsed: undefined,
       events: [
         ...agentResolved.events,
         {
@@ -5283,7 +5304,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
 
     applyCastingCostPaymentSideEffect(seatId, payment);
     // Orb of Dragonkind's discount on a Dragon spell: the Orb(s) that gave it get tapped.
-    if (sourceZone === "hand" && card.typeLine.includes("Dragon") && !useTapAlt) {
+    if ((sourceZone === "hand" || sourceZone === "command") && card.typeLine.includes("Dragon") && !useTapAlt) {
       const orbs = seat.board.battlefield.filter((permanent) => isDragonMana(permanent));
       const genericRoom = Math.max(0, card.manaValue - coloredPipCount(card));
       const toTapOrbs = new Set(orbs.slice(0, Math.min(orbs.length, genericRoom)).map((permanent) => permanent.id));
@@ -7573,7 +7594,8 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         sourceCard !== undefined &&
         commonTriggerEffect(sourceCard.oracleText, "entered", undefined, playedSession.seats.find((seat) => seat.id === action.actorSeatId))?.kind === "create_tokens";
       const tokenSpecs =
-        sourceCard && !etbTokensOwnedByTrigger
+        // Syphon Flesh's "a Zombie for each creature sacrificed this way" is made by its sacrifice effect, not once more here.
+        sourceCard && !etbTokensOwnedByTrigger && !/for each creature sacrificed this way/i.test(etbEffectText(sourceCard.oracleText))
           ? parseCreateTokenSpecs(etbEffectText(sourceCard.oracleText), undefined, undefined, action.chosenX, countCreaturesAttackingSeat(playedSession, action.actorSeatId))
           : [];
       // Beast Within ("its controller creates..."), Generous Gift ("its owner creates..."), and any
@@ -8117,7 +8139,11 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
 
   function recordAgentReasoning(seatId: string, reasoning: AgentReasoning) {
     const info = agentDecisionInfo.current[seatId];
-    setAgentReasoning((current) => ({ ...current, [seatId]: info ? { ...info, ...reasoning } : reasoning }));
+    setAgentReasoning((current) => {
+      const previous = current[seatId];
+      const history = previous ? [...(previous.history ?? []), { turn: previous.turn, phase: previous.phase, purpose: previous.purpose, label: previous.label, reason: previous.reason.slice(0, 240) }].slice(-12) : undefined;
+      return { ...current, [seatId]: { ...(info ?? {}), ...reasoning, ...(history ? { history } : {}) } };
+    });
   }
 
   function queueCommonTriggers(triggers: Array<Extract<PendingAction, { type: "trigger" }>>) {
@@ -24861,6 +24887,9 @@ export function isAvailableManaSource(card: VisibleCard, seat: PlayerSeat, allSe
   // entered the battlefield for spell/ability payment. Reported live as a freshly fetched Elvish
   // Mystic and a freshly played Llanowar Elves both tapping for mana immediately, neither with haste.
   if (card.typeLine.includes("Creature") && card.summoningSick && !hasHaste(card)) return false;
+  // Orb of Dragonkind ("{1}, {T}: Add two mana ... only for Dragon spells") is not a plain mana source: it is modelled as a one-mana discount on
+  // Dragon spells (see isDragonMana). Counting it as two free mana as well made a six-mana Dragon castable with three lands.
+  if (isDragonMana(card)) return false;
   return !card.tapped && manaChoicesForCard(card, seat, allSeats).length > 0;
 }
 

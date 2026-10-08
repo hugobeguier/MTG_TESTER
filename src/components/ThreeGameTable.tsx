@@ -1910,6 +1910,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
         <AgentReasoningModal
           seat={props.session.seats.find((seat) => seat.id === reasoningSeatId)}
           reasoning={props.agentReasoning?.[reasoningSeatId]}
+          recentEvents={props.session.events.slice(0, 40).map((event) => event.message).reverse()}
           thinking={Boolean(props.agentThinking?.[reasoningSeatId])}
           onClose={() => setReasoningSeatId(undefined)}
         />
@@ -2922,11 +2923,13 @@ const AGENT_REASONING_PURPOSE_LABELS: Record<string, string> = {
 function AgentReasoningModal({
   seat,
   reasoning,
+  recentEvents,
   thinking,
   onClose
 }: {
   seat?: PlayerSeat;
   reasoning?: AgentReasoning;
+  recentEvents?: string[];
   thinking: boolean;
   onClose?: () => void;
 }) {
@@ -2980,6 +2983,8 @@ function AgentReasoningModal({
             reason: reasoning.reason,
             deliberation: reasoning.deliberation
           },
+          history: reasoning.history ?? [],
+          recentEvents: recentEvents ?? [],
           messages: next.map(({ role, content }) => ({ role, content }))
         })
       });
