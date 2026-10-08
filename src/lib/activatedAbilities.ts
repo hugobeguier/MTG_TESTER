@@ -162,7 +162,8 @@ export interface SacrificeAbility {
   // fetch land cycle: "{T}, Pay 1 life, Sacrifice this land: Search your library for a [type]
   // card..."). 0 when the ability has no life cost.
   costLife: number;
-  sacrificeTarget: "self" | "creature";
+  // "permanent": a non-creature cost ("Sacrifice an artifact", "Sacrifice a land"), chosen among the controller's permanents of that kind.
+  sacrificeTarget: "self" | "creature" | "permanent";
   // Set when the sacrificed permanent must be a specific creature type (Retrofitter Foundry's
   // "Sacrifice a Servo"/"Sacrifice a Thopter", not just "sacrifice a creature") — undefined means
   // any creature qualifies. Only meaningful when sacrificeTarget is "creature".
@@ -220,7 +221,7 @@ function numberWordToInt(value: string | undefined): number | undefined {
 // doesn't — the whole clause silently failed to match, and every real fetch land had no activated
 // ability recognized at all (not offered as a legal action, no interactive search, nothing).
 const SACRIFICE_CLAUSE_PATTERN =
-  /^((?:(?:\{[^}]+\}|discard a card|pay \d+ life)\s*,?\s*)*)sacrifice\s+(another\s+(?:creature|[a-z]+\s+creature|[a-z]+\s+or\s+[a-z]+)|this\s+[a-z]+|an?\s+creature|(?:a|one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+creatures|an?\s+(?!permanents?\b|lands?\b|cards?\b|artifacts?\b|enchantments?\b|planeswalkers?\b|tokens?\b)[a-z]+)\s*:\s*([\s\S]+?)\.?\s*$/i;
+  /^((?:(?:\{[^}]+\}|discard a card|pay \d+ life)\s*,?\s*)*)sacrifice\s+(another\s+(?:creature|[a-z]+\s+creature|[a-z]+\s+or\s+[a-z]+)|this\s+[a-z]+|an?\s+creature|an?\s+(?:nonland\s+permanent|permanent|artifact|land|enchantment|treasure|food|clue)|(?:a|one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+creatures|an?\s+(?!permanents?\b|lands?\b|cards?\b|artifacts?\b|enchantments?\b|planeswalkers?\b|tokens?\b)[a-z]+)\s*:\s*([\s\S]+?)\.?\s*$/i;
 
 const SACRIFICE_COUNT_PATTERN = /^(a|one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+creatures$/i;
 
@@ -243,7 +244,8 @@ export function parseGenericSacrificeAbilities(oracleText: string): SacrificeAbi
     const costLifeMatch = costPrefix.match(/pay (\d+) life/i);
     const costLife = costLifeMatch ? Number.parseInt(costLifeMatch[1], 10) : 0;
     // "Sacrifice a Desert" (Scavenger Grounds is itself a Desert) — the only way to pay it is the source.
-    const sacrificeTarget: "self" | "creature" = /^this\b/i.test(targetPhrase) || /^a desert$/i.test(targetPhrase) ? "self" : "creature";
+    const permanentKindMatch = targetPhrase.match(/^an?\s+(nonland\s+permanent|permanent|artifact|land|enchantment|treasure|food|clue)$/i);
+    const sacrificeTarget: "self" | "creature" | "permanent" = /^this\b/i.test(targetPhrase) || /^a desert$/i.test(targetPhrase) ? "self" : permanentKindMatch ? "permanent" : "creature";
     const countMatch = targetPhrase.match(SACRIFICE_COUNT_PATTERN);
     const sacrificeCount = countMatch ? numberWordToInt(countMatch[1]) ?? 1 : 1;
     // "Sacrifice ANOTHER creature" (Ghoulcaller Gisa, Ayara, Kalitas) must not let the source pay for its
@@ -251,7 +253,12 @@ export function parseGenericSacrificeAbilities(oracleText: string): SacrificeAbi
     // "another Vampire or Zombie"), which chooseSacrificeTargets evaluates with the shared qualifier matcher.
     const sacrificeExcludesSelf = /^another\b/i.test(targetPhrase);
     const typeWord = countMatch ? undefined : targetPhrase.replace(/^(?:another|an?)\s+/i, "");
-    const sacrificeTargetTypeFilter = sacrificeTarget === "creature" && typeWord !== undefined && !/^creatures?$/i.test(typeWord) ? typeWord : undefined;
+    const sacrificeTargetTypeFilter =
+      sacrificeTarget === "permanent"
+        ? permanentKindMatch![1].toLowerCase().replace(/\s+/g, " ")
+        : sacrificeTarget === "creature" && typeWord !== undefined && !/^creatures?$/i.test(typeWord)
+          ? typeWord
+          : undefined;
 
     // "Return target Dragon creature card or Ugin planeswalker card from your graveyard to your hand." (Haven of the Spirit Dragon):
     // the planeswalker half is dropped; the Dragon half is the whole realistic use.

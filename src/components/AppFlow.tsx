@@ -727,6 +727,8 @@ type PendingRuleChoice =
       tapSubtype?: string;
       // Sephara's alternative cost: only these creatures may be picked, and the cast is replayed (with the alternative chosen) afterwards.
       eligibleIds?: string[];
+      // A non-creature sacrifice cost ("Sacrifice an artifact"): any permanent matching typeFilter.
+      anyPermanent?: boolean;
       castResume?: { seatId: string; cardId: string; position?: { x: number; z: number }; sourceZone: "hand" | "command" | "exile" | "graveyard" | "library"; faceIndex?: number };
     }
   // "Each player sacrifices a creature or planeswalker of their choice." (Plaguecrafter, Accursed
@@ -5492,9 +5494,13 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       card &&
       ability &&
       seat?.kind === "human" &&
-      ability.sacrificeTarget === "creature" &&
+      ability.sacrificeTarget !== "self" &&
       (ability.sacrificeCount === 1 ||
-        seat.board.battlefield.filter((creature) => creature.typeLine.includes("Creature") && creature.id !== (ability.sacrificeExcludesSelf ? cardId : undefined) && matchesSacrificeFilter(creature, ability.sacrificeTargetTypeFilter)).length > ability.sacrificeCount)
+        seat.board.battlefield.filter((creature) =>
+          ability.sacrificeTarget === "permanent"
+            ? creature.id !== cardId && matchesPermanentSacrificeFilter(creature, ability.sacrificeTargetTypeFilter)
+            : creature.typeLine.includes("Creature") && creature.id !== (ability.sacrificeExcludesSelf ? cardId : undefined) && matchesSacrificeFilter(creature, ability.sacrificeTargetTypeFilter)
+        ).length > ability.sacrificeCount)
     ) {
       setPendingRuleChoice({
         id: crypto.randomUUID(),
@@ -5502,10 +5508,11 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         controllerSeatId: seatId,
         sourceCardId: cardId,
         sourceCardName: card.name,
-        prompt: `${card.name}: choose a creature to sacrifice.`,
+        prompt: `${card.name}: choose ${ability.sacrificeTarget === "permanent" ? "a permanent" : "a creature"} to sacrifice.`,
         abilityIndex,
         typeFilter: ability.sacrificeTargetTypeFilter,
-        excludeCardId: ability.sacrificeExcludesSelf ? cardId : undefined,
+        excludeCardId: ability.sacrificeExcludesSelf || ability.sacrificeTarget === "permanent" ? cardId : undefined,
+        anyPermanent: ability.sacrificeTarget === "permanent" || undefined,
         count: ability.sacrificeCount
       });
       return;
@@ -9317,7 +9324,9 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         ? choice.eligibleIds.includes(card.id) && !card.tapped
         : choice.tapSubtype
         ? card.typeLine.includes("Creature") && !card.tapped && !card.phasedOut && permanentMatchesQualifier(card, choice.tapSubtype)
-        : hasCardType(card, "Creature") && card.id !== choice.excludeCardId && matchesSacrificeFilter(card, choice.typeFilter?.toLowerCase());
+        : choice.anyPermanent
+          ? card.id !== choice.excludeCardId && matchesPermanentSacrificeFilter(card, choice.typeFilter)
+          : hasCardType(card, "Creature") && card.id !== choice.excludeCardId && matchesSacrificeFilter(card, choice.typeFilter?.toLowerCase());
     const pickedIds = [...(choice.pickedIds ?? []), cardId];
     const needed = choice.count - pickedIds.length;
     if (needed > 0) {
@@ -12690,7 +12699,7 @@ function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllowed: boo
       // Rule 119.4: a life payment (Arid Mesa and the rest of the fetch-land cycle's "Pay 1 life"
       // cost, ...) can only be made if the player's life total is at least that much.
       if (ability.costLife > 0 && seat.life < ability.costLife) return;
-      if (ability.sacrificeTarget === "creature" && !chooseSacrificeTargets(seat, ability.sacrificeTargetTypeFilter, ability.sacrificeCount, ability.sacrificeExcludesSelf ? card.id : undefined)) return;
+      if (ability.sacrificeTarget !== "self" && !chooseSacrificeTargets(seat, ability.sacrificeTargetTypeFilter, ability.sacrificeCount, ability.sacrificeExcludesSelf || ability.sacrificeTarget === "permanent" ? card.id : undefined, ability.sacrificeTarget === "permanent")) return;
       if (ability.effect.kind === "search_library" && (seat.library?.length ?? 0) === 0) return;
       // Rule 601.2c-equivalent for an activated ability: don't offer "activate Cankerbloom" with
       // nothing to destroy any more than legalMainPhaseActions offers casting a removal spell with
@@ -12708,7 +12717,7 @@ function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllowed: boo
       const targetNames =
         ability.sacrificeTarget === "self"
           ? [card.name]
-          : (chooseSacrificeTargets(seat, ability.sacrificeTargetTypeFilter, ability.sacrificeCount, ability.sacrificeExcludesSelf ? card.id : undefined) ?? []).map((target) => target.name);
+          : (chooseSacrificeTargets(seat, ability.sacrificeTargetTypeFilter, ability.sacrificeCount, ability.sacrificeExcludesSelf || ability.sacrificeTarget === "permanent" ? card.id : undefined, ability.sacrificeTarget === "permanent") ?? []).map((target) => target.name);
       actions.push({
         id: `activate-sacrifice:${card.id}:${abilityIndex}`,
         actionType: "activate_ability",
@@ -13102,9 +13111,18 @@ function matchesSacrificeFilter(card: VisibleCard, filter: string | undefined): 
     .some((alternative) => permanentMatchesQualifier(card, alternative.trim()));
 }
 
-function chooseSacrificeTargets(seat: PlayerSeat, typeFilter: string | undefined, count: number, excludeCardId?: string): VisibleCard[] | undefined {
-  const creatures = seat.board.battlefield.filter(
-    (card) => card.typeLine.includes("Creature") && card.id !== excludeCardId && matchesSacrificeFilter(card, typeFilter)
+// A non-creature sacrifice cost ("Sacrifice an artifact / a land / a permanent / a Treasure"): does this permanent qualify?
+export function matchesPermanentSacrificeFilter(card: VisibleCard, filter: string | undefined): boolean {
+  if (!filter || filter === "permanent") return true;
+  if (filter === "nonland permanent") return !card.typeLine.includes("Land");
+  return card.typeLine.toLowerCase().includes(filter.toLowerCase());
+}
+
+function chooseSacrificeTargets(seat: PlayerSeat, typeFilter: string | undefined, count: number, excludeCardId?: string, anyPermanent = false): VisibleCard[] | undefined {
+  const creatures = seat.board.battlefield.filter((card) =>
+    anyPermanent
+      ? card.id !== excludeCardId && matchesPermanentSacrificeFilter(card, typeFilter)
+      : card.typeLine.includes("Creature") && card.id !== excludeCardId && matchesSacrificeFilter(card, typeFilter)
   );
   if (creatures.length < count) return undefined;
   const byValue = (card: VisibleCard) => effectivePower(card) + effectiveToughness(card);
@@ -13305,7 +13323,7 @@ export function payGenericSacrificeCost(
   const sacrificeTargets =
     ability.sacrificeTarget === "self"
       ? [card]
-      : (preChosenSacrificeTargets ?? chooseSacrificeTargets(seat, ability.sacrificeTargetTypeFilter, ability.sacrificeCount, ability.sacrificeExcludesSelf ? card.id : undefined));
+      : (preChosenSacrificeTargets ?? chooseSacrificeTargets(seat, ability.sacrificeTargetTypeFilter, ability.sacrificeCount, ability.sacrificeExcludesSelf || ability.sacrificeTarget === "permanent" ? card.id : undefined, ability.sacrificeTarget === "permanent"));
   if (!sacrificeTargets || sacrificeTargets.length === 0) return undefined;
 
   let next = session;
@@ -22860,7 +22878,9 @@ function ruleChoiceView(
               ? choice.eligibleIds.includes(card.id) && !card.tapped
               : choice.tapSubtype
               ? card.typeLine.includes("Creature") && !card.tapped && !card.phasedOut && permanentMatchesQualifier(card, choice.tapSubtype)
-              : hasCardType(card, "Creature") && card.id !== choice.excludeCardId && matchesSacrificeFilter(card, filter))
+              : choice.anyPermanent
+                ? card.id !== choice.excludeCardId && matchesPermanentSacrificeFilter(card, choice.typeFilter)
+                : hasCardType(card, "Creature") && card.id !== choice.excludeCardId && matchesSacrificeFilter(card, filter))
           )
           .map((card) => ({ card, seatId: humanSeat.id, seatName: humanSeat.name }))
       };

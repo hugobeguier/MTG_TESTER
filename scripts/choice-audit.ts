@@ -24,7 +24,7 @@ const TRIGGER_ASKS_TARGET = new Set([
   "counters_on_up_to_creatures", "double_power_counters", "landfall_return_nonland_permanent", "pay_then_zone", "put_land_from_hand",
   "dragon_from_hand_attacking", "venture_room", "modal", "choose_named_mode", "hideaway", "pay_red_for_damage", "discard_any_then_draw",
   "sacrifice_surplus_then_draw", "add_counter", "proliferate", "connive", "draw_then_put_back", "scry_cards", "surveil_cards", "seat_discards",
-  "discard_then_draw", "blink", "copy_token"
+  "discard_then_draw", "blink", "copy_token", "targeted_effect", "drain"
 ]);
 
 const ranks: Record<string, number> = (() => {
@@ -79,14 +79,20 @@ function auditCard(card: { name: string; typeLine: string; oracleText: string; m
     } else if (triggered) {
       const effect = commonTriggerEffect(line, "clause") ?? commonTriggerEffect(line.replace(/^[^,]*,\s*/, ""), "clause");
       recognisedEffect = effect;
-      asksTarget = Boolean(effect && TRIGGER_ASKS_TARGET.has(effect.kind));
+      // add_counter only asks when the counter goes on a target; a drain only when it names a target player.
+      asksTarget = Boolean(
+        effect &&
+          TRIGGER_ASKS_TARGET.has(effect.kind) &&
+          (effect.kind !== "add_counter" || String((effect as { scope?: string }).scope).startsWith("target")) &&
+          (effect.kind !== "drain" || (effect as { scope?: string }).scope === "target_player")
+      );
       if (!effect) issues.add("unrecognised");
     } else if (activated) {
       const abilityEffect = parseGenericAbilityEffect(effectText);
       const tapAbilities = parseGenericTapAbilities(line);
       const sacAbilities = parseGenericSacrificeAbilities(line);
       const manaAbilities = parseGenericManaAbilities(line);
-      recognisedEffect = abilityEffect ? { kind: abilityEffect.kind } : tapAbilities[0] ? { kind: tapAbilities[0].effect.kind } : sacAbilities[0] ? { kind: sacAbilities[0].effect.kind } : manaAbilities[0] ? { kind: "mana" } : undefined;
+      recognisedEffect = abilityEffect ? { kind: abilityEffect.kind === "trigger" ? abilityEffect.effect.kind : abilityEffect.kind } : tapAbilities[0] ? { kind: tapAbilities[0].effect.kind } : sacAbilities[0] ? { kind: sacAbilities[0].effect.kind } : manaAbilities[0] ? { kind: "mana" } : undefined;
       if (!recognisedEffect) issues.add("unrecognised");
       const removal = parseRemovalEffect(effectText);
       const zone = parseZoneEffect(effectText);
@@ -94,7 +100,9 @@ function auditCard(card: { name: string; typeLine: string; oracleText: string; m
         (removal && (removal.kind === "modal" || removalEffectTargetSpec(removal, "x") !== undefined || removal.kind === "damage")) ||
           (zone && zoneEffectTargetSpec(zone) !== undefined) ||
           parseTargetedPump(effectText) ||
-          (tapAbilities[0] && ["exile_graveyard_creature_then_tokens", "grant_graveyard_cast", "zone_effect", "target_unblockable"].includes(tapAbilities[0].effect.kind)) ||
+          (abilityEffect?.kind === "trigger" && abilityEffect.effect.kind === "targeted_effect") ||
+          (sacAbilities[0] && ["targeted_effect", "zone_effect"].includes(sacAbilities[0].effect.kind)) ||
+          (tapAbilities[0] && ["exile_graveyard_creature_then_tokens", "grant_graveyard_cast", "zone_effect", "target_unblockable", "targeted_effect"].includes(tapAbilities[0].effect.kind)) ||
           (abilityEffect && ["exile_graveyard_card_scavenge", "search_library"].includes(abilityEffect.kind))
       );
     } else {

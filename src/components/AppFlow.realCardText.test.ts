@@ -2393,3 +2393,11 @@ describe("extra land drops: Loot, Exuberant Explorer (real Oracle text)", () => 
     expect(landPlaysMade(plays, "k")).toBe(2);
   });
 });
+
+describe("non-creature sacrifice costs", () => {
+  it("Zuran Orb sacrifices a chosen land", () => {
+    const orb = parseGenericSacrificeAbilities(real("Zuran Orb", "zo").oracleText)[0];
+    expect(orb.sacrificeTarget).toBe("permanent");
+    expect(orb.sacrificeTargetTypeFilter).toBe("land");
+  });
+});

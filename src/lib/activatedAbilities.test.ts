@@ -139,10 +139,10 @@ describe("parseGenericSacrificeAbilities", () => {
     expect(abilities[0]).toMatchObject({ costMana: 0, costTap: true, sacrificeTargetTypeFilter: "Thopter", effect: { kind: "create_tokens" } });
   });
 
-  it("does not treat 'sacrifice a land'/'sacrifice a permanent'/'sacrifice an artifact' as a creature-type sacrifice", () => {
-    expect(parseGenericSacrificeAbilities("Sacrifice a land: Draw a card.")).toHaveLength(0);
-    expect(parseGenericSacrificeAbilities("Sacrifice a permanent: Draw a card.")).toHaveLength(0);
-    expect(parseGenericSacrificeAbilities("Sacrifice an artifact: Draw a card.")).toHaveLength(0);
+  it("treats 'sacrifice a land/permanent/artifact' as a non-creature permanent sacrifice", () => {
+    expect(parseGenericSacrificeAbilities("Sacrifice a land: Draw a card.")[0]).toMatchObject({ sacrificeTarget: "permanent", sacrificeTargetTypeFilter: "land" });
+    expect(parseGenericSacrificeAbilities("Sacrifice a permanent: Draw a card.")[0]).toMatchObject({ sacrificeTarget: "permanent", sacrificeTargetTypeFilter: "permanent" });
+    expect(parseGenericSacrificeAbilities("Sacrifice an artifact: Draw a card.")[0]).toMatchObject({ sacrificeTarget: "permanent", sacrificeTargetTypeFilter: "artifact" });
   });
 
   it("leaves 'sacrifice a creature' matching the generic (untyped) creature branch, not the type-filter branch", () => {
