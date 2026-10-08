@@ -66,7 +66,10 @@ function auditCard(card: { name: string; typeLine: string; oracleText: string; m
     const modalMulti = /\bchoose (?:two|three|one or more|up to (?:two|three)|any number)\b/i.test(line);
     const anyNumber = /\bany number of\b/i.test(effectText);
     const nameCard = /\bname a (?:nonland )?card\b|\bchoose a card name\b/i.test(effectText);
-    const sacrificeCost = activated ? /^[^:]*\bsacrifice (?:an?|another) (artifact|land|permanent|enchantment|nonland permanent)\b/i.test(line) : false;
+    const sacrificeCost = activated
+      ? /^[^:]*\bsacrifice (?:an?|another) (artifact|land|permanent|enchantment|nonland permanent)\b/i.test(line) &&
+        !parseGenericSacrificeAbilities(line).some((ability) => ability.sacrificeTarget === "permanent")
+      : false;
     const xPick = /\bchoose a number\b|\bpay any amount\b/i.test(effectText);
     if (!(hasTarget || hasMay || modalMulti || anyNumber || nameCard || sacrificeCost || xPick)) continue;
 
