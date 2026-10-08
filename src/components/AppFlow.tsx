@@ -14875,6 +14875,17 @@ export function resolveEndStepExileDamage(session: GameSession, activeSeatId: st
   return rulesEvent(next, activeSeatId, `${sourceName}: ${marked.length} exiled card${marked.length === 1 ? " was" : "s were"} not played, so each opponent takes ${amount * marked.length} damage.`);
 }
 
+// "You win the game" (Hellkite Tyrant, Mechanized Production): every other player loses, and the state-based pass ends the game.
+export function winTheGame(session: GameSession, winnerSeatId: string, sourceName: string): GameSession {
+  const winner = session.seats.find((seat) => seat.id === winnerSeatId);
+  if (!winner) return session;
+  return rulesEvent(
+    { ...session, seats: session.seats.map((seat) => (seat.id === winnerSeatId || seat.hasLost ? seat : { ...seat, hasLost: true, lossReason: `${winner.name} wins the game with ${sourceName}` })) },
+    winnerSeatId,
+    `${winner.name} wins the game with ${sourceName}!`
+  );
+}
+
 export function runStateBasedActionsPass(session: GameSession): { session: GameSession; changed: boolean } {
   let changed = false;
   let next = session;
@@ -24374,6 +24385,13 @@ export function applyDeterministicPhaseTrigger(session: GameSession, seatId: str
   }
 
 
+  // Hellkite Tyrant: "At the beginning of your upkeep, if you control twenty or more artifacts, you win the game."
+  const winArtifacts = clauseText.match(/\bif you control (twenty|\d+) or more artifacts, you win the game\b/i);
+  if (winArtifacts) {
+    const needed = winArtifacts[1].toLowerCase() === "twenty" ? 20 : Number.parseInt(winArtifacts[1], 10);
+    const owner = session.seats.find((item) => item.id === seatId);
+    return owner && owner.board.battlefield.filter((card) => card.typeLine.includes("Artifact")).length >= needed ? winTheGame(session, seatId, sourceCard.name) : session;
+  }
   // "At the beginning of your upkeep, if you control no Thopters other than this creature, return
   // this creature to its owner's hand and create five ... tokens" (Thopter Assembly, ...) — none of
   // the parsers below understand a leading "if ~," condition gating the whole effect on their own,
@@ -24437,6 +24455,17 @@ export function applyDeterministicPhaseTrigger(session: GameSession, seatId: str
     return destroyCreatures(session, [{ seatId, cardId: sourceCard.id, message: `${sourceCard.name} is sacrificed at the end step.` }], "Rules action");
   }
 
+  // Mechanized Production: "At the beginning of your upkeep, create a token that's a copy of enchanted artifact. Then if you control eight or
+  // more artifacts with the same name as the enchanted artifact, you win the game."
+  if (/\bcreate a token that'?s a copy of enchanted artifact\b/i.test(clauseText)) {
+    const owner = session.seats.find((item) => item.id === seatId);
+    const enchanted = sourceCard.attachedToId ? owner?.board.battlefield.find((card) => card.id === sourceCard.attachedToId) : undefined;
+    if (!owner || !enchanted) return session;
+    const copied = createCopyTokenForSeat(session, seatId, enchanted).session;
+    const sameName = (copied.seats.find((item) => item.id === seatId)?.board.battlefield ?? []).filter((card) => card.typeLine.includes("Artifact") && card.name === enchanted.name).length;
+    const withEvent = rulesEvent(copied, seatId, `${sourceCard.name}: creates a token that's a copy of ${enchanted.name}.`);
+    return sameName >= 8 ? winTheGame(withEvent, seatId, sourceCard.name) : withEvent;
+  }
   // Braids, Arisen Nightmare: "...you may sacrifice a permanent. If you do, each opponent may sacrifice one that shares a type; each who
   // doesn't loses 2 life and you draw." Not modelled — resolving it as a plain "draw a card" handed out a free card every end step.
   if (/\byou may sacrifice an artifact, creature, enchantment, land, or planeswalker\b.*\beach opponent may sacrifice\b/i.test(clauseText)) return session;

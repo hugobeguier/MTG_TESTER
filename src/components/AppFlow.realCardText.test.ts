@@ -2781,3 +2781,25 @@ describe("Mirrorworks", () => {
     expect(resolveTriggerEffect(broke, { ...trigger }).seats[0].board.battlefield.filter((c) => c.token)).toHaveLength(0);
   });
 });
+
+describe("win the game: Mechanized Production, Hellkite Tyrant", () => {
+  it("Mechanized Production copies the enchanted artifact each upkeep and wins at eight of the same name", async () => {
+    const { winTheGame } = await import("./AppFlow");
+    expect(typeof winTheGame).toBe("function");
+    const ring = real("Sol Ring", "ring");
+    const aura = real("Mechanized Production", "mp", { attachedToId: "ring" });
+    const sevenCopies = Array.from({ length: 6 }, (_, i) => ({ ...ring, id: "c" + i, token: true }));
+    const few = applyDeterministicPhaseTrigger(session([seat("a", [aura, ring]), seat("b", [])]), "a", aura, "upkeep step")!;
+    expect(few.seats[0].board.battlefield.filter((c) => c.name === "Sol Ring")).toHaveLength(2);
+    expect(few.seats[1].hasLost).toBeFalsy();
+    const many = applyDeterministicPhaseTrigger(session([seat("a", [aura, ring, ...sevenCopies]), seat("b", [])]), "a", aura, "upkeep step")!;
+    expect(many.seats[1].hasLost).toBe(true);
+  });
+
+  it("Hellkite Tyrant wins with twenty artifacts and not with nineteen", () => {
+    const tyrant = real("Hellkite Tyrant", "ht");
+    const arts = (n: number) => Array.from({ length: n }, (_, i) => real("Sol Ring", "r" + i));
+    expect(applyDeterministicPhaseTrigger(session([seat("a", [tyrant, ...arts(19)]), seat("b", [])]), "a", tyrant, "upkeep step")?.seats[1].hasLost).toBeFalsy();
+    expect(applyDeterministicPhaseTrigger(session([seat("a", [tyrant, ...arts(20)]), seat("b", [])]), "a", tyrant, "upkeep step")?.seats[1].hasLost).toBe(true);
+  });
+});
