@@ -2047,9 +2047,32 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       if (!spec || legalTargets(session, entry.seatId, spec, entry.card).length <= 1) continue;
       deferredChoiceEntry = { entry, zoneEffect, spec, optional: /\byou may\b/i.test(etbEffectText(entry.card.oracleText)) };
     }
+    // A creature whose enters effect is removal ("When this creature enters, destroy target creature an opponent controls": Ravenous
+    // Chupacabra, Shriekmaw, Reclamation Sage, Acidic Slime) did nothing when it entered any way but a cast. A human controller picks the
+    // target (the first such entry; others use the heuristic); an agent's is chosen automatically.
+    const removalByEntry = remainingEntries
+      // (An enters effect the trigger system already owns — a Dragon's "deals damage to any target" — is not also applied here.)
+      .map((entry) => ({
+        entry,
+        removal:
+          entry.card.token || commonTriggerEffect(entry.card.oracleText, "entered", undefined, session.seats.find((seat) => seat.id === entry.seatId)) !== undefined
+            ? undefined
+            : parseRemovalEffect(etbEffectText(entry.card.oracleText))
+      }))
+      .filter((item): item is { entry: (typeof entries)[number]; removal: RemovalEffect } => item.removal !== undefined && item.removal.kind !== "modal");
+    let deferredRemovalEntry: { entry: (typeof entries)[number]; removal: RemovalEffect } | undefined;
+    for (const item of removalByEntry) {
+      if (deferredRemovalEntry) break;
+      const spec = removalEffectTargetSpec(item.removal, item.entry.card.id);
+      if (!spec || session.seats.find((seat) => seat.id === item.entry.seatId)?.kind !== "human") continue;
+      if (legalTargets(session, item.entry.seatId, spec, item.entry.card).length > 1) deferredRemovalEntry = item;
+    }
     const entryTriggers = remainingEntries.flatMap((entry) => findCommonTriggersForPermanentEntered(session, entry.seatId, entry.card));
     setSession((current) => {
       let next = current.pendingEntries === entries ? { ...current, pendingEntries: undefined } : current;
+      for (const item of removalByEntry) {
+        if (item !== deferredRemovalEntry) next = applyRemovalEffect(next, item.entry.seatId, item.entry.card.name, item.entry.card, item.removal);
+      }
       for (const { entry, zoneEffect } of zoneEffectsByEntry) {
         if (zoneEffect && entry !== deferredChoiceEntry?.entry) next = applyZoneEffect(next, entry.seatId, entry.card.name, zoneEffect);
       }
@@ -2065,13 +2088,28 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     // Same "let the rules advisor handle whatever the deterministic common-trigger system doesn't
     // own" fallback as the pendingDeaths effect's own, for ETB clauses instead of death clauses.
     for (const entry of remainingEntries) {
+      if (removalByEntry.some((item) => item.entry === entry)) continue;
       // A token with no rules text (a vanilla Zombie) has nothing for the rules advisor to read.
       if (entry.card.token && !etbEffectText(entry.card.oracleText).trim()) continue;
       if (commonTriggerEffect(entry.card.oracleText, "entered", undefined, session.seats.find((seat) => seat.id === entry.seatId)) === undefined) {
         void consultRulesAdvisor("spell_resolved_to_battlefield", entry.seatId, entry.card);
       }
     }
-    if (deferredChoiceEntry) {
+    if (deferredRemovalEntry) {
+      const removalSpec = removalEffectTargetSpec(deferredRemovalEntry.removal, deferredRemovalEntry.entry.card.id)!;
+      setPendingRuleChoice({
+        id: crypto.randomUUID(),
+        kind: "choose_effect_target",
+        controllerSeatId: deferredRemovalEntry.entry.seatId,
+        sourceCardId: deferredRemovalEntry.entry.card.id,
+        sourceCardName: deferredRemovalEntry.entry.card.name,
+        sourceCard: deferredRemovalEntry.entry.card,
+        prompt: removalSpec.prompt,
+        spec: removalSpec,
+        optional: /\byou may\b/i.test(etbEffectText(deferredRemovalEntry.entry.card.oracleText)),
+        pending: { kind: "removal", effect: deferredRemovalEntry.removal }
+      });
+    } else if (deferredChoiceEntry) {
       setPendingRuleChoice({
         id: crypto.randomUUID(),
         kind: "choose_effect_target",
