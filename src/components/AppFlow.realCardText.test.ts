@@ -2733,3 +2733,34 @@ describe("The Ur-Dragon", () => {
     expect(after.seats[0].board.hand.length).toBe(2); // 1 + 2 drawn - the permanent put onto the battlefield
   });
 });
+
+describe("Improvise", () => {
+  it("Reverse Engineer: untapped non-mana artifacts pay for the generic part of its cost", () => {
+    const spell = real("Reverse Engineer", "re", { zone: "hand" as const });
+    const artifacts = [real("Skullclamp", "a1"), real("Ancient Stone Idol", "a2"), real("Retrofitter Foundry", "a3")];
+    const withLand = seat("a", [...artifacts, real("Island", "i1"), real("Island", "i2"), real("Island", "i3")]);
+    const payment = chooseManaSourcesForCost(withLand, spell, spell.manaValue, undefined, [withLand]);
+    expect(payment.ok).toBe(true);
+    // 3 of the 5 mana came from artifacts, so at most 2 lands were tapped
+    expect(payment.sourceIds.filter((id) => id.startsWith("a")).length).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe("Saheeli's Artistry", () => {
+  it("copies the chosen artifact and the chosen creature (which also becomes an artifact)", async () => {
+    const { applyCastGenericModes, parseGenericModalEffect } = await import("./AppFlow");
+    const spell = real("Saheeli's Artistry", "sa", { zone: "hand" as const });
+    const s = session([seat("a", [real("Sol Ring", "ring"), bear("cub")]), seat("b", [])]);
+    const modal = parseGenericModalEffect(spell.oracleText, undefined)!;
+    expect(modal.atMost).toBe(true);
+    const prompt = nextCastPrompt(s, "a", spell, undefined, { targets: [] } as CastChoices);
+    expect(prompt?.kind).toBe("modes");
+    const after = applyCastGenericModes(s, "a", spell, modal, {
+      modes: [0, 1],
+      targets: [{ kind: "card", seatId: "a", cardId: "ring" }, { kind: "card", seatId: "a", cardId: "cub" }]
+    } as CastChoices);
+    const tokens = after.seats[0].board.battlefield.filter((c) => c.token);
+    expect(tokens.map((c) => c.name).sort()).toEqual(["Bear cub", "Sol Ring"]);
+    expect(tokens.find((c) => c.name === "Bear cub")!.typeLine).toContain("Artifact");
+  });
+});

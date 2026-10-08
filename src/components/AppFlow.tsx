@@ -535,6 +535,8 @@ type PendingTargetedEffect =
 // order the spell's effects consume them. Attached to the spell on the stack so resolution uses exactly what the opponents saw.
 export interface CastChoices {
   modes?: number[];
+  // "Choose one or more / one or both": the player pressed "Done choosing" after at least one mode.
+  modesDone?: boolean;
   targets: ChosenTarget[];
 }
 
@@ -9688,7 +9690,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       prompt: prompt.prompt,
       promptKind: prompt.kind,
       options,
-      answers: { modes: base.answers.modes ? [...base.answers.modes] : undefined, targets: [...base.answers.targets] },
+      answers: { modes: base.answers.modes ? [...base.answers.modes] : undefined, modesDone: base.answers.modesDone, targets: [...base.answers.targets] },
       resume: base.resume
     });
   }
@@ -9699,8 +9701,9 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     if (!choice || choice.kind !== "choose_cast_targets") return;
     const option = choice.options[index];
     if (!option) return;
-    const answers: CastChoices = { modes: [...(choice.answers.modes ?? [])], targets: [...choice.answers.targets] };
-    if (choice.promptKind === "modes" && option.mode !== undefined) answers.modes!.push(option.mode);
+    const answers: CastChoices = { modes: [...(choice.answers.modes ?? [])], modesDone: choice.answers.modesDone, targets: [...choice.answers.targets] };
+    if (choice.promptKind === "modes" && option.mode === -1) answers.modesDone = true;
+    else if (choice.promptKind === "modes" && option.mode !== undefined) answers.modes!.push(option.mode);
     else if (option.target) answers.targets.push(option.target);
     if (!answers.modes?.length) delete answers.modes;
     const next = nextCastPrompt(session, choice.controllerSeatId, choice.planCard, choice.chosenX, answers);
@@ -16500,6 +16503,16 @@ function genericModeSlots(session: GameSession, seatId: string, source: VisibleC
   if (mode.kind === "zone") return zoneSlots(session, seatId, source, mode.effect);
   if (mode.kind === "removal") return removalSlots(session, seatId, source, mode.effect);
   if (mode.kind === "pump") return [{ prompt: `${source.name}: choose a creature.`, options: labeledTargetOptions(session, seatId, "any_creature", source) }];
+  // One verb on a chosen target (Saheeli's Artistry's token copies): the legal targets of the shared target spec.
+  if (mode.kind === "trigger" && mode.effect.kind === "targeted_effect") {
+    const spec = targetedEffectSpec(mode.effect.effect, source.id, source.name);
+    const options = legalTargets(session, seatId, spec, source).map((target) => {
+      if (target.kind === "player") return { label: session.seats.find((seat) => seat.id === target.seatId)?.name ?? "Player", target: { kind: "player" as const, seatId: target.seatId } };
+      const owner = session.seats.find((seat) => seat.id === target.seatId);
+      return { label: `${target.card.name} — ${owner?.id === seatId ? "yours" : owner?.name ?? ""}`, target: { kind: "card" as const, seatId: target.seatId, cardId: target.card.id } };
+    });
+    return [{ prompt: `${source.name}: ${spec.prompt}`, options }];
+  }
   return [];
 }
 
@@ -16521,19 +16534,23 @@ export function nextCastPrompt(
       .filter(({ mode }) => (structure.kind === "removal_modal" ? removalEffectHasLegalTarget(session, seatId, card, mode as Exclude<RemovalEffect, { kind: "modal" }>) : genericModalModeHasLegalTarget(session, seatId, mode as GenericModalMode)));
     const wanted = Math.min(structure.modal.chooseCount, viable.length);
     const picked = answers.modes ?? [];
-    if (picked.length < wanted) {
+    // "One or more / one or both": the player may stop early, so even a spell whose every mode is viable asks.
+    const atMost = structure.kind === "generic_modal" && Boolean(structure.modal.atMost) && viable.length > 1;
+    if (picked.length < wanted && !answers.modesDone) {
       const remaining = viable.filter(({ index }) => !picked.includes(index));
       // Nothing to decide when every viable mode has to be picked anyway.
-      if (remaining.length === wanted - picked.length) {
+      if (!atMost && remaining.length === wanted - picked.length) {
         answers.modes = [...picked, ...remaining.map(({ index }) => index)];
       } else {
+        const options = remaining.map(({ mode, index }) => ({
+          label: structure.kind === "removal_modal" ? describeRemovalMode(mode as Exclude<RemovalEffect, { kind: "modal" }>) : (mode as GenericModalMode).text ?? `Mode ${index + 1}`,
+          mode: index
+        }));
+        if (atMost && picked.length >= 1) options.push({ label: "Done choosing", mode: -1 });
         return {
           kind: "modes",
-          prompt: `${card.name}: choose mode ${picked.length + 1} of ${wanted}.`,
-          options: remaining.map(({ mode, index }) => ({
-            label: structure.kind === "removal_modal" ? describeRemovalMode(mode as Exclude<RemovalEffect, { kind: "modal" }>) : (mode as GenericModalMode).text ?? `Mode ${index + 1}`,
-            mode: index
-          }))
+          prompt: atMost ? `${card.name}: choose a mode (${picked.length} chosen).` : `${card.name}: choose mode ${picked.length + 1} of ${wanted}.`,
+          options
         };
       }
     }
@@ -16600,6 +16617,7 @@ export function applyCastGenericModes(session: GameSession, casterSeatId: string
     if (mode.kind === "zone") next = applyZoneEffect(next, casterSeatId, source.name, mode.effect, undefined, target);
     else if (mode.kind === "pump") next = applyTargetedPumpEffect(next, casterSeatId, source, mode.effect, target);
     else if (mode.kind === "removal") next = applyRemovalEffect(next, casterSeatId, source.name, source, mode.effect, undefined, target);
+    else if (mode.kind === "trigger" && mode.effect.kind === "targeted_effect") next = applyTargetedEffect(next, casterSeatId, source, mode.effect.effect, target);
     else next = applyGenericModalEffect(next, casterSeatId, source, { chooseCount: 1, modes: [mode] });
   }
   return next;
@@ -19056,6 +19074,10 @@ function parseSingleGenericMode(modeText: string, modes: GenericModalMode[]): vo
 function genericModalModeHasLegalTarget(session: GameSession, casterSeatId: string, mode: GenericModalMode): boolean {
   if (mode.kind === "all") return mode.parts.every((part) => genericModalModeHasLegalTarget(session, casterSeatId, part));
   if (mode.kind === "extra") return true;
+  if (mode.kind === "trigger" && mode.effect.kind === "targeted_effect") {
+    const probe = { id: "", name: "", typeLine: "", oracleText: "", colors: [], manaValue: 0, role: "permanent", zone: "battlefield" } as VisibleCard;
+    return legalTargets(session, casterSeatId, targetedEffectSpec(mode.effect.effect, "", ""), probe).length > 0;
+  }
   if (mode.kind === "removal") return removalEffectHasLegalTarget(session, casterSeatId, { id: "", name: "", typeLine: "", oracleText: "", colors: [], manaValue: 0, role: "permanent", zone: "battlefield" } as VisibleCard, mode.effect);
   if (mode.kind === "zone") return zoneEffectHasLegalTarget(session, casterSeatId, mode.effect);
   if (mode.kind === "pump") return choosePumpTarget(session, casterSeatId, mode.effect) !== undefined;
@@ -21520,11 +21542,14 @@ function createTokenCard(seatId: string, sourceCardId: string, spec: TokenSpec):
 // Types granted by a separate static ability (e.g. Secret Arcade) aren't copied either; they'll
 // apply fresh to the token on its own if it also matches that effect's scope, via the same
 // grantedTypes recompute every other permanent goes through.
-function createCopyTokenForSeat(session: GameSession, seatId: string, source: VisibleCard, options: { notLegendary?: boolean } = {}): { session: GameSession; token: VisibleCard } {
+function createCopyTokenForSeat(session: GameSession, seatId: string, source: VisibleCard, options: { notLegendary?: boolean; asArtifact?: boolean } = {}): { session: GameSession; token: VisibleCard } {
   const token: VisibleCard = {
     id: `${seatId}-token-${crypto.randomUUID()}`,
     name: source.name,
-    typeLine: options.notLegendary ? source.typeLine.replace(/\bLegendary\s+/, "") : source.typeLine,
+    typeLine: (() => {
+      const base = options.notLegendary ? source.typeLine.replace(/\bLegendary\s+/, "") : source.typeLine;
+      return options.asArtifact && !base.includes("Artifact") ? "Artifact " + base : base;
+    })(),
     oracleText: source.oracleText,
     manaCost: source.manaCost,
     manaValue: source.manaValue,
@@ -24173,7 +24198,7 @@ export function applyTargetedEffect(session: GameSession, controllerSeatId: stri
     const targetCard = session.seats.find((seat) => seat.id === target.seatId)?.board.battlefield.find((card) => card.id === target.cardId);
     if (!targetCard) return rulesEvent(session, controllerSeatId, `${source.name}: the target is gone.`);
     if (verb.kind === "copy_token") {
-      const copied = createCopyTokenForSeat(next, controllerSeatId, targetCard).session;
+      const copied = createCopyTokenForSeat(next, controllerSeatId, targetCard, { asArtifact: verb.asArtifact }).session;
       next = rulesEvent(copied, controllerSeatId, `${source.name}: creates a token that's a copy of ${targetCard.name}.`);
       return next;
     }
@@ -25252,6 +25277,16 @@ export function chooseManaSourcesForCost(seat: PlayerSeat, card: VisibleCard, to
       if (!source) return { ok: false as const, sourceIds: [...chosen], reason: `missing ${color} mana` };
       chosen.add(source.id);
       pool[color] += manaProducedBy(source, seat);
+    }
+  }
+
+  // Improvise: each untapped artifact that is not itself a mana source pays for {1} of the generic cost, saving lands.
+  if (/\bimprovise\b/i.test(card.oracleText ?? "")) {
+    for (const artifact of seat.board.battlefield) {
+      if (manaPoolTotal(pool) >= totalCost) break;
+      if (artifact.id === excludeCardId || chosen.has(artifact.id) || artifact.tapped || !artifact.typeLine.includes("Artifact") || isAvailableManaSource(artifact, seat, allSeats)) continue;
+      chosen.add(artifact.id);
+      pool.C += 1;
     }
   }
 

@@ -14,7 +14,7 @@ export type TargetedVerb =
   | { kind: "draw"; amount: number }
   | { kind: "discard"; amount: number }
   // "Create a token that's a copy of another target nonland permanent you control." (Extravagant Replication)
-  | { kind: "copy_token" };
+  | { kind: "copy_token"; asArtifact?: boolean };
 
 export interface TargetedEffect {
   verb: TargetedVerb;
@@ -138,10 +138,11 @@ export function parseTargetedEffect(rawText: string): TargetedEffect | undefined
   }
 
   // "Create a token that's a copy of [another] target nonland permanent you control." — no "except ..." modifiers (those change what is copied).
-  const copy = text.match(/^create a token that'?s a copy of (another )?target ([a-z ,]+?)$/);
+  // "..., except it's an artifact in addition to its other types." (Saheeli's Artistry) is the one exception modelled.
+  const copy = text.match(/^create a token that'?s a copy of (another )?target ([a-z ]+?)(,? except it'?s an artifact in addition to its other types)?$/);
   if (copy) {
     const shape = permanentShape(copy[2]);
-    if (shape) return { verb: { kind: "copy_token" }, who: { kind: "permanent", ...shape, ...(copy[1] ? { another: true } : {}) } };
+    if (shape) return { verb: { kind: "copy_token", ...(copy[3] ? { asArtifact: true } : {}) }, who: { kind: "permanent", ...shape, ...(copy[1] ? { another: true } : {}) } };
   }
 
   // "Tap target creature."  /  "Untap target land."
