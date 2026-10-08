@@ -318,7 +318,7 @@ type TriggerEffect = (
   | { kind: "undying_return"; counterKind: "+1/+1" | "-1/-1" }
   // "Each opponent sacrifices a creature of their choice." (Butcher of Malakir, Dictate of Erebos, Grave Pact, Sheoldred): a human victim
   // picks; includeSelf is "Each player sacrifices ..." (Accursed Marauder).
-  | { kind: "each_opponent_sacrifices"; filter: string; includeSelf?: boolean }
+  | { kind: "each_opponent_sacrifices"; filter: string; includeSelf?: boolean; onlySeatId?: string }
   // "Each player discards a card." / "Each player loses 1 life and draws a card." (Rankle)
   | { kind: "each_player_basics"; discard?: number; loseLife?: number; draw?: number }
   // "Reveal cards from the top of your library until you reveal a land card. Put that card onto the battlefield tapped and the rest
@@ -2553,6 +2553,24 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     const key = `${session.turn}:${activeSeat.id}:${session.phase}:${session.extraBeginningPhaseActive ?? false}`;
     if (phaseTriggersChecked.current.has(key)) return;
     phaseTriggersChecked.current.add(key);
+    // "At the beginning of each opponent's upkeep, that player sacrifices a creature of their choice." (Sheoldred, Whispering One):
+    // sits on ANOTHER seat's permanent, so the active-seat sweep below never sees it.
+    if (session.phase === "upkeep step") {
+      const edicts = session.seats
+        .filter((other) => other.id !== activeSeat.id && !other.hasLost)
+        .flatMap((other) =>
+          other.board.battlefield
+            .filter((card) => !card.abilitiesStripped)
+            .flatMap((card) => {
+              const clause = oracleClauses(card.oracleText).find((line) => /^at the beginning of each opponent'?s upkeep, that player sacrifices an? (?:nontoken )?creature of their choice/i.test(line));
+              return clause ? [{ owner: other, card }] : [];
+            })
+        );
+      for (const { owner, card } of edicts) {
+        const edictTrigger = makeCommonTrigger(activeSeat.id, owner.id, card, { kind: "each_opponent_sacrifices", filter: "creature", onlySeatId: activeSeat.id }, `${card.name} triggers at ${activeSeat.name}'s upkeep.`);
+        setSession((current) => resolveTriggerEffect(current, edictTrigger));
+      }
+    }
     const triggers = phaseTriggeredCards(activeSeat, session.phase as TurnPhase);
     if (triggers.length === 0) return;
     if (triggers.length === 1) {
@@ -20858,6 +20876,9 @@ export function commonTriggerEffect(
   if (hideawayMatch && mode === "entered") return { kind: "hideaway", count: Number.parseInt(hideawayMatch[1], 10) };
   const namedMode = text.match(/\bas this (?:enchantment|artifact|permanent|creature) enters, choose ([a-z]+) or ([a-z]+)\./);
   if (namedMode && mode === "entered") return { kind: "choose_named_mode", options: [namedMode[1], namedMode[2]].map((label) => label.charAt(0).toUpperCase() + label.slice(1)) };
+  // Syr Konrad, the Grim: "Whenever another creature dies, or ..., Syr Konrad deals 1 damage to each opponent." (the dies half; the graveyard halves are not tracked)
+  const namedEachOpponentDamage = mode === "died" ? text.match(/, [a-z' ,-]+? deals (\d+) damage to each opponent\.?$/) : null;
+  if (namedEachOpponentDamage) return { kind: "damage_each_opponent", amount: Number.parseInt(namedEachOpponentDamage[1], 10) };
   const eachOpponentDamage = text.match(/^(?:this creature|it) deals (\d+) damage to each opponent\.?$/);
   if (eachOpponentDamage) return { kind: "damage_each_opponent", amount: Number.parseInt(eachOpponentDamage[1], 10) };
   const targetPump = text.match(/^target creature you control gets ([+-]\d+)\/([+-]\d+)(?: and gains ([a-z ]+?))? until end of turn\.?$/);
@@ -22292,6 +22313,7 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
     const humanChoices: Array<{ seatId: string; sourceCardId: string; sourceCardName: string; count: number; typeFilter: string }> = [];
     for (const victim of session.seats) {
       if (victim.hasLost || (victim.id === trigger.controllerSeatId && !includeSelf)) continue;
+      if (trigger.effect.onlySeatId && victim.id !== trigger.effect.onlySeatId) continue;
       const candidates = victim.board.battlefield
         .filter((card) => matchesEachPlayerSacrificeFilter(card, filter))
         .sort((a, b) => Number(Boolean(b.token)) - Number(Boolean(a.token)) || effectivePower(a) + effectiveToughness(a) - (effectivePower(b) + effectiveToughness(b)));
@@ -24188,6 +24210,10 @@ export function applyDeterministicPhaseTrigger(session: GameSession, seatId: str
   if (/^at the beginning of (?:the|your|each) end step, sacrifice (?:this creature|this permanent)\.?$/i.test(clauseText.trim())) {
     return destroyCreatures(session, [{ seatId, cardId: sourceCard.id, message: `${sourceCard.name} is sacrificed at the end step.` }], "Rules action");
   }
+
+  // Braids, Arisen Nightmare: "...you may sacrifice a permanent. If you do, each opponent may sacrifice one that shares a type; each who
+  // doesn't loses 2 life and you draw." Not modelled — resolving it as a plain "draw a card" handed out a free card every end step.
+  if (/\byou may sacrifice an artifact, creature, enchantment, land, or planeswalker\b.*\beach opponent may sacrifice\b/i.test(clauseText)) return session;
 
   const removalEffect = parseRemovalEffect(clauseText);
   if (removalEffect) return applyPrimitiveAction(session, seatId, sourceCard, { kind: "removal", effect: removalEffect });

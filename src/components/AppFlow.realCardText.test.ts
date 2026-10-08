@@ -2576,3 +2576,35 @@ describe("Animate Dead", () => {
     expect(gone.seats[0].board.battlefield.map((c) => c.id)).not.toContain("small");
   });
 });
+
+describe("Sheoldred, Whispering One's opponent-upkeep edict", () => {
+  it("only the player whose upkeep it is sacrifices", () => {
+    const sheoldred = real("Sheoldred, Whispering One", "sh");
+    const s = session([seat("a", [sheoldred]), seat("b", [bear("b1"), bear("b2")]), seat("c", [bear("c1"), bear("c2")])]);
+    const after = resolveTriggerEffect(s, { id: "t", type: "trigger", actorSeatId: "b", controllerSeatId: "a", sourceCardId: "sh", sourceCardName: "Sheoldred, Whispering One", triggerKind: "common", effect: { kind: "each_opponent_sacrifices", filter: "creature", onlySeatId: "b" }, message: "" } as never);
+    expect(after.seats[1].board.battlefield).toHaveLength(1);
+    expect(after.seats[2].board.battlefield).toHaveLength(2);
+  });
+});
+
+describe("Syr Konrad, the Grim", () => {
+  it("another creature dying deals 1 damage to each opponent", () => {
+    const konrad = real("Syr Konrad, the Grim", "sk");
+    const s = session([seat("a", [konrad, bear("mine")]), seat("b", [])]);
+    const trigger = findCommonTriggersForPermanentDied(s, "a", bear("mine")).find((t) => t.effect.kind === "damage_each_opponent")!;
+    expect(trigger).toBeTruthy();
+    expect(resolveTriggerEffect(s, trigger).seats[1].life).toBe(39);
+  });
+});
+
+describe("Braids, Arisen Nightmare", () => {
+  it("does not hand out a free card at the end step", () => {
+    const braids = real("Braids, Arisen Nightmare", "br");
+    const a = seat("a", [braids]);
+    a.library = [bear("l1", { zone: "library" as const })];
+    a.zones.library = 1;
+    const s = session([a, seat("b", [])]);
+    const after = applyDeterministicPhaseTrigger(s, "a", braids, "end step");
+    expect((after ?? s).seats[0].board.hand).toHaveLength(0);
+  });
+});
