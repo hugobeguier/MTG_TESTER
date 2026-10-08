@@ -2684,3 +2684,9 @@ describe("sacrifice-for-effect abilities (Meren's engine)", () => {
     expect(milled.seats[1].board.graveyard).toHaveLength(5);
   });
 });
+
+describe("Cankerbloom with its real text", () => {
+  it("parses despite the Proliferate reminder text", () => {
+    expect(parseGenericSacrificeAbilities(real("Cankerbloom", "cb").oracleText).length).toBeGreaterThan(0);
+  });
+});

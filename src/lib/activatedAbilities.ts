@@ -236,7 +236,8 @@ const SACRIFICE_COUNT_PATTERN = /^(a|one|two|three|four|five|six|seven|eight|nin
 
 export function parseGenericSacrificeAbilities(oracleText: string): SacrificeAbility[] {
   const abilities: SacrificeAbility[] = [];
-  const clauses = mergeModalBulletClauses(oracleClauses(oracleText));
+  // Reminder text ("Proliferate. (Choose any number of permanents ...)") explains a keyword; it is never part of the ability's wording.
+  const clauses = mergeModalBulletClauses(oracleClauses(oracleText)).map((clause) => clause.replace(/\s*\([^)]*\)/g, "").trim());
 
   for (const clause of clauses) {
     const match = clause.match(SACRIFICE_CLAUSE_PATTERN);
