@@ -20294,6 +20294,14 @@ export function findCombatDamageToPlayerTriggers(
     const damageSubject = damageClause?.toLowerCase().match(/\b(?:when|whenever)\s+(.+?)\s+deals combat damage to a player/)?.[1]?.trim();
     const shortName = source.name.toLowerCase().split(" // ")[0].split(",")[0].trim();
     if (damageSubject && (/^this\b/.test(damageSubject) || damageSubject === source.name.toLowerCase() || damageSubject === shortName) && source.id !== dealingCard.id) continue;
+    // Old Gnawbone: "...deals combat damage to a player, create that many Treasure tokens." — the damage dealt is the creature's power here.
+    if (/\bcreate that many treasure tokens\b/i.test(source.oracleText) && /\bwhenever a creature you control deals combat damage to a player\b/i.test(source.oracleText)) {
+      const amount = Math.max(0, effectivePower(dealingCard));
+      if (amount > 0) {
+        triggers.push(makeCommonTrigger(dealingSeatId, seat.id, source, { kind: "create_tokens", tokens: [{ ...predefinedTokenSpec("Treasure"), count: amount }] }, `${source.name} triggers because ${dealingCard.name} dealt ${amount} combat damage to a player.`));
+      }
+      continue;
+    }
     const rawEffect = commonTriggerEffect(source.oracleText, "combat_damage_to_player");
     const effect = rawEffect && rawEffect.then?.kind === "seat_discards" && damagedSeatId ? { ...rawEffect, then: { ...rawEffect.then, seatId: damagedSeatId } } : rawEffect;
     if (!effect) {
@@ -21238,7 +21246,7 @@ export function commonTriggerEffect(
   // Triggered damage: "it deals X damage to any target, where X is the number of Dragons you control", "deals 4
   // damage to any target", "deals 7 damage to target creature ...". Previously no trigger kind modeled damage at all, so every
   // Dragon damage trigger was LLM-only or silently absent.
-  if (/\bdeals damage equal to its power to any target\b/.test(text)) return { kind: "context_power_damage", optional };
+  if (/\bdeals damage equal to (?:its|that creature's) power to any target\b/.test(text)) return { kind: "context_power_damage", optional };
   const damageEffect = parseRemovalEffect(text);
   if (damageEffect && (damageEffect.kind === "damage" || damageEffect.kind === "mass_damage")) return { kind: "damage_effect", effect: damageEffect, optional };
 

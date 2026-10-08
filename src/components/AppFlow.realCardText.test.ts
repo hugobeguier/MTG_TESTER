@@ -2608,3 +2608,27 @@ describe("Braids, Arisen Nightmare", () => {
     expect((after ?? s).seats[0].board.hand).toHaveLength(0);
   });
 });
+
+describe("Terror of the Peaks", () => {
+  it("another creature entering makes it deal damage equal to that creature's power", () => {
+    const terror = real("Terror of the Peaks", "tp");
+    const entering = bear("e", { power: "4", toughness: "4" });
+    const s = session([seat("a", [terror, entering], { kind: "human" }), seat("b", [])]);
+    const trigger = findCommonTriggersForPermanentEntered(s, "a", entering).find((t) => t.effect.kind === "context_power_damage");
+    expect(trigger).toBeTruthy();
+    const aimed = resolveTriggerEffect(s, { ...trigger!, effect: { ...trigger!.effect, chosenOption: "p:b" } } as NonNullable<typeof trigger>);
+    expect(aimed.seats[1].life).toBe(36);
+  });
+});
+
+describe("Old Gnawbone", () => {
+  it("a creature connecting for 3 makes 3 Treasures", () => {
+    const gnaw = real("Old Gnawbone", "og");
+    const attacker = bear("atk", { power: "3", toughness: "3" });
+    const s = session([seat("a", [gnaw, attacker]), seat("b", [])]);
+    const trigger = findCombatDamageToPlayerTriggers(s, "a", attacker, "b").find((t) => t.effect.kind === "create_tokens")!;
+    expect(trigger).toBeTruthy();
+    const after = resolveTriggerEffect(s, trigger);
+    expect(after.seats[0].board.battlefield.filter((c) => c.name === "Treasure")).toHaveLength(3);
+  });
+});
