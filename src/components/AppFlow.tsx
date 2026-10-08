@@ -311,6 +311,9 @@ type TriggerEffect = (
   | { kind: "damage_each_other_opponent"; amount: number }
   // "Exile all graveyards." (Farewell's last mode)
   | { kind: "exile_all_graveyards" }
+  // "Each opponent sacrifices a creature of their choice." (Butcher of Malakir, Dictate of Erebos, Grave Pact, Sheoldred): a human victim
+  // picks; includeSelf is "Each player sacrifices ..." (Accursed Marauder).
+  | { kind: "each_opponent_sacrifices"; filter: string; includeSelf?: boolean }
   // "Each player discards a card." / "Each player loses 1 life and draws a card." (Rankle)
   | { kind: "each_player_basics"; discard?: number; loseLife?: number; draw?: number }
   // "Reveal cards from the top of your library until you reveal a land card. Put that card onto the battlefield tapped and the rest
@@ -11433,7 +11436,7 @@ function canAttack(card: VisibleCard, controllerBattlefield?: VisibleCard[]) {
 // restriction ("Creatures you control can't block ...") is a different shape and isn't matched here.
 export function creatureCantBlock(card: VisibleCard): boolean {
   if (card.abilitiesStripped) return false;
-  const shortName = card.name.toLowerCase().split(",")[0].trim();
+  const shortName = card.name.toLowerCase().split(" // ")[0].split(",")[0].trim();
   return card.oracleText.split("\n").some((line) => {
     const clause = line.replace(/\([^)]*\)/g, "").trim().toLowerCase().replace(/\.$/, "");
     return clause === "this creature can't block" || clause === `${card.name.toLowerCase()} can't block` || clause === `${shortName} can't block`;
@@ -13248,6 +13251,7 @@ function matchesEachPlayerSacrificeFilter(card: VisibleCard, typeFilter: string)
     if (trimmed === "artifact") return card.typeLine.includes("Artifact");
     if (trimmed === "enchantment") return card.typeLine.includes("Enchantment");
     if (trimmed === "land") return card.typeLine.includes("Land");
+    if (trimmed === "nontoken creature") return card.typeLine.includes("Creature") && !card.token;
     if (trimmed === "permanent") return true;
     if (trimmed === "nonland permanent") return !card.typeLine.includes("Land");
     return false;
@@ -19678,7 +19682,7 @@ function resolveHumanUnblockedDamage(session: GameSession, choice: BlockChoiceSt
 // The "When this creature/Linvala enters, [if <condition>,] <effect>" clauses of a permanent's own text, each split into
 // its optional intervening-if condition and its effect.
 function selfEntersClauses(source: VisibleCard): Array<{ condition?: string; effectText: string }> {
-  const shortName = source.name.toLowerCase().split(",")[0].trim();
+  const shortName = source.name.toLowerCase().split(" // ")[0].split(",")[0].trim();
   const clauses: Array<{ condition?: string; effectText: string }> = [];
   for (const rawClause of oracleClauses(source.oracleText)) {
     const clause = rawClause.replace(/\([^)]*\)/g, "").trim();
@@ -20190,7 +20194,7 @@ export function findCombatDamageToPlayerTriggers(
     // own damage; "a creature you control" (Toski) applies to any. This used to fire for every creature.
     const damageClause = oracleClauses(source.oracleText).find((clause) => /\b(?:when|whenever)\b[^,.]*\bdeals combat damage to a player\b/i.test(clause));
     const damageSubject = damageClause?.toLowerCase().match(/\b(?:when|whenever)\s+(.+?)\s+deals combat damage to a player/)?.[1]?.trim();
-    const shortName = source.name.toLowerCase().split(",")[0].trim();
+    const shortName = source.name.toLowerCase().split(" // ")[0].split(",")[0].trim();
     if (damageSubject && (/^this\b/.test(damageSubject) || damageSubject === source.name.toLowerCase() || damageSubject === shortName) && source.id !== dealingCard.id) continue;
     const rawEffect = commonTriggerEffect(source.oracleText, "combat_damage_to_player");
     const effect = rawEffect && rawEffect.then?.kind === "seat_discards" && damagedSeatId ? { ...rawEffect, then: { ...rawEffect.then, seatId: damagedSeatId } } : rawEffect;
@@ -20671,6 +20675,8 @@ function deathTriggerApplies(source: VisibleCard, sourceSeatId: string, deadCard
   // entirely, silently falling through to the unqualified "creature ... dies" branch below, which
   // has no self-exclusion at all and let Grim Haruspex's own death satisfy its own "another creature"
   // trigger — the exact bug this fixes).
+  // Massacre Wurm: "Whenever a creature an opponent controls dies, ..." fires for every other seat's creatures, never the controller's own.
+  if (/\b(?:when|whenever)\b(?:(?!\.).){0,40}\bcreatures? an opponent controls dies\b/.test(text)) return deadSeatId !== sourceSeatId;
   if (/\b(?:when|whenever)\b(?:(?!\.).){0,60}\banother(?:\s+[a-z]+){0,2}\s+creature(?: you control)? dies\b/.test(text)) {
     if (!isAnother) return false;
     return text.includes("you control") ? underYourControl : true;
@@ -20743,6 +20749,14 @@ export function commonTriggerEffect(
       ...(eachPlayer[3] ? { draw: numberWordToInt(eachPlayer[3]) ?? 1 } : {})
     };
   }
+  // "Each opponent sacrifices a creature of their choice." (as a trigger's effect, after the "Whenever ..., " head)
+  const edictBody = text.replace(/\([^)]*\)/g, "").replace(/^(?:when|whenever|at the beginning)\b[^,]*,\s*/, "").trim();
+  // ("Each player sacrifices ..." is the cast-time resolver's, parseEachPlayerSacrificeEffect; matching it here too would sacrifice twice.)
+  const edict = edictBody.match(/^each (opponent|other player) sacrifices an? ((?:nontoken )?creature(?: or planeswalker)?)(?: of (?:their|his or her) choice)?\.?$/);
+  if (edict) return { kind: "each_opponent_sacrifices", filter: edict[2], ...(edict[1] === "player" ? { includeSelf: true } : {}) };
+  // Massacre Wurm: "Whenever a creature an opponent controls dies, that player loses 2 life." (the actor is the player whose creature died)
+  const thatPlayerLoses = mode === "died" ? edictBody.match(/^that player loses (\d+) life\.?$/) : null;
+  if (thatPlayerLoses) return { kind: "actor_loses_life", amount: Number.parseInt(thatPlayerLoses[1], 10) };
   if (/^exile all graveyards\.?$/.test(text.replace(/\([^)]*\)/g, "").trim())) return { kind: "exile_all_graveyards" };
   const otherOpponents = text.match(/^(?:this creature|it) deals (\d+) damage to each other opponent\.?$/);
   if (otherOpponents) return { kind: "damage_each_other_opponent", amount: Number.parseInt(otherOpponents[1], 10) };
@@ -22164,6 +22178,25 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
       })
     };
     return rulesEvent(reordered, owner.id, `${trigger.sourceCardName}: ${owner.name} reveals ${revealed.length + 1} card${revealed.length === 0 ? "" : "s"} and puts ${land.name} onto the battlefield tapped.`);
+  }
+  if (trigger.effect.kind === "each_opponent_sacrifices") {
+    const { filter, includeSelf } = trigger.effect;
+    const destructions: Array<{ seatId: string; cardId: string; message: string }> = [];
+    const humanChoices: Array<{ seatId: string; sourceCardId: string; sourceCardName: string; count: number; typeFilter: string }> = [];
+    for (const victim of session.seats) {
+      if (victim.hasLost || (victim.id === trigger.controllerSeatId && !includeSelf)) continue;
+      const candidates = victim.board.battlefield
+        .filter((card) => matchesEachPlayerSacrificeFilter(card, filter))
+        .sort((a, b) => Number(Boolean(b.token)) - Number(Boolean(a.token)) || effectivePower(a) + effectiveToughness(a) - (effectivePower(b) + effectiveToughness(b)));
+      if (candidates.length === 0) continue;
+      if (victim.kind === "human" && candidates.length > 1) {
+        humanChoices.push({ seatId: victim.id, sourceCardId: trigger.sourceCardId, sourceCardName: trigger.sourceCardName, count: 1, typeFilter: filter });
+        continue;
+      }
+      destructions.push({ seatId: victim.id, cardId: candidates[0].id, message: `${victim.name} sacrifices ${candidates[0].name} to ${trigger.sourceCardName}.` });
+    }
+    const sacrificed = destroyCreatures(session, destructions, "Rules action");
+    return humanChoices.length > 0 ? { ...sacrificed, pendingSacrificeChoices: [...(sacrificed.pendingSacrificeChoices ?? []), ...humanChoices] } : sacrificed;
   }
   if (trigger.effect.kind === "each_player_basics") {
     const { discard, loseLife, draw } = trigger.effect;

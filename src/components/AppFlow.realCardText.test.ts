@@ -2473,3 +2473,60 @@ describe("draw, then you may put a land onto the battlefield", () => {
     }
   });
 });
+
+describe("death watchers: edicts and life loss", () => {
+  const deathSession = (watcher: string, humanFoe = false) => {
+    const w = real(watcher, "w");
+    const mine = bear("mine");
+    const foe1 = bear("f1", { ownerSeatId: "b" });
+    const foe2 = bear("f2", { ownerSeatId: "b", power: "5", toughness: "5" });
+    const s = session([seat("a", [w, mine]), seat("b", [foe1, foe2], humanFoe ? { kind: "human" } : {})]);
+    return { s, mine, foe1, foe2 };
+  };
+
+  it("Butcher of Malakir, Dictate of Erebos and Grave Pact: my creature dying makes each opponent sacrifice", () => {
+    for (const name of ["Butcher of Malakir", "Dictate of Erebos", "Grave Pact"]) {
+      const { s, mine } = deathSession(name);
+      const triggers = findCommonTriggersForPermanentDied(s, "a", mine);
+      const edict = triggers.find((t) => t.effect.kind === "each_opponent_sacrifices");
+      expect(edict, name).toBeTruthy();
+      const after = resolveTriggerEffect(s, edict!);
+      expect(after.seats[1].board.battlefield.map((c) => c.id), name).toEqual(["f2"]);
+    }
+  });
+
+  it("an opponent that is a human is asked which creature to sacrifice", () => {
+    const { s, mine } = deathSession("Grave Pact", true);
+    const edict = findCommonTriggersForPermanentDied(s, "a", mine).find((t) => t.effect.kind === "each_opponent_sacrifices")!;
+    const after = resolveTriggerEffect(s, edict);
+    expect(after.seats[1].board.battlefield).toHaveLength(2);
+    expect(after.pendingSacrificeChoices).toEqual([expect.objectContaining({ seatId: "b", count: 1 })]);
+  });
+
+  it("Massacre Wurm: only an OPPONENT's creature dying costs that player 2 life", () => {
+    const { s, mine, foe1 } = deathSession("Massacre Wurm");
+    expect(findCommonTriggersForPermanentDied(s, "a", mine).filter((t) => t.effect.kind === "actor_loses_life")).toHaveLength(0);
+    const trigger = findCommonTriggersForPermanentDied(s, "b", foe1).find((t) => t.effect.kind === "actor_loses_life")!;
+    expect(trigger).toBeTruthy();
+    expect(resolveTriggerEffect(s, trigger).seats[1].life).toBe(38);
+  });
+});
+
+describe("edicts on entering", () => {
+  it("Sheoldred's enters clause reads as an edict on opponents, and a human victim is asked", () => {
+    const effect = commonTriggerEffect("When Sheoldred enters, each opponent sacrifices a nontoken creature or planeswalker of their choice.", "clause");
+    expect(effect).toMatchObject({ kind: "each_opponent_sacrifices", filter: "nontoken creature or planeswalker" });
+    const s = session([seat("a", [real("Sheoldred, Whispering One", "sh")]), seat("b", [bear("tok", { token: true }), bear("big", { power: "4", toughness: "4" }), bear("sm")], { kind: "human" })]);
+    const after = resolveTriggerEffect(s, { id: "t", type: "trigger", actorSeatId: "a", controllerSeatId: "a", sourceCardId: "sh", sourceCardName: "Sheoldred", triggerKind: "common", effect: effect!, message: "" } as never);
+    expect(after.pendingSacrificeChoices).toEqual([expect.objectContaining({ seatId: "b", typeFilter: "nontoken creature or planeswalker" })]);
+  });
+
+  it("Accursed Marauder: each player sacrifices a NONTOKEN creature (the filter used to match nothing)", async () => {
+    const { applyEachPlayerSacrificeEffect, parseEachPlayerSacrificeEffect } = await import("./AppFlow");
+    const marauder = real("Accursed Marauder", "am");
+    const effect = parseEachPlayerSacrificeEffect(marauder.oracleText)!;
+    const s = session([seat("a", [marauder, bear("tok", { token: true })]), seat("b", [bear("x1")])]);
+    const after = applyEachPlayerSacrificeEffect(s, "Accursed Marauder", effect).session;
+    expect(after.seats[1].board.battlefield).toHaveLength(0);
+  });
+});

@@ -53,7 +53,7 @@ function descriptorIsEvaluable(descriptor: string): boolean {
 
 function parsePart(rawPart: string, sourceName: string): SubjectPart | undefined {
   const part = rawPart.trim();
-  const shortName = sourceName.toLowerCase().split(",")[0].trim();
+  const shortName = sourceName.toLowerCase().split(" // ")[0].split(",")[0].trim();
   if (/^this\s+[a-z ]+$/.test(part) || part === sourceName.toLowerCase() || part === shortName) {
     return { self: true, another: false, descriptor: "", control: "any" };
   }
