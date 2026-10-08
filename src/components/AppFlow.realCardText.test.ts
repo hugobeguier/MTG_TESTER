@@ -2632,3 +2632,30 @@ describe("Old Gnawbone", () => {
     expect(after.seats[0].board.battlefield.filter((c) => c.name === "Treasure")).toHaveLength(3);
   });
 });
+
+describe("Extravagant Replication", () => {
+  it("at upkeep an agent copies its best nonland permanent", () => {
+    const rep = real("Extravagant Replication", "er");
+    const big = bear("big", { power: "6", toughness: "6", manaValue: 6 });
+    const s = session([seat("a", [rep, bear("small"), big, real("Sol Ring", "ring")]), seat("b", [])]);
+    const after = applyDeterministicPhaseTrigger(s, "a", rep, "upkeep step");
+    expect(after).toBeTruthy();
+    const names = after!.seats[0].board.battlefield.map((c) => c.name);
+    expect(names.filter((n) => n === "Bear big")).toHaveLength(2);
+  });
+});
+
+describe("Miirym, Sentinel Wyrm", () => {
+  it("another nontoken Dragon entering makes a non-legendary token copy", () => {
+    const miirym = real("Miirym, Sentinel Wyrm", "mi");
+    const dragon = real("The Ur-Dragon", "ud");
+    const s = session([seat("a", [miirym, dragon]), seat("b", [])]);
+    const trigger = findCommonTriggersForPermanentEntered(s, "a", dragon).find((t) => t.effect.kind === "copy_token")!;
+    expect(trigger).toBeTruthy();
+    const after = resolveTriggerEffect(s, trigger);
+    const copy = after.seats[0].board.battlefield.find((c) => c.token && c.name === "The Ur-Dragon")!;
+    expect(copy).toBeTruthy();
+    expect(copy.typeLine).not.toContain("Legendary");
+    expect(after.pendingEntries?.some((e) => e.card.id === copy.id)).toBe(true);
+  });
+});

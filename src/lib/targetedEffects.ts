@@ -12,7 +12,9 @@ export type TargetedVerb =
   | { kind: "untap" }
   | { kind: "life"; delta: number }
   | { kind: "draw"; amount: number }
-  | { kind: "discard"; amount: number };
+  | { kind: "discard"; amount: number }
+  // "Create a token that's a copy of another target nonland permanent you control." (Extravagant Replication)
+  | { kind: "copy_token" };
 
 export interface TargetedEffect {
   verb: TargetedVerb;
@@ -135,6 +137,13 @@ export function parseTargetedEffect(rawText: string): TargetedEffect | undefined
     }
   }
 
+  // "Create a token that's a copy of [another] target nonland permanent you control." — no "except ..." modifiers (those change what is copied).
+  const copy = text.match(/^create a token that'?s a copy of (another )?target ([a-z ,]+?)$/);
+  if (copy) {
+    const shape = permanentShape(copy[2]);
+    if (shape) return { verb: { kind: "copy_token" }, who: { kind: "permanent", ...shape, ...(copy[1] ? { another: true } : {}) } };
+  }
+
   // "Tap target creature."  /  "Untap target land."
   const tapping = text.match(/^(tap|untap) (up to one )?target ([a-z ,]+?)$/);
   if (tapping) {
@@ -167,7 +176,7 @@ export function targetedEffectSpec(effect: TargetedEffect, sourceCardId: string,
 export function targetedEffectIsBeneficial(effect: TargetedEffect): boolean {
   const verb = effect.verb;
   if (verb.kind === "add_counters") return !verb.counterKind.startsWith("-");
-  if (verb.kind === "gain_keywords" || verb.kind === "untap" || verb.kind === "draw") return true;
+  if (verb.kind === "gain_keywords" || verb.kind === "untap" || verb.kind === "draw" || verb.kind === "copy_token") return true;
   if (verb.kind === "pump") return verb.power >= 0 && verb.toughness >= 0;
   if (verb.kind === "life") return verb.delta > 0;
   return false;

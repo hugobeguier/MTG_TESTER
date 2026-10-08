@@ -183,7 +183,7 @@ type TriggerEffect = (
       alsoTap?: boolean;
       matcher?: string;
     }
-  | { kind: "copy_token"; scope: "self" | "context" }
+  | { kind: "copy_token"; scope: "self" | "context"; notLegendary?: boolean }
   | { kind: "draw_then_put_back"; drawAmount: number; putBackAmount: number }
   // Board-wide temporary pump/debuff off a triggered ability (Doomwake Giant's Constellation
   // "creatures your opponents control get -1/-1 until end of turn") — shares its shape with
@@ -2732,6 +2732,12 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
             return;
           }
         }
+      }
+      // "At the beginning of your upkeep, <one verb> target ..." (Extravagant Replication): a human aims it.
+      if (activeSeat.kind === "human") {
+        const phaseClause = phaseEffectText(sourceCard.oracleText, phase);
+        const aimed = phaseClause ? commonTriggerEffect(phaseClause, "clause", undefined, activeSeat) : undefined;
+        if (aimed?.kind === "targeted_effect" && maybeRequestTarget(activeSeat.id, sourceCard, targetedEffectSpec(aimed.effect, sourceCard.id, sourceCard.name), Boolean(aimed.optional), { kind: "targeted", effect: aimed.effect })) return;
       }
       // Decide synchronously against the current render's session (consistent with the same kind
       // of pre-check already used to skip the advisor for ETB triggers) — consultRulesAdvisor has
@@ -21197,6 +21203,8 @@ export function commonTriggerEffect(
   // doesn't model, so it's declined rather than guessed at; likewise "of target X" (needs generic
   // targeting this engine doesn't have) and "of that card/permanent" referring to something
   // established in an earlier, separate clause.
+  // Miirym, Sentinel Wyrm: "...create a token that's a copy of it, except the token isn't legendary."
+  if (/\bcreate a token that'?s a copy of it, except the token isn'?t legendary\b/.test(text)) return { kind: "copy_token", scope: "context", notLegendary: true, optional };
   const copyMatch = text.match(/\bcreate a token that'?s a copy of (it|itself|this (?:creature|artifact|enchantment|permanent|land|planeswalker))\b(?!,?\s*except)/);
   if (copyMatch) {
     return { kind: "copy_token", scope: copyMatch[1] === "it" || copyMatch[1] === "itself" ? "context" : "self", optional };
@@ -21410,11 +21418,11 @@ function createTokenCard(seatId: string, sourceCardId: string, spec: TokenSpec):
 // Types granted by a separate static ability (e.g. Secret Arcade) aren't copied either; they'll
 // apply fresh to the token on its own if it also matches that effect's scope, via the same
 // grantedTypes recompute every other permanent goes through.
-function createCopyTokenForSeat(session: GameSession, seatId: string, source: VisibleCard): { session: GameSession; token: VisibleCard } {
+function createCopyTokenForSeat(session: GameSession, seatId: string, source: VisibleCard, options: { notLegendary?: boolean } = {}): { session: GameSession; token: VisibleCard } {
   const token: VisibleCard = {
     id: `${seatId}-token-${crypto.randomUUID()}`,
     name: source.name,
-    typeLine: source.typeLine,
+    typeLine: options.notLegendary ? source.typeLine.replace(/\bLegendary\s+/, "") : source.typeLine,
     oracleText: source.oracleText,
     manaCost: source.manaCost,
     manaValue: source.manaValue,
@@ -21435,7 +21443,9 @@ function createCopyTokenForSeat(session: GameSession, seatId: string, source: Vi
       seat.id === seatId
         ? { ...seat, board: { ...seat.board, battlefield: [...seat.board.battlefield, token] }, zones: { ...seat.zones, battlefield: seat.zones.battlefield + 1 } }
         : seat
-    )
+    ),
+    // A token copy entering is an entry like any other: its own "enters" triggers (and other permanents' watchers) fire.
+    pendingEntries: [...(session.pendingEntries ?? []), { seatId, card: token }]
   };
   return { session: nextSession, token };
 }
@@ -22931,7 +22941,7 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
       sourceCard && hasOnceEachTurnLimiter(sourceCard.oracleText)
         ? { ...session, onceEachTurnEffectsUsed: [...(session.onceEachTurnEffectsUsed ?? []), onceKey] }
         : session;
-    const { session: copiedSession } = createCopyTokenForSeat(markedSession, trigger.controllerSeatId, copySource.card);
+    const { session: copiedSession } = createCopyTokenForSeat(markedSession, trigger.controllerSeatId, copySource.card, { notLegendary: trigger.effect.notLegendary });
     return {
       ...copiedSession,
       events: [
@@ -24013,7 +24023,8 @@ function pickTargetedEffectTarget(session: GameSession, controllerSeatId: string
     return victim ? { kind: "player", seatId: victim.seatId } : undefined;
   }
   const cards = legal.filter((entry): entry is Extract<typeof legal[number], { kind: "card" }> => entry.kind === "card");
-  const score = (entry: { card: VisibleCard }) => effectivePower(entry.card) + effectiveToughness(entry.card) + (entry.card.commander ? 3 : 0);
+  const score = (entry: { card: VisibleCard }) =>
+    effect.verb.kind === "copy_token" ? entry.card.manaValue * 2 + effectivePower(entry.card) : effectivePower(entry.card) + effectiveToughness(entry.card) + (entry.card.commander ? 3 : 0);
   const wanted = effect.verb.kind === "untap" ? cards.filter((entry) => entry.card.tapped) : effect.verb.kind === "tap" ? cards.filter((entry) => !entry.card.tapped) : cards;
   const side = wanted.filter((entry) => (beneficial ? entry.seatId === controllerSeatId : entry.seatId !== controllerSeatId));
   const best = [...side].sort((a, b) => score(b) - score(a))[0];
@@ -24034,6 +24045,11 @@ export function applyTargetedEffect(session: GameSession, controllerSeatId: stri
   if (target.kind === "card") {
     const targetCard = session.seats.find((seat) => seat.id === target.seatId)?.board.battlefield.find((card) => card.id === target.cardId);
     if (!targetCard) return rulesEvent(session, controllerSeatId, `${source.name}: the target is gone.`);
+    if (verb.kind === "copy_token") {
+      const copied = createCopyTokenForSeat(next, controllerSeatId, targetCard).session;
+      next = rulesEvent(copied, controllerSeatId, `${source.name}: creates a token that's a copy of ${targetCard.name}.`);
+      return next;
+    }
     const change = (card: VisibleCard): VisibleCard => {
       if (verb.kind === "add_counters") return applyCounterDelta(card, verb.counterKind, verb.amount);
       if (verb.kind === "gain_keywords") return { ...card, temporaryGrantedKeywords: [...(card.temporaryGrantedKeywords ?? []), ...verb.keywords], grantedKeywords: [...new Set([...(card.grantedKeywords ?? []), ...verb.keywords])] };
