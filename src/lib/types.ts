@@ -221,6 +221,8 @@ export interface VisibleCard {
   // recompute rather than surviving until clearTemporaryBuffs. See its read site's own comment.
   temporaryGrantedKeywords?: string[];
   attachedToId?: string;
+  // Animate Dead: the Aura that returned this creature. When that Aura leaves the battlefield, this creature is sacrificed.
+  reanimatedByAuraId?: string;
   // A card in a graveyard that another permanent let its controller cast this turn (Zul Ashur: "You may cast
   // target Zombie creature card from your graveyard this turn") — see graveyardCasting.ts.
   graveyardCastGrant?: { seatId: string; turn: number };

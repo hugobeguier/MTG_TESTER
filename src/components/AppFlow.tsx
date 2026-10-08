@@ -311,6 +311,9 @@ type TriggerEffect = (
   | { kind: "damage_each_other_opponent"; amount: number }
   // "Exile all graveyards." (Farewell's last mode)
   | { kind: "exile_all_graveyards" }
+  // Animate Dead and friends: "Return enchanted creature card to the battlefield under your control and attach this Aura to it."
+  // The creature card is chosen from any graveyard when the Aura enters (the engine has no "enchant a card in a graveyard" attachment).
+  | { kind: "aura_reanimate" }
   // Undying / persist: "When this creature dies, if it had no +1/+1 (-1/-1) counters on it, return it to the battlefield with one."
   | { kind: "undying_return"; counterKind: "+1/+1" | "-1/-1" }
   // "Each opponent sacrifices a creature of their choice." (Butcher of Malakir, Dictate of Erebos, Grave Pact, Sheoldred): a human victim
@@ -6639,6 +6642,13 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
           prompt: `${trigger.sourceCardName}: choose a nonland permanent card in your graveyard to return.`,
           zone: "graveyard",
           cards: (controller.board.graveyard ?? []).filter((card) => !isLandCard(card) && /Creature|Artifact|Enchantment|Planeswalker|Battle/.test(card.typeLine)).map((card) => ({ seatId: controller.id, cardId: card.id })),
+          picksNeeded: 1
+        };
+      case "aura_reanimate":
+        return {
+          prompt: `${trigger.sourceCardName}: choose a creature card in a graveyard to return to the battlefield under your control.`,
+          zone: "graveyard",
+          cards: session.seats.flatMap((other) => (other.board.graveyard ?? []).filter((card) => card.typeLine.includes("Creature")).map((card) => ({ seatId: other.id, cardId: card.id }))),
           picksNeeded: 1
         };
       case "exile_self_return_creature_to_hand":
@@ -14726,6 +14736,23 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
     next = { ...next, seats: next.seats.map((seat) => ({ ...seat, board: { ...seat.board, battlefield: seat.board.battlefield.map((card) => (card.colors.length > 0 && !card.abilitiesStripped && /^devoid\b/im.test(card.oracleText) ? { ...card, colors: [] } : card)) } })) };
     changed = true;
   }
+  // Animate Dead: "When this Aura leaves the battlefield, that creature's controller sacrifices it."
+  {
+    const auraIds = new Set(next.seats.flatMap((seat) => seat.board.battlefield.map((card) => card.id)));
+    const orphans = next.seats.flatMap((seat) =>
+      seat.board.battlefield
+        .filter((card) => card.reanimatedByAuraId && !auraIds.has(card.reanimatedByAuraId))
+        .map((card) => ({ seatId: seat.id, cardId: card.id, message: `${card.name} is sacrificed because its Aura left the battlefield.` }))
+    );
+    if (orphans.length > 0) {
+      next = destroyCreatures(
+        { ...next, seats: next.seats.map((seat) => ({ ...seat, board: { ...seat.board, battlefield: seat.board.battlefield.map((card) => (card.reanimatedByAuraId && !auraIds.has(card.reanimatedByAuraId) ? { ...card, reanimatedByAuraId: undefined } : card)) } })) },
+        orphans,
+        "Rules action"
+      );
+      changed = true;
+    }
+  }
   const afterLinked = returnLinkedExiles(next);
   if (afterLinked !== next) {
     next = afterLinked;
@@ -19705,6 +19732,11 @@ export function findCommonTriggersForPermanentEntered(session: GameSession, ente
 
   for (const seat of session.seats) {
     for (const source of seat.board.battlefield) {
+      // Animate Dead: an Aura that returns a creature card from a graveyard and attaches to it.
+      if (source.id === enteredPermanent.id && /\baura\b/i.test(source.typeLine) && /return enchanted creature card to the battlefield under your control and attach this aura to it/i.test(source.oracleText)) {
+        triggers.push(makeCommonTrigger(enteringSeatId, seat.id, source, { kind: "aura_reanimate" }, `${source.name} enters and returns a creature card from a graveyard.`, enteredPermanent.id));
+        continue;
+      }
       // "When this creature enters, choose two —" (Titan of Industry): the bullets are the modes.
       if (source.id === enteredPermanent.id) {
         const modalEtb = modalClauseTriggerEffect(source, /^when (?:this [a-z]+|[^,]+?) enters(?: the battlefield)?, choose (?:one or more|one or both|any number|up to (?:two|three)|one|two|three)\b.*[—-]\s*$/i);
@@ -22188,6 +22220,48 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
       })
     };
     return rulesEvent(reordered, owner.id, `${trigger.sourceCardName}: ${owner.name} reveals ${revealed.length + 1} card${revealed.length === 0 ? "" : "s"} and puts ${land.name} onto the battlefield tapped.`);
+  }
+  if (trigger.effect.kind === "aura_reanimate") {
+    const controllerId = trigger.controllerSeatId;
+    // The human's pick (a card id), else the best creature card in any graveyard.
+    let holderId: string | undefined;
+    let cardId: string | undefined;
+    if (trigger.effect.chosenOption) {
+      const holder = session.seats.find((other) => (other.board.graveyard ?? []).some((card) => card.id === trigger.effect.chosenOption));
+      if (holder) {
+        holderId = holder.id;
+        cardId = trigger.effect.chosenOption;
+      }
+    }
+    if (!cardId) {
+      const best = chooseReanimationTarget(session, controllerId, true, "creature");
+      if (best) {
+        holderId = best.seatId;
+        cardId = best.card.id;
+      }
+    }
+    if (!holderId || !cardId) return rulesEvent(session, controllerId, `${trigger.sourceCardName}: no creature card in any graveyard.`);
+    const moved = moveCardAcrossSeats(session, holderId, cardId, controllerId, "battlefield");
+    return rulesEvent(
+      {
+        ...moved.session,
+        seats: moved.session.seats.map((other) =>
+          other.id !== controllerId
+            ? other
+            : {
+                ...other,
+                board: {
+                  ...other.board,
+                  battlefield: other.board.battlefield.map((card) =>
+                    card.id === trigger.sourceCardId ? { ...card, attachedToId: cardId } : card.id === cardId ? { ...card, reanimatedByAuraId: trigger.sourceCardId } : card
+                  )
+                }
+              }
+        )
+      },
+      controllerId,
+      `${trigger.sourceCardName} returns a creature card from a graveyard and attaches to it.`
+    );
   }
   if (trigger.effect.kind === "undying_return") {
     const holder = session.seats.find((item) => (item.board.graveyard ?? []).some((card) => card.id === trigger.sourceCardId));

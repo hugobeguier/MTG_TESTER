@@ -2554,3 +2554,25 @@ describe("undying (Mikaeus, the Unhallowed)", () => {
     expect(findCommonTriggersForPermanentDied(back, "a", returned).filter((t) => t.effect.kind === "undying_return")).toHaveLength(0);
   });
 });
+
+describe("Animate Dead", () => {
+  it("returns a chosen creature card from a graveyard, attaches, shrinks it, and sacrifices it when the Aura leaves", () => {
+    const aura = real("Animate Dead", "ad", { zone: "battlefield" as const });
+    const a = seat("a", [aura]);
+    const b = seat("b", []);
+    b.board.graveyard = [bear("big", { zone: "graveyard" as const, power: "5", toughness: "5" }), bear("small", { zone: "graveyard" as const })];
+    const s = session([a, b]);
+    const [trigger] = findCommonTriggersForPermanentEntered(s, "a", aura).filter((t) => t.effect.kind === "aura_reanimate");
+    expect(trigger).toBeTruthy();
+    const after = resolveTriggerEffect(s, { ...trigger, effect: { ...trigger.effect, chosenOption: "small" } } as typeof trigger);
+    const mine = after.seats[0].board.battlefield;
+    expect(mine.map((c) => c.id).sort()).toEqual(["ad", "small"]);
+    expect(mine.find((c) => c.id === "ad")!.attachedToId).toBe("small");
+    const settled = runStateBasedActionsPass(after).session;
+    expect(settled.seats[0].board.battlefield.find((c) => c.id === "small")!.attachmentPowerBonus).toBe(-1);
+    // the Aura leaves: the creature is sacrificed
+    const without = { ...settled, seats: settled.seats.map((x) => (x.id === "a" ? { ...x, board: { ...x.board, battlefield: x.board.battlefield.filter((c) => c.id !== "ad") } } : x)) };
+    const gone = runStateBasedActionsPass(without).session;
+    expect(gone.seats[0].board.battlefield.map((c) => c.id)).not.toContain("small");
+  });
+});
