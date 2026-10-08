@@ -14,7 +14,9 @@ export type TargetedVerb =
   | { kind: "draw"; amount: number }
   | { kind: "discard"; amount: number }
   // "Create a token that's a copy of another target nonland permanent you control." (Extravagant Replication)
-  | { kind: "copy_token"; asArtifact?: boolean };
+  | { kind: "copy_token"; asArtifact?: boolean }
+  // "Target creature can't block this creature this turn." (Kozilek's Pathfinder): the target can't block the source for the turn.
+  | { kind: "cant_block_source" };
 
 export interface TargetedEffect {
   verb: TargetedVerb;
@@ -107,6 +109,18 @@ export function parseTargetedEffect(rawText: string): TargetedEffect | undefined
     }
   }
 
+  // "Target creature can't block this creature this turn."  /  "Target creature can't block this turn."  /  "Target creature can't be blocked this turn."
+  const cantBlockSource = text.match(/^target ([a-z ,]+?) can'?t block this creature this turn$/);
+  if (cantBlockSource) {
+    const shape = permanentShape(cantBlockSource[1]);
+    if (shape) return { verb: { kind: "cant_block_source" }, who: { kind: "permanent", ...shape } };
+  }
+  const evasion = text.match(/^target ([a-z ,]+?) can'?t (be blocked|block) this turn$/);
+  if (evasion) {
+    const shape = permanentShape(evasion[1]);
+    if (shape) return { verb: { kind: "gain_keywords", keywords: [evasion[2] === "block" ? "can't block" : "can't be blocked"] }, who: { kind: "permanent", ...shape } };
+  }
+
   // "Target creature you control gains haste until end of turn."  (also "and trample")
   const gains = text.match(/^(?:until end of turn, )?target ([a-z ,]+?) gains ([a-z ,]+?)(?: until end of turn)?$/);
   if (gains) {
@@ -177,6 +191,8 @@ export function targetedEffectSpec(effect: TargetedEffect, sourceCardId: string,
 export function targetedEffectIsBeneficial(effect: TargetedEffect): boolean {
   const verb = effect.verb;
   if (verb.kind === "add_counters") return !verb.counterKind.startsWith("-");
+  if (verb.kind === "gain_keywords" && verb.keywords.includes("can't block")) return false;
+  if (verb.kind === "cant_block_source") return false;
   if (verb.kind === "gain_keywords" || verb.kind === "untap" || verb.kind === "draw" || verb.kind === "copy_token") return true;
   if (verb.kind === "pump") return verb.power >= 0 && verb.toughness >= 0;
   if (verb.kind === "life") return verb.delta > 0;

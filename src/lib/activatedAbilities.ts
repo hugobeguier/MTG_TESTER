@@ -234,12 +234,19 @@ const SACRIFICE_CLAUSE_PATTERN =
 
 const SACRIFICE_COUNT_PATTERN = /^(a|one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+creatures$/i;
 
+// "Leap of Faith — {3}: Target creature gains flying until end of turn." / "Max speed — {T}: ...": an ability word is only a label for the
+// ability that follows it, so the ability parsers read the clause without it.
+export function stripAbilityWordPrefix(clause: string): string {
+  return clause.replace(/^[A-Z][A-Za-z' ]{2,30} — (?=\{)/, "");
+}
+
 export function parseGenericSacrificeAbilities(oracleText: string): SacrificeAbility[] {
   const abilities: SacrificeAbility[] = [];
   // Reminder text ("Proliferate. (Choose any number of permanents ...)") explains a keyword; it is never part of the ability's wording.
   const clauses = mergeModalBulletClauses(oracleClauses(oracleText)).map((clause) => clause.replace(/\s*\([^)]*\)/g, "").trim());
 
-  for (const clause of clauses) {
+  for (const rawClause of clauses) {
+    const clause = stripAbilityWordPrefix(rawClause);
     const match = clause.match(SACRIFICE_CLAUSE_PATTERN);
     if (!match) continue;
 
@@ -377,7 +384,8 @@ export function parseGenericTapAbilities(oracleText: string): GenericTapAbility[
     .map((line) => line.trim())
     .filter(Boolean);
 
-  for (const clause of clauses) {
+  for (const rawClause of clauses) {
+    const clause = stripAbilityWordPrefix(rawClause);
     // Sacrifice-cost tap abilities are parseGenericSacrificeAbilities's shape, not this one.
     if (/\bsacrifice\b/i.test(clause)) continue;
     // "Tap three untapped Zombies you control: You draw a card and lose 1 life." (Cryptbreaker)
@@ -498,7 +506,8 @@ export function parseSelfUntapAbilities(oracleText: string): SelfUntapAbility[] 
     .map((line) => line.trim())
     .filter(Boolean);
 
-  for (const clause of clauses) {
+  for (const rawClause of clauses) {
+    const clause = stripAbilityWordPrefix(rawClause);
     if (/\{t\}/i.test(clause)) continue;
     const match = clause.match(SELF_UNTAP_CLAUSE_PATTERN);
     if (!match) continue;
@@ -606,7 +615,8 @@ export function parseGenericManaAbilities(oracleText: string): GenericManaAbilit
     .map((line) => line.trim())
     .filter(Boolean);
 
-  for (const clause of clauses) {
+  for (const rawClause of clauses) {
+    const clause = stripAbilityWordPrefix(rawClause);
     if (/\{[tx]\}/i.test(clause) || /\bsacrifice\b/i.test(clause)) continue;
     const match = clause.match(GENERIC_MANA_CLAUSE_PATTERN);
     if (!match) continue;

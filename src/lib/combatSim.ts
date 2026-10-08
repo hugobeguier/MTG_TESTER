@@ -110,6 +110,10 @@ export function hasMenace(card: CardLike) {
 // menace attacker "has a potential blocker" and hold back an attack the engine will actually just
 // wave through unblocked.
 export function canLegallyBlock(attacker: CardLike, blocker: CardLike, defenderBoard?: CardLike[]): boolean {
+  // Until-end-of-turn restrictions from "Target creature can't block (this creature) / can't be blocked this turn." effects.
+  const attackerTemporary = (attacker as { temporaryGrantedKeywords?: string[] }).temporaryGrantedKeywords;
+  const blockerTemporary = (blocker as { temporaryGrantedKeywords?: string[] }).temporaryGrantedKeywords;
+  if (attackerTemporary?.includes("can't be blocked") || blockerTemporary?.includes("can't block") || blockerTemporary?.includes("can't block:" + attacker.id)) return false;
   if (hasMenace(attacker)) return false;
   if (landwalkEvades(attacker as never, defenderBoard as never)) return false;
   if (canBlockOnlyFliers(blocker as never) && !hasFlying(attacker)) return false;

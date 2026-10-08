@@ -2908,3 +2908,27 @@ describe("delayed upkeep draws", () => {
     expect(deterministicRuleWorkflow(input("Ponder"))?.drawCountAfter).toBe(1);
   });
 });
+
+describe("can't block / can't be blocked effects and ability words", () => {
+  it("Kozilek's Pathfinder stops the chosen creature blocking it; Elvenking's Harper-style evasion and 'can't block' are recorded for the turn", async () => {
+    const { canLegallyBlock } = await import("@/lib/combatSim");
+    const effect = parseTargetedEffect("Target creature can't block this creature this turn.")!;
+    expect(effect.verb.kind).toBe("cant_block_source");
+    const pathfinder = real("Kozilek's Pathfinder", "kp");
+    const blocker = bear("blk");
+    const s = session([seat("a", [pathfinder]), seat("b", [blocker])]);
+    const after = applyTargetedEffect(s, "a", pathfinder, effect, { kind: "card", seatId: "b", cardId: "blk" });
+    const marked = after.seats[1].board.battlefield[0];
+    expect(canLegallyBlock(pathfinder as never, marked as never)).toBe(false);
+    expect(canLegallyBlock(pathfinder as never, blocker as never)).toBe(true);
+    const cantBlock = parseTargetedEffect("Target creature can't block this turn.")!;
+    expect(cantBlock.verb).toEqual({ kind: "gain_keywords", keywords: ["can't block"] });
+    const unblockable = parseTargetedEffect("Target creature can't be blocked this turn.")!;
+    expect(unblockable.verb).toEqual({ kind: "gain_keywords", keywords: ["can't be blocked"] });
+  });
+
+  it("an ability word before a cost is ignored: Towering Viewpoint and Amonkhet Raceway have their abilities", () => {
+    expect(parseGenericManaAbilities(real("Towering Viewpoint", "tv").oracleText).length).toBeGreaterThan(0);
+    expect(parseGenericTapAbilities(real("Amonkhet Raceway", "ar").oracleText).length).toBeGreaterThan(0);
+  });
+});

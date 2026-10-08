@@ -11632,6 +11632,8 @@ function canAttack(card: VisibleCard, controllerBattlefield?: VisibleCard[]) {
 // creature's OWN restriction, named by "this creature", its full name or its short name. A group
 // restriction ("Creatures you control can't block ...") is a different shape and isn't matched here.
 export function creatureCantBlock(card: VisibleCard): boolean {
+  // "Target creature can't block this turn." is recorded as a temporary pseudo-keyword, like "can't be blocked".
+  if (card.temporaryGrantedKeywords?.includes("can't block")) return true;
   if (card.abilitiesStripped) return false;
   const shortName = card.name.toLowerCase().split(" // ")[0].split(",")[0].trim();
   return card.oracleText.split("\n").some((line) => {
@@ -11660,6 +11662,8 @@ function canBlock(card: VisibleCard, attacker?: VisibleCard, controllerBattlefie
   if (creatureCantBlock(card)) return false;
   if (!attackBlockRestrictionMet(card, controllerBattlefield)) return false;
   if (attacker && attackerEvadesBlocker(attacker, card)) return false;
+  // "Target creature can't block this creature this turn." (Kozilek's Pathfinder)
+  if (attacker && card.temporaryGrantedKeywords?.includes("can't block:" + attacker.id)) return false;
   if (attacker && hasFlying(attacker) && !hasFlying(card) && !hasReach(card)) return false;
   // Landwalk: unblockable while the defending player controls a land of that type; "can block only creatures with flying".
   if (attacker && landwalkEvades(attacker, controllerBattlefield)) return false;
@@ -24326,6 +24330,7 @@ export function applyTargetedEffect(session: GameSession, controllerSeatId: stri
       return next;
     }
     const change = (card: VisibleCard): VisibleCard => {
+      if (verb.kind === "cant_block_source") return { ...card, temporaryGrantedKeywords: [...(card.temporaryGrantedKeywords ?? []), "can't block:" + source.id] };
       if (verb.kind === "add_counters") return applyCounterDelta(card, verb.counterKind, verb.amount);
       if (verb.kind === "gain_keywords") return { ...card, temporaryGrantedKeywords: [...(card.temporaryGrantedKeywords ?? []), ...verb.keywords], grantedKeywords: [...new Set([...(card.grantedKeywords ?? []), ...verb.keywords])] };
       if (verb.kind === "pump")
