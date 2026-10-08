@@ -7,6 +7,7 @@ export interface LibraryCastPermission {
 interface CastableShape {
   typeLine: string;
   power?: string;
+  colors?: string[];
 }
 
 interface PermissionSource {
@@ -19,6 +20,13 @@ export function libraryTopCastPermission(card: CastableShape, battlefield: Permi
   for (const source of battlefield) {
     if (source.abilitiesStripped) continue;
     for (const line of source.oracleText.split("\n")) {
+      // "You may play lands and cast spells from the top of your library." (One with the Multiverse): any spell. (Lands are not offered here.)
+      if (/^you may (?:play lands and )?cast spells from the top of your library\b/i.test(line)) return { grantsHaste: false };
+      // "You may cast artifact spells and colorless spells from the top of your library." (Mystic Forge)
+      if (/^you may cast artifact spells and colorless spells from the top of your library\b/i.test(line)) {
+        if (card.typeLine.includes("Artifact") || !card.colors || card.colors.length === 0) return { grantsHaste: false };
+        continue;
+      }
       const match = line.match(/^you may cast ([a-z]+) spells(?: with power (\d+) or greater)? from the top of your library\./i);
       if (!match) continue;
       const type = match[1].toLowerCase();

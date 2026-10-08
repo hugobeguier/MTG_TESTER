@@ -2881,3 +2881,16 @@ describe("Flawless Maneuver", () => {
     expect(adjustedCastingCost(without, spell, spell.manaValue, "hand", "a", [without])).toBe(spell.manaValue);
   });
 });
+
+describe("casting from the top of the library", () => {
+  it("One with the Multiverse allows any spell; Mystic Forge only artifact or colorless spells", async () => {
+    const { libraryTopCastPermission } = await import("@/lib/libraryCasting");
+    const multiverse = real("One with the Multiverse", "om");
+    const forge = real("Mystic Forge", "mf");
+    const colored = bear("c");
+    const ring = real("Sol Ring", "ring");
+    expect(libraryTopCastPermission(colored, [multiverse])).toBeTruthy();
+    expect(libraryTopCastPermission(colored, [forge])).toBeUndefined();
+    expect(libraryTopCastPermission(ring, [forge])).toBeTruthy();
+  });
+});
