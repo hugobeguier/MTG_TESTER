@@ -288,3 +288,23 @@ export async function requestCommanderDeck(input: {
     notes: parsed.notes
   };
 }
+
+// A plain conversational reply (no JSON schema): used by the debug chat where the human asks an agent why it made a decision.
+export async function chatWithAgent(input: { model?: string; system: string; messages: Array<{ role: "user" | "assistant"; content: string }>; baseUrl?: string }): Promise<string> {
+  const baseUrl = input.baseUrl ?? process.env.OLLAMA_BASE_URL ?? "http://localhost:11434";
+  const model = input.model ?? process.env.OLLAMA_MODEL ?? "qwen2.5:7b-instruct-q5_K_M";
+  const response = await ollamaFetch(
+    `${baseUrl}/api/chat`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model, stream: false, messages: [{ role: "system", content: input.system }, ...input.messages] })
+    },
+    OLLAMA_TIMEOUT_MS
+  );
+  if (!response.ok) throw new Error(`Ollama chat request failed with HTTP ${response.status}.`);
+  const body = await response.json();
+  const content = body.message?.content;
+  if (typeof content !== "string") throw new Error("Ollama response did not include message.content.");
+  return content.trim();
+}

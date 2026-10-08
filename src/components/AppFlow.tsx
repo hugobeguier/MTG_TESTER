@@ -72,6 +72,7 @@ import { matchWatcherSubject } from "@/lib/triggerWatchers";
 import { graveyardCastPermission } from "@/lib/graveyardCasting";
 import { libraryTopCastPermission } from "@/lib/libraryCasting";
 import { bushidoAmount, canBlockAdditionalCreature, canBlockOnlyFliers, cantUntap, landwalkEvades, mustAttackEachCombat } from "@/lib/combatRestrictions";
+import { summarizeSituation } from "@/lib/agentLessons";
 import { UNDERCITY_ROOM_NAMES, UNDERCITY_ROOM_TEXT, isUndercityRoom, nextUndercityRooms, preferredUndercityRoom, type UndercityRoom } from "@/lib/undercity";
 import { parseCycling } from "@/lib/cycling";
 import { parseTapCreaturesAltCost } from "@/lib/altCosts";
@@ -2885,6 +2886,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     // entirely rather than spending a model call on a forced play (e.g. only pass_priority is legal).
     if (legalActions.length === 1) {
       const only = legalActions[0];
+      agentDecisionInfo.current[seat.id] = { situation: summarizeSituation({ purpose, phase: (sessionOverride ?? session).phase, turn: (sessionOverride ?? session).turn, ...buildAgentDecisionContext(sessionOverride ?? session, seat, {}) }), options: [{ id: only.id, label: only.label, score: 0 }], chosenId: only.id, turn: (sessionOverride ?? session).turn, phase: (sessionOverride ?? session).phase };
       return {
         actionType: only.actionType,
         legalActionId: only.id,
@@ -2902,14 +2904,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     // for why a forced single-legal-action step above must not reach this.
     const previousStatedPlan = agentStatedPlans.current[seat.id];
     delete agentStatedPlans.current[seat.id];
-    const response = await fetch("/api/agents/action", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      signal: AbortSignal.timeout(AGENT_REQUEST_TIMEOUT_MS),
-      body: JSON.stringify({
-        agentName: seat.agentName ?? seat.name,
-        seatName: seat.name,
-        context: buildAgentDecisionContext(activeSession, seat, {
+    const decisionContext = buildAgentDecisionContext(activeSession, seat, {
           purpose,
           activeSeatId,
           prioritySeatId,
@@ -2919,7 +2914,15 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
           stack: stackActions.map((item) => pendingActionSummary(activeSession, item)),
           heuristicHint: purpose === "opening_hand_mulligan" ? evaluateOpeningHand(seat) : undefined,
           previousStatedPlan: previousStatedPlan || undefined
-        }),
+        });
+    const response = await fetch("/api/agents/action", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      signal: AbortSignal.timeout(AGENT_REQUEST_TIMEOUT_MS),
+      body: JSON.stringify({
+        agentName: seat.agentName ?? seat.name,
+        seatName: seat.name,
+        context: decisionContext,
         legalActions
       })
     });
@@ -2927,6 +2930,15 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       source: "ollama" | "fallback" | "invalid";
       message?: string;
       action?: AgentAction;
+      options?: Array<{ id: string; label: string; score: number; reasons?: string[] }>;
+    };
+    // Kept for the 🧠 chat: what this decision looked like, so the human can ask about it afterwards.
+    agentDecisionInfo.current[seat.id] = {
+      situation: summarizeSituation(decisionContext),
+      options: result.options ?? legalActions.slice(0, 8).map((candidate) => ({ id: candidate.id, label: candidate.label, score: 0 })),
+      chosenId: result.action?.legalActionId,
+      turn: activeSession.turn,
+      phase: activeSession.phase
     };
     if (result.message && result.source !== "ollama") {
       addEvent(`${seat.name} agent decision fallback: ${result.message}`, seat.id, "Agent decision");
@@ -8094,8 +8106,12 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     setAgentThinking((current) => ({ ...current, [seatId]: thinking }));
   }
 
+  // The situation and scored options of each agent's latest decision (see requestAgentDecision), attached to its reasoning for the 🧠 chat.
+  const agentDecisionInfo = useRef<Record<string, Pick<AgentReasoning, "situation" | "options" | "chosenId" | "turn" | "phase">>>({});
+
   function recordAgentReasoning(seatId: string, reasoning: AgentReasoning) {
-    setAgentReasoning((current) => ({ ...current, [seatId]: reasoning }));
+    const info = agentDecisionInfo.current[seatId];
+    setAgentReasoning((current) => ({ ...current, [seatId]: info ? { ...info, ...reasoning } : reasoning }));
   }
 
   function queueCommonTriggers(triggers: Array<Extract<PendingAction, { type: "trigger" }>>) {

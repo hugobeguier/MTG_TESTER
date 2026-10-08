@@ -403,6 +403,12 @@ export interface AgentReasoning {
   // for a small local model with no proportional benefit (those choices are already fairly
   // mechanical). Undefined for deterministic-fallback decisions and for purposes that don't ask for it.
   deliberation?: string;
+  // What the agent was looking at and choosing between (for the 🧠 chat): a plain-text board summary, the top scored options, the chosen id.
+  situation?: string;
+  options?: Array<{ id: string; label: string; score: number; reasons?: string[] }>;
+  chosenId?: string;
+  turn?: number;
+  phase?: string;
 }
 
 export interface GameSession {

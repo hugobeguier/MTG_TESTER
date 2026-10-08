@@ -14,6 +14,7 @@ import {
 } from "react";
 import * as THREE from "three";
 import type { AgentReasoning, GameSession, PlayerSeat, VisibleCard } from "@/lib/types";
+import type { AgentLesson } from "@/lib/agentLessons";
 import { effectivePower, effectiveToughness } from "@/lib/counters";
 import {
   parseGenericManaAbilities,
@@ -2930,9 +2931,94 @@ function AgentReasoningModal({
   onClose?: () => void;
 }) {
   const seatName = seat?.name ?? "Agent";
+  const agentName = seat?.agentName ?? seat?.name ?? "agent";
+  // Debug chat: ask the agent why it did something, and tell it what you would have done. Messages marked as lessons are saved on disk and
+  // fed back into every agent's prompt in later games.
+  const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string; saved?: boolean }>>([]);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | undefined>();
+  const [lessons, setLessons] = useState<AgentLesson[]>([]);
+  const [showLessons, setShowLessons] = useState(false);
+
+  useEffect(() => {
+    void fetch("/api/agents/lessons")
+      .then((response) => response.json())
+      .then((data: { lessons?: AgentLesson[] }) => setLessons(data.lessons ?? []))
+      .catch(() => undefined);
+  }, []);
+
+  // A new decision starts a new conversation.
+  useEffect(() => {
+    setMessages([]);
+    setError(undefined);
+  }, [reasoning?.at, seat?.id]);
+
+  async function ask() {
+    const text = draft.trim();
+    if (!text || !reasoning || busy) return;
+    const next = [...messages, { role: "user" as const, content: text }];
+    setMessages(next);
+    setDraft("");
+    setBusy(true);
+    setError(undefined);
+    try {
+      const response = await fetch("/api/agents/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          agentName,
+          seatName,
+          decision: {
+            purpose: reasoning.purpose,
+            turn: reasoning.turn,
+            phase: reasoning.phase,
+            situation: reasoning.situation ?? "(the board was not recorded for this decision)",
+            options: reasoning.options ?? [],
+            chosenId: reasoning.chosenId,
+            chosenLabel: reasoning.label,
+            reason: reasoning.reason,
+            deliberation: reasoning.deliberation
+          },
+          messages: next.map(({ role, content }) => ({ role, content }))
+        })
+      });
+      const data = (await response.json()) as { reply?: string; error?: string };
+      if (!response.ok || !data.reply) throw new Error(data.error ?? "The agent did not answer.");
+      setMessages([...next, { role: "assistant", content: data.reply }]);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The agent did not answer.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveLesson(index: number) {
+    const message = messages[index];
+    if (!message || !reasoning || message.role !== "user") return;
+    try {
+      const response = await fetch("/api/agents/lessons", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ agentName, purpose: reasoning.purpose, situation: reasoning.situation ?? "", chose: reasoning.label, advice: message.content })
+      });
+      const data = (await response.json()) as { lessons?: AgentLesson[] };
+      setLessons(data.lessons ?? lessons);
+      setMessages((current) => current.map((entry, position) => (position === index ? { ...entry, saved: true } : entry)));
+    } catch {
+      setError("Could not save the lesson.");
+    }
+  }
+
+  async function removeLesson(id: string) {
+    const response = await fetch("/api/agents/lessons?id=" + encodeURIComponent(id), { method: "DELETE" });
+    const data = (await response.json()) as { lessons?: AgentLesson[] };
+    setLessons(data.lessons ?? []);
+  }
+
   return (
     <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label={`${seatName} thinking`} onClick={onClose}>
-      <article className="mana-choice-modal" onClick={(event) => event.stopPropagation()}>
+      <article className="mana-choice-modal" style={{ maxHeight: "90vh", overflowY: "auto", minWidth: "min(640px, 94vw)" }} onClick={(event) => event.stopPropagation()}>
         <header>
           <p className="eyebrow">🧠 Thinking</p>
           <h2>{seatName}</h2>
@@ -2950,10 +3036,75 @@ function AgentReasoningModal({
             ) : null}
             <p className="agent-reasoning-label">Chose: {reasoning.label}</p>
             <p>{reasoning.reason || "No reasoning was given for this decision."}</p>
+            {reasoning.options && reasoning.options.length > 1 ? (
+              <details>
+                <summary>Options it was choosing between ({reasoning.options.length})</summary>
+                <ul style={{ margin: "6px 0", paddingLeft: 18 }}>
+                  {reasoning.options.map((option) => (
+                    <li key={option.id} style={{ fontWeight: option.id === reasoning.chosenId ? 700 : 400 }}>
+                      {option.label} — score {option.score}
+                      {option.id === reasoning.chosenId ? " (chosen)" : ""}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            ) : null}
+            <section aria-label="Chat with this agent" style={{ marginTop: 12, borderTop: "1px solid rgba(215,179,90,0.35)", paddingTop: 10 }}>
+              <p className="eyebrow">Ask {seatName} about this decision</p>
+              {messages.length === 0 ? <p style={{ opacity: 0.75 }}>Ask why it did this, or say what you would have done. Use "Save as lesson" on your own messages to teach the agents for future games.</p> : null}
+              {messages.map((message, index) => (
+                <div key={index} style={{ margin: "6px 0", padding: "6px 8px", borderRadius: 8, background: message.role === "user" ? "rgba(86,140,214,0.18)" : "rgba(255,255,255,0.06)" }}>
+                  <strong>{message.role === "user" ? "You" : seatName}:</strong> {message.content}
+                  {message.role === "user" ? (
+                    <div>
+                      <button type="button" disabled={message.saved} onClick={() => void saveLesson(index)}>
+                        {message.saved ? "Saved as lesson ✓" : "Save as lesson"}
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              ))}
+              {busy ? <p>{seatName} is thinking…</p> : null}
+              {error ? <p style={{ color: "#e07a6a" }}>{error}</p> : null}
+              <textarea
+                value={draft}
+                rows={2}
+                placeholder="Why did you…? / I would have… because…"
+                style={{ width: "100%", boxSizing: "border-box" }}
+                onChange={(event) => setDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    void ask();
+                  }
+                }}
+              />
+              <div className="modal-actions">
+                <button className="inspector-action" type="button" disabled={busy || !draft.trim()} onClick={() => void ask()}>
+                  Send
+                </button>
+              </div>
+            </section>
           </>
         ) : (
           <p>No decision yet this game.</p>
         )}
+        <section aria-label="Saved lessons" style={{ marginTop: 10 }}>
+          <button type="button" onClick={() => setShowLessons((current) => !current)}>
+            {showLessons ? "Hide" : "Show"} saved lessons ({lessons.length})
+          </button>
+          {showLessons ? (
+            <ul style={{ margin: "6px 0", paddingLeft: 18 }}>
+              {lessons.length === 0 ? <li>No lessons saved yet.</li> : null}
+              {lessons.map((lesson) => (
+                <li key={lesson.id} style={{ marginBottom: 6 }}>
+                  <em>{lesson.agentName} · {lesson.chose}:</em> {lesson.advice}{" "}
+                  <button type="button" onClick={() => void removeLesson(lesson.id)}>Delete</button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </section>
         <div className="modal-actions">
           <button className="inspector-action" type="button" onClick={onClose}>
             Close

@@ -3,6 +3,8 @@ import { z } from "zod";
 import { agentModelName, requestAgentAction } from "@/lib/ollama";
 import { knowledgeFilesForPurpose, loadKnowledgePack } from "@/lib/knowledge";
 import { fallbackAction, scoreLegalActions, type ScoringContext } from "@/lib/actionScoring";
+import { formatLessonsForPrompt } from "@/lib/agentLessons";
+import { readLessons } from "@/lib/agentLessonStore";
 
 const LegalActionSchema = z.object({
   id: z.string().min(1),
@@ -43,6 +45,8 @@ export async function POST(request: NextRequest) {
   const legalActionIds = new Set(input.legalActions.map((action) => action.id));
   const scoringContext = toScoringContext(input.context);
   const scoredActions = scoreLegalActions(input.legalActions, scoringContext);
+  // What the human sees in the 🧠 chat: the top candidates and their heuristic scores.
+  const options = scoredActions.slice(0, 8).map((scored) => ({ id: scored.id, label: scored.label, score: scored.score, reasons: scored.reasons?.slice(0, 3) }));
 
   try {
     const knowledge = await loadKnowledgePack(knowledgeFilesForPurpose(scoringContext.purpose));
@@ -51,8 +55,10 @@ export async function POST(request: NextRequest) {
     // for a full internal argument there would slow the game down for little benefit with a small
     // local model.
     const wantsDeliberation = scoringContext.purpose === "main_phase" || scoringContext.purpose === "priority_response";
+    const lessonText = formatLessonsForPrompt(await readLessons(), scoringContext.purpose);
     const system = [
       knowledge,
+      lessonText,
       [
         "You are a Magic: The Gathering Commander player controlling one agent seat.",
         "Choose exactly one legal action from the supplied legalActions list.",
@@ -153,6 +159,7 @@ export async function POST(request: NextRequest) {
     if (!action.legalActionId || !legalActionIds.has(action.legalActionId)) {
       return NextResponse.json({
         source: "invalid",
+        options,
         message: "Agent chose an action that was not in the legal action list.",
         action: fallbackAction(scoredActions, "Invalid LLM action; using fallback.")
       });
@@ -168,12 +175,13 @@ export async function POST(request: NextRequest) {
     if (!matchedLegalAction || matchedLegalAction.actionType !== action.actionType) {
       return NextResponse.json({
         source: "invalid",
+        options,
         message: "Agent's legalActionId did not match its stated actionType; using fallback.",
         action: fallbackAction(scoredActions, "Mismatched action id/type; using fallback.")
       });
     }
 
-    return NextResponse.json({ source: "ollama", action });
+    return NextResponse.json({ source: "ollama", action, options });
   } catch (error) {
     const message =
       error instanceof Error
@@ -181,6 +189,7 @@ export async function POST(request: NextRequest) {
         : "Ollama is unavailable. Used deterministic fallback.";
     return NextResponse.json({
       source: "fallback",
+      options,
       message,
       action: fallbackAction(scoredActions, "Ollama unavailable; using deterministic fallback.")
     });
