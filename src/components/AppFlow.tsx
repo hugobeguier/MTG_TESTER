@@ -73,6 +73,7 @@ import { graveyardCastPermission } from "@/lib/graveyardCasting";
 import { libraryTopCastPermission } from "@/lib/libraryCasting";
 import { bushidoAmount, canBlockAdditionalCreature, canBlockOnlyFliers, cantUntap, landwalkEvades, mustAttackEachCombat } from "@/lib/combatRestrictions";
 import { summarizeSituation } from "@/lib/agentLessons";
+import { parseTargetedEffect, targetedEffectIsBeneficial, targetedEffectSpec, type TargetedEffect } from "@/lib/targetedEffects";
 import { UNDERCITY_ROOM_NAMES, UNDERCITY_ROOM_TEXT, isUndercityRoom, nextUndercityRooms, preferredUndercityRoom, type UndercityRoom } from "@/lib/undercity";
 import { parseCycling } from "@/lib/cycling";
 import { parseTapCreaturesAltCost } from "@/lib/altCosts";
@@ -326,6 +327,8 @@ type TriggerEffect = (
   | { kind: "renown"; amount: number }
   // The human's echo decision (pay it, or sacrifice the permanent).
   | { kind: "echo_choice"; costText: string }
+  // A single verb on a target you choose: "put a +1/+1 counter on target creature you control", "target player loses 1 life and you gain 1 life".
+  | { kind: "targeted_effect"; effect: TargetedEffect }
   // "Whenever a creature you control with flying enters, it gains haste until end of turn." (Dragon Tempest): the creature that entered gains them.
   | { kind: "context_gains_keywords"; keywords: string[] }
   // "Destroy all creatures with flying. Put a +1/+1 counter on this creature for each creature destroyed this way." (Whiptongue Hydra)
@@ -501,6 +504,7 @@ interface BasicLandFetchSearchState {
 // pure applier owns re-entry (applyRemovalEffect/applyZoneEffect), carrying exactly what that
 // applier needs besides the target itself (chosenX for a variable-damage spell's already-paid X).
 type PendingTargetedEffect =
+  | { kind: "targeted"; effect: TargetedEffect }
   | { kind: "removal"; effect: RemovalEffect; chosenX?: number }
   | { kind: "zone"; effect: ZoneEffect; chosenX?: number }
   // "Another target creature gets +2/+0 and gains trample until end of turn." (Rhonas the Indomitable): the human aims the pump.
@@ -5569,8 +5573,14 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     if (seat?.kind === "human" && (paid.ability.effect.kind === "scry" || paid.ability.effect.kind === "surveil")) {
       const lookEffect = paid.ability.effect;
       setSession(() => paid.session);
-      startLibraryLook(lookEffect.kind as LibraryLookMode, lookEffect.amount + (lookEffect.kind === "surveil" ? surveilBonusForSeat(seat) : 0));
+      startLibraryLook(lookEffect.kind as LibraryLookMode, (lookEffect as { amount: number }).amount + (lookEffect.kind === "surveil" ? surveilBonusForSeat(seat) : 0));
       return;
+    }
+    // One-verb effects on a chosen target after a sacrifice (Yawgmoth's counter): the human picks it.
+    if (seat?.kind === "human" && paid.ability.effect.kind === "targeted_effect") {
+      const targeted = paid.ability.effect.effect;
+      setSession(() => paid.session);
+      if (maybeRequestTarget(seatId, paid.card, targetedEffectSpec(targeted, paid.card.id, paid.card.name), false, { kind: "targeted", effect: targeted })) return;
     }
     // "Destroy target creature" and friends after a sacrifice (Thrashing Brontodon): the human aims it.
     if (seat?.kind === "human" && paid.ability.effect.kind === "removal" && paid.ability.effect.effect.kind !== "modal") {
@@ -5731,6 +5741,12 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         return;
       }
     }
+    // One-verb effects on a chosen target ({T}: Target creature gains lifelink ...): the human picks it.
+    if (seat?.kind === "human" && paid.ability.effect.kind === "targeted_effect") {
+      const targeted = paid.ability.effect.effect;
+      setSession(() => paid.session);
+      if (maybeRequestTarget(seatId, paid.card, targetedEffectSpec(targeted, paid.card.id, paid.card.name), false, { kind: "targeted", effect: targeted })) return;
+    }
     // Lord of the Undead and friends: "return target Zombie card from your graveyard to your hand" — the human picks the card.
     if (seat?.kind === "human" && paid.ability.effect.kind === "zone_effect") {
       const zoneEff = paid.ability.effect.effect;
@@ -5866,6 +5882,11 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         if (pending && maybeRequestTarget(seatId, paid.card, aimSpec, false, pending)) return;
       }
       if (aimEffect.kind === "removal" && openAbilityDamageAim(seatId, paid.card, aimEffect.effect, paid.session)) return;
+      if (aimEffect.kind === "trigger" && aimEffect.effect.kind === "targeted_effect") {
+        const targeted = aimEffect.effect.effect;
+        setSession(() => paid.session);
+        if (maybeRequestTarget(seatId, paid.card, targetedEffectSpec(targeted, paid.card.id, paid.card.name), false, { kind: "targeted", effect: targeted })) return;
+      }
     }
     const next = applyGenericAbilityEffect(paid.session, seatId, paid.card, paid.effect, chosenCardId);
     setSession(next);
@@ -6456,6 +6477,12 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       if (max === 0) return false;
       return open(`${trigger.sourceCardName}: pay how much {R}? It deals that much damage to a target.`, Array.from({ length: max + 1 }, (_, count) => ({ index: count, label: count === 0 ? "Don't pay" : "{R} x" + count + " — " + count + " damage" })));
     }
+    // One-verb effects on a player (Blood Artist's drain): the human chooses who.
+    if (trigger.effect.kind === "targeted_effect" && trigger.effect.effect.who.kind === "player") {
+      const targeted = trigger.effect.effect;
+      const players = legalTargets(session, controller.id, targetedEffectSpec(targeted, trigger.sourceCardId, trigger.sourceCardName), findPermanentById(session, trigger.sourceCardId) ?? ({ id: trigger.sourceCardId, name: trigger.sourceCardName, typeLine: "", oracleText: "", manaValue: 0, colors: [], role: "effect", zone: "battlefield" } as VisibleCard)).filter((entry) => entry.kind === "player");
+      if (players.length >= 2) return open(`${trigger.sourceCardName}: choose a player.`, players.map((entry, index) => ({ index, label: `${session.seats.find((seat) => seat.id === entry.seatId)?.name ?? entry.seatId}${entry.seatId === controller.id ? " (you)" : ""} — ${session.seats.find((seat) => seat.id === entry.seatId)?.life ?? 0} life` })));
+    }
     // The Undercity's Trap! (a player loses 5 life) and Arena (goad a creature): the human aims them.
     if (trigger.effect.kind === "venture_room" && (trigger.effect.room === "trap" || trigger.effect.room === "arena")) {
       const slot = trigger.effect.room === "trap" ? "player" : "opponent_creature";
@@ -6499,6 +6526,14 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
           cards: legalTargets(session, controller.id, zoneSpec, sourceForTargets).filter((target): target is Extract<ReturnType<typeof legalTargets>[number], { kind: "card" }> => target.kind === "card").map((target) => ({ seatId: target.seatId, cardId: target.card.id })),
           picksNeeded: 1
         };
+      }
+      // One-verb effects on a chosen permanent (Wizard Class's counter, Heliod's counter, ...): the human picks it.
+      case "targeted_effect": {
+        const targeted = trigger.effect.effect;
+        if (targeted.who.kind !== "permanent") return undefined;
+        const aimSource = findPermanentById(session, trigger.sourceCardId) ?? ({ id: trigger.sourceCardId, name: trigger.sourceCardName, typeLine: "", oracleText: "", manaValue: 0, colors: [], role: "effect", zone: "battlefield" } as VisibleCard);
+        const entries = legalTargets(session, controller.id, targetedEffectSpec(targeted, aimSource.id, trigger.sourceCardName), aimSource).filter((entry): entry is Extract<ReturnType<typeof legalTargets>[number], { kind: "card" }> => entry.kind === "card");
+        return { prompt: `${trigger.sourceCardName}: choose a target.`, zone: "battlefield", cards: entries.map((entry) => ({ seatId: entry.seatId, cardId: entry.card.id })), picksNeeded: 1 };
       }
       // The Undercity's Forge: two +1/+1 counters on a creature you control.
       case "venture_room":
@@ -6768,6 +6803,12 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     }
     // Aimed damage: remember WHAT was picked (not its position in a list that may have changed by resolution).
     let encodedOption: string | undefined;
+    if (choice.trigger.effect.kind === "targeted_effect" && choice.trigger.effect.effect.who.kind === "player") {
+      const targeted = choice.trigger.effect.effect;
+      const pickSource = findPermanentById(session, choice.trigger.sourceCardId) ?? ({ id: choice.trigger.sourceCardId, name: choice.trigger.sourceCardName, typeLine: "", oracleText: "", manaValue: 0, colors: [], role: "effect", zone: "battlefield" } as VisibleCard);
+      const players = legalTargets(session, choice.controllerSeatId, targetedEffectSpec(targeted, choice.trigger.sourceCardId, choice.trigger.sourceCardName), pickSource).filter((entry) => entry.kind === "player");
+      if (players[index]) encodedOption = "p:" + players[index].seatId;
+    }
     if (choice.trigger.effect.kind === "venture_room" && (choice.trigger.effect.room === "trap" || choice.trigger.effect.room === "arena")) {
       const slot = choice.trigger.effect.room === "trap" ? "player" : "opponent_creature";
       const aimSource = { id: choice.trigger.sourceCardId, name: choice.trigger.sourceCardName, typeLine: "", oracleText: "", manaValue: 0, colors: [], role: "effect", zone: "battlefield" } as VisibleCard;
@@ -7813,13 +7854,19 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         sourceCard && !isModalCard
           ? parseTargetedPump(action.chosenX !== undefined ? substituteX(etbEffectText(sourceCard.oracleText), action.chosenX) : etbEffectText(sourceCard.oracleText))
           : undefined;
+      // Any other one-verb spell on a target ("Target creature gains haste until end of turn"): the cast-time pick, or the agent's best target.
+      const targetedSpellEffect = sourceCard && !isModalCard && !pumpEffect ? parseTargetedEffect(etbEffectText(sourceCard.oracleText)) : undefined;
+      const targetedSpellSession =
+        targetedSpellEffect && sourceCard
+          ? applyTargetedEffect(eachPlayerSacrificeResolvedSession, action.actorSeatId, sourceCard, targetedSpellEffect, castStruct?.kind === "targeted" ? action.castChoices?.targets[0] : undefined)
+          : eachPlayerSacrificeResolvedSession;
       const castPumpTarget = castStruct?.kind === "pump" ? action.castChoices?.targets[0] : undefined;
       const pumpResolvedSession =
         pumpEffect && sourceCard
           ? castStruct?.kind === "pump" && (!castPumpTarget || !castTargetLegal(eachPlayerSacrificeResolvedSession, action.actorSeatId, sourceCard, castPumpTarget))
             ? rulesEvent(eachPlayerSacrificeResolvedSession, action.actorSeatId, `${sourceCard.name}'s target is no longer legal; it does nothing.`)
             : applyTargetedPumpEffect(eachPlayerSacrificeResolvedSession, action.actorSeatId, sourceCard, pumpEffect, castPumpTarget)
-          : eachPlayerSacrificeResolvedSession;
+          : targetedSpellSession;
       // Board-wide sibling of the single-target pump above: "Each non-Dragon creature gets -X/-X
       // until end of turn." (Exude Toxin, ...) — same X-substitution-first handling, just no single
       // "target creature" to find, so it needed its own parser/applier instead of reusing pumpEffect.
@@ -9168,6 +9215,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         return applyRemovalEffect(current, choice.controllerSeatId, choice.sourceCardName, choice.sourceCard, choice.pending.effect, choice.pending.chosenX, target);
       }
       if (choice.pending.kind === "pump") return applyTargetedPumpEffect(current, choice.controllerSeatId, choice.sourceCard, choice.pending.effect, target);
+      if (choice.pending.kind === "targeted") return applyTargetedEffect(current, choice.controllerSeatId, choice.sourceCard, choice.pending.effect, target);
       return applyZoneEffect(current, choice.controllerSeatId, choice.sourceCardName, choice.pending.effect, choice.pending.chosenX, target);
     });
   }
@@ -13476,6 +13524,7 @@ export function applySacrificeEffect(
   // Scry/surveil auto-resolve deterministically for both agents and humans (no dedicated
   // interactive prompt wired up for this entry point yet, matching the auto-resolved mana/search
   // choices used elsewhere in this engine).
+  if (effect.kind === "targeted_effect") return applyTargetedEffect(session, seatId, sourceCard, effect.effect);
   const surveilAdjustedAmount = effect.kind === "surveil" ? effect.amount + surveilBonusForSeat(seat) : effect.amount;
   return resolveAgentLibraryLookWorkflow(session, seatId, sourceCardName, effect.kind === "surveil" ? "surveil_cards" : "scry_cards", surveilAdjustedAmount);
 }
@@ -14343,6 +14392,10 @@ export function applyGenericTapEffect(
     );
   }
 
+  if (effect.kind === "targeted_effect") {
+    const tapSource = session.seats.flatMap((item) => item.board.battlefield).find((card) => card.id === sourceCardId) ?? ({ id: sourceCardId, name: sourceCardName, typeLine: "", oracleText: "", manaValue: 0, colors: [], role: "effect", zone: "battlefield" } as VisibleCard);
+    return applyTargetedEffect(session, seatId, tapSource, effect.effect, chosenCardId ? findPermanentOwnerTarget(session, chosenCardId) : undefined);
+  }
   if (effect.kind !== "bounce_own") return session;
   // bounce_own
   const target = chooseGenericTapTarget(seat, effect.targetTypeFilter);
@@ -16111,7 +16164,8 @@ type CastStructure =
   | { kind: "generic_modal"; modal: GenericModalEffect }
   | { kind: "zone"; effect: ZoneEffect }
   | { kind: "extra"; effect: SpellExtraEffect }
-  | { kind: "pump"; effect: PumpEffect };
+  | { kind: "pump"; effect: PumpEffect }
+  | { kind: "targeted"; effect: TargetedEffect };
 
 // What a spell does that needs the caster's decisions — only for instants and sorceries (a permanent's enters effect is a trigger, whose
 // targets are chosen when it triggers).
@@ -16133,6 +16187,8 @@ export function castStructure(card: VisibleCard, chosenX?: number): CastStructur
   if (extra) return { kind: "extra", effect: extra };
   const pump = parseTargetedPump(chosenX !== undefined ? substituteX(text, chosenX) : text);
   if (pump) return { kind: "pump", effect: pump };
+  const targetedSpell = parseTargetedEffect(text);
+  if (targetedSpell) return { kind: "targeted", effect: targetedSpell };
   return undefined;
 }
 
@@ -16199,6 +16255,8 @@ export function nextCastPrompt(
     slots = zoneSlots(session, seatId, card, structure.effect);
   } else if (structure.kind === "extra") {
     slots = extraSlots(session, seatId, card, structure.effect);
+  } else if (structure.kind === "targeted") {
+    slots = [{ prompt: `${card.name}: choose a target.`, options: optionsFromSpec(session, seatId, targetedEffectSpec(structure.effect, card.id, card.name), card) }];
   } else {
     slots = [{ prompt: `${card.name}: choose a creature.`, options: labeledTargetOptions(session, seatId, "any_creature", card) }];
   }
@@ -20594,7 +20652,8 @@ export function commonTriggerEffect(
   const targetPlayerDrain = text.match(/\btarget player loses\s+(\d+|one|two|three|four|five)\s+life and you gain\s+(?:\d+|one|two|three|four|five)\s+life\b/);
   if (targetPlayerDrain) {
     const amount = numberWordToInt(targetPlayerDrain[1]);
-    if (amount) return { kind: "drain", amount, scope: "target_player", optional };
+    // The target player is the controller's choice (Blood Artist), so it goes through the shared targeted effect.
+    if (amount) return { kind: "targeted_effect", effect: { verb: { kind: "life", delta: -amount }, who: { kind: "player", opponentOnly: false }, youGainLife: amount }, optional };
   }
   const eachOpponentDrain = text.match(/\beach opponent loses\s+(\d+|one|two|three|four|five)\s+life and you gain\s+(?:\d+|one|two|three|four|five)\s+life\b/);
   if (eachOpponentDrain) {
@@ -20645,6 +20704,9 @@ export function commonTriggerEffect(
   }
 
   if (/\byou become the monarch\b/.test(text)) return { kind: "become_monarch", optional };
+  // "Put a +1/+1 counter on target creature you control." and the other one-verb effects on a chosen target.
+  const targetedTail = parseTargetedEffect(noReminder.replace(/^(?:when|whenever|at the beginning of)[^,]*,\s*/, ""));
+  if (targetedTail) return { kind: "targeted_effect", effect: targetedTail };
   const itGains = noReminder.match(/^(?:(?:whenever|when) [^,]*\benters?,\s*)?it gains ([a-z ,]+?) until end of turn\.?$/);
   if (itGains) return { kind: "context_gains_keywords", keywords: itGains[1].split(/ and |, /).map((word) => word.trim()).filter(Boolean) };
   if (/destroy all creatures with flying\. put a \+1\/\+1 counter on (?:this creature|[a-z',\- ]+) for each creature destroyed this way/.test(noReminder)) return { kind: "destroy_fliers_then_counters" };
@@ -22560,6 +22622,10 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
     if (power <= 0 || !entering) return noLegalTargetEvent(session, trigger.controllerSeatId, trigger.sourceCardName);
     return applyRemovalEffect(session, trigger.controllerSeatId, trigger.sourceCardName, entering, { kind: "damage", amount: power, targetType: "any" }, undefined, decodeChosenTarget(trigger.effect.chosenOption));
   }
+  if (trigger.effect.kind === "targeted_effect") {
+    const shim = findPermanentById(session, trigger.sourceCardId) ?? ({ id: trigger.sourceCardId, name: trigger.sourceCardName, typeLine: "", oracleText: "", manaValue: 0, colors: [], role: "effect", zone: "battlefield" } as VisibleCard);
+    return applyTargetedEffect(session, trigger.controllerSeatId, shim, trigger.effect.effect, decodeTargetedChoice(session, trigger.effect.chosenOption));
+  }
   if (trigger.effect.kind === "context_gains_keywords") {
     const gained = trigger.effect.keywords;
     const target = trigger.contextCardId ? findPermanentById(session, trigger.contextCardId) : undefined;
@@ -23480,6 +23546,88 @@ export function applyEndStepEffects(session: GameSession, seatId: string): GameS
     next = drawForSeat({ ...next, monarchDrawTurn: next.turn }, seatId, `${monarch.name} draws a card as the monarch.`);
   }
   return resolveEndStepExileDamage(next, seatId);
+}
+
+// Who an agent aims a targeted effect at: helpful verbs go on its own best permanent (or itself); harmful ones on the opponent they hurt most.
+function pickTargetedEffectTarget(session: GameSession, controllerSeatId: string, source: VisibleCard, effect: TargetedEffect): ChosenTarget | undefined {
+  const spec = targetedEffectSpec(effect, source.id, source.name);
+  const legal = legalTargets(session, controllerSeatId, spec, source);
+  if (legal.length === 0) return undefined;
+  const beneficial = targetedEffectIsBeneficial(effect);
+  if (effect.who.kind === "player") {
+    const players = legal.filter((entry): entry is Extract<typeof legal[number], { kind: "player" }> => entry.kind === "player");
+    const mine = players.find((entry) => entry.seatId === controllerSeatId);
+    const others = players.filter((entry) => entry.seatId !== controllerSeatId);
+    if (beneficial) {
+      const pick = mine ?? players[0];
+      return pick ? { kind: "player", seatId: pick.seatId } : undefined;
+    }
+    const victim = [...others].sort((a, b) => (session.seats.find((seat) => seat.id === a.seatId)?.life ?? 0) - (session.seats.find((seat) => seat.id === b.seatId)?.life ?? 0))[0];
+    return victim ? { kind: "player", seatId: victim.seatId } : undefined;
+  }
+  const cards = legal.filter((entry): entry is Extract<typeof legal[number], { kind: "card" }> => entry.kind === "card");
+  const score = (entry: { card: VisibleCard }) => effectivePower(entry.card) + effectiveToughness(entry.card) + (entry.card.commander ? 3 : 0);
+  const wanted = effect.verb.kind === "untap" ? cards.filter((entry) => entry.card.tapped) : effect.verb.kind === "tap" ? cards.filter((entry) => !entry.card.tapped) : cards;
+  const side = wanted.filter((entry) => (beneficial ? entry.seatId === controllerSeatId : entry.seatId !== controllerSeatId));
+  const best = [...side].sort((a, b) => score(b) - score(a))[0];
+  return best ? { kind: "card", seatId: best.seatId, cardId: best.card.id } : undefined;
+}
+
+// Applies a one-verb targeted effect to the chosen target (the human's pick), or to the agent's best target when none was chosen.
+export function applyTargetedEffect(session: GameSession, controllerSeatId: string, source: VisibleCard, effect: TargetedEffect, chosen?: ChosenTarget): GameSession {
+  const controller = session.seats.find((seat) => seat.id === controllerSeatId);
+  if (!controller) return session;
+  const spec = targetedEffectSpec(effect, source.id, source.name);
+  let target: ChosenTarget | undefined;
+  if (chosen) target = targetsStillLegal(session, controllerSeatId, spec, source, [chosen]) ? chosen : undefined;
+  else target = pickTargetedEffectTarget(session, controllerSeatId, source, effect);
+  if (!target) return rulesEvent(session, controllerSeatId, `${source.name}: no legal target, so the effect does nothing.`);
+  let next = session;
+  const verb = effect.verb;
+  if (target.kind === "card") {
+    const targetCard = session.seats.find((seat) => seat.id === target.seatId)?.board.battlefield.find((card) => card.id === target.cardId);
+    if (!targetCard) return rulesEvent(session, controllerSeatId, `${source.name}: the target is gone.`);
+    const change = (card: VisibleCard): VisibleCard => {
+      if (verb.kind === "add_counters") return applyCounterDelta(card, verb.counterKind, verb.amount);
+      if (verb.kind === "gain_keywords") return { ...card, temporaryGrantedKeywords: [...(card.temporaryGrantedKeywords ?? []), ...verb.keywords], grantedKeywords: [...new Set([...(card.grantedKeywords ?? []), ...verb.keywords])] };
+      if (verb.kind === "tap") return { ...card, tapped: true };
+      if (verb.kind === "untap") return { ...card, tapped: false };
+      return card;
+    };
+    next = { ...next, seats: next.seats.map((seat) => (seat.id !== target.seatId ? seat : { ...seat, board: { ...seat.board, battlefield: seat.board.battlefield.map((card) => (card.id === target.cardId ? change(card) : card)) } })) };
+    const what = verb.kind === "add_counters" ? `gets ${verb.amount} ${verb.counterKind} counter${verb.amount === 1 ? "" : "s"}` : verb.kind === "gain_keywords" ? `gains ${verb.keywords.join(" and ")} until end of turn` : verb.kind === "tap" ? "becomes tapped" : "becomes untapped";
+    next = rulesEvent(next, controllerSeatId, `${source.name}: ${targetCard.name} ${what}.`);
+  } else {
+    const victim = next.seats.find((seat) => seat.id === target.seatId);
+    if (!victim) return session;
+    if (verb.kind === "life") {
+      next = rulesEvent({ ...next, seats: next.seats.map((seat) => (seat.id === victim.id ? { ...seat, life: seat.life + verb.delta } : seat)) }, controllerSeatId, `${source.name}: ${victim.name} ${verb.delta < 0 ? "loses" : "gains"} ${Math.abs(verb.delta)} life.`);
+    } else if (verb.kind === "draw") {
+      next = drawMultipleForSeat(next, victim.id, verb.amount, `${victim.name} draws ${verb.amount} card${verb.amount === 1 ? "" : "s"} (${source.name}).`);
+    } else if (verb.kind === "discard") {
+      const deferred = deferHumanDiscard(next, victim.id, verb.amount, source.name);
+      if (deferred) next = deferred;
+      else {
+        for (let count = 0; count < verb.amount; count += 1) {
+          const fresh = next.seats.find((seat) => seat.id === victim.id);
+          const card = fresh ? chooseWorstHandCardToDiscard(fresh) : undefined;
+          if (!card) break;
+          next = rulesEvent(moveCardBetweenVisibleZones(next, victim.id, card.id, "graveyard"), victim.id, `${victim.name} discards ${card.name} (${source.name}).`);
+        }
+      }
+    }
+  }
+  if (effect.youGainLife) next = rulesEvent({ ...next, seats: next.seats.map((seat) => (seat.id === controllerSeatId ? { ...seat, life: seat.life + effect.youGainLife! } : seat)) }, controllerSeatId, `${controller.name} gains ${effect.youGainLife} life (${source.name}).`);
+  if (effect.youLoseLife) next = rulesEvent({ ...next, seats: next.seats.map((seat) => (seat.id === controllerSeatId ? { ...seat, life: seat.life - effect.youLoseLife! } : seat)) }, controllerSeatId, `${controller.name} loses ${effect.youLoseLife} life (${source.name}).`);
+  if (effect.youDraw) next = drawMultipleForSeat(next, controllerSeatId, effect.youDraw, `${controller.name} draws ${effect.youDraw} card${effect.youDraw === 1 ? "" : "s"} (${source.name}).`);
+  return next;
+}
+
+function decodeTargetedChoice(session: GameSession, value: string | undefined): ChosenTarget | undefined {
+  if (!value) return undefined;
+  const player = decodeChosenTarget(value);
+  if (player) return player;
+  return findPermanentOwnerTarget(session, value);
 }
 
 export function echoCostText(raw: string): string {

@@ -2,8 +2,9 @@
 // the test: two earlier tests passed on invented text while the real cards stayed broken (Court of Grace, the
 // "with power N or greater" watchers). Skipped per card when the catalog doesn't have it.
 import { describe, expect, it } from "vitest";
-import { landDropsAllowed, landPlaysMade, recordLandPlay, findCastTriggers, seatHasFlashGrant, findLeavesBattlefieldTriggers, hideawayDamageConditionMet, legalMainPhaseActions, tapCreaturesAltCostFor, applyCastRemoval, nextCastPrompt, type CastChoices, spellModePrompt, applyDigPick, applyDigToBattlefield, payGenericSacrificeCost, forcedAttackers, ventureIntoUndercity, applyPunisherChoiceEffect, openingHandBattlefieldCards, putOpeningHandCardOnBattlefield, untapForSeat, humanPhaseGraveyardChoice, clearTemporaryBuffs, playCardFromZone, resolveEndStepExileDamage, cleanupCombat, staticCostReduction, applyLabeledContinuation, spellTargetSlots, grantKeywordsToCreature, applyExalted, applySacrificeEffect, applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
+import { landDropsAllowed, landPlaysMade, recordLandPlay, findCastTriggers, seatHasFlashGrant, findLeavesBattlefieldTriggers, hideawayDamageConditionMet, legalMainPhaseActions, tapCreaturesAltCostFor, applyCastRemoval, nextCastPrompt, type CastChoices, spellModePrompt, applyDigPick, applyDigToBattlefield, applyTargetedEffect, castStructure, payGenericSacrificeCost, forcedAttackers, ventureIntoUndercity, applyPunisherChoiceEffect, openingHandBattlefieldCards, putOpeningHandCardOnBattlefield, untapForSeat, humanPhaseGraveyardChoice, clearTemporaryBuffs, playCardFromZone, resolveEndStepExileDamage, cleanupCombat, staticCostReduction, applyLabeledContinuation, spellTargetSlots, grantKeywordsToCreature, applyExalted, applySacrificeEffect, applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
 import { parseRemovalEffect } from "@/lib/removalSpells";
+import { parseTargetedEffect } from "@/lib/targetedEffects";
 import { canLegallyBlock } from "@/lib/combatSim";
 import { parseZoneEffect } from "@/lib/zoneEffects";
 import { permanentMatchesQualifier } from "@/lib/characteristics";
@@ -1500,6 +1501,49 @@ describe("rules gaps: afflict, flanking, lure, phasing, echo, turn-limited first
     expect(onTurn.grantedKeywords ?? []).toContain("first strike");
     const offTurn = runStateBasedActionsPass({ ...mine, activePlayerId: "b" }).session.seats[0].board.battlefield[0];
     expect(offTurn.grantedKeywords ?? []).not.toContain("first strike");
+  });
+});
+
+describe("one-verb targeted effects (real Oracle text)", () => {
+  const trig = (effect: unknown, chosenOption?: string) => ({ id: "t", type: "trigger" as const, actorSeatId: "a", controllerSeatId: "a", sourceCardId: "src", sourceCardName: "Src", triggerKind: "common" as const, effect: { ...(effect as object), chosenOption } as never, message: "" });
+  it("parses the common shapes", () => {
+    expect(parseTargetedEffect("Put a +1/+1 counter on target creature or enchantment you control.")).toMatchObject({ verb: { kind: "add_counters", counterKind: "+1/+1", amount: 1 }, who: { permanentType: "creature_or_enchantment", controller: "you" } });
+    expect(parseTargetedEffect("Target player loses 1 life and you gain 1 life.")).toMatchObject({ verb: { kind: "life", delta: -1 }, youGainLife: 1, who: { kind: "player", opponentOnly: false } });
+    expect(parseTargetedEffect("Target creature gains haste until end of turn.")).toMatchObject({ verb: { kind: "gain_keywords", keywords: ["haste"] } });
+    expect(parseTargetedEffect("Put a -1/-1 counter on up to one target creature and draw a card.")).toMatchObject({ upTo: true, youDraw: 1 });
+    expect(parseTargetedEffect("Destroy target creature.")).toBeUndefined();
+  });
+  it("Blood Artist and Heliod parse as targeted effects; the chosen target is the one hit", () => {
+    const artist = real("Blood Artist", "ba");
+    const effect = commonTriggerEffect(artist.oracleText.split("\n")[0], "clause")!;
+    expect(effect.kind).toBe("targeted_effect");
+    const s = session([seat("a", [artist]), seat("b", []), seat("c", [])]);
+    const aimed = resolveTriggerEffect(s, trig(effect, "p:c"));
+    expect(aimed.seats[2].life).toBe(39);
+    expect(aimed.seats[1].life).toBe(40);
+    expect(aimed.seats[0].life).toBe(41);
+    const heliod = real("Heliod, Sun-Crowned", "he");
+    const heliodEffect = commonTriggerEffect(heliod.oracleText.split("\n").find((l) => /whenever you gain life/i.test(l))!, "clause")!;
+    expect(heliodEffect.kind).toBe("targeted_effect");
+    const withBears = session([seat("a", [heliod, bear("b1"), bear("b2")]), seat("b", [])]);
+    const grown = resolveTriggerEffect(withBears, trig(heliodEffect, "b2")).seats[0].board.battlefield.find((c) => c.id === "b2")!;
+    expect(grown.counters?.find((c) => c.kind === "+1/+1")?.count).toBe(1);
+  });
+  it("Simic Ascendancy (ability), Yawgmoth (sacrifice ability) and Expedite (spell) all use the shared effect", () => {
+    const ascendancy = real("Simic Ascendancy", "sa");
+    expect(parseGenericAbilityEffect(parseGenericManaAbilities(ascendancy.oracleText)[0].effectText)).toBeTruthy();
+    const yawgmoth = real("Yawgmoth, Thran Physician", "yw");
+    expect(parseGenericSacrificeAbilities(yawgmoth.oracleText).some((a) => a.effect.kind === "targeted_effect")).toBe(true);
+    expect(castStructure(real("Expedite", "ex"))).toMatchObject({ kind: "targeted" });
+  });
+  it("a target that became illegal fizzles; an agent with no chosen target picks its own best creature", () => {
+    const effect = parseTargetedEffect("Put a +1/+1 counter on target creature you control.")!;
+    const s = session([seat("a", [bear("small", { power: "1", toughness: "1" }), bear("big", { power: "4", toughness: "4" })]), seat("b", [bear("foe")])]);
+    const source = real("Heliod, Sun-Crowned", "he");
+    const auto = applyTargetedEffect(s, "a", source, effect);
+    expect(auto.seats[0].board.battlefield.find((c) => c.id === "big")!.counters?.[0].count).toBe(1);
+    const illegal = applyTargetedEffect(s, "a", source, effect, { kind: "card", seatId: "b", cardId: "foe" });
+    expect(illegal.seats[1].board.battlefield[0].counters).toBeUndefined();
   });
 });
 

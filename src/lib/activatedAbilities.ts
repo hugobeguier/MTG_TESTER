@@ -4,6 +4,7 @@
 // producing and temporary-pump effects are recognized as "sacrifice ability shaped" but return no
 // effect, so callers can choose not to surface them as legal actions rather than silently no-op.
 
+import { parseTargetedEffect, type TargetedEffect } from "./targetedEffects";
 import { mergeModalBulletClauses, oracleClauses } from "./oracleClauses";
 import { parseRemovalEffect, type RemovalEffect } from "./removalSpells";
 import { parseZoneEffect, type ZoneEffect } from "./zoneEffects";
@@ -124,6 +125,7 @@ export type SacrificeEffect =
   | { kind: "create_tokens_by_sacrificed_power" }
   // "Return target creature card from your graveyard to your hand." (Memorial to Folly)
   | { kind: "zone_effect"; effect: ZoneEffect }
+  | { kind: "targeted_effect"; effect: TargetedEffect }
   | SearchLibraryEffect
   // "Transform this land/permanent/creature[, then untap it]." (Westvale Abbey -> Ormendahl,
   // Profane Prince). Whether it also untaps is read straight from the clause text at apply time
@@ -289,6 +291,8 @@ export type GenericTapEffect =
   | { kind: "draw_cards"; amount: number }
   // "Target creature can't be blocked this turn." (Rogue's Passage) — your best attacker.
   | { kind: "target_unblockable" }
+  // Any single-verb effect on a target the player chooses ("Target creature gains lifelink until end of turn", "Put a +1/+1 counter on target creature").
+  | { kind: "targeted_effect"; effect: TargetedEffect }
   // "Look at the top six cards of your library. You may reveal a creature card with mana value less than or equal to the number of lands
   // you control from among them and put it onto the battlefield. Put the rest on the bottom in a random order." (Loot, Exuberant Explorer)
   | { kind: "dig_creature_to_battlefield"; count: number }
@@ -452,6 +456,9 @@ function parseGenericTapEffectText(text: string): GenericTapEffect | undefined {
   const searchLibrary = parseSearchLibraryEffectText(text);
   if (searchLibrary) return searchLibrary;
 
+  const targetedEffect = parseTargetedEffect(text);
+  if (targetedEffect) return { kind: "targeted_effect", effect: targetedEffect };
+
   return undefined;
 }
 
@@ -604,6 +611,9 @@ export function parseGenericManaAbilities(oracleText: string): GenericManaAbilit
 
 function parseSacrificeEffectText(text: string): SacrificeEffect | undefined {
   const lower = text.toLowerCase();
+  // One verb on a chosen target (Yawgmoth's -1/-1 counter): checked first so the self-targeting counter parse below can't claim it.
+  const targetedEffect = parseTargetedEffect(text);
+  if (targetedEffect) return { kind: "targeted_effect", effect: targetedEffect };
 
   const scryMatch = lower.match(/\bscry\s+(x|\d+|one|two|three|four|five|six|seven|eight|nine|ten)\b/);
   if (scryMatch) {
