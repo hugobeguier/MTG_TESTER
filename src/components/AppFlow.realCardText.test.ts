@@ -2845,3 +2845,29 @@ describe("discard/bottom any number, draw that many plus one", () => {
     expect(effect).toMatchObject({ kind: "discard_any_then_draw", plusOne: true, toLibraryBottom: true });
   });
 });
+
+describe("Redress Fate", () => {
+  it("returns every artifact and enchantment card from your graveyard to the battlefield", () => {
+    const effect = parseZoneEffect(real("Redress Fate", "rf").oracleText.split("\n")[0]);
+    expect(effect).toMatchObject({ kind: "return_all_to_battlefield" });
+    const a = seat("a", []);
+    a.board.graveyard = [real("Sol Ring", "g1", { zone: "graveyard" as const }), real("Always Watching", "g2", { zone: "graveyard" as const }), bear("g3", { zone: "graveyard" as const })];
+    const after = applyZoneEffect(session([a, seat("b", [])]), "a", "Redress Fate", effect!);
+    expect(after.seats[0].board.battlefield.map((c) => c.id).sort()).toEqual(["g1", "g2"]);
+    expect(after.seats[0].board.graveyard!.map((c) => c.id)).toEqual(["g3"]);
+  });
+});
+
+describe("Inkshield", () => {
+  it("prevents combat damage to you this turn and makes an Inkling for each point prevented", () => {
+    const spell = real("Inkshield", "ik", { zone: "hand" as const });
+    const shieldMatch = spell.oracleText.match(/prevent all combat damage that would be dealt to you this turn\.(?:\s*for each 1 damage prevented this way, (create [^.]+))?/i);
+    expect(shieldMatch?.[1]).toMatch(/create a 2\/1/i);
+    const base = session([seat("a", []), seat("b", [])]);
+    const shielded = { ...base, combatDamageShields: [{ turn: base.turn, seatId: "a", sourceId: "ik", sourceName: "Inkshield", tokenClause: shieldMatch![1] }] };
+    const attacker = bear("atk", { power: "3", toughness: "3", attacking: true, attackTargetId: "a" });
+    const swing = resolveCombatDamage({ ...shielded, seats: [shielded.seats[0], { ...shielded.seats[1], board: { ...shielded.seats[1].board, battlefield: [attacker] } }] }, "b");
+    expect(swing.seats[0].life).toBe(40);
+    expect(swing.seats[0].board.battlefield.filter((c) => c.name.includes("Inkling"))).toHaveLength(3);
+  });
+});

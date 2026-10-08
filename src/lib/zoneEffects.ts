@@ -158,7 +158,14 @@ export interface SacrificeThenReanimateEffect {
   tapped: boolean;
 }
 
+// "Return all artifact and enchantment cards from your graveyard to the battlefield." (Redress Fate): no choice, every matching card comes back.
+export interface ReturnAllEffect {
+  kind: "return_all_to_battlefield";
+  types: Array<"artifact" | "enchantment" | "creature" | "land">;
+}
+
 export type ZoneEffect =
+  | ReturnAllEffect
   | ReanimateEffect
   | RegrowEffect
   | MillEffect
@@ -221,6 +228,11 @@ export function parseZoneEffect(oracleText: string): ZoneEffect | undefined {
   if (fathomlessDescent) {
     const targetType: RegrowTargetType = fathomlessDescent[1] === "nonland permanent" ? "nonland_permanent" : (fathomlessDescent[1] as RegrowTargetType);
     return { kind: "reanimate", anyGraveyard: false, targetType, manaValueCeiling: "graveyard_permanent_count" };
+  }
+
+  const returnAll = text.match(/\breturn all ((?:artifact|enchantment|creature|land)(?:,? (?:and|or) (?:artifact|enchantment|creature|land))*) cards from your graveyard to the battlefield\b/);
+  if (returnAll) {
+    return { kind: "return_all_to_battlefield", types: (returnAll[1].match(/artifact|enchantment|creature|land/g) ?? []) as ReturnAllEffect["types"] };
   }
 
   const reanimate = text.match(

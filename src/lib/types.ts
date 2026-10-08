@@ -529,6 +529,9 @@ export interface GameSession {
   // damage normally, while everyone else's is blocked. undefined keeps Spore Frog's original
   // all-or-nothing behavior unchanged.
   combatDamagePrevented?: { turn: number; exceptType?: string };
+  // "Prevent all combat damage that would be dealt to you this turn. For each 1 damage prevented this way, create a ... token." (Inkshield):
+  // a per-player shield that lasts for the turn it was made.
+  combatDamageShields?: Array<{ turn: number; seatId: string; sourceId: string; sourceName: string; tokenClause?: string }>;
   // Damage dealt to each player so far this turn (any source, combat or not): Spinerock Knoll's "an opponent was dealt 7 or more
   // damage this turn". Starts over whenever the turn number changes.
   damageThisTurn?: { turn: number; bySeat: Record<string, number> };

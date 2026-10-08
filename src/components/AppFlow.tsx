@@ -7962,9 +7962,22 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       const combatDamagePreventionMatch = sourceCard
         ? etbEffectText(sourceCard.oracleText).match(/\bprevent all combat damage that would be dealt this turn(?: by non-([a-z]+) creatures)?\b/i)
         : null;
-      const combatPreventionSession = combatDamagePreventionMatch
+      // Inkshield: a shield for the caster only, turning each prevented point into a token.
+      const shieldMatch = sourceCard
+        ? etbEffectText(sourceCard.oracleText).match(/\bprevent all combat damage that would be dealt to you this turn\.(?:\s*for each 1 damage prevented this way, (create [^.]+))?/i)
+        : null;
+      const shieldedBase: GameSession = shieldMatch
         ? {
             ...tokenResolvedSession,
+            combatDamageShields: [
+              ...(tokenResolvedSession.combatDamageShields ?? []).filter((shield) => shield.turn === tokenResolvedSession.turn),
+              { turn: tokenResolvedSession.turn, seatId: action.actorSeatId, sourceId: sourceCard!.id, sourceName: sourceCard!.name, tokenClause: shieldMatch[1] }
+            ]
+          }
+        : tokenResolvedSession;
+      const combatPreventionSession = combatDamagePreventionMatch
+        ? {
+            ...shieldedBase,
             combatDamagePrevented: { turn: tokenResolvedSession.turn, exceptType: combatDamagePreventionMatch[1] ? capitalizeWord(combatDamagePreventionMatch[1]) : undefined },
             events: [
               {
@@ -7974,10 +7987,10 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
                 message: `${action.cardName}: all combat damage is prevented this turn${combatDamagePreventionMatch[1] ? ` except from ${capitalizeWord(combatDamagePreventionMatch[1])} creatures` : ""}.`,
                 detail: "Rules action"
               },
-              ...tokenResolvedSession.events
+              ...shieldedBase.events
             ]
           }
-        : tokenResolvedSession;
+        : shieldedBase;
       const xCounterSession =
         sourceCard && destination === "battlefield" && action.chosenX && entersWithXCounters(sourceCard.oracleText)
           ? applyEntersWithXCounters(combatPreventionSession, action.actorSeatId, sourceCard.id, action.chosenX)
@@ -15958,6 +15971,16 @@ function applyCombatDamageToTarget(
 ): GameSession {
   if (amount <= 0) return session;
 
+  // Inkshield: this player's combat damage is prevented, and each point prevented makes a token.
+  if (damageKind === "combat" && !target.planeswalker) {
+    const shield = session.combatDamageShields?.find((entry) => entry.turn === session.turn && entry.seatId === target.seat.id);
+    if (shield) {
+      const prevented = rulesEvent(session, target.seat.id, `${sourceName}'s ${amount} combat damage to ${target.seat.name} is prevented by ${shield.sourceName}.`);
+      const specs = shield.tokenClause ? parseCreateTokenSpecs(shield.tokenClause) : [];
+      return specs.length > 0 ? createTokensForSeat(prevented, target.seat.id, shield.sourceId, specs.map((spec) => ({ ...spec, count: amount }))).session : prevented;
+    }
+  }
+
   const base: GameSession =
     source && hasLifelink(source) && sourceControllerSeatId
       ? {
@@ -17210,6 +17233,7 @@ function zoneEffectHasLegalTarget(session: GameSession, casterSeatId: string, ef
       return chooseControlTarget(session, casterSeatId) !== undefined;
     case "sacrifice_then_reanimate":
       return chooseCreatureCardsFromOwnGraveyard(session, casterSeatId, effect.targetCount) !== undefined;
+    case "return_all_to_battlefield":
     case "mill":
     case "put_land_from_graveyard_on_top":
     case "graveyard_to_library":
@@ -18025,6 +18049,13 @@ function resolvePreChosenGraveyardTarget(session: GameSession, casterSeatId: str
 
 export function applyZoneEffect(session: GameSession, casterSeatId: string, sourceName: string, effect: ZoneEffect, chosenX?: number, preChosenTarget?: ChosenTarget): GameSession {
   switch (effect.kind) {
+    case "return_all_to_battlefield": {
+      const owner = session.seats.find((seat) => seat.id === casterSeatId);
+      const wanted = (owner?.board.graveyard ?? []).filter((card) => effect.types.some((type) => card.typeLine.includes(type.charAt(0).toUpperCase() + type.slice(1))));
+      if (!owner || wanted.length === 0) return rulesEvent(session, casterSeatId, `${sourceName}: no matching cards in the graveyard.`);
+      const next = wanted.reduce((current, card) => moveCardAcrossSeats(current, owner.id, card.id, owner.id, "battlefield").session, session);
+      return rulesEvent(next, casterSeatId, `${sourceName}: ${owner.name} returns ${wanted.length} card${wanted.length === 1 ? "" : "s"} from the graveyard to the battlefield.`);
+    }
     case "reanimate": {
       // Fathomless descent's dynamic ceiling: "the number of permanent cards in your graveyard" —
       // same "permanent card" definition matchesReanimateTargetType's own "permanent" branch uses
