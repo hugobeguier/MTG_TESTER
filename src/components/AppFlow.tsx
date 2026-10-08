@@ -156,7 +156,8 @@ type LibraryLookMode = "scry" | "surveil" | "reorder" | "choose_one" | "choose_o
 // Spiritdancer under Secret Arcade, used to happen with no way to stop it).
 type TriggerEffect = (
   // A "choose one —" triggered ability (Elder Gargaroth): the parsed modes, resolved through applyGenericModalEffect.
-  | { kind: "modal"; modal: GenericModalEffect }
+  // pickedModes: the modes a human has chosen so far in a "choose two / one or more" trigger (picked one prompt at a time).
+  | { kind: "modal"; modal: GenericModalEffect; pickedModes?: number[] }
   | { kind: "draw_cards"; amount: number }
   | { kind: "gain_life"; amount: number }
   | { kind: "lose_life"; amount: number }
@@ -307,6 +308,8 @@ type TriggerEffect = (
   | { kind: "damage_each_other_opponent"; amount: number }
   // "Exile all graveyards." (Farewell's last mode)
   | { kind: "exile_all_graveyards" }
+  // "Each player discards a card." / "Each player loses 1 life and draws a card." (Rankle)
+  | { kind: "each_player_basics"; discard?: number; loseLife?: number; draw?: number }
   // "Reveal cards from the top of your library until you reveal a land card. Put that card onto the battlefield tapped and the rest
   // on the bottom of your library in a random order." (Clifftop Lookout)
   | { kind: "reveal_until_land_to_battlefield" }
@@ -2613,6 +2616,15 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         setSeatManaPool(activeSeat.id, pool);
         addEvent(`${sourceCard.name} adds ${phaseMana[1]} to ${activeSeat.name}'s mana pool.`, activeSeat.id, "Rules action");
         return;
+      }
+      // "At the beginning of ..., choose one / one or more —": a human picks the modes (Black Market Connections, Abiding Grace).
+      if (activeSeat.kind === "human") {
+        const phaseModalText = phaseEffectText(sourceCard.oracleText, phase);
+        const phaseModal = /\bchoose\b/i.test(phaseModalText) ? parseGenericModalEffect(phaseModalText, undefined) : undefined;
+        if (phaseModal && !parseCounterAccumulationTrigger(phaseModalText, sourceCard.name)) {
+          const modalTrigger = makeCommonTrigger(activeSeat.id, activeSeat.id, sourceCard, { kind: "modal", modal: phaseModal }, `${sourceCard.name} triggers.`);
+          if (openTriggerOptionPrompt(modalTrigger, [], undefined)) return;
+        }
       }
       // Echo: a human decides whether to pay it.
       if (activeSeat.kind === "human") {
@@ -6422,6 +6434,19 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       setPendingRuleChoice({ id: crypto.randomUUID(), kind: "choose_trigger_option", controllerSeatId: controller.id, sourceCardId: trigger.sourceCardId, sourceCardName: trigger.sourceCardName, prompt, options, trigger, remainingStack, queueing });
       return true;
     };
+    // "Choose two / one or more / any number": one mode per prompt, a Done button once enough are picked.
+    if (trigger.effect.kind === "modal" && trigger.effect.modal.chooseCount > 1) {
+      const modal = trigger.effect.modal;
+      const picked = trigger.effect.pickedModes ?? [];
+      const viable = modal.modes
+        .map((mode, index) => ({ mode, index }))
+        .filter(({ mode, index }) => !picked.includes(index) && genericModalModeHasLegalTarget(session, controller.id, mode));
+      if (picked.length + viable.length <= (modal.atMost ? 1 : modal.chooseCount) && !modal.atMost) return false;
+      if (viable.length === 0 || (picked.length === 0 && viable.length < 2)) return false;
+      const options = viable.map(({ mode, index }) => ({ index, label: mode.text ?? `Mode ${index + 1}` }));
+      if (picked.length >= 1 && modal.atMost) options.push({ index: MODAL_DONE_INDEX, label: "Done choosing" });
+      return open(`${trigger.sourceCardName}: choose ${modal.atMost ? "modes (" + (picked.length > 0 ? picked.length + " chosen" : "one or more") + ")" : "mode " + (picked.length + 1) + " of " + modal.chooseCount}.`, options);
+    }
     if (trigger.effect.kind === "modal" && trigger.effect.modal.chooseCount === 1) {
       const modal = trigger.effect.modal;
       const source = session.seats.flatMap((seat) => seat.board.battlefield).find((card) => card.id === trigger.sourceCardId);
@@ -6687,6 +6712,25 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         setSession((current) => ({ ...current, pendingDiscardChoices: [...(current.pendingDiscardChoices ?? []), { seatId: victimId, count: 1, sourceName }] }));
       }
       if (remaining > 1) window.setTimeout(() => setSession((current) => ({ ...current, pendingPunisherChoices: [...(current.pendingPunisherChoices ?? []), { seatId: victimId, sourceName, lifeAmount, times: remaining - 1 }] })), 300);
+      return;
+    }
+    // Choose-several modal trigger: each click adds a mode; the last pick (or Done) resolves it.
+    if (choice.trigger.effect.kind === "modal" && choice.trigger.effect.modal.chooseCount > 1) {
+      const effect = choice.trigger.effect;
+      const picked = index === MODAL_DONE_INDEX ? effect.pickedModes ?? [] : [...(effect.pickedModes ?? []), index];
+      const moreViable = effect.modal.modes.some((mode, modeIndex) => !picked.includes(modeIndex) && genericModalModeHasLegalTarget(session, choice.controllerSeatId, mode));
+      if (index !== MODAL_DONE_INDEX && picked.length < effect.modal.chooseCount && moreViable) {
+        const nextTrigger = { ...choice.trigger, effect: { ...effect, pickedModes: picked } } as Extract<PendingAction, { type: "trigger" }>;
+        const queueing = choice.queueing?.map((queued) => (queued.id === choice.trigger.id ? nextTrigger : queued));
+        if (openTriggerOptionPrompt(nextTrigger, choice.remainingStack, queueing)) return;
+      }
+      const finished = { ...choice.trigger, effect: { ...effect, pickedModes: picked, chosenOption: [...picked].sort((a, b) => a - b).join(",") } } as Extract<PendingAction, { type: "trigger" }>;
+      if (choice.queueing) {
+        queueCommonTriggers(choice.queueing.map((queued) => (queued.id === choice.trigger.id ? finished : queued)));
+        return;
+      }
+      setSession((current) => resolveTriggerEffect(current, finished));
+      resumeAfterTriggerChoice(choice.trigger, choice.remainingStack);
       return;
     }
     // Discover: cast it free (it is in exile with the permission), or take it into hand.
@@ -8217,7 +8261,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       if (trigger.effect.chosenOption !== undefined) continue;
       const controller = session.seats.find((seat) => seat.id === trigger.controllerSeatId);
       if (controller?.kind !== "human") continue;
-      const asksAtQueueTime = (trigger.effect.kind === "modal" && trigger.effect.modal.chooseCount === 1) || triggerCardPrompt(trigger, controller) !== undefined;
+      const asksAtQueueTime = trigger.effect.kind === "modal" || triggerCardPrompt(trigger, controller) !== undefined;
       if (asksAtQueueTime && openTriggerOptionPrompt(trigger, [], triggers)) return;
     }
     const [firstTrigger, ...laterTriggers] = triggers;
@@ -18703,16 +18747,24 @@ function applyPrimitiveActionPlan(session: GameSession, seatId: string, sourceCa
   }, session);
 }
 
+const MODAL_DONE_INDEX = 999;
+
 type GenericModalMode = (
   | { kind: "trigger"; effect: TriggerEffect }
   | { kind: "zone"; effect: ZoneEffect }
   | { kind: "pump"; effect: PumpEffect }
   // A single removal-shaped bullet inside a trigger's choose-one (Parapet Thrasher's "Destroy target artifact that opponent controls.")
   | { kind: "removal"; effect: RemovalEffect }
+  // A spell-extra shape ("Each player sacrifices a creature of their choice.")
+  | { kind: "extra"; effect: SpellExtraEffect }
+  // A mode of several sentences ("Create a Treasure token. You lose 1 life."): every part happens, in order.
+  | { kind: "all"; parts: GenericModalMode[] }
 ) & { text?: string };
 
 interface GenericModalEffect {
   chooseCount: number;
+  // "Choose one or more / any number / up to two": the player may stop before chooseCount modes.
+  atMost?: boolean;
   modes: GenericModalMode[];
   // "choose one that hasn't been chosen this turn" (Parapet Thrasher): each mode can be picked once per turn per source.
   distinctPerTurn?: boolean;
@@ -18740,11 +18792,36 @@ export function parseGenericModalEffect(oracleText: string, chosenX: number | un
     // The bullet's own wording labels the mode in the prompt a human sees.
     if (modes.length > before) modes[modes.length - 1] = { ...modes[modes.length - 1], text: modeText.replace(/^[•*]\s*/, "").trim() };
   }
-  return modes.length > 0 ? { chooseCount: header.chooseCount, modes, ...(/hasn'?t been chosen this turn/i.test(oracleText) ? { distinctPerTurn: true } : {}) } : undefined;
+  return modes.length > 0 ? { chooseCount: header.chooseCount, modes, ...(header.atMost ? { atMost: true } : {}), ...(/hasn'?t been chosen this turn/i.test(oracleText) ? { distinctPerTurn: true } : {}) } : undefined;
 }
 
 function parseOneGenericMode(modeText: string, modes: GenericModalMode[]): void {
+  // A bullet of several sentences ("Create a Treasure token. You lose 1 life.") is one mode when EVERY sentence is understood; a
+  // flavour label ("Sell Contraband — ") and reminder text are dropped first.
+  const body = modeText.replace(/\([^)]*\)/g, "").replace(/^[•*]\s*/, "").replace(/^[A-Z][A-Za-z' ,]{1,40} — /, "").trim();
+  const sentences = body.split(/(?<=\.)\s+/).filter(Boolean);
+  if (sentences.length > 1) {
+    const parts: GenericModalMode[] = [];
+    for (const sentence of sentences) {
+      const before = parts.length;
+      parseSingleGenericMode(sentence, parts);
+      if (parts.length === before) break;
+    }
+    if (parts.length === sentences.length) {
+      modes.push({ kind: "all", parts });
+      return;
+    }
+  }
+  parseSingleGenericMode(modeText, modes);
+}
+
+function parseSingleGenericMode(modeText: string, modes: GenericModalMode[]): void {
   {
+    const extra = parseSpellExtraEffects(modeText)[0];
+    if (extra) {
+      modes.push({ kind: "extra", effect: extra });
+      return;
+    }
     const pump = parseTargetedPump(modeText);
     if (pump) {
       modes.push({ kind: "pump", effect: pump });
@@ -18770,6 +18847,8 @@ function parseOneGenericMode(modeText: string, modes: GenericModalMode[]): void 
 }
 
 function genericModalModeHasLegalTarget(session: GameSession, casterSeatId: string, mode: GenericModalMode): boolean {
+  if (mode.kind === "all") return mode.parts.every((part) => genericModalModeHasLegalTarget(session, casterSeatId, part));
+  if (mode.kind === "extra") return true;
   if (mode.kind === "removal") return removalEffectHasLegalTarget(session, casterSeatId, { id: "", name: "", typeLine: "", oracleText: "", colors: [], manaValue: 0, role: "permanent", zone: "battlefield" } as VisibleCard, mode.effect);
   if (mode.kind === "zone") return zoneEffectHasLegalTarget(session, casterSeatId, mode.effect);
   if (mode.kind === "pump") return choosePumpTarget(session, casterSeatId, mode.effect) !== undefined;
@@ -18786,19 +18865,22 @@ function genericModalModeHasLegalTarget(session: GameSession, casterSeatId: stri
 // has no notion of declining (that only happens upstream, in the accept/decline UI a real triggered
 // ability goes through before ever reaching it), and a synthetic trigger built here skips that step
 // entirely, matching how cheaply this engine already treats "optional" ETB effects elsewhere.
-export function applyGenericModalEffect(session: GameSession, casterSeatId: string, sourceCard: VisibleCard, effect: GenericModalEffect, contextSeatId?: string, forcedIndex?: number): GameSession {
+export function applyGenericModalEffect(session: GameSession, casterSeatId: string, sourceCard: VisibleCard, effect: GenericModalEffect, contextSeatId?: string, forcedIndex?: number | number[]): GameSession {
+  const forced = forcedIndex === undefined ? undefined : Array.isArray(forcedIndex) ? forcedIndex : [forcedIndex];
   const modeKey = (index: number) => `${session.turn}:${sourceCard.id}:mode:${index}`;
   const indexed = effect.modes.map((mode, index) => ({ mode, index }));
   const viableModes = indexed.filter(
     ({ mode, index }) =>
-      (forcedIndex === undefined || index === forcedIndex) &&
+      (forced === undefined || forced.includes(index)) &&
       genericModalModeHasLegalTarget(session, casterSeatId, mode) &&
       !(effect.distinctPerTurn && session.onceEachTurnEffectsUsed?.includes(modeKey(index)))
   );
   const chosen = viableModes.slice(0, effect.chooseCount);
   if (chosen.length === 0) return noLegalTargetEvent(session, casterSeatId, sourceCard.name);
   const marked: GameSession = effect.distinctPerTurn ? { ...session, onceEachTurnEffectsUsed: [...(session.onceEachTurnEffectsUsed ?? []), ...chosen.map(({ index }) => modeKey(index))] } : session;
-  return chosen.map(({ mode }) => mode).reduce((current, mode) => {
+  const applyMode = (current: GameSession, mode: GenericModalMode): GameSession => {
+    if (mode.kind === "all") return mode.parts.reduce(applyMode, current);
+    if (mode.kind === "extra") return applySpellExtraEffect(current, casterSeatId, sourceCard, mode.effect);
     if (mode.kind === "zone") return applyZoneEffect(current, casterSeatId, sourceCard.name, mode.effect);
     if (mode.kind === "pump") return applyTargetedPumpEffect(current, casterSeatId, sourceCard, mode.effect);
     if (mode.kind === "removal") return applyRemovalEffect(current, casterSeatId, sourceCard.name, sourceCard, mode.effect);
@@ -18814,7 +18896,8 @@ export function applyGenericModalEffect(session: GameSession, casterSeatId: stri
       message: ""
     };
     return resolveTriggerEffect(current, syntheticTrigger);
-  }, marked);
+  };
+  return chosen.map(({ mode }) => mode).reduce(applyMode, marked);
 }
 
 interface CounterAccumulationEffect {
@@ -19586,6 +19669,14 @@ export function findCommonTriggersForPermanentEntered(session: GameSession, ente
 
   for (const seat of session.seats) {
     for (const source of seat.board.battlefield) {
+      // "When this creature enters, choose two —" (Titan of Industry): the bullets are the modes.
+      if (source.id === enteredPermanent.id) {
+        const modalEtb = modalClauseTriggerEffect(source, /^when (?:this [a-z]+|[^,]+?) enters(?: the battlefield)?, choose (?:one or more|one or both|any number|up to (?:two|three)|one|two|three)\b.*[—-]\s*$/i);
+        if (modalEtb) {
+          triggers.push(makeCommonTrigger(enteringSeatId, seat.id, source, modalEtb, `${source.name} triggers because it entered the battlefield.`, enteredPermanent.id));
+          continue;
+        }
+      }
       // "When ~ enters, if <condition>, <effect>" (Linvala, the Preserver has TWO such lines; Garruk's Uprising one):
       // each clause is its own trigger with its own condition, instead of one merged effect that ignored the ifs.
       if (source.id === enteredPermanent.id) {
@@ -19774,8 +19865,14 @@ function applyExtraUntapEffects(session: GameSession, activeUntapSeatId: string)
 
 // "When Atsushi dies, choose one — • ... • ..." — the modes sit on the bullet lines after the header clause.
 function modalDeathTriggerEffect(source: VisibleCard): TriggerEffect | undefined {
+  return modalClauseTriggerEffect(source, /^(?:when|whenever)\b[^,]*\bdies, choose (?:one|two)\b.*[—-]\s*$/i);
+}
+
+// "When this creature enters, choose two —" / "Whenever ~ deals combat damage to a player, choose any number —": the same
+// bullet-line modal under any trigger header.
+function modalClauseTriggerEffect(source: VisibleCard, header: RegExp): TriggerEffect | undefined {
   const clauses = oracleClauses(source.oracleText);
-  const headerIndex = clauses.findIndex((clause) => /^(?:when|whenever)\b[^,]*\bdies, choose (?:one|two)\b.*[—-]\s*$/i.test(clause));
+  const headerIndex = clauses.findIndex((clause) => header.test(clause));
   if (headerIndex < 0) return undefined;
   const bullets: string[] = [];
   for (const next of clauses.slice(headerIndex + 1)) {
@@ -20071,6 +20168,14 @@ export function findCombatDamageToPlayerTriggers(
       // "Whenever one or more Dragons you control deal combat damage to an opponent, choose one that hasn't been chosen this turn —"
       // (Parapet Thrasher). The damaged player rides along as the trigger's actor so "each other opponent" can exclude them.
       const sourceClauses = oracleClauses(source.oracleText);
+      // "Whenever Rankle deals combat damage to a player, choose any number —": the creature's own trigger.
+      if (source.id === dealingCard.id) {
+        const ownModal = modalClauseTriggerEffect(source, /^whenever [^,]+ deals combat damage to a player, choose (?:one or more|one or both|any number|up to (?:two|three)|one|two|three)\b.*[—-]\s*$/i);
+        if (ownModal) {
+          triggers.push(makeCommonTrigger(dealingSeatId, seat.id, source, ownModal, `${source.name} triggers because it dealt combat damage to a player.`));
+          continue;
+        }
+      }
       const groupIndex = sourceClauses.findIndex((clause) => /^whenever one or more [a-z]+s you control deal combat damage to an opponent, choose one\b.*[—-]\s*$/i.test(clause));
       const groupSubject = groupIndex >= 0 ? sourceClauses[groupIndex].match(/^whenever one or more ([a-z]+)s you control/i)?.[1] : undefined;
       if (groupIndex >= 0 && groupSubject && permanentMatchesQualifier(dealingCard, groupSubject)) {
@@ -20598,6 +20703,16 @@ export function commonTriggerEffect(
   if (extraCombat) return extraCombat[1] ? { kind: "additional_combat", payCostText: extraCombat[1].toUpperCase(), optional: true } : { kind: "additional_combat" };
   if (/when enchanted creature dies, return this card to its owner'?s hand/.test(text) || (mode === "died" && /^return this card to its owner'?s hand\.?$/.test(text.trim()))) return { kind: "return_self_to_hand" };
   if (/^investigate\.?$/.test(text.replace(/\([^)]*\)/g, "").replace(/^[^,]*,\s*/, "").trim())) return { kind: "create_tokens", tokens: [{ ...predefinedTokenSpec("Clue"), count: 1 }] };
+  // "Each player discards a card." / "Each player loses 1 life and draws a card." (Rankle, Master of Pranks)
+  const eachPlayer = text.replace(/\([^)]*\)/g, "").trim().match(/^each player (?:discards (a|one|two|\d+) cards?|loses (\d+) life(?: and draws (a|one|two|\d+) cards?)?)\.?$/);
+  if (eachPlayer) {
+    return {
+      kind: "each_player_basics",
+      ...(eachPlayer[1] ? { discard: numberWordToInt(eachPlayer[1]) ?? 1 } : {}),
+      ...(eachPlayer[2] ? { loseLife: Number.parseInt(eachPlayer[2], 10) } : {}),
+      ...(eachPlayer[3] ? { draw: numberWordToInt(eachPlayer[3]) ?? 1 } : {})
+    };
+  }
   if (/^exile all graveyards\.?$/.test(text.replace(/\([^)]*\)/g, "").trim())) return { kind: "exile_all_graveyards" };
   const otherOpponents = text.match(/^(?:this creature|it) deals (\d+) damage to each other opponent\.?$/);
   if (otherOpponents) return { kind: "damage_each_other_opponent", amount: Number.parseInt(otherOpponents[1], 10) };
@@ -22017,6 +22132,16 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
     };
     return rulesEvent(reordered, owner.id, `${trigger.sourceCardName}: ${owner.name} reveals ${revealed.length + 1} card${revealed.length === 0 ? "" : "s"} and puts ${land.name} onto the battlefield tapped.`);
   }
+  if (trigger.effect.kind === "each_player_basics") {
+    const { discard, loseLife, draw } = trigger.effect;
+    let next = session;
+    if (discard) next = applyDiscardEffect(next, trigger.controllerSeatId, trigger.sourceCardName, discard, "each_player");
+    for (const player of session.seats.filter((item) => !item.hasLost)) {
+      if (loseLife) next = rulesEvent({ ...next, seats: next.seats.map((item) => (item.id === player.id ? { ...item, life: item.life - loseLife } : item)) }, player.id, `${trigger.sourceCardName}: ${player.name} loses ${loseLife} life.`);
+      if (draw) next = drawMultipleForSeat(next, player.id, draw, `${trigger.sourceCardName}: ${player.name} draws ${draw} card${draw === 1 ? "" : "s"}.`);
+    }
+    return next;
+  }
   if (trigger.effect.kind === "exile_all_graveyards") {
     const count = session.seats.reduce((total, item) => total + (item.board.graveyard ?? []).length, 0);
     return rulesEvent(
@@ -22249,7 +22374,7 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
     const modalSource = session.seats.flatMap((seat) => seat.board.battlefield).find((card) => card.id === trigger.sourceCardId);
     // A "when this dies" modal source has already left the battlefield; only its name is needed then.
     const source = modalSource ?? ({ id: trigger.sourceCardId, name: trigger.sourceCardName, typeLine: "", oracleText: "", colors: [], manaValue: 0, role: "permanent", zone: "graveyard" } as VisibleCard);
-    return applyGenericModalEffect(session, trigger.controllerSeatId, source, trigger.effect.modal, trigger.actorSeatId, trigger.effect.chosenOption !== undefined ? Number.parseInt(trigger.effect.chosenOption, 10) : undefined);
+    return applyGenericModalEffect(session, trigger.controllerSeatId, source, trigger.effect.modal, trigger.actorSeatId, trigger.effect.chosenOption !== undefined ? trigger.effect.chosenOption.split(",").map((part) => Number.parseInt(part, 10)).filter((n) => Number.isFinite(n)) : undefined);
   }
   if (trigger.effect.kind === "scry_cards" || trigger.effect.kind === "surveil_cards") {
     return resolveAgentLibraryLookWorkflow(session, trigger.controllerSeatId, trigger.sourceCardName, trigger.effect.kind, trigger.effect.amount);

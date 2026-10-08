@@ -2425,3 +2425,41 @@ describe("choose-several modal spells keep every mode", () => {
     expect(parsed.modes.length).toBeGreaterThanOrEqual(3);
   });
 });
+
+describe("modal triggers: choose two / any number", () => {
+  it("Titan of Industry's enters trigger is a modal with its four modes", () => {
+    const titan = real("Titan of Industry", "ti");
+    const s = session([seat("a", [titan], { kind: "human" }), seat("b", [])]);
+    const triggers = findCommonTriggersForPermanentEntered(s, "a", titan);
+    expect(triggers).toHaveLength(1);
+    const effect = triggers[0].effect as { kind: string; modal: { chooseCount: number; modes: unknown[] } };
+    expect(effect.kind).toBe("modal");
+    expect(effect.modal.chooseCount).toBe(2);
+    expect(effect.modal.modes.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("Rankle's combat-damage trigger offers all three modes, and the chosen ones hit every player", async () => {
+    const { findCombatDamageToPlayerTriggers, resolveTriggerEffect } = await import("./AppFlow");
+    const rankle = real("Rankle, Master of Pranks", "rk");
+    const a = seat("a", [rankle]);
+    a.board.hand = [bear("h1", { zone: "hand" as const })];
+    const b = seat("b", []);
+    b.board.hand = [bear("h2", { zone: "hand" as const })];
+    const s = session([a, b]);
+    const [trigger] = findCombatDamageToPlayerTriggers(s, "a", rankle, "b");
+    const modal = (trigger.effect as { modal: { modes: unknown[]; atMost?: boolean } }).modal;
+    expect(modal.modes).toHaveLength(3);
+    expect(modal.atMost).toBe(true);
+    const done = resolveTriggerEffect(s, { ...trigger, effect: { ...trigger.effect, chosenOption: "0,1" } } as typeof trigger);
+    expect(done.seats[0].life).toBe(39);
+    expect(done.seats[1].life).toBe(39);
+    expect(done.seats[1].board.hand.map((c) => c.id)).not.toContain("h2");
+  });
+
+  it("Black Market Connections keeps both halves of every mode (token AND life loss)", async () => {
+    const { parseGenericModalEffect } = await import("./AppFlow");
+    const modal = parseGenericModalEffect(real("Black Market Connections", "bm").oracleText, undefined)!;
+    expect(modal.modes).toHaveLength(3);
+    expect(modal.modes.every((mode) => mode.kind === "all")).toBe(true);
+  });
+});

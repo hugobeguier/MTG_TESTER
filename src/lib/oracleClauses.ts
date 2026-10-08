@@ -328,6 +328,8 @@ export function mergeModalBulletClauses(clauses: string[]): string[] {
 export interface ModalHeader {
   chooseCount: number;
   modeTexts: string[];
+  // "Choose one or more / any number / up to two": chooseCount is the most modes, the player may pick fewer.
+  atMost?: boolean;
 }
 
 // "Choose one/two/three —\n• mode.\n• mode. ..." (Boros Charm, Austere Command, Profane Command,
@@ -338,7 +340,7 @@ export interface ModalHeader {
 // own modal handling and by AppFlow.tsx's generic (non-removal) modal handling, so both recognize
 // the same header shapes instead of drifting apart.
 export function parseModalHeader(oracleText: string): ModalHeader | undefined {
-  const header = oracleText.match(/\bchoose (one or more|one or both|one|two|three)(?: that hasn'?t been chosen this turn)?\s*[—-]\s*/i);
+  const header = oracleText.match(/\bchoose (one or more|one or both|any number|up to (?:two|three)|one|two|three)(?: that hasn'?t been chosen this turn)?\s*[—-]\s*/i);
   if (!header || header.index === undefined) return undefined;
   const word = header[1].toLowerCase();
   const modeTexts = oracleText
@@ -349,8 +351,11 @@ export function parseModalHeader(oracleText: string): ModalHeader | undefined {
   if (modeTexts.length < 2) return undefined;
   // "One or both" / "one or more" mean up to every mode — except with escalate, where each extra mode costs extra mana
   // this engine doesn't collect, so only the first (free) mode is taken (Collective Resistance).
-  const chooseCount = word === "one or more" || word === "one or both" ? (/\bescalate\b/i.test(oracleText) ? 1 : modeTexts.length) : ({ one: 1, two: 2, three: 3 } as Record<string, number>)[word] ?? 1;
-  return { chooseCount, modeTexts };
+  const everyMode = word === "one or more" || word === "one or both" || word === "any number";
+  const upTo = word.startsWith("up to ");
+  const chooseCount = everyMode ? (/\bescalate\b/i.test(oracleText) ? 1 : modeTexts.length) : ({ one: 1, two: 2, three: 3 } as Record<string, number>)[upTo ? word.slice(6) : word] ?? 1;
+  // "One or more" / "any number" / "up to two": the player may stop early (at least one mode for "one or more").
+  return { chooseCount, modeTexts, ...((everyMode || upTo) && chooseCount > 1 ? { atMost: true } : {}) };
 }
 
 // "Evolving Wilds/Terramorphic Expanse/Wayfarer's Bauble-style" search-a-basic-land-and-sacrifice

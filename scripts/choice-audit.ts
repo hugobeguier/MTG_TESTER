@@ -14,7 +14,8 @@ import { removalEffectTargetSpec, zoneEffectTargetSpec } from "../src/lib/target
 import { parseRemovalEffect } from "../src/lib/removalSpells";
 import { parseZoneEffect } from "../src/lib/zoneEffects";
 import { parseGenericTapAbilities, parseGenericSacrificeAbilities, parseGenericManaAbilities } from "../src/lib/activatedAbilities";
-import { castStructure, commonTriggerEffect, parseGenericAbilityEffect, parseTargetedPump } from "../src/components/AppFlow";
+import { castStructure, commonTriggerEffect, parseGenericAbilityEffect, parseGenericModalEffect, parseTargetedPump } from "../src/components/AppFlow";
+import { parseModalHeader } from "../src/lib/oracleClauses";
 
 // Trigger effect kinds that open a prompt for the human whenever the card's text has a target or choice (kept in step with AppFlow's
 // openTriggerOptionPrompt / triggerCardPrompt / finishTriggerResolution).
@@ -49,6 +50,9 @@ function auditCard(card: { name: string; typeLine: string; oracleText: string; m
   const issues = new Set<Issue>();
   const isSpell = /Instant|Sorcery/.test(card.typeLine);
   // Instants and sorceries ask for modes and targets when they are cast.
+  // A choose-several card whose every mode is understood: its triggers / casts ask the human for the modes.
+  const modalHeader = parseModalHeader(card.oracleText);
+  const modalFullyParsed = Boolean(modalHeader && parseGenericModalEffect(card.oracleText, undefined)?.modes.length === modalHeader.modeTexts.length);
   const castPrompts = isSpell ? castStructure(card as never) !== undefined : false;
   for (const raw of card.oracleText.split("\n")) {
     const line = stripReminder(raw);
@@ -120,7 +124,7 @@ function auditCard(card: { name: string; typeLine: string; oracleText: string; m
     // Only a RECOGNISED effect can silently auto-accept a "you may"; an unrecognised one is already listed as such. Dig effects prompt the human themselves.
     const humanPromptsKinds = new Set(["dig_type_to_hand", "dig_creature_to_battlefield", "dig_nonland_to_hand", "search_library"]);
     if (hasMay && recognisedEffect && !humanPromptsKinds.has(recognisedEffect.kind) && !(recognisedEffect as { optional?: boolean }).optional && !castPrompts && !asksTarget) issues.add("optional");
-    if (modalMulti && !castPrompts) issues.add("modal_multi");
+    if (modalMulti && !castPrompts && !modalFullyParsed) issues.add("modal_multi");
     if (anyNumber && !asksTarget && !castPrompts) issues.add("any_number");
     if (nameCard) issues.add("name_a_card");
     if (sacrificeCost) issues.add("noncreature_sacrifice_cost");
