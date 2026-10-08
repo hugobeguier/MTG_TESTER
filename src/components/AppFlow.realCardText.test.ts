@@ -2659,3 +2659,28 @@ describe("Miirym, Sentinel Wyrm", () => {
     expect(after.pendingEntries?.some((e) => e.card.id === copy.id)).toBe(true);
   });
 });
+
+describe("sacrifice-for-effect abilities (Meren's engine)", () => {
+  it("Birthing Pod, Jarad and Altar of Dementia parse with the right sacrifice and effect", () => {
+    const pod = parseGenericSacrificeAbilities(real("Birthing Pod", "bp").oracleText)[0];
+    expect(pod).toMatchObject({ sacrificeTarget: "creature", effect: { kind: "search_creature_by_sacrificed_mv" } });
+    const jarad = parseGenericSacrificeAbilities(real("Jarad, Golgari Lich Lord", "ja").oracleText).find((a) => a.effect.kind === "drain_by_sacrificed_power");
+    expect(jarad).toMatchObject({ sacrificeExcludesSelf: true });
+    expect(parseGenericSacrificeAbilities(real("Altar of Dementia", "ad").oracleText)[0]).toMatchObject({ effect: { kind: "mill_by_sacrificed_power" } });
+  });
+
+  it("Jarad drains each opponent by the sacrificed creature's power; Altar of Dementia mills that many", () => {
+    const jarad = real("Jarad, Golgari Lich Lord", "ja");
+    const fat = bear("fat", { power: "5", toughness: "5" });
+    const b = seat("b", []);
+    b.library = [bear("l1"), bear("l2"), bear("l3"), bear("l4"), bear("l5"), bear("l6")] as never;
+    b.zones.library = 6;
+    const s = session([seat("a", [jarad, fat]), b]);
+    const drain = parseGenericSacrificeAbilities(jarad.oracleText).find((a) => a.effect.kind === "drain_by_sacrificed_power")!;
+    expect(applySacrificeEffect(s, "a", jarad, drain.effect, drain.clause, [fat]).seats[1].life).toBe(35);
+    const altar = real("Altar of Dementia", "al");
+    const mill = parseGenericSacrificeAbilities(altar.oracleText)[0];
+    const milled = applySacrificeEffect(s, "a", altar, mill.effect, mill.clause, [fat]);
+    expect(milled.seats[1].board.graveyard).toHaveLength(5);
+  });
+});

@@ -5689,6 +5689,39 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       setSession(() => paid.session);
       if (maybeRequestTarget(seatId, paid.card, zoneChoiceSpecFor(session, seatId, zoneEff, paid.card), false, { kind: "zone", effect: zoneEff })) return;
     }
+    finishPaidSacrificeAbility(seatId, paid);
+  }
+
+  // After a sacrifice ability's cost is paid: Birthing Pod opens its mana-value-restricted search (the sacrificed creature is known now);
+  // everything else applies its effect.
+  function finishPaidSacrificeAbility(seatId: string, paid: NonNullable<ReturnType<typeof payGenericSacrificeCost>>) {
+    // Ashnod's Altar / Phyrexian Tower: the sacrifice pays for fixed mana that goes straight into the pool.
+    if (paid.ability.effect.kind === "add_mana") {
+      let pool = poolForSeat(seatId);
+      for (const symbol of paid.ability.effect.symbols.match(/\{([wubrgc])\}/gi) ?? []) pool = addManaToPool(pool, symbol[1].toUpperCase() as ManaColor, 1);
+      setSession(() => paid.session);
+      setSeatManaPool(seatId, pool);
+      addEvent(`${paid.card.name} adds ${paid.ability.effect.symbols} to ${session.seats.find((item) => item.id === seatId)?.name ?? "the player"}'s mana pool.`, seatId, "Rules action");
+      return;
+    }
+    if (paid.ability.effect.kind === "search_creature_by_sacrificed_mv") {
+      const wantedValue = Math.max(0, ...paid.sacrificed.map((creature) => creature.manaValue)) + 1;
+      setSession(() => paid.session);
+      setPendingRuleChoice({
+        id: crypto.randomUUID(),
+        kind: "choose_card_from_library",
+        controllerSeatId: seatId,
+        sourceCardId: paid.card.id,
+        sourceCardName: paid.card.name,
+        prompt: `${paid.card.name}: search your library for a creature card with mana value ${wantedValue} and put it onto the battlefield.`,
+        destination: "battlefield",
+        tapped: false,
+        maxChoices: 1,
+        allowedCardFilter: "creature",
+        manaValueRestriction: { op: "eq", value: wantedValue }
+      });
+      return;
+    }
     setSession(() => applySacrificeEffect(paid.session, seatId, paid.card, paid.ability.effect, paid.ability.clause, paid.sacrificed));
   }
 
@@ -9512,7 +9545,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       setSeatManaPool(choice.controllerSeatId, paid.poolSpent);
       clearManaContributions(choice.controllerSeatId);
     }
-    setSession(() => applySacrificeEffect(paid.session, choice.controllerSeatId, paid.card, paid.ability.effect, paid.ability.clause, paid.sacrificed));
+    finishPaidSacrificeAbility(choice.controllerSeatId, paid);
   }
 
   // Human resolution for choose_each_player_sacrifice — every OTHER seat's sacrifice/discard already
@@ -12854,6 +12887,8 @@ function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllowed: boo
       if (ability.costLife > 0 && seat.life < ability.costLife) return;
       if (ability.sacrificeTarget !== "self" && !chooseSacrificeTargets(seat, ability.sacrificeTargetTypeFilter, ability.sacrificeCount, ability.sacrificeExcludesSelf || ability.sacrificeTarget === "permanent" ? card.id : undefined, ability.sacrificeTarget === "permanent")) return;
       if (ability.effect.kind === "search_library" && (seat.library?.length ?? 0) === 0) return;
+      // Sacrificing for floating mana is a human's play; an agent has no way to spend the pool, so it is never offered to one.
+      if (ability.effect.kind === "add_mana" && seat.kind !== "human") return;
       // Rule 601.2c-equivalent for an activated ability: don't offer "activate Cankerbloom" with
       // nothing to destroy any more than legalMainPhaseActions offers casting a removal spell with
       // no legal target (see hasResolvableRemovalTarget) — same underlying check, reused here.
@@ -13609,6 +13644,20 @@ export function applySacrificeEffect(
     return rulesEvent(created.session, seatId, `${seat.name} activates ${sourceCardName} and creates ${count} ${created.createdTokens[0]?.name ?? "token"}${count === 1 ? "" : "s"}.`);
   }
 
+  if (effect.kind === "drain_by_sacrificed_power" || effect.kind === "mill_by_sacrificed_power") {
+    const amount = Math.max(0, ...sacrificed.map((creature) => effectivePower(creature)));
+    if (amount <= 0) return rulesEvent(session, seatId, `${sourceCardName} resolves, but the sacrificed creature had no power.`);
+    if (effect.kind === "mill_by_sacrificed_power") {
+      // "Target player": the opponent with the most cards left to lose.
+      const victim = session.seats.filter((other) => other.id !== seatId && !other.hasLost).sort((a, b) => (b.library?.length ?? 0) - (a.library?.length ?? 0))[0];
+      return victim ? applyMill(session, victim.id, sourceCardName, amount) : session;
+    }
+    const victims = session.seats.filter((other) => other.id !== seatId && !other.hasLost);
+    const drained: GameSession = { ...session, seats: session.seats.map((other) => (victims.some((victim) => victim.id === other.id) ? { ...other, life: other.life - amount } : other)) };
+    return rulesEvent(drained, seatId, `${sourceCardName}: each opponent loses ${amount} life.`);
+  }
+  if (effect.kind === "search_creature_by_sacrificed_mv") return session;
+
   if (effect.kind === "draw_cards") {
     const drawn = drawMultipleForSeat(session, seatId, effect.amount, `${seat.name} draws ${effect.amount} from ${sourceCardName}.`);
     if (!effect.alsoLoseLife) return drawn;
@@ -13702,6 +13751,8 @@ export function applySacrificeEffect(
   // interactive prompt wired up for this entry point yet, matching the auto-resolved mana/search
   // choices used elsewhere in this engine).
   if (effect.kind === "targeted_effect") return applyTargetedEffect(session, seatId, sourceCard, effect.effect);
+  // Fixed mana from a sacrifice (Ashnod's Altar) goes into the human's pool in finishPaidSacrificeAbility, which has the pool state.
+  if (effect.kind === "add_mana") return session;
   const surveilAdjustedAmount = effect.kind === "surveil" ? effect.amount + surveilBonusForSeat(seat) : effect.amount;
   return resolveAgentLibraryLookWorkflow(session, seatId, sourceCardName, effect.kind === "surveil" ? "surveil_cards" : "scry_cards", surveilAdjustedAmount);
 }

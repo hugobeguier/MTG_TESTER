@@ -69,8 +69,8 @@ describe("parseGenericSacrificeAbilities", () => {
     expect(abilities[0].effect).toEqual({ kind: "add_counter", counterKind: "+1/+1", amount: 1 });
   });
 
-  it("recognizes Ashnod's Altar as sacrifice-shaped but returns no ability since mana-producing effects aren't executable yet", () => {
-    expect(parseGenericSacrificeAbilities("Sacrifice a creature: Add {C}{C}.")).toHaveLength(0);
+  it("parses Ashnod's Altar as a sacrifice ability that adds fixed mana", () => {
+    expect(parseGenericSacrificeAbilities("Sacrifice a creature: Add {C}{C}.")[0]).toMatchObject({ sacrificeTarget: "creature", effect: { kind: "add_mana", symbols: "{C}{C}" } });
   });
 
   it("recognizes Nantuko Husk as sacrifice-shaped but returns no ability since temporary pump effects aren't executable yet", () => {
@@ -191,12 +191,11 @@ describe("parseGenericSacrificeAbilities", () => {
     });
   });
 
-  it("declines Birthing Pod's sacrifice-scaled search (a dynamic 'with mana value' qualifier)", () => {
-    expect(
-      parseGenericSacrificeAbilities(
-        "{1}{G/P}, {T}, Sacrifice a creature: Search your library for a creature card with mana value equal to 1 plus the sacrificed creature's mana value, put that card onto the battlefield, then shuffle. Activate only as a sorcery."
-      )
-    ).toHaveLength(0);
+  it("parses Birthing Pod's sacrifice-scaled search as its own effect (the mana value comes from the sacrificed creature)", () => {
+    const [ability] = parseGenericSacrificeAbilities(
+      "{1}{G/P}, {T}, Sacrifice a creature: Search your library for a creature card with mana value equal to 1 plus the sacrificed creature's mana value, put that card onto the battlefield, then shuffle. Activate only as a sorcery."
+    );
+    expect(ability.effect).toEqual({ kind: "search_creature_by_sacrificed_mv" });
   });
 
   it("parses Cankerbloom's real modal ability, merging its 'Choose one —' header with all three bullet modes including Proliferate", () => {

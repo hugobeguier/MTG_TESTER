@@ -123,6 +123,15 @@ export type SacrificeEffect =
   // "Create X 2/2 black Zombie creature tokens, where X is the sacrificed creature's power." (Ghoulcaller
   // Gisa) — the count comes from the creature that was sacrificed to pay for this very activation.
   | { kind: "create_tokens_by_sacrificed_power" }
+  // "Each opponent loses life equal to the sacrificed creature's power." (Jarad, Golgari Lich Lord)
+  | { kind: "drain_by_sacrificed_power" }
+  // "Sacrifice a creature: Add {C}{C}." (Ashnod's Altar), "{T}, Sacrifice a creature: Add {B}{B}." (Phyrexian Tower): fixed mana into the pool.
+  | { kind: "add_mana"; symbols: string }
+  // "Target player mills cards equal to the sacrificed creature's power." (Altar of Dementia)
+  | { kind: "mill_by_sacrificed_power" }
+  // "Search your library for a creature card with mana value equal to 1 plus the sacrificed creature's mana value, put it onto the
+  // battlefield, then shuffle." (Birthing Pod)
+  | { kind: "search_creature_by_sacrificed_mv" }
   // "Return target creature card from your graveyard to your hand." (Memorial to Folly)
   | { kind: "zone_effect"; effect: ZoneEffect }
   | { kind: "targeted_effect"; effect: TargetedEffect }
@@ -660,6 +669,13 @@ function parseSacrificeEffectText(text: string): SacrificeEffect | undefined {
   if (counterMatch) return { kind: "add_counter", counterKind: "+1/+1", amount: numberWordToInt(counterMatch[1]) ?? 1 };
 
   if (/\bcreate x\b[^.]*\btokens?\b[^.]*\bwhere x is the sacrificed creature'?s power\b/.test(lower)) return { kind: "create_tokens_by_sacrificed_power" };
+  const addMana = lower.match(/^add ((?:\{[wubrgc]\})+)\.?$/);
+  if (addMana) return { kind: "add_mana", symbols: addMana[1].toUpperCase() };
+  if (/\beach opponent loses life equal to the sacrificed creature'?s power\b/.test(lower)) return { kind: "drain_by_sacrificed_power" };
+  if (/\btarget player mills cards equal to the sacrificed creature'?s power\b/.test(lower)) return { kind: "mill_by_sacrificed_power" };
+  if (/\bsearch your library for a creature card with mana value equal to 1 plus the sacrificed creature'?s mana value, put that card onto the battlefield\b/.test(lower)) {
+    return { kind: "search_creature_by_sacrificed_mv" };
+  }
   if (/\bcreate\b[^.]*\btokens?\b/.test(lower)) return { kind: "create_tokens" };
 
   if (/^transform this (?:land|permanent|artifact|creature|enchantment)\b/.test(lower)) return { kind: "transform_self" };
