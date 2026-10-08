@@ -5578,7 +5578,11 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         addEvent(
           ability.costDiscard && seat.board.hand.length === 0
             ? `You have no card in hand to discard, so you can't activate ${card.name}.`
-            : `You don't have enough open mana to activate ${card.name} (${ability.costManaText || "no mana"}).`,
+            : !ability.costTapCreatures && card.tapped
+              ? `${card.name} is already tapped, so you can't activate its {T} ability.`
+              : !ability.costTapCreatures && card.typeLine.includes("Creature") && card.summoningSick && !hasHaste(card)
+                ? `${card.name} came under your control this turn (summoning sick), so it can't use a {T} ability yet.`
+                : `You can't pay for ${card.name}'s ability right now (${ability.costManaText || "no mana"}).`,
           seatId,
           "Rules action"
         );
