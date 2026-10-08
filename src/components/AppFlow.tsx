@@ -183,7 +183,7 @@ type TriggerEffect = (
       alsoTap?: boolean;
       matcher?: string;
     }
-  | { kind: "copy_token"; scope: "self" | "context"; notLegendary?: boolean }
+  | { kind: "copy_token"; scope: "self" | "context"; notLegendary?: boolean; payCostText?: string }
   | { kind: "draw_then_put_back"; drawAmount: number; putBackAmount: number }
   // Board-wide temporary pump/debuff off a triggered ability (Doomwake Giant's Constellation
   // "creatures your opponents control get -1/-1 until end of turn") — shares its shape with
@@ -21329,6 +21329,9 @@ export function commonTriggerEffect(
   // established in an earlier, separate clause.
   // Miirym, Sentinel Wyrm: "...create a token that's a copy of it, except the token isn't legendary."
   if (/\bcreate a token that'?s a copy of it, except the token isn'?t legendary\b/.test(text)) return { kind: "copy_token", scope: "context", notLegendary: true, optional };
+  // Mirrorworks: "...you may pay {2}. If you do, create a token that's a copy of that artifact."
+  const payCopy = text.match(/\byou may pay ((?:\{[^}]+\})+)\.\s*if you do, create a token that'?s a copy of that (?:artifact|creature|permanent|enchantment)\.?$/);
+  if (payCopy) return { kind: "copy_token", scope: "context", payCostText: payCopy[1].toUpperCase(), optional: true };
   const copyMatch = text.match(/\bcreate a token that'?s a copy of (it|itself|this (?:creature|artifact|enchantment|permanent|land|planeswalker))\b(?!,?\s*except)/);
   if (copyMatch) {
     return { kind: "copy_token", scope: copyMatch[1] === "it" || copyMatch[1] === "itself" ? "context" : "self", optional };
@@ -23093,7 +23096,16 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
       sourceCard && hasOnceEachTurnLimiter(sourceCard.oracleText)
         ? { ...session, onceEachTurnEffectsUsed: [...(session.onceEachTurnEffectsUsed ?? []), onceKey] }
         : session;
-    const { session: copiedSession } = createCopyTokenForSeat(markedSession, trigger.controllerSeatId, copySource.card, { notLegendary: trigger.effect.notLegendary });
+    // "You may pay {2}. If you do, ...": the cost is paid as the trigger resolves; unaffordable means nothing happens.
+    let paidSession = markedSession;
+    if (trigger.effect.payCostText) {
+      const payer = markedSession.seats.find((seat) => seat.id === trigger.controllerSeatId);
+      const total = manaValueFromManaCost(trigger.effect.payCostText);
+      const payment = payer ? chooseManaSourcesForCost(payer, genericManaAbilityCostShim({ costManaText: trigger.effect.payCostText }), total, undefined, markedSession.seats) : undefined;
+      if (!payer || !payment?.ok) return rulesEvent(markedSession, trigger.controllerSeatId, `${trigger.sourceCardName}: ${payer?.name ?? "the player"} can't pay ${trigger.effect.payCostText}.`);
+      paidSession = rulesEvent({ ...markedSession, seats: markedSession.seats.map((seat) => (seat.id === payer.id ? spendManaSources(seat, payment.sourceIds) : seat)) }, payer.id, `${payer.name} pays ${trigger.effect.payCostText} for ${trigger.sourceCardName}.`);
+    }
+    const { session: copiedSession } = createCopyTokenForSeat(paidSession, trigger.controllerSeatId, copySource.card, { notLegendary: trigger.effect.notLegendary });
     return {
       ...copiedSession,
       events: [

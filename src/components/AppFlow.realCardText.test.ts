@@ -2764,3 +2764,20 @@ describe("Saheeli's Artistry", () => {
     expect(tokens.find((c) => c.name === "Bear cub")!.typeLine).toContain("Artifact");
   });
 });
+
+describe("Mirrorworks", () => {
+  it("another nontoken artifact entering lets you pay {2} for a token copy", () => {
+    const mw = real("Mirrorworks", "mw");
+    const ring = real("Sol Ring", "ring");
+    const s = session([seat("a", [mw, ring, real("Island", "i1"), real("Island", "i2")]), seat("b", [])]);
+    const trigger = findCommonTriggersForPermanentEntered(s, "a", ring).find((t) => t.effect.kind === "copy_token")!;
+    expect(trigger).toBeTruthy();
+    expect(trigger.effect).toMatchObject({ payCostText: "{2}" });
+    const after = resolveTriggerEffect(s, trigger);
+    expect(after.seats[0].board.battlefield.filter((c) => c.token && c.name === "Sol Ring")).toHaveLength(1);
+    expect(after.seats[0].board.battlefield.some((c) => !c.token && c.tapped)).toBe(true);
+    // not enough mana: nothing happens
+    const broke = session([seat("a", [mw, { ...ring, tapped: true }]), seat("b", [])]);
+    expect(resolveTriggerEffect(broke, { ...trigger }).seats[0].board.battlefield.filter((c) => c.token)).toHaveLength(0);
+  });
+});
