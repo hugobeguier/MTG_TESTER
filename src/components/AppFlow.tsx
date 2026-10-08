@@ -5628,7 +5628,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
           : effect.kind === "grant_graveyard_cast"
             ? (seat.board.graveyard ?? []).filter((graveCard) => permanentMatchesQualifier(graveCard, effect.cardMatcher)).map((graveCard) => ({ seatId: seat.id, cardId: graveCard.id }))
             : undefined;
-      if (pool && pool.length >= 2) {
+      if (pool && pool.length >= 1) {
         setPendingRuleChoice({
           id: crypto.randomUUID(),
           kind: "choose_ability_card_target",
@@ -22791,7 +22791,7 @@ function ruleChoiceView(
         kind: "choose_creature_from_graveyards" as const,
         sourceCardName: choice.sourceCardName,
         prompt: choice.prompt,
-        actionLabel: "Exile",
+        actionLabel: /exile/i.test(choice.prompt) ? "Exile" : "Choose",
         cards: choice.cards.flatMap((entry) => {
           const owner = session.seats.find((seat) => seat.id === entry.seatId);
           const card = owner?.board.graveyard?.find((item) => item.id === entry.cardId);
