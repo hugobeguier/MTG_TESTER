@@ -14,6 +14,7 @@
     "bench:agents": "node scripts/agent-bench.mjs",
     "selfplay": "vite-node -c vitest.config.ts scripts/self-play.ts --",
     "backlog": "vite-node -c vitest.config.ts scripts/card-backlog.ts",
+    "choice-audit": "vite-node -c vitest.config.ts scripts/choice-audit.ts",
     "test": "vitest run"
   },
   "dependencies": {
