@@ -209,6 +209,9 @@ type TriggerEffect = (
   // resolved deterministically (put one down if there's a land in hand) rather than routed through
   // the standard optional_trigger pendingRuleChoice, since accepting is essentially always correct.
   | { kind: "put_land_from_hand" }
+  // The Ur-Dragon: "draw that many cards, then you may put a permanent card from your hand onto the battlefield."
+  | { kind: "draw_then_permanent"; amount: number }
+  | { kind: "put_permanent_from_hand" }
   // "Draw a card, then you may put a land card from your hand onto the battlefield." (Gretchen Titchwillow, Pendant of Prosperity).
   // ownerToo: "This artifact's owner draws a card, then that player may put a land card..." (the owner is an agent's auto pick).
   | { kind: "draw_then_land"; amount: number; ownerToo?: boolean }
@@ -7113,6 +7116,32 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       // nonland that earns the +1/+1 counter) routes through pendingRuleChoice.
       startConniveIteration(trigger, remainingStack, trigger.effect.amount, session);
       return;
+    } else if (accepted && trigger.effect.kind === "draw_then_permanent") {
+      // The draw happens now; WHICH permanent (or none) is the human's choice, asked with the hand as it is after the draw.
+      const controllerSeat = session.seats.find((seat) => seat.id === trigger.controllerSeatId);
+      if (controllerSeat?.kind === "human") {
+        const drawnSession = drawMultipleForSeat(session, trigger.controllerSeatId, trigger.effect.amount, `${controllerSeat.name} draws ${trigger.effect.amount} from ${trigger.sourceCardName}.`);
+        checkMiracleAfterDraw(session, drawnSession);
+        setSession(() => drawnSession);
+        const permanents = drawnSession.seats.find((seat) => seat.id === trigger.controllerSeatId)?.board.hand.filter((card) => !/Instant|Sorcery/.test(card.typeLine)) ?? [];
+        if (permanents.length > 0) {
+          const sourceCard = findPermanentById(drawnSession, trigger.sourceCardId) ?? ({ id: trigger.sourceCardId, name: trigger.sourceCardName, typeLine: "", oracleText: "", colors: [], manaValue: 0, role: "permanent", zone: "battlefield" } as VisibleCard);
+          setPendingRuleChoice({
+            id: crypto.randomUUID(),
+            kind: "choose_trigger_option",
+            controllerSeatId: trigger.controllerSeatId,
+            sourceCardId: trigger.sourceCardId,
+            sourceCardName: trigger.sourceCardName,
+            prompt: `${trigger.sourceCardName}: put a permanent card from your hand onto the battlefield?`,
+            options: [...permanents.map((card, index) => ({ index, label: card.name })), { index: permanents.length, label: "Don't put one" }],
+            trigger: makeCommonTrigger(trigger.controllerSeatId, trigger.controllerSeatId, sourceCard, { kind: "put_permanent_from_hand" }, `${trigger.sourceCardName} triggers.`),
+            remainingStack
+          });
+          return;
+        }
+      } else {
+        setSession((current) => resolveTriggerEffect(current, trigger));
+      }
     } else if (accepted && trigger.effect.kind === "draw_then_land") {
       // The draw happens now; WHICH land (or none) is the human's choice, asked with the hand as it is after the draw.
       const controllerSeat = session.seats.find((seat) => seat.id === trigger.controllerSeatId);
@@ -20210,6 +20239,21 @@ export function findMultiAttackTriggers(session: GameSession, attackerSeatId: st
   const keys: string[] = [];
   const attacker = session.seats.find((seat) => seat.id === attackerSeatId);
   const attackers = attacker?.board.battlefield.filter((card) => card.attacking) ?? [];
+  // "Whenever one or more Dragons you control attack, draw that many cards, then you may put a permanent card from your hand onto the
+  // battlefield." (The Ur-Dragon): once per declaration, for the attacking creatures of that subtype.
+  if (attacker) {
+    for (const source of attacker.board.battlefield) {
+      if (source.abilitiesStripped) continue;
+      const clause = oracleClauses(source.oracleText).find((line) => /^whenever one or more [a-z]+s you control attack, draw that many cards, then you may put a permanent card from your hand onto the battlefield/i.test(line));
+      const subtype = clause?.match(/^whenever one or more ([a-z]+)s you control attack/i)?.[1];
+      const key = `${session.turn}:${source.id}:subtype_attack`;
+      if (!clause || !subtype || session.onceEachTurnEffectsUsed?.includes(key)) continue;
+      const count = attackers.filter((card) => permanentMatchesQualifier(card, subtype)).length;
+      if (count === 0) continue;
+      keys.push(key);
+      triggers.push(makeCommonTrigger(attackerSeatId, attackerSeatId, source, { kind: "draw_then_permanent", amount: count }, `${source.name} triggers because ${count} ${subtype}${count === 1 ? "" : "s"} attacked.`));
+    }
+  }
   if (!attacker || attackers.length < 2) return { triggers, keys };
   for (const sourceSeat of session.seats) {
     if (sourceSeat.hasLost) continue;
@@ -22784,6 +22828,22 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
         ...session.events
       ]
     };
+  }
+  if (trigger.effect.kind === "draw_then_permanent") {
+    const drawn = drawMultipleForSeat(session, trigger.controllerSeatId, trigger.effect.amount, `${trigger.sourceCardName}: draws ${trigger.effect.amount} card${trigger.effect.amount === 1 ? "" : "s"}.`);
+    return resolveTriggerEffect(drawn, { ...trigger, effect: { kind: "put_permanent_from_hand" } });
+  }
+  if (trigger.effect.kind === "put_permanent_from_hand") {
+    const owner = session.seats.find((item) => item.id === trigger.controllerSeatId);
+    const permanents = (owner?.board.hand ?? []).filter((card) => !/Instant|Sorcery/.test(card.typeLine));
+    const chosenIndex = trigger.effect.chosenOption !== undefined ? Number.parseInt(trigger.effect.chosenOption, 10) : undefined;
+    // The human's "Don't put one" answer is an index past the last permanent card.
+    if (!owner || permanents.length === 0 || (chosenIndex !== undefined && chosenIndex >= permanents.length)) {
+      return rulesEvent(session, trigger.controllerSeatId, `${trigger.sourceCardName}: no permanent card is put onto the battlefield.`);
+    }
+    const pick = (chosenIndex !== undefined ? permanents[chosenIndex] : undefined) ?? [...permanents].sort((a, b) => b.manaValue - a.manaValue)[0];
+    const moved = moveCardAcrossSeats(session, owner.id, pick.id, owner.id, "battlefield");
+    return rulesEvent(moved.session, owner.id, `${trigger.sourceCardName}: ${owner.name} puts ${pick.name} onto the battlefield.`);
   }
   if (trigger.effect.kind === "draw_then_land") {
     const { amount, ownerToo } = trigger.effect;

@@ -2713,3 +2713,23 @@ describe("the Ancient Dragons roll a d20", () => {
     }
   });
 });
+
+describe("The Ur-Dragon", () => {
+  it("one or more Dragons attacking draws that many cards, then a permanent card from hand may enter", () => {
+    const ur = real("The Ur-Dragon", "ud", { attacking: true });
+    const dragon2 = real("Lathliss, Dragon Queen", "lq", { attacking: true });
+    const a = seat("a", [ur, dragon2, bear("b1", { attacking: true })]);
+    a.library = Array.from({ length: 10 }, (_, i) => bear("l" + i, { zone: "library" as const })) as never;
+    a.zones.library = 10;
+    a.board.hand = [real("Sol Ring", "sr", { zone: "hand" as const })];
+    const s = session([a, seat("b", [])]);
+    const { triggers, keys } = findMultiAttackTriggers(s, "a");
+    const trigger = triggers.find((t) => t.effect.kind === "draw_then_permanent")!;
+    expect(trigger).toBeTruthy();
+    expect((trigger.effect as { amount: number }).amount).toBe(2);
+    expect(keys.length).toBeGreaterThan(0);
+    const after = resolveTriggerEffect(s, trigger);
+    expect(after.seats[0].board.battlefield).toHaveLength(4);
+    expect(after.seats[0].board.hand.length).toBe(2); // 1 + 2 drawn - the permanent put onto the battlefield
+  });
+});
