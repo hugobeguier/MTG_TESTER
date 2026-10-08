@@ -2463,3 +2463,13 @@ describe("modal triggers: choose two / any number", () => {
     expect(modal.modes.every((mode) => mode.kind === "all")).toBe(true);
   });
 });
+
+describe("draw, then you may put a land onto the battlefield", () => {
+  it("Gretchen Titchwillow and Pendant of Prosperity parse as draw-then-land, and an agent draws and plays the land", () => {
+    for (const name of ["Gretchen Titchwillow", "Pendant of Prosperity"]) {
+      const card = real(name, "src");
+      const ability = parseGenericAbilityEffect(card.oracleText.split("\n").find((line) => /Draw a card/.test(line))!.replace(/^[^:]*:\s*/, ""));
+      expect(ability).toMatchObject({ kind: "trigger", effect: { kind: "draw_then_land" } });
+    }
+  });
+});

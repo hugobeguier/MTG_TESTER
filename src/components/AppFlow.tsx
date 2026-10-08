@@ -209,6 +209,9 @@ type TriggerEffect = (
   // resolved deterministically (put one down if there's a land in hand) rather than routed through
   // the standard optional_trigger pendingRuleChoice, since accepting is essentially always correct.
   | { kind: "put_land_from_hand" }
+  // "Draw a card, then you may put a land card from your hand onto the battlefield." (Gretchen Titchwillow, Pendant of Prosperity).
+  // ownerToo: "This artifact's owner draws a card, then that player may put a land card..." (the owner is an agent's auto pick).
+  | { kind: "draw_then_land"; amount: number; ownerToo?: boolean }
   // "Connives" (Ledger Shredder, and the same Streets of New Capenna keyword action on plenty of
   // other cards) — "Draw a card, then discard a card. If you discarded a nonland card, put a +1/+1
   // counter on this creature." amount is how many times (almost always 1; "connives twice" is the
@@ -6998,6 +7001,33 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       // nonland that earns the +1/+1 counter) routes through pendingRuleChoice.
       startConniveIteration(trigger, remainingStack, trigger.effect.amount, session);
       return;
+    } else if (accepted && trigger.effect.kind === "draw_then_land") {
+      // The draw happens now; WHICH land (or none) is the human's choice, asked with the hand as it is after the draw.
+      const controllerSeat = session.seats.find((seat) => seat.id === trigger.controllerSeatId);
+      if (controllerSeat?.kind === "human") {
+        const drawnSession = drawMultipleForSeat(session, trigger.controllerSeatId, trigger.effect.amount, `${controllerSeat.name} draws ${trigger.effect.amount} from ${trigger.sourceCardName}.`);
+        checkMiracleAfterDraw(session, drawnSession);
+        const lands = drawnSession.seats.find((seat) => seat.id === trigger.controllerSeatId)?.board.hand.filter((card) => card.typeLine.includes("Land")) ?? [];
+        const ownerAuto = trigger.effect.ownerToo ? resolveTriggerEffect(drawnSession, { ...trigger, effect: { ...trigger.effect, ownerToo: true }, controllerSeatId: findPermanentById(drawnSession, trigger.sourceCardId)?.ownerSeatId ?? trigger.controllerSeatId }) : drawnSession;
+        setSession(() => (trigger.effect.kind === "draw_then_land" && trigger.effect.ownerToo && findPermanentById(drawnSession, trigger.sourceCardId)?.ownerSeatId !== trigger.controllerSeatId ? ownerAuto : drawnSession));
+        if (lands.length > 0) {
+          const sourceCard = findPermanentById(drawnSession, trigger.sourceCardId) ?? ({ id: trigger.sourceCardId, name: trigger.sourceCardName, typeLine: "", oracleText: "", colors: [], manaValue: 0, role: "permanent", zone: "battlefield" } as VisibleCard);
+          setPendingRuleChoice({
+            id: crypto.randomUUID(),
+            kind: "choose_trigger_option",
+            controllerSeatId: trigger.controllerSeatId,
+            sourceCardId: trigger.sourceCardId,
+            sourceCardName: trigger.sourceCardName,
+            prompt: `${trigger.sourceCardName}: put a land card from your hand onto the battlefield?`,
+            options: [...lands.map((card, index) => ({ index, label: card.name })), { index: lands.length, label: "Don't put a land" }],
+            trigger: makeCommonTrigger(trigger.controllerSeatId, trigger.controllerSeatId, sourceCard, { kind: "put_land_from_hand" }, `${trigger.sourceCardName} triggers.`),
+            remainingStack
+          });
+          return;
+        }
+      } else {
+        setSession((current) => resolveTriggerEffect(current, trigger));
+      }
     } else if (accepted && trigger.effect.kind === "return_land_to_hand") {
       // Karoo/bounce lands (Simic Growth Chamber, ...): mandatory, but WHICH land is a real choice
       // — resolveTriggerEffect is a pure function with no access to pendingRuleChoice, so this
@@ -20967,6 +20997,9 @@ export function commonTriggerEffect(
     if (drawAmount && putBackAmount) return { kind: "draw_then_put_back", drawAmount, putBackAmount, optional };
   }
 
+  const drawThenLand = text.match(/\bdraw (a|one|two|\d+) cards?(?:,? then|\.) you may put a land card from your hand onto the battlefield\b/);
+  if (drawThenLand) return { kind: "draw_then_land", amount: numberWordToInt(drawThenLand[1]) ?? 1, ...(/owner draws/.test(text) ? { ownerToo: true } : {}) };
+
   const drawCount = extractCommonDrawCount(text);
   if (drawCount) return { kind: "draw_cards", amount: drawCount, optional };
 
@@ -22467,12 +22500,24 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
       ]
     };
   }
+  if (trigger.effect.kind === "draw_then_land") {
+    const { amount, ownerToo } = trigger.effect;
+    const owner = ownerToo ? findPermanentById(session, trigger.sourceCardId)?.ownerSeatId : undefined;
+    let next = session;
+    for (const seatId of [trigger.controllerSeatId, ...(owner && owner !== trigger.controllerSeatId ? [owner] : [])]) {
+      next = drawMultipleForSeat(next, seatId, amount, `${next.seats.find((item) => item.id === seatId)?.name ?? "Player"} draws ${amount} from ${trigger.sourceCardName}.`);
+      next = resolveTriggerEffect(next, { ...trigger, controllerSeatId: seatId, effect: { kind: "put_land_from_hand" } });
+    }
+    return next;
+  }
   if (trigger.effect.kind === "put_land_from_hand") {
     const controllerSeat = session.seats.find((seat) => seat.id === trigger.controllerSeatId);
     const landsInHand = controllerSeat?.board.hand.filter((card) => card.typeLine.includes("Land")) ?? [];
     // Prefer a nonbasic (a utility land is generically the more valuable thing to ramp into) —
     // falls back to a basic if that's all there is.
     const chosenIndex = trigger.effect.chosenOption !== undefined ? Number.parseInt(trigger.effect.chosenOption, 10) : undefined;
+    // The human's "Don't put a land" answer is an index past the last land.
+    if (chosenIndex !== undefined && chosenIndex >= landsInHand.length) return rulesEvent(session, trigger.controllerSeatId, `${trigger.sourceCardName}: no land is put onto the battlefield.`);
     const chosenLand = (chosenIndex !== undefined ? landsInHand[chosenIndex] : undefined) ?? landsInHand.find((card) => !isBasicLandCard(card)) ?? landsInHand[0];
     if (!controllerSeat || !chosenLand) {
       return {
