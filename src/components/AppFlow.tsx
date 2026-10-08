@@ -25537,6 +25537,8 @@ export function adjustedCastingCost(
   // permission itself already gates which zone/seat may cast it (see playCard's existing exile
   // checks); this only waives the cost on top of that, and only while actually casting from exile.
   if (sourceZone === "exile" && card.exiledPlayableFree) return 0;
+  // "If you control a commander, you may cast this spell without paying its mana cost." (Flawless Maneuver, Fierce Guardianship, Deadly Rollick)
+  if (/if you control a commander, you may cast this spell without paying its mana cost/i.test(card.oracleText) && seat.board.battlefield.some((permanent) => permanent.commander)) return 0;
   // Omniscience: "You may cast spells from your hand without paying their mana costs." An
   // unconditional standing permission (contrast Mind's Dilation's one-shot exile trigger above, or
   // One with the Multiverse's once-per-turn version below — see hasOmniscienceFreeHandCast's own

@@ -2871,3 +2871,13 @@ describe("Inkshield", () => {
     expect(swing.seats[0].board.battlefield.filter((c) => c.name.includes("Inkling"))).toHaveLength(3);
   });
 });
+
+describe("Flawless Maneuver", () => {
+  it("is free while you control a commander, and costs its mana cost otherwise", () => {
+    const spell = real("Flawless Maneuver", "fm", { zone: "hand" as const });
+    const withCommander = seat("a", [bear("cmd", { commander: true })]);
+    const without = seat("a", [bear("x")]);
+    expect(adjustedCastingCost(withCommander, spell, spell.manaValue, "hand", "a", [withCommander])).toBe(0);
+    expect(adjustedCastingCost(without, spell, spell.manaValue, "hand", "a", [without])).toBe(spell.manaValue);
+  });
+});
