@@ -230,7 +230,7 @@ export function parseGroupAnthemBoost(oracleText: string): GroupAnthemBoost[] {
   for (const rawClause of oracleText.split("\n")) {
     // Reminder text in parentheses ("(Any amount of damage they deal to a creature is enough to destroy
     // it.)") isn't part of the ability.
-    const text = rawClause.replace(/\([^)]*\)/g, "").trim().toLowerCase();
+    const text = rawClause.replace(/\([^)]*\)/g, "").trim().toLowerCase().replace(/\bnon-/g, "non");
     // "Skeletons you control and other Zombies you control get +1/+1 and have deathtouch." (Death Baron)
     // — two groups sharing one boost; the keyword half is parseGroupKeywordGrant's.
     const compound = text.match(/^([a-z][a-z ]*?) you control and other ([a-z][a-z ]*?) you control gets? \+(\d+)\/\+(\d+)(?: and have [a-z, ]+)?\.?$/);
@@ -304,6 +304,8 @@ function matchesQualifierWord(card: QualifiableCard, word: string): boolean {
   if (colorLetter) return hasColor(card, colorLetter);
   const negatedColor = word.startsWith("non") ? COLOR_LETTERS[word.slice(3)] : undefined;
   if (negatedColor) return !hasColor(card, negatedColor);
+  // "non-Human creatures" / "nonartifact creatures": the negation of any other single qualifier word.
+  if (word.startsWith("non") && word.length > 3) return !matchesQualifierWord(card, word.slice(3));
 
   // Fall back to a creature-subtype match (Elves, Goblins, Zombies, ...): singularize crudely and
   // check it appears in the type line, matching how the rest of this codebase parses subtypes.
@@ -360,7 +362,9 @@ const GRANTABLE_KEYWORDS = [
   "hexproof",
   "shroud",
   "haste",
-  "ward"
+  "ward",
+  "undying",
+  "persist"
 ];
 
 // "[Other] [Qualifier] you control have Keyword[, Keyword, and Keyword]." (Soaring Lightbringer,
@@ -373,7 +377,7 @@ const GRANTABLE_KEYWORDS = [
 export function parseGroupKeywordGrant(oracleText: string): GroupKeywordGrant[] {
   const grants: GroupKeywordGrant[] = [];
   for (const rawClause of oracleText.split("\n")) {
-    const text = rawClause.replace(/\([^)]*\)/g, "").trim().toLowerCase();
+    const text = rawClause.replace(/\([^)]*\)/g, "").trim().toLowerCase().replace(/\bnon-/g, "non");
     // Death Baron: "Skeletons you control and other Zombies you control get +1/+1 and have deathtouch."
     const compound = text.match(/^([a-z][a-z ]*?) you control and other ([a-z][a-z ]*?) you control gets? \+\d+\/\+\d+ and have ([a-z, ]+?)\.?$/);
     if (compound) {
@@ -428,7 +432,7 @@ export interface ConditionalStaticBoost {
 export function parseConditionalStaticBoosts(oracleText: string): ConditionalStaticBoost[] {
   const boosts: ConditionalStaticBoost[] = [];
   for (const rawClause of oracleText.split("\n")) {
-    const text = rawClause.replace(/\([^)]*\)/g, "").trim().toLowerCase();
+    const text = rawClause.replace(/\([^)]*\)/g, "").trim().toLowerCase().replace(/\bnon-/g, "non");
     const selfLife = text.match(/^this creature gets \+(\d+)\/\+(\d+) as long as you have (\d+) or more life\.?$/);
     if (selfLife) {
       boosts.push({ condition: { kind: "life_at_least", amount: Number.parseInt(selfLife[3], 10) }, scope: "self", power: Number.parseInt(selfLife[1], 10), toughness: Number.parseInt(selfLife[2], 10) });

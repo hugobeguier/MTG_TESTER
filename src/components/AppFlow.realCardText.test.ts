@@ -2530,3 +2530,27 @@ describe("edicts on entering", () => {
     expect(after.seats[1].board.battlefield).toHaveLength(0);
   });
 });
+
+describe("undying (Mikaeus, the Unhallowed)", () => {
+  it("Mikaeus gives other non-Humans +1/+1 and undying, but not Humans or itself", () => {
+    const human = bear("hu", { typeLine: "Creature — Human Soldier" });
+    const seats = settle([seat("a", [real("Mikaeus, the Unhallowed", "mk"), bear("b1"), human])]);
+    expect(find(seats, "a", "b1").attachmentPowerBonus).toBe(1);
+    expect(find(seats, "a", "b1").grantedKeywords).toContain("undying");
+    expect(find(seats, "a", "hu").attachmentPowerBonus).toBeUndefined();
+    expect(find(seats, "a", "mk").attachmentPowerBonus).toBeUndefined();
+  });
+
+  it("a creature with undying returns once with a +1/+1 counter, and not again if it died with one", () => {
+    const wolf = bear("w", { oracleText: "Undying", zone: "graveyard" as const });
+    const a = seat("a", []);
+    a.board.graveyard = [wolf];
+    const s = session([a, seat("b", [])]);
+    const [trigger] = findCommonTriggersForPermanentDied(s, "a", wolf).filter((t) => t.effect.kind === "undying_return");
+    expect(trigger).toBeTruthy();
+    const back = resolveTriggerEffect(s, trigger);
+    const returned = back.seats[0].board.battlefield.find((c) => c.id === "w")!;
+    expect(returned.counters).toEqual([{ kind: "+1/+1", count: 1 }]);
+    expect(findCommonTriggersForPermanentDied(back, "a", returned).filter((t) => t.effect.kind === "undying_return")).toHaveLength(0);
+  });
+});

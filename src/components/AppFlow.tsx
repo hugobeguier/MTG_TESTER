@@ -311,6 +311,8 @@ type TriggerEffect = (
   | { kind: "damage_each_other_opponent"; amount: number }
   // "Exile all graveyards." (Farewell's last mode)
   | { kind: "exile_all_graveyards" }
+  // Undying / persist: "When this creature dies, if it had no +1/+1 (-1/-1) counters on it, return it to the battlefield with one."
+  | { kind: "undying_return"; counterKind: "+1/+1" | "-1/-1" }
   // "Each opponent sacrifices a creature of their choice." (Butcher of Malakir, Dictate of Erebos, Grave Pact, Sheoldred): a human victim
   // picks; includeSelf is "Each player sacrifices ..." (Accursed Marauder).
   | { kind: "each_opponent_sacrifices"; filter: string; includeSelf?: boolean }
@@ -19946,6 +19948,14 @@ export function findCommonTriggersForPermanentDied(
     }
   }
 
+  // Undying / persist (printed or granted, e.g. by Mikaeus, the Unhallowed): checked against the counters it died with.
+  const hadCounter = (kind: string) => (deadCard.counters ?? []).some((counter) => counter.kind === kind && counter.count > 0);
+  const returnKind = hasKeyword(deadCard, "undying") && !hadCounter("+1/+1") ? "+1/+1" : hasKeyword(deadCard, "persist") && !hadCounter("-1/-1") ? "-1/-1" : undefined;
+  if (returnKind && !deadCard.token) {
+    const ownerSeatId = deadCard.ownerSeatId ?? deadSeatId;
+    triggers.push(makeCommonTrigger(deadSeatId, ownerSeatId, deadCard, { kind: "undying_return", counterKind: returnKind }, `${deadCard.name} triggers (${returnKind === "+1/+1" ? "undying" : "persist"}).`));
+  }
+
   // Dying is one way to leave the battlefield; the others (bounce, exile) arrive through pendingLeaves.
   triggers.push(...findLeavesBattlefieldTriggers(session, deadSeatId, deadCard));
 
@@ -22178,6 +22188,29 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
       })
     };
     return rulesEvent(reordered, owner.id, `${trigger.sourceCardName}: ${owner.name} reveals ${revealed.length + 1} card${revealed.length === 0 ? "" : "s"} and puts ${land.name} onto the battlefield tapped.`);
+  }
+  if (trigger.effect.kind === "undying_return") {
+    const holder = session.seats.find((item) => (item.board.graveyard ?? []).some((card) => card.id === trigger.sourceCardId));
+    if (!holder) return session;
+    const ownerId = (holder.board.graveyard ?? []).find((card) => card.id === trigger.sourceCardId)?.ownerSeatId ?? holder.id;
+    const kind = trigger.effect.counterKind;
+    const moved = moveCardAcrossSeats(session, holder.id, trigger.sourceCardId, ownerId, "battlefield");
+    const returned = moved.session.seats
+      .find((item) => item.id === ownerId)
+      ?.board.battlefield.find((card) => card.id === trigger.sourceCardId);
+    if (!returned) return moved.session;
+    return rulesEvent(
+      {
+        ...moved.session,
+        seats: moved.session.seats.map((item) =>
+          item.id !== ownerId
+            ? item
+            : { ...item, board: { ...item.board, battlefield: item.board.battlefield.map((card) => (card.id === trigger.sourceCardId ? { ...card, counters: [...(card.counters ?? []).filter((counter) => counter.kind !== kind), { kind, count: 1 }] } : card)) } }
+        )
+      },
+      ownerId,
+      `${trigger.sourceCardName} returns to the battlefield with a ${kind} counter.`
+    );
   }
   if (trigger.effect.kind === "each_opponent_sacrifices") {
     const { filter, includeSelf } = trigger.effect;
