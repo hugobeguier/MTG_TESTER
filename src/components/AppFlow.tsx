@@ -209,6 +209,9 @@ type TriggerEffect = (
   // resolved deterministically (put one down if there's a land in hand) rather than routed through
   // the standard optional_trigger pendingRuleChoice, since accepting is essentially always correct.
   | { kind: "put_land_from_hand" }
+  // "Put any number of creature cards from your hand onto the battlefield." (Ghalta, Stampede Tyrant) / "...land cards ... tapped" (Wrenn and Seven):
+  // a human picks cards one at a time (pickedIds), an agent puts them all.
+  | { kind: "put_any_from_hand"; filter: "creature" | "land" | "artifact" | "permanent"; tapped?: boolean; pickedIds?: string[] }
   // The Ur-Dragon: "draw that many cards, then you may put a permanent card from your hand onto the battlefield."
   | { kind: "draw_then_permanent"; amount: number }
   | { kind: "put_permanent_from_hand" }
@@ -371,7 +374,9 @@ type TriggerEffect = (
   // Melee: "Whenever this creature attacks, it gets +1/+1 until end of turn for each opponent you attacked this combat."
   | { kind: "melee" }
   // "Discard any number of cards, then draw that many cards." (The Elder Dragon War, chapter II). discardIds accumulates the human's picks.
-  | { kind: "discard_any_then_draw"; discardIds?: string[] }
+  // plusOne: "...then draw that many cards plus one." (Brass's Tunnel-Grinder); toLibraryBottom: "Put any number of cards from your hand on the
+  // bottom of your library, then draw that many cards plus one." (Valakut Awakening)
+  | { kind: "discard_any_then_draw"; discardIds?: string[]; plusOne?: boolean; toLibraryBottom?: boolean }
   // "Read ahead" (The Elder Dragon War): the controller picks the chapter a Saga starts on as it enters.
   | { kind: "read_ahead"; chapterCount: number }
   // "Exile the top X cards of your library, where X is the number of creatures you control with power 4 or greater. You may play those cards
@@ -6547,6 +6552,17 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       setPendingRuleChoice({ id: crypto.randomUUID(), kind: "choose_trigger_option", controllerSeatId: controller.id, sourceCardId: trigger.sourceCardId, sourceCardName: trigger.sourceCardName, prompt, options, trigger, remainingStack, queueing });
       return true;
     };
+    // Ghalta / Wrenn and Seven: pick the cards to put onto the battlefield one at a time, "Done" ends it.
+    if (trigger.effect.kind === "put_any_from_hand") {
+      const effect = trigger.effect;
+      const picked = effect.pickedIds ?? [];
+      const remaining = controller.board.hand.filter((card) => !picked.includes(card.id) && (effect.filter === "permanent" ? !/Instant|Sorcery/.test(card.typeLine) : card.typeLine.includes(effect.filter.charAt(0).toUpperCase() + effect.filter.slice(1))));
+      if (remaining.length === 0) return false;
+      return open(
+        `${trigger.sourceCardName}: put which ${effect.filter} cards from your hand onto the battlefield? (${picked.length} chosen)`,
+        [...remaining.map((card, index) => ({ index, label: `${card.name}${card.power !== undefined ? ` (${card.power}/${card.toughness})` : ""}` })), { index: MODAL_DONE_INDEX, label: picked.length > 0 ? "Done" : "Put none" }]
+      );
+    }
     // "Choose two / one or more / any number": one mode per prompt, a Done button once enough are picked.
     if (trigger.effect.kind === "modal" && trigger.effect.modal.chooseCount > 1) {
       const modal = trigger.effect.modal;
@@ -6832,6 +6848,28 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         setSession((current) => ({ ...current, pendingDiscardChoices: [...(current.pendingDiscardChoices ?? []), { seatId: victimId, count: 1, sourceName }] }));
       }
       if (remaining > 1) window.setTimeout(() => setSession((current) => ({ ...current, pendingPunisherChoices: [...(current.pendingPunisherChoices ?? []), { seatId: victimId, sourceName, lifeAmount, times: remaining - 1 }] })), 300);
+      return;
+    }
+    // Put any number of cards from hand onto the battlefield: each click adds a card; Done resolves.
+    if (choice.trigger.effect.kind === "put_any_from_hand") {
+      const effect = choice.trigger.effect;
+      const picked = effect.pickedIds ?? [];
+      const controller = session.seats.find((seat) => seat.id === choice.controllerSeatId);
+      const remaining = (controller?.board.hand ?? []).filter((card) => !picked.includes(card.id) && (effect.filter === "permanent" ? !/Instant|Sorcery/.test(card.typeLine) : card.typeLine.includes(effect.filter.charAt(0).toUpperCase() + effect.filter.slice(1))));
+      const added = index === MODAL_DONE_INDEX ? undefined : remaining[index];
+      const nextPicked = added ? [...picked, added.id] : picked;
+      if (added && remaining.length > 1) {
+        const nextTrigger = { ...choice.trigger, effect: { ...effect, pickedIds: nextPicked } } as Extract<PendingAction, { type: "trigger" }>;
+        const queueing = choice.queueing?.map((queued) => (queued.id === choice.trigger.id ? nextTrigger : queued));
+        if (openTriggerOptionPrompt(nextTrigger, choice.remainingStack, queueing)) return;
+      }
+      const finished = { ...choice.trigger, effect: { ...effect, pickedIds: nextPicked, chosenOption: nextPicked.join(",") } } as Extract<PendingAction, { type: "trigger" }>;
+      if (choice.queueing) {
+        queueCommonTriggers(choice.queueing.map((queued) => (queued.id === choice.trigger.id ? finished : queued)));
+        return;
+      }
+      setSession((current) => resolveTriggerEffect(current, finished));
+      resumeAfterTriggerChoice(choice.trigger, choice.remainingStack);
       return;
     }
     // Choose-several modal trigger: each click adds a mode; the last pick (or Done) resolves it.
@@ -8434,7 +8472,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       if (trigger.effect.chosenOption !== undefined) continue;
       const controller = session.seats.find((seat) => seat.id === trigger.controllerSeatId);
       if (controller?.kind !== "human") continue;
-      const asksAtQueueTime = trigger.effect.kind === "modal" || triggerCardPrompt(trigger, controller) !== undefined;
+      const asksAtQueueTime = trigger.effect.kind === "modal" || trigger.effect.kind === "put_any_from_hand" || triggerCardPrompt(trigger, controller) !== undefined;
       if (asksAtQueueTime && openTriggerOptionPrompt(trigger, [], triggers)) return;
     }
     const [firstTrigger, ...laterTriggers] = triggers;
@@ -20981,6 +21019,10 @@ export function commonTriggerEffect(
   if (extraCombat) return extraCombat[1] ? { kind: "additional_combat", payCostText: extraCombat[1].toUpperCase(), optional: true } : { kind: "additional_combat" };
   if (/when enchanted creature dies, return this card to its owner'?s hand/.test(text) || (mode === "died" && /^return this card to its owner'?s hand\.?$/.test(text.trim()))) return { kind: "return_self_to_hand" };
   if (/^investigate\.?$/.test(text.replace(/\([^)]*\)/g, "").replace(/^[^,]*,\s*/, "").trim())) return { kind: "create_tokens", tokens: [{ ...predefinedTokenSpec("Clue"), count: 1 }] };
+  const putAnyBody = text.replace(/\([^)]*\)/g, "").replace(/^(?:when|whenever|at the beginning)\b[^,]*,\s*/, "").trim();
+  // (Anywhere in the text: Ghalta's enters clause sits beside its cost-reduction line.)
+  const putAny = putAnyBody.match(/(?:^|[.,:]\s+)put any number of (creature|land|artifact|permanent) cards from your hand onto the battlefield( tapped)?\.?(?:\s|$)/);
+  if (putAny) return { kind: "put_any_from_hand", filter: putAny[1] as "creature", ...(putAny[2] ? { tapped: true } : {}) };
   // "Each player discards a card." / "Each player loses 1 life and draws a card." (Rankle, Master of Pranks)
   const eachPlayer = text.replace(/\([^)]*\)/g, "").trim().match(/^each player (?:discards (a|one|two|\d+) cards?|loses (\d+) life(?: and draws (a|one|two|\d+) cards?)?)\.?$/);
   if (eachPlayer) {
@@ -21051,6 +21093,8 @@ export function commonTriggerEffect(
   const packTactics = text.match(/if you attacked with creatures with total power (\d+) or greater this combat, you may put an? ([a-z]+) creature card from your hand onto the battlefield tapped and attacking/);
   if (packTactics) return { kind: "dragon_from_hand_attacking", subtype: packTactics[2], condition: { kind: "attacking_power_at_least", amount: Number.parseInt(packTactics[1], 10) } };
   if (/^(?:[^,]*,\s*)?discard any number of cards, then draw that many cards\.?$/.test(noReminder)) return { kind: "discard_any_then_draw" };
+  if (/^(?:[^,]*,\s*)?discard any number of cards, then draw that many cards plus one\.?$/.test(noReminder)) return { kind: "discard_any_then_draw", plusOne: true };
+  if (/^put any number of cards from your hand on the bottom of your library, then draw that many cards plus one\.?$/.test(noReminder)) return { kind: "discard_any_then_draw", plusOne: true, toLibraryBottom: true };
   const hawk = text.match(/exile the top x cards of your library, where x is the number of creatures you control with power (\d+) or greater\. you may play those cards until your next end step\..*?deals (\d+) damage to each opponent for each of those cards that are still exiled/);
   if (hawk) return { kind: "exile_top_by_power_then_damage", minPower: Number.parseInt(hawk[1], 10), damagePerCard: Number.parseInt(hawk[2], 10) };
   if (/you may exile it\. when you do, return target creature card from your graveyard to your hand/.test(text)) return { kind: "exile_self_return_creature_to_hand", optional: true };
@@ -22327,11 +22371,14 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
     // Agents discard what they can't use: extra lands once they have plenty, and spells far above their mana.
     const aiPicks = owner.board.hand.filter((card) => (isLandCard(card) ? lands >= 6 : card.manaValue >= lands + 4)).map((card) => card.id);
     const ids = (trigger.effect.chosenOption !== undefined ? trigger.effect.chosenOption.split(",").filter(Boolean) : aiPicks).filter((id) => owner.board.hand.some((card) => card.id === id));
-    if (ids.length === 0) return rulesEvent(session, owner.id, `${trigger.sourceCardName}: ${owner.name} discards nothing.`);
+    const bonus = trigger.effect.plusOne ? 1 : 0;
+    if (ids.length === 0 && bonus === 0) return rulesEvent(session, owner.id, `${trigger.sourceCardName}: ${owner.name} discards nothing.`);
     let next = session;
-    for (const id of ids) next = moveCardBetweenVisibleZones(next, owner.id, id, "graveyard");
-    next = rulesEvent(next, owner.id, `${trigger.sourceCardName}: ${owner.name} discards ${ids.length} card${ids.length === 1 ? "" : "s"}.`);
-    return drawMultipleForSeat(next, owner.id, ids.length, `${owner.name} draws ${ids.length} card${ids.length === 1 ? "" : "s"} from ${trigger.sourceCardName}.`);
+    for (const id of ids) {
+      next = trigger.effect.toLibraryBottom ? moveCardAcrossSeats(next, owner.id, id, owner.id, "library", { libraryPosition: "bottom" }).session : moveCardBetweenVisibleZones(next, owner.id, id, "graveyard");
+    }
+    next = rulesEvent(next, owner.id, `${trigger.sourceCardName}: ${owner.name} ${trigger.effect.toLibraryBottom ? "puts" : "discards"} ${ids.length} card${ids.length === 1 ? "" : "s"}${trigger.effect.toLibraryBottom ? " on the bottom of their library" : ""}.`);
+    return drawMultipleForSeat(next, owner.id, ids.length + bonus, `${owner.name} draws ${ids.length + bonus} card${ids.length + bonus === 1 ? "" : "s"} from ${trigger.sourceCardName}.`);
   }
   if (trigger.effect.kind === "exile_self_return_creature_to_hand") {
     const holder = session.seats.find((item) => (item.board.graveyard ?? []).some((card) => card.id === trigger.sourceCardId));
@@ -22480,6 +22527,23 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
       controllerId,
       `${trigger.sourceCardName} returns a creature card from a graveyard and attaches to it.`
     );
+  }
+  if (trigger.effect.kind === "put_any_from_hand") {
+    const owner = session.seats.find((item) => item.id === trigger.controllerSeatId);
+    if (!owner) return session;
+    const matches = (card: VisibleCard) =>
+      trigger.effect.kind === "put_any_from_hand" &&
+      (trigger.effect.filter === "permanent" ? !/Instant|Sorcery/.test(card.typeLine) : card.typeLine.includes(trigger.effect.filter.charAt(0).toUpperCase() + trigger.effect.filter.slice(1)));
+    const wanted = trigger.effect.chosenOption !== undefined ? trigger.effect.chosenOption.split(",").filter(Boolean) : owner.board.hand.filter(matches).sort((a, b) => b.manaValue - a.manaValue).map((card) => card.id);
+    let next = session;
+    let count = 0;
+    for (const id of wanted) {
+      const card = owner.board.hand.find((item) => item.id === id);
+      if (!card || !matches(card)) continue;
+      next = moveCardAcrossSeats(next, owner.id, id, owner.id, "battlefield", { tapped: trigger.effect.tapped }).session;
+      count += 1;
+    }
+    return rulesEvent(next, owner.id, `${trigger.sourceCardName}: ${owner.name} puts ${count} card${count === 1 ? "" : "s"} from hand onto the battlefield.`);
   }
   if (trigger.effect.kind === "undying_return") {
     const holder = session.seats.find((item) => (item.board.graveyard ?? []).some((card) => card.id === trigger.sourceCardId));

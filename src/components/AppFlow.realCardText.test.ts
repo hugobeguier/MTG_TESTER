@@ -2803,3 +2803,45 @@ describe("win the game: Mechanized Production, Hellkite Tyrant", () => {
     expect(applyDeterministicPhaseTrigger(session([seat("a", [tyrant, ...arts(20)]), seat("b", [])]), "a", tyrant, "upkeep step")?.seats[1].hasLost).toBe(true);
   });
 });
+
+describe("put any number of cards from hand (Ghalta, Wrenn and Seven)", () => {
+  it("Ghalta's enters trigger puts every creature card (agent) or exactly the chosen ones (human) from hand onto the battlefield", () => {
+    const ghalta = real("Ghalta, Stampede Tyrant", "gh");
+    const a = seat("a", [ghalta], { kind: "human" });
+    a.board.hand = [bear("h1", { zone: "hand" as const }), bear("h2", { zone: "hand" as const }), real("Sol Ring", "sr", { zone: "hand" as const })];
+    const s = session([a, seat("b", [])]);
+    const [trigger] = findCommonTriggersForPermanentEntered(s, "a", ghalta).filter((t) => t.effect.kind === "put_any_from_hand");
+    expect(trigger).toBeTruthy();
+    const all = resolveTriggerEffect(s, trigger);
+    expect(all.seats[0].board.battlefield.map((c) => c.id).sort()).toEqual(["gh", "h1", "h2"]);
+    expect(all.seats[0].board.hand.map((c) => c.id)).toEqual(["sr"]);
+    const some = resolveTriggerEffect(s, { ...trigger, effect: { ...trigger.effect, chosenOption: "h2" } } as typeof trigger);
+    expect(some.seats[0].board.battlefield.map((c) => c.id).sort()).toEqual(["gh", "h2"]);
+  });
+
+  it("Wrenn and Seven's 0 puts land cards onto the battlefield tapped", () => {
+    const effect = commonTriggerEffect("Put any number of land cards from your hand onto the battlefield tapped.", "clause");
+    expect(effect).toMatchObject({ kind: "put_any_from_hand", filter: "land", tapped: true });
+  });
+});
+
+describe("discard/bottom any number, draw that many plus one", () => {
+  it("Brass's Tunnel-Grinder: discarding 1 draws 2; discarding none still draws 1", () => {
+    const effect = commonTriggerEffect("When Brass's Tunnel-Grinder enters, discard any number of cards, then draw that many cards plus one.", "clause");
+    expect(effect).toMatchObject({ kind: "discard_any_then_draw", plusOne: true });
+    const a = seat("a", []);
+    a.board.hand = [bear("h1", { zone: "hand" as const }), bear("h2", { zone: "hand" as const })];
+    a.library = Array.from({ length: 10 }, (_, i) => bear("l" + i, { zone: "library" as const })) as never;
+    a.zones.library = 10;
+    const s = session([a, seat("b", [])]);
+    const trigger = { id: "t", type: "trigger", actorSeatId: "a", controllerSeatId: "a", sourceCardId: "bt", sourceCardName: "Brass's Tunnel-Grinder", triggerKind: "common", effect: { ...effect!, chosenOption: "h1" }, message: "" } as never;
+    expect(resolveTriggerEffect(s, trigger).seats[0].board.hand).toHaveLength(3);
+    const none = { ...(trigger as object), effect: { ...effect!, chosenOption: "" } } as never;
+    expect(resolveTriggerEffect(s, none).seats[0].board.hand).toHaveLength(3);
+  });
+
+  it("Valakut Awakening puts the chosen cards on the bottom of the library", () => {
+    const effect = commonTriggerEffect("Put any number of cards from your hand on the bottom of your library, then draw that many cards plus one.", "clause");
+    expect(effect).toMatchObject({ kind: "discard_any_then_draw", plusOne: true, toLibraryBottom: true });
+  });
+});
