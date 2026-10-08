@@ -2690,3 +2690,26 @@ describe("Cankerbloom with its real text", () => {
     expect(parseGenericSacrificeAbilities(real("Cankerbloom", "cb").oracleText).length).toBeGreaterThan(0);
   });
 });
+
+describe("the Ancient Dragons roll a d20", () => {
+  it("Copper makes Treasures, Silver draws, Gold makes Faerie Dragons: a number equal to the roll", () => {
+    for (const [name, check] of [
+      ["Ancient Copper Dragon", (seat0: PlayerSeat) => seat0.board.battlefield.filter((c) => c.name === "Treasure").length],
+      ["Ancient Silver Dragon", (seat0: PlayerSeat) => seat0.board.hand.length],
+      ["Ancient Gold Dragon", (seat0: PlayerSeat) => seat0.board.battlefield.filter((c) => c.name === "Faerie Dragon Token").length]
+    ] as const) {
+      const dragon = real(name, "ad");
+      const a = seat("a", [dragon]);
+      a.library = Array.from({ length: 30 }, (_, i) => bear("l" + i, { zone: "library" as const })) as never;
+      a.zones.library = 30;
+      const s = session([a, seat("b", [])]);
+      const trigger = findCombatDamageToPlayerTriggers(s, "a", dragon, "b").find((t) => t.effect.kind === "d20_roll")!;
+      expect(trigger, name).toBeTruthy();
+      const after = resolveTriggerEffect(s, trigger);
+      const roll = Number(after.events.find((e) => /rolls a d20 and gets/.test(e.message))!.message.match(/gets (\d+)/)![1]);
+      expect(roll).toBeGreaterThanOrEqual(1);
+      expect(roll).toBeLessThanOrEqual(20);
+      expect(check(after.seats[0]), name).toBe(roll);
+    }
+  });
+});

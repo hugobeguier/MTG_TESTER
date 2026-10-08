@@ -311,6 +311,8 @@ type TriggerEffect = (
   | { kind: "damage_each_other_opponent"; amount: number }
   // "Exile all graveyards." (Farewell's last mode)
   | { kind: "exile_all_graveyards" }
+  // "Roll a d20. You create a number of Treasure tokens equal to the result." (the Ancient Dragons): the roll is made when it resolves.
+  | { kind: "d20_roll"; payoff: "treasures" | "draw" | "faerie_dragons" }
   // Animate Dead and friends: "Return enchanted creature card to the battlefield under your control and attach this Aura to it."
   // The creature card is chosen from any graveyard when the Aura enters (the engine has no "enchant a card in a graveyard" attachment).
   | { kind: "aura_reanimate" }
@@ -20920,6 +20922,11 @@ export function commonTriggerEffect(
   // Massacre Wurm: "Whenever a creature an opponent controls dies, that player loses 2 life." (the actor is the player whose creature died)
   const thatPlayerLoses = mode === "died" ? edictBody.match(/^that player loses (\d+) life\.?$/) : null;
   if (thatPlayerLoses) return { kind: "actor_loses_life", amount: Number.parseInt(thatPlayerLoses[1], 10) };
+  // The Ancient Dragons: "...deals combat damage to a player, roll a d20. <payoff equal to the result>."
+  const d20Body = text.replace(/\([^)]*\)/g, "").replace(/^[^,]*,\s*/, "").trim();
+  if (/^roll a d20\. you create a number of treasure tokens equal to the result\.?$/.test(d20Body)) return { kind: "d20_roll", payoff: "treasures" };
+  if (/^roll a d20\. draw cards equal to the result\b/.test(d20Body)) return { kind: "d20_roll", payoff: "draw" };
+  if (/^roll a d20\. you create a number of 1\/1 blue faerie dragon creature tokens with flying equal to the result\.?$/.test(d20Body)) return { kind: "d20_roll", payoff: "faerie_dragons" };
   if (/^exile all graveyards\.?$/.test(text.replace(/\([^)]*\)/g, "").trim())) return { kind: "exile_all_graveyards" };
   const otherOpponents = text.match(/^(?:this creature|it) deals (\d+) damage to each other opponent\.?$/);
   if (otherOpponents) return { kind: "damage_each_other_opponent", amount: Number.parseInt(otherOpponents[1], 10) };
@@ -22413,6 +22420,15 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
       ownerId,
       `${trigger.sourceCardName} returns to the battlefield with a ${kind} counter.`
     );
+  }
+  if (trigger.effect.kind === "d20_roll") {
+    const roll = randomInt(20) + 1;
+    const rolled = rulesEvent(session, trigger.controllerSeatId, `${trigger.sourceCardName}: rolls a d20 and gets ${roll}.`);
+    if (trigger.effect.payoff === "draw") return drawMultipleForSeat(rolled, trigger.controllerSeatId, roll, `${trigger.sourceCardName}: draws ${roll} cards.`);
+    const specs = trigger.effect.payoff === "treasures"
+      ? [{ ...predefinedTokenSpec("Treasure"), count: roll }]
+      : parseCreateTokenSpecs("create a 1/1 blue Faerie Dragon creature token with flying").map((spec) => ({ ...spec, count: roll }));
+    return createTokensForSeat(rolled, trigger.controllerSeatId, trigger.sourceCardId, specs).session;
   }
   if (trigger.effect.kind === "each_opponent_sacrifices") {
     const { filter, includeSelf } = trigger.effect;
