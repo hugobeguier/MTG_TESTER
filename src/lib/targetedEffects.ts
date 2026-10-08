@@ -7,6 +7,7 @@ import type { TargetController, TargetSpec } from "./targeting";
 export type TargetedVerb =
   | { kind: "add_counters"; counterKind: string; amount: number }
   | { kind: "gain_keywords"; keywords: string[] }
+  | { kind: "pump"; power: number; toughness: number; keywords: string[] }
   | { kind: "tap" }
   | { kind: "untap" }
   | { kind: "life"; delta: number }
@@ -16,7 +17,9 @@ export type TargetedVerb =
 export interface TargetedEffect {
   verb: TargetedVerb;
   // A player or a permanent of the given type; controller narrows whose.
-  who: { kind: "player"; opponentOnly: boolean } | { kind: "permanent"; permanentType: RemovalTargetType; controller: TargetController };
+  who:
+    | { kind: "player"; opponentOnly: boolean }
+    | { kind: "permanent"; permanentType: RemovalTargetType; controller: TargetController; attackingOnly?: boolean; another?: boolean };
   // "up to one target ...": choosing nothing is allowed.
   upTo?: boolean;
   // The rest of a compound sentence that happens to the controller: "and you gain 1 life", "and draw a card".
@@ -35,9 +38,11 @@ function amountOf(word: string): number | undefined {
   return NUMBER_WORDS[word] ?? (/^\d+$/.test(word) ? Number.parseInt(word, 10) : undefined);
 }
 
-function permanentShape(phrase: string): { permanentType: RemovalTargetType; controller: TargetController } | undefined {
+function permanentShape(phrase: string): { permanentType: RemovalTargetType; controller: TargetController; attackingOnly?: boolean } | undefined {
   let controller: TargetController = "any";
   let noun = phrase.trim();
+  const attackingOnly = /^attacking /.test(noun);
+  if (attackingOnly) noun = noun.replace(/^attacking /, "");
   const trailing = noun.match(/ (you control|an opponent controls|you don'?t control|your opponents control)$/);
   if (trailing) {
     controller = trailing[1] === "you control" ? "you" : "opponent";
@@ -55,7 +60,7 @@ function permanentShape(phrase: string): { permanentType: RemovalTargetType; con
     land: "land"
   };
   const permanentType = types[noun];
-  return permanentType ? { permanentType, controller } : undefined;
+  return permanentType ? { permanentType, controller, ...(attackingOnly ? { attackingOnly: true } : {}) } : undefined;
 }
 
 export function parseTargetedEffect(rawText: string): TargetedEffect | undefined {
@@ -87,6 +92,16 @@ export function parseTargetedEffect(rawText: string): TargetedEffect | undefined
         ...(extra === "draw a card" ? { youDraw: 1 } : {}),
         ...(extra?.startsWith("you gain") ? { youGainLife: Number.parseInt(extra.replace(/\D/g, ""), 10) } : {})
       };
+    }
+  }
+
+  // "Target creature gets +2/+0 [and gains trample] until end of turn."  /  "Another target creature you control gets +1/+1 ..."  /  "Target creature an opponent controls gets -2/-2 ..."
+  const pump = text.match(/^(?:you may have )?(?:until end of turn, )?(another )?target ([a-z ,]+?) gets? ([+-]\d+)\/([+-]\d+)(?: and gains? ([a-z ,]+?))?(?: until end of turn)?$/);
+  if (pump) {
+    const shape = permanentShape(pump[2]);
+    const keywords = pump[5] ? pump[5].split(/, | and /).map((word) => word.trim()).filter(Boolean) : [];
+    if (shape && keywords.every((keyword) => KEYWORDS.has(keyword))) {
+      return { verb: { kind: "pump", power: Number.parseInt(pump[3], 10), toughness: Number.parseInt(pump[4], 10), keywords }, who: { kind: "permanent", ...shape, ...(pump[1] ? { another: true } : {}) } };
     }
   }
 
@@ -142,7 +157,8 @@ export function targetedEffectSpec(effect: TargetedEffect, sourceCardId: string,
     controller: effect.who.controller,
     min: effect.upTo ? 0 : 1,
     max: 1,
-    excludedCardIds: [],
+    excludedCardIds: effect.who.another ? [sourceCardId] : [],
+    ...(effect.who.attackingOnly ? { attackingOnly: true } : {}),
     prompt: `${label}: choose a target.`
   };
 }
@@ -152,6 +168,7 @@ export function targetedEffectIsBeneficial(effect: TargetedEffect): boolean {
   const verb = effect.verb;
   if (verb.kind === "add_counters") return !verb.counterKind.startsWith("-");
   if (verb.kind === "gain_keywords" || verb.kind === "untap" || verb.kind === "draw") return true;
+  if (verb.kind === "pump") return verb.power >= 0 && verb.toughness >= 0;
   if (verb.kind === "life") return verb.delta > 0;
   return false;
 }

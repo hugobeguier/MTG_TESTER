@@ -33,6 +33,8 @@ export interface TargetSpec {
   // "Another target creature" — the spell's own source, or an earlier slot's already-chosen card.
   excludedCardIds?: string[];
   excludedColors?: string[];
+  // "Target ATTACKING creature": only creatures currently attacking.
+  attackingOnly?: boolean;
   artifactsExcluded?: boolean;
   basicsExcluded?: boolean;
   prompt: string;
@@ -100,6 +102,7 @@ function matchesSpecFilters(card: VisibleCard, spec: TargetSpec): boolean {
     if (card.colors.some((color) => codes.includes(color))) return false;
   }
   if (spec.excludedCardIds?.includes(card.id)) return false;
+  if (spec.attackingOnly && !card.attacking) return false;
   return true;
 }
 

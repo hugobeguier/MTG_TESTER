@@ -20536,6 +20536,13 @@ export function commonTriggerEffect(
   // this engine's one-effect-per-clause parsing (see the module comment on TriggerEffect); a card
   // with multiple clauses where only one is optional would be mis-flagged, a declared simplification.
   const optional = /\byou may\b/.test(text) || undefined;
+  // One verb on a target the player chooses: parsed first so the older "pick the best creature" shapes below can't take it.
+  {
+    const cleaned = text.replace(/\([^)]*\)/g, "").trim();
+    const body = /^(?:when|whenever|at the beginning)\b/.test(cleaned) ? cleaned.replace(/^[^,]*,\s*/, "") : cleaned.replace(/^[a-z' ]+ — /, "");
+    const early = parseTargetedEffect(body);
+    if (early) return { kind: "targeted_effect", effect: early, ...(optional ? { optional } : {}) };
+  }
   // Single-card shapes the generic parsers below would misread (a flat draw for a conditional one) or miss entirely.
   if (mode === "entered" && /^living weapon\b/im.test(oracleText)) return { kind: "living_weapon" };
   if (/\bdouble the power and toughness of each creature you control until end of turn\b/.test(text)) return { kind: "double_power_toughness" };
@@ -23590,12 +23597,19 @@ export function applyTargetedEffect(session: GameSession, controllerSeatId: stri
     const change = (card: VisibleCard): VisibleCard => {
       if (verb.kind === "add_counters") return applyCounterDelta(card, verb.counterKind, verb.amount);
       if (verb.kind === "gain_keywords") return { ...card, temporaryGrantedKeywords: [...(card.temporaryGrantedKeywords ?? []), ...verb.keywords], grantedKeywords: [...new Set([...(card.grantedKeywords ?? []), ...verb.keywords])] };
+      if (verb.kind === "pump")
+        return {
+          ...card,
+          temporaryPowerBonus: (card.temporaryPowerBonus ?? 0) + verb.power,
+          temporaryToughnessBonus: (card.temporaryToughnessBonus ?? 0) + verb.toughness,
+          ...(verb.keywords.length ? { temporaryGrantedKeywords: [...(card.temporaryGrantedKeywords ?? []), ...verb.keywords], grantedKeywords: [...new Set([...(card.grantedKeywords ?? []), ...verb.keywords])] } : {})
+        };
       if (verb.kind === "tap") return { ...card, tapped: true };
       if (verb.kind === "untap") return { ...card, tapped: false };
       return card;
     };
     next = { ...next, seats: next.seats.map((seat) => (seat.id !== target.seatId ? seat : { ...seat, board: { ...seat.board, battlefield: seat.board.battlefield.map((card) => (card.id === target.cardId ? change(card) : card)) } })) };
-    const what = verb.kind === "add_counters" ? `gets ${verb.amount} ${verb.counterKind} counter${verb.amount === 1 ? "" : "s"}` : verb.kind === "gain_keywords" ? `gains ${verb.keywords.join(" and ")} until end of turn` : verb.kind === "tap" ? "becomes tapped" : "becomes untapped";
+    const what = verb.kind === "add_counters" ? `gets ${verb.amount} ${verb.counterKind} counter${verb.amount === 1 ? "" : "s"}` : verb.kind === "gain_keywords" ? `gains ${verb.keywords.join(" and ")} until end of turn` : verb.kind === "pump" ? `gets ${verb.power >= 0 ? "+" : ""}${verb.power}/${verb.toughness >= 0 ? "+" : ""}${verb.toughness}${verb.keywords.length ? " and gains " + verb.keywords.join(" and ") : ""} until end of turn` : verb.kind === "tap" ? "becomes tapped" : "becomes untapped";
     next = rulesEvent(next, controllerSeatId, `${source.name}: ${targetCard.name} ${what}.`);
   } else {
     const victim = next.seats.find((seat) => seat.id === target.seatId);

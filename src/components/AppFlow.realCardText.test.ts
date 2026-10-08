@@ -2358,7 +2358,7 @@ describe("cast triggers: Firespitter Whelp and Rhonas's Monument (real Oracle te
   it("Monument pumps the creature you choose when you cast a creature spell", () => {
     const s = session([seat("a", [real("Rhonas's Monument", "rm"), bear("x"), bear("y")]), seat("b", [])]);
     const [trigger] = findCastTriggers(s, "a", bear("c", { typeLine: "Creature — Elf" }), 1);
-    expect(trigger.effect).toMatchObject({ kind: "pump_target_creature", power: 2, toughness: 2, keywords: ["trample"] });
+    expect(trigger.effect).toMatchObject({ kind: "targeted_effect", effect: { verb: { kind: "pump", power: 2, toughness: 2, keywords: ["trample"] } } });
     const after = resolveTriggerEffect(s, { ...trigger, effect: { ...trigger.effect, chosenOption: "y" } });
     expect(after.seats[0].board.battlefield.find((c) => c.id === "y")!.temporaryPowerBonus).toBe(2);
     expect(after.seats[0].board.battlefield.find((c) => c.id === "y")!.temporaryGrantedKeywords).toContain("trample");
