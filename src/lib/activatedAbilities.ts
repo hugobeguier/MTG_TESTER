@@ -428,7 +428,7 @@ function parseGenericTapEffectText(text: string): GenericTapEffect | undefined {
   const grantAll = text.match(/^all ([a-z]+?)s? gain ([a-z ]+?) until end of turn\.?$/i);
   if (grantAll) return { kind: "grant_keyword_to_all_until_eot", typeMatcher: grantAll[1].toLowerCase(), keyword: grantAll[2].toLowerCase() };
   const zone = parseZoneEffect(text);
-  if (zone && zone.kind === "regrow") return { kind: "zone_effect", effect: zone };
+  if (zone && (zone.kind === "regrow" || zone.kind === "reanimate")) return { kind: "zone_effect", effect: zone };
 
   if (/\bcreate\b[^.]*\btokens?\b/i.test(text)) {
     return { kind: "create_tokens" };
@@ -670,7 +670,7 @@ function parseSacrificeEffectText(text: string): SacrificeEffect | undefined {
   if (searchLibrary) return searchLibrary;
 
   const zoneEffect = parseZoneEffect(text.endsWith(".") ? text : `${text}.`);
-  if (zoneEffect && zoneEffect.kind === "regrow") return { kind: "zone_effect", effect: zoneEffect };
+  if (zoneEffect && (zoneEffect.kind === "regrow" || zoneEffect.kind === "reanimate")) return { kind: "zone_effect", effect: zoneEffect };
 
   // Catches "Destroy/Exile/deals damage to/Return target X [to its owner's hand]" shapes, plain or
   // modal ("Choose one — ..."), by reusing removalSpells.ts's own parser rather than re-narrowing

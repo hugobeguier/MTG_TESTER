@@ -5882,6 +5882,11 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         if (pending && maybeRequestTarget(seatId, paid.card, aimSpec, false, pending)) return;
       }
       if (aimEffect.kind === "removal" && openAbilityDamageAim(seatId, paid.card, aimEffect.effect, paid.session)) return;
+      if (aimEffect.kind === "zone") {
+        const zoneEff = aimEffect.effect;
+        setSession(() => paid.session);
+        if (maybeRequestTarget(seatId, paid.card, zoneChoiceSpecFor(session, seatId, zoneEff, paid.card), false, { kind: "zone", effect: zoneEff })) return;
+      }
       if (aimEffect.kind === "trigger" && aimEffect.effect.kind === "targeted_effect") {
         const targeted = aimEffect.effect.effect;
         setSession(() => paid.session);
@@ -13778,8 +13783,22 @@ function parseEnterAsCopyEffect(
 // the "prefer your own stuff" bias other unmodeled-choice heuristics in this file already use, e.g.
 // chooseNonAuraEnchantmentTarget for Zur), then every other seat's in turn order.
 // The target spec for a zone effect only when the human really has more than one thing to choose between.
+// A reanimation ability's target (Whip of Erebos, Cauldron of Essence): a creature/permanent card in your graveyard, or in any graveyard.
+function reanimateAbilitySpec(effect: ZoneEffect): TargetSpec | undefined {
+  if (effect.kind !== "reanimate") return undefined;
+  return {
+    id: "target",
+    zone: "graveyard",
+    permanentType: effect.targetType === "card" ? undefined : (effect.targetType as TargetSpec["permanentType"]),
+    controller: effect.anyGraveyard ? "any" : "you",
+    min: 1,
+    max: 1,
+    prompt: `Return target ${effect.targetType === "card" ? "card" : effect.targetType.replace(/_/g, " ")} card from ${effect.anyGraveyard ? "a" : "your"} graveyard to the battlefield.`
+  };
+}
+
 function zoneChoiceSpecFor(session: GameSession, seatId: string, effect: ZoneEffect, sourceCard: VisibleCard): TargetSpec | undefined {
-  const spec = zoneEffectTargetSpec(effect);
+  const spec = zoneEffectTargetSpec(effect) ?? reanimateAbilitySpec(effect);
   if (!spec) return undefined;
   return legalTargets(session, seatId, spec, sourceCard).length > 1 ? spec : undefined;
 }
@@ -17675,7 +17694,9 @@ export function applyZoneEffect(session: GameSession, casterSeatId: string, sour
               (card) => !card.typeLine.includes("Instant") && !card.typeLine.includes("Sorcery")
             ).length
           : undefined;
-      const target = chooseReanimationTarget(session, casterSeatId, effect.anyGraveyard, effect.targetType, maxManaValue);
+      // The human's own pick (an activated ability's target prompt), when it is a card in a graveyard.
+      const pickedCard = preChosenTarget?.kind === "card" ? session.seats.find((seat) => seat.id === preChosenTarget.seatId)?.board.graveyard?.find((card) => card.id === preChosenTarget.cardId) : undefined;
+      const target = pickedCard && preChosenTarget?.kind === "card" ? { seatId: preChosenTarget.seatId, card: pickedCard } : chooseReanimationTarget(session, casterSeatId, effect.anyGraveyard, effect.targetType, maxManaValue);
       if (!target) return noLegalTargetEvent(session, casterSeatId, sourceName);
       const { session: movedSession } = moveCardAcrossSeats(session, target.seatId, target.card.id, casterSeatId, "battlefield");
       const counterRule = effect.counterIfType;

@@ -1547,6 +1547,21 @@ describe("one-verb targeted effects (real Oracle text)", () => {
   });
 });
 
+describe("reanimation abilities let the human pick the card", () => {
+  it("Whip of Erebos and Cauldron of Essence parse, and the chosen graveyard card is the one that returns", () => {
+    const whip = real("Whip of Erebos", "wh");
+    const ability = parseGenericTapAbilities(whip.oracleText).find((entry) => entry.effect.kind === "zone_effect")!;
+    expect(ability).toBeTruthy();
+    expect(parseGenericSacrificeAbilities(real("Cauldron of Essence", "ce").oracleText).some((entry) => entry.effect.kind === "zone_effect")).toBe(true);
+    const mine = seat("a", [whip]);
+    mine.board.graveyard = [bear("big", { zone: "graveyard" as const, manaValue: 7 }), bear("small", { zone: "graveyard" as const, manaValue: 1 })];
+    const effect = (ability.effect as { effect: Parameters<typeof applyZoneEffect>[3] }).effect;
+    const after = applyZoneEffect(session([mine, seat("b", [])]), "a", "Whip of Erebos", effect, undefined, { kind: "card", seatId: "a", cardId: "small" });
+    expect(after.seats[0].board.battlefield.map((c) => c.id)).toContain("small");
+    expect(after.seats[0].board.battlefield.map((c) => c.id)).not.toContain("big");
+  });
+});
+
 describe("Dragon Tempest", () => {
   it("each clause fires for the right creatures: fliers gain haste, Dragons deal X damage you aim", () => {
     const tempest = real("Dragon Tempest", "dt");
