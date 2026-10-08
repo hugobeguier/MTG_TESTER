@@ -2041,6 +2041,8 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     // Same "let the rules advisor handle whatever the deterministic common-trigger system doesn't
     // own" fallback as the pendingDeaths effect's own, for ETB clauses instead of death clauses.
     for (const entry of remainingEntries) {
+      // A token with no rules text (a vanilla Zombie) has nothing for the rules advisor to read.
+      if (entry.card.token && !etbEffectText(entry.card.oracleText).trim()) continue;
       if (commonTriggerEffect(entry.card.oracleText, "entered", undefined, session.seats.find((seat) => seat.id === entry.seatId)) === undefined) {
         void consultRulesAdvisor("spell_resolved_to_battlefield", entry.seatId, entry.card);
       }
@@ -7612,7 +7614,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
           : auraAttach?.kind === "attach_player"
             ? applyAuraAttachToPlayer(playedSession, action.actorSeatId, sourceCard!.id, auraAttach.seatId)
             : playedSession;
-      const tokenCreation = sourceCard && tokenSpecs.length > 0 ? createTokensForSeat(baseResolvedSession, tokenRecipientSeatId, sourceCard.id, tokenSpecs) : undefined;
+      const tokenCreation = sourceCard && tokenSpecs.length > 0 ? createTokensForSeat(baseResolvedSession, tokenRecipientSeatId, sourceCard.id, tokenSpecs, { queueEntries: false }) : undefined;
       const tokenResolvedSession = tokenCreation?.session ?? baseResolvedSession;
       // "Prevent all combat damage that would be dealt this turn[ by non-X creatures]." — reachable
       // here from a directly cast spell (Arachnogenesis, and any other Fog effect printed as an
@@ -20915,12 +20917,15 @@ function commanderColorCount(seat: PlayerSeat): number {
   return new Set(commanders.flatMap((card) => card.colorIdentity ?? card.colors ?? [])).size;
 }
 
-export function createTokensForSeat(session: GameSession, seatId: string, sourceCardId: string, specs: TokenSpec[]) {
+// queueEntries (default on): the new tokens also go into pendingEntries so their "enters" triggers (and other permanents' "whenever a Zombie enters") fire
+// through the usual queue. The spell-resolution caller turns it off because it captures the returned triggers itself.
+export function createTokensForSeat(session: GameSession, seatId: string, sourceCardId: string, specs: TokenSpec[], options: { queueEntries?: boolean } = {}) {
   const createdTokens = specs.flatMap((spec) =>
     Array.from({ length: spec.count }, () => createTokenCard(seatId, sourceCardId, spec))
   );
   const nextSession: GameSession = {
     ...session,
+    pendingEntries: options.queueEntries === false || createdTokens.length === 0 ? session.pendingEntries : [...(session.pendingEntries ?? []), ...createdTokens.map((token) => ({ seatId, card: token }))],
     seats: session.seats.map((seat) =>
       seat.id === seatId
         ? {

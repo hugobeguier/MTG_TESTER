@@ -2,7 +2,7 @@
 // the test: two earlier tests passed on invented text while the real cards stayed broken (Court of Grace, the
 // "with power N or greater" watchers). Skipped per card when the catalog doesn't have it.
 import { describe, expect, it } from "vitest";
-import { landDropsAllowed, landPlaysMade, recordLandPlay, findCastTriggers, seatHasFlashGrant, findLeavesBattlefieldTriggers, hideawayDamageConditionMet, legalMainPhaseActions, tapCreaturesAltCostFor, applyCastRemoval, nextCastPrompt, type CastChoices, spellModePrompt, applyDigPick, applyDigToBattlefield, forcedAttackers, ventureIntoUndercity, applyPunisherChoiceEffect, openingHandBattlefieldCards, putOpeningHandCardOnBattlefield, untapForSeat, humanPhaseGraveyardChoice, clearTemporaryBuffs, playCardFromZone, resolveEndStepExileDamage, cleanupCombat, staticCostReduction, applyLabeledContinuation, spellTargetSlots, grantKeywordsToCreature, applyExalted, applySacrificeEffect, applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
+import { landDropsAllowed, landPlaysMade, recordLandPlay, findCastTriggers, seatHasFlashGrant, findLeavesBattlefieldTriggers, hideawayDamageConditionMet, legalMainPhaseActions, tapCreaturesAltCostFor, applyCastRemoval, nextCastPrompt, type CastChoices, spellModePrompt, applyDigPick, applyDigToBattlefield, payGenericSacrificeCost, forcedAttackers, ventureIntoUndercity, applyPunisherChoiceEffect, openingHandBattlefieldCards, putOpeningHandCardOnBattlefield, untapForSeat, humanPhaseGraveyardChoice, clearTemporaryBuffs, playCardFromZone, resolveEndStepExileDamage, cleanupCombat, staticCostReduction, applyLabeledContinuation, spellTargetSlots, grantKeywordsToCreature, applyExalted, applySacrificeEffect, applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
 import { parseRemovalEffect } from "@/lib/removalSpells";
 import { canLegallyBlock } from "@/lib/combatSim";
 import { parseZoneEffect } from "@/lib/zoneEffects";
@@ -1500,6 +1500,20 @@ describe("rules gaps: afflict, flanking, lure, phasing, echo, turn-limited first
     expect(onTurn.grantedKeywords ?? []).toContain("first strike");
     const offTurn = runStateBasedActionsPass({ ...mine, activePlayerId: "b" }).session.seats[0].board.battlefield[0];
     expect(offTurn.grantedKeywords ?? []).not.toContain("first strike");
+  });
+});
+
+describe("tokens made by abilities still trigger 'whenever a Zombie enters'", () => {
+  it("Ghoulcaller Gisa sacrificing a 5/5 Zombie makes five Zombies, each queued as an entry so Champion of the Perished triggers five times", () => {
+    const gisa = real("Ghoulcaller Gisa", "gisa");
+    const champ = real("Champion of the Perished", "ch", { power: "1", toughness: "1" });
+    const zombie = bear("zt", { name: "Zombie Token", typeLine: "Token Creature — Zombie", power: "5", toughness: "5", token: true });
+    const s = session([seat("a", [gisa, champ, zombie, real("Swamp", "sw")]), seat("b", [])]);
+    const paid = payGenericSacrificeCost(s, "a", "gisa", 0, undefined)!;
+    const after = applySacrificeEffect(paid.session, "a", paid.card, paid.ability.effect, paid.ability.clause, paid.sacrificed);
+    expect(after.pendingEntries).toHaveLength(5);
+    const triggers = after.pendingEntries!.flatMap((entry) => findCommonTriggersForPermanentEntered(after, entry.seatId, entry.card));
+    expect(triggers.filter((t) => t.sourceCardId === "ch")).toHaveLength(5);
   });
 });
 
