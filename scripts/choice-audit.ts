@@ -122,7 +122,7 @@ function auditCard(card: { name: string; typeLine: string; oracleText: string; m
     }
     if (hasTarget && !asksTarget && !isSpell) issues.add("target");
     // Only a RECOGNISED effect can silently auto-accept a "you may"; an unrecognised one is already listed as such. Dig effects prompt the human themselves.
-    const humanPromptsKinds = new Set(["dig_type_to_hand", "dig_creature_to_battlefield", "dig_nonland_to_hand", "search_library"]);
+    const humanPromptsKinds = new Set(["dig_type_to_hand", "dig_creature_to_battlefield", "dig_nonland_to_hand", "search_library", "draw_then_land"]);
     if (hasMay && recognisedEffect && !humanPromptsKinds.has(recognisedEffect.kind) && !(recognisedEffect as { optional?: boolean }).optional && !castPrompts && !asksTarget) issues.add("optional");
     if (modalMulti && !castPrompts && !modalFullyParsed) issues.add("modal_multi");
     if (anyNumber && !asksTarget && !castPrompts) issues.add("any_number");
