@@ -2083,7 +2083,7 @@ describe("Rhonas the Indomitable pump", () => {
     const rhonas = real("Rhonas the Indomitable", "rh", { power: "5", toughness: "5" });
     const abilities = parseGenericManaAbilities(rhonas.oracleText);
     const effect = parseGenericAbilityEffect(abilities.find((a) => /another target creature/i.test(a.effectText))!.effectText)!;
-    expect(effect.kind).toBe("pump");
+    expect(effect.kind).toBe("trigger"); // the shared one-verb targeted effect: a human aims it
     const mine = seat("a", [rhonas, bear("b1")]);
     const after = applyGenericAbilityEffect(session([mine, seat("b", [])]), "a", rhonas, effect).seats[0].board.battlefield;
     const bearAfter = after.find((c) => c.id === "b1")!;

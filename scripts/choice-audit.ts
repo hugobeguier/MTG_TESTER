@@ -13,7 +13,7 @@ import { loadCardCatalog } from "../src/lib/cardCatalog";
 import { removalEffectTargetSpec, zoneEffectTargetSpec } from "../src/lib/targetSpecs";
 import { parseRemovalEffect } from "../src/lib/removalSpells";
 import { parseZoneEffect } from "../src/lib/zoneEffects";
-import { parseGenericTapAbilities, parseGenericSacrificeAbilities, parseGenericManaAbilities } from "../src/lib/activatedAbilities";
+import { parseGenericTapAbilities, parseGenericSacrificeAbilities, parseGenericManaAbilities, stripAbilityWordPrefix } from "../src/lib/activatedAbilities";
 import { castStructure, commonTriggerEffect, parseGenericAbilityEffect, parseGenericModalEffect, parseTargetedPump } from "../src/components/AppFlow";
 import { parseModalHeader } from "../src/lib/oracleClauses";
 
@@ -55,7 +55,7 @@ function auditCard(card: { name: string; typeLine: string; oracleText: string; m
   const modalFullyParsed = Boolean(modalHeader && parseGenericModalEffect(card.oracleText, undefined)?.modes.length === modalHeader.modeTexts.length);
   const castPrompts = isSpell ? castStructure(card as never) !== undefined : false;
   for (const raw of card.oracleText.split("\n")) {
-    const line = stripReminder(raw);
+    const line = stripAbilityWordPrefix(stripReminder(raw));
     if (!line || isKeywordOnly(line)) continue;
     const triggered = /^(?:when|whenever|at the beginning)/i.test(line);
     const activated = /^[^"]*?:\s/.test(line) && !triggered && /^(?:\{|[a-z]+,? ?)/i.test(line);

@@ -14170,6 +14170,10 @@ export function parseGenericAbilityEffect(effectText: string): GenericAbilityEff
   if (/^exile target card from a graveyard\.\s*if it was a creature card, put a \+1\/\+1 counter on this creature and you gain 1 life\.?$/i.test(effectText.trim())) {
     return { kind: "exile_graveyard_card_scavenge" };
   }
+  // One verb on a chosen target ("Target creature gains flying until end of turn.", "Put a +1/+1 counter on target creature. Activate only as a
+  // sorcery."): the shared targeted effect, so a human is asked for the target. The timing restriction is enforced by the ability's own limiter.
+  const targetedWhole = parseTargetedEffect(effectText.replace(/\s*activate only (?:as a sorcery|during your turn)[^.]*\.?\s*$/i, ""));
+  if (targetedWhole) return { kind: "trigger", effect: { kind: "targeted_effect", effect: targetedWhole } };
   const removal = parseRemovalEffect(effectText);
   if (removal) return { kind: "removal", effect: removal };
   const pump = parseTargetedPump(effectText);
