@@ -7966,15 +7966,20 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       const shieldMatch = sourceCard
         ? etbEffectText(sourceCard.oracleText).match(/\bprevent all combat damage that would be dealt to you this turn\.(?:\s*for each 1 damage prevented this way, (create [^.]+))?/i)
         : null;
+      // Portent: "Draw a card at the beginning of the next turn's upkeep." (counterspells schedule theirs in their own branch)
+      const delayedCasterDraws = sourceCard ? parseDelayedUpkeepDraws(sourceCard.oracleText)?.casterDraws : undefined;
+      const delayedBase: GameSession = delayedCasterDraws
+        ? { ...tokenResolvedSession, pendingUpkeepDraws: [...(tokenResolvedSession.pendingUpkeepDraws ?? []), { seatId: action.actorSeatId, amount: delayedCasterDraws, sourceName: action.cardName }] }
+        : tokenResolvedSession;
       const shieldedBase: GameSession = shieldMatch
         ? {
-            ...tokenResolvedSession,
+            ...delayedBase,
             combatDamageShields: [
-              ...(tokenResolvedSession.combatDamageShields ?? []).filter((shield) => shield.turn === tokenResolvedSession.turn),
-              { turn: tokenResolvedSession.turn, seatId: action.actorSeatId, sourceId: sourceCard!.id, sourceName: sourceCard!.name, tokenClause: shieldMatch[1] }
+              ...(delayedBase.combatDamageShields ?? []).filter((shield) => shield.turn === delayedBase.turn),
+              { turn: delayedBase.turn, seatId: action.actorSeatId, sourceId: sourceCard!.id, sourceName: sourceCard!.name, tokenClause: shieldMatch[1] }
             ]
           }
-        : tokenResolvedSession;
+        : delayedBase;
       const combatPreventionSession = combatDamagePreventionMatch
         ? {
             ...shieldedBase,

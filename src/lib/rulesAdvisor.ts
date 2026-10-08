@@ -271,7 +271,8 @@ export function deterministicRuleWorkflow(input: RuleAdvisorInput): RuleWorkflow
   }
 
   if (lookCount && (scopedText.includes("put them back in any order") || scopedText.includes("put those cards back in any order"))) {
-    const drawCountAfter = extractDrawCount(scopedText);
+    // A draw "at the beginning of the next turn's upkeep" (Portent) is scheduled by the spell's resolution, not made now.
+    const drawCountAfter = /at the beginning of the next turn'?s upkeep/.test(scopedText) ? undefined : extractDrawCount(scopedText);
     return {
       workflow: "reorder_top_cards",
       summary: `${input.sourceCard.name} instructs ${input.actorName} to look at the top ${lookCount} card${lookCount === 1 ? "" : "s"} and put them back in any order${drawCountAfter ? `, then draw ${drawCountAfter === 1 ? "a card" : `${drawCountAfter} cards`}` : ""}.`,
@@ -318,6 +319,18 @@ export function deterministicRuleWorkflow(input: RuleAdvisorInput): RuleWorkflow
         warnings: []
       };
     }
+  }
+
+  // Arcane Denial: its draws happen at the next upkeep and are scheduled as the spell resolves; drawing now as well gave the caster a free card.
+  if (/at the beginning of the next turn'?s upkeep/.test(scopedText) && !lookCount) {
+    return {
+      workflow: "manual_review",
+      summary: `${input.sourceCard.name}: its draws are scheduled for the next upkeep.`,
+      sourceCardId: input.sourceCard.id,
+      maxChoices: 0,
+      requiresHumanChoice: false,
+      warnings: []
+    };
   }
 
   const drawCount = extractDrawCount(scopedText);

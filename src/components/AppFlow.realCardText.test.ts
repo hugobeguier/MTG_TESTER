@@ -2894,3 +2894,17 @@ describe("casting from the top of the library", () => {
     expect(libraryTopCastPermission(ring, [forge])).toBeTruthy();
   });
 });
+
+describe("delayed upkeep draws", () => {
+  it("Arcane Denial no longer draws immediately and Portent's draw waits for the upkeep", async () => {
+    const { deterministicRuleWorkflow } = await import("@/lib/rulesAdvisor");
+    const { parseDelayedUpkeepDraws } = await import("@/lib/counterSpells");
+    const input = (name: string) => ({ event: "spell_resolved_to_graveyard", actorName: "a", sourceCard: real(name, "x", { zone: "graveyard" as const }), battlefield: [], hand: [], graveyard: [], exile: [], libraryPreview: [] });
+    expect(deterministicRuleWorkflow(input("Arcane Denial"))?.workflow).toBe("manual_review");
+    const portent = deterministicRuleWorkflow(input("Portent"));
+    expect(portent?.workflow).toBe("reorder_top_cards");
+    expect(portent?.drawCountAfter).toBeUndefined();
+    expect(parseDelayedUpkeepDraws(real("Portent", "p").oracleText)?.casterDraws).toBe(1);
+    expect(deterministicRuleWorkflow(input("Ponder"))?.drawCountAfter).toBe(1);
+  });
+});

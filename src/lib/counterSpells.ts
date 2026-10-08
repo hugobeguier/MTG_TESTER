@@ -44,7 +44,7 @@ export interface DelayedUpkeepDraws {
 export function parseDelayedUpkeepDraws(oracleText: string): DelayedUpkeepDraws | undefined {
   const text = oracleText.toLowerCase();
   const targetMatch = text.match(/\bits controller may draw up to (\w+) cards? at the beginning of the next turn'?s upkeep\b/);
-  const casterMatch = text.match(/\byou draw (a|one|two|three|four|five|\d+) cards? at the beginning of the next turn'?s upkeep\b/);
+  const casterMatch = text.match(/\b(?:you )?draw (a|one|two|three|four|five|\d+) cards? at the beginning of the next turn'?s upkeep\b/);
   if (!targetMatch && !casterMatch) return undefined;
   const wordToInt: Record<string, number> = { a: 1, one: 1, two: 2, three: 3, four: 4, five: 5 };
   const toAmount = (word: string) => wordToInt[word] ?? Number.parseInt(word, 10);
