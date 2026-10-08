@@ -25,7 +25,7 @@ const TRIGGER_ASKS_TARGET = new Set([
   "counters_on_up_to_creatures", "double_power_counters", "landfall_return_nonland_permanent", "pay_then_zone", "put_land_from_hand",
   "dragon_from_hand_attacking", "venture_room", "modal", "choose_named_mode", "hideaway", "pay_red_for_damage", "discard_any_then_draw",
   "sacrifice_surplus_then_draw", "add_counter", "proliferate", "connive", "draw_then_put_back", "scry_cards", "surveil_cards", "seat_discards",
-  "discard_then_draw", "blink", "copy_token", "targeted_effect", "drain"
+  "discard_then_draw", "blink", "copy_token", "targeted_effect", "drain", "put_any_from_hand", "draw_then_land", "draw_then_permanent", "aura_reanimate", "each_opponent_sacrifices"
 ]);
 
 const ranks: Record<string, number> = (() => {
