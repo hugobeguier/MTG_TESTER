@@ -60,6 +60,8 @@ export interface DestroyAllEffect {
   // "Destroy all TAPPED creatures." (Sunblast Angel) / "Destroy all creatures WITH FLYING." (Whiptongue Hydra).
   requireTapped?: boolean;
   requireKeyword?: string;
+  // "Exile all artifacts." (Farewell): the same sweep, but the permanents are exiled — indestructible doesn't save them.
+  exile?: boolean;
 }
 
 // "Destroy all creatures with mana value N or less/greater" (Austere Command's creature modes,
@@ -398,6 +400,11 @@ function parseGrantKeywords(text: string): GrantKeywordsEffect | undefined {
 }
 
 function parseSingleRemovalEffect(text: string): Exclude<RemovalEffect, ModalEffect> | undefined {
+  const exileAll = text.match(/\bexile all (artifacts and enchantments|artifacts|creatures|enchantments)\b(?!\s+(?:with|that|you|an?)\b)/);
+  if (exileAll) {
+    const targetType = ({ "artifacts and enchantments": "artifact_or_enchantment", artifacts: "artifact", creatures: "creature", enchantments: "enchantment" } as const)[exileAll[1] as "artifacts"];
+    return { kind: "destroy_all", targetType, excludedColors: [], exile: true };
+  }
   return parseDestroy(text) ?? parseExile(text) ?? parseDamage(text) ?? parseMassDamage(text) ?? parseBounce(text) ?? parseProliferate(text) ?? parseGrantKeywords(text);
 }
 
@@ -407,17 +414,25 @@ function parseSingleRemovalEffect(text: string): Exclude<RemovalEffect, ModalEff
 // modal spell where NO mode is removal-shaped parses to undefined for the whole card. Checked
 // before the single-mode parsers in parseRemovalEffect so a bullet's own text (e.g. a "deals N
 // damage to any target" mode) can't be mistaken for the whole card's effect out of context.
-function parseModal(oracleText: string): ModalEffect | undefined {
+const MIXED_MODAL = Symbol("mixed modal");
+
+function parseModal(oracleText: string): ModalEffect | typeof MIXED_MODAL | undefined {
   const header = parseModalHeader(oracleText);
   if (!header) return undefined;
   const modes = header.modeTexts.map((modeText) => parseSingleRemovalEffect(modeText.toLowerCase())).filter((mode): mode is Exclude<RemovalEffect, ModalEffect> => mode !== undefined);
   // A modal spell whose only parsed mode is the protective grant isn't a removal spell.
   if (modes.length === 0 || modes.every((mode) => mode.kind === "grant_keywords")) return undefined;
+  // A mode this parser can't read (Titan of Industry's life gain / token, Profane Command's life loss) must not vanish silently: the
+  // generic modal system parses removal bullets AND the rest, so it owns any mixed spell.
+  if (modes.length < header.modeTexts.length) return MIXED_MODAL;
   return { kind: "modal", chooseCount: header.chooseCount, modes };
 }
 
 export function parseRemovalEffect(oracleText: string): RemovalEffect | undefined {
-  return parseModal(oracleText) ?? parseSingleRemovalEffect(oracleText.toLowerCase());
+  const modal = parseModal(oracleText);
+  // A choose-N spell with a mode this file can't read belongs to the generic modal system as a whole; its other lines must not be mistaken for one effect.
+  if (modal === MIXED_MODAL) return undefined;
+  return modal ?? parseSingleRemovalEffect(oracleText.toLowerCase());
 }
 
 // Accepts grantedTypes (see typeGrants.ts) so a permanent that's only an artifact/enchantment/etc.

@@ -305,6 +305,8 @@ type TriggerEffect = (
   // "This creature deals 4 damage to each other opponent." (Parapet Thrasher) — every opponent except the one named by actorSeatId
   // (the player the Dragon just hit).
   | { kind: "damage_each_other_opponent"; amount: number }
+  // "Exile all graveyards." (Farewell's last mode)
+  | { kind: "exile_all_graveyards" }
   // "Reveal cards from the top of your library until you reveal a land card. Put that card onto the battlefield tapped and the rest
   // on the bottom of your library in a random order." (Clifftop Lookout)
   | { kind: "reveal_until_land_to_battlefield" }
@@ -17177,7 +17179,7 @@ export function applyRemovalEffect(
                 : card.typeLine.includes("Enchantment");
         return (
           baseMatch &&
-          !hasIndestructible(card) &&
+          (effect.exile || !hasIndestructible(card)) &&
           !cardMatchesExcludedType(card, effect.excludeType) &&
           !cardMatchesExcludedColor(card, effect.excludedColors) &&
           (!effect.requireTapped || Boolean(card.tapped)) &&
@@ -17188,6 +17190,9 @@ export function applyRemovalEffect(
         for (const card of seat.board.battlefield) {
           if (typeMatches(card)) destructions.push({ seatId: seat.id, cardId: card.id, message: `${card.name} is destroyed by ${sourceName}.` });
         }
+      }
+      if (effect.exile) {
+        return destructions.reduce((current, item) => moveCardBetweenVisibleZones(current, item.seatId, item.cardId, "exile"), session);
       }
       return destroyCreatures(session, destructions, "Rules action");
     }
@@ -20593,6 +20598,7 @@ export function commonTriggerEffect(
   if (extraCombat) return extraCombat[1] ? { kind: "additional_combat", payCostText: extraCombat[1].toUpperCase(), optional: true } : { kind: "additional_combat" };
   if (/when enchanted creature dies, return this card to its owner'?s hand/.test(text) || (mode === "died" && /^return this card to its owner'?s hand\.?$/.test(text.trim()))) return { kind: "return_self_to_hand" };
   if (/^investigate\.?$/.test(text.replace(/\([^)]*\)/g, "").replace(/^[^,]*,\s*/, "").trim())) return { kind: "create_tokens", tokens: [{ ...predefinedTokenSpec("Clue"), count: 1 }] };
+  if (/^exile all graveyards\.?$/.test(text.replace(/\([^)]*\)/g, "").trim())) return { kind: "exile_all_graveyards" };
   const otherOpponents = text.match(/^(?:this creature|it) deals (\d+) damage to each other opponent\.?$/);
   if (otherOpponents) return { kind: "damage_each_other_opponent", amount: Number.parseInt(otherOpponents[1], 10) };
   if (/^reveal cards from the top of your library until you reveal a land card\. put that card onto the battlefield tapped and the rest on the bottom of your library in a random order\.?$/.test(text.replace(/^[^,]*,\s*/, "").trim()) || /reveal cards from the top of your library until you reveal a land card\. put that card onto the battlefield tapped/.test(text)) {
@@ -22010,6 +22016,21 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
       })
     };
     return rulesEvent(reordered, owner.id, `${trigger.sourceCardName}: ${owner.name} reveals ${revealed.length + 1} card${revealed.length === 0 ? "" : "s"} and puts ${land.name} onto the battlefield tapped.`);
+  }
+  if (trigger.effect.kind === "exile_all_graveyards") {
+    const count = session.seats.reduce((total, item) => total + (item.board.graveyard ?? []).length, 0);
+    return rulesEvent(
+      {
+        ...session,
+        seats: session.seats.map((item) => ({
+          ...item,
+          board: { ...item.board, graveyard: [], exile: [...(item.board.exile ?? []), ...(item.board.graveyard ?? []).map((card) => ({ ...card, zone: "exile" as const }))] },
+          zones: { ...item.zones, graveyard: 0, exile: (item.zones.exile ?? 0) + (item.board.graveyard ?? []).length }
+        }))
+      },
+      trigger.controllerSeatId,
+      `${trigger.sourceCardName} exiles all graveyards (${count} card${count === 1 ? "" : "s"}).`
+    );
   }
   if (trigger.effect.kind === "damage_each_other_opponent") {
     const { amount } = trigger.effect;

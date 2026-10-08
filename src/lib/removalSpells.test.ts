@@ -202,11 +202,7 @@ describe("parseRemovalEffect — modal", () => {
       parseRemovalEffect(
         "Choose one —\n• Boros Charm deals 4 damage to target player or planeswalker.\n• Permanents you control gain indestructible until end of turn.\n• Target creature gains double strike until end of turn."
       )
-    ).toEqual({
-      kind: "modal",
-      chooseCount: 1,
-      modes: [{ kind: "damage", amount: 4, targetType: "player" }, { kind: "grant_keywords", keywords: ["double strike"] }]
-    });
+    ).toBeUndefined(); // a mode it can't read (Permanents you control gain indestructible) hands the whole spell to the generic modal system
   });
 
   it("parses a 'choose two' spell into all four destroy modes (Austere Command)", () => {
@@ -252,11 +248,7 @@ describe("parseRemovalEffect — modal", () => {
   });
 
   it("does not mistake 'Proliferate twice.'/'Proliferate X times.' for the plain single-Proliferate shape", () => {
-    expect(parseRemovalEffect("Choose one —\n• Destroy target artifact.\n• Proliferate twice.")).toEqual({
-      kind: "modal",
-      chooseCount: 1,
-      modes: [{ kind: "destroy", targetType: "artifact", excludedColors: [], artifactsExcluded: false, basicsExcluded: false }]
-    });
+    expect(parseRemovalEffect("Choose one —\n• Destroy target artifact.\n• Proliferate twice.")).toBeUndefined(); // the unreadable mode hands the whole spell to the generic modal system
   });
 });
 

@@ -2401,3 +2401,27 @@ describe("non-creature sacrifice costs", () => {
     expect(orb.sacrificeTargetTypeFilter).toBe("land");
   });
 });
+
+describe("choose-several modal spells keep every mode", () => {
+  it("Farewell offers all four modes and the chosen ones exile artifacts, creatures, enchantments and graveyards", async () => {
+    const { applyGenericModalEffect, parseGenericModalEffect } = await import("./AppFlow");
+    const farewell = real("Farewell", "fw", { zone: "hand" as const });
+    const parsed = parseGenericModalEffect(farewell.oracleText, undefined)!;
+    expect(parsed.chooseCount).toBe(4);
+    expect(parsed.modes).toHaveLength(4);
+    const mine = seat("a", [bear("mine"), real("Sol Ring", "ring")]);
+    const theirs = seat("b", [bear("foe", { ownerSeatId: "b" })]);
+    theirs.board.graveyard = [bear("dead", { zone: "graveyard" as const })];
+    const after = applyGenericModalEffect(session([mine, theirs]), "a", farewell, parsed);
+    expect(after.seats[0].board.battlefield).toHaveLength(0);
+    expect(after.seats[1].board.battlefield).toHaveLength(0);
+    expect(after.seats[1].board.graveyard).toHaveLength(0);
+    expect(after.seats[1].board.exile?.map((c) => c.id)).toContain("dead");
+  });
+
+  it("Titan of Industry keeps the life, token and shield modes next to the destroy mode", async () => {
+    const { parseGenericModalEffect } = await import("./AppFlow");
+    const parsed = parseGenericModalEffect(real("Titan of Industry", "ti").oracleText, undefined)!;
+    expect(parsed.modes.length).toBeGreaterThanOrEqual(3);
+  });
+});
