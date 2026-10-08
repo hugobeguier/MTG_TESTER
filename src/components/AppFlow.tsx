@@ -326,6 +326,8 @@ type TriggerEffect = (
   | { kind: "renown"; amount: number }
   // The human's echo decision (pay it, or sacrifice the permanent).
   | { kind: "echo_choice"; costText: string }
+  // "Whenever a creature you control with flying enters, it gains haste until end of turn." (Dragon Tempest): the creature that entered gains them.
+  | { kind: "context_gains_keywords"; keywords: string[] }
   // "Destroy all creatures with flying. Put a +1/+1 counter on this creature for each creature destroyed this way." (Whiptongue Hydra)
   | { kind: "destroy_fliers_then_counters" }
   // A creature that must attack, and the choice of whom.
@@ -6469,7 +6471,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     // "Deals N damage to any target" triggers: the human aims the damage.
     if (trigger.effect.kind === "damage_effect" || trigger.effect.kind === "context_power_damage") {
       const aiming = triggerDamageAiming(session, trigger, controller.id);
-      if (aiming && aiming.options.length >= 2) return open(`${trigger.sourceCardName}: choose a target for ${aiming.effect.kind === "damage" ? aiming.effect.amount : ""} damage.`, aiming.options.map((option, index) => ({ index, label: option.label })));
+      if (aiming && aiming.options.length >= 2) return open(`${trigger.sourceCardName}: choose a target for ${aiming.effect.kind === "damage" ? (aiming.effect.amount === "X" ? (aiming.effect.xDefinition ? resolveDynamicAmount(session, controller.id, aiming.effect.xDefinition) : "X") : aiming.effect.amount) : ""} damage.`, aiming.options.map((option, index) => ({ index, label: option.label })));
     }
     // God-Eternal Bontu: "sacrifice any number of other permanents, then draw that many cards" — the human picks which ones, one at a time.
     if (trigger.effect.kind === "sacrifice_surplus_then_draw") {
@@ -14486,7 +14488,7 @@ function returnLinkedExiles(session: GameSession): GameSession {
 function triggerDamageAiming(session: GameSession, trigger: Extract<PendingAction, { type: "trigger" }>, controllerSeatId: string): { effect: RemovalEffect; options: LabeledSlot["options"] } | undefined {
   const fallbackSource = { id: trigger.sourceCardId, name: trigger.sourceCardName, typeLine: "", oracleText: "", manaValue: 0, colors: [], role: "effect", zone: "battlefield" } as VisibleCard;
   const source = findPermanentById(session, trigger.sourceCardId) ?? fallbackSource;
-  if (trigger.effect.kind === "damage_effect" && trigger.effect.effect.kind === "damage" && typeof trigger.effect.effect.amount === "number") {
+  if (trigger.effect.kind === "damage_effect" && trigger.effect.effect.kind === "damage") {
     const dmg = trigger.effect.effect;
     const slot = dmg.targetType === "player" ? "player" : dmg.targetType === "creature" ? "any_creature" : "any_damage";
     return { effect: dmg, options: labeledTargetOptions(session, controllerSeatId, slot, source) };
@@ -19507,6 +19509,19 @@ export function findCommonTriggersForPermanentEntered(session: GameSession, ente
           continue;
         }
       }
+      // Another permanent entering: every watcher clause on the source is judged on its own (Dragon Tempest has two: fliers gain haste, and a
+      // Dragon deals damage). Judging the card's whole text at once applied the first effect found to every creature that entered.
+      if (source.id !== enteredPermanent.id) {
+        const perClause = oracleClauses(source.oracleText).filter((clause) => isEntersWatcherClause(clause) && !/\bthis\b[^,.]*\bor another\b/i.test(clause));
+        if (perClause.length > 1) {
+          for (const clause of perClause) {
+            const clauseEffect = commonTriggerEffect(clause, "clause", undefined, seat);
+            if (!clauseEffect || !enteredTriggerApplies({ ...source, oracleText: clause }, seat.id, enteredPermanent, enteringSeatId)) continue;
+            triggers.push(makeCommonTrigger(enteringSeatId, seat.id, source, clauseEffect, `${source.name} triggers because ${enteredPermanent.name} entered the battlefield.`, enteredPermanent.id));
+          }
+          continue;
+        }
+      }
       // A card with BOTH its own enters effect and a watcher on other permanents (Sarkhan, Dragon Ascendant): parse each side from
       // its own clause, or the first effect found would be applied for both.
       const watcherClauses = oracleClauses(source.oracleText).filter((clause) => isEntersWatcherClause(clause) && !/\bthis\b[^,.]*\bor another\b/i.test(clause));
@@ -20630,6 +20645,8 @@ export function commonTriggerEffect(
   }
 
   if (/\byou become the monarch\b/.test(text)) return { kind: "become_monarch", optional };
+  const itGains = noReminder.match(/^(?:(?:whenever|when) [^,]*\benters?,\s*)?it gains ([a-z ,]+?) until end of turn\.?$/);
+  if (itGains) return { kind: "context_gains_keywords", keywords: itGains[1].split(/ and |, /).map((word) => word.trim()).filter(Boolean) };
   if (/destroy all creatures with flying\. put a \+1\/\+1 counter on (?:this creature|[a-z',\- ]+) for each creature destroyed this way/.test(noReminder)) return { kind: "destroy_fliers_then_counters" };
   if (/^(?:[^,]*,\s*)?you take the initiative\.?$/.test(noReminder)) return { kind: "take_initiative" };
 
@@ -22542,6 +22559,16 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
     const power = entering ? Math.max(0, effectivePower(entering)) : 0;
     if (power <= 0 || !entering) return noLegalTargetEvent(session, trigger.controllerSeatId, trigger.sourceCardName);
     return applyRemovalEffect(session, trigger.controllerSeatId, trigger.sourceCardName, entering, { kind: "damage", amount: power, targetType: "any" }, undefined, decodeChosenTarget(trigger.effect.chosenOption));
+  }
+  if (trigger.effect.kind === "context_gains_keywords") {
+    const gained = trigger.effect.keywords;
+    const target = trigger.contextCardId ? findPermanentById(session, trigger.contextCardId) : undefined;
+    if (!target) return session;
+    return rulesEvent(
+      { ...session, seats: session.seats.map((seat) => ({ ...seat, board: { ...seat.board, battlefield: seat.board.battlefield.map((card) => (card.id === target.id ? { ...card, temporaryGrantedKeywords: [...(card.temporaryGrantedKeywords ?? []), ...gained], grantedKeywords: [...new Set([...(card.grantedKeywords ?? []), ...gained])] } : card)) } })) },
+      trigger.controllerSeatId,
+      `${trigger.sourceCardName}: ${target.name} gains ${gained.join(" and ")} until end of turn.`
+    );
   }
   if (trigger.effect.kind === "destroy_fliers_then_counters") {
     const victims = session.seats.flatMap((seat) => seat.board.battlefield.filter((card) => card.typeLine.includes("Creature") && hasFlying(card) && !hasIndestructible(card) && !card.phasedOut).map((card) => ({ seatId: seat.id, card })));

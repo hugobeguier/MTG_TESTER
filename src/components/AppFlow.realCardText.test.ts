@@ -1503,6 +1503,25 @@ describe("rules gaps: afflict, flanking, lure, phasing, echo, turn-limited first
   });
 });
 
+describe("Dragon Tempest", () => {
+  it("each clause fires for the right creatures: fliers gain haste, Dragons deal X damage you aim", () => {
+    const tempest = real("Dragon Tempest", "dt");
+    const dragon = real("Goldlust Triad", "dr", { summoningSick: true });
+    const angel = real("Serra Angel", "an", { summoningSick: true });
+    const bears = bear("gb", { summoningSick: true });
+    const s = session([seat("a", [tempest, dragon, angel, bears], { kind: "human" }), seat("b", [bear("foe")])]);
+    expect(findCommonTriggersForPermanentEntered(s, "a", dragon).map((t) => t.effect.kind).sort()).toEqual(["context_gains_keywords", "damage_effect"]);
+    expect(findCommonTriggersForPermanentEntered(s, "a", angel).map((t) => t.effect.kind)).toEqual(["context_gains_keywords"]);
+    expect(findCommonTriggersForPermanentEntered(s, "a", bears)).toHaveLength(0);
+    const haste = findCommonTriggersForPermanentEntered(s, "a", angel)[0];
+    const after = resolveTriggerEffect(s, haste).seats[0].board.battlefield.find((c) => c.id === "an")!;
+    expect(after.grantedKeywords).toContain("haste");
+    const damage = findCommonTriggersForPermanentEntered(s, "a", dragon).find((t) => t.effect.kind === "damage_effect")!;
+    const aimed = resolveTriggerEffect(s, { ...damage, effect: { ...damage.effect, chosenOption: "p:b" } as never });
+    expect(aimed.seats[1].life).toBe(39);
+  });
+});
+
 describe("Orb of Dragonkind and Syphon Flesh arithmetic", () => {
   it("an Orb plus three lands cannot cast the six-mana Lathliss (the Orb is a one-mana discount, not two free mana on top of it)", () => {
     const lathliss = real("Lathliss, Dragon Queen", "lq", { zone: "command" as const });
