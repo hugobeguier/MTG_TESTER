@@ -3984,7 +3984,9 @@ function cardRenderKey(card: VisibleCard) {
     image: battlefieldImageUrls(card)[0],
     x: card.battlefieldPosition?.x,
     z: card.battlefieldPosition?.z,
-    counters: card.counters?.map((counter) => `${counter.kind}:${counter.count}`).join("|")
+    counters: card.counters?.map((counter) => `${counter.kind}:${counter.count}`).join("|"),
+    // The power/toughness plate follows the live values (counters, until-end-of-turn bonuses, Auras and Equipment), so a change redraws it.
+    pt: card.typeLine.includes("Creature") ? `${effectivePower(card)}/${effectiveToughness(card)}` : undefined
   };
 }
 
@@ -4274,7 +4276,50 @@ function describeCounterBadges(card: VisibleCard): CounterBadge[] {
 
 // Billboard sprites (always face the camera) rather than flat card-aligned planes, since this
 // camera can orbit and a flat badge would go edge-on and unreadable from a low angle.
+// A creature whose power/toughness differs from the printed numbers (counters, pumps, Auras) gets a live P/T plate on its lower corner: green when
+// it is bigger than printed, red when smaller. Without it the table kept showing the printed numbers until you opened the card.
+function addPowerToughnessPlate(group: THREE.Group, card: VisibleCard, x: number, z: number) {
+  if (!card.typeLine.includes("Creature")) return;
+  const printedPower = Number.parseInt(card.power ?? "", 10);
+  const printedToughness = Number.parseInt(card.toughness ?? "", 10);
+  if (!Number.isFinite(printedPower) || !Number.isFinite(printedToughness)) return;
+  const power = effectivePower(card);
+  const toughness = effectiveToughness(card);
+  if (power === printedPower && toughness === printedToughness) return;
+  const bigger = power >= printedPower && toughness >= printedToughness;
+  const text = `${power}/${toughness}`;
+  const key = `pt|${text}|${bigger}`;
+  let texture = counterBadgeTextureCache.get(key);
+  if (!texture) {
+    const canvas = document.createElement("canvas");
+    canvas.width = 192;
+    canvas.height = 96;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    roundRect(ctx, 4, 4, 184, 88, 18);
+    ctx.fillStyle = bigger ? "#2f9e44" : "#c92a2a";
+    ctx.fill();
+    ctx.lineWidth = 6;
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.7)";
+    ctx.stroke();
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 52px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(text, 96, 52);
+    texture = new THREE.CanvasTexture(canvas);
+    texture.needsUpdate = true;
+    counterBadgeTextureCache.set(key, texture);
+  }
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false }));
+  sprite.scale.set(0.42, 0.21, 1);
+  sprite.position.set(x + 0.22, 0.34, z + 0.44);
+  sprite.renderOrder = 11;
+  group.add(sprite);
+}
+
 function addCounterBadges(group: THREE.Group, card: VisibleCard, x: number, z: number) {
+  addPowerToughnessPlate(group, card, x, z);
   const badges = describeCounterBadges(card);
   if (badges.length === 0) return;
   badges.forEach((badge, index) => {
