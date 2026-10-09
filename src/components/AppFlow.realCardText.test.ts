@@ -2932,3 +2932,16 @@ describe("can't block / can't be blocked effects and ability words", () => {
     expect(parseGenericTapAbilities(real("Amonkhet Raceway", "ar").oracleText).length).toBeGreaterThan(0);
   });
 });
+
+describe("Zur, Eternal Schemer's target", () => {
+  it("only your non-Aura enchantments are offered", async () => {
+    const { animateEnchantmentSpec } = await import("./AppFlow");
+    const { legalTargets } = await import("@/lib/targeting");
+    const zur = real("Zur, Eternal Schemer", "zur");
+    const mine = seat("a", [zur, real("Always Watching", "e1"), real("Starfield of Nyx", "e2"), real("Pacifism", "aura")]);
+    const foe = seat("b", [real("Always Watching", "e3")]);
+    const s = session([mine, foe]);
+    const ids = legalTargets(s, "a", animateEnchantmentSpec(mine, "Zur"), zur).map((t) => (t.kind === "card" ? t.card.id : "")).sort();
+    expect(ids).toEqual(["e1", "e2"]);
+  });
+});

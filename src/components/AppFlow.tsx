@@ -534,7 +534,9 @@ type PendingTargetedEffect =
   | { kind: "removal"; effect: RemovalEffect; chosenX?: number }
   | { kind: "zone"; effect: ZoneEffect; chosenX?: number }
   // "Another target creature gets +2/+0 and gains trample until end of turn." (Rhonas the Indomitable): the human aims the pump.
-  | { kind: "pump"; effect: PumpEffect };
+  | { kind: "pump"; effect: PumpEffect }
+  // "Target non-Aura enchantment you control becomes a creature ..." (Zur, Eternal Schemer): the human picks the enchantment.
+  | { kind: "animate_enchantment" };
 
 // The human's answers to a spell's cast-time choices: which modes (indices into the card's own mode list) and which targets, in the
 // order the spell's effects consume them. Attached to the spell on the stack so resolution uses exactly what the opponents saw.
@@ -6021,6 +6023,12 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         if (pending && maybeRequestTarget(seatId, paid.card, aimSpec, false, pending)) return;
       }
       if (aimEffect.kind === "removal" && openAbilityDamageAim(seatId, paid.card, aimEffect.effect, paid.session)) return;
+      // Zur, Eternal Schemer: "Target non-Aura enchantment you control becomes a creature ...": the human chooses which.
+      if (aimEffect.kind === "animate_enchantment" && seat) {
+        const animateSpec = animateEnchantmentSpec(seat, paid.card.name);
+        setSession(() => paid.session);
+        if (maybeRequestTarget(seatId, paid.card, animateSpec, false, { kind: "animate_enchantment" })) return;
+      }
       if (aimEffect.kind === "zone") {
         const zoneEff = aimEffect.effect;
         setSession(() => paid.session);
@@ -9502,6 +9510,10 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         return applyRemovalEffect(current, choice.controllerSeatId, choice.sourceCardName, choice.sourceCard, choice.pending.effect, choice.pending.chosenX, target);
       }
       if (choice.pending.kind === "pump") return applyTargetedPumpEffect(current, choice.controllerSeatId, choice.sourceCard, choice.pending.effect, target);
+      if (choice.pending.kind === "animate_enchantment") {
+        const picked = target.kind === "card" ? current.seats.find((other) => other.id === target.seatId)?.board.battlefield.find((card) => card.id === target.cardId) : undefined;
+        return picked && target.kind === "card" ? applyEnchantmentAnimation(current, choice.controllerSeatId, choice.sourceCardName, { seatId: target.seatId, card: picked }) : current;
+      }
       if (choice.pending.kind === "targeted") return applyTargetedEffect(current, choice.controllerSeatId, choice.sourceCard, choice.pending.effect, target);
       return applyZoneEffect(current, choice.controllerSeatId, choice.sourceCardName, choice.pending.effect, choice.pending.chosenX, target);
     });
@@ -11631,6 +11643,20 @@ function canAttack(card: VisibleCard, controllerBattlefield?: VisibleCard[]) {
 // "This creature can't block." (Gravecrawler, Carrion Feeder) / "Razorlash Transmogrant can't block." — the
 // creature's OWN restriction, named by "this creature", its full name or its short name. A group
 // restriction ("Creatures you control can't block ...") is a different shape and isn't matched here.
+// What Zur, Eternal Schemer may point at: a non-Aura enchantment its controller has.
+export function animateEnchantmentSpec(seat: PlayerSeat, sourceName: string): TargetSpec {
+  return {
+    id: "target",
+    zone: "battlefield",
+    permanentType: "enchantment",
+    controller: "you",
+    min: 1,
+    max: 1,
+    excludedCardIds: seat.board.battlefield.filter((card) => isAura(card)).map((card) => card.id),
+    prompt: `${sourceName}: choose a non-Aura enchantment you control to become a creature.`
+  };
+}
+
 export function creatureCantBlock(card: VisibleCard): boolean {
   // "Target creature can't block this turn." is recorded as a temporary pseudo-keyword, like "can't be blocked".
   if (card.temporaryGrantedKeywords?.includes("can't block")) return true;
