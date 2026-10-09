@@ -211,6 +211,9 @@ type TriggerEffect = (
   // resolved deterministically (put one down if there's a land in hand) rather than routed through
   // the standard optional_trigger pendingRuleChoice, since accepting is essentially always correct.
   | { kind: "put_land_from_hand" }
+  // "Choose left or right. Each player gains control of all nonland permanents other than Aminatou controlled by the next player in the chosen
+  // direction." (Aminatou, the Fateshifter's -6): chosenOption "0" is left, "1" right.
+  | { kind: "rotate_control" }
   // "You may have that player shuffle." (Portent): chosenOption "0" shuffles.
   | { kind: "shuffle_library"; seatId: string }
   // "When this land enters, sacrifice it. When you do, search your library for a basic Plains, Island, or Swamp card, put it onto the
@@ -6640,6 +6643,9 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         `${trigger.sourceCardName}: put a ${trigger.effect.subtype} creature card from your hand onto the battlefield tapped and attacking?`,
         [...candidates.map((card, index) => ({ index, label: `${card.name} (${card.power ?? "?"}/${card.toughness ?? "?"})` })), { index: candidates.length, label: "No thanks" }]
       );
+    }
+    if (trigger.effect.kind === "rotate_control") {
+      return open(`${trigger.sourceCardName}: choose a direction. Each player gains control of the nonland permanents of the next player that way.`, [{ index: 0, label: "Left" }, { index: 1, label: "Right" }]);
     }
     if (trigger.effect.kind === "discard_any_then_draw") {
       if (controller.board.hand.length === 0) return false;
@@ -21197,6 +21203,7 @@ export function commonTriggerEffect(
   // this engine's one-effect-per-clause parsing (see the module comment on TriggerEffect); a card
   // with multiple clauses where only one is optional would be mis-flagged, a declared simplification.
   const optional = /\byou may\b/.test(text) || undefined;
+  if (/^choose left or right\. each player gains control of all nonland permanents other than [^.]+ controlled by the next player in the chosen direction\.?$/.test(text.replace(/\([^)]*\)/g, "").trim())) return { kind: "rotate_control" };
   const storefront = text
     .replace(/\([^)]*\)/g, "")
     .match(/^when this land enters, sacrifice it\. when you do, search your library for a basic ([a-z, ]+?) card, put it onto the battlefield tapped, then shuffle(?: and you gain (\d+) life)?\.?$/);
@@ -22806,6 +22813,20 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
       if (draw) next = drawMultipleForSeat(next, player.id, draw, `${trigger.sourceCardName}: ${player.name} draws ${draw} card${draw === 1 ? "" : "s"}.`);
     }
     return next;
+  }
+  if (trigger.effect.kind === "rotate_control") {
+    const alive = session.seats.filter((seat) => !seat.hasLost);
+    if (alive.length < 2) return session;
+    const step = trigger.effect.chosenOption === "1" ? -1 : 1;
+    // Every seat takes the nonland permanents of the next seat in the chosen direction, all at once (decided from the board as it is now).
+    const moves = alive.flatMap((taker, index) => {
+      const giver = alive[(index + step + alive.length) % alive.length];
+      return giver.board.battlefield
+        .filter((card) => !card.typeLine.includes("Land") && card.id !== trigger.sourceCardId)
+        .map((card) => ({ cardId: card.id, fromSeatId: giver.id, toSeatId: taker.id }));
+    });
+    const moved = moves.reduce((current, move) => changeControlWithinBattlefield(current, move.cardId, move.fromSeatId, move.toSeatId), session);
+    return rulesEvent(moved, trigger.controllerSeatId, `${trigger.sourceCardName}: every player gains control of the next player's nonland permanents (${step === 1 ? "left" : "right"}).`);
   }
   if (trigger.effect.kind === "shuffle_library") {
     const targetSeatId = trigger.effect.seatId;

@@ -107,7 +107,7 @@ function auditCard(card: { name: string; typeLine: string; oracleText: string; m
         (removal && (removal.kind === "modal" || removalEffectTargetSpec(removal, "x") !== undefined || removal.kind === "damage")) ||
           (zone && zoneEffectTargetSpec(zone) !== undefined) ||
           parseTargetedPump(effectText) ||
-          (abilityEffect?.kind === "trigger" && abilityEffect.effect.kind === "targeted_effect") ||
+          (abilityEffect?.kind === "trigger" && abilityEffect.effect.kind === "targeted_effect") || abilityEffect?.kind === "animate_enchantment" ||
           (sacAbilities[0] && ["targeted_effect", "zone_effect"].includes(sacAbilities[0].effect.kind)) ||
           (tapAbilities[0] && ["exile_graveyard_creature_then_tokens", "grant_graveyard_cast", "zone_effect", "target_unblockable", "targeted_effect"].includes(tapAbilities[0].effect.kind)) ||
           (abilityEffect && ["exile_graveyard_card_scavenge", "search_library"].includes(abilityEffect.kind))

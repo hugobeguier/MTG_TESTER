@@ -3092,3 +3092,19 @@ describe("playing a land from the top of the library", () => {
     expect(after.seats[0].library?.[0]?.id).toBe("next");
   });
 });
+
+describe("Aminatou, the Fateshifter's -6", () => {
+  it("rotates every player's nonland permanents (not Aminatou) one seat in the chosen direction", () => {
+    const text = real("Aminatou, the Fateshifter", "am").oracleText.split("\n").find((line) => line.startsWith("−6") || line.startsWith("-6"))!;
+    const effect = commonTriggerEffect(text.replace(/^[−-]6:\s*/, ""), "clause");
+    expect(effect).toMatchObject({ kind: "rotate_control" });
+    const aminatou = real("Aminatou, the Fateshifter", "am");
+    const s = session([seat("a", [aminatou, bear("a1"), real("Island", "land-a")]), seat("b", [bear("b1")]), seat("c", [bear("c1")])]);
+    const make = (option: string) => ({ id: "t", type: "trigger", actorSeatId: "a", controllerSeatId: "a", sourceCardId: "am", sourceCardName: "Aminatou", triggerKind: "common", effect: { ...effect!, chosenOption: option }, message: "" }) as never;
+    const left = resolveTriggerEffect(s, make("0"));
+    const ids = (seatIndex: number) => left.seats[seatIndex].board.battlefield.map((c) => c.id).sort();
+    expect(ids(0)).toEqual(["am", "b1", "land-a"]);
+    expect(ids(1)).toEqual(["c1"]);
+    expect(ids(2)).toEqual(["a1"]);
+  });
+});
