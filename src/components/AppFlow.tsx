@@ -5337,7 +5337,8 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
           : card.manaValue;
     const fixedCost =
       adjustedCastingCost(seat, costCard, baseCost, sourceZone, activeSeatId, session.seats, session.turn, session.onceEachTurnEffectsUsed) +
-      (sourceZone === "command" ? card.commanderTax ?? 0 : 0);
+      (sourceZone === "command" ? card.commanderTax ?? 0 : 0) +
+      targetingTax(session, seatId, castChoices?.targets ?? []);
     // One with the Multiverse: fixedCost came back 0 specifically because of its once-per-turn
     // permission (not because the card is genuinely free or discounted some other way) — recorded
     // now, at the moment this cast actually commits, not inside adjustedCastingCost itself (a pure
@@ -6446,7 +6447,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         return;
       }
     }
-    const fixedCost = adjustedCastingCost(humanSeat, card, card.manaValue, sourceZone === "exile" ? "exile" : "hand", activeSeatId, session.seats);
+    const fixedCost = adjustedCastingCost(humanSeat, card, card.manaValue, sourceZone === "exile" ? "exile" : "hand", activeSeatId, session.seats) + targetingTax(session, humanSeat.id, castChoices?.targets ?? []);
     const pool = poolForSeat(humanSeat.id);
     // canReceivePriorityForPendingAction already offers this priority window whenever untapped
     // lands could cover the cost, not only when mana is already floating — payment must accept the
@@ -25441,6 +25442,27 @@ function canCastAtInstantSpeed(card: VisibleCard, flashGranted = false) {
 // "You may cast spells as though they had flash." (Leyline of Anticipation, Vedalken Orrery) grants every spell; "You may cast green creature
 // spells as though they had flash." (Yeva, Nature's Herald) only the ones it describes (pass the card to check). Reminder text is ignored:
 // a creature that merely HAS flash ("(You may cast this spell any time you could cast an instant.)") grants nothing to anything else.
+// "Creatures and enchantments you control have 'Spells your opponents cast that target this permanent cost {1} more to cast.'" (Callaphe,
+// Beloved of the Sea, and the same tax printed directly on a permanent, as with Sphere of Safety-style cards): {1} more for each chosen
+// target that carries it and belongs to an opponent of the caster.
+export function targetingTax(session: GameSession, casterSeatId: string, targets: ChosenTarget[]): number {
+  let tax = 0;
+  for (const target of targets) {
+    if (target.kind !== "card" || target.seatId === casterSeatId) continue;
+    const owner = session.seats.find((seat) => seat.id === target.seatId);
+    const targeted = owner?.board.battlefield.find((card) => card.id === target.cardId);
+    if (!owner || !targeted) continue;
+    const grants = owner.board.battlefield.some(
+      (source) =>
+        !source.abilitiesStripped &&
+        /creatures and enchantments you control have "spells your opponents cast that target this permanent cost \{1\} more to cast\."/i.test(source.oracleText) &&
+        (targeted.typeLine.includes("Creature") || targeted.typeLine.includes("Enchantment"))
+    );
+    if (grants || /\bspells your opponents cast that target this (?:permanent|creature) cost \{1\} more to cast\b/i.test(targeted.oracleText)) tax += 1;
+  }
+  return tax;
+}
+
 export function seatHasFlashGrant(seat: PlayerSeat, card?: VisibleCard): boolean {
   // Timely Ward: flash only if it can target a commander (this checks the caster's own commander on the battlefield).
   if (card && /cast this spell as though it had flash if it targets a commander/i.test(card.oracleText) && seat.board.battlefield.some((permanent) => permanent.commander)) return true;

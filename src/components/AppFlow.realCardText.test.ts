@@ -3047,3 +3047,14 @@ describe("Timely Ward", () => {
     expect(seatHasFlashGrant(without, ward)).toBe(false);
   });
 });
+
+describe("Callaphe's tax", () => {
+  it("spells that target an opponent's creature or enchantment cost {1} more while Callaphe is out", async () => {
+    const { targetingTax } = await import("./AppFlow");
+    const s = session([seat("a", []), seat("b", [real("Callaphe, Beloved of the Sea", "ca"), bear("shielded"), real("Always Watching", "ench"), real("Sol Ring", "ring")])]);
+    expect(targetingTax(s, "a", [{ kind: "card", seatId: "b", cardId: "shielded" }])).toBe(1);
+    expect(targetingTax(s, "a", [{ kind: "card", seatId: "b", cardId: "shielded" }, { kind: "card", seatId: "b", cardId: "ench" }])).toBe(2);
+    expect(targetingTax(s, "a", [{ kind: "card", seatId: "b", cardId: "ring" }])).toBe(0);
+    expect(targetingTax(s, "b", [{ kind: "card", seatId: "b", cardId: "shielded" }])).toBe(0);
+  });
+});
