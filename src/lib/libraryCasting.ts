@@ -16,12 +16,14 @@ interface PermissionSource {
 }
 
 export function libraryTopCastPermission(card: CastableShape, battlefield: PermissionSource[]): LibraryCastPermission | undefined {
-  if (card.typeLine.includes("Land")) return undefined;
+  const isLand = card.typeLine.includes("Land");
   for (const source of battlefield) {
     if (source.abilitiesStripped) continue;
     for (const line of source.oracleText.split("\n")) {
-      // "You may play lands and cast spells from the top of your library." (One with the Multiverse): any spell. (Lands are not offered here.)
-      if (/^you may (?:play lands and )?cast spells from the top of your library\b/i.test(line)) return { grantsHaste: false };
+      // "You may play lands and cast spells from the top of your library." (One with the Multiverse): any spell, and lands (a land play).
+      if (/^you may play lands and cast spells from the top of your library\b/i.test(line)) return { grantsHaste: false };
+      if (isLand) continue;
+      if (/^you may cast spells from the top of your library\b/i.test(line)) return { grantsHaste: false };
       // "You may cast artifact spells and colorless spells from the top of your library." (Mystic Forge)
       if (/^you may cast artifact spells and colorless spells from the top of your library\b/i.test(line)) {
         if (card.typeLine.includes("Artifact") || !card.colors || card.colors.length === 0) return { grantsHaste: false };

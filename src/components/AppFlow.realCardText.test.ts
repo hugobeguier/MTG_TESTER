@@ -3061,12 +3061,34 @@ describe("Callaphe's tax", () => {
 
 describe("Portent's shuffle option", () => {
   it("shuffles the chosen library only when the player says yes", () => {
-    const lib = (n: number) => Array.from({ length: n }, (_, i) => bear("l" + i, { zone: "library" as const })) as never;
+    const lib = (n: number) => Array.from({ length: n }, (_, i) => bear("l" + i, { zone: "library" as const })) as unknown as VisibleCard[];
     const b = seat("b", []);
     b.library = lib(30);
     const s = session([seat("a", []), b]);
     const make = (option: string) => ({ id: "t", type: "trigger", actorSeatId: "a", controllerSeatId: "a", sourceCardId: "x", sourceCardName: "Portent", triggerKind: "common", effect: { kind: "shuffle_library", seatId: "b", chosenOption: option }, message: "" }) as never;
     expect(resolveTriggerEffect(s, make("1")).seats[1].library!.map((c) => c.id)).toEqual(b.library!.map((c) => c.id));
     expect(resolveTriggerEffect(s, make("0")).seats[1].library!.map((c) => c.id)).not.toEqual(b.library!.map((c) => c.id));
+  });
+});
+
+describe("One with the Multiverse plays lands from the top", () => {
+  it("offers a land on top of the library only with the land-and-spell wording", async () => {
+    const { libraryTopCastPermission } = await import("@/lib/libraryCasting");
+    const multiverse = real("One with the Multiverse", "om");
+    const forge = real("Mystic Forge", "mf");
+    const land = real("Island", "i");
+    expect(libraryTopCastPermission(land, [multiverse])).toBeTruthy();
+    expect(libraryTopCastPermission(land, [forge])).toBeUndefined();
+  });
+});
+
+describe("playing a land from the top of the library", () => {
+  it("moves it onto the battlefield", () => {
+    const a = seat("a", []);
+    a.library = [real("Island", "top", { zone: "library" as const }), bear("next", { zone: "library" as const })] as unknown as VisibleCard[];
+    a.zones.library = 2;
+    const after = playCardFromZone(session([a, seat("b", [])]), "a", "top", undefined, undefined, "battlefield", [], "library");
+    expect(after.seats[0].board.battlefield.map((c) => c.id)).toContain("top");
+    expect(after.seats[0].library?.[0]?.id).toBe("next");
   });
 });

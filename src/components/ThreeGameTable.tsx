@@ -1489,7 +1489,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
               const top = (human.library ?? [])[0];
               return top && libraryTopCastPermission(top, human.board.battlefield) ? (
                 <button type="button" title="You may look at and cast this card from the top of your library" onClick={() => props.onPlayCard?.(human.id, top.id, undefined, "library")}>
-                  Cast top of library: {top.name}
+                  {top.typeLine.includes("Land") ? "Play" : "Cast"} top of library: {top.name}
                 </button>
               ) : null;
             })()}

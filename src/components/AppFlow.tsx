@@ -12671,7 +12671,8 @@ export function legalMainPhaseActions(
   }
   // The top card of the library, when a permanent lets it be cast from there (Thundermane Dragon).
   const topCard = (seat.library ?? [])[0];
-  if (topCard && libraryTopCastPermission(topCard, seat.board.battlefield)) {
+  // (A land on top, playable with One with the Multiverse, is a human's land play; agents are not offered it as a cast.)
+  if (topCard && !isLandCard(topCard) && libraryTopCastPermission(topCard, seat.board.battlefield)) {
     const fixedCost = adjustedCastingCost(seat, topCard, topCard.manaValue, "library", activeSeatId, session.seats);
     const chosenX = maxAffordableX(seat, topCard, fixedCost);
     const totalCost = totalCastingCost(seat, topCard, topCard.manaValue, chosenX);
