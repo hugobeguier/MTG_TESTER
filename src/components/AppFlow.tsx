@@ -14115,6 +14115,8 @@ type GenericAbilityEffect =
   | { kind: "animate_enchantment" }
   | { kind: "trigger"; effect: TriggerEffect }
   | { kind: "phase_out" }
+  // "{2}{C}: Exile enchanted creature." (Utter Insignificance): exiles whatever this Aura is attached to.
+  | { kind: "exile_enchanted" }
   // Scavenging Ooze: "Exile target card from a graveyard. If it was a creature card, put a +1/+1 counter on this creature and you gain 1 life."
   | { kind: "exile_graveyard_card_scavenge" }
   | { kind: "transform_self" };
@@ -14257,6 +14259,7 @@ export function parseGenericAbilityEffect(effectText: string): GenericAbilityEff
   if (searchLibrary) return { kind: "search_library", effect: searchLibrary };
   if (parseEnchantmentAnimationEffect(effectText)) return { kind: "animate_enchantment" };
   if (parsePhaseOutEffect(effectText)) return { kind: "phase_out" };
+  if (/^exile enchanted (?:creature|permanent)\.?$/i.test(effectText.trim())) return { kind: "exile_enchanted" };
   if (parseTransformSelfEffect(effectText)) return { kind: "transform_self" };
   const zone = parseZoneEffect(effectText);
   if (zone) return { kind: "zone", effect: zone };
@@ -14364,6 +14367,7 @@ function genericAbilityEffectHasLegalTarget(session: GameSession, casterSeatId: 
     const target = sourceCard.attachedToId ? findPermanentById(session, sourceCard.attachedToId) : undefined;
     return target !== undefined && !target.phasedOut;
   }
+  if (effect.kind === "exile_enchanted") return sourceCard.attachedToId !== undefined && findPermanentById(session, sourceCard.attachedToId) !== undefined;
   if (effect.kind === "transform_self") return Boolean(sourceCard.faces && sourceCard.faces.length === 2);
   if (effect.kind === "search_library") {
     const seat = session.seats.find((item) => item.id === casterSeatId);
@@ -14423,6 +14427,12 @@ export function applyGenericAbilityEffect(session: GameSession, casterSeatId: st
     return rulesEvent(grown, casterSeatId, `${caster.name} exiles ${pick.card.name} with ${sourceCard.name}: a +1/+1 counter and 1 life.`);
   }
   if (effect.kind === "phase_out") return applyPhaseOut(session, casterSeatId, sourceCard);
+  if (effect.kind === "exile_enchanted") {
+    const holder = sourceCard.attachedToId ? session.seats.find((seat) => seat.board.battlefield.some((card) => card.id === sourceCard.attachedToId)) : undefined;
+    const target = holder?.board.battlefield.find((card) => card.id === sourceCard.attachedToId);
+    if (!holder || !target) return noLegalTargetEvent(session, casterSeatId, sourceCard.name);
+    return rulesEvent(moveCardBetweenVisibleZones(session, holder.id, target.id, "exile"), casterSeatId, `${sourceCard.name} exiles ${target.name}.`);
+  }
   if (effect.kind === "transform_self") return transformPermanent(session, casterSeatId, sourceCard.id, sourceCard.name, false);
   const syntheticTrigger: Extract<PendingAction, { type: "trigger" }> = {
     id: crypto.randomUUID(),

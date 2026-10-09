@@ -3017,3 +3017,17 @@ describe("Demon of Fate's Design", () => {
     expect(after.seats[0].board.battlefield.find((c) => c.id === "dfd")!.temporaryPowerBonus).toBe(ench.manaValue);
   });
 });
+
+describe("Utter Insignificance", () => {
+  it("its {2}{C} ability exiles the enchanted creature", () => {
+    const aura = real("Utter Insignificance", "ui", { attachedToId: "victim" });
+    const [ability] = parseGenericManaAbilities(aura.oracleText);
+    expect(ability.effectText).toMatch(/exile enchanted creature/i);
+    const effect = parseGenericAbilityEffect(ability.effectText)!;
+    expect(effect.kind).toBe("exile_enchanted");
+    const s = session([seat("a", [aura]), seat("b", [bear("victim")])]);
+    const after = applyGenericAbilityEffect(s, "a", aura, effect);
+    expect(after.seats[1].board.battlefield).toHaveLength(0);
+    expect(after.seats[1].board.exile?.map((c) => c.id)).toContain("victim");
+  });
+});
