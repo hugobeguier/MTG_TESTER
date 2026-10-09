@@ -2988,3 +2988,20 @@ describe("Obscura Storefront", () => {
     expect((trigger.effect as { filter: string }).filter).toMatch(/plains/);
   });
 });
+
+describe("Enhanced Surveillance", () => {
+  it("its exile ability shuffles your graveyard into your library and the enchantment goes to exile", () => {
+    const es = real("Enhanced Surveillance", "es");
+    const [ability] = parseGenericSacrificeAbilities(es.oracleText);
+    expect(ability).toMatchObject({ exileSelf: true, effect: { kind: "zone_effect" } });
+    const a = seat("a", [es]);
+    a.board.graveyard = [bear("g1", { zone: "graveyard" as const }), bear("g2", { zone: "graveyard" as const })];
+    a.library = [];
+    const s = session([a, seat("b", [])]);
+    const paid = payGenericSacrificeCost(s, "a", "es", 0)!;
+    expect(paid.session.seats[0].board.exile?.map((c) => c.id)).toContain("es");
+    const after = applySacrificeEffect(paid.session, "a", paid.card, paid.ability.effect, paid.ability.clause, paid.sacrificed);
+    expect(after.seats[0].board.graveyard).toHaveLength(0);
+    expect(after.seats[0].library?.length).toBe(2);
+  });
+});

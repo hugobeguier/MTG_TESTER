@@ -183,6 +183,8 @@ export interface SacrificeAbility {
   // N for a fixed-count plural shape (Westvale Abbey's "Sacrifice five creatures"). Always 1 when
   // sacrificeTarget is "self" (a card never sacrifices multiple copies of itself).
   sacrificeCount: number;
+  // "Exile this enchantment: ..." — the cost exiles the source instead of sacrificing it.
+  exileSelf?: boolean;
   effect: SacrificeEffect;
   clause: string;
 }
@@ -230,7 +232,7 @@ function numberWordToInt(value: string | undefined): number | undefined {
 // doesn't — the whole clause silently failed to match, and every real fetch land had no activated
 // ability recognized at all (not offered as a legal action, no interactive search, nothing).
 const SACRIFICE_CLAUSE_PATTERN =
-  /^((?:(?:\{[^}]+\}|discard a card|pay \d+ life)\s*,?\s*)*)sacrifice\s+(another\s+(?:creature|[a-z]+\s+creature|[a-z]+\s+or\s+[a-z]+)|this\s+[a-z]+|an?\s+creature|an?\s+(?:nonland\s+permanent|permanent|artifact|land|enchantment|treasure|food|clue)|(?:a|one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+creatures|an?\s+(?!permanents?\b|lands?\b|cards?\b|artifacts?\b|enchantments?\b|planeswalkers?\b|tokens?\b)[a-z]+)\s*:\s*([\s\S]+?)\.?\s*$/i;
+  /^((?:(?:\{[^}]+\}|discard a card|pay \d+ life)\s*,?\s*)*)(?:sacrifice|exile(?= this\b))\s+(another\s+(?:creature|[a-z]+\s+creature|[a-z]+\s+or\s+[a-z]+)|this\s+[a-z]+|an?\s+creature|an?\s+(?:nonland\s+permanent|permanent|artifact|land|enchantment|treasure|food|clue)|(?:a|one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+creatures|an?\s+(?!permanents?\b|lands?\b|cards?\b|artifacts?\b|enchantments?\b|planeswalkers?\b|tokens?\b)[a-z]+)\s*:\s*([\s\S]+?)\.?\s*$/i;
 
 const SACRIFICE_COUNT_PATTERN = /^(a|one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+creatures$/i;
 
@@ -253,6 +255,8 @@ export function parseGenericSacrificeAbilities(oracleText: string): SacrificeAbi
     const costPrefix = match[1];
     const targetPhrase = match[2];
     const effectText = match[3];
+    // "Exile this enchantment: ..." (Enhanced Surveillance) is paid like a sacrifice, but the permanent goes to exile.
+    const exileSelf = /exile\s+this\b/i.test(clause.slice(costPrefix.length, costPrefix.length + 12));
 
     const costTap = /\{t\}/i.test(costPrefix);
     const costDiscard = /discard a card/i.test(costPrefix);
@@ -293,6 +297,7 @@ export function parseGenericSacrificeAbilities(oracleText: string): SacrificeAbi
       sacrificeTargetTypeFilter,
       sacrificeExcludesSelf,
       sacrificeCount,
+      ...(exileSelf ? { exileSelf: true } : {}),
       effect,
       clause
     });
@@ -453,7 +458,7 @@ function parseGenericTapEffectText(text: string): GenericTapEffect | undefined {
   const grantAll = text.match(/^all ([a-z]+?)s? gain ([a-z ]+?) until end of turn\.?$/i);
   if (grantAll) return { kind: "grant_keyword_to_all_until_eot", typeMatcher: grantAll[1].toLowerCase(), keyword: grantAll[2].toLowerCase() };
   const zone = parseZoneEffect(text);
-  if (zone && (zone.kind === "regrow" || zone.kind === "reanimate")) return { kind: "zone_effect", effect: zone };
+  if (zone && (zone.kind === "regrow" || zone.kind === "reanimate" || zone.kind === "graveyard_to_library")) return { kind: "zone_effect", effect: zone };
 
   if (/\bcreate\b[^.]*\btokens?\b/i.test(text)) {
     return { kind: "create_tokens" };
@@ -704,7 +709,7 @@ function parseSacrificeEffectText(text: string): SacrificeEffect | undefined {
   if (searchLibrary) return searchLibrary;
 
   const zoneEffect = parseZoneEffect(text.endsWith(".") ? text : `${text}.`);
-  if (zoneEffect && (zoneEffect.kind === "regrow" || zoneEffect.kind === "reanimate")) return { kind: "zone_effect", effect: zoneEffect };
+  if (zoneEffect && (zoneEffect.kind === "regrow" || zoneEffect.kind === "reanimate" || zoneEffect.kind === "graveyard_to_library")) return { kind: "zone_effect", effect: zoneEffect };
 
   // Catches "Destroy/Exile/deals damage to/Return target X [to its owner's hand]" shapes, plain or
   // modal ("Choose one — ..."), by reusing removalSpells.ts's own parser rather than re-narrowing

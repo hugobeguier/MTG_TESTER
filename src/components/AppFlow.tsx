@@ -13720,6 +13720,10 @@ export function payGenericSacrificeCost(
     };
   }
 
+  if (ability.exileSelf) {
+    next = rulesEvent(moveCardBetweenVisibleZones(next, seatId, card.id, "exile"), seatId, `${seat.name} exiles ${card.name} to activate it.`);
+    return { session: next, ability, card, sacrificed: sacrificeTargets, poolSpent: poolPayment?.ok ? poolPayment.pool : undefined };
+  }
   next = destroyCreatures(
     next,
     sacrificeTargets.map((target) => ({
