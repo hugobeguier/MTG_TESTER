@@ -3031,3 +3031,9 @@ describe("Utter Insignificance", () => {
     expect(after.seats[1].board.exile?.map((c) => c.id)).toContain("victim");
   });
 });
+
+describe("Blasphemous Edict", () => {
+  it("reads 'thirteen creatures' as a sacrifice count of 13", () => {
+    expect(parseSpellExtraEffects(real("Blasphemous Edict", "be").oracleText.split("\n")[1] ?? real("Blasphemous Edict", "be").oracleText)).toContainEqual({ kind: "each_player_sacrifices", count: 13 });
+  });
+});

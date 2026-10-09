@@ -62,7 +62,7 @@ export type SpellExtraEffect =
   // "Add {R} for each tapped land your opponents control." (Mana Geyser)
   | { kind: "add_mana_per_tapped_opponent_land"; color: "W" | "U" | "B" | "R" | "G" | "C" };
 
-const WORDS: Record<string, number> = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
+const WORDS: Record<string, number> = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13 };
 
 function wordToInt(value: string): number | undefined {
   const parsed = Number.parseInt(value, 10);
@@ -100,7 +100,7 @@ export function parseSpellExtraEffects(text: string): SpellExtraEffect[] {
     });
   }
 
-  const sacrifice = normalized.match(/\beach player sacrifices (a|an|one|two|three|four|five|six|seven|eight|nine|ten|\d+) creatures? of their choice\b/i);
+  const sacrifice = normalized.match(/\beach player sacrifices (a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|\d+) creatures? of their choice\b/i);
   if (sacrifice) {
     const count = wordToInt(sacrifice[1]);
     if (count) effects.push({ kind: "each_player_sacrifices", count });
