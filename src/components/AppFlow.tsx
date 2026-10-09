@@ -211,6 +211,8 @@ type TriggerEffect = (
   // resolved deterministically (put one down if there's a land in hand) rather than routed through
   // the standard optional_trigger pendingRuleChoice, since accepting is essentially always correct.
   | { kind: "put_land_from_hand" }
+  // "You may have that player shuffle." (Portent): chosenOption "0" shuffles.
+  | { kind: "shuffle_library"; seatId: string }
   // "When this land enters, sacrifice it. When you do, search your library for a basic Plains, Island, or Swamp card, put it onto the
   // battlefield tapped, then shuffle and you gain 1 life." (Obscura Storefront and the other Streets/Storefront cycle)
   | { kind: "sacrifice_self_then_search"; filter: string; lifeGain: number }
@@ -495,6 +497,8 @@ type PendingAction =
 
 interface LibraryLookState {
   seatId: string;
+  // Portent: after the reorder, offer "have that player shuffle" (the card that offers it).
+  shuffleOfferSource?: string;
   mode: LibraryLookMode;
   cards: VisibleCard[];
   remaining: number;
@@ -541,7 +545,9 @@ type PendingTargetedEffect =
   // "Another target creature gets +2/+0 and gains trample until end of turn." (Rhonas the Indomitable): the human aims the pump.
   | { kind: "pump"; effect: PumpEffect }
   // "Target non-Aura enchantment you control becomes a creature ..." (Zur, Eternal Schemer): the human picks the enchantment.
-  | { kind: "animate_enchantment" };
+  | { kind: "animate_enchantment" }
+  // "Look at the top three cards of target player's library, then put them back in any order. You may have that player shuffle." (Portent)
+  | { kind: "library_look"; count: number; offerShuffle: boolean };
 
 // The human's answers to a spell's cast-time choices: which modes (indices into the card's own mode list) and which targets, in the
 // order the spell's effects consume them. Attached to the spell on the stack so resolution uses exactly what the opponents saw.
@@ -8890,6 +8896,11 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
                 : lookWorkflow === "look_at_top_cards_reveal_type_to_hand"
                   ? "choose_one_bottom"
                   : "scry";
+        // Portent: the human chooses WHICH player's library to look at (and may then have that player shuffle).
+        if (lookWorkflow === "reorder_top_cards" && /target player'?s library/i.test(sourceCard.oracleText)) {
+          const lookSpec: TargetSpec = { id: "target", zone: "player", controller: "any", min: 1, max: 1, prompt: `${sourceCard.name}: choose a player whose library you look at.` };
+          if (maybeRequestTarget(seatId, sourceCard, lookSpec, false, { kind: "library_look", count, offerShuffle: /you may have that player shuffle/i.test(sourceCard.oracleText) })) return;
+        }
         startLibraryLook(
           humanMode,
           count,
@@ -9351,7 +9362,10 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     count: number,
     allowedCardFilter?: string,
     drawCountAfter?: number,
-    restDestination?: "bottom" | "graveyard"
+    restDestination?: "bottom" | "graveyard",
+    // Portent looks at ANOTHER player's library.
+    targetSeatId?: string,
+    shuffleOfferSource?: string
   ) {
     // setLibraryLook must not be called from inside setSession's updater (React may invoke that
     // updater more than once, and other setState calls inside it are unreliable) — computed against
@@ -9359,10 +9373,11 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     // Reproduced live as Diabolic Vision's "look at the top 5, pick one" window never opening at
     // all: the event log line this same call also wrote could still show up (the returned session
     // object was still correct), while the actual look-window state silently never stuck.
-    const seat = session.seats.find((item) => item.id === humanSeat.id);
+    const seat = session.seats.find((item) => item.id === (targetSeatId ?? humanSeat.id));
     const cards = (seat?.library ?? []).slice(0, mode === "scry" ? 1 : count);
     setLibraryLook({
-      seatId: humanSeat.id,
+      seatId: targetSeatId ?? humanSeat.id,
+      ...(shuffleOfferSource ? { shuffleOfferSource } : {}),
       mode,
       cards,
       remaining: count,
@@ -9533,6 +9548,12 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     const choice = pendingRuleChoice;
     if (!choice || choice.kind !== "choose_effect_target") return;
     setPendingRuleChoice(undefined);
+    if (choice.pending.kind === "library_look") {
+      if (target.kind === "player" && targetsStillLegal(session, choice.controllerSeatId, choice.spec, choice.sourceCard, [target])) {
+        startLibraryLook("reorder", choice.pending.count, undefined, undefined, undefined, target.seatId, choice.pending.offerShuffle ? choice.sourceCardName : undefined);
+      }
+      return;
+    }
     setSession((current) => {
       if (!targetsStillLegal(current, choice.controllerSeatId, choice.spec, choice.sourceCard, [target])) {
         return noLegalTargetEvent(current, choice.controllerSeatId, choice.sourceCardName);
@@ -9546,6 +9567,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         return picked && target.kind === "card" ? applyEnchantmentAnimation(current, choice.controllerSeatId, choice.sourceCardName, { seatId: target.seatId, card: picked }) : current;
       }
       if (choice.pending.kind === "targeted") return applyTargetedEffect(current, choice.controllerSeatId, choice.sourceCard, choice.pending.effect, target);
+      if (choice.pending.kind === "library_look") return current;
       return applyZoneEffect(current, choice.controllerSeatId, choice.sourceCardName, choice.pending.effect, choice.pending.chosenX, target);
     });
   }
@@ -10633,6 +10655,21 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       return drawMultipleForSeat(reordered, activeLook.seatId, drawCountAfter, `${seatName} draws ${drawCountAfter === 1 ? "a card" : `${drawCountAfter} cards`}.`);
     });
     setLibraryLook(undefined);
+    if (activeLook.shuffleOfferSource) {
+      const stub = { id: "shuffle-offer", name: activeLook.shuffleOfferSource, typeLine: "Instant", oracleText: "", colors: [], manaValue: 0, role: "spell", zone: "graveyard" } as VisibleCard;
+      const targetName = session.seats.find((seat) => seat.id === activeLook.seatId)?.name ?? "that player";
+      setPendingRuleChoice({
+        id: crypto.randomUUID(),
+        kind: "choose_trigger_option",
+        controllerSeatId: humanSeat.id,
+        sourceCardId: stub.id,
+        sourceCardName: activeLook.shuffleOfferSource,
+        prompt: `${activeLook.shuffleOfferSource}: have ${targetName} shuffle their library?`,
+        options: [{ index: 0, label: "Shuffle" }, { index: 1, label: "Don't shuffle" }],
+        trigger: makeCommonTrigger(humanSeat.id, humanSeat.id, stub, { kind: "shuffle_library", seatId: activeLook.seatId }, `${activeLook.shuffleOfferSource}: shuffle option.`),
+        remainingStack: []
+      });
+    }
   }
 
   // "choose_one" (Diabolic Vision-style "look at the top N, put one into hand, the rest on top in
@@ -22768,6 +22805,15 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
       if (draw) next = drawMultipleForSeat(next, player.id, draw, `${trigger.sourceCardName}: ${player.name} draws ${draw} card${draw === 1 ? "" : "s"}.`);
     }
     return next;
+  }
+  if (trigger.effect.kind === "shuffle_library") {
+    const targetSeatId = trigger.effect.seatId;
+    if (trigger.effect.chosenOption !== "0") return session;
+    return rulesEvent(
+      { ...session, seats: session.seats.map((seat) => (seat.id === targetSeatId ? { ...seat, library: shuffleCards(seat.library ?? []) } : seat)) },
+      trigger.controllerSeatId,
+      `${trigger.sourceCardName}: ${session.seats.find((seat) => seat.id === targetSeatId)?.name ?? "the player"}'s library is shuffled.`
+    );
   }
   if (trigger.effect.kind === "exile_all_graveyards") {
     const count = session.seats.reduce((total, item) => total + (item.board.graveyard ?? []).length, 0);

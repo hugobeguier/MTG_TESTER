@@ -3058,3 +3058,15 @@ describe("Callaphe's tax", () => {
     expect(targetingTax(s, "b", [{ kind: "card", seatId: "b", cardId: "shielded" }])).toBe(0);
   });
 });
+
+describe("Portent's shuffle option", () => {
+  it("shuffles the chosen library only when the player says yes", () => {
+    const lib = (n: number) => Array.from({ length: n }, (_, i) => bear("l" + i, { zone: "library" as const })) as never;
+    const b = seat("b", []);
+    b.library = lib(30);
+    const s = session([seat("a", []), b]);
+    const make = (option: string) => ({ id: "t", type: "trigger", actorSeatId: "a", controllerSeatId: "a", sourceCardId: "x", sourceCardName: "Portent", triggerKind: "common", effect: { kind: "shuffle_library", seatId: "b", chosenOption: option }, message: "" }) as never;
+    expect(resolveTriggerEffect(s, make("1")).seats[1].library!.map((c) => c.id)).toEqual(b.library!.map((c) => c.id));
+    expect(resolveTriggerEffect(s, make("0")).seats[1].library!.map((c) => c.id)).not.toEqual(b.library!.map((c) => c.id));
+  });
+});
