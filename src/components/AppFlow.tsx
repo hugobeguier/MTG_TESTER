@@ -211,6 +211,9 @@ type TriggerEffect = (
   // resolved deterministically (put one down if there's a land in hand) rather than routed through
   // the standard optional_trigger pendingRuleChoice, since accepting is essentially always correct.
   | { kind: "put_land_from_hand" }
+  // "When this land enters, sacrifice it. When you do, search your library for a basic Plains, Island, or Swamp card, put it onto the
+  // battlefield tapped, then shuffle and you gain 1 life." (Obscura Storefront and the other Streets/Storefront cycle)
+  | { kind: "sacrifice_self_then_search"; filter: string; lifeGain: number }
   // "Put any number of creature cards from your hand onto the battlefield." (Ghalta, Stampede Tyrant) / "...land cards ... tapped" (Wrenn and Seven):
   // a human picks cards one at a time (pickedIds), an agent puts them all.
   | { kind: "put_any_from_hand"; filter: "creature" | "land" | "artifact" | "permanent"; tapped?: boolean; pickedIds?: string[] }
@@ -7166,6 +7169,31 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       // nonland that earns the +1/+1 counter) routes through pendingRuleChoice.
       startConniveIteration(trigger, remainingStack, trigger.effect.amount, session);
       return;
+    } else if (accepted && trigger.effect.kind === "sacrifice_self_then_search") {
+      // The land is sacrificed first, then the search (a basic of the listed types, tapped) is the reflexive trigger's.
+      const searchEffect = trigger.effect;
+      const owner = session.seats.find((seat) => seat.id === trigger.controllerSeatId);
+      const onBattlefield = owner?.board.battlefield.some((card) => card.id === trigger.sourceCardId);
+      if (owner && onBattlefield) {
+        setSession((current) => {
+          const sacrificed = moveCardBetweenVisibleZones(current, trigger.controllerSeatId, trigger.sourceCardId, "graveyard");
+          const gained = searchEffect.lifeGain > 0 ? { ...sacrificed, seats: sacrificed.seats.map((seat) => (seat.id === trigger.controllerSeatId ? { ...seat, life: seat.life + searchEffect.lifeGain } : seat)) } : sacrificed;
+          return rulesEvent(gained, trigger.controllerSeatId, `${trigger.sourceCardName} is sacrificed${searchEffect.lifeGain > 0 ? ` and ${owner.name} gains ${searchEffect.lifeGain} life` : ""}.`);
+        });
+        setPendingRuleChoice({
+          id: crypto.randomUUID(),
+          kind: "choose_card_from_library",
+          controllerSeatId: trigger.controllerSeatId,
+          sourceCardId: trigger.sourceCardId,
+          sourceCardName: trigger.sourceCardName,
+          prompt: `${trigger.sourceCardName}: search your library for a basic ${searchEffect.filter} card and put it onto the battlefield tapped.`,
+          destination: "battlefield",
+          tapped: true,
+          maxChoices: 1,
+          allowedCardFilter: searchEffect.filter
+        });
+        return;
+      }
     } else if (accepted && trigger.effect.kind === "draw_then_permanent") {
       // The draw happens now; WHICH permanent (or none) is the human's choice, asked with the hand as it is after the draw.
       const controllerSeat = session.seats.find((seat) => seat.id === trigger.controllerSeatId);
@@ -21101,6 +21129,10 @@ export function commonTriggerEffect(
   // this engine's one-effect-per-clause parsing (see the module comment on TriggerEffect); a card
   // with multiple clauses where only one is optional would be mis-flagged, a declared simplification.
   const optional = /\byou may\b/.test(text) || undefined;
+  const storefront = text
+    .replace(/\([^)]*\)/g, "")
+    .match(/^when this land enters, sacrifice it\. when you do, search your library for a basic ([a-z, ]+?) card, put it onto the battlefield tapped, then shuffle(?: and you gain (\d+) life)?\.?$/);
+  if (storefront) return { kind: "sacrifice_self_then_search", filter: storefront[1].replace(/,? or /g, ", ").replace(/\s+/g, " "), lifeGain: storefront[2] ? Number.parseInt(storefront[2], 10) : 0 };
   // One verb on a target the player chooses: parsed first so the older "pick the best creature" shapes below can't take it.
   {
     const cleaned = text.replace(/\([^)]*\)/g, "").trim();

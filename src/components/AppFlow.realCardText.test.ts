@@ -2977,3 +2977,14 @@ describe("Heliod, the Warped Eclipse", () => {
     expect(spell).toBeTruthy();
   });
 });
+
+describe("Obscura Storefront", () => {
+  it("its enters trigger sacrifices the land then searches for a basic Plains, Island or Swamp", () => {
+    const store = real("Obscura Storefront", "os");
+    const s = session([seat("a", [store]), seat("b", [])]);
+    const trigger = findCommonTriggersForPermanentEntered(s, "a", store).find((t) => t.effect.kind === "sacrifice_self_then_search")!;
+    expect(trigger).toBeTruthy();
+    expect(trigger.effect).toMatchObject({ lifeGain: 1 });
+    expect((trigger.effect as { filter: string }).filter).toMatch(/plains/);
+  });
+});
