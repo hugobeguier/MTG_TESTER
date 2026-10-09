@@ -13798,6 +13798,21 @@ export function applySacrificeEffect(
     return rulesEvent(created.session, seatId, `${seat.name} activates ${sourceCardName} and creates ${count} ${created.createdTokens[0]?.name ?? "token"}${count === 1 ? "" : "s"}.`);
   }
 
+  if (effect.kind === "pump_self_by_sacrificed_mv") {
+    const bonus = sacrificed.reduce((total, permanent) => total + permanent.manaValue, 0);
+    return rulesEvent(
+      {
+        ...session,
+        seats: session.seats.map((item) =>
+          item.id !== seatId
+            ? item
+            : { ...item, board: { ...item.board, battlefield: item.board.battlefield.map((card) => (card.id === sourceCardId ? { ...card, temporaryPowerBonus: (card.temporaryPowerBonus ?? 0) + bonus } : card)) } }
+        )
+      },
+      seatId,
+      `${sourceCardName} gets +${bonus}/+0 until end of turn.`
+    );
+  }
   if (effect.kind === "drain_by_sacrificed_power" || effect.kind === "mill_by_sacrificed_power") {
     const amount = Math.max(0, ...sacrificed.map((creature) => effectivePower(creature)));
     if (amount <= 0) return rulesEvent(session, seatId, `${sourceCardName} resolves, but the sacrificed creature had no power.`);

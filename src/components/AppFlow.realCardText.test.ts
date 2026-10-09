@@ -3005,3 +3005,15 @@ describe("Enhanced Surveillance", () => {
     expect(after.seats[0].library?.length).toBe(2);
   });
 });
+
+describe("Demon of Fate's Design", () => {
+  it("sacrificing another enchantment pumps it by that enchantment's mana value", () => {
+    const demon = real("Demon of Fate's Design", "dfd");
+    const abilities = parseGenericSacrificeAbilities(demon.oracleText);
+    const pump = abilities.find((a) => a.effect.kind === "pump_self_by_sacrificed_mv")!;
+    expect(pump).toMatchObject({ sacrificeTarget: "permanent", sacrificeTargetTypeFilter: "enchantment", sacrificeExcludesSelf: true });
+    const ench = real("Starfield of Nyx", "sn");
+    const after = applySacrificeEffect(session([seat("a", [demon]), seat("b", [])]), "a", demon, pump.effect, pump.clause, [ench]);
+    expect(after.seats[0].board.battlefield.find((c) => c.id === "dfd")!.temporaryPowerBonus).toBe(ench.manaValue);
+  });
+});

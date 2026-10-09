@@ -125,6 +125,8 @@ export type SacrificeEffect =
   | { kind: "create_tokens_by_sacrificed_power" }
   // "Each opponent loses life equal to the sacrificed creature's power." (Jarad, Golgari Lich Lord)
   | { kind: "drain_by_sacrificed_power" }
+  // "This creature gets +X/+0 until end of turn, where X is the sacrificed enchantment's mana value." (Demon of Fate's Design)
+  | { kind: "pump_self_by_sacrificed_mv" }
   // "Sacrifice a creature: Add {C}{C}." (Ashnod's Altar), "{T}, Sacrifice a creature: Add {B}{B}." (Phyrexian Tower): fixed mana into the pool.
   | { kind: "add_mana"; symbols: string }
   // "Target player mills cards equal to the sacrificed creature's power." (Altar of Dementia)
@@ -232,7 +234,7 @@ function numberWordToInt(value: string | undefined): number | undefined {
 // doesn't — the whole clause silently failed to match, and every real fetch land had no activated
 // ability recognized at all (not offered as a legal action, no interactive search, nothing).
 const SACRIFICE_CLAUSE_PATTERN =
-  /^((?:(?:\{[^}]+\}|discard a card|pay \d+ life)\s*,?\s*)*)(?:sacrifice|exile(?= this\b))\s+(another\s+(?:creature|[a-z]+\s+creature|[a-z]+\s+or\s+[a-z]+)|this\s+[a-z]+|an?\s+creature|an?\s+(?:nonland\s+permanent|permanent|artifact|land|enchantment|treasure|food|clue)|(?:a|one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+creatures|an?\s+(?!permanents?\b|lands?\b|cards?\b|artifacts?\b|enchantments?\b|planeswalkers?\b|tokens?\b)[a-z]+)\s*:\s*([\s\S]+?)\.?\s*$/i;
+  /^((?:(?:\{[^}]+\}|discard a card|pay \d+ life)\s*,?\s*)*)(?:sacrifice|exile(?= this\b))\s+(another\s+(?:creature|[a-z]+\s+creature|[a-z]+\s+or\s+[a-z]+)|this\s+[a-z]+|an?\s+creature|an?\s+(?:nonland\s+permanent|permanent|artifact|land|enchantment|treasure|food|clue)|another\s+(?:nonland\s+permanent|permanent|artifact|land|enchantment)|(?:a|one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+creatures|an?\s+(?!permanents?\b|lands?\b|cards?\b|artifacts?\b|enchantments?\b|planeswalkers?\b|tokens?\b)[a-z]+)\s*:\s*([\s\S]+?)\.?\s*$/i;
 
 const SACRIFICE_COUNT_PATTERN = /^(a|one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+creatures$/i;
 
@@ -265,7 +267,7 @@ export function parseGenericSacrificeAbilities(oracleText: string): SacrificeAbi
     const costLifeMatch = costPrefix.match(/pay (\d+) life/i);
     const costLife = costLifeMatch ? Number.parseInt(costLifeMatch[1], 10) : 0;
     // "Sacrifice a Desert" (Scavenger Grounds is itself a Desert) — the only way to pay it is the source.
-    const permanentKindMatch = targetPhrase.match(/^an?\s+(nonland\s+permanent|permanent|artifact|land|enchantment|treasure|food|clue)$/i);
+    const permanentKindMatch = targetPhrase.match(/^(?:an?|another)\s+(nonland\s+permanent|permanent|artifact|land|enchantment|treasure|food|clue)$/i);
     const sacrificeTarget: "self" | "creature" | "permanent" = /^this\b/i.test(targetPhrase) || /^a desert$/i.test(targetPhrase) ? "self" : permanentKindMatch ? "permanent" : "creature";
     const countMatch = targetPhrase.match(SACRIFICE_COUNT_PATTERN);
     const sacrificeCount = countMatch ? numberWordToInt(countMatch[1]) ?? 1 : 1;
@@ -685,6 +687,7 @@ function parseSacrificeEffectText(text: string): SacrificeEffect | undefined {
   if (counterMatch) return { kind: "add_counter", counterKind: "+1/+1", amount: numberWordToInt(counterMatch[1]) ?? 1 };
 
   if (/\bcreate x\b[^.]*\btokens?\b[^.]*\bwhere x is the sacrificed creature'?s power\b/.test(lower)) return { kind: "create_tokens_by_sacrificed_power" };
+  if (/^this creature gets \+x\/\+0 until end of turn, where x is the sacrificed (?:enchantment|artifact|permanent)'?s mana value\.?$/.test(lower.trim())) return { kind: "pump_self_by_sacrificed_mv" };
   const addMana = lower.match(/^add ((?:\{[wubrgc]\})+)\.?$/);
   if (addMana) return { kind: "add_mana", symbols: addMana[1].toUpperCase() };
   if (/\beach opponent loses life equal to the sacrificed creature'?s power\b/.test(lower)) return { kind: "drain_by_sacrificed_power" };
