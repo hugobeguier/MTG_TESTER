@@ -77,6 +77,35 @@ export function parseDevotionCda(oracleText: string): DevotionCda | undefined {
 // Devotion (rule 704.6b-ish, official term): count every colored mana symbol of the given color in
 // the mana costs of permanents you control — hybrid ({B/G}) and Phyrexian ({U/P}) symbols count
 // toward every color they could produce, not just their "primary" color.
+// "As long as your devotion to white and black is less than seven, Athreos isn't a creature." (the Theros gods)
+export interface DevotionNotCreature {
+  colors: ManaColorLetter[];
+  threshold: number;
+}
+
+export function parseDevotionNotCreature(oracleText: string): DevotionNotCreature | undefined {
+  const match = oracleText
+    .toLowerCase()
+    .match(/as long as your devotion to (white|blue|black|red|green)(?: and (white|blue|black|red|green))? is less than (\w+), [^.]*? isn'?t a creature/);
+  if (!match) return undefined;
+  const words: Record<string, number> = { three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
+  const threshold = words[match[3]] ?? Number.parseInt(match[3], 10);
+  if (!Number.isFinite(threshold)) return undefined;
+  return { colors: [match[1], match[2]].filter((name): name is string => Boolean(name)).map((name) => COLOR_NAMES[name]), threshold };
+}
+
+// Devotion to several colors at once: each mana symbol that could produce any of them counts once.
+export function computeDevotionToColors(battlefield: Array<{ manaCost?: string }>, colors: ManaColorLetter[]): number {
+  let count = 0;
+  for (const card of battlefield) {
+    for (const symbol of card.manaCost?.match(/\{[^}]+\}/g) ?? []) {
+      const parts = symbol.slice(1, -1).toUpperCase().split("/");
+      if (colors.some((color) => parts.includes(color))) count += 1;
+    }
+  }
+  return count;
+}
+
 export function computeDevotion(battlefield: Array<{ manaCost?: string }>, color: ManaColorLetter): number {
   let count = 0;
   for (const card of battlefield) {

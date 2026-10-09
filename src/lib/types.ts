@@ -223,6 +223,8 @@ export interface VisibleCard {
   attachedToId?: string;
   // Animate Dead: the Aura that returned this creature. When that Aura leaves the battlefield, this creature is sacrificed.
   reanimatedByAuraId?: string;
+  // Athreos and the other gods: the type line they have while their devotion is high enough for them to be creatures (the live typeLine drops "Creature" below it).
+  typeLineWithCreature?: string;
   // A card in a graveyard that another permanent let its controller cast this turn (Zul Ashur: "You may cast
   // target Zombie creature card from your graveyard this turn") — see graveyardCasting.ts.
   graveyardCastGrant?: { seatId: string; turn: number };

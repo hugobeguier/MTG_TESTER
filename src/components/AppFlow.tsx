@@ -110,6 +110,8 @@ import {
 } from "@/lib/attachments";
 import {
   computeDevotion,
+  computeDevotionToColors,
+  parseDevotionNotCreature,
   countMatchingPermanents,
   hasChooseCreatureTypeEtb,
   parseAllZonesCda,
@@ -15000,6 +15002,34 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
       );
       changed = true;
     }
+  }
+  // The gods: "As long as your devotion to white and black is less than seven, Athreos isn't a creature."
+  if (next.seats.some((seat) => seat.board.battlefield.some((card) => !card.abilitiesStripped && parseDevotionNotCreature(card.oracleText)))) {
+    let godChanged = false;
+    next = {
+      ...next,
+      seats: next.seats.map((seat) => ({
+        ...seat,
+        board: {
+          ...seat.board,
+          battlefield: seat.board.battlefield.map((card) => {
+            const rule = card.abilitiesStripped ? undefined : parseDevotionNotCreature(card.oracleText);
+            if (!rule) return card;
+            const creatureNow = computeDevotionToColors(seat.board.battlefield, rule.colors) >= rule.threshold;
+            if (!creatureNow && card.typeLine.includes("Creature")) {
+              godChanged = true;
+              return { ...card, typeLineWithCreature: card.typeLine, typeLine: card.typeLine.replace(/\s*Creature/, ""), attacking: false, blocking: false };
+            }
+            if (creatureNow && card.typeLineWithCreature) {
+              godChanged = true;
+              return { ...card, typeLine: card.typeLineWithCreature, typeLineWithCreature: undefined };
+            }
+            return card;
+          })
+        }
+      }))
+    };
+    if (godChanged) changed = true;
   }
   const afterLinked = returnLinkedExiles(next);
   if (afterLinked !== next) {

@@ -2945,3 +2945,17 @@ describe("Zur, Eternal Schemer's target", () => {
     expect(ids).toEqual(["e1", "e2"]);
   });
 });
+
+describe("Athreos, Shroud-Veiled", () => {
+  it("isn't a creature below seven devotion to white and black, and becomes one at seven", () => {
+    const athreos = real("Athreos, Shroud-Veiled", "at");
+    expect(athreos.typeLine).toContain("Creature");
+    const low = runStateBasedActionsPass(session([seat("a", [athreos]), seat("b", [])])).session.seats[0].board.battlefield.find((c) => c.id === "at")!;
+    expect(low.typeLine).not.toContain("Creature");
+    expect(low.typeLine).toContain("Enchantment");
+    // plenty of white and black permanents: devotion reaches seven again
+    const heavy = Array.from({ length: 4 }, (_, i) => bear("w" + i, { manaCost: "{1}{W}{B}" }));
+    const high = runStateBasedActionsPass(session([seat("a", [{ ...low }, ...heavy]), seat("b", [])])).session.seats[0].board.battlefield.find((c) => c.id === "at")!;
+    expect(high.typeLine).toContain("Creature");
+  });
+});
