@@ -3108,3 +3108,31 @@ describe("Aminatou, the Fateshifter's -6", () => {
     expect(ids(2)).toEqual(["a1"]);
   });
 });
+
+describe("Sunken Palace", () => {
+  it("parses its costly mana ability, exiles seven cards to pay, and a spell copy ceases to exist after resolving", () => {
+    const palace = real("Sunken Palace", "sp");
+    const abilities = parseGenericTapAbilities(palace.oracleText);
+    const marked = abilities.find((a) => a.effect.kind === "add_copy_mana")!;
+    expect(marked).toMatchObject({ costManaText: "{1}{U}", costExileGraveyard: 7, effect: { kind: "add_copy_mana", symbol: "{U}" } });
+    const a = seat("a", [palace, real("Island", "i1"), real("Island", "i2")]);
+    a.board.graveyard = Array.from({ length: 8 }, (_, i) => bear("g" + i, { zone: "graveyard" as const }));
+    const s = session([a, seat("b", [])]);
+    const index = abilities.indexOf(marked);
+    const paid = payGenericTapCost(s, "a", "sp", index)!;
+    expect(paid).toBeTruthy();
+    expect(paid.session.seats[0].board.graveyard).toHaveLength(1);
+    expect(paid.session.seats[0].board.exile).toHaveLength(7);
+    expect(paid.session.seats[0].board.battlefield.find((c) => c.id === "sp")!.tapped).toBe(true);
+    // not enough cards: cannot pay
+    const few = seat("a", [palace, real("Island", "i1"), real("Island", "i2")]);
+    few.board.graveyard = [bear("g0", { zone: "graveyard" as const })];
+    expect(payGenericTapCost(session([few, seat("b", [])]), "a", "sp", index)).toBeUndefined();
+    // a spell copy (a token card) resolving to the graveyard disappears
+    const hand = seat("a", []);
+    hand.board.hand = [{ ...real("Swords to Plowshares", "sw-copy", { zone: "hand" as const }), token: true, spellCopy: true }];
+    hand.zones.hand = 1;
+    const resolved = playCardFromZone(session([hand, seat("b", [])]), "a", "sw-copy", undefined, undefined, "graveyard");
+    expect(resolved.seats[0].board.graveyard).toHaveLength(0);
+  });
+});

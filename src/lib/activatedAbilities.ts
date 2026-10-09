@@ -322,6 +322,8 @@ export type GenericTapEffect =
   | { kind: "draw_cards"; amount: number }
   // "Target creature can't be blocked this turn." (Rogue's Passage) — your best attacker.
   | { kind: "target_unblockable" }
+  // "Add {U}. When you spend this mana to cast a spell or activate an ability, copy that spell or ability." (Sunken Palace): the mana is marked.
+  | { kind: "add_copy_mana"; symbol: string }
   // Any single-verb effect on a target the player chooses ("Target creature gains lifelink until end of turn", "Put a +1/+1 counter on target creature").
   | { kind: "targeted_effect"; effect: TargetedEffect }
   // "Look at the top six cards of your library. You may reveal a creature card with mana value less than or equal to the number of lands
@@ -374,6 +376,8 @@ export interface GenericTapAbility {
   costLifeCommanderColors?: boolean;
   // "Tap three untapped Zombies you control" (Cryptbreaker): tapping other creatures IS the cost, with no {T} of its own.
   costTapCreatures?: { count: number; subtype: string };
+  // "Exile seven cards from your graveyard" as part of the cost (Sunken Palace).
+  costExileGraveyard?: number;
   effect: GenericTapEffect;
   clause: string;
 }
@@ -395,6 +399,24 @@ export function parseGenericTapAbilities(oracleText: string): GenericTapAbility[
     const clause = stripAbilityWordPrefix(rawClause);
     // Sacrifice-cost tap abilities are parseGenericSacrificeAbilities's shape, not this one.
     if (/\bsacrifice\b/i.test(clause)) continue;
+    // "{1}{U}, {T}, Exile seven cards from your graveyard: Add {U}. When you spend this mana to cast a spell or activate an ability, copy that spell or ability."
+    const copyMana = clause
+      .replace(/\([^)]*\)/g, "")
+      .match(/^((?:\{[^}]+\},?\s*)+)exile (seven|six|five|four|three|\d+) cards from your graveyard:\s*add (\{[wubrgc]\})\.\s*when you spend this mana to cast a spell or activate an ability, copy that spell or ability\b/i);
+    if (copyMana && /\{t\}/i.test(copyMana[1])) {
+      const costSymbols = copyMana[1].match(/\{[^}]+\}/g) ?? [];
+      const manaSymbols = costSymbols.filter((symbol) => !/^\{t\}$/i.test(symbol));
+      abilities.push({
+        costMana: manaSymbols.reduce((total, symbol) => total + (Number.parseInt(symbol.replace(/[{}]/g, ""), 10) || 0), 0),
+        costManaText: manaSymbols.join(""),
+        costDiscard: false,
+        untapsSelf: false,
+        costExileGraveyard: numberWordToInt(copyMana[2].toLowerCase()) ?? 7,
+        effect: { kind: "add_copy_mana", symbol: copyMana[3].toUpperCase() },
+        clause
+      });
+      continue;
+    }
     // "Tap three untapped Zombies you control: You draw a card and lose 1 life." (Cryptbreaker)
     const tapCreatures = clause.match(/^tap (a|one|two|three|four|\d+) untapped ([a-z]+)s you control:\s*(.+?)\.?\s*$/i);
     if (tapCreatures) {

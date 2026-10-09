@@ -225,6 +225,8 @@ export interface VisibleCard {
   attachedToId?: string;
   // Animate Dead: the Aura that returned this creature. When that Aura leaves the battlefield, this creature is sacrificed.
   reanimatedByAuraId?: string;
+  // A copy of a spell made by Sunken Palace's mana: it resolves like the spell, then ceases to exist instead of going to the graveyard.
+  spellCopy?: boolean;
   // Athreos and the other gods: the type line they have while their devotion is high enough for them to be creatures (the live typeLine drops "Creature" below it).
   typeLineWithCreature?: string;
   // A card in a graveyard that another permanent let its controller cast this turn (Zul Ashur: "You may cast

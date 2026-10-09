@@ -471,6 +471,8 @@ type PendingAction =
       sourceZone?: "hand" | "command" | "exile" | "graveyard" | "library";
       // Cast from the graveyard via flashback: the spell is exiled instead of returning to the graveyard.
       flashback?: boolean;
+      // A copy made by Sunken Palace's mana: nothing is paid, no cast triggers, and the copy ceases to exist after resolving.
+      isCopy?: boolean;
       manaSourceIds: string[];
       position?: { x: number; z: number };
       faceIndex?: number;
@@ -1612,6 +1614,8 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   // actually including the human in requiredPasses.
   const [holdPriorityOnce, setHoldPriorityOnce] = useState(false);
   const [manaPools, setManaPools] = useState<Record<string, ManaPool>>({});
+  // Sunken Palace: how many of a seat's floating {U} are "copy" mana (the spell they pay for is copied). Emptied with the pool.
+  const [copyMana, setCopyMana] = useState<Record<string, number>>({});
   const [manaContributions, setManaContributions] = useState<Record<string, ManaContribution[]>>({});
   const [restrictedManaBatches, setRestrictedManaBatches] = useState<Record<string, RestrictedManaBatch[]>>({});
   const [manaChoice, setManaChoice] = useState<ManaChoiceState | undefined>();
@@ -1850,6 +1854,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     const keepsRed = session.seats.find((seat) => seat.id === seatId)?.board.battlefield.some((card) => !card.abilitiesStripped && /you don'?t lose unspent red mana as steps and phases end/i.test(card.oracleText));
     setSeatManaPool(seatId, keepsRed ? { ...emptyManaPool(), R: poolForSeat(seatId).R } : emptyManaPool());
     setManaContributions((current) => ({ ...current, [seatId]: [] }));
+    setCopyMana((current) => (current[seatId] ? { ...current, [seatId]: 0 } : current));
   }
 
   // Rule 500.4: a step or phase ending empties every player's mana pool, not just the active
@@ -5504,6 +5509,21 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       }));
     }
     beginPendingAction(action, "Stack", preChosenSacrificeTargets);
+    // Sunken Palace: if the spell was paid for (at least partly) with its marked {U}, copy the spell. The copy goes on the stack above the
+    // original, so it resolves first; it is not cast (no cast triggers), pays nothing and keeps the original's modes and targets.
+    if (seat.kind === "human" && payment.source === "pool" && (copyMana[seatId] ?? 0) > 0 && (payment.spent.U ?? 0) >= 1) {
+      const copyCardId = `${cardId}-spellcopy-${crypto.randomUUID()}`;
+      setCopyMana((current) => ({ ...current, [seatId]: Math.max(0, (current[seatId] ?? 0) - 1) }));
+      setSession((current) => ({
+        ...current,
+        seats: current.seats.map((item) =>
+          item.id !== seatId ? item : { ...item, board: { ...item.board, hand: [...item.board.hand, { ...card, id: copyCardId, token: true, spellCopy: true, zone: "hand" as const }] } }
+        ),
+        events: [{ id: crypto.randomUUID(), at: new Date().toISOString(), seatId, message: `Sunken Palace's mana copies ${castName}.`, detail: "Rules action" }, ...current.events]
+      }));
+      const copyAction: PendingAction = { ...action, id: crypto.randomUUID(), cardId: copyCardId, sourceZone: "hand", manaSourceIds: [], isCopy: true, flashback: undefined, message: `${castName} is copied.` } as PendingAction;
+      window.setTimeout(() => beginPendingAction(copyAction, "Stack"), 0);
+    }
     setSelectedHandCardId(undefined);
   }
 
@@ -5863,6 +5883,15 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     if (paid.poolSpent) {
       setSeatManaPool(seatId, paid.poolSpent);
       clearManaContributions(seatId);
+    }
+    // Sunken Palace: the mana goes into the pool, marked so that the spell it pays for is copied.
+    if (paid.ability.effect.kind === "add_copy_mana") {
+      const manaColor = paid.ability.effect.symbol.replace(/[{}]/g, "") as ManaColor;
+      setSession(() => paid.session);
+      setSeatManaPool(seatId, addManaToPool(paid.poolSpent ?? poolForSeat(seatId), manaColor, 1));
+      setCopyMana((current) => ({ ...current, [seatId]: (current[seatId] ?? 0) + 1 }));
+      addEvent(`${paid.card.name} adds ${paid.ability.effect.symbol}; the spell it pays for will be copied.`, seatId, "Rules action");
+      return;
     }
     // Loot, Exuberant Explorer: after paying, the human sees the top cards and picks which creature (if any) enters.
     if (seat?.kind === "human" && paid.ability.effect.kind === "dig_creature_to_battlefield") {
@@ -6257,7 +6286,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     // further down used to fire its own independent setTimeout unconditionally, racing (and usually
     // winning against) the trigger ever making it onto the stack.
     let hasCastTriggers = false;
-    if (action.type === "spell") {
+    if (action.type === "spell" && !action.isCopy) {
       checkCastTriggeredKeywords(action);
       const sourceCard = findSpellSourceCard(session, action);
       if (sourceCard) {
@@ -6296,7 +6325,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     // the several call sites that can create a "spell" PendingAction (playCard, respondWithCard,
     // agentRespondWithCard, miracle), since hasResolvableTarget already guarantees a legal sacrifice
     // exists before any of them are allowed to construct this action in the first place.
-    const castSourceCard = action.type === "spell" ? findSpellSourceCard(session, action) : undefined;
+    const castSourceCard = action.type === "spell" && !action.isCopy ? findSpellSourceCard(session, action) : undefined;
     const additionalSacrifice = castSourceCard ? parseAdditionalSacrificeCost(castSourceCard.oracleText) : undefined;
     const actorSeat = session.seats.find((seat) => seat.id === action.actorSeatId);
     // preChosenSacrificeTargets: a human already picked which creature via the interactive
@@ -13120,6 +13149,9 @@ function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllowed: boo
       if (!activateOnlyIfConditionMet(ability.clause, seat)) return;
       if (hasSorcerySpeedOnlyLimiter(ability.clause) && !sorcerySpeedAllowed) return;
       if (ability.costRemoveCounter && counterCount(card, ability.costRemoveCounter) < 1) return;
+      if (ability.costExileGraveyard && (seat.board.graveyard?.length ?? 0) < ability.costExileGraveyard) return;
+      // Sunken Palace's marked mana only helps a human, who spends it from the pool; agents are not offered it.
+      if (ability.effect.kind === "add_copy_mana" && seat.kind !== "human") return;
       if (ability.costLifeCommanderColors && seat.life <= commanderColorCount(seat)) return;
       // Hideaway lands (Spinerock Knoll, Mosswort Bridge): worth activating only with a hidden card and the condition already true.
       if (ability.effect.kind === "hideaway_play") {
@@ -14055,6 +14087,7 @@ export function payGenericTapCost(
   if (ability.costTapCreatures && !tappedForCost) return undefined;
   if (!activateOnlyIfConditionMet(ability.clause, seat)) return undefined;
   if (ability.costRemoveCounter && counterCount(card, ability.costRemoveCounter) < 1) return undefined;
+  if (ability.costExileGraveyard && (seat.board.graveyard?.length ?? 0) < ability.costExileGraveyard) return undefined;
   const lifeCost = ability.costLifeCommanderColors ? commanderColorCount(seat) : 0;
   if (lifeCost > 0 && seat.life <= lifeCost) return undefined;
   const tapIds = new Set((tappedForCost ?? []).map((creature) => creature.id));
@@ -14111,6 +14144,13 @@ export function payGenericTapCost(
         ...next.events
       ]
     };
+  }
+  // "Exile seven cards from your graveyard" (Sunken Palace): the least valuable cards go first (spells and lands before creatures).
+  if (ability.costExileGraveyard) {
+    const keepValue = (graveCard: VisibleCard) => (graveCard.typeLine.includes("Creature") ? 3 : /Instant|Sorcery/.test(graveCard.typeLine) ? 1 : 2) + graveCard.manaValue * 0.1;
+    const toExile = [...(seat.board.graveyard ?? [])].sort((a, b) => keepValue(a) - keepValue(b)).slice(0, ability.costExileGraveyard);
+    next = toExile.reduce((current, graveCard) => moveCardBetweenVisibleZones(current, seatId, graveCard.id, "exile"), next);
+    next = rulesEvent(next, seatId, `${seat.name} exiles ${toExile.length} cards from their graveyard to activate ${card.name}.`);
   }
   // Paying the {T} in the cost taps the source; an "Untap ~." effect (Retrofitter Foundry's 2nd/3rd
   // abilities) then immediately untaps it again as part of resolving — net result is it stays
@@ -27417,13 +27457,13 @@ export function playCardFromZone(
         hand: sourceZone === "hand" ? spentSeat.board.hand.filter((item) => item.id !== cardId) : spentSeat.board.hand,
         exile: destination === "exile" ? [...exile.filter((item) => item.id !== cardId), played] : leavesExileZone ? exile.filter((item) => item.id !== cardId) : spentSeat.board.exile,
         battlefield: destination === "battlefield" ? [...spentSeat.board.battlefield, playedOnBattlefield] : spentSeat.board.battlefield,
-        graveyard: destination === "graveyard" ? [...graveyard, played] : graveyard
+        graveyard: destination === "graveyard" && !played.spellCopy ? [...graveyard, played] : graveyard
       },
       zones: {
         ...spentSeat.zones,
         battlefield: spentSeat.zones.battlefield + (destination === "battlefield" ? 1 : 0),
         command: Math.max(0, spentSeat.zones.command - (commanderLeavesCommand ? 1 : 0)),
-        graveyard: Math.max(0, spentSeat.zones.graveyard + (destination === "graveyard" ? 1 : 0) - (sourceZone === "graveyard" ? 1 : 0)),
+        graveyard: Math.max(0, spentSeat.zones.graveyard + (destination === "graveyard" && !played.spellCopy ? 1 : 0) - (sourceZone === "graveyard" ? 1 : 0)),
         hand: sourceZone === "hand" ? Math.max(0, spentSeat.zones.hand - 1) : spentSeat.zones.hand,
         exile: Math.max(0, spentSeat.zones.exile + (destination === "exile" && sourceZone !== "exile" ? 1 : 0) - (leavesExileZone ? 1 : 0)),
         library: Math.max(0, spentSeat.zones.library + (destination === "library" ? 1 : 0) - (sourceZone === "library" ? 1 : 0))
