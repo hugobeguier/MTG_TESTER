@@ -3037,3 +3037,13 @@ describe("Blasphemous Edict", () => {
     expect(parseSpellExtraEffects(real("Blasphemous Edict", "be").oracleText.split("\n")[1] ?? real("Blasphemous Edict", "be").oracleText)).toContainEqual({ kind: "each_player_sacrifices", count: 13 });
   });
 });
+
+describe("Timely Ward", () => {
+  it("has flash only while you control a commander", () => {
+    const ward = real("Timely Ward", "tw", { zone: "hand" as const });
+    const withCommander = seat("a", [bear("cmd", { commander: true })]);
+    const without = seat("a", [bear("x")]);
+    expect(seatHasFlashGrant(withCommander, ward)).toBe(true);
+    expect(seatHasFlashGrant(without, ward)).toBe(false);
+  });
+});

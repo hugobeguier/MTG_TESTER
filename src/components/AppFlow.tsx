@@ -25430,7 +25430,9 @@ function handCardFaceOptions(
 // what's sitting elsewhere on its controller's battlefield). Defaults to false so every existing
 // call site keeps its current behavior until it's updated to pass the seat's actual grant status.
 function canCastAtInstantSpeed(card: VisibleCard, flashGranted = false) {
-  return card.typeLine.includes("Instant") || /\bflash\b/i.test(card.oracleText) || flashGranted;
+  // "You may cast this spell as though it had flash if it targets a commander." (Timely Ward) is a conditional permission, not the Flash keyword.
+  const printedFlash = /\bflash\b/i.test(card.oracleText.replace(/as though it had flash/gi, ""));
+  return card.typeLine.includes("Instant") || printedFlash || flashGranted;
 }
 
 // Scoped narrowly to what a priority-response decision needs: battlefield-only, no "spells of the
@@ -25440,6 +25442,8 @@ function canCastAtInstantSpeed(card: VisibleCard, flashGranted = false) {
 // spells as though they had flash." (Yeva, Nature's Herald) only the ones it describes (pass the card to check). Reminder text is ignored:
 // a creature that merely HAS flash ("(You may cast this spell any time you could cast an instant.)") grants nothing to anything else.
 export function seatHasFlashGrant(seat: PlayerSeat, card?: VisibleCard): boolean {
+  // Timely Ward: flash only if it can target a commander (this checks the caster's own commander on the battlefield).
+  if (card && /cast this spell as though it had flash if it targets a commander/i.test(card.oracleText) && seat.board.battlefield.some((permanent) => permanent.commander)) return true;
   return seat.board.battlefield.some((source) => {
     if (source.abilitiesStripped) return false;
     const text = source.oracleText.replace(/\([^)]*\)/g, "");
