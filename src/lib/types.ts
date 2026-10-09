@@ -139,6 +139,8 @@ export interface DeckScore {
 export interface PlayerSeat {
   id: string;
   name: string;
+  // How many cards this player has drawn so far in the given turn (Heliod, the Warped Eclipse counts what opponents drew).
+  drawnThisTurn?: { turn: number; count: number };
   kind: SeatKind;
   agentName?: AgentName;
   life: number;

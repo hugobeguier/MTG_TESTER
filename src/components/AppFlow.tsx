@@ -25643,9 +25643,14 @@ export function adjustedCastingCost(
   // miracleCostFor below. The unconditional-0 early returns above (Mind's Dilation, Omniscience,
   // "without paying its mana cost" effects, ...) are real cast-for-free effects, rules-distinct
   // from a cost reduction, and correctly bypass this floor entirely.
+  // "Spells you cast cost {1} less to cast for each card your opponents have drawn this turn." (Heliod, the Warped Eclipse)
+  const drawnByOpponents =
+    turn !== undefined && seat.board.battlefield.some((permanent) => !permanent.abilitiesStripped && /spells you cast cost \{1\} less to cast for each card your opponents have drawn this turn/i.test(permanent.oracleText))
+      ? allSeats.filter((other) => other.id !== seat.id && other.drawnThisTurn?.turn === turn).reduce((total, other) => total + (other.drawnThisTurn?.count ?? 0), 0)
+      : 0;
   return Math.max(
     coloredPipCount(card),
-    baseCost - pendingArtifactAffinityReduction(seat) - staticCostReduction(seat, card) - selfConditionalCostReduction(card, allSeats) - selfScalingCostReduction(card, seat, allSeats)
+    baseCost - drawnByOpponents - pendingArtifactAffinityReduction(seat) - staticCostReduction(seat, card) - selfConditionalCostReduction(card, allSeats) - selfScalingCostReduction(card, seat, allSeats)
   );
 }
 
@@ -26894,6 +26899,7 @@ export function drawForSeat(session: GameSession, seatId: string, message: strin
     if (!drawn) return seat;
     return {
       ...seat,
+      drawnThisTurn: { turn: session.turn, count: (seat.drawnThisTurn?.turn === session.turn ? seat.drawnThisTurn.count : 0) + 1 },
       library,
       board: {
         ...seat.board,

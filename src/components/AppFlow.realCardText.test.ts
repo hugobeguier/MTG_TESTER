@@ -2959,3 +2959,21 @@ describe("Athreos, Shroud-Veiled", () => {
     expect(high.typeLine).toContain("Creature");
   });
 });
+
+describe("Heliod, the Warped Eclipse", () => {
+  it("spells cost {1} less for each card the opponents drew this turn", () => {
+    const heliod = real("Heliod, the Radiant Dawn // Heliod, the Warped Eclipse", "he");
+    const warped = { ...heliod, ...(heliod.faces?.[1] ? heliod.faces[1] : {}), oracleText: "Spells you cast cost {1} less to cast for each card your opponents have drawn this turn." };
+    const spell = real("Swords to Plowshares", "sw", { zone: "hand" as const });
+    const a = seat("a", [warped as never]);
+    const b = seat("b", []);
+    b.drawnThisTurn = { turn: 1, count: 3 };
+    // one white pip stays payable; Swords costs {W}: generic reduction can't go below the colored pip
+    const big = real("Omniscience", "am", { zone: "hand" as const });
+    const base = adjustedCastingCost(a, big, big.manaValue, "hand", "a", [a, b], 1);
+    b.drawnThisTurn = { turn: 1, count: 0 };
+    const none = adjustedCastingCost(a, big, big.manaValue, "hand", "a", [a, b], 1);
+    expect(none - base).toBe(3);
+    expect(spell).toBeTruthy();
+  });
+});
