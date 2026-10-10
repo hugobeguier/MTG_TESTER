@@ -16194,6 +16194,12 @@ function changeControlWithinBattlefield(session: GameSession, cardId: string, fr
     ...card,
     ownerSeatId,
     summoningSick: card.typeLine.includes("Creature") ? true : card.summoningSick,
+    // Rule 506.4: a permanent that changes controllers is removed from combat.
+    attacking: false,
+    blocking: false,
+    attackTargetId: undefined,
+    blockingTargetId: undefined,
+    extraBlockingTargetId: undefined,
     temporaryControlChange: temporary || undefined
   };
 

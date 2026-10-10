@@ -3224,3 +3224,16 @@ describe("Reign of Dragons: Magda, Sarkhan's Triumph, Unexpected Windfall", () =
     expect(parseCreateTokenSpecs(windfall.oracleText)[0]?.name).toBe("Treasure");
   });
 });
+
+describe("control changes leave combat", () => {
+  it("a rotated attacker is no longer attacking (and summoning sick under its new controller)", () => {
+    const aminatou = real("Aminatou, the Fateshifter", "am");
+    const effect = commonTriggerEffect("Choose left or right. Each player gains control of all nonland permanents other than Aminatou controlled by the next player in the chosen direction.", "clause")!;
+    const attacker = bear("atk", { attacking: true, attackTargetId: "a" });
+    const s = session([seat("a", [aminatou]), seat("b", [attacker])]);
+    const after = resolveTriggerEffect(s, { id: "t", type: "trigger", actorSeatId: "a", controllerSeatId: "a", sourceCardId: "am", sourceCardName: "Aminatou", triggerKind: "common", effect: { ...effect, chosenOption: "0" }, message: "" } as never);
+    const moved = after.seats[0].board.battlefield.find((c) => c.id === "atk")!;
+    expect(moved.attacking).toBe(false);
+    expect(moved.summoningSick).toBe(true);
+  });
+});
