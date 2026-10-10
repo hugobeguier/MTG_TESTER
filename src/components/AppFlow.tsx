@@ -21788,7 +21788,14 @@ function commanderColorCount(seat: PlayerSeat): number {
 
 // queueEntries (default on): the new tokens also go into pendingEntries so their "enters" triggers (and other permanents' "whenever a Zombie enters") fire
 // through the usual queue. The spell-resolution caller turns it off because it captures the returned triggers itself.
-export function createTokensForSeat(session: GameSession, seatId: string, sourceCardId: string, specs: TokenSpec[], options: { queueEntries?: boolean } = {}) {
+export function createTokensForSeat(session: GameSession, seatId: string, sourceCardId: string, rawSpecs: TokenSpec[], options: { queueEntries?: boolean } = {}) {
+  // Draconic Visitor: "If one or more artifact tokens would be created under your control, that many 5/5 red Dragon creature tokens with flying are
+  // created instead." (Treasures, Clues, Thopters, ... all become Dragons.)
+  const replacesArtifactTokens = session.seats
+    .find((seat) => seat.id === seatId)
+    ?.board.battlefield.some((card) => !card.abilitiesStripped && /if one or more artifact tokens would be created under your control, that many 5\/5 red dragon creature tokens with flying are created instead/i.test(card.oracleText));
+  const dragonSpec = replacesArtifactTokens ? parseCreateTokenSpecs("create a 5/5 red Dragon creature token with flying")[0] : undefined;
+  const specs = dragonSpec ? rawSpecs.map((spec) => (spec.typeLine.includes("Artifact") ? { ...dragonSpec, count: spec.count } : spec)) : rawSpecs;
   const createdTokens = specs.flatMap((spec) =>
     Array.from({ length: spec.count }, () => createTokenCard(seatId, sourceCardId, spec))
   );

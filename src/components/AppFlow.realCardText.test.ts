@@ -204,6 +204,7 @@ describe("Dragon damage triggers (real Oracle text)", () => {
 });
 
 import { commonTriggerEffect } from "./AppFlow";
+import { createTokensForSeat, parseCreateTokenSpecs } from "./AppFlow";
 
 describe("pump abilities (real Oracle text)", () => {
   it("Scourge of Valkas: {R}: this creature gets +1/+0 — itself only", () => {
@@ -3134,5 +3135,19 @@ describe("Sunken Palace", () => {
     hand.zones.hand = 1;
     const resolved = playCardFromZone(session([hand, seat("b", [])]), "a", "sw-copy", undefined, undefined, "graveyard");
     expect(resolved.seats[0].board.graveyard).toHaveLength(0);
+  });
+});
+
+describe("Draconic Visitor", () => {
+  it("artifact tokens become 5/5 flying Dragons; other tokens are untouched", () => {
+    const visitor = real("Draconic Visitor", "dv");
+    const s = session([seat("a", [visitor]), seat("b", [])]);
+    const treasure = createTokensForSeat(s, "a", "src", [{ ...parseCreateTokenSpecs("create a Treasure token")[0], count: 2 }]).session.seats[0].board.battlefield.filter((c) => c.token);
+    expect(treasure.map((c) => c.name)).toEqual(["Dragon Token", "Dragon Token"]);
+    expect(treasure[0].power).toBe("5");
+    const zombies = createTokensForSeat(s, "a", "src", parseCreateTokenSpecs("create a 2/2 black Zombie creature token")).session.seats[0].board.battlefield.filter((c) => c.token);
+    expect(zombies[0].name).toContain("Zombie");
+    const other = createTokensForSeat(session([seat("a", []), seat("b", [visitor])]), "a", "src", parseCreateTokenSpecs("create a Treasure token")).session.seats[0].board.battlefield.filter((c) => c.token);
+    expect(other[0].name).toBe("Treasure");
   });
 });
