@@ -3181,3 +3181,46 @@ describe("Sarkhan the Masterless", () => {
     expect(reverted.typeLine).not.toContain("Dragon");
   });
 });
+
+describe("Magda, the Hoardmaster's Treasure sacrifice", () => {
+  it("sacrificing three Treasures makes a 4/4 flying haste Scorpion Dragon", () => {
+    const magda = real("Magda, the Hoardmaster", "mg");
+    const abilities = parseGenericSacrificeAbilities(magda.oracleText);
+    const ability = abilities.find((a) => a.sacrificeCount === 3)!;
+    expect(ability).toMatchObject({ sacrificeTarget: "permanent", sacrificeTargetTypeFilter: "treasure", effect: { kind: "create_tokens" } });
+    const treasures = Array.from({ length: 4 }, (_, i) => ({ ...real("Sol Ring", "t" + i), name: "Treasure", typeLine: "Token Artifact — Treasure", token: true }));
+    const s = session([seat("a", [magda, ...treasures]), seat("b", [])]);
+    const index = abilities.indexOf(ability);
+    const paid = payGenericSacrificeCost(s, "a", "mg", index)!;
+    expect(paid).toBeTruthy();
+    expect(paid.sacrificed).toHaveLength(3);
+    const after = applySacrificeEffect(paid.session, "a", paid.card, paid.ability.effect, paid.ability.clause, paid.sacrificed);
+    const dragon = after.seats[0].board.battlefield.find((c) => c.token && /Dragon/.test(c.name + c.typeLine))!;
+    expect(dragon).toBeTruthy();
+    expect(dragon.power).toBe("4");
+    expect(after.seats[0].board.battlefield.filter((c) => c.name === "Treasure")).toHaveLength(1);
+  });
+});
+
+describe("Reign of Dragons: Magda, Sarkhan's Triumph, Unexpected Windfall", () => {
+  it("Magda's crime trigger reads as a tapped Treasure", () => {
+    const magda = real("Magda, the Hoardmaster", "mg");
+    const clause = magda.oracleText.split("\n").find((line) => /commit a crime/i.test(line))!;
+    const match = clause.replace(/\([^)]*\)/g, "").trim().match(/^whenever you commit a crime, (.+?)(?:\s+this ability triggers only once each turn\.?)?$/i)!;
+    expect(commonTriggerEffect(match[1], "clause")).toMatchObject({ kind: "create_tokens", tokens: [{ name: "Treasure", tapped: true }] });
+  });
+
+  it("Sarkhan's Triumph fetches a Dragon creature card to hand through the library search", async () => {
+    const { deterministicRuleWorkflow } = await import("@/lib/rulesAdvisor");
+    const workflow = deterministicRuleWorkflow({ event: "spell_resolved_to_graveyard", actorName: "a", sourceCard: real("Sarkhan's Triumph", "st", { zone: "graveyard" as const }), battlefield: [], hand: [], graveyard: [], exile: [], libraryPreview: [] });
+    expect(workflow?.workflow).toBe("search_library_to_hand");
+    expect((workflow?.allowedCardFilter ?? "").toLowerCase()).toContain("dragon");
+  });
+
+  it("Unexpected Windfall: discard as a cost, then draw two and make a Treasure", () => {
+    const windfall = real("Unexpected Windfall", "uw", { zone: "hand" as const });
+    expect(windfall.oracleText).toMatch(/discard a card/i);
+    expect(parseSimpleDrawEffect(windfall.oracleText.split("\n").slice(1).join(" "))?.amount ?? parseSimpleDrawEffect(windfall.oracleText)?.amount).toBe(2);
+    expect(parseCreateTokenSpecs(windfall.oracleText)[0]?.name).toBe("Treasure");
+  });
+});

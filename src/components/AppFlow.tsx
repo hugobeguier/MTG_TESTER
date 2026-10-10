@@ -5513,6 +5513,15 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       }));
     }
     beginPendingAction(action, "Stack", preChosenSacrificeTargets);
+    // A spell that targets an opponent or something of theirs is a crime (Magda, the Hoardmaster).
+    {
+      const targetsOpponent = (castChoices?.targets ?? []).some((target) => target.seatId !== seatId);
+      const agentRemoval = seat.kind !== "human" && !castChoices && (() => {
+        const removal = parseRemovalEffect(etbEffectText(card.oracleText));
+        return removal !== undefined && ["destroy", "exile", "damage", "bounce", "destroy_up_to_x"].includes(removal.kind);
+      })();
+      if (targetsOpponent || agentRemoval) commitCrime(seatId);
+    }
     // Sunken Palace: if the spell was paid for (at least partly) with its marked {U}, copy the spell. The copy goes on the stack above the
     // original, so it resolves first; it is not cast (no cast triggers), pays nothing and keeps the original's modes and targets.
     if (seat.kind === "human" && payment.source === "pool" && (copyMana[seatId] ?? 0) > 0 && (payment.spent.U ?? 0) >= 1) {
@@ -5529,6 +5538,32 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       window.setTimeout(() => beginPendingAction(copyAction, "Stack"), 0);
     }
     setSelectedHandCardId(undefined);
+  }
+
+  // Rule 700.13: targeting an opponent, anything they control, or a card in their graveyard is committing a crime. Fires "Whenever you commit a
+  // crime, ..." (Magda, the Hoardmaster: a tapped Treasure, once each turn). A human's chosen targets are known; an agent's removal spell counts
+  // as one because its targets are chosen as it resolves.
+  function commitCrime(seatId: string) {
+    const seat = session.seats.find((item) => item.id === seatId);
+    if (!seat) return;
+    const triggers: Array<Extract<PendingAction, { type: "trigger" }>> = [];
+    const usedKeys: string[] = [];
+    for (const source of seat.board.battlefield) {
+      if (source.abilitiesStripped) continue;
+      for (const clause of oracleClauses(source.oracleText)) {
+        const match = clause.replace(/\([^)]*\)/g, "").trim().match(/^whenever you commit a crime, (.+?)(?:\s+this ability triggers only once each turn\.?)?$/i);
+        if (!match) continue;
+        const key = `${session.turn}:${source.id}:crime`;
+        if (/triggers only once each turn/i.test(clause) && ((session.onceEachTurnEffectsUsed ?? []).includes(key) || usedKeys.includes(key))) continue;
+        const effect = commonTriggerEffect(match[1], "clause", undefined, seat);
+        if (!effect) continue;
+        usedKeys.push(key);
+        triggers.push(makeCommonTrigger(seatId, seatId, source, effect, `${source.name} triggers because ${seat.name} committed a crime.`));
+      }
+    }
+    if (triggers.length === 0) return;
+    setSession((current) => ({ ...current, onceEachTurnEffectsUsed: [...(current.onceEachTurnEffectsUsed ?? []), ...usedKeys] }));
+    window.setTimeout(() => queueCommonTriggers(triggers), 0);
   }
 
   function declareHumanAttack(cardId: string, targetId: string) {
@@ -9587,6 +9622,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     const choice = pendingRuleChoice;
     if (!choice || choice.kind !== "choose_effect_target") return;
     setPendingRuleChoice(undefined);
+    if (target.seatId !== choice.controllerSeatId) commitCrime(choice.controllerSeatId);
     if (choice.pending.kind === "library_look") {
       if (target.kind === "player" && targetsStillLegal(session, choice.controllerSeatId, choice.spec, choice.sourceCard, [target])) {
         startLibraryLook("reorder", choice.pending.count, undefined, undefined, undefined, target.seatId, choice.pending.offerShuffle ? choice.sourceCardName : undefined);
@@ -21922,9 +21958,9 @@ export function parseCreateTokenSpecs(
   ];
 
   for (const item of predefined) {
-    const match = normalized.match(new RegExp(`creates?\\s+(a|an|one|two|three|four|five|six|seven|eight|nine|ten|\\d+)\\s+${item.name}\\s+tokens?`, "i"));
+    const match = normalized.match(new RegExp(`creates?\\s+(a|an|one|two|three|four|five|six|seven|eight|nine|ten|\\d+)\\s+(tapped\\s+)?${item.name}\\s+tokens?`, "i"));
     if (match && item.spec) {
-      specs.push({ ...item.spec, count: numberWordToInt(match[1]) ?? 1 });
+      specs.push({ ...item.spec, count: numberWordToInt(match[1]) ?? 1, ...(match[2] ? { tapped: true } : {}) });
     }
   }
 

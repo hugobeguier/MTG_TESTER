@@ -570,6 +570,10 @@ function extractSearchedCardType(text: string): string | undefined {
   const LIST_OF_TYPES = "[a-z][a-z'-]*(?:,\\s*[a-z][a-z'-]*)*(?:,?\\s*or\\s+[a-z][a-z'-]*)?";
   const pluralMatch = text.match(new RegExp(`\\bsearch (?:your|their) library for up to \\w+ (${LIST_OF_TYPES}) cards?\\b`));
   if (pluralMatch) return pluralMatch[1].trim();
+  // "a Dragon creature card" (Sarkhan's Triumph): a subtype followed by the card type. The subtype is the filter (a card with it in its type
+  // line is that kind of creature); without this the search offered every card in the library.
+  const subtypeMatch = text.match(/\bsearch (?:your|their) library for an? ([a-z][a-z'-]*) (?:creature|artifact|enchantment) cards?\b/);
+  if (subtypeMatch && !["basic", "legendary", "snow", "nonland", "nonbasic", "nonlegendary", "noncreature", "nontoken", "colorless"].includes(subtypeMatch[1])) return subtypeMatch[1];
   const singularMatch = text.match(new RegExp(`\\bsearch (?:your|their) library for an? (${LIST_OF_TYPES}) cards?\\b`));
   return singularMatch ? singularMatch[1].trim() : undefined;
 }

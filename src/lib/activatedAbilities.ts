@@ -234,9 +234,10 @@ function numberWordToInt(value: string | undefined): number | undefined {
 // doesn't — the whole clause silently failed to match, and every real fetch land had no activated
 // ability recognized at all (not offered as a legal action, no interactive search, nothing).
 const SACRIFICE_CLAUSE_PATTERN =
-  /^((?:(?:\{[^}]+\}|discard a card|pay \d+ life)\s*,?\s*)*)(?:sacrifice|exile(?= this\b))\s+(another\s+(?:creature|[a-z]+\s+creature|[a-z]+\s+or\s+[a-z]+)|this\s+[a-z]+|an?\s+creature|an?\s+(?:nonland\s+permanent|permanent|artifact|land|enchantment|treasure|food|clue)|another\s+(?:nonland\s+permanent|permanent|artifact|land|enchantment)|(?:a|one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+creatures|an?\s+(?!permanents?\b|lands?\b|cards?\b|artifacts?\b|enchantments?\b|planeswalkers?\b|tokens?\b)[a-z]+)\s*:\s*([\s\S]+?)\.?\s*$/i;
+  /^((?:(?:\{[^}]+\}|discard a card|pay \d+ life)\s*,?\s*)*)(?:sacrifice|exile(?= this\b))\s+(another\s+(?:creature|[a-z]+\s+creature|[a-z]+\s+or\s+[a-z]+)|this\s+[a-z]+|an?\s+creature|an?\s+(?:nonland\s+permanent|permanent|artifact|land|enchantment|treasure|food|clue)|another\s+(?:nonland\s+permanent|permanent|artifact|land|enchantment)|(?:a|one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+(?:creatures|treasures|artifacts|lands|enchantments)|an?\s+(?!permanents?\b|lands?\b|cards?\b|artifacts?\b|enchantments?\b|planeswalkers?\b|tokens?\b)[a-z]+)\s*:\s*([\s\S]+?)\.?\s*$/i;
 
-const SACRIFICE_COUNT_PATTERN = /^(a|one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+creatures$/i;
+// "Sacrifice five creatures" / "Sacrifice three Treasures" (Magda, the Hoardmaster): a count and a plural noun.
+const SACRIFICE_COUNT_PATTERN = /^(a|one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+(creatures|treasures|artifacts|lands|enchantments)$/i;
 
 // "Leap of Faith — {3}: Target creature gains flying until end of turn." / "Max speed — {T}: ...": an ability word is only a label for the
 // ability that follows it, so the ability parsers read the clause without it.
@@ -268,8 +269,10 @@ export function parseGenericSacrificeAbilities(oracleText: string): SacrificeAbi
     const costLife = costLifeMatch ? Number.parseInt(costLifeMatch[1], 10) : 0;
     // "Sacrifice a Desert" (Scavenger Grounds is itself a Desert) — the only way to pay it is the source.
     const permanentKindMatch = targetPhrase.match(/^(?:an?|another)\s+(nonland\s+permanent|permanent|artifact|land|enchantment|treasure|food|clue)$/i);
-    const sacrificeTarget: "self" | "creature" | "permanent" = /^this\b/i.test(targetPhrase) || /^a desert$/i.test(targetPhrase) ? "self" : permanentKindMatch ? "permanent" : "creature";
     const countMatch = targetPhrase.match(SACRIFICE_COUNT_PATTERN);
+    // A counted non-creature noun ("three Treasures") is a permanent sacrifice of that kind.
+    const pluralPermanentKind = countMatch && countMatch[2].toLowerCase() !== "creatures" ? countMatch[2].toLowerCase().slice(0, -1) : undefined;
+    const sacrificeTarget: "self" | "creature" | "permanent" = /^this\b/i.test(targetPhrase) || /^a desert$/i.test(targetPhrase) ? "self" : permanentKindMatch || pluralPermanentKind ? "permanent" : "creature";
     const sacrificeCount = countMatch ? numberWordToInt(countMatch[1]) ?? 1 : 1;
     // "Sacrifice ANOTHER creature" (Ghoulcaller Gisa, Ayara, Kalitas) must not let the source pay for its
     // own cost; the descriptor after "another" can carry a color or an "or" ("another black creature",
@@ -278,7 +281,7 @@ export function parseGenericSacrificeAbilities(oracleText: string): SacrificeAbi
     const typeWord = countMatch ? undefined : targetPhrase.replace(/^(?:another|an?)\s+/i, "");
     const sacrificeTargetTypeFilter =
       sacrificeTarget === "permanent"
-        ? permanentKindMatch![1].toLowerCase().replace(/\s+/g, " ")
+        ? pluralPermanentKind ?? permanentKindMatch![1].toLowerCase().replace(/\s+/g, " ")
         : sacrificeTarget === "creature" && typeWord !== undefined && !/^creatures?$/i.test(typeWord)
           ? typeWord
           : undefined;
