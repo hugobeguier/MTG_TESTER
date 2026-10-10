@@ -3151,3 +3151,33 @@ describe("Draconic Visitor", () => {
     expect(other[0].name).toBe("Treasure");
   });
 });
+
+describe("Sarkhan the Masterless", () => {
+  it("each Dragon pings a creature that attacks you or your planeswalker", () => {
+    const sarkhan = real("Sarkhan the Masterless", "sm");
+    const dragons = [real("Goldspan Dragon", "d1"), real("Thundermane Dragon", "d2")];
+    const attacker = bear("atk", { attacking: true });
+    const s = session([seat("a", [sarkhan, ...dragons]), seat("b", [attacker])]);
+    const { triggers } = findAttackTriggers(s, { seatId: "b", card: attacker, defendingSeatId: "a" });
+    const ping = triggers.find((t) => t.effect.kind === "dragons_ping_attacker")!;
+    expect(ping).toBeTruthy();
+    const after = settle(resolveTriggerEffect(s, ping).seats);
+    expect(after[1].board.battlefield.map((c) => c.id)).not.toContain("atk");
+    // an attack on a different player does not trigger it
+    const elsewhere = findAttackTriggers(session([seat("a", [sarkhan, ...dragons]), seat("b", [attacker]), seat("c", [])]), { seatId: "b", card: attacker, defendingSeatId: "c" });
+    expect(elsewhere.triggers.find((t) => t.effect.kind === "dragons_ping_attacker")).toBeUndefined();
+  });
+
+  it("+1 turns your planeswalkers into 4/4 flying Dragons until end of turn", () => {
+    const effect = commonTriggerEffect("Until end of turn, each planeswalker you control becomes a 4/4 red Dragon creature and gains flying.", "clause");
+    expect(effect).toMatchObject({ kind: "planeswalkers_become_dragons" });
+    const sarkhan = real("Sarkhan the Masterless", "sm", { counters: [{ kind: "loyalty", count: 5 }] });
+    const s = session([seat("a", [sarkhan]), seat("b", [])]);
+    const after = resolveTriggerEffect(s, { id: "t", type: "trigger", actorSeatId: "a", controllerSeatId: "a", sourceCardId: "sm", sourceCardName: "Sarkhan", triggerKind: "common", effect: effect!, message: "" } as never);
+    const walker = settle(after.seats)[0].board.battlefield.find((c) => c.id === "sm")!;
+    expect(walker.typeLine).toContain("Dragon");
+    expect(walker.temporaryAnimatedAsCreature).toBe(true);
+    const reverted = clearTemporaryBuffs({ ...after, seats: settle(after.seats) }).seats[0].board.battlefield.find((c) => c.id === "sm")!;
+    expect(reverted.typeLine).not.toContain("Dragon");
+  });
+});

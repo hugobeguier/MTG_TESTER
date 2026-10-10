@@ -211,6 +211,10 @@ type TriggerEffect = (
   // resolved deterministically (put one down if there's a land in hand) rather than routed through
   // the standard optional_trigger pendingRuleChoice, since accepting is essentially always correct.
   | { kind: "put_land_from_hand" }
+  // Sarkhan the Masterless: "Whenever a creature attacks you or a planeswalker you control, each Dragon you control deals 1 damage to that creature."
+  | { kind: "dragons_ping_attacker" }
+  // Sarkhan the Masterless +1: "Until end of turn, each planeswalker you control becomes a 4/4 red Dragon creature and gains flying."
+  | { kind: "planeswalkers_become_dragons" }
   // "Choose left or right. Each player gains control of all nonland permanents other than Aminatou controlled by the next player in the chosen
   // direction." (Aminatou, the Fateshifter's -6): chosenOption "0" is left, "1" right.
   | { kind: "rotate_control" }
@@ -20622,7 +20626,12 @@ export function findAttackTriggers(
         triggers.push(makeCommonTrigger(attack.seatId, sourceSeat.id, source, { kind: "myriad", defendingSeatId: attack.defendingSeatId, optional: true }, `${source.name} triggers (myriad).`, attack.card.id));
       }
       const sourceClauses = oracleClauses(source.oracleText);
+      const dragonPing = /^whenever a creature attacks you or a planeswalker you control, each dragon you control deals 1 damage to that creature\.?$/i;
+      if (event === "attacks" && attack.defendingSeatId === sourceSeat.id && sourceClauses.some((clause) => dragonPing.test(clause.replace(/\([^)]*\)/g, "").trim()))) {
+        triggers.push(makeCommonTrigger(attack.seatId, sourceSeat.id, source, { kind: "dragons_ping_attacker" }, `${source.name} triggers because ${attack.card.name} attacked.`, attack.card.id));
+      }
       for (const [clauseIndex, clause] of sourceClauses.entries()) {
+        if (dragonPing.test(clause.replace(/\([^)]*\)/g, "").trim())) continue;
         const eventPattern = event === "attacks" ? /\b(?:when|whenever)\b[^,.]*\battacks\b/i : /\b(?:when|whenever)\b[^,.]*\bblocks\b/i;
         if (isActivatedAbilityClause(clause) || !eventPattern.test(clause)) continue;
         // Myriad's reminder text ("Myriad (Whenever this creature attacks, ...)") is handled above by the keyword itself.
@@ -21244,6 +21253,7 @@ export function commonTriggerEffect(
   // with multiple clauses where only one is optional would be mis-flagged, a declared simplification.
   const optional = /\byou may\b/.test(text) || undefined;
   if (/^choose left or right\. each player gains control of all nonland permanents other than [^.]+ controlled by the next player in the chosen direction\.?$/.test(text.replace(/\([^)]*\)/g, "").trim())) return { kind: "rotate_control" };
+  if (/^until end of turn, each planeswalker you control becomes a 4\/4 red dragon creature and gains flying\.?$/.test(text.replace(/\([^)]*\)/g, "").replace(/^[+\-−]?\d+:\s*/, "").trim())) return { kind: "planeswalkers_become_dragons" };
   const storefront = text
     .replace(/\([^)]*\)/g, "")
     .match(/^when this land enters, sacrifice it\. when you do, search your library for a basic ([a-z, ]+?) card, put it onto the battlefield tapped, then shuffle(?: and you gain (\d+) life)?\.?$/);
@@ -22860,6 +22870,54 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
       if (draw) next = drawMultipleForSeat(next, player.id, draw, `${trigger.sourceCardName}: ${player.name} draws ${draw} card${draw === 1 ? "" : "s"}.`);
     }
     return next;
+  }
+  if (trigger.effect.kind === "dragons_ping_attacker") {
+    const controller = session.seats.find((seat) => seat.id === trigger.controllerSeatId);
+    const attackerHolder = session.seats.find((seat) => seat.board.battlefield.some((card) => card.id === trigger.contextCardId));
+    const attacker = attackerHolder?.board.battlefield.find((card) => card.id === trigger.contextCardId);
+    if (!controller || !attackerHolder || !attacker) return session;
+    const dragons = controller.board.battlefield.filter((card) => card.typeLine.includes("Dragon")).length;
+    if (dragons <= 0) return session;
+    const source = controller.board.battlefield.find((card) => card.id === trigger.sourceCardId);
+    return dealDamageToCreature(session, trigger.sourceCardName, attackerHolder.id, attacker.id, dragons, source, controller.id);
+  }
+  if (trigger.effect.kind === "planeswalkers_become_dragons") {
+    const owner = session.seats.find((seat) => seat.id === trigger.controllerSeatId);
+    const walkers = owner?.board.battlefield.filter((card) => card.typeLine.includes("Planeswalker") && !card.temporaryAnimatedAsCreature) ?? [];
+    if (!owner || walkers.length === 0) return session;
+    const ids = new Set(walkers.map((card) => card.id));
+    return rulesEvent(
+      {
+        ...session,
+        seats: session.seats.map((seat) =>
+          seat.id !== owner.id
+            ? seat
+            : {
+                ...seat,
+                board: {
+                  ...seat.board,
+                  battlefield: seat.board.battlefield.map((card) =>
+                    ids.has(card.id)
+                      ? {
+                          ...card,
+                          temporaryOriginalTypeLine: card.temporaryOriginalTypeLine ?? card.typeLine,
+                          // ("Creature" itself comes from temporaryAnimatedAsCreature in the layer pass, as for an animated land; only the Dragon subtype is added here.)
+                          typeLine: card.typeLine.includes(" — ") ? card.typeLine + " Dragon" : card.typeLine + " — Dragon",
+                          temporaryAnimatedAsCreature: true,
+                          temporaryBasePower: 4,
+                          temporaryBaseToughness: 4,
+                          temporaryGrantedKeywords: [...(card.temporaryGrantedKeywords ?? []), "flying"],
+                          grantedKeywords: [...new Set([...(card.grantedKeywords ?? []), "flying"])]
+                        }
+                      : card
+                  )
+                }
+              }
+        )
+      },
+      owner.id,
+      `${trigger.sourceCardName}: ${walkers.map((card) => card.name).join(", ")} become 4/4 Dragon creatures with flying until end of turn.`
+    );
   }
   if (trigger.effect.kind === "rotate_control") {
     const alive = session.seats.filter((seat) => !seat.hasLost);
