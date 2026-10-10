@@ -272,7 +272,11 @@ export function parseGenericSacrificeAbilities(oracleText: string): SacrificeAbi
     const countMatch = targetPhrase.match(SACRIFICE_COUNT_PATTERN);
     // A counted non-creature noun ("three Treasures") is a permanent sacrifice of that kind.
     const pluralPermanentKind = countMatch && countMatch[2].toLowerCase() !== "creatures" ? countMatch[2].toLowerCase().slice(0, -1) : undefined;
-    const sacrificeTarget: "self" | "creature" | "permanent" = /^this\b/i.test(targetPhrase) || /^a desert$/i.test(targetPhrase) ? "self" : permanentKindMatch || pluralPermanentKind ? "permanent" : "creature";
+    // "Sacrifice another creature or artifact" (Umbral Collar Zealot): an alternative that is not a creature makes it a permanent sacrifice.
+    const mixedKind =
+      !countMatch && /\bor\b/i.test(targetPhrase) && /\b(?:artifact|enchantment|land|planeswalker)\b/i.test(targetPhrase) ? targetPhrase.replace(/^(?:another|an?)\s+/i, "").toLowerCase() : undefined;
+    const sacrificeTarget: "self" | "creature" | "permanent" =
+      /^this\b/i.test(targetPhrase) || /^a desert$/i.test(targetPhrase) ? "self" : permanentKindMatch || pluralPermanentKind || mixedKind ? "permanent" : "creature";
     const sacrificeCount = countMatch ? numberWordToInt(countMatch[1]) ?? 1 : 1;
     // "Sacrifice ANOTHER creature" (Ghoulcaller Gisa, Ayara, Kalitas) must not let the source pay for its
     // own cost; the descriptor after "another" can carry a color or an "or" ("another black creature",
@@ -281,7 +285,7 @@ export function parseGenericSacrificeAbilities(oracleText: string): SacrificeAbi
     const typeWord = countMatch ? undefined : targetPhrase.replace(/^(?:another|an?)\s+/i, "");
     const sacrificeTargetTypeFilter =
       sacrificeTarget === "permanent"
-        ? pluralPermanentKind ?? permanentKindMatch![1].toLowerCase().replace(/\s+/g, " ")
+        ? pluralPermanentKind ?? mixedKind ?? permanentKindMatch![1].toLowerCase().replace(/\s+/g, " ")
         : sacrificeTarget === "creature" && typeWord !== undefined && !/^creatures?$/i.test(typeWord)
           ? typeWord
           : undefined;

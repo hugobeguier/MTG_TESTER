@@ -96,7 +96,8 @@ export function zoneEffectTargetSpec(effect: ZoneEffect): TargetSpec | undefined
       controller: "you",
       min: 1,
       max: 1,
-      prompt: `Return target ${effect.targetType === "card" ? "card" : describeTargetType(effect.targetType)} from your graveyard to your hand.`
+      ...(effect.subtype ? { subtype: effect.subtype } : {}),
+      prompt: `Return target ${effect.subtype ? `${effect.subtype.charAt(0).toUpperCase()}${effect.subtype.slice(1)} card` : effect.targetType === "card" ? "card" : describeTargetType(effect.targetType)} from your graveyard to your hand.`
     };
   }
   // "Exile target player's graveyard." (Bojuka Bog): the player is chosen, not picked by a heuristic.

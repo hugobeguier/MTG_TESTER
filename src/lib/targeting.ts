@@ -2,6 +2,7 @@ import type { GameSession, PlayerSeat, VisibleCard } from "./types";
 import { effectivePower, effectiveToughness } from "./counters";
 import { matchesTargetType, type RemovalTargetType } from "./removalSpells";
 import { hasKeyword, protectionColors } from "./keywords";
+import { permanentMatchesQualifier } from "./characteristics";
 
 // The reusable "who/what can this effect legally target" + "what would the AI pick" split this
 // engine has never had (see AppFlow.tsx's own chooseRemovalTarget/chooseCounterTarget/... comments,
@@ -35,6 +36,8 @@ export interface TargetSpec {
   excludedColors?: string[];
   // "Target ATTACKING creature": only creatures currently attacking.
   attackingOnly?: boolean;
+  // "Target Zombie card" (Lord of the Undead): the card must have this creature type (a changeling counts).
+  subtype?: string;
   artifactsExcluded?: boolean;
   basicsExcluded?: boolean;
   prompt: string;
@@ -103,6 +106,7 @@ function matchesSpecFilters(card: VisibleCard, spec: TargetSpec): boolean {
   }
   if (spec.excludedCardIds?.includes(card.id)) return false;
   if (spec.attackingOnly && !card.attacking) return false;
+  if (spec.subtype && !permanentMatchesQualifier(card, spec.subtype)) return false;
   return true;
 }
 

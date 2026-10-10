@@ -5730,6 +5730,16 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       setSeatManaPool(seatId, paid.poolSpent);
       clearManaContributions(seatId);
     }
+    finishPaidSacrificeAbility(seatId, paid);
+  }
+
+  // After a sacrifice ability's cost is paid: Birthing Pod opens its mana-value-restricted search (the sacrificed creature is known now);
+  // everything else applies its effect.
+  function finishPaidSacrificeAbility(seatId: string, paid: NonNullable<ReturnType<typeof payGenericSacrificeCost>>) {
+    // The human's own choices after the cost is paid (look windows, targets), whichever way the cost was paid - including a sacrifice the
+    // human chose from a list - so every route into a sacrifice ability asks the same questions.
+    const seat = session.seats.find((item) => item.id === seatId);
+    const cardId = paid.card.id;
     // Orb of Dragonkind: the human looks at the top cards and picks which Dragon (if any) to take.
     if (seat?.kind === "human" && paid.ability.effect.kind === "dig_type_to_hand") {
       const digEffect = paid.ability.effect;
@@ -5777,12 +5787,6 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       setSession(() => paid.session);
       if (maybeRequestTarget(seatId, paid.card, zoneChoiceSpecFor(session, seatId, zoneEff, paid.card), false, { kind: "zone", effect: zoneEff })) return;
     }
-    finishPaidSacrificeAbility(seatId, paid);
-  }
-
-  // After a sacrifice ability's cost is paid: Birthing Pod opens its mana-value-restricted search (the sacrificed creature is known now);
-  // everything else applies its effect.
-  function finishPaidSacrificeAbility(seatId: string, paid: NonNullable<ReturnType<typeof payGenericSacrificeCost>>) {
     // Ashnod's Altar / Phyrexian Tower: the sacrifice pays for fixed mana that goes straight into the pool.
     if (paid.ability.effect.kind === "add_mana") {
       let pool = poolForSeat(seatId);
@@ -13570,7 +13574,11 @@ function matchesSacrificeFilter(card: VisibleCard, filter: string | undefined): 
 export function matchesPermanentSacrificeFilter(card: VisibleCard, filter: string | undefined): boolean {
   if (!filter || filter === "permanent") return true;
   if (filter === "nonland permanent") return !card.typeLine.includes("Land");
-  return card.typeLine.toLowerCase().includes(filter.toLowerCase());
+  // "creature or artifact": any one alternative is enough.
+  return filter
+    .toLowerCase()
+    .split(/\s+or\s+/)
+    .some((alternative) => alternative === "permanent" || (alternative === "nonland permanent" ? !card.typeLine.includes("Land") : card.typeLine.toLowerCase().includes(alternative.trim())));
 }
 
 function chooseSacrificeTargets(seat: PlayerSeat, typeFilter: string | undefined, count: number, excludeCardId?: string, anyPermanent = false): VisibleCard[] | undefined {

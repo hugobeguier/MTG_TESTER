@@ -3237,3 +3237,32 @@ describe("control changes leave combat", () => {
     expect(moved.summoningSick).toBe(true);
   });
 });
+
+describe("Umbral Collar Zealot and Lord of the Undead", () => {
+  it("Umbral Collar Zealot may sacrifice another creature OR an artifact to surveil 1", () => {
+    const zealot = real("Umbral Collar Zealot", "uz");
+    const [ability] = parseGenericSacrificeAbilities(zealot.oracleText);
+    expect(ability).toMatchObject({ sacrificeTarget: "permanent", sacrificeExcludesSelf: true, effect: { kind: "surveil", amount: 1 } });
+    // only the zealot and a Sol Ring: the artifact pays
+    const s = session([seat("a", [zealot, real("Sol Ring", "ring")]), seat("b", [])]);
+    const paid = payGenericSacrificeCost(s, "a", "uz", 0)!;
+    expect(paid).toBeTruthy();
+    expect(paid.sacrificed.map((c) => c.id)).toEqual(["ring"]);
+    // a creature pays too; the zealot never sacrifices itself
+    const withBear = payGenericSacrificeCost(session([seat("a", [zealot, bear("b1")]), seat("b", [])]), "a", "uz", 0)!;
+    expect(withBear.sacrificed.map((c) => c.id)).toEqual(["b1"]);
+    expect(payGenericSacrificeCost(session([seat("a", [zealot]), seat("b", [])]), "a", "uz", 0)).toBeUndefined();
+  });
+
+  it("Lord of the Undead only offers Zombie cards from your graveyard", async () => {
+    const { legalTargets } = await import("@/lib/targeting");
+    const lord = real("Lord of the Undead", "lu");
+    const [ability] = parseGenericTapAbilities(lord.oracleText);
+    const spec = zoneEffectTargetSpec((ability.effect as { effect: Parameters<typeof applyZoneEffect>[3] }).effect)!;
+    const a = seat("a", [lord]);
+    a.board.graveyard = [real("Gravecrawler", "z1", { zone: "graveyard" as const }), bear("elf", { zone: "graveyard" as const }), real("Cryptbreaker", "z2", { zone: "graveyard" as const }), real("Sol Ring", "r", { zone: "graveyard" as const })];
+    const ids = legalTargets(session([a, seat("b", [])]), "a", spec, lord).map((t) => (t.kind === "card" ? t.card.id : "")).sort();
+    expect(ids).toEqual(["z1", "z2"]);
+    expect(spec.prompt).toMatch(/Zombie/);
+  });
+});
