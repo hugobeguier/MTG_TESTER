@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import type { CardImageUris, CardRecord, DeckCard } from "./types";
 
@@ -18,11 +18,15 @@ interface StoredCardCatalog {
 const CATALOG_PATH = path.join(process.cwd(), "data", "commander-cards.json");
 
 let cachedCatalog: CardCatalog | undefined;
+// The data file's modified time when the catalog was cached: a running server picks up a refreshed catalog (npm run cards:import) without a restart.
+let cachedCatalogMtimeMs: number | undefined;
 
 export function loadCardCatalog(): CardCatalog {
-  if (cachedCatalog) return cachedCatalog;
+  const currentMtimeMs = existsSync(CATALOG_PATH) ? statSync(CATALOG_PATH).mtimeMs : undefined;
+  if (cachedCatalog && cachedCatalogMtimeMs === currentMtimeMs) return cachedCatalog;
 
   if (existsSync(CATALOG_PATH)) {
+    cachedCatalogMtimeMs = currentMtimeMs;
     const stored = JSON.parse(readFileSync(CATALOG_PATH, "utf8")) as StoredCardCatalog;
     cachedCatalog = buildCatalog(stored.cards, stored.importedAt, "generated");
     return cachedCatalog;
