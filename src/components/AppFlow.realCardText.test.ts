@@ -3266,3 +3266,18 @@ describe("Umbral Collar Zealot and Lord of the Undead", () => {
     expect(spec.prompt).toMatch(/Zombie/);
   });
 });
+
+describe("Tome of Legends", () => {
+  it("gets a page counter only when YOUR COMMANDER enters or attacks, never from the Tome itself entering or other creatures", () => {
+    const tome = real("Tome of Legends", "tome");
+    const cmd = real("Lathliss, Dragon Queen", "cmd", { commander: true });
+    const other = real("Goldlust Triad", "oth");
+    const s = session([seat("a", [tome, cmd, other]), seat("b", [])]);
+    const pageTriggers = (triggers: Array<{ sourceCardName: string; effect: { kind: string } }>) => triggers.filter((t) => t.sourceCardName === "Tome of Legends" && t.effect.kind === "add_counter");
+    expect(pageTriggers(findCommonTriggersForPermanentEntered(s, "a", tome))).toHaveLength(0);
+    expect(pageTriggers(findCommonTriggersForPermanentEntered(s, "a", other))).toHaveLength(0);
+    expect(pageTriggers(findCommonTriggersForPermanentEntered(s, "a", cmd))).toHaveLength(1);
+    expect(pageTriggers(findAttackTriggers(s, { seatId: "a", card: { ...cmd, attacking: true }, defendingSeatId: "b" }).triggers)).toHaveLength(1);
+    expect(pageTriggers(findAttackTriggers(s, { seatId: "a", card: { ...other, attacking: true }, defendingSeatId: "b" }).triggers)).toHaveLength(0);
+  });
+});

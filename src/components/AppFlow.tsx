@@ -5023,7 +5023,10 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
             : sourceZone === "library"
               ? seat?.library?.find((item, index) => index === 0 && item.id === cardId)
               : seat?.board.hand.find((item) => item.id === cardId);
-    if (!seat || !card) return;
+    if (!seat || !card) {
+      addEvent(`Couldn't find that card in ${sourceZone === "hand" ? "your hand" : "your " + sourceZone} to play it (it may have already been played or moved).`, seatId, "Timing");
+      return;
+    }
 
     if (sourceZone === "command" && card.id !== cardId) return;
     if (castRestrictedByTurnCount(session, card)) {
@@ -20284,7 +20287,12 @@ export function findCommonTriggersForPermanentEntered(session: GameSession, ente
       // "Whenever this creature enters or attacks, ..." (Dragonhawk, Fate's Tempest): the entering half; the attack half is findAttackTriggers'.
       if (source.id === enteredPermanent.id) {
         const entersOrAttacks = oracleClauses(source.oracleText).find((clause) => /^(?:when|whenever) [^,]*\benters? or attacks\b/i.test(clause));
-        const entersOrAttacksEffect = entersOrAttacks ? commonTriggerEffect(entersOrAttacks, "clause", undefined, seat) : undefined;
+        // Only when the entering permanent IS the subject: "Whenever your commander enters or attacks" (Tome of Legends) is not about the Tome itself
+        // entering - it used to add a second page counter on top of the one the Tome enters with.
+        const subjectIsSource = entersOrAttacks
+          ? matchWatcherSubject(entersOrAttacks, "enters", { sourceId: source.id, sourceName: source.name, subject: enteredPermanent, subjectIsControlledBySourceController: true })
+          : undefined;
+        const entersOrAttacksEffect = entersOrAttacks && subjectIsSource !== false ? commonTriggerEffect(entersOrAttacks, "clause", undefined, seat) : undefined;
         if (entersOrAttacksEffect) {
           triggers.push(makeCommonTrigger(enteringSeatId, seat.id, source, entersOrAttacksEffect, `${source.name} triggers because it entered the battlefield.`, enteredPermanent.id));
           continue;
