@@ -165,7 +165,13 @@ type TriggerEffect = (
   | { kind: "lose_life"; amount: number }
   | { kind: "scry_cards"; amount: number }
   | { kind: "surveil_cards"; amount: number }
-  | { kind: "create_tokens"; tokens: TokenSpec[] }
+  | {
+      kind: "create_tokens";
+      tokens: TokenSpec[];
+      // "Create a Treasure token. Then if you control four or more Treasures, sacrifice this Saga. If you do, create a 6/6 ... Dragon" (The
+      // Misty Mountains Cold): the extra tokens (and the Saga's sacrifice) only happen when the Treasure count reaches the threshold.
+      ifTreasures?: { threshold: number; sacrificeSelf: boolean; tokens: TokenSpec[] };
+    }
   // counterKind isn't restricted to "+1/+1"/"-1/-1" — plenty of real triggered abilities put an
   // arbitrary-named counter on a target creature (Athreos, Shroud-Veiled's "put a coin counter on
   // target creature or planeswalker", stun/shield counters elsewhere, ...); applyCounterDelta already
@@ -2128,7 +2134,10 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       // entry path (not a normal cast, which its own spell-resolution path already covers) still
       // gets its own chapter 1 the instant it enters, same as any other vector.
       for (const entry of entries) {
-        if (isSagaCard(entry.card)) next = applySagaEntryLoreCounter(next, entry.seatId, entry.card.id);
+        // Only a Saga with no lore counter yet: a cast Saga already got its chapter I in the spell-resolution path, and this batch also
+        // lists it - a second counter here fired chapter II (The Misty Mountains Cold made two Treasures and two Dragons at once).
+        const enteredSaga = next.seats.find((seat) => seat.id === entry.seatId)?.board.battlefield.find((card) => card.id === entry.card.id);
+        if (isSagaCard(entry.card) && enteredSaga && loreCounterCount(enteredSaga) === 0) next = applySagaEntryLoreCounter(next, entry.seatId, entry.card.id);
       }
       return next;
     });
@@ -21581,6 +21590,14 @@ export function commonTriggerEffect(
   if (/\bdraw two cards if you control the creature with the greatest power or tied for the greatest power\b/.test(text)) {
     return { kind: "draw_cards", amount: 2, condition: { kind: "controls_greatest_power" } };
   }
+  const treasurePayoff = relevantText.match(/^create a treasure token\. then if you control (\w+) or more treasures, (sacrifice this [a-z]+\. if you do, )?(create .+?\.)(?: \(.*)?$/i);
+  if (treasurePayoff) {
+    const threshold = numberWordToInt(treasurePayoff[1].toLowerCase()) ?? Number.parseInt(treasurePayoff[1], 10);
+    const payoffTokens = parseCreateTokenSpecs(treasurePayoff[3], undefined, controllerSeat);
+    if (threshold > 0 && payoffTokens.length > 0) {
+      return { kind: "create_tokens", tokens: [predefinedTokenSpec("Treasure")], ifTreasures: { threshold, sacrificeSelf: Boolean(treasurePayoff[2]), tokens: payoffTokens } };
+    }
+  }
   const groupGrant = text.match(/^(?:[^,]*,\s*)?creatures you control gain ([a-z ]+?) until end of turn\.?$/);
   if (groupGrant && !/\bget\b/.test(text)) return { kind: "creatures_gain_keywords", keywords: groupGrant[1].split(/ and |, /) };
   const tokenSpecs = parseCreateTokenSpecs(relevantText, dynamicCounterCount, controllerSeat);
@@ -23536,6 +23553,15 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
   if (trigger.effect.kind === "create_tokens") {
     const created = createTokensForSeat(session, trigger.controllerSeatId, trigger.sourceCardId, trigger.effect.tokens);
     const createdNames = created.createdTokens.map((token) => token.name);
+    const payoff = trigger.effect.ifTreasures;
+    if (payoff) {
+      const treasures = created.session.seats.find((item) => item.id === trigger.controllerSeatId)?.board.battlefield.filter((card) => card.typeLine.includes("Treasure")).length ?? 0;
+      const base = rulesEvent(created.session, trigger.controllerSeatId, `${trigger.sourceCardName} trigger resolves. ${seatName} creates ${createdNames.join(", ")} and controls ${treasures} Treasure${treasures === 1 ? "" : "s"}.`);
+      if (treasures < payoff.threshold) return base;
+      const sacrificed = payoff.sacrificeSelf ? moveCardBetweenVisibleZones(base, trigger.controllerSeatId, trigger.sourceCardId, "graveyard") : base;
+      const payoffCreated = createTokensForSeat(sacrificed, trigger.controllerSeatId, trigger.sourceCardId, payoff.tokens);
+      return rulesEvent(payoffCreated.session, trigger.controllerSeatId, `${trigger.sourceCardName}: ${payoff.sacrificeSelf ? "sacrificed, " : ""}creates ${payoffCreated.createdTokens.map((token) => token.name).join(", ")}.`);
+    }
     return {
       ...created.session,
       events: [

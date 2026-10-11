@@ -3398,3 +3398,29 @@ describe("double striker unblocked", () => {
     expect(after.seats[1].life).toBe(34);
   });
 });
+
+describe("The Misty Mountains Cold chapters (real Oracle text)", () => {
+  const chapterEffect = () => {
+    const saga = real("The Misty Mountains Cold", "mm");
+    const text = parseSagaChapters(saga.oracleText)!.effectByChapter.get(1)!;
+    return { saga, effect: commonTriggerEffect(text, "clause")! };
+  };
+  const run = (treasures: number) => {
+    const { saga, effect } = chapterEffect();
+    const tre = Array.from({ length: treasures }, (_, i) => bear("t" + i, { name: "Treasure", typeLine: "Token Artifact - Treasure", token: true, power: undefined, toughness: undefined }));
+    const s = session([seat("a", [saga, ...tre])]);
+    return resolveTriggerEffect(s, { id: "t", type: "trigger" as const, actorSeatId: "a", controllerSeatId: "a", sourceCardId: "mm", sourceCardName: "The Misty Mountains Cold", triggerKind: "common" as const, effect: effect as never, message: "" });
+  };
+  it("only makes a Treasure while you have fewer than four", () => {
+    const after = run(1).seats[0].board.battlefield;
+    expect(after.filter((c) => c.typeLine.includes("Treasure")).length).toBe(2);
+    expect(after.some((c) => c.name.includes("Dragon"))).toBe(false);
+    expect(after.some((c) => c.id === "mm")).toBe(true);
+  });
+  it("with the fourth Treasure it sacrifices the Saga and makes one Dragon", () => {
+    const after = run(3).seats[0].board.battlefield;
+    expect(after.filter((c) => c.typeLine.includes("Treasure")).length).toBe(4);
+    expect(after.filter((c) => c.name.includes("Dragon")).length).toBe(1);
+    expect(after.some((c) => c.id === "mm")).toBe(false);
+  });
+});
