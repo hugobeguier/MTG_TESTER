@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { agentModelName, chatWithAgent } from "@/lib/ollama";
-import { formatDecisionForChat, formatLessonsForPrompt } from "@/lib/agentLessons";
+import { cardTextsMentioned, formatDecisionForChat, formatLessonsForPrompt } from "@/lib/agentLessons";
 import { readLessons } from "@/lib/agentLessonStore";
+import { loadCardCatalog } from "@/lib/cardCatalog";
 
 const ChatRequest = z.object({
   agentName: z.string().min(1),
@@ -34,12 +35,17 @@ export async function POST(request: NextRequest) {
       : "";
   const eventsText =
     input.recentEvents.length > 0 ? "The most recent game log (all players, oldest first):\n" + input.recentEvents.map((line) => "- " + line).join("\n") : "";
+  const cardTexts = cardTextsMentioned(
+    [input.decision.situation, input.decision.chosenLabel, input.decision.reason, ...input.decision.options.map((option) => option.label), ...input.history.map((entry) => entry.label), ...input.recentEvents, ...input.messages.map((message) => message.content)].join("\n"),
+    loadCardCatalog().cards
+  );
   const system = [
     `You are ${input.seatName}, an AI player in a Magic: The Gathering Commander game. The human watching is asking you about a decision you made.`,
     "Answer in English only, in 2-5 plain sentences. Be honest and specific: use only the facts below, and say so if you cannot tell.",
-    "Do not invent card text. The heuristic scores are a rule-of-thumb ranking, not your own opinion; mention them when they explain the choice.",
+    "Do not invent card text or abilities: if something is not in the Oracle text given below, you do not know it - say so. Remember who benefits from an effect (Swords to Plowshares gives the life to the exiled creature's controller, not to you). The heuristic scores are a rule-of-thumb ranking, not your own opinion; mention them when they explain the choice.",
     "If the human says what they would have done, agree or disagree briefly with a concrete reason, then restate their idea as one short rule you would follow next time.",
     formatDecisionForChat(input.decision),
+    cardTexts,
     historyText,
     eventsText,
     "You are only one of the players. You know your own decisions above and what the game log shows. If the human asks about a card or play that is not yours (it was another player's, or you never had that card), say whose play it was according to the log instead of claiming it or denying the card exists.",

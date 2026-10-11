@@ -81,3 +81,19 @@ describe("lesson storage and routes", () => {
     expect(await reloaded.readLessons()).toEqual([]);
   });
 });
+
+describe("card texts for the agent chat", () => {
+  it("attaches the exact Oracle text of the cards a question mentions, longest name first", async () => {
+    const { cardTextsMentioned } = await import("./agentLessons");
+    const cards = [
+      { name: "Swords to Plowshares", typeLine: "Instant", oracleText: "Exile target creature. Its controller gains life equal to its power." },
+      { name: "Umbral Collar Zealot", typeLine: "Creature — Zombie", oracleText: "Sacrifice another creature or artifact: Surveil 1." },
+      { name: "Plains", typeLine: "Basic Land", oracleText: "" }
+    ];
+    const text = cardTextsMentioned("Why did you use Swords to Plowshares on the Umbral Collar Zealot?", cards);
+    expect(text).toContain("Its controller gains life equal to its power");
+    expect(text).toContain("Sacrifice another creature or artifact");
+    expect(text).not.toContain("Plains");
+    expect(cardTextsMentioned("nothing relevant here", cards)).toBe("");
+  });
+});

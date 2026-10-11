@@ -79,6 +79,27 @@ export function formatLessonsForPrompt(lessons: AgentLesson[], purpose: string |
   ].join("\n");
 }
 
+// The exact Oracle text of every card the conversation mentions, so an explanation can only quote what a card really does (a small model asked
+// "why Swords on the Zealot?" invented "creates Dragon tokens" and said the caster gains the life). Longest names first so "Swords to Plowshares" is
+// found as itself, and the list is capped.
+export function cardTextsMentioned(text: string, cards: Array<{ name: string; typeLine?: string; oracleText?: string }>, limit = 10): string {
+  const haystack = text.toLowerCase();
+  const found: Array<{ name: string; typeLine?: string; oracleText?: string }> = [];
+  const seen = new Set<string>();
+  for (const card of [...cards].sort((a, b) => b.name.length - a.name.length)) {
+    const name = card.name.split(" // ")[0].toLowerCase();
+    if (name.length < 4 || seen.has(name) || !haystack.includes(name)) continue;
+    seen.add(name);
+    found.push(card);
+    if (found.length >= limit) break;
+  }
+  if (found.length === 0) return "";
+  return (
+    "Exact Oracle text of the cards mentioned (the ONLY source of truth about what a card does - never attribute any other ability to a card):\n" +
+    found.map((card) => `- ${card.name}${card.typeLine ? " (" + card.typeLine + ")" : ""}: ${(card.oracleText ?? "").replace(/\n/g, " / ")}`).join("\n")
+  );
+}
+
 export function formatDecisionForChat(decision: DecisionRecord): string {
   const options = decision.options
     .slice(0, 8)
