@@ -299,6 +299,8 @@ export interface VisibleCard {
   tapped?: boolean;
   summoningSick?: boolean;
   attacking?: boolean;
+  // Damage marked on a creature this turn (rule 120.6): it dies when this reaches its toughness, and it all wears off in the cleanup step.
+  damage?: number;
   attackTargetId?: string;
   blockDecided?: boolean;
   blocking?: boolean;

@@ -3296,3 +3296,24 @@ describe("Desolation of Smaug mana and late attackers (real card text)", () => {
     expect(attackLockedOut(s, token)).toBe(false);
   });
 });
+
+describe("marked damage (rule 120.6)", () => {
+  const big = () => bear("big", { power: "5", toughness: "5" });
+  const burn = () => real("Lightning Bolt", "bolt");
+  const hit = (seats: PlayerSeat[], amount: number) =>
+    applyRemovalEffect(session(seats), "a", "Lightning Bolt", burn(), { kind: "damage", amount, targetType: "creature" }, undefined, { kind: "card", seatId: "b", cardId: "big" } as never).seats;
+
+  it("a 3-damage hit that doesn't kill stays marked, so a second hit the same turn finishes the creature", () => {
+    const first = hit([seat("a", []), seat("b", [big()])], 3);
+    const bigAfter = first.find((s) => s.id === "b")!.board.battlefield.find((c) => c.id === "big");
+    expect(bigAfter?.damage).toBe(3);
+    const second = hit(first, 2);
+    expect(second.find((s) => s.id === "b")!.board.battlefield.some((c) => c.id === "big")).toBe(false);
+  });
+
+  it("the damage wears off in the cleanup step", () => {
+    const first = hit([seat("a", []), seat("b", [big()])], 3);
+    const cleared = clearTemporaryBuffs(session(first));
+    expect(cleared.seats.find((s) => s.id === "b")!.board.battlefield[0].damage).toBeUndefined();
+  });
+});

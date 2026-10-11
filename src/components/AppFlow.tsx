@@ -12994,9 +12994,11 @@ export function clearTemporaryBuffs(session: GameSession): GameSession {
           card.temporaryAnimatedAsCreature ||
           card.temporaryGrantedKeywords ||
           card.temporaryOriginalTypeLine !== undefined ||
-          card.temporaryCopyOriginal
+          card.temporaryCopyOriginal ||
+          card.damage
             ? {
                 ...card,
+                damage: undefined,
                 ...(card.temporaryCopyOriginal ? { ...card.temporaryCopyOriginal, temporaryCopyOriginal: undefined } : {}),
                 temporaryPowerBonus: undefined,
                 temporaryToughnessBonus: undefined,
@@ -15370,6 +15372,11 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
         destructions.push({ seatId: seat.id, cardId: card.id, message: `${card.name} is put into ${possessive(seat)} graveyard for having toughness 0 or less.` });
         continue;
       }
+      // Rule 704.5g: damage marked on it (earlier this turn) now equals its toughness, e.g. after a toughness drop.
+      if (card.typeLine.includes("Creature") && (card.damage ?? 0) > 0 && (card.damage ?? 0) >= effectiveToughness(card) && !hasIndestructible(card)) {
+        destructions.push({ seatId: seat.id, cardId: card.id, message: `${card.name} is destroyed by the damage marked on it.` });
+        continue;
+      }
       if (isPlaneswalkerCard(card) && loyaltyCounterCount(card) <= 0) {
         destructions.push({ seatId: seat.id, cardId: card.id, message: `${card.name} is put into ${possessive(seat)} graveyard for having no loyalty counters.` });
       }
@@ -15879,6 +15886,7 @@ function resetForZoneChange<T extends VisibleCard>(card: T, zone: VisibleCard["z
       : {}),
     tapped: false,
     attacking: false,
+    damage: undefined,
     attackTargetId: undefined,
     blockDecided: false,
     blocking: false,
@@ -16453,6 +16461,14 @@ function applyDealtDamageTriggers(session: GameSession, seatId: string, card: Vi
   return next;
 }
 
+// Damage that doesn't kill stays marked on the creature until cleanup, so a second hit the same turn can finish it.
+function markDamageOnCard(seats: GameSession["seats"], seatId: string, cardId: string, amount: number): GameSession["seats"] {
+  if (amount <= 0) return seats;
+  return seats.map((seat) =>
+    seat.id !== seatId ? seat : { ...seat, board: { ...seat.board, battlefield: seat.board.battlefield.map((card) => (card.id === cardId ? { ...card, damage: (card.damage ?? 0) + amount } : card)) } }
+  );
+}
+
 function dealDamageToCreatureCore(
   session: GameSession,
   sourceName: string,
@@ -16503,9 +16519,10 @@ function dealDamageToCreatureCore(
     };
   }
 
-  const isLethal = !hasIndestructible(target) && (amount >= effectiveToughness(target) || Boolean(source && hasDeathtouch(source)));
+  const isLethal = !hasIndestructible(target) && ((target.damage ?? 0) + amount >= effectiveToughness(target) || Boolean(source && hasDeathtouch(source)));
   const withEvent: GameSession = {
     ...base,
+    seats: isLethal ? base.seats : markDamageOnCard(base.seats, targetSeatId, targetCardId, amount),
     events: [
       {
         id: crypto.randomUUID(),
@@ -19883,7 +19900,7 @@ interface MultiBlockedCombatOutcome {
 // blocker still deals its own full power to the attacker, same as a single block, just summed.
 function simulateMultiBlockedCombat(attackingCard: VisibleCard, blockers: VisibleCard[]): MultiBlockedCombatOutcome {
   const attackerPower = Math.max(0, effectivePower(attackingCard));
-  const attackerToughness = effectiveToughness(attackingCard);
+  const attackerToughness = effectiveToughness(attackingCard) - (attackingCard.damage ?? 0);
 
   let attackerAlive = true;
   let attackerDamageMarked = 0;
@@ -19894,7 +19911,7 @@ function simulateMultiBlockedCombat(attackingCard: VisibleCard, blockers: Visibl
     alive: true,
     damageMarked: 0,
     dealtToAttacker: 0,
-    toughness: effectiveToughness(card),
+    toughness: effectiveToughness(card) - (card.damage ?? 0),
     protectedFromAttacker: isProtectedFrom(card, attackingCard) || preventsCombatDamageToSelf(card)
   }));
 
@@ -20105,6 +20122,12 @@ function resolveBlockedCombatDamage(
       )
     };
   }
+
+  // Survivors keep the damage they took (it can matter to a burn spell later this turn).
+  for (const result of outcome.blockerResults) {
+    if (!result.destroyed && result.minusCounters <= 0) nextSession = { ...nextSession, seats: markDamageOnCard(nextSession.seats, target.seat.id, result.blocker.id, result.damageMarked) };
+  }
+  if (!outcome.attackerDestroyed && outcome.attackerMinusCounters <= 0) nextSession = { ...nextSession, seats: markDamageOnCard(nextSession.seats, attackerSeatId, attackingCard.id, outcome.attackerDamageMarked) };
 
   if (outcome.trampleOverflow > 0) {
     nextSession = applyCombatDamageToTarget(nextSession, attackingCard.name, target, outcome.trampleOverflow, attackingCard, attackerSeatId);

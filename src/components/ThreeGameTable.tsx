@@ -2262,6 +2262,12 @@ function CardInspector({
                 <dd>{effectivePower(card)}/{effectiveToughness(card)}</dd>
               </div>
             ) : null}
+            {card.damage ? (
+              <div>
+                <dt>Damage marked</dt>
+                <dd>{card.damage} ({Math.max(0, effectiveToughness(card) - card.damage)} toughness left this turn)</dd>
+              </div>
+            ) : null}
             {card.counters && card.counters.length > 0 ? (
               <div>
                 <dt>Counters</dt>
@@ -3990,6 +3996,7 @@ function cardRenderKey(card: VisibleCard) {
     x: card.battlefieldPosition?.x,
     z: card.battlefieldPosition?.z,
     counters: card.counters?.map((counter) => `${counter.kind}:${counter.count}`).join("|"),
+    damage: card.damage ?? 0,
     // The power/toughness plate follows the live values (counters, until-end-of-turn bonuses, Auras and Equipment), so a change redraws it.
     pt: card.typeLine.includes("Creature") ? `${effectivePower(card)}/${effectiveToughness(card)}` : undefined
   };
@@ -4323,8 +4330,44 @@ function addPowerToughnessPlate(group: THREE.Group, card: VisibleCard, x: number
   group.add(sprite);
 }
 
+// Damage marked on a creature this turn: a red "-3" on its upper corner (wears off at cleanup), so a hit that didn't kill it is still visible.
+function addDamageBadge(group: THREE.Group, card: VisibleCard, x: number, z: number) {
+  const damage = card.damage ?? 0;
+  if (damage <= 0 || !card.typeLine.includes("Creature")) return;
+  const text = `-${damage}`;
+  const key = `dmg|${text}`;
+  let texture = counterBadgeTextureCache.get(key);
+  if (!texture) {
+    const canvas = document.createElement("canvas");
+    canvas.width = 160;
+    canvas.height = 96;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    roundRect(ctx, 4, 4, 152, 88, 44);
+    ctx.fillStyle = "#e03131";
+    ctx.fill();
+    ctx.lineWidth = 6;
+    ctx.strokeStyle = "#ffffff";
+    ctx.stroke();
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 56px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(text, 80, 52);
+    texture = new THREE.CanvasTexture(canvas);
+    texture.needsUpdate = true;
+    counterBadgeTextureCache.set(key, texture);
+  }
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false }));
+  sprite.scale.set(0.36, 0.22, 1);
+  sprite.position.set(x - 0.22, 0.36, z - 0.44);
+  sprite.renderOrder = 12;
+  group.add(sprite);
+}
+
 function addCounterBadges(group: THREE.Group, card: VisibleCard, x: number, z: number) {
   addPowerToughnessPlate(group, card, x, z);
+  addDamageBadge(group, card, x, z);
   const badges = describeCounterBadges(card);
   if (badges.length === 0) return;
   badges.forEach((badge, index) => {
