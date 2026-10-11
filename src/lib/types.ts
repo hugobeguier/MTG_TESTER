@@ -34,6 +34,8 @@ export interface RestrictedManaBatch {
   sourceCardName: string;
   remaining: ManaPool;
   restriction: "cast_spells_only";
+  // "Spend this mana only to cast Dragon spells" (Desolation of Smaug): only a spell with this type/subtype may use it.
+  spellType?: string;
 }
 
 export interface CardRecord {
@@ -537,6 +539,9 @@ export interface GameSession {
   combatDamagePrevented?: { turn: number; exceptType?: string };
   // "Prevent all combat damage that would be dealt to you this turn. For each 1 damage prevented this way, create a ... token." (Inkshield):
   // a per-player shield that lasts for the turn it was made.
+  // Rule 508.1: attackers are declared once, at the start of the step. The creatures that could be declared (fixed when the first attacker is
+  // chosen) - anything that arrives afterwards (a Utvara Hellkite token, even one given haste) can't join this combat.
+  attackPool?: { turn: number; ids: string[] };
   combatDamageShields?: Array<{ turn: number; seatId: string; sourceId: string; sourceName: string; tokenClause?: string }>;
   // Damage dealt to each player so far this turn (any source, combat or not): Spinerock Knoll's "an opponent was dealt 7 or more
   // damage this turn". Starts over whenever the turn number changes.

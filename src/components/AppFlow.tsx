@@ -1174,6 +1174,7 @@ type PendingRuleChoice =
       sourceCardName: string;
       prompt: string;
       amount: number;
+      spellType?: string;
     };
 
 interface ManualLibrarySearchState {
@@ -1793,7 +1794,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     if (!inspectedCard) return undefined;
     if (activeSeatId !== humanSeat.id || session.phase !== "declare attackers step") return undefined;
     const isOwnBattlefieldCreature = humanSeat.board.battlefield.some((card) => card.id === inspectedCard.id);
-    if (!isOwnBattlefieldCreature || !canAttack(inspectedCard)) return undefined;
+    if (!isOwnBattlefieldCreature || !canAttack(inspectedCard) || attackLockedOut(session, inspectedCard)) return undefined;
     const targets: Array<{ targetId: string; label: string }> = [];
     for (const opponent of session.seats.filter((seat) => seat.id !== humanSeat.id && !seat.hasLost)) {
       targets.push({ targetId: opponent.id, label: `Attack ${opponent.name}` });
@@ -1873,8 +1874,13 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     setManaContributions((current) => ({ ...current, [seatId]: [] }));
   }
 
-  function restrictedManaPoolForSeat(seatId: string): ManaPool {
-    const batches = restrictedManaBatches[seatId] ?? [];
+  // A batch limited to one kind of spell ("only to cast Dragon spells") is usable only for a spell of that type or subtype.
+  function restrictedBatchUsable(batch: RestrictedManaBatch, forCard?: VisibleCard) {
+    return !batch.spellType || Boolean(forCard && forCard.typeLine.toLowerCase().includes(batch.spellType.toLowerCase()));
+  }
+
+  function restrictedManaPoolForSeat(seatId: string, forCard?: VisibleCard): ManaPool {
+    const batches = (restrictedManaBatches[seatId] ?? []).filter((batch) => restrictedBatchUsable(batch, forCard));
     return batches.reduce((pool, batch) => addPools(pool, batch.remaining), emptyManaPool());
   }
 
@@ -1882,12 +1888,16 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   // that's fully drained. `spent` is always <= restrictedManaPoolForSeat's own total per color (only
   // ever called right after a successful payCostFromPool against that exact pool), so this never
   // needs to handle an over-drain.
-  function spendRestrictedMana(seatId: string, spent: ManaPool) {
+  function spendRestrictedMana(seatId: string, spent: ManaPool, forCard?: VisibleCard) {
     setRestrictedManaBatches((current) => {
       const batches = current[seatId] ?? [];
       const remainingSpend = { ...spent };
       const nextBatches: RestrictedManaBatch[] = [];
       for (const batch of batches) {
+        if (!restrictedBatchUsable(batch, forCard)) {
+          nextBatches.push(batch);
+          continue;
+        }
         const nextRemaining = { ...batch.remaining };
         for (const color of Object.keys(nextRemaining) as ManaColor[]) {
           const take = Math.min(nextRemaining[color], remainingSpend[color]);
@@ -1900,11 +1910,11 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     });
   }
 
-  function addRestrictedManaBatch(seatId: string, sourceCardName: string, amounts: ManaPool) {
+  function addRestrictedManaBatch(seatId: string, sourceCardName: string, amounts: ManaPool, spellType?: string) {
     if (manaPoolTotal(amounts) <= 0) return;
     setRestrictedManaBatches((current) => ({
       ...current,
-      [seatId]: [...(current[seatId] ?? []), { id: crypto.randomUUID(), sourceCardName, remaining: amounts, restriction: "cast_spells_only" }]
+      [seatId]: [...(current[seatId] ?? []), { id: crypto.randomUUID(), sourceCardName, remaining: amounts, restriction: "cast_spells_only", ...(spellType ? { spellType } : {}) }]
     }));
   }
 
@@ -1925,11 +1935,11 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   // available floating mana is always legal, rule 106.4) that keeps this from having to reconstruct
   // a partially-reduced cost's own colored-pip requirements.
   function payCastingCost(seatId: string, seat: PlayerSeat, costCard: VisibleCard, totalCost: number) {
-    const restricted = restrictedManaPoolForSeat(seatId);
+    const restricted = restrictedManaPoolForSeat(seatId, costCard);
     if (manaPoolTotal(restricted) > 0) {
       const restrictedResult = payCostFromPool(restricted, costCard, totalCost);
       if (restrictedResult.ok) {
-        return { ok: true as const, source: "restricted" as const, sourceIds: [] as string[], pool: undefined, spent: restrictedResult.spent };
+        return { ok: true as const, source: "restricted" as const, sourceIds: [] as string[], pool: undefined, spent: restrictedResult.spent, forCard: costCard };
       }
     }
     if (seat.kind === "human") {
@@ -1951,7 +1961,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   function applyCastingCostPaymentSideEffect(seatId: string, payment: ReturnType<typeof payCastingCost>) {
     if (!payment.ok) return;
     if (payment.source === "restricted") {
-      spendRestrictedMana(seatId, payment.spent);
+      spendRestrictedMana(seatId, payment.spent, "forCard" in payment ? payment.forCard : undefined);
     } else if (payment.source === "pool" && payment.pool) {
       setSeatManaPool(seatId, payment.pool);
       clearManaContributions(seatId);
@@ -4413,7 +4423,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   function declareAttack(session: GameSession, seatId: string, cardId: string | undefined, targetId: string | undefined): GameSession {
     const attacker = session.seats.find((seat) => seat.id === seatId);
     if (!attacker) return session;
-    const attackingCard = attacker.board.battlefield.find((card) => card.id === cardId && canAttack(card, attacker.board.battlefield));
+    const attackingCard = attacker.board.battlefield.find((card) => card.id === cardId && canAttack(card, attacker.board.battlefield) && !attackLockedOut(session, card));
     const target = resolveAttackTarget(session, targetId);
 
     if (!attackingCard || !target) {
@@ -4458,6 +4468,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
 
     const attackDeclaredSession: GameSession = {
       ...session,
+      attackPool: session.attackPool?.turn === session.turn ? session.attackPool : { turn: session.turn, ids: attacker.board.battlefield.map((card) => card.id) },
       // Drained by the pendingAttackDeclarations effect, which queues this attacker's "whenever ... attacks"
       // triggers (and any watcher's, e.g. Marchesa's Decree on the defending player's side).
       pendingAttackDeclarations: [...(session.pendingAttackDeclarations ?? []), { seatId, card: { ...attackingCard, attacking: true }, defendingSeatId: target.seat.id }],
@@ -7975,6 +7986,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     // Mana a resolving spell adds (Mana Geyser) — mana pools live in this component's React state, not
     // in the session the updater below returns, so it's captured here and added after the updater runs.
     let capturedSpellMana: { color: ManaColor; amount: number } | undefined;
+    let capturedRestrictedMana: { amount: number; spellType: string; sourceName: string } | undefined;
     let capturedTriggers: Array<Extract<PendingAction, { type: "trigger" }>> = [];
     setSession((current) => {
       const baseDestination = spellResolutionDestination(current, action);
@@ -8378,6 +8390,10 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         const amount = manaFromTappedOpponentLands(simpleDrawResolvedSession, action.actorSeatId);
         if (amount > 0) capturedSpellMana = { color: manaExtra.color, amount };
       }
+      const restrictedManaExtra = spellExtraEffects.find((effect) => effect.kind === "add_restricted_mana");
+      if (restrictedManaExtra && restrictedManaExtra.kind === "add_restricted_mana" && sourceCard) {
+        capturedRestrictedMana = { amount: restrictedManaExtra.amount, spellType: restrictedManaExtra.spellType, sourceName: sourceCard.name };
+      }
       // Rule 500.7: "Take an extra turn after this one." (Temporal Mastery, Time Warp, ...) —
       // applies regardless of the spell's own destination, same "still happens even though the
       // instant/sorcery itself resolves to the graveyard" reasoning as removal/zone/pump above.
@@ -8535,6 +8551,25 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     window.setTimeout(() => {
       if (capturedSpellMana) {
         setSeatManaPool(action.actorSeatId, addManaToPool(poolForSeat(action.actorSeatId), capturedSpellMana.color, capturedSpellMana.amount));
+        addEvent(`${action.cardName} adds ${capturedSpellMana.amount} {${capturedSpellMana.color}} (${capturedSpellMana.amount} tapped land${capturedSpellMana.amount === 1 ? "" : "s"} among your opponents').`, action.actorSeatId, "Rules action");
+      }
+      if (capturedRestrictedMana) {
+        const restricted = capturedRestrictedMana;
+        const caster = session.seats.find((item) => item.id === action.actorSeatId);
+        if (caster?.kind === "human") {
+          setPendingRuleChoice({
+            id: crypto.randomUUID(),
+            kind: "distribute_attack_trigger_mana",
+            controllerSeatId: action.actorSeatId,
+            sourceCardId: action.cardId,
+            sourceCardName: restricted.sourceName,
+            prompt: `${restricted.sourceName}: choose any combination of colors for ${restricted.amount} mana. Spend it only to cast ${restricted.spellType} spells.`,
+            amount: restricted.amount,
+            spellType: restricted.spellType
+          });
+        } else if (caster) {
+          addRestrictedManaBatch(action.actorSeatId, restricted.sourceName, attackTriggerManaHeuristicSplit(caster, restricted.amount), restricted.spellType);
+        }
       }
       if (capturedTriggers.length > 0) {
         queueCommonTriggers(capturedTriggers);
@@ -10171,8 +10206,8 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     for (const color of ["W", "U", "B", "R", "G"] as ColoredMana[]) pool[color] = Math.max(0, distribution[color] ?? 0);
     if (manaPoolTotal(pool) !== choice.amount) return;
     setPendingRuleChoice(undefined);
-    addRestrictedManaBatch(choice.controllerSeatId, choice.sourceCardName, pool);
-    addEvent(`${choice.sourceCardName} adds ${formatManaPoolPayment(pool)}, spendable only to cast spells this turn.`, choice.controllerSeatId, "Rules action");
+    addRestrictedManaBatch(choice.controllerSeatId, choice.sourceCardName, pool, choice.spellType);
+    addEvent(`${choice.sourceCardName} adds ${formatManaPoolPayment(pool)}, spendable only to cast ${choice.spellType ? choice.spellType + " " : ""}spells this turn.`, choice.controllerSeatId, "Rules action");
   }
 
   function acceptCommanderZoneChoice() {
@@ -11797,6 +11832,11 @@ function attackBlockRestrictionMet(card: VisibleCard, controllerBattlefield?: Vi
   return true;
 }
 
+// A creature that arrived after the first attacker was declared this combat can't be declared as an attacker (Utvara Hellkite + Dragon Tempest).
+export function attackLockedOut(session: GameSession, card: VisibleCard) {
+  return Boolean(session.attackPool && session.attackPool.turn === session.turn && !session.attackPool.ids.includes(card.id));
+}
+
 function canAttack(card: VisibleCard, controllerBattlefield?: VisibleCard[]) {
   if (!attackBlockRestrictionMet(card, controllerBattlefield)) return false;
   return hasCardType(card, "Creature") && !card.tapped && !card.phasedOut && (!card.summoningSick || hasHaste(card)) && !card.attacking && !hasDefender(card);
@@ -12853,6 +12893,7 @@ function hasAgentMainPhaseAction(seat: PlayerSeat, hasPlayedLand: boolean, activ
 function clearCombatState(session: GameSession): GameSession {
   return {
     ...session,
+    attackPool: undefined,
     seats: session.seats.map((seat) => ({
       ...seat,
       zones: seat.board.battlefield.some((card) => card.exileAtEndOfCombat) ? { ...seat.zones, battlefield: seat.zones.battlefield - seat.board.battlefield.filter((card) => card.exileAtEndOfCombat).length } : seat.zones,
@@ -17364,6 +17405,7 @@ export function applySpellExtraEffect(session: GameSession, casterSeatId: string
 
     // Needs the live game's mana pool — see manaFromTappedOpponentLands.
     case "add_mana_per_tapped_opponent_land":
+    case "add_restricted_mana":
       return session;
   }
 }

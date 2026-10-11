@@ -2,7 +2,7 @@
 // the test: two earlier tests passed on invented text while the real cards stayed broken (Court of Grace, the
 // "with power N or greater" watchers). Skipped per card when the catalog doesn't have it.
 import { describe, expect, it } from "vitest";
-import { landDropsAllowed, landPlaysMade, recordLandPlay, findCastTriggers, seatHasFlashGrant, findLeavesBattlefieldTriggers, hideawayDamageConditionMet, legalMainPhaseActions, tapCreaturesAltCostFor, applyCastRemoval, nextCastPrompt, type CastChoices, spellModePrompt, applyDigPick, applyDigToBattlefield, applyTargetedEffect, castStructure, payGenericSacrificeCost, forcedAttackers, ventureIntoUndercity, applyPunisherChoiceEffect, openingHandBattlefieldCards, putOpeningHandCardOnBattlefield, untapForSeat, humanPhaseGraveyardChoice, clearTemporaryBuffs, playCardFromZone, resolveEndStepExileDamage, cleanupCombat, staticCostReduction, applyLabeledContinuation, spellTargetSlots, grantKeywordsToCreature, applyExalted, applySacrificeEffect, applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass } from "./AppFlow";
+import { landDropsAllowed, landPlaysMade, recordLandPlay, findCastTriggers, seatHasFlashGrant, findLeavesBattlefieldTriggers, hideawayDamageConditionMet, legalMainPhaseActions, tapCreaturesAltCostFor, applyCastRemoval, nextCastPrompt, type CastChoices, spellModePrompt, applyDigPick, applyDigToBattlefield, applyTargetedEffect, castStructure, payGenericSacrificeCost, forcedAttackers, ventureIntoUndercity, applyPunisherChoiceEffect, openingHandBattlefieldCards, putOpeningHandCardOnBattlefield, untapForSeat, humanPhaseGraveyardChoice, clearTemporaryBuffs, playCardFromZone, resolveEndStepExileDamage, cleanupCombat, staticCostReduction, applyLabeledContinuation, spellTargetSlots, grantKeywordsToCreature, applyExalted, applySacrificeEffect, applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass, attackLockedOut } from "./AppFlow";
 import { parseRemovalEffect } from "@/lib/removalSpells";
 import { parseTargetedEffect } from "@/lib/targetedEffects";
 import { canLegallyBlock } from "@/lib/combatSim";
@@ -3279,5 +3279,20 @@ describe("Tome of Legends", () => {
     expect(pageTriggers(findCommonTriggersForPermanentEntered(s, "a", cmd))).toHaveLength(1);
     expect(pageTriggers(findAttackTriggers(s, { seatId: "a", card: { ...cmd, attacking: true }, defendingSeatId: "b" }).triggers)).toHaveLength(1);
     expect(pageTriggers(findAttackTriggers(s, { seatId: "a", card: { ...other, attacking: true }, defendingSeatId: "b" }).triggers)).toHaveLength(0);
+  });
+});
+
+describe("Desolation of Smaug mana and late attackers (real card text)", () => {
+  it("Desolation of Smaug adds four mana usable only on Dragon spells", () => {
+    const effects = parseSpellExtraEffects(etbEffectText(real("Desolation of Smaug", "d").oracleText));
+    expect(effects).toContainEqual({ kind: "add_restricted_mana", amount: 4, spellType: "Dragon" });
+  });
+
+  it("a creature that arrives after the first attacker was declared (Utvara Hellkite token with Dragon Tempest haste) can't attack", () => {
+    const s = session([seat("a", [])]);
+    const token = bear("tok");
+    expect(attackLockedOut({ ...s, attackPool: { turn: s.turn, ids: ["x"] } }, token)).toBe(true);
+    expect(attackLockedOut({ ...s, attackPool: { turn: s.turn, ids: ["x", "tok"] } }, token)).toBe(false);
+    expect(attackLockedOut(s, token)).toBe(false);
   });
 });

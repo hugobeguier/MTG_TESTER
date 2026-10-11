@@ -60,7 +60,9 @@ export type SpellExtraEffect =
   // "Each opponent draws a card, then you draw a card for each opponent who drew a card this way." (Cut a Deal)
   | { kind: "opponents_draw_then_you_draw" }
   // "Add {R} for each tapped land your opponents control." (Mana Geyser)
-  | { kind: "add_mana_per_tapped_opponent_land"; color: "W" | "U" | "B" | "R" | "G" | "C" };
+  | { kind: "add_mana_per_tapped_opponent_land"; color: "W" | "U" | "B" | "R" | "G" | "C" }
+  // "Add four mana in any combination of colors. Spend this mana only to cast Dragon spells." (Desolation of Smaug)
+  | { kind: "add_restricted_mana"; amount: number; spellType: string };
 
 const WORDS: Record<string, number> = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13 };
 
@@ -188,6 +190,12 @@ export function parseSpellExtraEffects(text: string): SpellExtraEffect[] {
 
   const addMana = normalized.match(/^add \{([wubrgc])\} for each tapped land your opponents control\b/i);
   if (addMana) effects.push({ kind: "add_mana_per_tapped_opponent_land", color: addMana[1].toUpperCase() as "W" | "U" | "B" | "R" | "G" | "C" });
+
+  const restrictedMana = normalized.match(/\badd (a|an|one|two|three|four|five|six|seven|\d+) mana in any combination of colors\. spend this mana only to cast (?:an? )?([a-z]+) spells\b/i);
+  if (restrictedMana) {
+    const amount = wordToInt(restrictedMana[1]);
+    if (amount) effects.push({ kind: "add_restricted_mana", amount, spellType: restrictedMana[2].charAt(0).toUpperCase() + restrictedMana[2].slice(1).toLowerCase() });
+  }
 
   return effects;
 }
