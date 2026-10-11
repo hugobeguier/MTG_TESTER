@@ -1,4 +1,1 @@
-1. Darksteel Juggernaut has 0 in power and thoughness but it gets +1/+1 for each artifact, so it should not enter the graveyard upon entering the battlefield unless the player does not have any artifacts
-2. Sable casts Grave Pact which triggers my Esper Sentinel, but when I then used a Counterspell on that spell my Esper Sentinel did not trigger afterwards
-3. I got Mind's Dilation in my graveyard, And I wanted to play Heliod, the Radiant Dawn to return that enchantment to my hand, but for some reason I get You cannot cast Heliod, the Radiant Dawn; there is no legal target.
-4. 
+1. The Misty Mountains Cold triggers twice and creates 2 6/6 dragons and two treasures that is incorrect
