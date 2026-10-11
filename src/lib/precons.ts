@@ -280,9 +280,9 @@ export const CALLING_ALL_ANGELS_DECKLIST = `Commander: Giada, Font of Hope
 1 Temple of the False God
 32 Plains`;
 
-// Human plays Wretched Ranks; the three agent seats (in seat order) get the other precons.
-export const FOUNDATIONS_PLAYER_DECKLIST = WRETCHED_RANKS_DECKLIST;
-export const FOUNDATIONS_AGENT_DECKLISTS = [REIGN_OF_DRAGONS_DECKLIST, TRAMPLESAURUS_REX_DECKLIST, CALLING_ALL_ANGELS_DECKLIST];
+// Human plays Reign of Dragons (Lathliss); the three agent seats (in seat order: Veyra, Malik, Sable) get the other decks - Veyra plays Wretched Ranks (Ghoulcaller Gisa).
+export const FOUNDATIONS_PLAYER_DECKLIST = REIGN_OF_DRAGONS_DECKLIST;
+export const FOUNDATIONS_AGENT_DECKLISTS = [WRETCHED_RANKS_DECKLIST, TRAMPLESAURUS_REX_DECKLIST, CALLING_ALL_ANGELS_DECKLIST];
 
 export function commanderFromDeckList(deckList: string): string {
   return deckList.match(/^Commander:\s*(.+)$/im)?.[1].trim() ?? "";
