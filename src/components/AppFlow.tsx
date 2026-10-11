@@ -4996,7 +4996,11 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     castChoices?: CastChoices,
     altChoice?: "alt" | "normal"
   ) {
-    if (pendingAction) return;
+    if (pendingAction) {
+      // Said out loud: a click that silently does nothing looks like a broken card (Breaching Dragonstorm's free cast).
+      addEvent(`Can't play a card while "${pendingAction.type === "spell" ? pendingAction.cardName : pendingAction.type === "trigger" ? pendingAction.sourceCardName : "an action"}" is still on the stack - resolve or pass priority first.`, seatId, "Timing");
+      return;
+    }
     if (castDispatchInFlight.current !== null) {
       // A genuine same-tick re-dispatch (the case this guard exists for) is always well under this
       // threshold — anything older means the macrotask reset simply never ran, so treat it as stale
@@ -5046,6 +5050,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     // action offering it only exists under the same condition), but exile-play permission is
     // itself temporary/scoped, so re-check it here too.
     if (sourceZone === "exile" && (card.exiledPlayableBySeatId !== seatId || (card.exiledPlayableUntilTurn !== undefined && session.turn > card.exiledPlayableUntilTurn))) {
+      addEvent(`${seat.name} may not cast ${card.name} from exile (${card.exiledPlayableBySeatId !== seatId ? "the permission belongs to another player" : "the permission has expired"}).`, seatId, "Timing");
       return;
     }
 
@@ -6464,13 +6469,17 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   // the same canCastAtInstantSpeed check either way, so an exiled sorcery still isn't offered as a
   // response, only an exiled instant/flash card is.
   function respondWithCard(cardId: string, sourceZone: "hand" | "exile", preChosenSacrificeTargets?: VisibleCard[], castChoices?: CastChoices) {
-    if (!pendingAction || prioritySeatId !== humanSeat.id) return;
+    if (!pendingAction || prioritySeatId !== humanSeat.id) {
+      if (pendingAction) addEvent("You don't have priority right now, so you can't cast that yet.", humanSeat.id, "Timing");
+      return;
+    }
     const card = sourceZone === "exile" ? findExiledCardAnySeat(session, cardId) : humanSeat.board.hand.find((item) => item.id === cardId);
     if (!card) return;
     if (
       sourceZone === "exile" &&
       (card.exiledPlayableBySeatId !== humanSeat.id || (card.exiledPlayableUntilTurn !== undefined && session.turn > card.exiledPlayableUntilTurn))
     ) {
+      addEvent(`You may not cast ${card.name} from exile (the permission has expired or isn't yours).`, humanSeat.id, "Timing");
       return;
     }
     if (!canCastAtInstantSpeed(card, seatHasFlashGrant(humanSeat, card)) && !(sourceZone === "exile" && card.exiledPlayableAnyTime)) {
