@@ -2,7 +2,7 @@
 // the test: two earlier tests passed on invented text while the real cards stayed broken (Court of Grace, the
 // "with power N or greater" watchers). Skipped per card when the catalog doesn't have it.
 import { describe, expect, it } from "vitest";
-import { landDropsAllowed, landPlaysMade, recordLandPlay, findCastTriggers, seatHasFlashGrant, findLeavesBattlefieldTriggers, hideawayDamageConditionMet, legalMainPhaseActions, tapCreaturesAltCostFor, applyCastRemoval, nextCastPrompt, type CastChoices, spellModePrompt, applyDigPick, applyDigToBattlefield, applyTargetedEffect, castStructure, payGenericSacrificeCost, forcedAttackers, ventureIntoUndercity, applyPunisherChoiceEffect, openingHandBattlefieldCards, putOpeningHandCardOnBattlefield, untapForSeat, humanPhaseGraveyardChoice, clearTemporaryBuffs, playCardFromZone, resolveEndStepExileDamage, cleanupCombat, staticCostReduction, applyLabeledContinuation, spellTargetSlots, grantKeywordsToCreature, applyExalted, applySacrificeEffect, applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass, attackLockedOut } from "./AppFlow";
+import { landDropsAllowed, landPlaysMade, recordLandPlay, findCastTriggers, seatHasFlashGrant, findLeavesBattlefieldTriggers, hideawayDamageConditionMet, legalMainPhaseActions, tapCreaturesAltCostFor, applyCastRemoval, nextCastPrompt, type CastChoices, spellModePrompt, applyDigPick, applyDigToBattlefield, applyTargetedEffect, castStructure, payGenericSacrificeCost, forcedAttackers, ventureIntoUndercity, applyPunisherChoiceEffect, openingHandBattlefieldCards, putOpeningHandCardOnBattlefield, untapForSeat, humanPhaseGraveyardChoice, clearTemporaryBuffs, playCardFromZone, resolveEndStepExileDamage, cleanupCombat, staticCostReduction, applyLabeledContinuation, spellTargetSlots, grantKeywordsToCreature, applyExalted, applySacrificeEffect, applyZoneEffect, totalAttackTax, applyEntersWithCounterReplacements, activateGraveyardReturnInSession, applyGenericTapEffect, chooseManaSourcesForCost, cycleCardInSession, assignBlockers, findCombatDamageToPlayerTriggers, findMultiAttackTriggers, adjustedCastingCost, findCommonTriggersForPermanentDied, resolveCombatDamage, payGenericTapCost, applySpellExtraEffect, parseSimpleDrawEffect, parseSimpleLifeChange, applyGenericAbilityEffect, parseGenericAbilityEffect, applyRemovalEffect, findLifeGainTriggers, lifeGainReplacementBonus, runStateBasedActionsPass, attackLockedOut, totalCastingCost } from "./AppFlow";
 import { parseRemovalEffect } from "@/lib/removalSpells";
 import { parseTargetedEffect } from "@/lib/targetedEffects";
 import { canLegallyBlock } from "@/lib/combatSim";
@@ -3367,5 +3367,25 @@ describe("Chaos Warp asks for its target (real Oracle text)", () => {
     const after = applySpellExtraEffect(s, "a", warp, { kind: "shuffle_permanent_reveal_top" }, undefined, [chosen]);
     expect(after.events.some((e) => e.message.includes("shuffles Bear t2"))).toBe(true);
     expect(after.seats[1].board.battlefield.some((c) => c.id === "t1")).toBe(true);
+  });
+});
+
+describe("Stoneforge Masterwork (real Oracle text)", () => {
+  it("gives +1/+1 per other creature sharing a creature type with the equipped one", () => {
+    const sword = { ...real("Stoneforge Masterwork", "sm"), attachedToId: "e" } as VisibleCard;
+    const equipped = bear("e", { typeLine: "Creature — Elf Warrior" });
+    const seats = settle([seat("a", [sword, equipped, bear("w", { typeLine: "Creature — Human Warrior" }), bear("x", { typeLine: "Creature — Elf" }), bear("y", { typeLine: "Creature — Goblin" })])]);
+    expect(find(seats, "a", "e").attachmentPowerBonus).toBe(2);
+    expect(find(seats, "a", "e").attachmentToughnessBonus).toBe(2);
+  });
+});
+
+describe("Ghalta, Primal Hunger's cost (real Oracle text)", () => {
+  it("is reduced by total power in the charged cost, not only in the castable check", () => {
+    const ghalta = real("Ghalta, Primal Hunger", "g");
+    const mine = seat("a", [bear("p1", { power: "5", toughness: "5" }), bear("p2", { power: "4", toughness: "4" }), bear("p3", { power: "3", toughness: "3" })]);
+    const s = session([mine]);
+    expect(adjustedCastingCost(mine, ghalta, ghalta.manaValue, "hand", "a", s.seats)).toBe(2);
+    expect(totalCastingCost(mine, ghalta, ghalta.manaValue, 0, s.seats)).toBe(2);
   });
 });

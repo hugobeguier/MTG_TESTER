@@ -3431,7 +3431,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     }
     const fixedCost = adjustedCastingCost(seat, card, card.manaValue, sourceZone === "exile" ? "exile" : "hand", activeSeatId, session.seats);
     const chosenX = maxAffordableX(seat, card, fixedCost);
-    const adjustedCost = totalCastingCost(seat, card, card.manaValue, chosenX);
+    const adjustedCost = totalCastingCost(seat, card, card.manaValue, chosenX, session.seats);
     const payment = payCastingCost(seat.id, seat, card, adjustedCost);
     if (!payment.ok) {
       addEvent(cannotPayMessage(seat, card, selectedManaTotal(seat, payment.sourceIds), adjustedCost, payment.reason), seat.id, "Mana");
@@ -5434,7 +5434,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     const chosenX = Math.min(maxX, card.chosenCastX ?? maxX);
     // A cast whose mana cost was waived outright ("without paying its mana cost"): fixedCost already holds just the extra taxes.
     const costWaived = baseCost > 0 && adjustedCastingCost(seat, costCard, baseCost, sourceZone, activeSeatId, session.seats, session.turn, session.onceEachTurnEffectsUsed) === 0;
-    const totalCost = costWaived ? fixedCost : totalCastingCost(seat, costCard, baseCost, chosenX) + (sourceZone === "command" ? card.commanderTax ?? 0 : 0);
+    const totalCost = costWaived ? fixedCost : totalCastingCost(seat, costCard, baseCost, chosenX, session.seats) + (sourceZone === "command" ? card.commanderTax ?? 0 : 0);
     // payCastingCost tries a seat's restricted mana (Klauth's floating batch, if any) before the
     // normal pool-then-auto-tap payment every other cost uses — see its own doc comment.
     const payment = payCastingCost(seatId, seat, costCard, totalCost);
@@ -6572,7 +6572,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     // they were given the chance to try.
     const chosenX = manaPoolTotal(pool) > 0 ? maxAffordableX(humanSeat, card, fixedCost, pool) : maxAffordableX(humanSeat, card, fixedCost);
     const respondWaived = card.manaValue > 0 && adjustedCastingCost(humanSeat, card, card.manaValue, sourceZone === "exile" ? "exile" : "hand", activeSeatId, session.seats) === 0;
-    const adjustedCost = respondWaived ? fixedCost : totalCastingCost(humanSeat, card, card.manaValue, chosenX);
+    const adjustedCost = respondWaived ? fixedCost : totalCastingCost(humanSeat, card, card.manaValue, chosenX, session.seats);
     const payment = payCastingCost(humanSeat.id, humanSeat, card, adjustedCost);
     const availableMana = payment.ok ? manaPoolTotal(payment.spent) : selectedManaTotal(humanSeat, payment.sourceIds);
     if (!isLandCard(card) && !payment.ok) {
@@ -12727,7 +12727,7 @@ export function legalMainPhaseActions(
         const baseCost = manaValueFromManaCost(face.manaCost);
         const fixedCost = adjustedCastingCost(seat, shim, baseCost, "hand", activeSeatId, session.seats);
         const chosenX = maxAffordableX(seat, shim, fixedCost);
-        const totalCost = totalCastingCost(seat, shim, baseCost, chosenX);
+        const totalCost = totalCastingCost(seat, shim, baseCost, chosenX, session.seats);
         const payment = chooseManaSourcesForCost(seat, shim, totalCost, undefined, session.seats);
         if (!payment.ok) return;
         if (!hasResolvableTarget(session, seat.id, { ...card, name: face.name, typeLine: face.typeLine, oracleText: face.oracleText })) return;
@@ -12751,7 +12751,7 @@ export function legalMainPhaseActions(
 
     const fixedCost = adjustedCastingCost(seat, card, card.manaValue, "hand", activeSeatId, session.seats);
     const chosenX = maxAffordableX(seat, card, fixedCost);
-    const totalCost = totalCastingCost(seat, card, card.manaValue, chosenX);
+    const totalCost = totalCastingCost(seat, card, card.manaValue, chosenX, session.seats);
     let payment = chooseManaSourcesForCost(seat, card, totalCost, undefined, session.seats);
     // An alternative cost (Sephara) that lets an otherwise unaffordable spell be cast.
     const legalTapAlt = tapCreaturesAltCostFor(seat, card);
@@ -12796,7 +12796,7 @@ export function legalMainPhaseActions(
     const baseCost = permanentFace ? manaValueFromManaCost(permanentFace.manaCost) : card.manaValue;
     const fixedCost = adjustedCastingCost(seat, castCard, baseCost, "exile", activeSeatId, session.seats);
     const chosenX = maxAffordableX(seat, castCard, fixedCost);
-    const totalCost = totalCastingCost(seat, castCard, baseCost, chosenX);
+    const totalCost = totalCastingCost(seat, castCard, baseCost, chosenX, session.seats);
     const payment = chooseManaSourcesForCost(seat, castCard, totalCost, undefined, session.seats);
     if (!payment.ok) continue;
     const targetCheckCard = permanentFace ? { ...card, name: permanentFace.name, typeLine: permanentFace.typeLine, oracleText: permanentFace.oracleText } : card;
@@ -12825,7 +12825,7 @@ export function legalMainPhaseActions(
     const baseCost = permission.costText ? manaValueFromManaCost(permission.costText) : card.manaValue;
     const fixedCost = adjustedCastingCost(seat, castCard, baseCost, "graveyard", activeSeatId, session.seats);
     const chosenX = maxAffordableX(seat, castCard, fixedCost);
-    const totalCost = totalCastingCost(seat, castCard, baseCost, chosenX);
+    const totalCost = totalCastingCost(seat, castCard, baseCost, chosenX, session.seats);
     const payment = chooseManaSourcesForCost(seat, castCard, totalCost, undefined, session.seats);
     if (!payment.ok) continue;
     if (!hasResolvableTarget(session, seat.id, card)) continue;
@@ -12846,7 +12846,7 @@ export function legalMainPhaseActions(
   if (topCard && !isLandCard(topCard) && libraryTopCastPermission(topCard, seat.board.battlefield)) {
     const fixedCost = adjustedCastingCost(seat, topCard, topCard.manaValue, "library", activeSeatId, session.seats);
     const chosenX = maxAffordableX(seat, topCard, fixedCost);
-    const totalCost = totalCastingCost(seat, topCard, topCard.manaValue, chosenX);
+    const totalCost = totalCastingCost(seat, topCard, topCard.manaValue, chosenX, session.seats);
     const payment = chooseManaSourcesForCost(seat, topCard, totalCost, undefined, session.seats);
     if (payment.ok && hasResolvableTarget(session, seat.id, topCard)) {
       actions.push({
@@ -13172,7 +13172,7 @@ export function legalPriorityActions(seat: PlayerSeat, pendingAction: PendingAct
     .filter(({ card }) => {
       const fixedCost = adjustedCastingCost(seat, card, card.manaValue, "hand", activeSeatId, session.seats);
       const chosenX = maxAffordableX(seat, card, fixedCost);
-      return chooseManaSourcesForCost(seat, card, totalCastingCost(seat, card, card.manaValue, chosenX), undefined, session.seats).ok;
+      return chooseManaSourcesForCost(seat, card, totalCastingCost(seat, card, card.manaValue, chosenX, session.seats), undefined, session.seats).ok;
     })
     .filter(({ card }) => hasResolvableTarget(session, seat.id, card))
     .map(({ card, sourceZone }) => ({
@@ -15573,6 +15573,13 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
               const x = Math.max(0, ...commanders.map((commander) => commander.manaValue));
               power += x;
               toughness += x;
+            }
+            // "Equipped creature gets +1/+1 for each other creature you control that shares a creature type with it." (Stoneforge Masterwork)
+            if (/\bequipped creature gets \+1\/\+1 for each other creature you control that shares a creature type with it\b/i.test(attachment.oracleText)) {
+              const owner = next.seats.find((item) => item.id === (attachment.controllerSeatId ?? seat.id)) ?? seat;
+              const sharing = owner.board.battlefield.filter((other) => other.id !== card.id && other.typeLine.includes("Creature") && sharesCreatureType(card, other)).length;
+              power += sharing;
+              toughness += sharing;
             }
             for (const keyword of attachmentGrantedKeywords(attachment.oracleText)) keywordSet.add(keyword);
             for (const color of attachmentGrantedProtectionColors(attachment.oracleText)) protectionSet.add(color);
@@ -24375,6 +24382,20 @@ function ruleChoiceView(
 // Shallow-copies power/toughness onto their current effective values (counters, static buffs, ...)
 // so a view built from this reads the same numbers combat math will actually use — the raw
 // card.power/toughness strings are what's printed on the card, not what's currently true.
+// Creature subtypes of a type line (either dash), for "shares a creature type"; a Changeling shares a type with every creature.
+function creatureSubtypesOf(card: VisibleCard): string[] {
+  if (!card.typeLine.includes("Creature")) return [];
+  const match = card.typeLine.match(/[—-]\s*(.+)$/);
+  return match ? match[1].trim().split(/\s+/).filter(Boolean) : [];
+}
+
+function sharesCreatureType(a: VisibleCard, b: VisibleCard): boolean {
+  const isChangeling = (card: VisibleCard) => !card.abilitiesStripped && /\bchangeling\b/i.test(card.oracleText);
+  if (isChangeling(a) || isChangeling(b)) return true;
+  const types = new Set(creatureSubtypesOf(a).map((type) => type.toLowerCase()));
+  return creatureSubtypesOf(b).some((type) => types.has(type.toLowerCase()));
+}
+
 function withEffectiveStats(card: VisibleCard): VisibleCard {
   // The live numbers become the printed ones, so every modifier is dropped from the copy: the block prompt applies effectivePower() again,
   // which used to count +1/+1 counters and pumps twice (a 10/10 Managorger Hydra was shown as 19/19).
@@ -26290,11 +26311,14 @@ function matchesCostReductionQualifier(qualifier: string, card: VisibleCard): bo
 // once here (instead of adding xCount*chosenX on top of the already-discounted fixedCost) is what
 // keeps a leftover reduction from being counted twice: once to justify affording a higher X, and
 // then never actually subtracted from what's paid.
-export function totalCastingCost(seat: PlayerSeat, card: VisibleCard, baseCost: number, chosenX: number) {
+export function totalCastingCost(seat: PlayerSeat, card: VisibleCard, baseCost: number, chosenX: number, allSeats?: PlayerSeat[]) {
   const unitCost = xOrMultikickerUnitCost(card);
+  // The spell's own reductions (Ghalta's "costs {X} less, where X is the total power of creatures you control", Blasphemous Act) were part of
+  // adjustedCastingCost - which decides whether a spell is castable - but never of this, which decides what is charged, so the two disagreed.
+  const ownReduction = allSeats ? selfConditionalCostReduction(card, allSeats) + selfScalingCostReduction(card, seat, allSeats) : 0;
   // Rule 601.2f: same colored-pip floor as adjustedCastingCost above — a flat cost reduction can
   // never eat into X/multikicker-inflated cost's colored requirement either.
-  return Math.max(coloredPipCount(card), baseCost + unitCost * chosenX - pendingArtifactAffinityReduction(seat) - staticCostReduction(seat, card));
+  return Math.max(coloredPipCount(card), baseCost + unitCost * chosenX - pendingArtifactAffinityReduction(seat) - staticCostReduction(seat, card) - ownReduction);
 }
 
 // Saheeli, the Gifted's second +1: "The next spell you cast this turn has affinity for artifacts.
@@ -27904,7 +27928,7 @@ export function canReceivePriorityForPendingAction(
     }
     const fixedCost = adjustedCastingCost(seat, card, card.manaValue, "hand", activeSeatId, session.seats);
     const chosenX = maxAffordableX(seat, card, fixedCost);
-    const totalCost = totalCastingCost(seat, card, card.manaValue, chosenX);
+    const totalCost = totalCastingCost(seat, card, card.manaValue, chosenX, session.seats);
     // A human hasn't necessarily tapped anything into their mana pool yet at this point — that
     // normally happens once they actually get priority and choose to respond. Checking only
     // payCostFromPool's already-tapped pool here meant a human with untapped lands and a castable
