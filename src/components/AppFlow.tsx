@@ -5173,12 +5173,13 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         ];
         return zoneResolvedSession;
       });
-      if (capturedTriggers.length > 0) {
-        window.setTimeout(() => queueCommonTriggers(capturedTriggers), 0);
-      }
-      if (landZoneChoice) {
+      // Read AFTER the updater has run: React may defer a functional updater (when other state updates are already queued, as on a
+      // human's land play), and reading these two right after setSession then saw them still empty - Spinerock Knoll's hideaway never fired.
+      window.setTimeout(() => {
+        if (capturedTriggers.length > 0) queueCommonTriggers(capturedTriggers);
         const pendingLandEffect = landZoneChoice;
-        window.setTimeout(() => {
+        if (!pendingLandEffect) return;
+        {
           const spec = zoneEffectTargetSpec(pendingLandEffect);
           if (!spec) return;
           setPendingRuleChoice({
@@ -5193,8 +5194,8 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
             optional: false,
             pending: { kind: "zone", effect: pendingLandEffect }
           });
-        }, 0);
-      }
+        }
+      }, 0);
       if (seat.kind === "human") {
         if (choosesCreatureType) {
           window.setTimeout(
@@ -11023,7 +11024,12 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     const seat = session.seats.find((item) => item.id === seatId);
     const card = location === "command" ? seat?.board.commander : seat?.board.battlefield.find((item) => item.id === cardId);
     if (!seat || !card || card.tapped || !isAvailableManaSource(card, seat, session.seats)) return;
-    setSession((current) => tapVisibleCard(current, seatId, cardId, location));
+    // A Treasure (or any "{T}, Sacrifice this: Add ...") is used up by tapping it, and a storage land loses its counter - the automatic payment
+    // already did this through spendManaSources; a manual tap only ever tapped it, so Treasures stayed on the battlefield.
+    const consumedOnUse = location === "battlefield" && (isSacrificeManaSource(card) || manaAbilityCounterRemovalKind(card.oracleText) !== undefined);
+    setSession((current) =>
+      consumedOnUse ? { ...current, seats: current.seats.map((item) => (item.id === seatId ? spendManaSources(item, [cardId]) : item)) } : tapVisibleCard(current, seatId, cardId, location)
+    );
     const amount = manaProducedBy(card, seat);
     setManaPools((current) => {
       const pool = current[seatId] ?? emptyManaPool();
@@ -16809,7 +16815,7 @@ export function spellModePrompt(
 export function labeledTargetOptions(
   session: GameSession,
   controllerSeatId: string,
-  slot: "any_damage" | "player" | "own_creature" | "own_permanent" | "opponent_creature" | "opponent_creature_or_planeswalker" | "any_creature",
+  slot: "any_damage" | "player" | "own_creature" | "own_permanent" | "any_permanent" | "opponent_creature" | "opponent_creature_or_planeswalker" | "any_creature",
   source: VisibleCard
 ): LabeledSlot["options"] {
   const options: LabeledSlot["options"] = [];
@@ -16833,6 +16839,7 @@ export function labeledTargetOptions(
         slot === "any_damage" ? isCreature || isPlaneswalker :
         slot === "own_creature" ? own && isCreature :
         slot === "own_permanent" ? own :
+        slot === "any_permanent" ? true :
         slot === "any_creature" ? isCreature :
         slot === "opponent_creature" ? !own && isCreature :
         slot === "opponent_creature_or_planeswalker" ? !own && (isCreature || isPlaneswalker) :
@@ -16917,7 +16924,7 @@ export function castStructure(card: VisibleCard, chosenX?: number): CastStructur
   if (removal && removal.kind !== "modal") return { kind: "removal", effect: removal };
   const zone = parseZoneEffect(text);
   if (zone) return { kind: "zone", effect: zone };
-  const extra = parseSpellExtraEffects(text).find((effect) => effect.kind === "creature_bites" || effect.kind === "grant_keywords");
+  const extra = parseSpellExtraEffects(text).find((effect) => effect.kind === "creature_bites" || effect.kind === "grant_keywords" || effect.kind === "shuffle_permanent_reveal_top");
   if (extra) return { kind: "extra", effect: extra };
   const pump = parseTargetedPump(chosenX !== undefined ? substituteX(text, chosenX) : text);
   if (pump) return { kind: "pump", effect: pump };
@@ -16933,6 +16940,9 @@ function extraSlots(session: GameSession, seatId: string, source: VisibleCard, e
       { prompt: `${source.name}: choose the creature you control that deals the damage.`, options: labeledTargetOptions(session, seatId, "own_creature", source) },
       { prompt: `${source.name}: choose the creature that takes it.`, options: labeledTargetOptions(session, seatId, /creature or planeswalker you don'?t control/i.test(text) ? "opponent_creature_or_planeswalker" : "opponent_creature", source) }
     ];
+  }
+  if (effect.kind === "shuffle_permanent_reveal_top") {
+    return [{ prompt: `${source.name}: choose the permanent its owner shuffles into their library.`, options: labeledTargetOptions(session, seatId, "any_permanent", source) }];
   }
   if (effect.kind === "grant_keywords") {
     return [{ prompt: `${source.name}: choose a permanent you control to gain ${effect.keywords.join(" and ")} until end of turn.`, options: labeledTargetOptions(session, seatId, "own_permanent", source) }];
@@ -17068,7 +17078,7 @@ export function applyCastGenericModes(session: GameSession, casterSeatId: string
 // undefined when the spell has nothing to choose between.
 export function spellTargetSlots(session: GameSession, controllerSeatId: string, source: VisibleCard, chosenX?: number): { slots: LabeledSlot[]; continuation: LabeledContinuation } | undefined {
   const text = etbEffectText(source.oracleText);
-  const extra = parseSpellExtraEffects(text).find((effect) => effect.kind === "creature_bites" || effect.kind === "grant_keywords");
+  const extra = parseSpellExtraEffects(text).find((effect) => effect.kind === "creature_bites" || effect.kind === "grant_keywords" || effect.kind === "shuffle_permanent_reveal_top");
   if (extra?.kind === "creature_bites") {
     const mine = labeledTargetOptions(session, controllerSeatId, "own_creature", source);
     const theirs = labeledTargetOptions(session, controllerSeatId, /creature or planeswalker you don'?t control/i.test(text) ? "opponent_creature_or_planeswalker" : "opponent_creature", source);
@@ -17080,6 +17090,11 @@ export function spellTargetSlots(session: GameSession, controllerSeatId: string,
       ],
       continuation: { kind: "extra", effect: extra }
     };
+  }
+  if (extra?.kind === "shuffle_permanent_reveal_top") {
+    const all = labeledTargetOptions(session, controllerSeatId, "any_permanent", source);
+    if (all.length < 2) return undefined;
+    return { slots: [{ prompt: `${source.name}: choose the permanent its owner shuffles into their library.`, options: all }], continuation: { kind: "extra", effect: extra } };
   }
   if (extra?.kind === "grant_keywords") {
     const own = labeledTargetOptions(session, controllerSeatId, "own_permanent", source);
@@ -17315,7 +17330,7 @@ export function applySpellExtraEffect(session: GameSession, casterSeatId: string
     }
 
     case "shuffle_permanent_reveal_top": {
-      const target = chooseRemovalTarget(session, casterSeatId, "permanent", source);
+      const target = resolvePreChosenBattlefieldTarget(session, chosenTargets?.[0]) ?? chooseRemovalTarget(session, casterSeatId, "permanent", source);
       if (!target) return noLegalTargetEvent(session, casterSeatId, sourceName);
       const warded = payWardIfNeeded(session, casterSeatId, target.card, sourceName);
       if (warded.countered) return warded.session;
@@ -24361,10 +24376,21 @@ function ruleChoiceView(
 // so a view built from this reads the same numbers combat math will actually use — the raw
 // card.power/toughness strings are what's printed on the card, not what's currently true.
 function withEffectiveStats(card: VisibleCard): VisibleCard {
+  // The live numbers become the printed ones, so every modifier is dropped from the copy: the block prompt applies effectivePower() again,
+  // which used to count +1/+1 counters and pumps twice (a 10/10 Managorger Hydra was shown as 19/19).
   return {
     ...card,
     power: card.power !== undefined ? String(effectivePower(card)) : card.power,
-    toughness: card.toughness !== undefined ? String(effectiveToughness(card)) : card.toughness
+    toughness: card.toughness !== undefined ? String(effectiveToughness(card)) : card.toughness,
+    setPowerOverride: undefined,
+    setToughnessOverride: undefined,
+    cdaPower: undefined,
+    cdaToughness: undefined,
+    temporaryPowerBonus: undefined,
+    temporaryToughnessBonus: undefined,
+    attachmentPowerBonus: undefined,
+    attachmentToughnessBonus: undefined,
+    counters: card.counters?.filter((counter) => counter.kind !== "+1/+1" && counter.kind !== "-1/-1")
   };
 }
 

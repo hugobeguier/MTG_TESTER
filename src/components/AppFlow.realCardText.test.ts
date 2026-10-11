@@ -3317,3 +3317,55 @@ describe("marked damage (rule 120.6)", () => {
     expect(cleared.seats.find((s) => s.id === "b")!.board.battlefield[0].damage).toBeUndefined();
   });
 });
+
+describe("Spinerock Knoll played from hand", () => {
+  it("raises the hideaway trigger after the land is played", () => {
+    const knoll = real("Spinerock Knoll", "sk");
+    const mine = seat("a", [], { kind: "human" });
+    mine.board.hand = [{ ...knoll, zone: "hand" as const }];
+    mine.library = [bear("n1", { zone: "library" as const }), bear("n2", { zone: "library" as const }), bear("n3", { zone: "library" as const }), bear("n4", { zone: "library" as const }), bear("n5", { zone: "library" as const })];
+    const s = session([mine, seat("b", [])]);
+    const played = playCardFromZone(s, "a", "sk", "You plays Spinerock Knoll.", undefined, "battlefield", [], "hand");
+    const triggers = findCommonTriggersForPermanentEntered(played, "a", { ...knoll, zone: "hand" as const });
+    expect(triggers.map((t) => t.effect.kind)).toContain("hideaway");
+  });
+});
+
+describe("Terror of Mount Velus enters (real Oracle text)", () => {
+  it("gives every creature double strike, not just itself", () => {
+    const terror = real("Terror of Mount Velus", "tv");
+    const other = bear("o1");
+    const s = session([seat("a", [terror, other]), seat("b", [])]);
+    const triggers = findCommonTriggersForPermanentEntered(s, "a", terror);
+    expect(triggers.map((t) => t.effect.kind)).toContain("creatures_gain_keywords");
+    const after = resolveTriggerEffect(s, triggers.find((t) => t.effect.kind === "creatures_gain_keywords")!);
+    const o = after.seats[0].board.battlefield.find((c) => c.id === "o1")!;
+    expect([...(o.grantedKeywords ?? []), ...(o.temporaryGrantedKeywords ?? [])].join(" ").toLowerCase()).toContain("double strike");
+  });
+});
+
+describe("Terror of Mount Velus survives the state-based pass", () => {
+  it("double strike is still granted after the layer pass runs", () => {
+    const terror = real("Terror of Mount Velus", "tv");
+    const s = session([seat("a", [terror, bear("o1")]), seat("b", [])]);
+    const t = findCommonTriggersForPermanentEntered(s, "a", terror).find((x) => x.effect.kind === "creatures_gain_keywords")!;
+    const after = runStateBasedActionsPass(resolveTriggerEffect(s, t)).session;
+    const o = after.seats[0].board.battlefield.find((c) => c.id === "o1")!;
+    expect(o.grantedKeywords ?? []).toContain("double strike");
+  });
+});
+
+describe("Chaos Warp asks for its target (real Oracle text)", () => {
+  it("offers every permanent as a target and shuffles the chosen one, not the heuristic pick", () => {
+    const warp = real("Chaos Warp", "cw");
+    const mine = seat("a", [bear("m1")], { kind: "human" });
+    const theirs = seat("b", [bear("t1", { power: "9", toughness: "9" }), bear("t2")], { library: [bear("inst", { typeLine: "Instant", zone: "library" as const })] });
+    const s = session([mine, theirs]);
+    const slots = spellTargetSlots(s, "a", warp);
+    expect(slots?.slots[0].options.length).toBe(3);
+    const chosen = slots!.slots[0].options.find((o) => o.target.kind === "card" && o.target.cardId === "t2")!.target;
+    const after = applySpellExtraEffect(s, "a", warp, { kind: "shuffle_permanent_reveal_top" }, undefined, [chosen]);
+    expect(after.events.some((e) => e.message.includes("shuffles Bear t2"))).toBe(true);
+    expect(after.seats[1].board.battlefield.some((c) => c.id === "t1")).toBe(true);
+  });
+});
