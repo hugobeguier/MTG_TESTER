@@ -1585,6 +1585,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   const [selectedHandCardId, setSelectedHandCardId] = useState<string | undefined>();
   const [inspectedCard, setInspectedCard] = useState<VisibleCard | undefined>();
   const [gameStage, setGameStage] = useState<GameStage>("mulligan");
+  const [gameOverDismissed, setGameOverDismissed] = useState(false);
   const [mulligans, setMulligans] = useState<Record<string, number>>({});
   const [keptHands, setKeptHands] = useState<Record<string, boolean>>({});
   const [mulliganReturnCardIds, setMulliganReturnCardIds] = useState<string[]>([]);
@@ -3562,6 +3563,8 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     const nextSession: GameSession = {
       ...session,
       status: "ready",
+      winnerSeatId: undefined,
+      attackPool: undefined,
       activePlayerId: activeSeatId,
       phase: "opening hand",
       turn: 0,
@@ -3597,6 +3600,11 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         ...session.events
       ]
     };
+    // Per-turn bookkeeping is keyed by turn number, so a restarted game (turn 1 again) would find the last game's entries: forget them all.
+    for (const ref of [agentMainActions, agentDecisionRequests, landPlaysThisTurn, firstDrawThisTurn, loyaltyActivationsThisTurn, phaseTriggersChecked, cleanupDiscardChecked, cleanupRestrictedManaChecked]) ref.current.clear();
+    spellsCastThisTurn.current.clear();
+    agentStatedPlans.current = {};
+    setRestrictedManaBatches({});
     setSession(nextSession);
     setMulligans(agentResolved.mulligans);
     setKeptHands(agentResolved.keptHands);
@@ -3612,6 +3620,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     setBlockChoice(undefined);
     setSetupMessage(undefined);
     setGameStage("mulligan");
+    setGameOverDismissed(false);
     setMode("game");
   }
 
@@ -11085,6 +11094,28 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
 
   return (
     <main className="app-shell game-shell">
+      {session.status === "complete" && !gameOverDismissed ? (
+        <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label="Game over">
+          <article className="mana-choice-modal">
+            <header>
+              <p className="eyebrow">Game over</p>
+              <h2>{session.winnerSeatId ? `${session.seats.find((seat) => seat.id === session.winnerSeatId)?.name ?? "A player"} won!` : "The game ended with no winner."}</h2>
+            </header>
+            <p>{session.seats.filter((seat) => seat.hasLost).map((seat) => `${seat.name}: ${seat.lossReason ?? "lost"}`).join(" · ")}</p>
+            <div className="modal-actions">
+              <button type="button" className="inspector-action" disabled={gameStarting} onClick={() => void startGame()}>
+                {gameStarting ? "Restarting..." : "Play again (same decks)"}
+              </button>
+              <button type="button" className="inspector-action" onClick={() => setGameOverDismissed(true)}>
+                Look at the board
+              </button>
+              <button type="button" className="inspector-action" onClick={() => setMode("setup")}>
+                Back to setup
+              </button>
+            </div>
+          </article>
+        </div>
+      ) : null}
       <button className="game-back-button" type="button" onClick={() => setMode("setup")} aria-label="Back to setup">
         ×
       </button>
