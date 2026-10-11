@@ -3389,3 +3389,12 @@ describe("Ghalta, Primal Hunger's cost (real Oracle text)", () => {
     expect(totalCastingCost(mine, ghalta, ghalta.manaValue, 0, s.seats)).toBe(2);
   });
 });
+
+describe("double striker unblocked", () => {
+  it("deals its combat damage to the player twice", () => {
+    const atk = bear("ds", { power: "3", toughness: "3", attacking: true, attackTargetId: "b", grantedKeywords: ["double strike"] });
+    const s = session([seat("a", [atk]), seat("b", [])]);
+    const after = resolveCombatDamage(s, "a");
+    expect(after.seats[1].life).toBe(34);
+  });
+});

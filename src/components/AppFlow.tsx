@@ -11474,7 +11474,11 @@ export function resolveCombatDamage(inputSession: GameSession, attackerId: strin
     result =
       orderedBlockers.length > 0
         ? resolveBlockedCombatDamage(result, attackerId, attackingCard, target, orderedBlockers)
-        : applyCombatDamageToTarget(result, attackingCard.name, target, Math.max(0, effectivePower(attackingCard)), attackingCard, attackerId);
+        : // Unblocked: a double striker deals its damage twice (first-strike step, then the regular one) - this used to deal it once.
+          Array.from({ length: hasDoubleStrike(attackingCard) ? 2 : 1 }).reduce<GameSession>(
+            (acc) => applyCombatDamageToTarget(acc, attackingCard.name, target, Math.max(0, effectivePower(attackingCard)), attackingCard, attackerId),
+            result
+          );
   }
   return result;
 }
