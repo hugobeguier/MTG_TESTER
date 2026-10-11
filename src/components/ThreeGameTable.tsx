@@ -663,7 +663,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
   // Unlike Agent Activity's last-8 slice, this keeps the full session.events history so it reads as
   // a complete record of the game so far, not just a rolling ticker.
   const actionLogEvents = props.session.events.filter(
-    (event) => event.detail !== "Mana" && event.detail !== "Rules advisor" && event.detail !== "Timing" && event.detail !== "Phase change"
+    (event) => event.detail !== "Mana" && event.detail !== "Rules advisor" && event.detail !== "Phase change"
   );
   const prioritySeat = props.session.seats.find((seat) => seat.id === props.prioritySeatId);
   const humanSeatIndex = Math.max(0, props.session.seats.findIndex((seat) => seat.id === human.id));
