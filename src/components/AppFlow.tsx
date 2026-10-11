@@ -5411,7 +5411,9 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       return;
     }
     const chosenX = Math.min(maxX, card.chosenCastX ?? maxX);
-    const totalCost = totalCastingCost(seat, costCard, baseCost, chosenX) + (sourceZone === "command" ? card.commanderTax ?? 0 : 0);
+    // A cast whose mana cost was waived outright ("without paying its mana cost"): fixedCost already holds just the extra taxes.
+    const costWaived = baseCost > 0 && adjustedCastingCost(seat, costCard, baseCost, sourceZone, activeSeatId, session.seats, session.turn, session.onceEachTurnEffectsUsed) === 0;
+    const totalCost = costWaived ? fixedCost : totalCastingCost(seat, costCard, baseCost, chosenX) + (sourceZone === "command" ? card.commanderTax ?? 0 : 0);
     // payCastingCost tries a seat's restricted mana (Klauth's floating batch, if any) before the
     // normal pool-then-auto-tap payment every other cost uses — see its own doc comment.
     const payment = payCastingCost(seatId, seat, costCard, totalCost);
@@ -6548,7 +6550,8 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     // hasn't manually pre-tapped can never actually resolve an instant-speed response even though
     // they were given the chance to try.
     const chosenX = manaPoolTotal(pool) > 0 ? maxAffordableX(humanSeat, card, fixedCost, pool) : maxAffordableX(humanSeat, card, fixedCost);
-    const adjustedCost = totalCastingCost(humanSeat, card, card.manaValue, chosenX);
+    const respondWaived = card.manaValue > 0 && adjustedCastingCost(humanSeat, card, card.manaValue, sourceZone === "exile" ? "exile" : "hand", activeSeatId, session.seats) === 0;
+    const adjustedCost = respondWaived ? fixedCost : totalCastingCost(humanSeat, card, card.manaValue, chosenX);
     const payment = payCastingCost(humanSeat.id, humanSeat, card, adjustedCost);
     const availableMana = payment.ok ? manaPoolTotal(payment.spent) : selectedManaTotal(humanSeat, payment.sourceIds);
     if (!isLandCard(card) && !payment.ok) {
