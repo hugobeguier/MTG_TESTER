@@ -11108,6 +11108,11 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
               <h2>{session.winnerSeatId ? `${session.seats.find((seat) => seat.id === session.winnerSeatId)?.name ?? "A player"} won!` : "The game ended with no winner."}</h2>
             </header>
             <p>{session.seats.filter((seat) => seat.hasLost).map((seat) => `${seat.name}: ${seat.lossReason ?? "lost"}`).join(" · ")}</p>
+            {gameStarting ? (
+              <p>Dealing new hands. Each AI seat decides its mulligan with its own model (and loads it first), so this can take a minute or two - the board changes when they are done.</p>
+            ) : setupMessage ? (
+              <p>{setupMessage}</p>
+            ) : null}
             <div className="modal-actions">
               <button type="button" className="inspector-action" disabled={gameStarting} onClick={() => void startGame()}>
                 {gameStarting ? "Restarting..." : "Play again (same decks)"}
