@@ -16249,7 +16249,7 @@ function moveCardAcrossSeatsCore(
     ...resetForZoneChange(card, destinationZone),
     ownerSeatId,
     // Tapped lands (shock/check/"unless") enter tapped on every path, not only when the caller remembered to ask.
-    tapped: destinationZone === "battlefield" ? options.tapped ?? entersBattlefieldTapped(card, session.seats.find((seat) => seat.id === destinationSeatId)) : false,
+    tapped: destinationZone === "battlefield" ? Boolean(options.tapped) || entersBattlefieldTapped(card, session.seats.find((seat) => seat.id === destinationSeatId)) : false,
     summoningSick: destinationZone === "battlefield" ? card.typeLine.includes("Creature") : undefined,
     counters: destinationZone === "battlefield" && isPlaneswalkerCard(card) ? withInitialLoyaltyCounters(card) : undefined
   };

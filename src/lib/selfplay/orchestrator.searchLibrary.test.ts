@@ -115,4 +115,16 @@ describe("applySearchLibraryEffect", () => {
     expect(result.events[0].message).toContain("Mountain");
     expect(result.events[0].message).toContain("tapped");
   });
+
+  it("a fetched tapland enters tapped and a fetched Dragon gets Dragonstorm Globe's counter (shared entry step)", () => {
+    const globe: VisibleCard = { ...libraryCard("g", "Dragonstorm Globe", "Artifact"), zone: "battlefield", oracleText: "Each Dragon you control enters with an additional +1/+1 counter on it." };
+    const tapland: VisibleCard = { ...libraryCard("t", "Test Tapland", "Land"), oracleText: "This land enters tapped." };
+    const dragon = { ...libraryCard("d", "Test Dragon", "Creature — Dragon"), power: "3", toughness: "3" };
+    const base = seatWithLibrary([tapland, dragon]);
+    const seat = { ...base, board: { ...base.board, battlefield: [globe] } };
+    const land = applySearchLibraryEffect(session(seat), "p", "Fetch", { kind: "search_library", destination: "battlefield", tapped: false, cardTypeFilter: "land", count: 1 });
+    expect(land.seats[0].board.battlefield.find((c) => c.id === "t")!.tapped).toBe(true);
+    const drag = applySearchLibraryEffect(session(seat), "p", "Fetch", { kind: "search_library", destination: "battlefield", tapped: false, cardTypeFilter: "creature", count: 1 });
+    expect(drag.seats[0].board.battlefield.find((c) => c.id === "d")!.counters?.find((c) => c.kind === "+1/+1")?.count).toBe(1);
+  });
 });
