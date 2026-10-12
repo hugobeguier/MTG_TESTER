@@ -204,7 +204,7 @@ describe("Dragon damage triggers (real Oracle text)", () => {
 });
 
 import { commonTriggerEffect } from "./AppFlow";
-import { createTokensForSeat, parseCreateTokenSpecs } from "./AppFlow";
+import { createTokensForSeat, parseCreateTokenSpecs, moveCardAcrossSeats, moveLibraryCardToDestination } from "./AppFlow";
 
 describe("pump abilities (real Oracle text)", () => {
   it("Scourge of Valkas: {R}: this creature gets +1/+0 — itself only", () => {
@@ -1116,6 +1116,42 @@ describe("chosen-type and enters-with-counter permanents (real Oracle text)", ()
     const after = applyEntersWithCounterReplacements(s, "a", "drag");
     expect(after.seats[0].board.battlefield.find((c) => c.id === "drag")!.counters?.find((c) => c.kind === "+1/+1")?.count).toBe(1);
     expect(applyEntersWithCounterReplacements(s, "a", "elf").seats[0].board.battlefield.find((c) => c.id === "elf")!.counters).toBeUndefined();
+  });
+  it("Dragonstorm Globe: a Dragon reanimated from the graveyard gets the counter", () => {
+    const s0 = session([seat("a", [real("Dragonstorm Globe", "dg")])]);
+    const dragon = bear("drag", { typeLine: "Creature — Dragon" });
+    const s = { ...s0, seats: [{ ...s0.seats[0], board: { ...s0.seats[0].board, graveyard: [dragon] } }] };
+    const { session: after } = moveCardAcrossSeats(s, "a", "drag", "a", "battlefield");
+    expect(after.seats[0].board.battlefield.find((c) => c.id === "drag")!.counters?.find((c) => c.kind === "+1/+1")?.count).toBe(1);
+  });
+  it("Dragonstorm Globe: a Dragon tutored onto the battlefield gets the counter", () => {
+    const s0 = session([seat("a", [real("Dragonstorm Globe", "dg")])]);
+    const s = { ...s0, seats: [{ ...s0.seats[0], library: [bear("drag", { typeLine: "Creature — Dragon" })] }] };
+    const after = moveLibraryCardToDestination(s, "a", "drag", "battlefield", false);
+    expect(after.seats[0].board.battlefield.find((c) => c.id === "drag")!.counters?.find((c) => c.kind === "+1/+1")?.count).toBe(1);
+  });
+  it("Clone: a Clone returned from the graveyard enters as a copy of the best creature", () => {
+    const s0 = session([seat("a", [bear("big", { power: "6", toughness: "6", typeLine: "Creature — Giant" }), bear("small")])]);
+    const clone = real("Clone", "cl");
+    const s = { ...s0, seats: [{ ...s0.seats[0], board: { ...s0.seats[0].board, graveyard: [clone] } }] };
+    const { session: after } = moveCardAcrossSeats(s, "a", "cl", "a", "battlefield");
+    const entered = after.seats[0].board.battlefield.find((c) => c.id === "cl")!;
+    expect(entered.typeLine).toContain("Giant");
+    expect(entered.power).toBe("6");
+  });
+  it("a checkland returned to the battlefield enters tapped without the caller asking", () => {
+    const s0 = session([seat("a", [])]);
+    const land = real("Dragonskull Summit", "ds");
+    const s = { ...s0, seats: [{ ...s0.seats[0], board: { ...s0.seats[0].board, graveyard: [land] } }] };
+    const { session: after } = moveCardAcrossSeats(s, "a", "ds", "a", "battlefield");
+    expect(after.seats[0].board.battlefield.find((c) => c.id === "ds")!.tapped).toBe(true);
+  });
+  it("Dragonstorm Globe: a Dragon TOKEN entering also gets the counter", () => {
+    const s = session([seat("a", [real("Dragonstorm Globe", "dg")])]);
+    const specs = parseCreateTokenSpecs("create a 5/5 red Dragon creature token with flying");
+    const { session: after } = createTokensForSeat(s, "a", "dg", specs, { queueEntries: false });
+    const token = after.seats[0].board.battlefield.find((c) => c.token)!;
+    expect(token.counters?.find((c) => c.kind === "+1/+1")?.count).toBe(1);
   });
 });
 

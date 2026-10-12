@@ -14403,6 +14403,10 @@ function parseEnterAsCopyEffect(
   // (Cursed Mirror) — the same replacement effect, but it wears off at end of turn and the copy gets an extra keyword.
   const temporaryMatch = oracleText.match(/\byou may have it become a copy of any creature on the battlefield until end of turn, except it has ([a-z]+)\b/i);
   if (temporaryMatch) return { controlledOnly: false, allowedTypes: ["creature"], temporary: true, extraKeyword: temporaryMatch[1].toLowerCase() };
+  // "You may have this creature enter as a copy of any creature on the battlefield." (Clone) / "...any artifact or creature..." (Phyrexian Metamorph).
+  // Exceptions after the comma (Phantasmal Image's Illusion, Sakashima's name change) aren't modeled.
+  const creatureCopyMatch = oracleText.match(/\byou may have this creature enter as a copy of any (artifact or creature|creature) on the battlefield\b/i);
+  if (creatureCopyMatch) return { controlledOnly: false, allowedTypes: creatureCopyMatch[1].toLowerCase().includes("artifact") ? ["artifact", "creature"] : ["creature"] };
   const controlledMatch = oracleText.match(
     /\byou may have this enchantment enter as a copy of an enchantment you control(?:,?\s*except it has\s*"([^"]+)")?/i
   );
@@ -16244,7 +16248,8 @@ function moveCardAcrossSeatsCore(
   const movedCard: VisibleCard = {
     ...resetForZoneChange(card, destinationZone),
     ownerSeatId,
-    tapped: destinationZone === "battlefield" ? Boolean(options.tapped) : false,
+    // Tapped lands (shock/check/"unless") enter tapped on every path, not only when the caller remembered to ask.
+    tapped: destinationZone === "battlefield" ? options.tapped ?? entersBattlefieldTapped(card, session.seats.find((seat) => seat.id === destinationSeatId)) : false,
     summoningSick: destinationZone === "battlefield" ? card.typeLine.includes("Creature") : undefined,
     counters: destinationZone === "battlefield" && isPlaneswalkerCard(card) ? withInitialLoyaltyCounters(card) : undefined
   };
@@ -16311,7 +16316,58 @@ function moveCardAcrossSeatsCore(
     sourceZone === "graveyard"
       ? [...(session.pendingGraveyardDepartures ?? []), { seatId: sourceSeatId, cards: [card] }]
       : session.pendingGraveyardDepartures;
-  return { session: { ...session, seats, pendingEntries, pendingGraveyardDepartures }, movedCard };
+  const moved: GameSession = { ...session, seats, pendingEntries, pendingGraveyardDepartures };
+  return { session: destinationZone === "battlefield" ? applyEntryEffects(moved, destinationSeatId, movedCard.id) : moved, movedCard };
+}
+
+// The shared "a permanent enters the battlefield" step for every path that is NOT a cast (reanimate, flicker,
+// return from exile, tutor-to-battlefield, copy tokens): the self "enters with N counters" clauses and the
+// other permanents' "enters with an additional +1/+1 counter" replacements (Dragonstorm Globe, Giada).
+// X counters are deliberately absent: X is 0 for anything not cast (Hangarback Walker flickered really does die).
+// The cast path applies the same pieces inline in resolution (see applyEntersWithCounterReplacements's caller).
+function applyEntryEffects(session: GameSession, seatId: string, cardId: string): GameSession {
+  const entering = session.seats.find((seat) => seat.id === seatId)?.board.battlefield.find((card) => card.id === cardId);
+  if (!entering) return session;
+  let next = session;
+  const fixed = entersWithFixedCounterKind(entering.oracleText);
+  if (fixed && !(entering.counters ?? []).some((counter) => counter.kind === fixed.kind)) next = applyEntersWithCounterKind(next, seatId, cardId, fixed.kind, fixed.count);
+  if (entersWithCounterPerColorControlled(entering.oracleText)) {
+    const seat = next.seats.find((item) => item.id === seatId);
+    if (seat) next = applyEntersWithXCounters(next, seatId, cardId, colorsAmongPermanentsControlled(seat, cardId));
+  }
+  return applyEntersWithCounterReplacements(applyEnterAsCopyOnEntry(next, seatId, cardId), seatId, cardId);
+}
+
+// "You may have this enter as a copy of ..." for a permanent that did NOT come from a cast (a Clone reanimated, flickered
+// or tutored). The cast path asks the human first (choose_cast_copy); these paths have no prompt, so — like the AI seats —
+// it takes the best legal target (findEnterAsCopyTarget's heuristic), and stays a blank card only if there is none.
+// Cursed Mirror's temporary copy is left to the cast path.
+function applyEnterAsCopyOnEntry(session: GameSession, seatId: string, cardId: string): GameSession {
+  const entering = session.seats.find((seat) => seat.id === seatId)?.board.battlefield.find((card) => card.id === cardId);
+  if (!entering || entering.token) return session;
+  const effect = parseEnterAsCopyEffect(entering.oracleText);
+  if (!effect || effect.temporary) return session;
+  // The entering permanent must not be able to copy itself.
+  const without: GameSession = { ...session, seats: session.seats.map((seat) => ({ ...seat, board: { ...seat.board, battlefield: seat.board.battlefield.filter((card) => card.id !== cardId) } })) };
+  const target = findEnterAsCopyTarget(without, seatId, effect, entering.chosenCopyTargetId);
+  if (!target) return session;
+  const copy: VisibleCard = {
+    ...entering,
+    name: target.name,
+    typeLine: target.typeLine,
+    oracleText: effect.extraAbilityText ? `${target.oracleText}\n${effect.extraAbilityText}` : target.oracleText,
+    manaCost: target.manaCost,
+    manaValue: target.manaValue,
+    colors: target.colors,
+    colorIdentity: target.colorIdentity,
+    power: target.power,
+    toughness: target.toughness,
+    imageUris: target.imageUris ?? entering.imageUris
+  };
+  return {
+    ...session,
+    seats: session.seats.map((seat) => (seat.id === seatId ? { ...seat, board: { ...seat.board, battlefield: seat.board.battlefield.map((card) => (card.id === cardId ? copy : card)) } } : seat))
+  };
 }
 
 // A control change (Threaten/Mind Control-style) is NOT a zone change (rule 400.7 only triggers on
@@ -22046,7 +22102,9 @@ export function createTokensForSeat(session: GameSession, seatId: string, source
   // spell-resolution pipeline: a created token that only becomes (e.g.) an enchantment via a
   // separate static ability needs grantedTypes computed before "an enchantment enters" watchers
   // (including the token's own) can recognize it.
-  const sbaCheckedSession = checkStateBasedActions(nextSession);
+  // Dragonstorm Globe / Giada: "enters with an additional +1/+1 counter" applies to tokens too (e.g. Dragon tokens).
+  const withReplacementCounters = createdTokens.reduce((acc, token) => applyEntryEffects(acc, seatId, token.id), nextSession);
+  const sbaCheckedSession = checkStateBasedActions(withReplacementCounters);
   const triggers = createdTokens.flatMap((token) => findCommonTriggersForPermanentEntered(sbaCheckedSession, seatId, token));
   return { session: sbaCheckedSession, createdTokens, triggers };
 }
@@ -22110,7 +22168,7 @@ function createCopyTokenForSeat(session: GameSession, seatId: string, source: Vi
     // A token copy entering is an entry like any other: its own "enters" triggers (and other permanents' watchers) fire.
     pendingEntries: [...(session.pendingEntries ?? []), { seatId, card: token }]
   };
-  return { session: nextSession, token };
+  return { session: applyEntryEffects(nextSession, seatId, token.id), token };
 }
 
 export function parseCreateTokenSpecs(
@@ -28720,7 +28778,7 @@ export function moveLibraryCardToDestination(
   });
 
   if (!movedName) return session;
-  return {
+  const searched: GameSession = {
     ...session,
     seats,
     pendingEntries: enteredBattlefieldCard ? [...(session.pendingEntries ?? []), { seatId, card: enteredBattlefieldCard }] : session.pendingEntries,
@@ -28737,6 +28795,8 @@ export function moveLibraryCardToDestination(
       ...session.events
     ]
   };
+  // Same shared entry step as every other non-cast entry (counters, Dragonstorm Globe/Giada).
+  return enteredBattlefieldCard ? applyEntryEffects(searched, seatId, enteredBattlefieldCard.id) : searched;
 }
 
 function createVisibleFromDeckCard(deckCard: { name: string; role?: string; card?: CommanderDeck["cards"][number]["card"] }, colors: string[], id: string, zone: VisibleCard["zone"]): VisibleCard {
