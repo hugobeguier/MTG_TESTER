@@ -78,10 +78,12 @@ import {
   assignBlockers,
   cleanupCombat,
   chooseManaSourcesForCost,
+  commonTriggerEffect,
   countCreaturesAttackingSeat,
   createTokensForSeat,
   drawForSeat,
   drawMultipleForSeat,
+  findCommonTriggersForPermanentEntered,
   genericCostShim,
   grantsExtraTurn,
   hasVigilance,
@@ -114,6 +116,7 @@ import {
   resolveAttackTarget,
   resolveCombatDamage,
   resolvePendingUpkeepDraws,
+  resolveTriggerEffect,
   rollForStartingSeat,
   roomDoorFaces,
   runStateBasedActionsPass,
@@ -565,10 +568,8 @@ export function applySearchLibraryEffect(session: GameSession, casterSeatId: str
 
   // Battlefield destination (Farseek-style land ramp, ...) reuses moveCardAcrossSeats — the same
   // shared library->battlefield primitive the live game's own zone effects already lean on (see its
-  // SacrificeThenReanimate caller) — rather than duplicating battlefield-entry setup here. This only
-  // places the card; it does NOT run the fetched permanent's own ETB triggers (a land landing on the
-  // battlefield via a search almost never has one worth modeling here, and self-play has no generic
-  // ETB-trigger pipeline at all regardless — see this file's own header gap list).
+  // SacrificeThenReanimate caller) rather than duplicating battlefield-entry setup here. This only places the card; the fetched
+  // permanent's own enters triggers then fire through drainEntryTriggers (moveCardAcrossSeats queues it in pendingEntries).
   if (effect.destination === "battlefield") {
     const working = found.reduce(
       (acc, card) => moveCardAcrossSeats(acc, casterSeatId, card.id, casterSeatId, "battlefield", { tapped: effect.tapped }).session,
@@ -622,6 +623,46 @@ export function applySearchLibraryEffect(session: GameSession, casterSeatId: str
   };
 }
 
+// Headless stand-in for AppFlow.tsx's pendingEntries useEffect (~L2074): that effect is React-bound, but everything
+// it calls to RESOLVE an entry is a pure exported function, so this runs the same pieces synchronously — a permanent's
+// own zone-effect ETB (Eternal Witness), its removal ETB (Ravenous Chupacabra), and every common "enters" trigger on the
+// board (its own, plus landfall / "whenever a creature enters" watchers) via findCommonTriggersForPermanentEntered +
+// resolveTriggerEffect. Optional triggers are always accepted and choices use the pure resolver's agent auto-pick, the same
+// policy the live game applies to AI seats. NOT modeled: Saga chapter I (gap #5), the rules-advisor fallback for ETB text no
+// deterministic parser owns, and human-only prompts. Bounded, because a trigger can itself create entries.
+const MAX_ENTRY_DRAIN_ROUNDS = 12;
+
+function queueEntry(session: GameSession, seatId: string, cardId: string): GameSession {
+  const card = session.seats.find((seat) => seat.id === seatId)?.board.battlefield.find((item) => item.id === cardId);
+  return card ? { ...session, pendingEntries: [...(session.pendingEntries ?? []), { seatId, card }] } : session;
+}
+
+export function drainEntryTriggers(session: GameSession): GameSession {
+  let working = session;
+  for (let round = 0; round < MAX_ENTRY_DRAIN_ROUNDS; round += 1) {
+    const entries = working.pendingEntries;
+    if (!entries || entries.length === 0) break;
+    working = { ...working, pendingEntries: undefined };
+    for (const entry of entries) {
+      const onBattlefield = working.seats.find((seat) => seat.id === entry.seatId)?.board.battlefield.some((card) => card.id === entry.card.id);
+      if (!onBattlefield) continue; // already died/left before its enter effects were processed
+      const controller = working.seats.find((seat) => seat.id === entry.seatId);
+      const etbText = etbEffectText(entry.card.oracleText);
+      const zoneEffect = parseZoneEffect(etbText);
+      if (zoneEffect) {
+        working = applyZoneEffect(working, entry.seatId, entry.card.name, zoneEffect);
+        continue;
+      }
+      if (!entry.card.token && commonTriggerEffect(entry.card.oracleText, "entered", undefined, controller) === undefined) {
+        const removal = parseRemovalEffect(etbText);
+        if (removal && removal.kind !== "modal") working = applyRemovalEffect(working, entry.seatId, entry.card.name, entry.card, removal);
+      }
+      for (const trigger of findCommonTriggersForPermanentEntered(working, entry.seatId, entry.card)) working = resolveTriggerEffect(working, trigger);
+    }
+  }
+  return working.pendingEntries?.length ? { ...working, pendingEntries: undefined } : working;
+}
+
 function applyMainPhaseAction(
   session: GameSession,
   seatId: string,
@@ -632,7 +673,7 @@ function applyMainPhaseAction(
 
   if (action.actionType === "play_land" && action.cardId) {
     const next = playCardFromZone(session, seatId, action.cardId, `${seat.name} plays a land.`, undefined, "battlefield", [], "hand", action.faceIndex);
-    return { session: next, changed: next !== session };
+    return { session: next === session ? next : queueEntry(next, seatId, action.cardId), changed: next !== session };
   }
 
   if (action.actionType === "cast_commander" && action.cardId) {
@@ -654,7 +695,7 @@ function applyMainPhaseAction(
         spellEffectCardName: commander.name
       };
     }
-    return { session: next, manaPayment: { seatId, sourceIds: payment.sourceIds, totalCost }, changed: next !== session };
+    return { session: next === session || destination !== "battlefield" ? next : queueEntry(next, seatId, commander.id), manaPayment: { seatId, sourceIds: payment.sourceIds, totalCost }, changed: next !== session };
   }
 
   if (action.actionType === "cast_spell" && action.cardId) {
@@ -701,7 +742,7 @@ function applyMainPhaseAction(
     }
     // Giada, Font of Hope-style "each other Angel you control enters with an additional +1/+1 counter".
     const withReplacementCounters = destination === "battlefield" && next !== session ? applyEntersWithCounterReplacements(next, seatId, card.id) : next;
-    return { session: withReplacementCounters, manaPayment: { seatId, sourceIds: payment.sourceIds, totalCost }, changed: next !== session };
+    return { session: destination === "battlefield" && next !== session ? queueEntry(withReplacementCounters, seatId, card.id) : withReplacementCounters, manaPayment: { seatId, sourceIds: payment.sourceIds, totalCost }, changed: next !== session };
   }
 
   // pass_priority / end_turn / anything unrecognized: no session change, handled by the caller
@@ -746,7 +787,7 @@ async function runMainPhase(
     if (applied.spellEffectMatched !== undefined && applied.spellEffectCardName !== undefined) {
       recordSpellCoverage(applied.spellEffectMatched, applied.spellEffectCardName);
     }
-    session = runStateBasedActionsPass(applied.session).session;
+    session = runStateBasedActionsPass(drainEntryTriggers(applied.session)).session;
     afterAction(prev, session, {
       seatId,
       turn: session.turn,
