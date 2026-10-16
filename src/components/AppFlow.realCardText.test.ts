@@ -3460,3 +3460,26 @@ describe("The Misty Mountains Cold chapters (real Oracle text)", () => {
     expect(after.some((c) => c.id === "mm")).toBe(false);
   });
 });
+
+describe("Return of the Wildspeaker", () => {
+  it("offers both modes, and each applies (draw = greatest non-Human power; pump skips Humans)", async () => {
+    const { applyGenericModalEffect, parseGenericModalEffect } = await import("./AppFlow");
+    const spell = real("Return of the Wildspeaker", "rw", { zone: "hand" as const });
+    const modal = parseGenericModalEffect(spell.oracleText, undefined)!;
+    expect(modal.chooseCount).toBe(1);
+    expect(modal.modes).toHaveLength(2);
+    const prompt = nextCastPrompt(session([seat("a", [bear("x")]), seat("b", [])]), "a", spell, undefined, { targets: [] } as CastChoices);
+    expect(prompt?.kind).toBe("modes");
+    const human = bear("human", { typeLine: "Creature — Human Soldier", power: "9", toughness: "9" } as Partial<VisibleCard>);
+    const wolf = bear("wolf", { typeLine: "Creature — Wolf", power: "3", toughness: "3" } as Partial<VisibleCard>);
+    const s = session([seat("a", [human, wolf]), seat("b", [])]);
+    s.seats[0].library = [bear("l1"), bear("l2"), bear("l3"), bear("l4")];
+    s.seats[0].zones = { ...s.seats[0].zones, library: 4 };
+    const drawn = applyGenericModalEffect(s, "a", spell, modal, undefined, 0);
+    expect(drawn.seats[0].board.hand.length).toBe(3);
+    const pumped = applyGenericModalEffect(s, "a", spell, modal, undefined, 1);
+    const bf = pumped.seats[0].board.battlefield;
+    expect(bf.find((c) => c.id === "wolf")?.temporaryPowerBonus).toBe(3);
+    expect(bf.find((c) => c.id === "human")?.temporaryPowerBonus ?? 0).toBe(0);
+  });
+});

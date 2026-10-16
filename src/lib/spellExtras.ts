@@ -29,10 +29,11 @@ export type SpellExtraEffect =
   // "All creatures get -1/-1 until end of turn for each Swamp you control." (Mutilate) and
   // "Until end of turn, creatures you control gain trample and get +X/+X, where X is the greatest
   // power among creatures you control." (Overwhelming Stampede)
-  | { kind: "pump_dynamic"; scope: "all" | "controlled"; sign: 1 | -1; basis: PumpBasis; grantsTrample: boolean }
+  | { kind: "pump_dynamic"; scope: "all" | "controlled"; sign: 1 | -1; basis: PumpBasis; grantsTrample: boolean; excludeSubtype?: string }
   // "Draw cards equal to the greatest power among creatures you control. You may cast a spell with
   // mana value 5 or less from your hand without paying its mana cost." (Rishkar's Expertise)
-  | { kind: "draw_greatest_power_then_free_cast"; freeCastMaxManaValue: number }
+  // excludeSubtype: "non-Human creatures you control" (Return of the Wildspeaker) counts only creatures without that subtype.
+  | { kind: "draw_greatest_power_then_free_cast"; freeCastMaxManaValue: number; excludeSubtype?: string }
   // "The owner of target permanent shuffles it into their library, then reveals the top card of
   // their library. If it's a permanent card, they put it onto the battlefield." (Chaos Warp)
   | { kind: "shuffle_permanent_reveal_top" }
@@ -143,10 +144,27 @@ export function parseSpellExtraEffects(text: string): SpellExtraEffect[] {
     if (basis) effects.push({ kind: "pump_dynamic", scope: "controlled", sign: xPump[2] === "-" ? -1 : 1, basis, grantsTrample: Boolean(xPump[1]) });
   }
 
-  const drawPower = normalized.match(/\bdraw cards equal to the greatest power among creatures you control\b/i);
+  // "Non-Human creatures you control get +3/+3 until end of turn." (Return of the Wildspeaker)
+  const nonTypePump = normalized.match(/^(?:[•*]\s*)?(?:until end of turn, )?non-([a-z]+) creatures you control get ([+-])(\d+)\/([+-])(\d+)(?: until end of turn)?\.?$/i);
+  if (nonTypePump && nonTypePump[2] === nonTypePump[4] && nonTypePump[3] === nonTypePump[5]) {
+    effects.push({
+      kind: "pump_dynamic",
+      scope: "controlled",
+      sign: nonTypePump[2] === "-" ? -1 : 1,
+      basis: { kind: "fixed", amount: Number.parseInt(nonTypePump[3], 10) },
+      grantsTrample: false,
+      excludeSubtype: nonTypePump[1].toLowerCase()
+    });
+  }
+
+  const drawPower = normalized.match(/\bdraw cards equal to the greatest power among (?:non-([a-z]+) )?creatures you control\b/i);
   if (drawPower) {
     const freeCast = normalized.match(/\byou may cast a spell with mana value (\d+) or less from your hand without paying its mana cost\b/i);
-    effects.push({ kind: "draw_greatest_power_then_free_cast", freeCastMaxManaValue: freeCast ? Number.parseInt(freeCast[1], 10) : -1 });
+    effects.push({
+      kind: "draw_greatest_power_then_free_cast",
+      freeCastMaxManaValue: freeCast ? Number.parseInt(freeCast[1], 10) : -1,
+      ...(drawPower[1] ? { excludeSubtype: drawPower[1].toLowerCase() } : {})
+    });
   }
 
   if (/\bthe owner of target permanent shuffles it into their library, then reveals the top card of their library\. if it'?s a permanent card, they put it onto the battlefield\b/i.test(normalized)) {

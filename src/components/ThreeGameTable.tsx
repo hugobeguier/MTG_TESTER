@@ -4019,11 +4019,15 @@ function rebuildDynamicScene(
   // creature) — a per-seat map can't see across seats.
   const isTuckedAttachment = (card: VisibleCard) => (isEquipment(card) || isAura(card)) && Boolean(card.attachedToId);
   const resolvedBattlefieldPositions = new Map<string, { x: number; z: number }>();
+  // Facing (the host's seat rotation) and tapped state of each host, so an attachment sits the same way up as what it's on —
+  // an Aura on an opponent's creature used to render upside down (controller's rotation, not the host's).
+  const hostOrientation = new Map<string, { rot: number; tapped: boolean }>();
   session.seats.forEach((seat, seatIndex) => {
     const seatArea = PLAYER_AREAS[seatIndex] ?? PLAYER_AREAS[0];
     for (const card of seat.board.battlefield) {
       if (isTuckedAttachment(card)) continue;
       resolvedBattlefieldPositions.set(card.id, card.battlefieldPosition ?? defaultBattlefieldPosition(seatArea, card, seat.board.battlefield));
+      hostOrientation.set(card.id, { rot: seatArea.rot, tapped: Boolean(card.tapped) });
     }
   });
 
@@ -4074,7 +4078,8 @@ function rebuildDynamicScene(
         const point = targetPoint
           ? { x: targetPoint.x + (isAura(card) ? -0.15 - siblingIndex * 0.12 : 0.15 + siblingIndex * 0.12), z: targetPoint.z + 0.14 }
           : card.battlefieldPosition ?? defaultBattlefieldPosition(area, card, seat.board.battlefield);
-        addCard(group, card, seat.id, "battlefield", point.x, point.z, area.rot, selectedCardId, cardMeshesRef);
+        const host = card.attachedToId ? hostOrientation.get(card.attachedToId) : undefined;
+        addCard(group, card, seat.id, "battlefield", point.x, point.z, host?.rot ?? area.rot, selectedCardId, cardMeshesRef, host?.tapped);
       });
     });
 
@@ -4244,7 +4249,8 @@ function addCard(
   z: number,
   rot: number,
   selectedCardId: string | undefined,
-  cardMeshesRef: MutableRefObject<THREE.Object3D[]>
+  cardMeshesRef: MutableRefObject<THREE.Object3D[]>,
+  tappedOverride?: boolean
 ) {
   const texture = makeCardTexture(card, selectedCardId === card.id);
   const material = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide });
@@ -4254,7 +4260,7 @@ function addCard(
     applyImageTexture(imageUrls, material);
   }
   mesh.rotation.x = -Math.PI / 2;
-  mesh.rotation.z = rot + (card.tapped ? Math.PI / 2 : 0);
+  mesh.rotation.z = rot + ((tappedOverride ?? card.tapped) ? Math.PI / 2 : 0);
   mesh.position.set(x, 0.08, z);
   mesh.userData = { kind: "card", card, seatId, location } satisfies CardUserData;
   group.add(mesh);

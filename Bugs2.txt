@@ -1,1 +1,2 @@
-1. The Misty Mountains Cold triggers twice and creates 2 6/6 dragons and two treasures that is incorrect
+1. Return of the Wildspeaker did not let me choose one of the two choices
+2. look at the deer.jpg it entered -180 degrees I would like to have it facing the same way the permanent it is attached to. 

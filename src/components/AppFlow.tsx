@@ -16844,8 +16844,14 @@ function rulesEvent(session: GameSession, seatId: string, message: string): Game
   return { ...session, events: [{ id: crypto.randomUUID(), at: new Date().toISOString(), seatId, message, detail: "Rules action" }, ...session.events] };
 }
 
-function greatestCreaturePower(seat: PlayerSeat | undefined): number {
-  const powers = (seat?.board.battlefield ?? []).filter((card) => card.typeLine.includes("Creature")).map((card) => effectivePower(card));
+function hasCreatureSubtype(card: VisibleCard, subtype: string): boolean {
+  return new RegExp(`\\b${subtype}\\b`, "i").test(card.typeLine.split("—")[1] ?? "");
+}
+
+function greatestCreaturePower(seat: PlayerSeat | undefined, excludeSubtype?: string): number {
+  const powers = (seat?.board.battlefield ?? [])
+    .filter((card) => card.typeLine.includes("Creature") && !(excludeSubtype && hasCreatureSubtype(card, excludeSubtype)))
+    .map((card) => effectivePower(card));
   return powers.length > 0 ? Math.max(0, ...powers) : 0;
 }
 
@@ -17370,6 +17376,7 @@ export function applySpellExtraEffect(session: GameSession, casterSeatId: string
             ...seat.board,
             battlefield: seat.board.battlefield.map((card) => {
               if (!card.typeLine.includes("Creature")) return card;
+              if (effect.excludeSubtype && hasCreatureSubtype(card, effect.excludeSubtype)) return card;
               affected += 1;
               return {
                 ...card,
@@ -17392,7 +17399,7 @@ export function applySpellExtraEffect(session: GameSession, casterSeatId: string
     }
 
     case "draw_greatest_power_then_free_cast": {
-      const count = greatestCreaturePower(caster);
+      const count = greatestCreaturePower(caster, effect.excludeSubtype);
       let next = drawMultipleForSeat(session, casterSeatId, count, `${caster.name} draws ${count} card${count === 1 ? "" : "s"} from ${sourceName}.`);
       if (effect.freeCastMaxManaValue < 0) return next;
       // "You may cast a spell ... without paying its mana cost." There's no free-cast pipeline for a
