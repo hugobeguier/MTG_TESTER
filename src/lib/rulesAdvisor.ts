@@ -69,6 +69,10 @@ export const RuleWorkflowSchema = z.object({
   // silently, the same gap noted on getUrzaSagaChapterThreeOptions before this existed ("the generic
   // choose_card_from_library picker has no enforced type/cost restriction").
   manaValueRestriction: z.object({ op: z.enum(["lte", "eq", "gte"]), value: z.number().int().min(0) }).optional(),
+  // search_library_to_battlefield only: "any number of creature cards with total mana value 6 or less"
+  // (Protean Hulk) — any number of finds whose mana values SUM to at most this, unlike manaValueRestriction
+  // above (a per-card limit).
+  totalManaValueLimit: z.number().int().min(0).optional(),
   // look_at_top_cards_reveal_type_to_hand only: where the cards NOT taken to hand go. Undefined
   // means the bottom of the library (Growing Rites of Itlimoc's own template, and the pre-existing
   // default every consumer already assumed); "graveyard" is Grisly Salvage's real destination for
@@ -174,6 +178,8 @@ export function deterministicRuleWorkflow(input: RuleAdvisorInput): RuleWorkflow
       summary: `${input.sourceCard.name} instructs ${input.actorName} to scry ${scryCount}.`,
       sourceCardId: input.sourceCard.id,
       maxChoices: scryCount,
+      // "Scry 2, then draw two cards." (Read the Bones): the draw follows the scry.
+      drawCountAfter: /\bscry \w+,? then draw\b/.test(scopedText) ? extractDrawCount(scopedText) : undefined,
       requiresHumanChoice: true,
       warnings: []
     };
@@ -416,6 +422,27 @@ export function deterministicRuleWorkflow(input: RuleAdvisorInput): RuleWorkflow
       manaValueRestriction: extractManaValueRestriction(scopedText),
       destination: "hand",
       destinationChoices: ["hand", "graveyard"],
+      requiresHumanChoice: true,
+      warnings: []
+    };
+  }
+
+  // "Search your library for any number of creature cards with total mana value 6 or less, put them onto the
+  // battlefield, then shuffle." (Protean Hulk) — without this the generic branches below treated it as a
+  // one-card search of any type with a per-card limit.
+  const totalManaValueSearch = scopedText.match(
+    /\bsearch your library for any number of ([a-z][a-z' -]*?) cards? with total mana value (\d+) or less\b[^.]*\bonto the battlefield\b/
+  );
+  if (totalManaValueSearch) {
+    return {
+      workflow: "search_library_to_battlefield",
+      summary: `${input.sourceCard.name}: search your library for any number of ${totalManaValueSearch[1]} cards with total mana value ${totalManaValueSearch[2]} or less and put them onto the battlefield.`,
+      sourceCardId: input.sourceCard.id,
+      maxChoices: 20,
+      allowedCardFilter: totalManaValueSearch[1].trim(),
+      totalManaValueLimit: Number.parseInt(totalManaValueSearch[2], 10),
+      destination: "battlefield",
+      tapped: scopedText.includes("tapped"),
       requiresHumanChoice: true,
       warnings: []
     };

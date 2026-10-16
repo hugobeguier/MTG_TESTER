@@ -46,7 +46,7 @@
 //    vigilant, mark attacking, pay any attack tax) but NOT Klauth's mana trigger, Metalcraft attack
 //    debuffs, "whenever you attack a player" token creation, Breena's symmetric trigger, or
 //    annihilator's forced sacrifices — all of which stay entirely inside AppFlow.tsx.
-// 5. Saga chapter advancement is skipped, same as milestone 1's smoke test (advanceSagaLoreCounters
+// 5. (Now modeled headlessly via applySagaEntryLoreCounterHeadless/advanceSagaLoreCountersHeadless; chapters no deterministic parser owns do nothing.) Originally: Saga chapter advancement skipped (advanceSagaLoreCounters
 //    is still a nested, unhoistable AppFlow.tsx closure — see that milestone's report).
 // 6. Cleanup step's discard-to-hand-size isn't modeled (no UI/brain hook for "which cards to
 //    discard" exists in headless mode yet).
@@ -62,7 +62,9 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import {
   adjustedCastingCost,
+  advanceSagaLoreCountersHeadless,
   applyDeckToSeat,
+  applySagaEntryLoreCounterHeadless,
   applyGenericModalEffect,
   applyLivingDeathEffect,
   applyMassBounceEffect,
@@ -74,8 +76,14 @@ import {
   applyRemovalEffect,
   applySimpleLifeChange,
   applyTargetedPumpEffect,
+  applyBraidsEndStep,
   applyZoneEffect,
   assignBlockers,
+  findCommonTriggersForPermanentDied,
+  findSacrificeWatcherTriggers,
+  isBraidsEndStepText,
+  moveLibraryCardToDestination,
+  searchableLibraryCards,
   cleanupCombat,
   chooseManaSourcesForCost,
   commonTriggerEffect,
@@ -129,6 +137,7 @@ import {
   withOpeningHand,
   type LegalAgentAction
 } from "@/components/AppFlow";
+import { deterministicRuleWorkflow } from "@/lib/rulesAdvisor";
 import { parseSearchLibraryEffectText, type SearchLibraryEffect } from "@/lib/activatedAbilities";
 import { loadCardCatalog, lookupCard } from "@/lib/cardCatalog";
 import { createDeckFromList } from "@/lib/deckParser";
@@ -623,12 +632,52 @@ export function applySearchLibraryEffect(session: GameSession, casterSeatId: str
   };
 }
 
+// Headless stand-in for AppFlow.tsx's pendingDeaths useEffect: "whenever a creature dies" watchers (Blood Artist, Grim Haruspex, Syr Konrad,
+// Massacre Wurm), "whenever a player sacrifices another permanent" (Mazirek), undying, and a dying creature's own search-the-library clause
+// (Protean Hulk: any number of creatures with total mana value 6 or less, taken greedily). Bounded like drainEntryTriggers.
+export function drainDeathTriggers(session: GameSession): GameSession {
+  let working = session;
+  for (let round = 0; round < MAX_ENTRY_DRAIN_ROUNDS; round += 1) {
+    const deaths = working.pendingDeaths;
+    if (!deaths || deaths.length === 0) break;
+    working = { ...working, pendingDeaths: undefined };
+    const triggers = [
+      ...deaths.flatMap((death) => findCommonTriggersForPermanentDied(working, death.seatId, death.card, death.attachedSourceIds, deaths)),
+      ...findSacrificeWatcherTriggers(working, deaths)
+    ];
+    for (const trigger of triggers) working = resolveTriggerEffect(working, trigger);
+    for (const death of deaths) {
+      if (!death.card.typeLine.includes("Creature") || commonTriggerEffect(death.card.oracleText, "died") !== undefined) continue;
+      const seat = working.seats.find((item) => item.id === death.seatId);
+      if (!seat) continue;
+      const workflow = deterministicRuleWorkflow({
+        event: "card_moved_to_graveyard", actorName: seat.name, sourceCard: death.card, battlefield: [], hand: [], graveyard: [], exile: [], libraryPreview: []
+      });
+      if (workflow?.workflow !== "search_library_to_battlefield" || workflow.totalManaValueLimit === undefined) continue;
+      let remaining = workflow.totalManaValueLimit;
+      const taken: string[] = [];
+      for (let pick = 0; pick < workflow.maxChoices; pick += 1) {
+        const library = (working.seats.find((item) => item.id === death.seatId)?.library ?? []).filter((card) => !taken.includes(card.id));
+        const fits = searchableLibraryCards(library, { allowedCardFilter: workflow.allowedCardFilter, remainingTotalManaValue: remaining });
+        const best = fits.reduce<VisibleCard | undefined>((top, card) => (!top || card.manaValue > top.manaValue ? card : top), undefined);
+        if (!best) break;
+        taken.push(best.id);
+        remaining -= best.manaValue;
+        working = moveLibraryCardToDestination(working, death.seatId, best.id, "battlefield", Boolean(workflow.tapped));
+      }
+      working = { ...working, seats: working.seats.map((item) => (item.id === death.seatId ? { ...item, library: shuffleCards(item.library ?? []) } : item)) };
+    }
+    working = drainEntryTriggers(working);
+  }
+  return working.pendingDeaths?.length ? { ...working, pendingDeaths: undefined } : working;
+}
+
 // Headless stand-in for AppFlow.tsx's pendingEntries useEffect (~L2074): that effect is React-bound, but everything
 // it calls to RESOLVE an entry is a pure exported function, so this runs the same pieces synchronously — a permanent's
 // own zone-effect ETB (Eternal Witness), its removal ETB (Ravenous Chupacabra), and every common "enters" trigger on the
 // board (its own, plus landfall / "whenever a creature enters" watchers) via findCommonTriggersForPermanentEntered +
 // resolveTriggerEffect. Optional triggers are always accepted and choices use the pure resolver's agent auto-pick, the same
-// policy the live game applies to AI seats. NOT modeled: Saga chapter I (gap #5), the rules-advisor fallback for ETB text no
+// policy the live game applies to AI seats. NOT modeled: the rules-advisor fallback for ETB text no
 // deterministic parser owns, and human-only prompts. Bounded, because a trigger can itself create entries.
 const MAX_ENTRY_DRAIN_ROUNDS = 12;
 
@@ -649,6 +698,7 @@ export function drainEntryTriggers(session: GameSession): GameSession {
       const controller = working.seats.find((seat) => seat.id === entry.seatId);
       const etbText = etbEffectText(entry.card.oracleText);
       const zoneEffect = parseZoneEffect(etbText);
+      working = applySagaEntryLoreCounterHeadless(working, entry.seatId, entry.card.id); // no-op unless a Saga with no lore counter yet
       if (zoneEffect) {
         working = applyZoneEffect(working, entry.seatId, entry.card.name, zoneEffect);
         continue;
@@ -1019,7 +1069,7 @@ export async function playGame(session: GameSession, brains: Record<string, Brai
           }
           case "draw step": {
             const prev = session;
-            session = drawForSeat(session, activeSeat.id, `${activeSeat.name} draws for turn.`);
+            session = advanceSagaLoreCountersHeadless(drawForSeat(session, activeSeat.id, `${activeSeat.name} draws for turn.`), activeSeat.id);
             session = runStateBasedActionsPass(session).session;
             afterAction(prev, session, { seatId: activeSeat.id, turn: session.turn, phase, actionType: "phase:draw" });
             break;
@@ -1027,6 +1077,7 @@ export async function playGame(session: GameSession, brains: Record<string, Brai
           case "precombat main phase":
           case "postcombat main phase": {
             session = await runMainPhase(session, activeSeat.id, brains[activeSeat.id], landPlaysThisTurn, recordDecision, afterAction, recordSpellCoverage);
+            session = drainDeathTriggers(session);
             break;
           }
           case "beginning of combat step":
@@ -1043,6 +1094,7 @@ export async function playGame(session: GameSession, brains: Record<string, Brai
             const prev = session;
             session = resolveCombatDamage(session, activeSeat.id);
             session = runStateBasedActionsPass(session).session;
+            session = drainDeathTriggers(session);
             afterAction(prev, session, { seatId: activeSeat.id, turn: session.turn, phase, actionType: "phase:combat_damage" });
             break;
           }
@@ -1052,7 +1104,17 @@ export async function playGame(session: GameSession, brains: Record<string, Brai
             afterAction(prev, session, { seatId: activeSeat.id, turn: session.turn, phase, actionType: "phase:end_of_combat" });
             break;
           }
-          case "end step":
+          case "end step": {
+            // Braids, Arisen Nightmare (the agent policy lives in applyBraidsEndStep).
+            const prev = session;
+            for (const source of activeSeat.board.battlefield) {
+              const live = session.seats.find((seat) => seat.id === activeSeat.id)?.board.battlefield.find((card) => card.id === source.id);
+              if (live && !live.abilitiesStripped && isBraidsEndStepText(live.oracleText)) session = applyBraidsEndStep(session, activeSeat.id, live);
+            }
+            session = drainDeathTriggers(session);
+            if (session !== prev) afterAction(prev, session, { seatId: activeSeat.id, turn: session.turn, phase, actionType: "phase:end_step" });
+            break;
+          }
           case "cleanup step":
             break;
         }

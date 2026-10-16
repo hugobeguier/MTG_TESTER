@@ -143,6 +143,8 @@ export interface PlayerSeat {
   name: string;
   // How many cards this player has drawn so far in the given turn (Heliod, the Warped Eclipse counts what opponents drew).
   drawnThisTurn?: { turn: number; count: number };
+  // True once this player has created a token this turn (Idol of Oblivion's "activate only if you created a token this turn"); cleared when the turn changes.
+  createdTokenThisTurn?: boolean;
   kind: SeatKind;
   agentName?: AgentName;
   life: number;
@@ -455,7 +457,8 @@ export interface GameSession {
   // died, captured before the same state-based-action pass clears their attachedToId (since the
   // creature is already gone from the battlefield by then) — "whenever equipped/enchanted creature
   // dies" triggers need this snapshot rather than the (by-then-cleared) live attachedToId.
-  pendingDeaths?: Array<{ seatId: string; card: VisibleCard; attachedSourceIds?: string[] }>;
+  // sacrificed: this permanent was sacrificed (not destroyed) — "whenever a player sacrifices another permanent" watchers (Mazirek) read it.
+  pendingDeaths?: Array<{ seatId: string; card: VisibleCard; attachedSourceIds?: string[]; sacrificed?: boolean }>;
   // Same idea as pendingDeaths, for a permanent that enters the battlefield WITHOUT going through
   // spell-cast resolution (which already queues its own ETB triggers directly) — reanimation
   // (moveCardAcrossSeats), and a search/tutor landing on the battlefield (moveLibraryCardToDestination)
@@ -505,6 +508,20 @@ export interface GameSession {
   // Punisher effects ("loses N life unless that player sacrifices a nonland permanent or discards a card", repeated): a human victim chooses
   // each time; the resolver records the remaining repetitions here.
   pendingPunisherChoices?: Array<{ seatId: string; sourceName: string; lifeAmount: number; times: number }>;
+  // Braids, Arisen Nightmare's end-step trigger, one question per human who must answer, drained by a component effect: the
+  // controller's "you may sacrifice a permanent" (stage "controller"), then each human opponent's "you may sacrifice a permanent
+  // that shares a card type, or lose 2 life and let Braids' controller draw" (stage "opponent").
+  // Rishkar's Expertise: a free cast of a hand card with mana value <= maxManaValue, offered to seatId once the spell has resolved.
+  pendingFreeCastChoices?: Array<{ seatId: string; sourceName: string; maxManaValue: number }>;
+  pendingBraidsChoices?: Array<{
+    stage: "controller" | "opponent";
+    seatId: string;
+    braidsSeatId: string;
+    sourceName: string;
+    sourceCardId: string;
+    typeFilter?: string;
+    remainingOpponentIds?: string[];
+  }>;
   // Initiative (rule 725): the player who has it ventures into the Undercity at each of their upkeeps; combat damage to them takes it.
   initiativeSeatId?: string;
   // Each player's progress through the Undercity: the room they are in (the last room means it was completed and the next venture starts over).

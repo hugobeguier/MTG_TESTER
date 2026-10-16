@@ -97,7 +97,7 @@ interface ThreeGameTableProps {
   onShuffleLibrary?: (seatId: string) => void;
   onOpenLibrarySearch?: () => void;
   onCloseLibrarySearch?: () => void;
-  onSearchLibraryCardToHand?: (cardId: string, destination?: "hand" | "graveyard") => void;
+  onSearchLibraryCardToHand?: (cardId: string, destination?: "hand" | "graveyard" | "battlefield") => void;
   onFinishLibrarySearch?: () => void;
   onChooseGraveyardReanimationTarget?: (seatId: string, cardId: string) => void;
   onChooseSacrificeCostTarget?: (seatId: string, cardId: string) => void;
@@ -232,7 +232,7 @@ type RuleChoiceView =
       // "... put it into your hand or graveyard, then shuffle." (Dina's Guidance) — when set,
       // LibrarySearchModal offers one action button per zone listed here instead of a single
       // destination-based button, and onChoose is called with whichever the controller picked.
-      destinationChoices?: Array<"hand" | "graveyard">;
+      destinationChoices?: Array<"hand" | "graveyard" | "battlefield">;
       allowedCardFilter?: string;
       // "Up to N"/"N" (Archaeomancer's Map's "up to two basic Plains cards," ...) — cards above
       // already excludes anything counted in chosenCount, so LibrarySearchModal can show "X of Y
@@ -612,6 +612,9 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
   const [actionLogOpen, setActionLogOpen] = useState(false);
   const [actionLogPosition, setActionLogPosition] = useState({ x: 400, y: 144 });
   const [priorityStopsOpen, setPriorityStopsOpen] = useState(false);
+  // Enlarged read-only preview of the hand card under the mouse (own hand and observer-view agent hands);
+  // clicking still opens the full inspector.
+  const [hoverPreviewCard, setHoverPreviewCard] = useState<VisibleCard | undefined>();
   // Now that most priority windows auto-pass instead of stopping the human (see priorityStops.ts),
   // props.pendingAction often goes from set to undefined within the same tick an agent's decision
   // resolves — the stack HUD below used to key directly off props.pendingAction, so a spell an agent
@@ -1361,6 +1364,8 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
                   key={card.id}
                   title={`${card.name}\n${card.typeLine}\n${card.oracleText}`}
                   onClick={() => props.onInspectCard?.(card)}
+                  onMouseEnter={() => setHoverPreviewCard(card)}
+                  onMouseLeave={() => setHoverPreviewCard((current) => (current?.id === card.id ? undefined : current))}
                 >
                   {card.imageUris?.normal ? <img src={card.imageUris.normal} alt="" draggable={false} /> : <FallbackHandCard card={card} />}
                 </article>
@@ -1963,6 +1968,15 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
           onToggleStopOnTargeted={props.onToggleStopOnTargeted}
         />
       ) : null}
+      {hoverPreviewCard && !props.inspectedCard ? (
+        <div className="hand-hover-preview" aria-hidden="true">
+          {hoverPreviewCard.imageUris?.large || hoverPreviewCard.imageUris?.normal ? (
+            <img src={hoverPreviewCard.imageUris.large ?? hoverPreviewCard.imageUris.normal} alt="" draggable={false} />
+          ) : (
+            <FallbackHandCard card={hoverPreviewCard} />
+          )}
+        </div>
+      ) : null}
       <div className="three-hand-panel" aria-label="Your hand">
         <div className="three-zone-strip">
           <div className="three-hand-heading">
@@ -1983,8 +1997,13 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
                   props.onInspectCard?.(card);
                   props.onSelectHandCard?.(card);
                 }}
-                onDragStart={(event) => onCardDragStart(event, card, "hand")}
+                onDragStart={(event) => {
+                  setHoverPreviewCard(undefined);
+                  onCardDragStart(event, card, "hand");
+                }}
                 onDragEnd={onCardDragEnd}
+                onMouseEnter={() => setHoverPreviewCard(card)}
+                onMouseLeave={() => setHoverPreviewCard((current) => (current?.id === card.id ? undefined : current))}
                 title={`${card.name}\n${card.typeLine}\n${card.oracleText}`}
               >
                 {card.imageUris?.normal ? <img src={card.imageUris.normal} alt="" draggable={false} /> : <FallbackHandCard card={card} />}
@@ -2488,14 +2507,14 @@ function LibrarySearchModal({
   destination: "hand" | "battlefield" | "graveyard" | "library";
   // "... put it into your hand or graveyard, then shuffle." (Dina's Guidance) — when set, each card
   // gets one action button per listed zone instead of a single destination-based button.
-  destinationChoices?: Array<"hand" | "graveyard">;
+  destinationChoices?: Array<"hand" | "graveyard" | "battlefield">;
   prompt?: string;
   sourceCardName?: string;
   allowedCardFilter?: string;
   maxChoices?: number;
   chosenCount?: number;
   onClose?: () => void;
-  onChoose?: (cardId: string, destination?: "hand" | "graveyard") => void;
+  onChoose?: (cardId: string, destination?: "hand" | "graveyard" | "battlefield") => void;
   onFinish?: () => void;
 }) {
   const [query, setQuery] = useState("");
@@ -2543,7 +2562,7 @@ function LibrarySearchModal({
                 <div className="library-search-destination-choices">
                   {destinationChoices.map((choice) => (
                     <button key={choice} type="button" onClick={() => onChoose?.(card.id, choice)}>
-                      {choice === "graveyard" ? "To Graveyard" : "To Hand"}
+                      {choice === "graveyard" ? "To Graveyard" : choice === "battlefield" ? "To Battlefield" : "To Hand"}
                     </button>
                   ))}
                 </div>

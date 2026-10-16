@@ -2240,3 +2240,26 @@ ol {
     grid-template-columns: 1fr;
   }
 }
+
+/* Enlarged hover preview of a hand card (own or observed agent hand); never intercepts the mouse so it can't
+   cause enter/leave flicker on the card underneath. */
+.hand-hover-preview {
+  aspect-ratio: 488 / 680;
+  border-radius: 14px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.7);
+  left: 16px;
+  overflow: hidden;
+  pointer-events: none;
+  position: fixed;
+  top: 50%;
+  transform: translateY(-50%);
+  width: min(340px, 28vw);
+  z-index: 60;
+}
+
+.hand-hover-preview img {
+  display: block;
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}

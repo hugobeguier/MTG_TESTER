@@ -50,6 +50,9 @@ export type SpellExtraEffect =
   | { kind: "gain_life_per_creature"; perCreature: number; minPower: number }
   // "Target permanent you control gains hexproof and indestructible until end of turn." (Tamiyo's Safekeeping)
   | { kind: "grant_keywords"; keywords: string[] }
+  // "Permanents you control gain hexproof and indestructible until end of turn." (Heroic Intervention) — every permanent
+  // the caster controls, no target to choose.
+  | { kind: "grant_keywords_all_permanents"; keywords: string[] }
   // "Each other player sacrifices a creature of their choice. You create a 2/2 black Zombie creature token for
   // each creature sacrificed this way." (Syphon Flesh) — tokenClause is "create a 2/2 ... token".
   | { kind: "each_other_player_sacrifices"; tokenClause?: string }
@@ -187,6 +190,8 @@ export function parseSpellExtraEffects(text: string): SpellExtraEffect[] {
 
   const permanentGrant = normalized.match(/\btarget permanent you control gains ([a-z]+(?: and [a-z]+)?) until end of turn\b/i);
   if (permanentGrant) effects.push({ kind: "grant_keywords", keywords: permanentGrant[1].toLowerCase().split(" and ") });
+  const allPermanentsGrant = normalized.match(/\bpermanents you control gain ([a-z]+(?: and [a-z]+)?) until end of turn\b/i);
+  if (allPermanentsGrant) effects.push({ kind: "grant_keywords_all_permanents", keywords: allPermanentsGrant[1].toLowerCase().split(" and ") });
 
   if (/\beach other player sacrifices (?:a|one) creature of their choice\b/i.test(normalized)) {
     const perSacrifice = normalized.match(/\b(create [^.]+?) for each creature sacrificed this way\b/i);

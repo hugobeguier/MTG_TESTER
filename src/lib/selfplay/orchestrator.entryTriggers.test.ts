@@ -1,6 +1,7 @@
 // drainEntryTriggers is the headless stand-in for AppFlow.tsx's pendingEntries effect: a permanent that just entered
 // (cast, land drop, token, reanimated, fetched) must fire its own enters trigger and the board's watchers.
 import { describe, expect, it } from "vitest";
+import { advanceSagaLoreCountersHeadless } from "@/components/AppFlow";
 import { drainEntryTriggers } from "./orchestrator";
 import type { GameSession, PlayerSeat, VisibleCard } from "@/lib/types";
 
@@ -51,5 +52,28 @@ describe("drainEntryTriggers", () => {
     const priest = permanent("c", "Test Priest", "Creature — Cleric", "When this creature enters, you gain 3 life.");
     const after = drainEntryTriggers(sessionWith([], priest));
     expect(after.seats[0].life).toBe(40);
+  });
+});
+
+describe("Sagas in the simulator", () => {
+  const sagaText = "(As this Saga enters and after your draw step, add a lore counter. Sacrifice after III.)\nI — You gain 2 life.\nII — You gain 3 life.\nIII — You gain 4 life.";
+
+  it("chapter I fires when the Saga enters, and each later draw step advances it until it is sacrificed", () => {
+    const saga = permanent("s", "Test Saga", "Enchantment — Saga", sagaText);
+    let s = drainEntryTriggers(sessionWith([saga], saga));
+    expect(s.seats[0].life).toBe(42);
+    expect(s.seats[0].board.battlefield[0].counters?.find((c) => c.kind === "lore")?.count).toBe(1);
+    s = advanceSagaLoreCountersHeadless(s, "p");
+    expect(s.seats[0].life).toBe(45);
+    s = advanceSagaLoreCountersHeadless(s, "p");
+    expect(s.seats[0].life).toBe(49);
+    expect(s.seats[0].board.battlefield.some((c) => c.id === "s")).toBe(false);
+  });
+
+  it("does not fire chapter I a second time for a Saga that already has a lore counter", () => {
+    const saga = permanent("s", "Test Saga", "Enchantment — Saga", sagaText);
+    const once = drainEntryTriggers(sessionWith([saga], saga));
+    const again = drainEntryTriggers({ ...once, pendingEntries: [{ seatId: "p", card: once.seats[0].board.battlefield[0] }] });
+    expect(again.seats[0].life).toBe(42);
   });
 });

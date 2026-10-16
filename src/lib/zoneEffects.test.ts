@@ -6,7 +6,8 @@ describe("parseZoneEffect — reanimate", () => {
     expect(parseZoneEffect("Put target creature card from a graveyard onto the battlefield under your control. You lose life equal to that card's mana value.")).toEqual({
       kind: "reanimate",
       anyGraveyard: true,
-      targetType: "creature"
+      targetType: "creature",
+      loseLifeEqualToManaValue: true
     });
   });
 

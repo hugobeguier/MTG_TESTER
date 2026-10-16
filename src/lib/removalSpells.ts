@@ -12,6 +12,8 @@ export type RemovalTargetType =
   | "creature_or_enchantment"
   | "artifact_creature_or_planeswalker"
   | "artifact_or_enchantment"
+  | "artifact_or_creature"
+  | "artifact_enchantment_or_land"
   | "artifact"
   | "enchantment"
   | "permanent"
@@ -33,6 +35,8 @@ export interface DestroyEffect {
   controllerInvestigates?: boolean;
   // "Destroy target creature with toughness 4 or greater." (Destroy Evil) — a legal target needs at least this much toughness.
   minToughness?: number;
+  // "Destroy target creature an opponent controls." (Ravenous Chupacabra) / "... you don't control" — only other players' permanents may be targeted.
+  opponentOnly?: boolean;
 }
 
 // "Destroy up to X target artifacts and/or enchantments." (Pest Infestation) — a variable, MULTI-
@@ -195,6 +199,11 @@ export type RemovalEffect =
 const QUALIFIER = "(?:non\\w+[,\\s]*)*";
 const TARGET_TYPE_PATTERNS: Array<{ pattern: RegExp; type: RemovalTargetType }> = [
   { pattern: new RegExp(`target ${QUALIFIER}artifact, creature, or planeswalker`), type: "artifact_creature_or_planeswalker" },
+  // Acidic Slime: "Destroy target artifact, enchantment, or land." — checked before the plain "artifact"
+  // pattern, which would otherwise read only the first word and leave enchantments and lands untargetable.
+  { pattern: new RegExp(`target ${QUALIFIER}artifact, ${QUALIFIER}enchantment, or ${QUALIFIER}land\\b`), type: "artifact_enchantment_or_land" },
+  // Putrefy: "Destroy target artifact or creature." — same reasoning; without this the creature half was dropped.
+  { pattern: new RegExp(`target ${QUALIFIER}artifact or ${QUALIFIER}creature\\b`), type: "artifact_or_creature" },
   { pattern: new RegExp(`target ${QUALIFIER}creature or planeswalker`), type: "creature_or_planeswalker" },
   // Withering Torment: "Destroy target creature or enchantment." — checked before the plain "creature" pattern,
   // which would otherwise match its "target creature" prefix and silently drop the enchantment half.
@@ -285,6 +294,7 @@ function parseDestroy(text: string): DestroyEffect | DestroyAllEffect | DestroyA
     excludedColors: COLORS.filter((color) => clause.includes(`non${color}`)),
     artifactsExcluded: clause.includes("nonartifact"),
     basicsExcluded: clause.includes("nonbasic"),
+    ...(/\b(?:an opponent controls|you don'?t control|your opponents control)\b/.test(clause) ? { opponentOnly: true } : {}),
     ...(/\bits controller investigates\b/.test(text) ? { controllerInvestigates: true } : {}),
     ...(clause.match(/target creature with toughness (\d+) or greater/) ? { minToughness: Number.parseInt(clause.match(/target creature with toughness (\d+) or greater/)![1], 10) } : {})
   };
@@ -451,6 +461,10 @@ export function matchesTargetType(card: { typeLine: string; grantedTypes?: strin
       return has("Artifact") || has("Creature") || has("Planeswalker");
     case "artifact_or_enchantment":
       return has("Artifact") || has("Enchantment");
+    case "artifact_or_creature":
+      return has("Artifact") || has("Creature");
+    case "artifact_enchantment_or_land":
+      return has("Artifact") || has("Enchantment") || has("Land");
     case "artifact":
       return has("Artifact");
     case "enchantment":

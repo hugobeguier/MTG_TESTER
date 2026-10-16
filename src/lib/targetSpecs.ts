@@ -23,7 +23,7 @@ export function removalEffectTargetSpec(effect: RemovalEffect, sourceCardId: str
         id: "target",
         zone: "battlefield",
         permanentType: effect.targetType,
-        controller: "any",
+        controller: effect.opponentOnly ? "opponent" : "any",
         min: 1,
         max: 1,
         excludedCardIds: [sourceCardId],

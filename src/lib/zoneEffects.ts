@@ -24,6 +24,8 @@ export interface ReanimateEffect {
   manaValueCeiling?: "graveyard_permanent_count";
   // "If it's an Angel, put two +1/+1 counters on it." (Defy Death)
   counterIfType?: { typeWord: string; count: number };
+  // "You lose life equal to that card's mana value." (Reanimate)
+  loseLifeEqualToManaValue?: boolean;
 }
 
 export interface RegrowEffect {
@@ -245,6 +247,7 @@ export function parseZoneEffect(oracleText: string): ZoneEffect | undefined {
       kind: "reanimate",
       targetType: reanimate[1] as RegrowTargetType,
       anyGraveyard: reanimate[2] === "a",
+      ...(/\byou lose life equal to that card'?s mana value\b/.test(text) ? { loseLifeEqualToManaValue: true } : {}),
       ...(counterIf ? { counterIfType: { typeWord: counterIf[1], count: counts[counterIf[2]] ?? Number.parseInt(counterIf[2], 10) } } : {})
     };
   }

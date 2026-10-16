@@ -197,7 +197,7 @@ type TriggerEffect = (
   // "creatures your opponents control get -1/-1 until end of turn") — shares its shape with
   // spell-cast MassPumpEffect (see parseMassPump/applyMassPumpEffect) so the same application
   // logic is reused rather than duplicated.
-  | { kind: "mass_pump"; power: number; toughness: number; excludeType?: string; scope: "all" | "controlled" | "opponents"; matcher?: string; minPower?: number; grantsKeyword?: string }
+  | { kind: "mass_pump"; power: number; toughness: number; excludeType?: string; scope: "all" | "controlled" | "opponents"; matcher?: string; minPower?: number; grantsKeyword?: string; xFromCreatureCount?: boolean }
   // "This creature gets +1/+0 until end of turn." (Scourge of Valkas) — only the source itself.
   | { kind: "self_pump"; power: number; toughness: number }
   // Mind's Dilation-style "exile the top card of [that player]'s library. Until end of turn, you
@@ -387,6 +387,8 @@ type TriggerEffect = (
   | { kind: "punisher_prompt"; lifeAmount: number; remaining: number }
   // Discover: cast the found card for free, or put it into hand.
   | { kind: "discover_choice"; cardName: string }
+  // Rishkar's Expertise: which hand card (by id, in option order) to cast without paying its mana cost.
+  | { kind: "free_cast_choice"; cardIds: string[] }
   // "If this card is in your opening hand, you may begin the game with it on the battlefield." (the Leylines): the human's yes/no; the other
   // such cards still to ask about ride along.
   | { kind: "opening_hand_battlefield"; remainingIds: string[] }
@@ -703,6 +705,9 @@ type PendingRuleChoice =
       // left unset by every construction site other than the rulesAdvisor-driven search dispatch, so
       // nothing else is affected.
       manaValueRestriction?: { op: "lte" | "eq" | "gte"; value: number };
+      // "any number of creature cards with total mana value 6 or less" (Protean Hulk): the picks' mana values
+      // must add up to at most this — see chooseRuleLibraryCard / searchableLibraryCards.
+      totalManaValueLimit?: number;
       // Accumulates across multiple picks for an "up to N"/"N" search (Archaeomancer's Map's "up to
       // two basic Plains cards," ...) — chooseRuleLibraryCard appends to this and keeps the choice
       // open until maxChoices is reached (or the player clicks Done early, since "up to N" doesn't
@@ -722,11 +727,11 @@ type PendingRuleChoice =
       // per-pick CHOICE of zone: the same card can go to either. When set, the picker offers both
       // actions per card and chooseRuleLibraryCard/completeRuleChoice route to whichever the
       // controller actually chose instead of always using `destination`.
-      destinationChoices?: Array<"hand" | "graveyard">;
+      destinationChoices?: Array<"hand" | "graveyard" | "battlefield">;
       // Keyed by cardId — the actual per-pick zone the controller chose via destinationChoices
       // above, for however many cards have already been picked in this (possibly multi-pick)
       // search. Consulted before splitDestination/destination in completeRuleChoice.
-      chosenDestinations?: Record<string, "hand" | "graveyard">;
+      chosenDestinations?: Record<string, "hand" | "graveyard" | "battlefield">;
     }
   // "Put target creature card from A GRAVEYARD onto the battlefield under your control." (Virtue of
   // Persistence) — a real target choice across every player's graveyard, not just the controller's
@@ -747,6 +752,8 @@ type PendingRuleChoice =
       // experienceCounters) — every other consumer of this choice (Reanimate, Virtue of Persistence)
       // always sends the chosen card straight to the battlefield, so it stays undefined for those.
       manaValueCeiling?: number;
+      // Reanimate: "You lose life equal to that card's mana value." — applied when the chosen card returns.
+      loseLifeEqualToManaValue?: boolean;
       // Meren's real text is "in your graveyard" (its own controller's only) — Virtue of Persistence
       // is the only existing consumer of this choice, and its pool genuinely spans every player's
       // graveyard, so this defaults to false/undefined (unrestricted) to leave that unchanged.
@@ -806,6 +813,10 @@ type PendingRuleChoice =
       // "Each player sacrifices six creatures" (Necrotic Hex): how many are still to be chosen, and tokens this spell made are not eligible.
       remaining?: number;
       excludeTokensFromSourceId?: string;
+      // Braids, Arisen Nightmare's "you may" picks: closing the picker declines. "controller" is Braids' controller choosing what to
+      // sacrifice; "opponent" is an opponent who may sacrifice a permanent sharing a type (declining costs them 2 life and gives Braids'
+      // controller a card), with the opponents still to answer after them.
+      braids?: { stage: "controller" | "opponent"; braidsSeatId: string; remainingOpponentIds?: string[] };
     }
   // "As an additional cost to cast this spell, sacrifice a creature." (Village Rites, Altar's Reap,
   // ...) — the human controller's own pick of WHICH creature to sacrifice to pay this cost, opened
@@ -1696,6 +1707,8 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   const spellsCastThisTurn = useRef<Map<string, number>>(new Map());
   const firstDrawThisTurn = useRef<Set<string>>(new Set());
   const loyaltyActivationsThisTurn = useRef<Set<string>>(new Set());
+  // Ids of the permanents whose floating mana paid for the spell being cast right now (Path of Ancestry's scry needs to know).
+  const lastCastManaContributors = useRef<string[]>([]);
   const phaseTriggersChecked = useRef<Set<string>>(new Set());
   const cleanupDiscardChecked = useRef<Set<string>>(new Set());
   // Klauth, Unrivaled Ancient's restricted mana batch is only ever created during its own seat's
@@ -1966,6 +1979,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   // since spendManaSources against payment.sourceIds already happens at each call site's own
   // existing post-payment step.
   function applyCastingCostPaymentSideEffect(seatId: string, payment: ReturnType<typeof payCastingCost>) {
+    lastCastManaContributors.current = payment.ok && payment.source === "pool" ? (manaContributions[seatId] ?? []).map((item) => item.cardId) : [];
     if (!payment.ok) return;
     if (payment.source === "restricted") {
       spendRestrictedMana(seatId, payment.spent, "forCard" in payment ? payment.forCard : undefined);
@@ -2049,7 +2063,11 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     const deaths = session.pendingDeaths;
     if (!deaths || deaths.length === 0 || deaths === processedDeathBatchRef.current) return;
     processedDeathBatchRef.current = deaths;
-    const deathTriggers = deaths.flatMap((death) => findCommonTriggersForPermanentDied(session, death.seatId, death.card, death.attachedSourceIds, deaths));
+    const deathTriggers = [
+      ...deaths.flatMap((death) => findCommonTriggersForPermanentDied(session, death.seatId, death.card, death.attachedSourceIds, deaths)),
+      // Mazirek-style "whenever a player sacrifices another permanent" (any permanent type, so not part of the creature-death scan above).
+      ...findSacrificeWatcherTriggers(session, deaths)
+    ];
     setSession((current) => (current.pendingDeaths === deaths ? { ...current, pendingDeaths: undefined } : current));
     if (deathTriggers.length > 0) queueCommonTriggers(deathTriggers);
     // A death's own "when this dies" clause can also need a workflow the deterministic
@@ -2263,6 +2281,28 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     openPunisherPrompt(next.seatId, next.sourceName, next.lifeAmount, next.times);
   }, [session.pendingPunisherChoices, pendingAction, pendingRuleChoice]);
 
+  // Braids, Arisen Nightmare: the controller's "you may sacrifice a permanent", then each human opponent's "may sacrifice one that shares a type".
+  useEffect(() => {
+    const queue = session.pendingBraidsChoices;
+    if (!queue || queue.length === 0 || pendingAction || pendingRuleChoice) return;
+    const [next, ...rest] = queue;
+    setSession((current) => ({ ...current, pendingBraidsChoices: rest.length > 0 ? rest : undefined }));
+    const braidsController = session.seats.find((seat) => seat.id === next.braidsSeatId);
+    setPendingRuleChoice({
+      id: crypto.randomUUID(),
+      kind: "choose_each_player_sacrifice",
+      controllerSeatId: next.seatId,
+      sourceCardId: next.sourceCardId,
+      sourceCardName: next.sourceName,
+      prompt:
+        next.stage === "controller"
+          ? `${next.sourceName}: you may sacrifice an artifact, creature, enchantment, land, or planeswalker. Close this window to sacrifice nothing.`
+          : `${next.sourceName}: you may sacrifice a permanent that shares a card type (${next.typeFilter ?? ""}). Close this window to lose 2 life and let ${braidsController?.name ?? "its controller"} draw a card.`,
+      typeFilter: next.typeFilter ?? BRAIDS_TYPE_FILTER,
+      braids: { stage: next.stage, braidsSeatId: next.braidsSeatId, remainingOpponentIds: next.remainingOpponentIds }
+    });
+  }, [session.pendingBraidsChoices, pendingAction, pendingRuleChoice]);
+
   function openPunisherPrompt(seatId: string, sourceName: string, lifeAmount: number, remaining: number) {
     if (remaining <= 0) return;
     const victim = session.seats.find((seat) => seat.id === seatId);
@@ -2282,6 +2322,36 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       remainingStack: []
     });
   }
+
+  // Rishkar's Expertise: "You may cast a spell with mana value 5 or less from your hand without paying its mana cost."
+  useEffect(() => {
+    const queue = session.pendingFreeCastChoices;
+    if (!queue || queue.length === 0 || pendingAction || pendingRuleChoice) return;
+    const [next, ...rest] = queue;
+    setSession((current) => ({ ...current, pendingFreeCastChoices: rest.length > 0 ? rest : undefined }));
+    const caster = session.seats.find((seat) => seat.id === next.seatId);
+    const eligible = (caster?.board.hand ?? []).filter((card) => !isLandCard(card) && card.manaValue <= next.maxManaValue);
+    if (!caster || eligible.length === 0) return;
+    if (caster.kind !== "human") {
+      const pick = chooseFreeCastCard(eligible);
+      if (!pick) return;
+      setSession((current) => markHandCardFreeCastable(current, caster.id, pick.id));
+      window.setTimeout(() => playCard(caster.id, pick.id, undefined, "exile"), 150);
+      return;
+    }
+    const shim = { id: "free-cast-" + next.sourceName, name: next.sourceName, typeLine: "", oracleText: "", manaValue: 0, colors: [], role: "effect", zone: "battlefield" } as VisibleCard;
+    setPendingRuleChoice({
+      id: crypto.randomUUID(),
+      kind: "choose_trigger_option",
+      controllerSeatId: caster.id,
+      sourceCardId: shim.id,
+      sourceCardName: next.sourceName,
+      prompt: next.sourceName + ": you may cast a spell with mana value " + next.maxManaValue + " or less from your hand without paying its mana cost.",
+      options: [...eligible.map((card, index) => ({ index, label: "Cast " + card.name + " (mana value " + card.manaValue + ")" })), { index: eligible.length, label: "Don't cast anything" }],
+      trigger: makeCommonTrigger(caster.id, caster.id, shim, { kind: "free_cast_choice", cardIds: eligible.map((card) => card.id) }, next.sourceName + " free cast."),
+      remainingStack: []
+    });
+  }, [session.pendingFreeCastChoices, pendingAction, pendingRuleChoice]);
 
   // Discover: cast the exiled card free, or put it into hand.
   useEffect(() => {
@@ -2795,6 +2865,14 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         const phaseClause = phaseEffectText(sourceCard.oracleText, phase);
         const aimed = phaseClause ? commonTriggerEffect(phaseClause, "clause", undefined, activeSeat) : undefined;
         if (aimed?.kind === "targeted_effect" && maybeRequestTarget(activeSeat.id, sourceCard, targetedEffectSpec(aimed.effect, sourceCard.id, sourceCard.name), Boolean(aimed.optional), { kind: "targeted", effect: aimed.effect })) return;
+      }
+      // Braids, Arisen Nightmare: a human controller answers "you may sacrifice a permanent" through a picker (see pendingBraidsChoices).
+      if (activeSeat.kind === "human" && isBraidsEndStepText(sourceCard.oracleText)) {
+        setSession((current) => ({
+          ...current,
+          pendingBraidsChoices: [...(current.pendingBraidsChoices ?? []), { stage: "controller", seatId: activeSeat.id, braidsSeatId: activeSeat.id, sourceName: sourceCard.name, sourceCardId: sourceCard.id }]
+        }));
+        return;
       }
       // Decide synchronously against the current render's session (consistent with the same kind
       // of pre-check already used to skip the advisor for ETB triggers) — consultRulesAdvisor has
@@ -3592,6 +3670,8 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       pendingDiscardChoices: undefined,
       pendingDiscoverChoices: undefined,
       pendingPunisherChoices: undefined,
+      pendingBraidsChoices: undefined,
+      pendingFreeCastChoices: undefined,
       pendingCombatDamageToPlayer: undefined,
       pendingAttackDeclarations: undefined,
       pendingBlockDeclarations: undefined,
@@ -6255,6 +6335,14 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       }));
     }
 
+    // Path of Ancestry: its mana spent on a creature spell sharing a type with your commander scries 1.
+    if (pathOfAncestryScries(session, caster.id, sourceCard, [...action.manaSourceIds, ...lastCastManaContributors.current])) {
+      if (caster.kind === "human") startLibraryLook("scry", 1);
+      else setSession((current) => resolveAgentLibraryLookWorkflow(current, caster.id, "Path of Ancestry", "scry_cards", 1));
+      addEvent(`Path of Ancestry: ${caster.name} scries 1.`, caster.id, "Rules action");
+    }
+    lastCastManaContributors.current = [];
+
     if (!sourceCard.typeLine.includes("Creature")) {
       const prowessCreatureIds = caster.board.battlefield.filter((card) => hasKeyword(card, "prowess")).map((card) => card.id);
       if (prowessCreatureIds.length > 0) {
@@ -7034,6 +7122,15 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       resumeAfterTriggerChoice(choice.trigger, choice.remainingStack);
       return;
     }
+    // Rishkar's Expertise: the picked hand card moves to exile with a free-cast permission and is cast right away; the last option declines.
+    if (choice.trigger.effect.kind === "free_cast_choice") {
+      const pickedId = choice.trigger.effect.cardIds[index];
+      if (pickedId) {
+        setSession((current) => markHandCardFreeCastable(current, choice.controllerSeatId, pickedId));
+        window.setTimeout(() => playCard(choice.controllerSeatId, pickedId, undefined, "exile"), 100);
+      }
+      return;
+    }
     // Discover: cast it free (it is in exile with the permission), or take it into hand.
     if (choice.trigger.effect.kind === "discover_choice") {
       if (index === 0) {
@@ -7698,7 +7795,8 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
           controllerSeatId: action.actorSeatId,
           sourceCardId: sourceCard.id,
           sourceCardName: sourceCard.name,
-          prompt: `${sourceCard.name}: choose a creature card in any graveyard to return to the battlefield.`
+          prompt: `${sourceCard.name}: choose a creature card in any graveyard to return to the battlefield.`,
+          loseLifeEqualToManaValue: reanimateZoneEffect.loseLifeEqualToManaValue
         });
         resumeTopStackAction(remainingStack);
         return;
@@ -7716,10 +7814,11 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       if (actor?.kind === "human" && !action.castChoices && sourceCard && reanimateZoneEffect?.kind === "regrow") {
         const regrowSpec = zoneEffectTargetSpec(reanimateZoneEffect);
         const regrowPool = regrowSpec ? legalTargets(session, action.actorSeatId, regrowSpec, sourceCard) : [];
-        if (regrowSpec && regrowPool.length > 1) {
+        const optional = /\byou may\b/i.test(etbEffectText(sourceCard.oracleText));
+        // "you may return target card ..." (Eternal Witness) is a real decision even with a single legal card: decline = return nothing.
+        if (regrowSpec && (regrowPool.length > 1 || (optional && regrowPool.length > 0))) {
           const remainingStack = removeStackAction(action.id);
           const resolutionDestination = spellResolutionDestination(session, action);
-          const optional = /\byou may\b/i.test(etbEffectText(sourceCard.oracleText));
           let capturedEntryTriggers: Array<Extract<PendingAction, { type: "trigger" }>> = [];
           setSession((current) => {
             const played = playCardFromZone(
@@ -7828,7 +7927,9 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       const castRemovalTargetSpec = castRemovalEffect ? removalEffectTargetSpec(castRemovalEffect, sourceCard!.id) : undefined;
       if (actor?.kind === "human" && !action.castChoices && sourceCard && castRemovalEffect && castRemovalTargetSpec) {
         const removalPool = legalTargets(session, action.actorSeatId, castRemovalTargetSpec, sourceCard);
-        if (removalPool.length > 1) {
+        // "you may destroy target ..." (Reclamation Sage) is a real decision even with a single legal target: decline = destroy nothing.
+        const optionalRemoval = /\byou may\b/i.test(etbEffectText(sourceCard.oracleText));
+        if (removalPool.length > 1 || (optionalRemoval && removalPool.length > 0)) {
           const remainingStack = removeStackAction(action.id);
           const resolutionDestination = spellResolutionDestination(session, action);
           setSession((current) =>
@@ -7853,7 +7954,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
             sourceCard,
             prompt: castRemovalTargetSpec.prompt,
             spec: castRemovalTargetSpec,
-            optional: false,
+            optional: optionalRemoval,
             pending: { kind: "removal", effect: castRemovalEffect, chosenX: action.chosenX }
           });
           resumeTopStackAction(remainingStack);
@@ -8216,8 +8317,20 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         commonTriggerEffect(sourceCard.oracleText, "entered", undefined, playedSession.seats.find((s) => s.id === action.actorSeatId))?.kind === "damage_effect";
       const removalEffect = sourceCard && !etbDamageOwnedByTrigger ? parseRemovalEffect(etbEffectText(sourceCard.oracleText)) : undefined;
       const castStruct = action.castChoices && sourceCard ? castStructure(sourceCard, action.chosenX) : undefined;
+      // "When this creature enters, you MAY destroy target artifact or enchantment." (Reclamation Sage): the controller
+      // declines rather than destroying their own permanent — a seat with no opposing target to hit skips the optional destroy.
+      const optionalDestroyWithNoOpposingTarget =
+        removalEffect?.kind === "destroy" &&
+        !action.castChoices &&
+        sourceCard !== undefined &&
+        /\byou may\b/i.test(etbEffectText(sourceCard.oracleText)) &&
+        !chooseRemovalTarget(
+          exploredSession, action.actorSeatId, removalEffect.targetType, sourceCard, removalEffect.excludedColors, removalEffect.artifactsExcluded, removalEffect.basicsExcluded, true, removalEffect.minToughness, true
+        );
       const removalResolvedSession =
-        removalEffect && sourceCard
+        optionalDestroyWithNoOpposingTarget && sourceCard
+          ? rulesEvent(exploredSession, action.actorSeatId, `${sourceCard.name}: ${exploredSession.seats.find((seat) => seat.id === action.actorSeatId)?.name ?? "the controller"} chooses not to destroy anything.`)
+          : removalEffect && sourceCard
           ? action.castChoices && (castStruct?.kind === "removal" || castStruct?.kind === "removal_modal")
             ? applyCastRemoval(exploredSession, action.actorSeatId, sourceCard, removalEffect, action.chosenX, action.castChoices)
             : applyPrimitiveAction(exploredSession, action.actorSeatId, sourceCard, { kind: "removal", effect: removalEffect, chosenX: action.chosenX })
@@ -8236,9 +8349,9 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       const castZoneTarget = castStruct?.kind === "zone" ? action.castChoices?.targets[0] : undefined;
       const zoneResolvedSession =
         zoneEffect && sourceCard
-          ? castStruct?.kind === "zone" && (!castZoneTarget || !castTargetLegal(removalResolvedSession, action.actorSeatId, sourceCard, castZoneTarget))
+          ? castStruct?.kind === "zone" && zoneEffect.kind !== "sacrifice_then_reanimate" && (!castZoneTarget || !castTargetLegal(removalResolvedSession, action.actorSeatId, sourceCard, castZoneTarget))
             ? rulesEvent(removalResolvedSession, action.actorSeatId, `${sourceCard.name}'s target is no longer legal; it does nothing.`)
-            : applyZoneEffect(removalResolvedSession, action.actorSeatId, sourceCard.name, zoneEffect, action.chosenX, castZoneTarget)
+            : applyZoneEffect(removalResolvedSession, action.actorSeatId, sourceCard.name, zoneEffect, action.chosenX, castZoneTarget, castStruct?.kind === "zone" ? action.castChoices?.targets : undefined)
           : removalResolvedSession;
       // "When this artifact enters, search your library for up to two basic Plains cards, ..."
       // (Archaeomancer's Map, and the same ETB-tutor shape on plenty of other permanents) — this
@@ -8401,6 +8514,11 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
             if (chosen && !chosen.every((target) => castTargetLegal(acc, action.actorSeatId, sourceCard, target))) {
               return rulesEvent(acc, action.actorSeatId, `${sourceCard.name}'s target is no longer legal; it does nothing.`);
             }
+            // Rishkar's Expertise: the draw happens now; the free cast is a choice, queued (pendingFreeCastChoices) for the caster to answer.
+            if (effect.kind === "draw_greatest_power_then_free_cast" && effect.freeCastMaxManaValue >= 0) {
+              const drawn = applySpellExtraEffect(acc, action.actorSeatId, sourceCard, { ...effect, freeCastMaxManaValue: -1 }, action.chosenX, chosen);
+              return { ...drawn, pendingFreeCastChoices: [...(drawn.pendingFreeCastChoices ?? []), { seatId: action.actorSeatId, sourceName: sourceCard.name, maxManaValue: effect.freeCastMaxManaValue }] };
+            }
             return applySpellExtraEffect(acc, action.actorSeatId, sourceCard, effect, action.chosenX, chosen);
           }, simpleDrawResolvedSession)
         : simpleDrawResolvedSession;
@@ -8537,7 +8655,9 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
           isLivingDeath ||
           massBounceEffect ||
           grantsExtraTurn(sourceCard.oracleText);
-        if (!ownEtbAlreadyHandled) {
+        // "Scry 2, then draw two cards." (Read the Bones): the draw and life clauses are handled above, but the scry itself is the advisor's workflow.
+        const scryThenDraw = /^\s*scry \w+,? then draw\b/i.test(etbEffectText(sourceCard.oracleText));
+        if (!ownEtbAlreadyHandled || scryThenDraw) {
           capturedAdvisorCall = {
             event: destination === "battlefield" ? "spell_resolved_to_battlefield" : "spell_resolved_to_graveyard",
             seatId: action.actorSeatId,
@@ -8930,7 +9050,9 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         tapped: true,
         maxChoices: Math.max(1, workflow.maxChoices || 2),
         allowedCardFilter: workflow.allowedCardFilter,
-        splitDestination: "hand"
+        splitDestination: "hand",
+        // The player decides which found land goes onto the battlefield (tapped) and which to hand; the second find gets the other zone.
+        destinationChoices: isHuman ? ["battlefield", "hand"] : undefined
       });
       return;
     }
@@ -8964,7 +9086,8 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         tapped: workflow.tapped,
         maxChoices: Math.max(1, workflow.maxChoices || 1),
         allowedCardFilter: workflow.allowedCardFilter,
-        manaValueRestriction: workflow.manaValueRestriction
+        manaValueRestriction: workflow.manaValueRestriction,
+        totalManaValueLimit: workflow.totalManaValueLimit
       });
       return;
     }
@@ -9052,7 +9175,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
           humanMode,
           count,
           workflow.allowedCardFilter,
-          lookWorkflow === "reorder_top_cards" ? workflow.drawCountAfter : undefined,
+          lookWorkflow === "reorder_top_cards" || lookWorkflow === "scry_cards" ? workflow.drawCountAfter : undefined,
           lookWorkflow === "look_at_top_cards_reveal_type_to_hand" ? workflow.restDestination : undefined
         );
         return;
@@ -9065,7 +9188,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
           lookWorkflow,
           count,
           workflow.allowedCardFilter,
-          lookWorkflow === "reorder_top_cards" ? workflow.drawCountAfter : undefined,
+          lookWorkflow === "reorder_top_cards" || lookWorkflow === "scry_cards" ? workflow.drawCountAfter : undefined,
           lookWorkflow === "look_at_top_cards_reveal_type_to_hand" ? workflow.restDestination : undefined
         )
       );
@@ -9633,12 +9756,21 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   // destination: the per-pick zone override for Dina's Guidance-style choose_card_from_library
   // choices (see PendingRuleChoice.destinationChoices/chosenDestinations) — undefined for every
   // ordinary single-destination search, which just falls back to `choice.destination` as before.
-  function chooseRuleLibraryCard(cardId: string, destination?: "hand" | "graveyard") {
+  function chooseRuleLibraryCard(cardId: string, destination?: "hand" | "graveyard" | "battlefield") {
     const choice = pendingRuleChoice;
     if (!choice || choice.kind !== "choose_card_from_library") return;
     const chosenCardIds = [...(choice.chosenCardIds ?? []), cardId];
-    const chosenDestinations = destination ? { ...(choice.chosenDestinations ?? {}), [cardId]: destination } : choice.chosenDestinations;
-    if (chosenCardIds.length >= choice.maxChoices) {
+    // Kodama's Reach / Cultivate (split destination): the first find goes wherever the player said, the second gets the other zone.
+    const firstSplitDestination = choice.splitDestination && choice.chosenCardIds?.length ? choice.chosenDestinations?.[choice.chosenCardIds[0]] : undefined;
+    const effectiveDestination = destination ?? (firstSplitDestination ? (firstSplitDestination === "battlefield" ? "hand" : "battlefield") : undefined);
+    const chosenDestinations = effectiveDestination ? { ...(choice.chosenDestinations ?? {}), [cardId]: effectiveDestination } : choice.chosenDestinations;
+    // Protean Hulk-style total-mana-value budget: finish on its own once nothing else fits.
+    const controllerLibrary = session.seats.find((item) => item.id === choice.controllerSeatId)?.library ?? [];
+    const remainingBudget = remainingLibraryTotalManaValue({ totalManaValueLimit: choice.totalManaValueLimit, chosenCardIds }, controllerLibrary);
+    const budgetExhausted =
+      remainingBudget !== undefined &&
+      searchableLibraryCards(controllerLibrary.filter((card) => !chosenCardIds.includes(card.id)), { ...choice, remainingTotalManaValue: remainingBudget }).length === 0;
+    if (chosenCardIds.length >= choice.maxChoices || budgetExhausted) {
       completeRuleChoice({ ...choice, chosenDestinations }, chosenCardIds);
       return;
     }
@@ -9778,14 +9910,16 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         };
       }
       const { session: reanimatedSession } = moveCardAcrossSeats(current, sourceSeatId, cardId, choice.controllerSeatId, "battlefield");
+      const lifeLost = choice.loseLifeEqualToManaValue ? card.manaValue : 0;
       return {
         ...reanimatedSession,
+        seats: lifeLost > 0 ? reanimatedSession.seats.map((item) => (item.id === choice.controllerSeatId ? { ...item, life: item.life - lifeLost } : item)) : reanimatedSession.seats,
         events: [
           {
             id: crypto.randomUUID(),
             at: new Date().toISOString(),
             seatId: choice.controllerSeatId,
-            message: `${choice.sourceCardName} returns ${card.name} from ${possessive(sourceSeat)} graveyard to the battlefield under its new controller.`,
+            message: `${choice.sourceCardName} returns ${card.name} from ${possessive(sourceSeat)} graveyard to the battlefield under its new controller.${lifeLost > 0 ? ` ${current.seats.find((item) => item.id === choice.controllerSeatId)?.name ?? "The controller"} loses ${lifeLost} life.` : ""}`,
             detail: "Rules action"
           },
           ...reanimatedSession.events
@@ -9861,6 +9995,17 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     const chosenCard = seat?.board.battlefield.find((item) => item.id === cardId);
     if (!seat || !chosenCard) return;
     setPendingRuleChoice(undefined);
+    // Braids, Arisen Nightmare: after the sacrifice, the opponents' halves follow (the controller's pick sets the shared type).
+    if (choice.braids) {
+      const braids = choice.braids;
+      setSession((current) => {
+        const sacrificed = applyChosenEachPlayerSacrifice(current, choice.controllerSeatId, chosenCard.id, choice.sourceCardName);
+        return braids.stage === "controller"
+          ? braidsRunOpponents(sacrificed, braids.braidsSeatId, choice.sourceCardName, choice.sourceCardId, braidsSharedTypeFilter(chosenCard), braidsOpponentIds(sacrificed, braids.braidsSeatId))
+          : braidsRunOpponents(sacrificed, braids.braidsSeatId, choice.sourceCardName, choice.sourceCardId, choice.typeFilter, braids.remainingOpponentIds ?? []);
+      });
+      return;
+    }
     setSession((current) => applyChosenEachPlayerSacrifice(current, choice.controllerSeatId, chosenCard.id, choice.sourceCardName));
     // More to choose (Necrotic Hex's six): reopen with the card just picked gone.
     const left = (choice.remaining ?? 1) - 1;
@@ -10280,17 +10425,23 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     if (choice.kind === "choose_card_from_library") {
       const selectedIds = cardIds.slice(0, choice.maxChoices);
       const splitDestination = choice.splitDestination;
+      // "... then shuffle." — every tutor/fetch in the deck ends with it; a search that put the card on top of the library is the one exception
+      // (those shuffle first, then place), so it is left alone.
+      const shuffleAfterSearch = (searched: GameSession): GameSession =>
+        choice.destination === "library"
+          ? searched
+          : { ...searched, seats: searched.seats.map((item) => (item.id === choice.controllerSeatId ? { ...item, library: shuffleCards(item.library ?? []) } : item)) };
       setSession((current) =>
-        selectedIds.reduce((next, cardId, index) => {
+        shuffleAfterSearch(selectedIds.reduce((next, cardId, index) => {
           // Dina's Guidance-style per-pick choice (see PendingRuleChoice.destinationChoices) wins
           // over both the split-destination convention and the plain single destination below —
           // the controller explicitly chose this card's zone, so nothing else should override it.
           const chosenDestination = choice.chosenDestinations?.[cardId];
-          if (chosenDestination) return moveLibraryCardToDestination(next, choice.controllerSeatId, cardId, chosenDestination, false);
+          if (chosenDestination) return moveLibraryCardToDestination(next, choice.controllerSeatId, cardId, chosenDestination, chosenDestination === "battlefield" ? Boolean(choice.tapped) : false);
           return splitDestination && index > 0
             ? moveLibraryCardToDestination(next, choice.controllerSeatId, cardId, splitDestination, false)
             : moveLibraryCardToDestination(next, choice.controllerSeatId, cardId, choice.destination, Boolean(choice.tapped));
-        }, current)
+        }, current))
       );
       setPendingRuleChoice(undefined);
       return;
@@ -10441,6 +10592,14 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         });
         return;
       }
+      // Braids, Arisen Nightmare: queued for a human controller's picker (see pendingBraidsChoices); the other triggers carry on.
+      if (phase === "end step" && seat.kind === "human" && isBraidsEndStepText(card.oracleText)) {
+        workingSession = {
+          ...workingSession,
+          pendingBraidsChoices: [...(workingSession.pendingBraidsChoices ?? []), { stage: "controller", seatId, braidsSeatId: seatId, sourceName: card.name, sourceCardId: card.id }]
+        };
+        continue;
+      }
       const targetCounterEffect = phase ? targetCreatureCounterPhaseTrigger(card, phase) : undefined;
       if (phase && seat.kind === "human" && targetCounterEffect) {
         if (workingSession !== session) setSession(workingSession);
@@ -10481,6 +10640,26 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   }
 
   function cancelRuleChoice() {
+    // Braids, Arisen Nightmare: closing the picker declines the "may". An opponent who declines takes the penalty (and the next opponent is asked).
+    if (pendingRuleChoice?.kind === "choose_each_player_sacrifice" && pendingRuleChoice.braids) {
+      const declined = pendingRuleChoice;
+      const braids = declined.braids!;
+      setPendingRuleChoice(undefined);
+      if (braids.stage === "opponent") {
+        setSession((current) =>
+          braidsRunOpponents(
+            braidsDeclinePenalty(current, declined.controllerSeatId, braids.braidsSeatId, declined.sourceCardName),
+            braids.braidsSeatId,
+            declined.sourceCardName,
+            declined.sourceCardId,
+            declined.typeFilter,
+            braids.remainingOpponentIds ?? []
+          )
+        );
+      }
+      addEvent(`${declined.sourceCardName}: ${braids.stage === "opponent" ? "no permanent is sacrificed" : "nothing is sacrificed"}.`, declined.controllerSeatId, "Rules action");
+      return;
+    }
     if (pendingRuleChoice) {
       addEvent(`No rule choice was made for ${ruleChoiceLabel(pendingRuleChoice)}.`, pendingRuleChoice.controllerSeatId, "Rules advisor");
       // Don't let a cancelled discard-to-hand-size choice leave a stale "end the turn once this
@@ -10555,6 +10734,16 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       const chosen: VisibleCard[] = [];
       const chosenIds = new Set<string>();
       for (let i = 0; i < choice.maxChoices; i += 1) {
+        // Protean Hulk-style total-mana-value budget: take the most expensive creature that still fits, until nothing does.
+        if (choice.totalManaValueLimit !== undefined) {
+          const remaining = choice.totalManaValueLimit - chosen.reduce((sum, picked) => sum + picked.manaValue, 0);
+          const fits = searchableLibraryCards((seat.library ?? []).filter((candidate) => !chosenIds.has(candidate.id)), { ...choice, remainingTotalManaValue: remaining });
+          const best = fits.reduce<VisibleCard | undefined>((top, candidate) => (!top || candidate.manaValue > top.manaValue ? candidate : top), undefined);
+          if (!best) break;
+          chosen.push(best);
+          chosenIds.add(best.id);
+          continue;
+        }
         const card = chooseAgentLibraryCardForRuleChoice(seat, choice, chosenIds, chosen, session.seats);
         if (!card) break;
         chosen.push(card);
@@ -10731,7 +10920,11 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     const activeLook = libraryLook;
     if (!activeLook) return;
     if (activeLook.mode === "scry") {
-      setSession((current) => addLibraryLookEvent(current, activeLook.seatId, `${current.seats.find((seat) => seat.id === activeLook.seatId)?.name ?? "Player"} keeps ${activeLook.cards.find((card) => card.id === cardId)?.name ?? "that card"} on top and finishes scrying.`));
+      setSession((current) => {
+        const scried = addLibraryLookEvent(current, activeLook.seatId, `${current.seats.find((seat) => seat.id === activeLook.seatId)?.name ?? "Player"} keeps ${activeLook.cards.find((card) => card.id === cardId)?.name ?? "that card"} on top and finishes scrying.`);
+        // "Scry 2, then draw two cards." (Read the Bones): the draw follows the scry.
+        return activeLook.drawCountAfter ? drawMultipleForSeat(scried, activeLook.seatId, activeLook.drawCountAfter, `${scried.seats.find((seat) => seat.id === activeLook.seatId)?.name ?? "Player"} draws ${activeLook.drawCountAfter} card${activeLook.drawCountAfter === 1 ? "" : "s"}.`) : scried;
+      });
       setLibraryLook(undefined);
       return;
     }
@@ -10753,7 +10946,11 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         const moved = moveLibraryCard(current, activeLook.seatId, cardId, "bottom");
         const seat = moved.seats.find((item) => item.id === activeLook.seatId);
         const nextCard = nextRemaining > 0 ? (seat?.library ?? [])[0] : undefined;
-        setLibraryLook(nextCard ? { seatId: activeLook.seatId, mode: "scry", cards: [nextCard], remaining: nextRemaining } : undefined);
+        setLibraryLook(nextCard ? { seatId: activeLook.seatId, mode: "scry", cards: [nextCard], remaining: nextRemaining, drawCountAfter: activeLook.drawCountAfter } : undefined);
+        // "Scry 2, then draw two cards." (Read the Bones): the scry is over (no card left to look at), so the draw happens now.
+        if (!nextCard && activeLook.drawCountAfter) {
+          return drawMultipleForSeat(moved, activeLook.seatId, activeLook.drawCountAfter, `${moved.seats.find((item) => item.id === activeLook.seatId)?.name ?? "Player"} draws ${activeLook.drawCountAfter} card${activeLook.drawCountAfter === 1 ? "" : "s"}.`);
+        }
         return moved;
       });
       return;
@@ -11935,6 +12132,11 @@ function attackerEvadesBlocker(attacker: VisibleCard, blocker: VisibleCard): boo
     const match = line.replace(/\([^)]*\)/g, "").match(/can'?t be blocked by creatures with power (\d+) or less/i);
     if (match && effectivePower(blocker) <= Number.parseInt(match[1], 10)) return true;
   }
+  // Champion of Lambholt's static (see the keyword-grant scan in runStateBasedActionsPass).
+  for (const keyword of attacker.grantedKeywords ?? []) {
+    const below = keyword.match(/^can't be blocked by power below (-?\d+)$/);
+    if (below && effectivePower(blocker) < Number.parseInt(below[1], 10)) return true;
+  }
   return false;
 }
 
@@ -13005,6 +13207,7 @@ export function clearTemporaryBuffs(session: GameSession): GameSession {
       // Safety net for "the next spell you cast this turn" if no spell was ever cast — the normal
       // consumption path is checkCastTriggeredKeywords, which only runs when a spell is cast.
       nextSpellHasArtifactAffinity: undefined,
+      createdTokenThisTurn: undefined,
       board: {
         ...seat.board,
         // Every until-end-of-turn field is cleared together: a creature can carry several at once (a pump that also grants trample,
@@ -15674,6 +15877,17 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
             }
           }
 
+          // Champion of Lambholt: "Creatures with power less than this creature's power can't block creatures you control." Recorded on
+          // each of the controller's creatures as a pseudo-keyword carrying the current threshold (read back by attackerEvadesBlocker).
+          if (card.typeLine.includes("Creature")) {
+            for (const champion of seat.board.battlefield) {
+              if (champion.abilitiesStripped) continue;
+              if (/creatures with power less than this creature'?s power can'?t block creatures you control/i.test(champion.oracleText)) {
+                keywordSet.add(`can't be blocked by power below ${effectivePower(champion)}`);
+              }
+            }
+          }
+
           // Same shape as the keyword-grant scan just above, but for a granted ACTIVATED mana
           // ability (Insidious Roots' "Creature tokens you control have '{T}: Add one mana of any
           // color.'") — kept in its own field (grantedManaAbilityText) rather than merged into
@@ -16003,7 +16217,7 @@ function destroyCreaturesCore(
   detail: string
 ): GameSession {
   const events: GameEvent[] = [];
-  const newDeaths: Array<{ seatId: string; card: VisibleCard; attachedSourceIds?: string[] }> = [];
+  const newDeaths: Array<{ seatId: string; card: VisibleCard; attachedSourceIds?: string[]; sacrificed?: boolean }> = [];
   // Equipment/Aura attachedToId snapshot, taken from the pre-destruction battlefield before this
   // same state-based-action pass clears it once the creature it points at is actually gone — see
   // types.ts's pendingDeaths comment.
@@ -16028,7 +16242,9 @@ function destroyCreaturesCore(
       // must not appear as a death for "whenever another creature you control dies"-style triggers.
       if (hasGraveyardShuffleReplacement(card.oracleText)) continue;
       const attachedSourceIds = allBattlefieldCards.filter((permanent) => permanent.attachedToId === card.id).map((permanent) => permanent.id);
-      newDeaths.push({ seatId: seat.id, card, attachedSourceIds: attachedSourceIds.length > 0 ? attachedSourceIds : undefined });
+      // Every sacrifice path words its log message "sacrifice(s)/sacrificed" (destroy paths say "destroyed"), so the message tells them apart.
+      const wasSacrificed = /\bsacrifice[sd]?\b/i.test(toDestroy.find((entry) => entry.cardId === card.id)?.message ?? "");
+      newDeaths.push({ seatId: seat.id, card, attachedSourceIds: attachedSourceIds.length > 0 ? attachedSourceIds : undefined, ...(wasSacrificed ? { sacrificed: true } : {}) });
     }
     for (const entry of toDestroy) {
       const card = destroyedCards.find((item) => item.id === entry.cardId);
@@ -16651,11 +16867,14 @@ function chooseRemovalTarget(
   // opponent's non-indestructible artifact was sitting right there.
   avoidIndestructible: boolean = false,
   // "toughness 4 or greater" (Destroy Evil): candidates below this toughness aren't legal targets.
-  minToughness?: number
+  minToughness?: number,
+  // "target creature an opponent controls" (Ravenous Chupacabra): only other players' permanents are legal — never a fallback to your own.
+  opponentOnly: boolean = false
 ): { seatId: string; card: VisibleCard } | undefined {
   const excludedColorCodes = excludedColors.map((color) => PROTECTION_COLOR_CODE[color]).filter(Boolean);
   const candidates: Array<{ seatId: string; card: VisibleCard }> = [];
   for (const seat of session.seats) {
+    if (opponentOnly && seat.id === casterSeatId) continue;
     for (const card of seat.board.battlefield) {
       if (!matchesTargetType(card, targetType)) continue;
       if (artifactsExcluded && card.typeLine.includes("Artifact")) continue;
@@ -16982,6 +17201,21 @@ function removalSlots(session: GameSession, seatId: string, source: VisibleCard,
 }
 
 function zoneSlots(session: GameSession, seatId: string, source: VisibleCard, effect: ZoneEffect): LabeledSlot[] {
+  // Victimize: "Choose two target creature cards in your graveyard. Sacrifice a creature. If you do, return the chosen cards ..." —
+  // one slot per graveyard target, then the creature to sacrifice (picked up front, since the cast prompt is where the player decides).
+  if (effect.kind === "sacrifice_then_reanimate") {
+    const owner = session.seats.find((item) => item.id === seatId);
+    const graveyardOptions: LabeledSlot["options"] = (owner?.board.graveyard ?? [])
+      .filter((card) => card.typeLine.includes("Creature"))
+      .map((card) => ({ label: `${card.name} (mana value ${card.manaValue})`, target: { kind: "card" as const, seatId, cardId: card.id } }));
+    const slots: LabeledSlot[] = Array.from({ length: effect.targetCount }, (_, index) => ({
+      prompt: `${source.name}: choose creature card ${index + 1} of ${effect.targetCount} in your graveyard.`,
+      options: graveyardOptions
+    }));
+    const sacrificeOptions = labeledTargetOptions(session, seatId, "own_creature", source);
+    if (sacrificeOptions.length > 0) slots.push({ prompt: `${source.name}: choose the creature you sacrifice when it resolves.`, options: sacrificeOptions });
+    return slots;
+  }
   const spec = zoneEffectTargetSpec(effect);
   return spec ? [{ prompt: `${source.name}: ${spec.prompt}`, options: optionsFromSpec(session, seatId, spec, source) }] : [];
 }
@@ -17107,7 +17341,11 @@ export function nextCastPrompt(
   }
   const slot = slots[answers.targets.length];
   if (!slot || slot.options.length === 0) return undefined;
-  return { kind: "target", prompt: slot.prompt, options: slot.options };
+  // A card already picked for an earlier slot can't be picked again (Victimize's second graveyard creature).
+  const alreadyPicked = new Set(answers.targets.flatMap((target) => (target.kind === "card" ? [target.cardId] : [])));
+  const options = slot.options.filter((option) => option.target.kind !== "card" || !alreadyPicked.has(option.target.cardId));
+  if (options.length === 0) return undefined;
+  return { kind: "target", prompt: slot.prompt, options };
 }
 
 // Is a target chosen at cast time still legal as the spell resolves? An illegal one makes the spell fizzle (rule 608.2b).
@@ -17507,6 +17745,30 @@ export function applySpellExtraEffect(session: GameSession, casterSeatId: string
     case "grant_keywords":
       return applyRemovalEffect(session, casterSeatId, sourceName, source, { kind: "grant_keywords", keywords: effect.keywords }, undefined, chosenTargets?.[0]);
 
+    case "grant_keywords_all_permanents":
+      return rulesEvent(
+        {
+          ...session,
+          seats: session.seats.map((seat) =>
+            seat.id !== casterSeatId
+              ? seat
+              : {
+                  ...seat,
+                  board: {
+                    ...seat.board,
+                    battlefield: seat.board.battlefield.map((card) => ({
+                      ...card,
+                      temporaryGrantedKeywords: [...(card.temporaryGrantedKeywords ?? []), ...effect.keywords],
+                      grantedKeywords: [...new Set([...(card.grantedKeywords ?? []), ...effect.keywords])]
+                    }))
+                  }
+                }
+          )
+        },
+        casterSeatId,
+        `${sourceName}: permanents ${caster.name} controls gain ${effect.keywords.join(" and ")} until end of turn.`
+      );
+
     case "each_other_player_sacrifices": {
       const destructions: Array<{ seatId: string; cardId: string; message: string }> = [];
       for (const other of session.seats) {
@@ -17642,7 +17904,7 @@ function removalEffectHasLegalTarget(session: GameSession, casterSeatId: string,
     case "destroy_all_conditional":
       return true;
     case "destroy":
-      return chooseRemovalTarget(session, casterSeatId, effect.targetType, sourceCard, effect.excludedColors, effect.artifactsExcluded, effect.basicsExcluded, true, effect.minToughness) !== undefined;
+      return chooseRemovalTarget(session, casterSeatId, effect.targetType, sourceCard, effect.excludedColors, effect.artifactsExcluded, effect.basicsExcluded, true, effect.minToughness, effect.opponentOnly) !== undefined;
     // Rule 601.2c: "up to X" never requires a legal target — choosing zero is always legal, same
     // reasoning as proliferate's "choose any number" just below.
     case "destroy_up_to_x":
@@ -18167,7 +18429,7 @@ export function applyRemovalEffect(
     case "destroy": {
       const target =
         resolvePreChosenBattlefieldTarget(session, preChosenTarget) ??
-        chooseRemovalTarget(session, casterSeatId, effect.targetType, source, effect.excludedColors, effect.artifactsExcluded, effect.basicsExcluded, true, effect.minToughness);
+        chooseRemovalTarget(session, casterSeatId, effect.targetType, source, effect.excludedColors, effect.artifactsExcluded, effect.basicsExcluded, true, effect.minToughness, effect.opponentOnly);
       if (!target) return noLegalTargetEvent(session, casterSeatId, sourceName);
       const warded = payWardIfNeeded(session, casterSeatId, target.card, sourceName);
       if (warded.countered) return warded.session;
@@ -18520,7 +18782,16 @@ function resolvePreChosenGraveyardTarget(session: GameSession, casterSeatId: str
   return seat?.board.graveyard?.find((item) => item.id === preChosenTarget.cardId);
 }
 
-export function applyZoneEffect(session: GameSession, casterSeatId: string, sourceName: string, effect: ZoneEffect, chosenX?: number, preChosenTarget?: ChosenTarget): GameSession {
+export function applyZoneEffect(
+  session: GameSession,
+  casterSeatId: string,
+  sourceName: string,
+  effect: ZoneEffect,
+  chosenX?: number,
+  preChosenTarget?: ChosenTarget,
+  // Every cast-time target in order (Victimize: the graveyard creatures, then the creature to sacrifice).
+  preChosenTargets?: ChosenTarget[]
+): GameSession {
   switch (effect.kind) {
     case "return_all_to_battlefield": {
       const owner = session.seats.find((seat) => seat.id === casterSeatId);
@@ -18554,14 +18825,16 @@ export function applyZoneEffect(session: GameSession, casterSeatId: string, sour
               )
             }
           : movedSession;
+      const reanimateLifeLoss = effect.loseLifeEqualToManaValue ? target.card.manaValue : 0;
       return {
         ...reanimatedSession,
+        seats: reanimateLifeLoss > 0 ? reanimatedSession.seats.map((seat) => (seat.id === casterSeatId ? { ...seat, life: seat.life - reanimateLifeLoss } : seat)) : reanimatedSession.seats,
         events: [
           {
             id: crypto.randomUUID(),
             at: new Date().toISOString(),
             seatId: casterSeatId,
-            message: `${sourceName} returns ${target.card.name} from a graveyard to the battlefield under its new controller.`,
+            message: `${sourceName} returns ${target.card.name} from a graveyard to the battlefield under its new controller.${reanimateLifeLoss > 0 ? ` The caster loses ${reanimateLifeLoss} life.` : ""}`,
             detail: "Rules action"
           },
           ...reanimatedSession.events
@@ -18671,9 +18944,17 @@ export function applyZoneEffect(session: GameSession, casterSeatId: string, sour
     }
     case "sacrifice_then_reanimate": {
       const casterSeat = session.seats.find((seat) => seat.id === casterSeatId);
-      const chosenCards = chooseCreatureCardsFromOwnGraveyard(session, casterSeatId, effect.targetCount);
+      // The player's own cast-time picks (still in the graveyard / on the battlefield) win over the heuristic.
+      const pickedGraveyardCards = (preChosenTargets ?? [])
+        .slice(0, effect.targetCount)
+        .flatMap((target) => (target.kind === "card" ? [casterSeat?.board.graveyard?.find((card) => card.id === target.cardId && card.typeLine.includes("Creature"))] : []))
+        .filter((card): card is VisibleCard => Boolean(card));
+      const chosenCards = preChosenTargets ? (pickedGraveyardCards.length > 0 ? pickedGraveyardCards : undefined) : chooseCreatureCardsFromOwnGraveyard(session, casterSeatId, effect.targetCount);
       if (!casterSeat || !chosenCards) return noLegalTargetEvent(session, casterSeatId, sourceName);
-      const sacrificeTargets = chooseSacrificeTargets(casterSeat, undefined, effect.sacrificeCount);
+      const pickedSacrificeTarget = preChosenTargets?.[effect.targetCount];
+      const pickedSacrifice =
+        pickedSacrificeTarget?.kind === "card" ? casterSeat.board.battlefield.find((card) => card.id === pickedSacrificeTarget.cardId && card.typeLine.includes("Creature")) : undefined;
+      const sacrificeTargets = pickedSacrifice ? [pickedSacrifice] : chooseSacrificeTargets(casterSeat, undefined, effect.sacrificeCount);
       if (!sacrificeTargets) {
         // Rule 608.2c: the sacrifice isn't an additional cost on this card's actual templating (see
         // SacrificeThenReanimateEffect's own doc comment) — it's a resolution-time instruction the
@@ -18693,7 +18974,13 @@ export function applyZoneEffect(session: GameSession, casterSeatId: string, sour
           ]
         };
       }
-      const sacrificedSession = sacrificeTargets.reduce((acc, target) => moveCardBetweenVisibleZones(acc, casterSeatId, target.id, "graveyard"), session);
+      // Through destroyCreatures (not a raw zone move) so the sacrifice fires death triggers (Blood Artist, Grim Haruspex, Syr Konrad)
+      // and Mazirek-style "whenever a player sacrifices" watchers.
+      const sacrificedSession = destroyCreatures(
+        session,
+        sacrificeTargets.map((target) => ({ seatId: casterSeatId, cardId: target.id, message: `${casterSeat.name} sacrifices ${target.name} to ${sourceName}.` })),
+        "Rules action"
+      );
       const returnedSession = chosenCards.reduce(
         (acc, card) => moveCardAcrossSeats(acc, casterSeatId, card.id, casterSeatId, "battlefield", { tapped: effect.tapped }).session,
         sacrificedSession
@@ -18879,6 +19166,8 @@ export function parseSimpleDrawEffect(text: string): { amount: number } | undefi
   // the caster the cards.
   if (/\bdraw a card for each\b/.test(lowered)) return undefined;
   if (/\byou and target opponent each draw\b|\beach opponent draws a card, then you draw/.test(lowered)) return undefined;
+  // "Scry 2, then draw two cards." (Read the Bones): the scry workflow performs the draw after the scry.
+  if (/^\s*scry \w+,? then draw\b/.test(lowered)) return undefined;
   // "If it's a Zombie card, draw a card." (Cemetery Recruitment) — a CONDITIONAL draw owned by the regrow
   // effect it follows; an unconditional draw here was giving the card for free.
   if (/\bif (?:it'?s|that card is|you do)\b[^.]*,\s*(?:you )?draw\b/.test(lowered)) return undefined;
@@ -19148,6 +19437,9 @@ interface MassPumpEffect {
   // an unqualified "each creature."
   excludeType?: string;
   scope: "all" | "controlled" | "opponents";
+  // "+X/+X, where X is the number of creatures you control" (Craterhoof Behemoth): power and toughness are the
+  // caster's creature count at resolution, ignoring the fixed numbers above.
+  xFromCreatureCount?: boolean;
 }
 
 // Board-wide sibling of parseTargetedPump's single-target shape: "Each [non-Type] creature[s] [you
@@ -19166,7 +19458,11 @@ export function parseMassPump(text: string): MassPumpEffect | undefined {
   };
 }
 
-export function applyMassPumpEffect(session: GameSession, casterSeatId: string, sourceCardName: string, effect: MassPumpEffect): GameSession {
+export function applyMassPumpEffect(session: GameSession, casterSeatId: string, sourceCardName: string, rawEffect: MassPumpEffect): GameSession {
+  const creatureCount = rawEffect.xFromCreatureCount
+    ? (session.seats.find((seat) => seat.id === casterSeatId)?.board.battlefield.filter((card) => card.typeLine.includes("Creature")).length ?? 0)
+    : 0;
+  const effect = rawEffect.xFromCreatureCount ? { ...rawEffect, power: creatureCount, toughness: creatureCount } : rawEffect;
   const qualifierText = effect.excludeType ? `non-${effect.excludeType} ` : "";
   const powerText = `${effect.power >= 0 ? "+" : ""}${effect.power}`;
   const toughnessText = `${effect.toughness >= 0 ? "+" : ""}${effect.toughness}`;
@@ -20524,6 +20820,14 @@ export function findCommonTriggersForPermanentEntered(session: GameSession, ente
             : commonTriggerEffect(watcherClauses.join(" "), "clause", undefined, seat)
           : commonTriggerEffect(source.oracleText, "entered", undefined, seat);
       if (!effect || !enteredTriggerApplies(source, seat.id, enteredPermanent, enteringSeatId)) continue;
+      // Guardian Project: "... if it doesn't have the same name as another creature you control or a creature card in your graveyard, draw a card."
+      if (
+        source.id !== enteredPermanent.id &&
+        /\bif it doesn'?t have the same name as another creature you control or a creature card in your graveyard\b/i.test(source.oracleText)
+      ) {
+        const sameNameCreature = (card: VisibleCard) => card.id !== enteredPermanent.id && card.name === enteredPermanent.name && hasCardType(card, "Creature");
+        if (seat.board.battlefield.some(sameNameCreature) || (seat.board.graveyard ?? []).some(sameNameCreature)) continue;
+      }
       // "When ~ enters, if he was kicked, ..." (Josu Vess) only fires for a kicked cast.
       if (source.id === enteredPermanent.id && /\bif (?:he|she|it|this creature|this permanent) was kicked\b/i.test(source.oracleText) && !source.kicked) continue;
       triggers.push(
@@ -20679,6 +20983,32 @@ function modalClauseTriggerEffect(source: VisibleCard, header: RegExp): TriggerE
   }
   const modal = parseGenericModalEffect([clauses[headerIndex], ...bullets].join("\n"), undefined);
   return modal ? { kind: "modal", modal } : undefined;
+}
+
+// "Whenever a player sacrifices another permanent, put a +1/+1 counter on each creature you control." (Mazirek,
+// Kraul Death Priest) — fires once per sacrificed permanent (any player's, never Mazirek itself) for each such
+// watcher on the battlefield. Deaths come from destroyCreatures' pendingDeaths, which marks sacrifices.
+export function findSacrificeWatcherTriggers(
+  session: GameSession,
+  deaths: Array<{ seatId: string; card: VisibleCard; sacrificed?: boolean }>
+): Array<Extract<PendingAction, { type: "trigger" }>> {
+  const triggers: Array<Extract<PendingAction, { type: "trigger" }>> = [];
+  for (const death of deaths) {
+    if (!death.sacrificed) continue;
+    for (const seat of session.seats) {
+      if (seat.hasLost) continue;
+      for (const source of seat.board.battlefield) {
+        if (source.id === death.card.id || source.abilitiesStripped) continue;
+        const clause = oracleClauses(source.oracleText).find((line) => /^whenever a player sacrifices another permanent\b/i.test(line));
+        if (!clause) continue;
+        const effectText = clause.replace(/^whenever a player sacrifices another permanent,\s*/i, "");
+        const effect = commonTriggerEffect(effectText, "clause", undefined, seat);
+        if (!effect) continue;
+        triggers.push(makeCommonTrigger(death.seatId, seat.id, source, effect, `${source.name} triggers because ${death.card.name} was sacrificed.`, death.card.id));
+      }
+    }
+  }
+  return triggers;
 }
 
 export function findCommonTriggersForPermanentDied(
@@ -21935,6 +22265,9 @@ export function commonTriggerEffect(
   // pump for EVERY creature.
   const selfPumpMatch = text.match(/\b(?:this creature|it) gets ([+-]\d+)\/([+-]\d+) until end of turn\b/);
   if (selfPumpMatch) return { kind: "self_pump", power: Number.parseInt(selfPumpMatch[1], 10), toughness: Number.parseInt(selfPumpMatch[2], 10), optional };
+  // "Creatures you control gain trample and get +X/+X until end of turn, where X is the number of creatures you control." (Craterhoof Behemoth)
+  const xPumpMatch = text.match(/\bcreatures you control gain ([a-z ]+?) and get \+x\/\+x until end of turn, where x is the number of creatures you control\b/);
+  if (xPumpMatch) return { kind: "mass_pump", scope: "controlled", power: 0, toughness: 0, grantsKeyword: xPumpMatch[1], xFromCreatureCount: true, optional };
   // "Dragons you control get +1/+0 until end of turn." (Lathliss)
   const groupPumpMatch = text.match(/\b([a-z]+?)s you control get ([+-]\d+)\/([+-]\d+) until end of turn\b/);
   if (groupPumpMatch && groupPumpMatch[1] !== "creature") {
@@ -22093,6 +22426,7 @@ export function createTokensForSeat(session: GameSession, seatId: string, source
       seat.id === seatId
         ? {
             ...seat,
+            createdTokenThisTurn: createdTokens.length > 0 ? true : seat.createdTokenThisTurn,
             board: {
               ...seat.board,
               battlefield: [...seat.board.battlefield, ...createdTokens]
@@ -24094,6 +24428,52 @@ function findSpellSourceCard(session: GameSession, action: Extract<PendingAction
           : actor?.board.hand.find((card) => card.id === action.cardId);
 }
 
+// The cards a human's library-search picker may offer: the search's own printed restriction ("Forest card",
+// "basic land card", "creature card", a mana-value ceiling) is enforced, so the player can't pick an illegal
+// card by mistake (rule 701.19: a search can only find cards that match; an empty list is a legal "fail to
+// find"). A placeholder/unrecognized phrase (the rules advisor's generic "cards matching the source effect",
+// "basic lands sharing a land type") leaves the whole library visible, as before.
+export function searchableLibraryCards(
+  library: VisibleCard[],
+  choice: {
+    allowedCardFilter?: string;
+    manaValueRestriction?: { op: "lte" | "eq" | "gte"; value: number };
+    // Protean Hulk: the budget still unspent (limit minus the picks' mana values so far).
+    remainingTotalManaValue?: number;
+  }
+): VisibleCard[] {
+  const rawFilter = (choice.allowedCardFilter ?? "").toLowerCase().trim();
+  const filter = rawFilter.replace(/\s+cards?$/, "").trim();
+  const usableFilter = filter && !/^cards?$/.test(filter) && !/matching the source effect|sharing a land type/.test(filter);
+  const restriction = choice.manaValueRestriction;
+  return library.filter((card) => {
+    if (choice.remainingTotalManaValue !== undefined && card.manaValue > choice.remainingTotalManaValue) return false;
+    if (usableFilter) {
+      // "basic land" / "basic plains" (landcycling): the card must be a basic land, then match the remaining type word if there is one.
+      const wantsBasic = /^basic\b/.test(filter);
+      const typeWord = (wantsBasic ? filter.replace(/^basic\s*/, "") : filter).replace(/^lands?$/, "").trim();
+      if (wantsBasic && !isBasicLandCard(card)) return false;
+      if (typeWord && !cardMatchesTypeFilter(card.typeLine, typeWord)) return false;
+    }
+    if (restriction) {
+      if (restriction.op === "lte" && card.manaValue > restriction.value) return false;
+      if (restriction.op === "gte" && card.manaValue < restriction.value) return false;
+      if (restriction.op === "eq" && card.manaValue !== restriction.value) return false;
+    }
+    return true;
+  });
+}
+
+export function remainingLibraryTotalManaValue(
+  choice: { totalManaValueLimit?: number; chosenCardIds?: string[] },
+  library: VisibleCard[]
+): number | undefined {
+  if (choice.totalManaValueLimit === undefined) return undefined;
+  const chosen = new Set(choice.chosenCardIds ?? []);
+  const spent = library.filter((card) => chosen.has(card.id)).reduce((sum, card) => sum + card.manaValue, 0);
+  return Math.max(0, choice.totalManaValueLimit - spent);
+}
+
 function ruleChoiceView(
   choice: PendingRuleChoice | undefined,
   humanSeat: PlayerSeat,
@@ -24107,9 +24487,18 @@ function ruleChoiceView(
         kind: "choose_card_from_library" as const,
         sourceCardName: choice.sourceCardName,
         prompt: choice.prompt,
-        cards: (humanSeat.library ?? []).filter((card) => !chosenCardIds.has(card.id)),
-        destination: choice.destination,
-        destinationChoices: choice.destinationChoices,
+        cards: searchableLibraryCards((humanSeat.library ?? []).filter((card) => !chosenCardIds.has(card.id)), {
+          ...choice,
+          remainingTotalManaValue: remainingLibraryTotalManaValue(choice, humanSeat.library ?? [])
+        }),
+        // Kodama's Reach / Cultivate: after the first find's zone is picked, the second find just goes to the other zone.
+        destination:
+          choice.splitDestination && chosenCardIds.size > 0 && choice.destinationChoices
+            ? choice.chosenDestinations?.[[...chosenCardIds][0]] === "battlefield"
+              ? choice.splitDestination
+              : "battlefield"
+            : choice.destination,
+        destinationChoices: choice.splitDestination && chosenCardIds.size > 0 ? undefined : choice.destinationChoices,
         allowedCardFilter: choice.allowedCardFilter,
         maxChoices: choice.maxChoices,
         chosenCount: chosenCardIds.size
@@ -25179,9 +25568,9 @@ export function applyDeterministicPhaseTrigger(session: GameSession, seatId: str
     const withEvent = rulesEvent(copied, seatId, `${sourceCard.name}: creates a token that's a copy of ${enchanted.name}.`);
     return sameName >= 8 ? winTheGame(withEvent, seatId, sourceCard.name) : withEvent;
   }
-  // Braids, Arisen Nightmare: "...you may sacrifice a permanent. If you do, each opponent may sacrifice one that shares a type; each who
-  // doesn't loses 2 life and you draw." Not modelled — resolving it as a plain "draw a card" handed out a free card every end step.
-  if (/\byou may sacrifice an artifact, creature, enchantment, land, or planeswalker\b.*\beach opponent may sacrifice\b/i.test(clauseText)) return session;
+  // Braids, Arisen Nightmare (see applyBraidsEndStep): a human controller is asked through pendingBraidsChoices before this is ever reached;
+  // this is the agent's decision. (Resolving it as a plain "draw a card" used to hand out a free card every end step.)
+  if (/\byou may sacrifice an artifact, creature, enchantment, land, or planeswalker\b.*\beach opponent may sacrifice\b/i.test(clauseText)) return applyBraidsEndStep(session, seatId, sourceCard);
 
   const removalEffect = parseRemovalEffect(clauseText);
   if (removalEffect) return applyPrimitiveAction(session, seatId, sourceCard, { kind: "removal", effect: removalEffect });
@@ -25262,6 +25651,40 @@ export function applyDeterministicPhaseTrigger(session: GameSession, seatId: str
 }
 
 const COMMANDER_STARTING_LIFE = 40;
+
+// Path of Ancestry: "When that mana is spent to cast a creature spell that shares a creature type with your commander, scry 1."
+export function pathOfAncestryScries(session: GameSession, seatId: string, spell: VisibleCard, manaSourceIds: string[]): boolean {
+  if (!spell.typeLine.includes("Creature")) return false;
+  const seat = session.seats.find((item) => item.id === seatId);
+  if (!seat) return false;
+  const usedPath = seat.board.battlefield.some((card) => manaSourceIds.includes(card.id) && /when that mana is spent to cast a creature spell that shares a creature type with your commander, scry 1/i.test(card.oracleText));
+  if (!usedPath) return false;
+  const commander = seat.board.commander ?? seat.board.battlefield.find((card) => card.commander);
+  const typesOf = (typeLine: string) => (typeLine.includes("—") ? typeLine.slice(typeLine.indexOf("—") + 1).trim().split(/\s+/).filter(Boolean) : []);
+  if (!commander) return false;
+  const commanderTypes = typesOf(commander.typeLine);
+  return typesOf(spell.typeLine).some((type) => commanderTypes.includes(type));
+}
+
+// An agent's pick for a free cast: the most expensive permanent that fits, else the most expensive spell.
+export function chooseFreeCastCard(cards: VisibleCard[]): VisibleCard | undefined {
+  const isSpellOnly = (card: VisibleCard) => card.typeLine.includes("Instant") || card.typeLine.includes("Sorcery");
+  const byValue = (a: VisibleCard, b: VisibleCard) => b.manaValue - a.manaValue;
+  return [...cards].filter((card) => !isSpellOnly(card)).sort(byValue)[0] ?? [...cards].sort(byValue)[0];
+}
+
+// Moves a hand card to exile with a free-cast permission for this turn, so the normal cast flow (targets, ETBs, triggers) can cast it for {0}.
+export function markHandCardFreeCastable(session: GameSession, seatId: string, cardId: string): GameSession {
+  const moved = moveCardAcrossSeats(session, seatId, cardId, seatId, "exile").session;
+  return {
+    ...moved,
+    seats: moved.seats.map((seat) =>
+      seat.id !== seatId
+        ? seat
+        : { ...seat, board: { ...seat.board, exile: (seat.board.exile ?? []).map((card) => (card.id === cardId ? { ...card, exiledPlayableBySeatId: seatId, exiledPlayableUntilTurn: session.turn, exiledPlayableFree: true } : card)) } }
+    )
+  };
+}
 
 function staticConditionMet(condition: StaticCondition, seat: PlayerSeat, source?: VisibleCard, activePlayerId?: string): boolean {
   if (condition.kind === "your_turn") return activePlayerId === seat.id;
@@ -25387,6 +25810,95 @@ export function applyChosenEachPlayerSacrifice(session: GameSession, seatId: str
   return destroyCreatures(session, [{ seatId, cardId, message: `${seat.name} sacrifices ${card.name} to ${sourceCardName}.` }], "Rules action");
 }
 
+// Braids, Arisen Nightmare: "At the beginning of your end step, you may sacrifice an artifact, creature, enchantment, land, or planeswalker.
+// If you do, each opponent may sacrifice a permanent of their choice that shares a card type with it. For each opponent who doesn't, that
+// player loses 2 life and you draw a card." A human answers each "may" through a picker (closing it declines); agents decide by heuristic.
+export function isBraidsEndStepText(oracleText: string): boolean {
+  return /\bat the beginning of your end step, you may sacrifice an artifact, creature, enchantment, land, or planeswalker\b.*\beach opponent may sacrifice\b/is.test(oracleText);
+}
+
+export const BRAIDS_TYPE_FILTER = "artifact or creature or enchantment or land or planeswalker";
+
+// The card types of the sacrificed permanent, as the "a or b" filter the sacrifice picker understands.
+export function braidsSharedTypeFilter(card: VisibleCard): string {
+  const lowered = card.typeLine.toLowerCase();
+  const types = ["artifact", "creature", "enchantment", "land", "planeswalker"].filter((type) => lowered.includes(type));
+  return types.length > 0 ? types.join(" or ") : BRAIDS_TYPE_FILTER;
+}
+
+// An opponent who doesn't sacrifice loses 2 life and the Braids controller draws a card.
+export function braidsDeclinePenalty(session: GameSession, opponentSeatId: string, braidsSeatId: string, sourceName: string): GameSession {
+  const opponent = session.seats.find((item) => item.id === opponentSeatId);
+  const controller = session.seats.find((item) => item.id === braidsSeatId);
+  if (!opponent || !controller) return session;
+  const lost: GameSession = { ...session, seats: session.seats.map((item) => (item.id === opponentSeatId ? { ...item, life: item.life - 2 } : item)) };
+  const logged = rulesEvent(lost, opponentSeatId, `${opponent.name} doesn't sacrifice a permanent to ${sourceName} and loses 2 life.`);
+  return drawMultipleForSeat(logged, braidsSeatId, 1, `${controller.name} draws a card from ${sourceName}.`);
+}
+
+function braidsAgentOpponentPick(opponent: PlayerSeat, typeFilter: string): VisibleCard | undefined {
+  const candidates = opponent.board.battlefield.filter((card) => matchesEachPlayerSacrificeFilter(card, typeFilter));
+  if (candidates.length === 0) return undefined;
+  const cheapest = [...candidates].sort((a, b) => Number(Boolean(b.token)) - Number(Boolean(a.token)) || a.manaValue - b.manaValue)[0];
+  // A token is free to give up; anything real is only worth it once life is getting low (2 life is cheaper than a card).
+  return cheapest.token || opponent.life <= 12 ? cheapest : undefined;
+}
+
+// Runs the opponents' halves in turn order. An agent decides on the spot; a human with something to sacrifice is queued (the rest of the
+// opponents follow after their answer); a human with nothing to sacrifice simply takes the penalty.
+export function braidsRunOpponents(
+  session: GameSession,
+  braidsSeatId: string,
+  sourceName: string,
+  sourceCardId: string,
+  typeFilter: string,
+  opponentIds: string[]
+): GameSession {
+  let next = session;
+  for (let index = 0; index < opponentIds.length; index += 1) {
+    const opponent = next.seats.find((item) => item.id === opponentIds[index]);
+    if (!opponent || opponent.hasLost) continue;
+    const hasCandidate = opponent.board.battlefield.some((card) => matchesEachPlayerSacrificeFilter(card, typeFilter));
+    if (opponent.kind === "human") {
+      if (!hasCandidate) {
+        next = braidsDeclinePenalty(next, opponent.id, braidsSeatId, sourceName);
+        continue;
+      }
+      return {
+        ...next,
+        pendingBraidsChoices: [
+          ...(next.pendingBraidsChoices ?? []),
+          { stage: "opponent", seatId: opponent.id, braidsSeatId, sourceName, sourceCardId, typeFilter, remainingOpponentIds: opponentIds.slice(index + 1) }
+        ]
+      };
+    }
+    const pick = braidsAgentOpponentPick(opponent, typeFilter);
+    next = pick
+      ? destroyCreatures(next, [{ seatId: opponent.id, cardId: pick.id, message: `${opponent.name} sacrifices ${pick.name} to ${sourceName}.` }], "Rules action")
+      : braidsDeclinePenalty(next, opponent.id, braidsSeatId, sourceName);
+  }
+  return next;
+}
+
+export function braidsOpponentIds(session: GameSession, braidsSeatId: string): string[] {
+  const start = session.seats.findIndex((item) => item.id === braidsSeatId);
+  const ordered = start < 0 ? session.seats : [...session.seats.slice(start + 1), ...session.seats.slice(0, start)];
+  return ordered.filter((item) => item.id !== braidsSeatId && !item.hasLost).map((item) => item.id);
+}
+
+// The whole trigger for an AGENT controller (a human's "may sacrifice" is asked through pendingBraidsChoices instead): it sacrifices a
+// token, or a land it has plenty of; otherwise it declines (a real permanent isn't worth a probable card).
+export function applyBraidsEndStep(session: GameSession, seatId: string, sourceCard: VisibleCard): GameSession {
+  const seat = session.seats.find((item) => item.id === seatId);
+  if (!seat) return session;
+  const lands = seat.board.battlefield.filter((card) => card.typeLine.includes("Land"));
+  const pick =
+    seat.board.battlefield.find((card) => card.token && card.id !== sourceCard.id) ?? (lands.length >= 7 ? lands.find((land) => !land.commander) : undefined);
+  if (!pick) return rulesEvent(session, seatId, `${seat.name} doesn't sacrifice anything to ${sourceCard.name}.`);
+  const sacrificed = destroyCreatures(session, [{ seatId, cardId: pick.id, message: `${seat.name} sacrifices ${pick.name} to ${sourceCard.name}.` }], "Rules action");
+  return braidsRunOpponents(sacrificed, seatId, sourceCard.name, sourceCard.id, braidsSharedTypeFilter(pick), braidsOpponentIds(sacrificed, seatId));
+}
+
 // "Repeat the following process X times. Each opponent loses N life unless that player sacrifices a
 // nonland permanent or discards a card." (Torment of Hailfire, and the same "punisher" template on
 // similarly-worded cards) — X is the spell's own chosenX (the same X-cost convention
@@ -25394,7 +25906,7 @@ export function applyChosenEachPlayerSacrifice(session: GameSession, seatId: str
 export function parsePunisherChoiceEffect(text: string): { lifeAmount: number } | undefined {
   const match = text
     .toLowerCase()
-    .match(/\brepeat the following process \w+ times\.\s*each opponent loses (\d+) life unless that player sacrifices an? nonland permanent or discards a card\b/);
+    .match(/\brepeat the following process \w+ times\.\s*each opponent loses (\d+) life unless that player sacrifices an? nonland permanent(?: of their choice)? or discards a card\b/);
   if (!match) return undefined;
   return { lifeAmount: Number(match[1]) };
 }
@@ -26672,6 +27184,8 @@ function isBoardConditionMet(conditionRaw: string, seat: PlayerSeat, allSeats?: 
   if (condition === "this land entered this turn or if you control a basic land") {
     return seat.board.battlefield.some((c) => isBasicLandCard(c));
   }
+  // "you created a token this turn" (Idol of Oblivion's draw)
+  if (condition === "you created a token this turn") return Boolean(seat.createdTokenThisTurn);
 
   // "you control three or more lands with the same name" (Endless Atlas)
   const sameNameMatch = condition.match(/^you control (\d+|two|three|four|five|six|seven|eight|nine|ten) or more lands with the same name$/);
@@ -26722,6 +27236,7 @@ export function isRecognizedBoardCondition(conditionRaw: string): boolean {
   if (/^you have (\d+|two|three|four|five|six|seven|eight|nine|ten) or more ([a-z]+) cards? in your graveyard$/.test(condition)) return true;
   if (/^you control an? ([a-z]+) or an? ([a-z]+)$/.test(condition)) return true;
   if (condition === "this land entered this turn or if you control a basic land") return true;
+  if (condition === "you created a token this turn") return true;
   if (/^you control an? ([a-z]+)$/.test(condition)) return true;
   if (/^you control (\d+|two|three|four|five|six|seven|eight|nine|ten) or more lands with the same name$/.test(condition)) return true;
   if (/^you have at least (\d+) life more than your starting life total$/.test(condition)) return true;
@@ -27645,7 +28160,7 @@ export function resolveAgentLibraryLookWorkflow(
       ...session.events
     ]
   };
-  if (workflow === "reorder_top_cards" && drawCountAfter) {
+  if ((workflow === "reorder_top_cards" || workflow === "scry_cards") && drawCountAfter) {
     return drawMultipleForSeat(withEvent, seatId, drawCountAfter, `${seatName} draws ${drawCountAfter === 1 ? "a card" : `${drawCountAfter} cards`}.`);
   }
   return withEvent;
@@ -28301,6 +28816,9 @@ function moveCardBetweenVisibleZonesCore(session: GameSession, seatId: string, c
 function resolveMyriadLandscapeSearch(session: GameSession, seatId: string, cardId: string, chosenCardIds: string[]): GameSession {
   let sourceName = "";
   let foundNames: string[] = [];
+  // For the landfall watchers (Avenger of Zendikar, ...) and Mazirek-style sacrifice watchers: the lands that entered and the sacrificed source.
+  let enteredLands: VisibleCard[] = [];
+  let sacrificedSource: VisibleCard | undefined;
 
   const seats = session.seats.map((seat) => {
     if (seat.id !== seatId) return seat;
@@ -28316,10 +28834,13 @@ function resolveMyriadLandscapeSearch(session: GameSession, seatId: string, card
     foundNames = found.map((card) => card.name);
     const foundIds = new Set(found.map((card) => card.id));
     const graveyard = seat.board.graveyard ?? [];
+    enteredLands = found.map((card) => ({ ...card, zone: "battlefield" as const, tapped: true, battlefieldPosition: undefined }));
+    sacrificedSource = source;
 
     return {
       ...seat,
-      library: library.filter((card) => !foundIds.has(card.id)),
+      // "... then shuffle."
+      library: shuffleCards(library.filter((card) => !foundIds.has(card.id))),
       board: {
         ...seat.board,
         battlefield: [
@@ -28357,6 +28878,8 @@ function resolveMyriadLandscapeSearch(session: GameSession, seatId: string, card
   return {
     ...session,
     seats,
+    pendingEntries: enteredLands.length > 0 ? [...(session.pendingEntries ?? []), ...enteredLands.map((card) => ({ seatId, card }))] : session.pendingEntries,
+    pendingDeaths: sacrificedSource ? [...(session.pendingDeaths ?? []), { seatId, card: sacrificedSource, sacrificed: true }] : session.pendingDeaths,
     events: [
       {
         id: crypto.randomUUID(),
@@ -28555,6 +29078,53 @@ function isSagaCard(card: VisibleCard) {
 
 function loreCounterCount(card: VisibleCard): number {
   return card.counters?.find((counter) => counter.kind === "lore")?.count ?? 0;
+}
+
+// Headless Saga support for the self-play simulator. The live game's version (applySagaEntryLoreCounter /
+// advanceSagaLoreCounters / triggerSagaChapter, nested in the component) defers each chapter through window.setTimeout into
+// React-bound queues; here a chapter resolves synchronously through the same pure pieces (grant text, transform, or
+// commonTriggerEffect + resolveTriggerEffect). A chapter no deterministic parser owns does nothing (the live game would hand it
+// to the rules advisor). Read ahead takes the last chapter, the live agent heuristic's default (chooseReadAheadChapter).
+function sagaChapterHeadless(session: GameSession, seatId: string, saga: VisibleCard, chapterText: string): GameSession {
+  const grantedAbility = parseGainsAbilityGrant(chapterText);
+  if (grantedAbility) {
+    return { ...session, seats: session.seats.map((seat) => (seat.id === seatId ? { ...seat, board: { ...seat.board, battlefield: seat.board.battlefield.map((card) => (card.id === saga.id ? { ...card, oracleText: `${card.oracleText}\n${grantedAbility}` } : card)) } } : seat)) };
+  }
+  if (isSagaTransformChapter(chapterText)) return transformPermanent(session, seatId, saga.id, saga.name, false);
+  const effect = commonTriggerEffect(chapterText, "clause");
+  if (!effect) return session;
+  return resolveTriggerEffect(session, { id: crypto.randomUUID(), type: "trigger", actorSeatId: seatId, controllerSeatId: seatId, sourceCardId: saga.id, sourceCardName: saga.name, triggerKind: "common", effect, message: `${saga.name}'s chapter triggers.` });
+}
+
+function sagaLoreStepHeadless(session: GameSession, seatId: string, saga: VisibleCard, chapters: SagaChapters, newCount: number, counterSteps: number): GameSession {
+  let next = session;
+  for (let index = 0; index < counterSteps; index += 1) next = applyLoreCounterEtb(next, seatId, saga.id);
+  const chapterText = chapters.effectByChapter.get(newCount);
+  if (chapterText) next = sagaChapterHeadless(next, seatId, saga, chapterText);
+  if (newCount >= chapters.chapterCount && chapters.sacrificesOnFinalChapter) next = moveCardBetweenVisibleZones(next, seatId, saga.id, "graveyard");
+  return next;
+}
+
+// Chapter I as the Saga enters (only if it has no lore counter yet).
+export function applySagaEntryLoreCounterHeadless(session: GameSession, seatId: string, cardId: string): GameSession {
+  const saga = session.seats.find((seat) => seat.id === seatId)?.board.battlefield.find((card) => card.id === cardId);
+  const chapters = saga && isSagaCard(saga) && loreCounterCount(saga) === 0 ? parseSagaChapters(saga.oracleText) : undefined;
+  if (!saga || !chapters) return session;
+  if (/^read ahead\b/im.test(saga.oracleText)) return sagaLoreStepHeadless(session, seatId, saga, chapters, chapters.chapterCount, chapters.chapterCount);
+  return sagaLoreStepHeadless(session, seatId, saga, chapters, 1, 1);
+}
+
+// Each Saga the seat controls that is still short of its last chapter gains a counter (after the draw step).
+export function advanceSagaLoreCountersHeadless(session: GameSession, seatId: string): GameSession {
+  const seat = session.seats.find((item) => item.id === seatId);
+  if (!seat) return session;
+  let next = session;
+  for (const saga of seat.board.battlefield.filter(isSagaCard)) {
+    const chapters = parseSagaChapters(saga.oracleText);
+    const count = loreCounterCount(saga);
+    if (chapters && count < chapters.chapterCount) next = sagaLoreStepHeadless(next, seatId, saga, chapters, count + 1, 1);
+  }
+  return next;
 }
 
 function basicLandForColor(color: string): string | undefined {
