@@ -1,0 +1,340 @@
+// Deterministic "don't make this specific dumb play" guards for agent seats (casual-Commander sensible, not cEDH optimizing).
+// Three rules, each a pure function over a ScorableAction + ScoringContext so they can be unit-tested with real oracle text:
+//   1. sacrificeGuard    — don't sacrifice your own permanents for a trivial payoff (Viscera Seer scrying away the board).
+//   2. removalGuard      — don't spend creature removal / removal Auras on a non-threat.
+//   3. protectionGuard   — don't cast hexproof/indestructible/protection instants with nothing threatening your permanents.
+// evaluatePlayGuards() runs all three. actionScoring.scoreLegalAction applies it as a large score penalty (so the heuristic picker never
+// chooses a violating action) and marks the scored action `vetoed`; app/api/agents/action/route.ts uses that mark to replace an
+// LLM-chosen violating action (see resolveGuardedChoice in actionScoring.ts).
+
+import type { CardLike, ScorableAction, ScoringContext } from "./actionScoring";
+import { creatureValue } from "./strategy";
+import { hasDeathtouch, hasIndestructible, parseNum } from "./combatSim";
+
+type Opponent = NonNullable<ScoringContext["opponents"]>[number];
+
+export interface GuardVerdict {
+  allowed: boolean;
+  reason?: string;
+}
+
+const ALLOWED: GuardVerdict = { allowed: true };
+
+function clean(text: string | undefined): string {
+  return (text ?? "").replace(/\([^)]*\)/g, "").replace(/\s+/g, " ").toLowerCase();
+}
+
+// The legal-action detail is "<cost> <type line>. <oracle text> Payable with ...": keep only the card-text part.
+function actionText(action: ScorableAction): string {
+  return clean((action.detail ?? "").replace(/Payable with[\s\S]*$/i, ""));
+}
+
+function isCreature(card: CardLike): boolean {
+  return (card.typeLine ?? "").includes("Creature") || (parseNum(card.power) !== undefined && parseNum(card.toughness) !== undefined && !(card.typeLine ?? "").includes("Land"));
+}
+
+function isToken(card: CardLike): boolean {
+  return Boolean((card as { token?: unknown }).token) || /^token\b/i.test(card.typeLine ?? "");
+}
+
+function stackItems(context: ScoringContext): StackItem[] {
+  const items: StackItem[] = [...(context.stack ?? [])];
+  if (context.pendingAction) items.push(context.pendingAction);
+  return items;
+}
+
+type StackItem = NonNullable<ScoringContext["stack"]>[number];
+
+// ---------------------------------------------------------------------------------------------------------------------------------
+// Rule 2: removal
+// ---------------------------------------------------------------------------------------------------------------------------------
+
+export interface RemovalSpell {
+  kind: "destroy" | "exile" | "bounce" | "damage" | "shrink" | "aura";
+  scope: "creature" | "permanent";
+}
+
+const NOUN = "([a-z,' -]*?)";
+
+// Recognizes a spell/aura whose job is to take out ONE opposing creature/permanent. Counterspells, board wipes, burn that may go face
+// ("any target") and modal spells are deliberately not recognized — the guard can't tell which mode/target they will use.
+export function parseTargetedRemoval(action: ScorableAction): RemovalSpell | undefined {
+  if (action.actionType !== "cast_spell") return undefined;
+  const text = actionText(action);
+  if (!text || /\bchoose (?:one|two|three|up to)\b|\bcounter target\b/.test(text)) return undefined;
+  const isAura = /\baura\b/.test(text.split(".")[0] ?? "") || /\benchant creature\b/.test(text);
+
+  if (isAura && /\benchant creature\b(?! you control)/.test(text)) {
+    if (/\benchanted creature\b[^.]*\b(?:can't attack|can't block|loses all abilities|base power and toughness|doesn't untap|gets -\d+\/-\d+|becomes? a)/.test(text)) return { kind: "aura", scope: "creature" };
+    return undefined;
+  }
+
+  const destroyExile = text.match(new RegExp(`\\b(destroy|exile) target ${NOUN}(creature|permanent)\\b(?! cards?)(?! you (?:control|own))`));
+  if (destroyExile) return { kind: destroyExile[1] as "destroy" | "exile", scope: destroyExile[3] === "permanent" ? "permanent" : "creature" };
+
+  if (new RegExp(`\\breturn target ${NOUN}(creature|permanent)\\b(?! cards?)(?! you (?:control|own))[^.]* to (?:its|their) owner's hand`).test(text)) {
+    return { kind: "bounce", scope: "creature" };
+  }
+  if (new RegExp(`\\bdeals? (?:\\d+|x) damage to target ${NOUN}creature\\b(?! you control)(?! card)`).test(text) && !/\bany target\b/.test(text)) {
+    return { kind: "damage", scope: "creature" };
+  }
+  if (/\btarget creature (?:an opponent controls )?gets? -(?:\d+|x)\/-(?:\d+|x)/.test(text)) return { kind: "shrink", scope: "creature" };
+  return undefined;
+}
+
+function removalMinThreat(spellManaValue: number): number {
+  return 4 + Math.max(0, spellManaValue - 2) * 0.5;
+}
+
+// How much a permanent threatens the deciding seat, in the same "mana worth of stuff" units as strategy.creatureValue (which already
+// prices keywords, draw/ramp/token engines, anthems and the commander), plus what its power does against MY life and a few game-ending
+// text patterns.
+export function opposingThreat(card: CardLike, context: ScoringContext): number {
+  let threat = creatureValue(card);
+  const text = clean(card.oracleText);
+  const power = Math.max(0, parseNum(card.power) ?? 0);
+  const myLife = Math.max(1, context.you?.life ?? 40);
+  threat += Math.min(3, (power / myLife) * 8);
+  if (/\beach opponent loses\b|\bdeals? \d+ damage to each opponent\b|\byou win the game\b|\bextra turn\b|\buntap all\b|\bgain control of\b/.test(text)) threat += 2;
+  if (/\bwhenever (?:you|an opponent|a player) (?:cast|casts|draw|draws)\b/.test(text)) threat += 1;
+  if (/\bcan't be blocked\b|\bhaste\b/.test(text) && power >= 3) threat += 0.7;
+  if (/\binfect\b/.test(text)) threat += 2;
+  if (/\bprotection from\b|\bhexproof\b/.test(text) && /\bcreatures? you control\b/.test(text)) threat += 1;
+  if (card.commander) {
+    const dealt = Object.values(context.you?.commanderDamage ?? {}).reduce((max, value) => Math.max(max, value), 0);
+    if (dealt >= 10) threat += 3;
+  }
+  return threat;
+}
+
+function ownerOf(card: CardLike, context: ScoringContext): Opponent | undefined {
+  return (context.opponents ?? []).find((opponent) => (opponent.battlefield ?? []).some((entry) => entry.id === card.id));
+}
+
+function totalPower(cards: CardLike[] | undefined): number {
+  return (cards ?? []).filter(isCreature).reduce((sum, card) => sum + Math.max(0, parseNum(card.power) ?? 0), 0);
+}
+
+export interface RemovalAssessment extends GuardVerdict {
+  bestTarget?: CardLike;
+  bestThreat?: number;
+  threshold?: number;
+}
+
+// Is there a target on the table worth spending this removal on? The target is chosen AFTER the cast (legal-action targetIds is usually
+// empty), so this asks whether the best available target clears the bar; a removal spell may still be held for a better one.
+export function removalGuard(action: ScorableAction, context: ScoringContext): RemovalAssessment {
+  const spell = parseTargetedRemoval(action);
+  if (!spell) return ALLOWED;
+  const opponents = context.opponents ?? [];
+  const named = action.targetIds.map((id) => opponents.flatMap((opponent) => opponent.battlefield ?? []).find((card) => card.id === id)).filter((card): card is CardLike => Boolean(card));
+  const pool = opponents.flatMap((opponent) => opponent.battlefield ?? []).filter((card) => !(card.typeLine ?? "").includes("Land"));
+  const candidates = named.length > 0 ? named : spell.scope === "creature" ? pool.filter(isCreature) : pool;
+  if (candidates.length === 0) return ALLOWED; // nothing visible to judge (the engine decides legality)
+
+  const spellCard = (context.you?.hand ?? []).find((card) => card.id === action.cardId);
+  const manaValue = spellCard?.manaValue ?? 2;
+  const myLife = Math.max(1, context.you?.life ?? 40);
+
+  const scored = candidates.map((card) => ({ card, threat: opposingThreat(card, context) })).sort((a, b) => b.threat - a.threat);
+  const best = scored[0];
+  const second = scored[1]?.threat ?? 0;
+  let threshold = removalMinThreat(manaValue);
+  // The one clear standout on a board of small stuff is worth a little less than the usual bar.
+  if (best.threat >= second + 2) threshold = Math.max(3, threshold - 1);
+
+  if (best.threat >= threshold) return { allowed: true, bestTarget: best.card, bestThreat: best.threat, threshold };
+
+  // Threatening lethal: an opponent whose combined power reaches my life, and the target is part of it.
+  for (const { card } of scored) {
+    const owner = ownerOf(card, context);
+    if ((parseNum(card.power) ?? 0) > 0 && totalPower(owner?.battlefield) >= myLife) {
+      return { allowed: true, bestTarget: card, bestThreat: best.threat, threshold };
+    }
+  }
+  return {
+    allowed: false,
+    reason: `removal held: the best target (${best.card.name ?? "a creature"}, threat ${best.threat.toFixed(1)}) is below the ${threshold.toFixed(1)} bar for spending a removal spell — keep it for a real threat`,
+    bestTarget: best.card,
+    bestThreat: best.threat,
+    threshold
+  };
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------
+// Rule 3: protection spells
+// ---------------------------------------------------------------------------------------------------------------------------------
+
+const PROTECTION_RE = /\b(?:gains?|have|has) (?:hexproof|indestructible|protection from|shroud)\b|\bphases? out\b/;
+
+export function isProtectionInstant(action: ScorableAction): boolean {
+  if (action.actionType !== "cast_spell") return false;
+  const text = actionText(action);
+  if (!PROTECTION_RE.test(text) || !/\byou control\b/.test(text)) return false;
+  return /\binstant\b/.test(text.split(".")[0] ?? "") || /\bflash\b/.test(text);
+}
+
+const THREAT_RE = /\b(?:destroy|exile|sacrifices?)\b|\bdeals? (?:\d+|x|that much) damage\b|\bgets? -(?:\d+|x)\/-(?:\d+|x)|\breturn target [^.]* to (?:its|their) owner's hand\b|\bfights?\b|\bgain control\b|\bloses? all abilities\b/;
+const MASS_RE = /\b(?:all|each|every)\b/;
+
+function myCardIds(context: ScoringContext): Set<string> {
+  return new Set([...(context.you?.battlefield ?? []).map((card) => card.id), ...(context.you?.commander ? [context.you.commander.id] : [])]);
+}
+
+// Does this stack item (cast or triggered by someone else) threaten something I control that THIS protection would actually save?
+export function stackItemThreatensMe(item: StackItem, context: ScoringContext, protectionText: string): boolean {
+  const mine = context.you?.id;
+  if (mine && item.actorSeatId === mine) return false;
+  const text = clean(item.oracleText);
+  if (!text || !THREAT_RE.test(text)) return false;
+  const cardTargets = item.targetCardIds ?? [];
+  const seatTargets = item.targetSeatIds ?? [];
+  const ids = myCardIds(context);
+  const stopsTargeting = /\bhexproof\b|\bshroud\b|\bprotection from\b|\bphases? out\b/.test(protectionText);
+  const stopsDestroyAndDamage = /\bindestructible\b|\bprotection from\b|\bphases? out\b/.test(protectionText);
+  const isDestroyOrDamage = /\bdestroy\b|\bdeals? [^.]*damage\b/.test(text);
+  if (cardTargets.length > 0 || seatTargets.length > 0) {
+    const aimedAtMine = cardTargets.some((id) => ids.has(id)) || (mine !== undefined && seatTargets.includes(mine));
+    // Hexproof makes it fizzle; indestructible only helps against destroy / damage (not exile, -X/-X, sacrifice).
+    return aimedAtMine && (stopsTargeting || (stopsDestroyAndDamage && isDestroyOrDamage));
+  }
+  if (/\btarget\b/.test(text)) {
+    // Targets unknown — assume it may be aimed at me if I have anything to lose.
+    return ids.size > 0 && (stopsTargeting || (stopsDestroyAndDamage && isDestroyOrDamage));
+  }
+  if (MASS_RE.test(text)) {
+    // A non-targeted sweeper: only indestructible / protection / phasing helps.
+    return stopsDestroyAndDamage && (isDestroyOrDamage || /\bphases? out\b/.test(protectionText));
+  }
+  return false;
+}
+
+// A creature of mine in combat that the combat damage in front of it would kill and this spell can save (indestructible / protection / phasing).
+function savesCreatureInCombat(context: ScoringContext, protectionText: string): boolean {
+  if (!/combat|declare|blockers|damage/i.test(context.phase ?? "")) return false;
+  if (!/\bindestructible\b|\bprotection from\b|\bphases? out\b/.test(protectionText)) return false;
+  const mine = (context.you?.battlefield ?? []).filter((card) => isCreature(card) && (card.attacking || card.blocking));
+  const theirs = (context.opponents ?? []).flatMap((opponent) => opponent.battlefield ?? []).filter((card) => isCreature(card) && (card.attacking || card.blocking));
+  return mine.some((card) => {
+    if (hasIndestructible(card)) return false;
+    const toughness = parseNum(card.toughness) ?? 0;
+    return theirs.some((enemy) => hasDeathtouch(enemy) || (parseNum(enemy.power) ?? 0) >= toughness);
+  });
+}
+
+export function protectionGuard(action: ScorableAction, context: ScoringContext): GuardVerdict {
+  if (!isProtectionInstant(action)) return ALLOWED;
+  const text = actionText(action);
+  if (stackItems(context).some((item) => stackItemThreatensMe(item, context, text))) return ALLOWED;
+  if (savesCreatureInCombat(context, text)) return ALLOWED;
+  return { allowed: false, reason: "protection held: nothing on the stack (or in combat) threatens your permanents, so casting it now just wastes it" };
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------
+// Rule 1: pointless sacrifices
+// ---------------------------------------------------------------------------------------------------------------------------------
+
+// Effects worth giving up a real permanent for: the sacrifice converts it into something bigger.
+const CONVERT_EFFECT_RE = /\btransform\b|\bsearch your library\b|\bcreate\b[^.]*\btokens?\b|\bput [^.]* onto the battlefield\b|\breturn [^.]* from (?:your|a) graveyard\b/;
+
+function sacrificedCards(action: ScorableAction, context: ScoringContext): CardLike[] | undefined {
+  const battlefield = context.you?.battlefield ?? [];
+  if (action.sacrificeCardIds && action.sacrificeCardIds.length > 0) {
+    const found = action.sacrificeCardIds.map((id) => battlefield.find((card) => card.id === id)).filter((card): card is CardLike => Boolean(card));
+    return found.length > 0 ? found : undefined;
+  }
+  const names = (action.label ?? "").match(/\(sacrifice ([^)]+)\)/i)?.[1];
+  if (!names) return undefined;
+  const picked: CardLike[] = [];
+  for (const name of names.split(/,\s*/)) {
+    const matches = battlefield.filter((card) => card.name === name && !picked.includes(card));
+    if (matches.length === 0) continue;
+    picked.push([...matches].sort((a, b) => Number(isToken(b)) - Number(isToken(a)) || creatureValue(a) - creatureValue(b))[0]);
+  }
+  return picked.length > 0 ? picked : undefined;
+}
+
+// Fodder: a token that is just a body, or a nothing card (0 mana value, 1 total stats, no text).
+export function isWorthlessFodder(card: CardLike): boolean {
+  const text = clean(card.oracleText);
+  const stats = Math.max(0, parseNum(card.power) ?? 0) + Math.max(0, parseNum(card.toughness) ?? 0);
+  if (card.commander) return false;
+  if (isToken(card)) return creatureValue(card) <= 3.5 && !/\bwhenever\b|\bdraw\b|\bcreatures? you control (?:get|have)\b/.test(text);
+  return (card.manaValue ?? 0) <= 0 && stats <= 1 && text.length === 0;
+}
+
+// Will this permanent be gone anyway: delayed sacrifice/exile on itself, or removal already on the stack aimed at it (or a sweeper).
+export function isDoomed(card: CardLike, context: ScoringContext): boolean {
+  const text = clean(card.oracleText);
+  if (/\b(?:sacrifice|exile) (?:it|this creature)\b[^.]*\b(?:end step|end of turn)\b|\bat the beginning of (?:the )?(?:next )?end step, (?:sacrifice|exile)\b/.test(text)) return true;
+  const mine = context.you?.id;
+  for (const item of stackItems(context)) {
+    if (mine && item.actorSeatId === mine) continue;
+    const itemText = clean(item.oracleText);
+    if (!itemText || !THREAT_RE.test(itemText)) continue;
+    if ((item.targetCardIds ?? []).includes(card.id)) return true;
+    if ((item.targetCardIds ?? []).length === 0 && /\b(?:destroy|exile) all\b|\ball creatures get -|\bdeals? \d+ damage to each creature\b|\beach creature\b/.test(itemText)) return true;
+    // Removal on the stack whose target we cannot see, answered with a sacrifice outlet: the classic in-response play.
+    if ((item.targetCardIds ?? []).length === 0 && (item.targetSeatIds ?? []).length === 0 && /\btarget (?:[a-z-]+ )*(?:creature|permanent)\b/.test(itemText) && context.purpose === "priority_response") return true;
+  }
+  return false;
+}
+
+// Life-drain per sacrifice the board already provides (Blood Artist, Zulaport Cutthroat, Falkenrath Noble ...) plus the outlet's own damage.
+function drainPerSacrifice(action: ScorableAction, context: ScoringContext): number {
+  let drain = 0;
+  for (const card of context.you?.battlefield ?? []) {
+    const match = clean(card.oracleText).match(/whenever [^.,]*(?:another creature|a creature)[^.,]* dies,[^.]*?(?:loses?|deals?) (\d+)(?: life| damage)/);
+    if (match) drain += Number(match[1]);
+  }
+  const own = actionText(action).match(/deals? (\d+) damage to (?:any target|each opponent|target (?:player|opponent))/);
+  if (own) drain += Number(own[1]);
+  return drain;
+}
+
+export function sacrificeGuard(action: ScorableAction, context: ScoringContext): GuardVerdict {
+  if (action.actionType !== "activate_ability") return ALLOWED;
+  if (action.abilityKind !== undefined && action.abilityKind !== "generic_sacrifice") return ALLOWED;
+  if (!/\(sacrifice /i.test(action.label ?? "") && !(action.sacrificeCardIds?.length)) return ALLOWED;
+  const fodder = sacrificedCards(action, context);
+  if (!fodder) return ALLOWED;
+  // Sacrificing the ability's own source (fetch lands, Mind Stone) is a different trade, scored elsewhere.
+  if (fodder.some((card) => card.id === action.cardId)) return ALLOWED;
+
+  const text = actionText(action);
+  const names = fodder.map((card) => card.name ?? "a permanent").join(", ");
+  const converts = CONVERT_EFFECT_RE.test(text);
+
+  // A lethal (or chain-lethal) drain is worth any sacrifice.
+  const drain = drainPerSacrifice(action, context);
+  if (drain > 0) {
+    const minLife = Math.min(...(context.opponents ?? []).map((opponent) => opponent.life ?? 40), 999);
+    const bodies = (context.you?.battlefield ?? []).filter(isCreature).length;
+    if (minLife <= drain * Math.max(1, bodies)) return ALLOWED;
+  }
+
+  const realFodder = fodder.filter((card) => !isWorthlessFodder(card) && !isDoomed(card, context));
+  if (realFodder.length > 0 && !converts) {
+    return { allowed: false, reason: `sacrifice held: giving up ${realFodder.map((card) => card.name).join(", ")} for this payoff has no real gain (it is not doomed, not worthless fodder, and the effect is not lethal)` };
+  }
+
+  // Cheap repeatable outlets (scry, +1/+1 counter, mana, a card) fed with tokens: only while there are tokens to spare.
+  if (!converts && realFodder.length === 0) {
+    const doomed = fodder.every((card) => isDoomed(card, context));
+    const spareTokens = (context.you?.battlefield ?? []).filter((card) => isToken(card) && isWorthlessFodder(card)).length;
+    if (!doomed && drain === 0 && spareTokens < 3) {
+      return { allowed: false, reason: `sacrifice held: ${names} is the last of your spare fodder; repeating a low-value sacrifice outlet just shrinks your board` };
+    }
+  }
+  return ALLOWED;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------
+
+export function evaluatePlayGuards(action: ScorableAction, context: ScoringContext): { vetoed: boolean; reasons: string[] } {
+  const reasons: string[] = [];
+  for (const verdict of [sacrificeGuard(action, context), removalGuard(action, context), protectionGuard(action, context)]) {
+    if (!verdict.allowed && verdict.reason) reasons.push(verdict.reason);
+  }
+  return { vetoed: reasons.length > 0, reasons };
+}

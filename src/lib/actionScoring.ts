@@ -1,5 +1,7 @@
 import { attackEconomics, defenderOf, threatShares } from "./strategy";
 import { mustAttackEachCombat } from "./combatRestrictions";
+import { evaluatePlayGuards } from "./playGuards";
+import { scoreGangBlockRisk, scoreInterferenceTiming, scoreOwnBoardWipe, scoreRemovalAftermath } from "./lookAhead";
 import { canLegallyBlock, hasDeathtouch, hasDoubleStrike, hasFirstStrike, hasFlying, hasIndestructible, hasInfect, hasKeyword, hasLifelink, hasMenace, hasReach, hasTrample, parseNum, simulateDuel } from "./combatSim";
 
 export { simulateDuel };
@@ -24,6 +26,10 @@ export interface ScorableAction {
   label: string;
   detail?: string;
   role?: string;
+  // "generic_sacrifice" for a sacrifice-cost activated ability; sacrificeCardIds are the permanents its cost would sacrifice
+  // (see AppFlow's legalActivatedAbilityActions). Read by playGuards.sacrificeGuard.
+  abilityKind?: string;
+  sacrificeCardIds?: string[];
 }
 
 export interface CardLike {
@@ -43,12 +49,17 @@ export interface CardLike {
   keywords?: string[];
   // True for the owner's commander (the deck's engine — losing it costs more than its stats say).
   commander?: boolean;
+  token?: boolean;
+  attacking?: boolean;
+  blocking?: boolean;
 }
 
 export interface ScoringContext {
   purpose?: string;
   turn?: number;
+  phase?: string;
   you?: {
+    id?: string;
     life?: number;
     poison?: number;
     // Commander damage this seat has taken, keyed by the dealing commander's card id (see
@@ -67,21 +78,38 @@ export interface ScoringContext {
     poison?: number;
     commanderDamage?: Record<string, number>;
     battlefield?: CardLike[];
-    availableMana?: { total?: number };
+    availableMana?: { total?: number; byColor?: Record<string, number> };
     commander?: CardLike;
+    // The opponent's commander color identity, and counterspells / protection tricks already seen in their graveyard or exile
+    // (see lookAhead.estimateOpponentInterferenceRisk).
+    colorIdentity?: string[];
+    shownTells?: { counterspells: number; protection: number };
     // For an opponent only the size of the hand is known.
     hand?: CardLike[] | { count?: number };
   }>;
-  stack?: Array<{ id?: string; cardName?: string; oracleText?: string }>;
+  stack?: Array<StackItemLike>;
   // The item currently awaiting a response (as opposed to `stack`, which holds everything already
   // passed on and waiting below it) — see AppFlow.tsx's pendingActionSourceCard for how oracleText
   // gets attached.
-  pendingAction?: { id?: string; cardName?: string; oracleText?: string };
+  pendingAction?: StackItemLike;
+}
+
+// A spell/ability on the stack as the agent sees it. actorSeatId is who put it there; targetCardIds/targetSeatIds are the targets
+// chosen at cast time when known (see AppFlow's pendingActionSummary).
+export interface StackItemLike {
+  id?: string;
+  cardName?: string;
+  oracleText?: string;
+  actorSeatId?: string;
+  targetCardIds?: string[];
+  targetSeatIds?: string[];
 }
 
 export interface ScoredAction extends ScorableAction {
   score: number;
   reasons: string[];
+  // Set when a deterministic play guard (playGuards.ts) forbids this action; the score is also pushed far down.
+  vetoReason?: string;
 }
 
 const BASELINE_SCORE_BY_ACTION_TYPE: Record<ScorableActionType, number> = {
@@ -650,7 +678,7 @@ function scoreStackResponse(action: ScorableAction, context: ScoringContext, del
   }
 }
 
-export function scoreLegalAction(action: ScorableAction, context: ScoringContext): { score: number; reasons: string[] } {
+export function scoreLegalAction(action: ScorableAction, context: ScoringContext): { score: number; reasons: string[]; vetoReason?: string } {
   let score = BASELINE_SCORE_BY_ACTION_TYPE[action.actionType] ?? 0;
   const reasons: string[] = [];
   const delta = (amount: number, reason: string) => {
@@ -675,8 +703,31 @@ export function scoreLegalAction(action: ScorableAction, context: ScoringContext
   scoreImmediateWinThreats(action, context, delta);
   scoreStackResponse(action, context, delta);
   scoreDevelopment(action, context, delta);
+  // One-step look-ahead and counterspell/protection awareness (lookAhead.ts) — score adjustments only.
+  scoreGangBlockRisk(action, context, delta);
+  scoreOwnBoardWipe(action, context, delta);
+  scoreRemovalAftermath(action, context, delta);
+  scoreInterferenceTiming(action, context, delta);
+
+  // Hard guards last: a vetoed play sinks below every legal alternative (pass/end turn are always offered) and is flagged so the
+  // live route can also overrule an LLM that picked it anyway.
+  const guards = evaluatePlayGuards(action, context);
+  if (guards.vetoed) {
+    delta(-50, guards.reasons[0]);
+    return { score, reasons, vetoReason: guards.reasons.join("; ") };
+  }
 
   return { score, reasons };
+}
+
+// The action to actually take given a chosen id: the choice itself unless a play guard vetoes it, in which case the best-scored
+// non-vetoed legal action replaces it (pass/end turn if nothing else). `scored` must come from scoreLegalActions (sorted, best first).
+export function resolveGuardedChoice(scored: ScoredAction[], chosenId: string | undefined): { action: ScoredAction | undefined; overridden: boolean; reason?: string } {
+  const chosen = scored.find((candidate) => candidate.id === chosenId);
+  if (chosen && !chosen.vetoReason) return { action: chosen, overridden: false };
+  const replacement = scored.find((candidate) => !candidate.vetoReason) ?? scored[0];
+  if (!chosen) return { action: replacement, overridden: false };
+  return { action: replacement, overridden: true, reason: chosen.vetoReason };
 }
 
 export function scoreLegalActions(actions: ScorableAction[], context: ScoringContext): ScoredAction[] {
@@ -700,7 +751,7 @@ export interface FallbackAgentAction {
 // heuristicBrain (src/lib/selfplay/brains.ts, which has no LLM at all in this milestone) import it
 // from here rather than keeping two copies that could silently drift apart.
 export function fallbackAction(scoredActions: ScoredAction[], reason: string): FallbackAgentAction {
-  const preferred = scoredActions[0];
+  const preferred = scoredActions.find((candidate) => !candidate.vetoReason) ?? scoredActions[0];
 
   return {
     actionType: preferred.actionType,

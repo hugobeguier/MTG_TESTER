@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { agentModelName, requestAgentAction } from "@/lib/ollama";
 import { knowledgeFilesForPurpose, loadKnowledgePack } from "@/lib/knowledge";
-import { fallbackAction, scoreLegalActions, type ScoringContext } from "@/lib/actionScoring";
+import { fallbackAction, resolveGuardedChoice, scoreLegalActions, type ScoringContext } from "@/lib/actionScoring";
 import { formatLessonsForPrompt } from "@/lib/agentLessons";
 import { readLessons } from "@/lib/agentLessonStore";
 
@@ -24,7 +24,10 @@ const LegalActionSchema = z.object({
   targetIds: z.array(z.string()).default([]),
   label: z.string().min(1),
   detail: z.string().optional(),
-  role: z.string().optional()
+  role: z.string().optional(),
+  // Read by the play guards (src/lib/playGuards.ts); zod would otherwise strip them.
+  abilityKind: z.string().optional(),
+  sacrificeCardIds: z.array(z.string()).optional()
 });
 
 const AgentActionRequestSchema = z.object({
@@ -87,6 +90,13 @@ export async function POST(request: NextRequest) {
         "the permanent it would target — casting it now just spends it for no reason. Hold it (pass_priority",
         "or take a different action) unless a real removal spell, combat damage, or other threat is actually",
         "about to resolve against something you control.",
+        "A legal action carrying a vetoReason is forbidden by a deterministic play guard (a pointless sacrifice of your own",
+        "permanent, removal spent on a non-threat, or a protection spell with nothing to protect against). Do not choose it —",
+        "the system will replace it with the best allowed action anyway.",
+        "Scores already include a look-ahead: worst-case double blocks, what a wipe leaves each side, what a removal spell leaves",
+        "behind, and counterspell/protection risk from each opponent's open mana, colors, hand size and what they have already shown.",
+        "A big spell scored down for a likely counterspell should wait (or be preceded by a cheaper bait spell) for at most a turn or two;",
+        "a spell scored up because counter-capable opponents are tapped out should be cast now.",
         "A land drop is free: it costs no mana, no card, no tempo, and banks a resource for every future",
         "turn. \"Nothing urgent is happening this turn\" is not a reason to skip it — that is true on almost",
         "every single turn of the game and playing a land anyway is still correct. Pass on a legal play_land",
@@ -178,6 +188,18 @@ export async function POST(request: NextRequest) {
         options,
         message: "Agent's legalActionId did not match its stated actionType; using fallback.",
         action: fallbackAction(scoredActions, "Mismatched action id/type; using fallback.")
+      });
+    }
+
+    // Deterministic play guards (src/lib/playGuards.ts: pointless sacrifices, removal on non-threats, protection with nothing to
+    // protect against) overrule the model: a vetoed choice is replaced by the best non-vetoed legal action.
+    const guarded = resolveGuardedChoice(scoredActions, action.legalActionId);
+    if (guarded.overridden && guarded.action) {
+      return NextResponse.json({
+        source: "invalid",
+        options,
+        message: `Play guard overruled the agent's choice: ${guarded.reason}`,
+        action: fallbackAction(scoredActions, `Play guard vetoed the chosen action (${guarded.reason}); using the best allowed action.`)
       });
     }
 

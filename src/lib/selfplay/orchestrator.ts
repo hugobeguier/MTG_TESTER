@@ -147,6 +147,7 @@ import { parseRemovalEffect } from "@/lib/removalSpells";
 import { parseSpellExtraEffects } from "@/lib/spellExtras";
 import { graveyardCastPermission } from "@/lib/graveyardCasting";
 import { parseZoneEffect } from "@/lib/zoneEffects";
+import { classifyTell } from "@/lib/lookAhead";
 import type { CardLike, ScoringContext } from "@/lib/actionScoring";
 import type { GameSession, PlayerSeat, VisibleCard } from "@/lib/types";
 import { auditAfterAction, createAuditState, SelfPlayStrictViolationError, type AuditMeta, type AuditState, type AuditViolation } from "./audit";
@@ -256,7 +257,11 @@ function toCardLike(card: VisibleCard): CardLike {
     manaValue: card.manaValue,
     role: card.role,
     tapped: card.tapped,
-    oracleText: card.oracleText
+    oracleText: card.oracleText,
+    token: card.token ? true : undefined,
+    attacking: card.attacking,
+    blocking: card.blocking,
+    commander: card.commander ? true : undefined
   };
 }
 
@@ -268,7 +273,9 @@ function buildScoringContext(session: GameSession, seatId: string, purpose: stri
   return {
     purpose,
     turn: session.turn,
+    phase: session.phase,
     you: {
+      id: seat.id,
       life: seat.life,
       poison: seat.poison,
       commanderDamage: seat.commanderDamage,
@@ -283,7 +290,14 @@ function buildScoringContext(session: GameSession, seatId: string, purpose: stri
       life: opponent.life,
       poison: opponent.poison,
       commanderDamage: opponent.commanderDamage,
-      battlefield: opponent.board.battlefield.map(toCardLike)
+      battlefield: opponent.board.battlefield.map(toCardLike),
+      availableMana: { total: opponent.board.battlefield.filter((card) => isAvailableManaSource(card, opponent, session.seats)).length },
+      colorIdentity: opponent.board.commander?.colorIdentity ?? opponent.board.commander?.colors,
+      hand: { count: opponent.board.hand.length },
+      shownTells: (() => {
+        const tells = [...(opponent.board.graveyard ?? []), ...(opponent.board.exile ?? [])].map((card) => classifyTell(card.oracleText, card.typeLine));
+        return { counterspells: tells.filter((tell) => tell === "counter").length, protection: tells.filter((tell) => tell === "protection").length };
+      })()
     }))
   };
 }

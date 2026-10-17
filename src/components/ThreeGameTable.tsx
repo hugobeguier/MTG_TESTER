@@ -28,6 +28,7 @@ import {
 } from "@/lib/activatedAbilities";
 import { equipCost, isAura, isEquipment } from "@/lib/attachments";
 import { graveyardCastPermission } from "@/lib/graveyardCasting";
+import type { StackItemDescription } from "@/lib/stackDescription";
 import { libraryTopCastPermission } from "@/lib/libraryCasting";
 import { parseCycling } from "@/lib/cycling";
 import { parseGraveyardReturnAbility } from "@/lib/graveyardAbilities";
@@ -192,6 +193,37 @@ interface ThreeGameTableProps {
   onStopNext?: () => void;
 }
 
+// Who controls a stack item, what it does and what it targets, with a loud badge when it goes after the human.
+function StackDescriptionBlock({ description, humanSeatId }: { description?: StackItemDescription; humanSeatId?: string }) {
+  if (!description) return null;
+  const affectsYou = description.affectsPlayerSeatId !== undefined && description.affectsPlayerSeatId === humanSeatId;
+  return (
+    <div className={`stack-desc${affectsYou ? " targets-you" : ""}`}>
+      <div className="stack-desc-head">
+        <strong>{description.source}</strong>
+        <span>{description.controllerSeatId === humanSeatId ? "yours" : `controlled by ${description.controller}`}</span>
+      </div>
+      {affectsYou ? <span className="stack-target-badge">Targets you / your stuff - consider responding</span> : null}
+      {description.summary ? <p className="stack-desc-summary">{description.summary}</p> : null}
+      {description.targets.length > 0 ? (
+        <ul className="stack-targets">
+          {description.targets.map((target, index) => {
+            const mine = target.seatId === humanSeatId;
+            return (
+              <li key={`${target.cardId ?? target.seatId}-${index}`} className={mine ? "is-mine" : undefined}>
+                <b>{target.kind === "player" ? (mine ? "You" : target.label) : target.label}</b>
+                <em>{target.kind === "player" ? "player" : mine ? "yours" : `${target.seatName}'s`}</em>
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <span className="stack-no-targets">{description.targetsPending ? "Target not recorded yet (chosen as it resolves)" : "No targets"}</span>
+      )}
+    </div>
+  );
+}
+
 type PendingActionView =
   | {
       id: string;
@@ -210,6 +242,7 @@ type PendingActionView =
       // stack HUD render real card art instead of just the name/type-line strings above. Can be
       // missing if the card already left the zone this was derived from (fizzled counterspell, ...).
       sourceCard?: VisibleCard;
+      description?: StackItemDescription;
     }
   | {
       id: string;
@@ -220,6 +253,7 @@ type PendingActionView =
       triggerKind: "common";
       message: string;
       sourceCard?: VisibleCard;
+      description?: StackItemDescription;
     };
 
 type RuleChoiceView =
@@ -1543,6 +1577,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
               <VisualCard card={displayedAction.sourceCard} compact />
             ) : null}
             <p>{displayedAction.message}</p>
+            {displayedAction.type !== "phase" ? <StackDescriptionBlock description={displayedAction.description} humanSeatId={human?.id} /> : null}
             {displayedAction.type === "spell" && displayedAction.cardTypeLine ? (
               <p className="stack-type-line">{displayedAction.cardTypeLine}</p>
             ) : null}
@@ -1560,6 +1595,9 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
                         {action.type === "spell" && action.cardTypeLine ? <small>{action.cardTypeLine}</small> : null}
                       </>
                     )}
+                    {action.type !== "phase" && action !== displayedAction && action.id !== displayedAction.id ? (
+                      <StackDescriptionBlock description={action.description} humanSeatId={human?.id} />
+                    ) : null}
                   </div>
                 ))}
               </div>

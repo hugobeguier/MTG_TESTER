@@ -133,7 +133,9 @@ import { matchesTargetType, parseRemovalEffect, type DynamicAmount, type Removal
 import { hasCardType, parseTypeGrantEffects, typeGrantAppliesTo } from "@/lib/typeGrants";
 import { parseZoneEffect, type LookDigEffect, type RegrowTargetType, type ZoneEffect } from "@/lib/zoneEffects";
 import { legalTargets, targetsStillLegal, type ChosenTarget, type TargetSpec } from "@/lib/targeting";
+import { describeStackItem, type StackItemDescription, type StackItemLike } from "@/lib/stackDescription";
 import { removalEffectTargetSpec, zoneEffectTargetSpec } from "@/lib/targetSpecs";
+import { classifyTell } from "@/lib/lookAhead";
 import { DEFAULT_STOP_SETTINGS, shouldStopForPriority, stopKey, TURN_PHASES, type PriorityStopSettings } from "@/lib/priorityStops";
 import { ThreeGameTable } from "./ThreeGameTable";
 
@@ -1251,6 +1253,8 @@ export interface LegalAgentAction {
     | "animate_manland"
     | "cycling";
   abilityIndex?: number;
+  // generic_sacrifice only: the permanents the cost would sacrifice (read by the agent play guards, src/lib/playGuards.ts).
+  sacrificeCardIds?: string[];
   faceIndex?: number;
   loyaltyCost?: number;
   // Set only for a cast_spell action sourced from exile (impulse-draw/steal-and-play effects) or from the
@@ -5606,7 +5610,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       faceIndex:
         doorFace ? faceIndex : spellFace ? faceIndex : dfcSplit ? dfcSplit.spellIndex : !doors && card.faces?.length === 2 ? 0 : undefined,
       chosenX: chosenX > 0 ? chosenX : undefined,
-      castChoices,
+      castChoices: castChoices ?? (seat.kind !== "human" && !doorFace && !spellFace && !dfcSplit && sourceZone !== "command" ? agentCastTimeRemovalChoices(session, seatId, card) : undefined),
       message: `${seat.name} casts ${castName}${xText}${sourceZone === "command" ? " from the command zone" : sourceZone === "exile" ? " from exile" : sourceZone === "graveyard" ? (flashbackCostText ? " with flashback" : " from the graveyard") : sourceZone === "library" ? " from the top of their library" : ""}${spentManaText}.`
     };
     if (usesOnceEachTurnFreeCast) {
@@ -11352,8 +11356,8 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         mulliganReturnRequired={Math.max(0, humanSeat.board.hand.length - openingHandKeepSize(mulligans[humanSeat.id] ?? 0))}
         session={{ ...session, activePlayerId: activeSeatId }}
         prioritySeatId={prioritySeatId}
-        pendingAction={pendingAction ? withPendingActionSourceCard(session, pendingAction) : undefined}
-        stackActions={stackActions.map((action) => withPendingActionSourceCard(session, action))}
+        pendingAction={pendingAction ? withPendingActionSourceCard(session, pendingAction, stackActions) : undefined}
+        stackActions={stackActions.map((action) => withPendingActionSourceCard(session, action, stackActions))}
         agentThinking={agentThinking}
         agentReasoning={agentReasoning}
         manaPool={poolForSeat(humanSeat.id)}
@@ -13486,15 +13490,17 @@ function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllowed: boo
       const sacrificeCostTotal = manaValueFromManaCost(ability.costManaText);
       const affordable = sacrificeCostTotal === 0 || chooseManaSourcesForCost(seat, genericManaAbilityCostShim(ability), sacrificeCostTotal, card.id, session.seats).ok;
       if (!affordable) return;
-      const targetNames =
+      const sacrificeCards =
         ability.sacrificeTarget === "self"
-          ? [card.name]
-          : (chooseSacrificeTargets(seat, ability.sacrificeTargetTypeFilter, ability.sacrificeCount, ability.sacrificeExcludesSelf || ability.sacrificeTarget === "permanent" ? card.id : undefined, ability.sacrificeTarget === "permanent") ?? []).map((target) => target.name);
+          ? [card]
+          : (chooseSacrificeTargets(seat, ability.sacrificeTargetTypeFilter, ability.sacrificeCount, ability.sacrificeExcludesSelf || ability.sacrificeTarget === "permanent" ? card.id : undefined, ability.sacrificeTarget === "permanent") ?? []);
+      const targetNames = sacrificeCards.map((target) => target.name);
       actions.push({
         id: `activate-sacrifice:${card.id}:${abilityIndex}`,
         actionType: "activate_ability",
         abilityKind: "generic_sacrifice",
         abilityIndex,
+        sacrificeCardIds: sacrificeCards.map((target) => target.id),
         cardId: card.id,
         targetIds: [],
         label: `activate ${card.name} (sacrifice ${targetNames.join(", ") || "a creature"})`,
@@ -17348,6 +17354,22 @@ export function nextCastPrompt(
   return { kind: "target", prompt: slot.prompt, options };
 }
 
+// An agent's single-target destroy/exile/bounce instant or sorcery used to pick its target only as it resolved, so the stack showed no
+// target for it. Pick it as it is cast instead (same deterministic chooser the resolution used), so it is recorded in castChoices and
+// visible to opponents, and re-checked for legality on resolution. Everything else keeps its existing resolution-time pick.
+export function agentCastTimeRemovalChoices(session: GameSession, seatId: string, card: VisibleCard): CastChoices | undefined {
+  if (card.faces?.length) return undefined;
+  const structure = castStructure(card);
+  if (structure?.kind !== "removal") return undefined;
+  const effect = structure.effect;
+  if (effect.kind !== "destroy" && effect.kind !== "exile" && effect.kind !== "bounce") return undefined;
+  const target =
+    effect.kind === "destroy"
+      ? chooseRemovalTarget(session, seatId, effect.targetType, card, effect.excludedColors, effect.artifactsExcluded, effect.basicsExcluded, true, effect.minToughness, effect.opponentOnly)
+      : chooseRemovalTarget(session, seatId, effect.targetType, card);
+  return target ? { targets: [{ kind: "card", seatId: target.seatId, cardId: target.card.id }] } : undefined;
+}
+
 // Is a target chosen at cast time still legal as the spell resolves? An illegal one makes the spell fizzle (rule 608.2b).
 export function castTargetLegal(session: GameSession, controllerSeatId: string, source: VisibleCard, target: ChosenTarget): boolean {
   if (target.kind === "player") {
@@ -20620,8 +20642,11 @@ function pendingActionSourceCard(session: GameSession, action: PendingAction): V
 // render real card art (VisualCard) instead of just a name string. Never stored in state — derived
 // fresh every render from pendingActionSourceCard so it can't go stale if the card's zone/counters
 // change while it sits on the stack.
-function withPendingActionSourceCard(session: GameSession, action: PendingAction): PendingAction & { sourceCard?: VisibleCard } {
-  return { ...action, sourceCard: pendingActionSourceCard(session, action) };
+function withPendingActionSourceCard(session: GameSession, action: PendingAction, stack: PendingAction[] = []): PendingAction & { sourceCard?: VisibleCard; description?: StackItemDescription } {
+  const sourceCard = pendingActionSourceCard(session, action);
+  // Who controls it, what it does and what it targets (src/lib/stackDescription.ts), for the stack HUD's target lines and "targets you" badge.
+  const description = action.type === "phase" ? undefined : describeStackItem(session, { ...action, sourceCard } as StackItemLike, stack as StackItemLike[]);
+  return { ...action, sourceCard, description };
 }
 
 function pendingActionSummary(session: GameSession, action: PendingAction) {
@@ -20631,7 +20656,10 @@ function pendingActionSummary(session: GameSession, action: PendingAction) {
     actorSeatId: action.actorSeatId,
     cardName: "cardName" in action ? action.cardName : "sourceCardName" in action ? action.sourceCardName : undefined,
     oracleText: pendingActionSourceCard(session, action)?.oracleText,
-    message: action.message
+    message: action.message,
+    // Targets chosen at cast time (a card on someone's battlefield, or a player), so agents can tell whether a spell is aimed at them.
+    targetCardIds: action.type === "spell" ? (action.castChoices?.targets ?? []).flatMap((target) => (target.kind === "card" ? [target.cardId] : [])) : undefined,
+    targetSeatIds: action.type === "spell" ? (action.castChoices?.targets ?? []).flatMap((target) => (target.kind === "player" ? [target.seatId] : [])) : undefined
   };
 }
 
@@ -20656,6 +20684,13 @@ function agentSeatSnapshot(seat: PlayerSeat, includeHand: boolean) {
     poison: seat.poison ?? 0,
     availableMana: summarizeAvailableMana(seat),
     commander: seat.board.commander ? agentCardSnapshot(seat.board.commander) : undefined,
+    // For counterspell/protection awareness (lookAhead.estimateOpponentInterferenceRisk): the commander's colors, and counterspells /
+    // protection tricks this seat has already shown in its graveyard or exile.
+    colorIdentity: seat.board.commander?.colorIdentity ?? seat.board.commander?.colors,
+    shownTells: (() => {
+      const tells = [...(seat.board.graveyard ?? []), ...(seat.board.exile ?? [])].map((card) => classifyTell(card.oracleText, card.typeLine));
+      return { counterspells: tells.filter((tell) => tell === "counter").length, protection: tells.filter((tell) => tell === "protection").length };
+    })(),
     // Only for the deciding seat's own view ("you"), not an opponent's — this is the agent's own
     // deck's game plan (see bracketPolicy.ts' buildDeckGamePlan), not intelligence about others.
     gamePlan: includeHand ? seat.deck?.gamePlan : undefined,

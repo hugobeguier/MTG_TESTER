@@ -1045,6 +1045,75 @@ h3 {
   line-height: 1.25;
 }
 
+.stack-desc {
+  border-left: 3px solid rgba(242, 240, 232, 0.25);
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.2rem 0 0.2rem 0.5rem;
+}
+
+.stack-desc.targets-you {
+  background: rgba(220, 60, 60, 0.12);
+  border-left-color: #e5484d;
+}
+
+.stack-desc-head {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.stack-desc-head span {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.stack-target-badge {
+  background: #e5484d;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  justify-self: start;
+  padding: 0.1rem 0.4rem;
+}
+
+.stack-desc-summary {
+  color: #d8d4c4;
+  font-size: 0.78rem;
+  line-height: 1.3;
+  margin: 0;
+}
+
+.stack-targets {
+  display: grid;
+  gap: 0.15rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.stack-targets li {
+  font-size: 0.8rem;
+}
+
+.stack-targets li em {
+  color: var(--muted);
+  font-size: 0.7rem;
+  margin-left: 0.35rem;
+}
+
+.stack-targets li.is-mine b {
+  color: #ff8a8a;
+}
+
+.stack-no-targets {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-style: italic;
+}
+
 .stack-detail .visual-card.is-compact,
 .stack-item .visual-card.is-compact {
   justify-self: start;
