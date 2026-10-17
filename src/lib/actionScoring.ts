@@ -1,6 +1,7 @@
 import { attackEconomics, defenderOf, threatShares } from "./strategy";
 import { mustAttackEachCombat } from "./combatRestrictions";
 import { evaluatePlayGuards } from "./playGuards";
+import { declineFreeAttackReason, freeAttackBonus } from "./freeAttack";
 import { scoreGangBlockRisk, scoreInterferenceTiming, scoreOwnBoardWipe, scoreRemovalAftermath } from "./lookAhead";
 import { canLegallyBlock, hasDeathtouch, hasDoubleStrike, hasFirstStrike, hasFlying, hasIndestructible, hasInfect, hasKeyword, hasLifelink, hasMenace, hasReach, hasTrample, parseNum, simulateDuel } from "./combatSim";
 
@@ -271,6 +272,12 @@ function scoreLethalAttack(action: ScorableAction, context: ScoringContext, delt
   if (attackerPower >= targetLife) {
     delta(6, `would be lethal to ${targetOpponent.name ?? "this opponent"} if it connects (${attackerPower} damage vs ${targetLife} life)`);
   }
+}
+
+// No possible blocker and nothing forfeited: the attack is free damage (freeAttack.ts).
+function scoreFreeAttack(action: ScorableAction, context: ScoringContext, delta: (amount: number, reason: string) => void) {
+  const bonus = freeAttackBonus(action, context);
+  if (bonus) delta(bonus.amount, bonus.reason);
 }
 
 function scoreAttackTargetSelection(action: ScorableAction, context: ScoringContext, delta: (amount: number, reason: string) => void) {
@@ -693,6 +700,7 @@ export function scoreLegalAction(action: ScorableAction, context: ScoringContext
   scoreAttackProfitability(action, context, delta);
   scoreLethalAttack(action, context, delta);
   scoreAttackTargetSelection(action, context, delta);
+  scoreFreeAttack(action, context, delta);
   scoreBlockDecision(action, context, delta);
   scoreHoldInstants(action, context, delta);
   scoreProactiveProtectionCast(action, context, delta);
@@ -732,7 +740,17 @@ export function resolveGuardedChoice(scored: ScoredAction[], chosenId: string | 
 
 export function scoreLegalActions(actions: ScorableAction[], context: ScoringContext): ScoredAction[] {
   return actions
-    .map((action) => ({ ...action, ...scoreLegalAction(action, context) }))
+    .map((action) => {
+      const scored = { ...action, ...scoreLegalAction(action, context) };
+      // Passing on a free attack (no possible blocker, nothing forfeited) is vetoed so an LLM choice of it is overruled too.
+      const declined = declineFreeAttackReason(action, actions, context);
+      if (declined && !scored.vetoReason) {
+        scored.score -= 50;
+        scored.reasons = [...scored.reasons, declined];
+        scored.vetoReason = declined;
+      }
+      return scored;
+    })
     .sort((a, b) => b.score - a.score);
 }
 
