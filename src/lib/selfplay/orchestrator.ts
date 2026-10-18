@@ -314,6 +314,9 @@ export interface SelfPlayOptions {
   timeoutMs?: number;
   strict?: boolean;
   verbose?: boolean;
+  // Optional observer called after every applied action with the same (prev, next, meta) the audit sees — used by the mistake
+  // detector (mistakes.ts); never affects play.
+  onAction?: (prev: GameSession, next: GameSession, meta: AuditMeta) => void;
 }
 
 export interface DecisionCounts {
@@ -1046,6 +1049,7 @@ export async function playGame(session: GameSession, brains: Record<string, Brai
   function afterAction(prev: GameSession, next: GameSession, meta: AuditMeta) {
     auditAfterAction(auditState, next, meta, opts.strict ?? false);
     scanForAnomalies(anomalyState, prev, next, meta);
+    opts.onAction?.(prev, next, meta);
   }
 
   let phaseIndex = 0;

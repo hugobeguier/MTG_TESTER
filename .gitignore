@@ -16,3 +16,4 @@ data/*.db-shm
 data/xmage-source
 # Per-run self-play output (scripts/self-play.ts) — generated JSONL logs, not repo content.
 bench/selfplay-results/
+bench/mistakes/
