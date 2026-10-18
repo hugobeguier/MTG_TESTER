@@ -96,6 +96,12 @@ function facingLethal(context: ScoringContext): boolean {
 const FRESH_VALUE_THRESHOLD = 3;
 
 export function wipeSequencingGuard(action: ScorableAction, context: ScoringContext): { allowed: boolean; reason?: string } {
+  // The other half: deploying something a planned wipe would kill is vetoed too, so an LLM that picks the creature first is overruled and
+  // the (higher-scored) wipe goes first; the creature is cast afterwards with the mana that is left.
+  const blockingWipe = deploymentHeldForWipe(action, context);
+  if (blockingWipe) {
+    return { allowed: false, reason: `${(action.label ?? "").replace(/^cast\s+/i, "") || "this permanent"} held: ${blockingWipe.name} is going to be cast this turn and would kill it — cast the wipe first, then deploy with the remaining mana` };
+  }
   if (action.actionType !== "cast_spell") return { allowed: true };
   const text = detailText(action);
   if (!wipeScope(text)) return { allowed: true };
@@ -122,13 +128,18 @@ export function plannedWipe(context: ScoringContext, exceptCardId: string | unde
   });
 }
 
-export function scoreWipeSequencing(action: ScorableAction, context: ScoringContext, delta: Delta) {
-  if (action.actionType !== "cast_spell" && action.actionType !== "cast_commander") return;
+// The planned wipe that a permanent-casting action should wait for, if any.
+export function deploymentHeldForWipe(action: ScorableAction, context: ScoringContext): CardLike | undefined {
+  if (action.actionType !== "cast_spell" && action.actionType !== "cast_commander") return undefined;
   const card = (context.you?.hand ?? []).find((item) => item.id === action.cardId) ?? (context.you?.commander?.id === action.cardId ? context.you?.commander : undefined);
-  if (!card || (card.typeLine ?? "").includes("Instant") || (card.typeLine ?? "").includes("Sorcery")) return;
+  if (!card || (card.typeLine ?? "").includes("Instant") || (card.typeLine ?? "").includes("Sorcery")) return undefined;
   const wipe = plannedWipe(context, card.id);
+  if (!wipe) return undefined;
+  return wipeVictims(clean(wipe.oracleText), [card]).length > 0 ? wipe : undefined;
+}
+
+export function scoreWipeSequencing(action: ScorableAction, context: ScoringContext, delta: Delta) {
+  const wipe = deploymentHeldForWipe(action, context);
   if (!wipe) return;
-  const text = clean(wipe.oracleText);
-  if (wipeVictims(text, [card]).length === 0) return;
-  delta(-7, `hold ${card.name}: ${wipe.name} is going to be cast this turn and would kill it — wipe first, then deploy with the remaining mana`);
+  delta(-7, `hold ${(action.label ?? "").replace(/^cast\s+(?:commander\s+)?/i, "")}: ${wipe.name} is going to be cast this turn and would kill it — wipe first, then deploy with the remaining mana`);
 }

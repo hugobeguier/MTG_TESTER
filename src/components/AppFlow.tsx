@@ -15502,6 +15502,11 @@ export function winTheGame(session: GameSession, winnerSeatId: string, sourceNam
 export function runStateBasedActionsPass(session: GameSession): { session: GameSession; changed: boolean } {
   let changed = false;
   let next = session;
+  // Stamp the turn every permanent entered on, whichever path put it there (tokens, reanimation, flicker, copies, ...): the paths that
+  // bypass playCardFromZone leave enteredTurn unset, and this pass runs right after each action, still within that same turn.
+  if (next.seats.some((seat) => seat.board.battlefield.some((card) => card.enteredTurn === undefined))) {
+    next = { ...next, seats: next.seats.map((seat) => ({ ...seat, board: { ...seat.board, battlefield: seat.board.battlefield.map((card) => (card.enteredTurn === undefined ? { ...card, enteredTurn: next.turn } : card)) } })) };
+  }
   // Devoid: a permanent with it is colorless.
   if (next.seats.some((seat) => seat.board.battlefield.some((card) => card.colors.length > 0 && !card.abilitiesStripped && /^devoid\b/im.test(card.oracleText)))) {
     next = { ...next, seats: next.seats.map((seat) => ({ ...seat, board: { ...seat.board, battlefield: seat.board.battlefield.map((card) => (card.colors.length > 0 && !card.abilitiesStripped && /^devoid\b/im.test(card.oracleText) ? { ...card, colors: [] } : card)) } })) };
@@ -16131,6 +16136,7 @@ function resetForZoneChange<T extends VisibleCard>(card: T, zone: VisibleCard["z
   return {
     ...card,
     zone,
+    enteredTurn: undefined,
     ...(frontFace
       ? {
           name: frontFace.name,

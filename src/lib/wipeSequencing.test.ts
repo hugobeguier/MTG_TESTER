@@ -83,3 +83,18 @@ describe("creatures wait for the wipe", () => {
     expect(fallbackAction(scoreLegalActions([giant.action, pass], context), "t").legalActionId).toBe(giant.action.id);
   });
 });
+
+describe("LLM path: an LLM that picks the creature first is overruled", () => {
+  it("resolveGuardedChoice replaces the creature with the wipe", async () => {
+    const { resolveGuardedChoice } = await import("./actionScoring");
+    const wrath = cast("Wrath of God", "Sorcery", 4, WRATH);
+    const giant = cast("Test Giant", "Creature — Giant", 5, "");
+    giant.card.power = "4";
+    giant.card.toughness = "4";
+    const scored = scoreLegalActions([giant.action, wrath.action, pass], ctx({ hand: [wrath.card, giant.card], availableMana: { total: 9 } }, giants));
+    const decision = resolveGuardedChoice(scored, giant.action.id);
+    expect(decision.overridden).toBe(true);
+    expect(decision.action?.id).toBe(wrath.action.id);
+    expect(decision.reason).toMatch(/cast the wipe first/);
+  });
+});
