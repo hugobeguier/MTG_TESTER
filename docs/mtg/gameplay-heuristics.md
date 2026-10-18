@@ -133,3 +133,13 @@ Choosing whom to attack — look at all opponents together:
 - **Do not feed the winner:** if one opponent is far ahead, attacking a weaker opponent can help the leader. Prefer the line that lowers the leader's power.
 
 Balance aggression with development. Casting your commander, anthems when you have creatures to boost, card-draw engines early and ramp are how the deck gets stronger — do not trade away the pieces that make it work for a few points of damage, and do not sit back so long that the opponents' engines outgrow yours.
+
+## Common mistakes found by self-play review
+
+These came out of thousands of simulated decisions; avoid them unless the board clearly says otherwise.
+
+- **A lone attacker into a blocker that kills it and survives.** If the defender has an untapped creature that can legally block your attacker, would kill it and would not die, the attack just gives that creature away. Attack only when you send more attackers than such blockers, or when the attack is lethal, or when the attacker is expendable.
+- **Tapping out while the table can kill you next turn.** Count what the opponents' creatures can deal to you after your own blockers are accounted for. If that is lethal, spend mana on blockers, removal or a sweeper, not on a mana rock or an enchantment, and keep an instant-speed answer up when you have one.
+- **A board wipe when you are ahead.** Compare the value of your creatures with the value of everyone else's combined; a sweeper is for when you lose less than the table does.
+- **A spell with no target or no effect.** Do not cast removal when only your own creature could be the target, a counterspell with nothing on the stack, or a spell that costs more life than you have.
+- **Extra blockers that only die.** Add a second blocker to a block only if it survives the attacker.
