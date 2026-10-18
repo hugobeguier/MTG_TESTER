@@ -452,10 +452,18 @@ function scoreTransformSacrifice(action: ScorableAction, context: ScoringContext
 // "no blocks" actions from a declare_blockers decision carry a meaningful attacker/blocker pair —
 // everything else (including block actions outside that purpose) is left at baseline.
 function scoreBlockDecision(action: ScorableAction, context: ScoringContext, delta: (amount: number, reason: string) => void) {
-  if (context.purpose !== "declare_blockers" || action.actionType !== "block") return;
+  if ((context.purpose !== "declare_blockers" && context.purpose !== "declare_blockers_additional") || action.actionType !== "block") return;
   const blocker = findCard(context.you?.battlefield, action.cardId);
   const attacker = findCard(opponentBattlefields(context), action.targetIds[0]);
   if (!blocker || !attacker) return;
+
+  // A creature already blocks this attacker: another body only joins if it survives the attacker (free extra damage); one that would die
+  // without a reason is just thrown away (mistake detector: "pointless_block", gang-adding at the +2 baseline every time).
+  if (context.purpose === "declare_blockers_additional") {
+    if (simulateDuel(attacker, blocker).blockerDies) delta(-3, "an additional blocker that would die just feeds the attacker a second creature");
+    else delta(1, "an additional blocker that survives adds damage for free");
+    return;
+  }
 
   const attackerPower = parseNum(attacker.power) ?? 0;
   const duel = simulateDuel(attacker, blocker);

@@ -13,7 +13,7 @@
 import type { CardLike, ScorableAction, ScoredAction, ScoringContext } from "@/lib/actionScoring";
 import { isBoardWipeText, scoreLegalActions } from "@/lib/actionScoring";
 import { freeAttackVerdict, untappedBlockersFor } from "@/lib/freeAttack";
-import { parseTargetedRemoval, protectionGuard, removalGuard, sacrificeGuard, situationalTimingGuard } from "@/lib/playGuards";
+import { immediateLifeLoss, parseTargetedRemoval, protectionGuard, removalGuard, sacrificeGuard, situationalTimingGuard } from "@/lib/playGuards";
 import { simulateDuel, parseNum } from "@/lib/combatSim";
 import { creatureValue } from "@/lib/strategy";
 import type { GameSession, VisibleCard } from "@/lib/types";
@@ -120,11 +120,8 @@ export function analyzeDecision(point: DecisionPoint, chosen: ScorableAction, sc
     // Targeted removal with no OPPOSING creature to hit: the only legal target is the caster's own creature (Swords on your own commander).
     const hitsOwnOnly = parseTargetedRemoval(chosen)?.scope === "creature" && !modal && (context.opponents ?? []).every((o) => !(o.battlefield ?? []).some(isCreatureCard)) && (context.you?.battlefield ?? []).some(isCreatureCard);
     if (hitsOwnOnly) add("spell_no_target_or_effect", "targeted creature removal cast with no opposing creature: it can only hit my own", [name]);
-    const lifeCost = text.match(/\byou lose (\d+) life\b|\bpay (\d+) life\b/);
-    if (lifeCost && !/\b(?:target|each) (?:opponent|player)s? loses?\b/.test(text.slice(0, lifeCost.index ?? 0))) {
-      const cost = Number(lifeCost[1] ?? lifeCost[2]);
-      if ((context.you?.life ?? 40) <= cost) add("self_lethal_life_cost", `${name} costs ${cost} life and I only have ${context.you?.life}`, [name]);
-    }
+    const lifeLoss = immediateLifeLoss(chosen);
+    if (lifeLoss > 0 && (context.you?.life ?? 40) <= lifeLoss) add("self_lethal_life_cost", `${name} makes me lose ${lifeLoss} life and I only have ${context.you?.life}`, [name]);
     if (targetsCreature && !anyCreature && !modal && /\b(?:instant|sorcery|aura)\b/.test(head)) add("spell_no_target_or_effect", "spell needs a target creature and no creature is on the table", [name]);
 
     if (isBoardWipeText(text) && !/\bcounter target\b/.test(text)) {

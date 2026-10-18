@@ -1,0 +1,1236 @@
+{
+  "health": {
+    "games": 40,
+    "seedRange": "1000..1039",
+    "pool": "legacy",
+    "unguarded": false,
+    "finishedPct": 100,
+    "timeouts": 0,
+    "turnCaps": 0,
+    "crashes": 0,
+    "avgTurnsPerSeat": 9.8875,
+    "auditViolations": 0,
+    "decisions": 3932,
+    "winnerSpread": {
+      "Seat A": 25,
+      "Seat B": 15
+    },
+    "actionsByType": {
+      "play_land": 580,
+      "pass_priority": 1785,
+      "cast_spell": 630,
+      "attack": 787,
+      "cast_commander": 42,
+      "block": 108
+    },
+    "decisionsByPurpose": {
+      "main_phase": 2873,
+      "declare_attackers": 867,
+      "declare_blockers": 169,
+      "declare_blockers_additional": 23
+    },
+    "passRate": 0.4539674465920651,
+    "avgWallClockMs": 219.8
+  },
+  "categories": {
+    "suicide_attack": {
+      "count": 8,
+      "games": 7,
+      "topCards": [
+        [
+          "Aminatou, Veil Piercer",
+          3
+        ],
+        [
+          "Emry, Lurker of the Loch",
+          2
+        ],
+        [
+          "Merciless Executioner",
+          2
+        ],
+        [
+          "Moon-Blessed Cleric",
+          2
+        ],
+        [
+          "Saheeli, the Gifted",
+          2
+        ],
+        [
+          "Loyal Apprentice",
+          1
+        ],
+        [
+          "Korlessa, Scale Singer",
+          1
+        ],
+        [
+          "Ganax, Astral Hunter",
+          1
+        ]
+      ],
+      "examples": [
+        {
+          "category": "suicide_attack",
+          "message": "Emry, Lurker of the Loch attacks into Aminatou, Veil Piercer, which can block and kill it without dying (1 attacker(s) vs 1 such blocker(s))",
+          "cardNames": [
+            "Emry, Lurker of the Loch",
+            "Aminatou, Veil Piercer"
+          ],
+          "game": 5,
+          "turn": 8,
+          "phase": "declare attackers step",
+          "seat": "Seat A",
+          "purpose": "declare_attackers",
+          "state": {
+            "life": {
+              "Seat A": 37,
+              "Seat B": 40
+            },
+            "hand": [
+              "Thopter Assembly",
+              "Loyal Apprentice",
+              "Duplicant",
+              "Tomb of the Spirit Dragon",
+              "Island",
+              "Saheeli's Directive"
+            ],
+            "battlefield": {
+              "Seat A": [
+                "Emry, Lurker of the Loch 1/2",
+                "Saheeli, the Gifted 3/4"
+              ],
+              "Seat B": [
+                "Moon-Blessed Cleric 3/2(t)",
+                "Aminatou, Veil Piercer 2/4"
+              ]
+            },
+            "openMana": 0,
+            "stack": []
+          },
+          "chosen": "attack Seat B with Emry, Lurker of the Loch",
+          "alternatives": [
+            {
+              "label": "attack Seat B with Emry, Lurker of the Loch",
+              "score": 0,
+              "vetoed": false
+            },
+            {
+              "label": "declare no attackers",
+              "score": 0,
+              "vetoed": false
+            }
+          ]
+        },
+        {
+          "category": "suicide_attack",
+          "message": "Merciless Executioner attacks into Aminatou, Veil Piercer, which can block and kill it without dying (1 attacker(s) vs 1 such blocker(s))",
+          "cardNames": [
+            "Merciless Executioner",
+            "Aminatou, Veil Piercer"
+          ],
+          "game": 7,
+          "turn": 9,
+          "phase": "declare attackers step",
+          "seat": "Seat B",
+          "purpose": "declare_attackers",
+          "state": {
+            "life": {
+              "Seat B": 40,
+              "Seat A": 40
+            },
+            "hand": [
+              "Satyr Wayfinder",
+              "Reanimate",
+              "Dauthi Voidwalker",
+              "Journey to Eternity",
+              "Buried Alive",
+              "Village Rites"
+            ],
+            "battlefield": {
+              "Seat B": [
+                "Merciless Executioner 3/1",
+                "Warren Soultrader 3/3"
+              ],
+              "Seat A": [
+                "Talisman of Dominance(t)",
+                "Aminatou, Veil Piercer 2/4"
+              ]
+            },
+            "openMana": 0,
+            "stack": []
+          },
+          "chosen": "attack Seat A with Merciless Executioner",
+          "alternatives": [
+            {
+              "label": "attack Seat A with Merciless Executioner",
+              "score": 1,
+              "vetoed": false
+            },
+            {
+              "label": "declare no attackers",
+              "score": 0,
+              "vetoed": false
+            }
+          ]
+        },
+        {
+          "category": "suicide_attack",
+          "message": "Loyal Apprentice attacks into Korlessa, Scale Singer, which can block and kill it without dying (1 attacker(s) vs 1 such blocker(s))",
+          "cardNames": [
+            "Loyal Apprentice",
+            "Korlessa, Scale Singer"
+          ],
+          "game": 10,
+          "turn": 6,
+          "phase": "declare attackers step",
+          "seat": "Seat B",
+          "purpose": "declare_attackers",
+          "state": {
+            "life": {
+              "Seat B": 40,
+              "Seat A": 40
+            },
+            "hand": [
+              "Saheeli, Filigree Master",
+              "Rogue's Passage",
+              "Treasure Vault",
+              "Thoughtcast",
+              "Saheeli's Directive"
+            ],
+            "battlefield": {
+              "Seat B": [
+                "Loyal Apprentice 2/1"
+              ],
+              "Seat A": [
+                "Korlessa, Scale Singer 1/4"
+              ]
+            },
+            "openMana": 0,
+            "stack": []
+          },
+          "chosen": "attack Seat A with Loyal Apprentice",
+          "alternatives": [
+            {
+              "label": "attack Seat A with Loyal Apprentice",
+              "score": 0,
+              "vetoed": false
+            },
+            {
+              "label": "declare no attackers",
+              "score": 0,
+              "vetoed": false
+            }
+          ]
+        }
+      ]
+    },
+    "self_inflicted_loss": {
+      "count": 2,
+      "games": 2,
+      "topCards": [
+        [
+          "Rivaz of the Claw",
+          1
+        ],
+        [
+          "Talisman of Progress",
+          1
+        ],
+        [
+          "Talisman of Hierarchy",
+          1
+        ],
+        [
+          "Talisman of Dominance",
+          1
+        ],
+        [
+          "Aminatou, Veil Piercer",
+          1
+        ],
+        [
+          "Sphere of Safety",
+          1
+        ]
+      ],
+      "examples": [
+        {
+          "category": "self_inflicted_loss",
+          "message": "casting cast Crux of Fate cost the caster ~6 of permanents (Rivaz of the Claw) against ~0 for everyone else",
+          "cardNames": [
+            "Rivaz of the Claw"
+          ],
+          "game": 2,
+          "turn": 9,
+          "phase": "precombat main phase",
+          "seat": "Seat A",
+          "purpose": "outcome",
+          "state": {
+            "life": {
+              "Seat A": 39,
+              "Seat B": 39
+            },
+            "hand": [
+              "Crux of Fate",
+              "Two-Headed Hellkite",
+              "Ancient Silver Dragon",
+              "Ancient Copper Dragon",
+              "Mox Opal"
+            ],
+            "battlefield": {
+              "Seat A": [
+                "Korlessa, Scale Singer",
+                "Rivaz of the Claw"
+              ],
+              "Seat B": [
+                "Saheeli, Sublime Artificer",
+                "Saheeli, the Gifted"
+              ]
+            },
+            "openMana": 0,
+            "stack": []
+          },
+          "chosen": "cast Crux of Fate",
+          "alternatives": []
+        },
+        {
+          "category": "self_inflicted_loss",
+          "message": "casting cast Devastation Tide cost the caster ~24 of permanents (Talisman of Progress, Talisman of Hierarchy, Talisman of Dominance, Aminatou, Veil Piercer, Sphere of Safety) against ~15 for everyone else",
+          "cardNames": [
+            "Talisman of Progress",
+            "Talisman of Hierarchy",
+            "Talisman of Dominance",
+            "Aminatou, Veil Piercer",
+            "Sphere of Safety"
+          ],
+          "game": 12,
+          "turn": 12,
+          "phase": "precombat main phase",
+          "seat": "Seat B",
+          "purpose": "outcome",
+          "state": {
+            "life": {
+              "Seat A": 38,
+              "Seat B": 36
+            },
+            "hand": [
+              "Virtue of Persistence",
+              "Archaeomancer's Map",
+              "Brainsurge",
+              "Secret Arcade",
+              "Devastation Tide"
+            ],
+            "battlefield": {
+              "Seat A": [
+                "Everflowing Chalice",
+                "Enthusiastic Mechanaut",
+                "Saheeli, Sublime Artificer",
+                "Prototype Portal"
+              ],
+              "Seat B": [
+                "Talisman of Progress",
+                "Talisman of Hierarchy",
+                "Talisman of Dominance",
+                "Aminatou, Veil Piercer",
+                "Sphere of Safety"
+              ]
+            },
+            "openMana": 0,
+            "stack": []
+          },
+          "chosen": "cast Devastation Tide",
+          "alternatives": []
+        }
+      ]
+    },
+    "tapped_out_into_lethal": {
+      "count": 2,
+      "games": 2,
+      "topCards": [
+        [
+          "Dracogenesis",
+          1
+        ],
+        [
+          "Sheoldred",
+          1
+        ]
+      ],
+      "examples": [
+        {
+          "category": "tapped_out_into_lethal",
+          "message": "tapped out for Dracogenesis while an opponent's board can swing ~5 against my 2 life",
+          "cardNames": [
+            "Dracogenesis"
+          ],
+          "game": 17,
+          "turn": 19,
+          "phase": "precombat main phase",
+          "seat": "Seat B",
+          "purpose": "main_phase",
+          "state": {
+            "life": {
+              "Seat B": 2,
+              "Seat A": 24
+            },
+            "hand": [
+              "Dracogenesis"
+            ],
+            "battlefield": {
+              "Seat B": [
+                "Urza's Incubator",
+                "Miirym, Sentinel Wyrm 6/6",
+                "Scalelord Reckoner 4/4",
+                "Scalelord Reckoner 4/4"
+              ],
+              "Seat A": [
+                "Meren of Clan Nel Toth 3/4",
+                "Syr Konrad, the Grim 5/4(t)",
+                "Acidic Slime 2/2(t)",
+                "Ashnod's Altar",
+                "Dauthi Voidwalker 3/2",
+                "Ramos, Dragon Engine 4/4"
+              ]
+            },
+            "openMana": 7,
+            "stack": []
+          },
+          "chosen": "cast Dracogenesis",
+          "alternatives": [
+            {
+              "label": "cast Dracogenesis",
+              "score": 3,
+              "vetoed": false
+            },
+            {
+              "label": "pass this phase",
+              "score": 0,
+              "vetoed": false
+            },
+            {
+              "label": "end turn and skip remaining phases",
+              "score": 0,
+              "vetoed": false
+            }
+          ]
+        },
+        {
+          "category": "tapped_out_into_lethal",
+          "message": "tapped out for Sheoldred while an opponent's board can swing ~13 against my 7 life",
+          "cardNames": [
+            "Sheoldred"
+          ],
+          "game": 25,
+          "turn": 14,
+          "phase": "precombat main phase",
+          "seat": "Seat A",
+          "purpose": "main_phase",
+          "state": {
+            "life": {
+              "Seat A": 7,
+              "Seat B": 37
+            },
+            "hand": [
+              "Massacre Wurm",
+              "Sheoldred",
+              "Grisly Salvage",
+              "Solemn Simulacrum",
+              "Junji, the Midnight Sky"
+            ],
+            "battlefield": {
+              "Seat A": [
+                "Birthing Pod"
+              ],
+              "Seat B": [
+                "Orb of Dragonkind",
+                "Terror of the Peaks 5/4(t)",
+                "Goldspan Dragon 4/4(t)",
+                "Ancient Copper Dragon 6/5(t)",
+                "Roaming Throne 4/4"
+              ]
+            },
+            "openMana": 5,
+            "stack": []
+          },
+          "chosen": "cast Sheoldred",
+          "alternatives": [
+            {
+              "label": "cast Sheoldred",
+              "score": 5,
+              "vetoed": false
+            },
+            {
+              "label": "cast Junji, the Midnight Sky",
+              "score": 5,
+              "vetoed": false
+            },
+            {
+              "label": "cast Grisly Salvage",
+              "score": 3,
+              "vetoed": false
+            },
+            {
+              "label": "cast Solemn Simulacrum",
+              "score": 3,
+              "vetoed": false
+            },
+            {
+              "label": "pass this phase",
+              "score": 0,
+              "vetoed": false
+            },
+            {
+              "label": "end turn and skip remaining phases",
+              "score": 0,
+              "vetoed": false
+            }
+          ]
+        }
+      ]
+    },
+    "spell_no_target_or_effect": {
+      "count": 1,
+      "games": 1,
+      "topCards": [
+        [
+          "Utter Insignificance",
+          1
+        ]
+      ],
+      "examples": [
+        {
+          "category": "spell_no_target_or_effect",
+          "message": "targeted creature removal cast with no opposing creature: it can only hit my own",
+          "cardNames": [
+            "Utter Insignificance"
+          ],
+          "game": 36,
+          "turn": 14,
+          "phase": "precombat main phase",
+          "seat": "Seat B",
+          "purpose": "main_phase",
+          "state": {
+            "life": {
+              "Seat B": 40,
+              "Seat A": 37
+            },
+            "hand": [
+              "Heliod, the Radiant Dawn",
+              "Mirrormade",
+              "Soaring Lightbringer",
+              "Devastation Tide",
+              "Utter Insignificance",
+              "Archon of Sun's Grace",
+              "Boon of the Spirit Realm"
+            ],
+            "battlefield": {
+              "Seat B": [
+                "Talisman of Hierarchy",
+                "Monologue Tax",
+                "Moon-Blessed Cleric 3/2",
+                "Smuggler's Share"
+              ],
+              "Seat A": [
+                "Saheeli, the Gifted 3/4"
+              ]
+            },
+            "openMana": 3,
+            "stack": []
+          },
+          "chosen": "cast Utter Insignificance",
+          "alternatives": [
+            {
+              "label": "cast Utter Insignificance",
+              "score": 3,
+              "vetoed": false
+            },
+            {
+              "label": "pass this phase",
+              "score": 0,
+              "vetoed": false
+            },
+            {
+              "label": "end turn and skip remaining phases",
+              "score": 0,
+              "vetoed": false
+            }
+          ]
+        }
+      ]
+    },
+    "unused_mana_castable_left": {
+      "count": 1,
+      "games": 1,
+      "topCards": [
+        [
+          "Merciless Executioner",
+          1
+        ]
+      ],
+      "examples": [
+        {
+          "category": "unused_mana_castable_left",
+          "message": "ended the turn with 3 mana open while Merciless Executioner was castable (Merciless Executioner: a wipe now costs me more (~25) than the table (~8) — I would be behind afterwards)",
+          "cardNames": [
+            "Merciless Executioner"
+          ],
+          "game": 39,
+          "turn": 17,
+          "phase": "postcombat main phase",
+          "seat": "Seat B",
+          "purpose": "main_phase",
+          "state": {
+            "life": {
+              "Seat B": 33,
+              "Seat A": 5
+            },
+            "hand": [
+              "Merciless Executioner"
+            ],
+            "battlefield": {
+              "Seat B": [
+                "Caustic Caterpillar 1/1(t)",
+                "Dauthi Voidwalker 3/2(t)",
+                "Junji, the Midnight Sky 5/5(t)",
+                "Birthing Pod",
+                "Eternal Witness 2/1(t)",
+                "Blood Artist 0/1(t)",
+                "Meren of Clan Nel Toth 3/4"
+              ],
+              "Seat A": [
+                "Aminatou, Veil Piercer 2/4(t)",
+                "Arcane Signet",
+                "Starfield of Nyx",
+                "Talisman of Dominance",
+                "Archaeomancer's Map"
+              ]
+            },
+            "openMana": 3,
+            "stack": []
+          },
+          "chosen": "pass this phase",
+          "alternatives": [
+            {
+              "label": "pass this phase",
+              "score": 0,
+              "vetoed": false
+            },
+            {
+              "label": "end turn and skip remaining phases",
+              "score": 0,
+              "vetoed": false
+            },
+            {
+              "label": "cast Merciless Executioner",
+              "score": -1,
+              "vetoed": false
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "flagCounts": {
+    "pointless_sacrifice": 0,
+    "removal_on_low_threat": 0,
+    "idle_protection_spell": 0,
+    "combat_spell_outside_combat": 0,
+    "declined_free_attack": 0,
+    "unused_mana_castable_left": 1,
+    "missed_land_drop": 0,
+    "spell_no_target_or_effect": 1,
+    "own_wipe_while_ahead": 0,
+    "self_inflicted_loss": 2,
+    "tapped_out_into_lethal": 2,
+    "repeated_activation": 0,
+    "suicide_attack": 8,
+    "pointless_block": 0,
+    "self_lethal_life_cost": 0
+  },
+  "engineGaps_unmodeledSpellsCastWithNoEffect": [
+    [
+      "One with the Machine",
+      5
+    ],
+    [
+      "Saheeli's Directive",
+      4
+    ],
+    [
+      "Lim-Dûl's Vault",
+      4
+    ],
+    [
+      "Whir of Invention",
+      3
+    ],
+    [
+      "Portent",
+      1
+    ]
+  ],
+  "games": [
+    {
+      "game": 0,
+      "seed": 1000,
+      "decks": [
+        "Meren",
+        "UrDragon"
+      ],
+      "terminationReason": "win",
+      "turns": 16,
+      "winner": "Seat A",
+      "wallClockMs": 533,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 1,
+      "seed": 1001,
+      "decks": [
+        "Meren",
+        "UrDragon"
+      ],
+      "terminationReason": "win",
+      "turns": 21,
+      "winner": "Seat A",
+      "wallClockMs": 234,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 2,
+      "seed": 1002,
+      "decks": [
+        "UrDragon",
+        "Saheeli"
+      ],
+      "terminationReason": "win",
+      "turns": 24,
+      "winner": "Seat A",
+      "wallClockMs": 317,
+      "violations": 0,
+      "flags": 1
+    },
+    {
+      "game": 3,
+      "seed": 1003,
+      "decks": [
+        "UrDragon",
+        "Saheeli"
+      ],
+      "terminationReason": "win",
+      "turns": 15,
+      "winner": "Seat A",
+      "wallClockMs": 155,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 4,
+      "seed": 1004,
+      "decks": [
+        "Saheeli",
+        "Aminatou 100 cards"
+      ],
+      "terminationReason": "win",
+      "turns": 22,
+      "winner": "Seat A",
+      "wallClockMs": 250,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 5,
+      "seed": 1005,
+      "decks": [
+        "Saheeli",
+        "Aminatou 100 cards"
+      ],
+      "terminationReason": "win",
+      "turns": 25,
+      "winner": "Seat A",
+      "wallClockMs": 197,
+      "violations": 0,
+      "flags": 1
+    },
+    {
+      "game": 6,
+      "seed": 1006,
+      "decks": [
+        "Aminatou 100 cards",
+        "Meren"
+      ],
+      "terminationReason": "win",
+      "turns": 22,
+      "winner": "Seat A",
+      "wallClockMs": 150,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 7,
+      "seed": 1007,
+      "decks": [
+        "Aminatou 100 cards",
+        "Meren"
+      ],
+      "terminationReason": "win",
+      "turns": 22,
+      "winner": "Seat B",
+      "wallClockMs": 240,
+      "violations": 0,
+      "flags": 1
+    },
+    {
+      "game": 8,
+      "seed": 1008,
+      "decks": [
+        "Meren",
+        "UrDragon"
+      ],
+      "terminationReason": "win",
+      "turns": 22,
+      "winner": "Seat A",
+      "wallClockMs": 236,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 9,
+      "seed": 1009,
+      "decks": [
+        "Meren",
+        "UrDragon"
+      ],
+      "terminationReason": "win",
+      "turns": 20,
+      "winner": "Seat B",
+      "wallClockMs": 100,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 10,
+      "seed": 1010,
+      "decks": [
+        "UrDragon",
+        "Saheeli"
+      ],
+      "terminationReason": "win",
+      "turns": 18,
+      "winner": "Seat A",
+      "wallClockMs": 165,
+      "violations": 0,
+      "flags": 1
+    },
+    {
+      "game": 11,
+      "seed": 1011,
+      "decks": [
+        "UrDragon",
+        "Saheeli"
+      ],
+      "terminationReason": "win",
+      "turns": 19,
+      "winner": "Seat A",
+      "wallClockMs": 260,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 12,
+      "seed": 1012,
+      "decks": [
+        "Saheeli",
+        "Aminatou 100 cards"
+      ],
+      "terminationReason": "win",
+      "turns": 26,
+      "winner": "Seat A",
+      "wallClockMs": 240,
+      "violations": 0,
+      "flags": 1
+    },
+    {
+      "game": 13,
+      "seed": 1013,
+      "decks": [
+        "Saheeli",
+        "Aminatou 100 cards"
+      ],
+      "terminationReason": "win",
+      "turns": 25,
+      "winner": "Seat A",
+      "wallClockMs": 249,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 14,
+      "seed": 1014,
+      "decks": [
+        "Aminatou 100 cards",
+        "Meren"
+      ],
+      "terminationReason": "win",
+      "turns": 22,
+      "winner": "Seat A",
+      "wallClockMs": 161,
+      "violations": 0,
+      "flags": 1
+    },
+    {
+      "game": 15,
+      "seed": 1015,
+      "decks": [
+        "Aminatou 100 cards",
+        "Meren"
+      ],
+      "terminationReason": "win",
+      "turns": 16,
+      "winner": "Seat B",
+      "wallClockMs": 155,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 16,
+      "seed": 1016,
+      "decks": [
+        "Meren",
+        "UrDragon"
+      ],
+      "terminationReason": "win",
+      "turns": 18,
+      "winner": "Seat A",
+      "wallClockMs": 147,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 17,
+      "seed": 1017,
+      "decks": [
+        "Meren",
+        "UrDragon"
+      ],
+      "terminationReason": "win",
+      "turns": 19,
+      "winner": "Seat A",
+      "wallClockMs": 239,
+      "violations": 0,
+      "flags": 1
+    },
+    {
+      "game": 18,
+      "seed": 1018,
+      "decks": [
+        "UrDragon",
+        "Saheeli"
+      ],
+      "terminationReason": "win",
+      "turns": 18,
+      "winner": "Seat A",
+      "wallClockMs": 280,
+      "violations": 0,
+      "flags": 1
+    },
+    {
+      "game": 19,
+      "seed": 1019,
+      "decks": [
+        "UrDragon",
+        "Saheeli"
+      ],
+      "terminationReason": "win",
+      "turns": 23,
+      "winner": "Seat A",
+      "wallClockMs": 252,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 20,
+      "seed": 1020,
+      "decks": [
+        "Saheeli",
+        "Aminatou 100 cards"
+      ],
+      "terminationReason": "win",
+      "turns": 16,
+      "winner": "Seat A",
+      "wallClockMs": 131,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 21,
+      "seed": 1021,
+      "decks": [
+        "Saheeli",
+        "Aminatou 100 cards"
+      ],
+      "terminationReason": "win",
+      "turns": 19,
+      "winner": "Seat A",
+      "wallClockMs": 155,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 22,
+      "seed": 1022,
+      "decks": [
+        "Aminatou 100 cards",
+        "Meren"
+      ],
+      "terminationReason": "win",
+      "turns": 12,
+      "winner": "Seat A",
+      "wallClockMs": 94,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 23,
+      "seed": 1023,
+      "decks": [
+        "Aminatou 100 cards",
+        "Meren"
+      ],
+      "terminationReason": "win",
+      "turns": 14,
+      "winner": "Seat B",
+      "wallClockMs": 81,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 24,
+      "seed": 1024,
+      "decks": [
+        "Meren",
+        "UrDragon"
+      ],
+      "terminationReason": "win",
+      "turns": 27,
+      "winner": "Seat B",
+      "wallClockMs": 245,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 25,
+      "seed": 1025,
+      "decks": [
+        "Meren",
+        "UrDragon"
+      ],
+      "terminationReason": "win",
+      "turns": 14,
+      "winner": "Seat B",
+      "wallClockMs": 106,
+      "violations": 0,
+      "flags": 1
+    },
+    {
+      "game": 26,
+      "seed": 1026,
+      "decks": [
+        "UrDragon",
+        "Saheeli"
+      ],
+      "terminationReason": "win",
+      "turns": 29,
+      "winner": "Seat B",
+      "wallClockMs": 269,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 27,
+      "seed": 1027,
+      "decks": [
+        "UrDragon",
+        "Saheeli"
+      ],
+      "terminationReason": "win",
+      "turns": 18,
+      "winner": "Seat B",
+      "wallClockMs": 179,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 28,
+      "seed": 1028,
+      "decks": [
+        "Saheeli",
+        "Aminatou 100 cards"
+      ],
+      "terminationReason": "win",
+      "turns": 22,
+      "winner": "Seat A",
+      "wallClockMs": 223,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 29,
+      "seed": 1029,
+      "decks": [
+        "Saheeli",
+        "Aminatou 100 cards"
+      ],
+      "terminationReason": "win",
+      "turns": 17,
+      "winner": "Seat A",
+      "wallClockMs": 87,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 30,
+      "seed": 1030,
+      "decks": [
+        "Aminatou 100 cards",
+        "Meren"
+      ],
+      "terminationReason": "win",
+      "turns": 15,
+      "winner": "Seat B",
+      "wallClockMs": 165,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 31,
+      "seed": 1031,
+      "decks": [
+        "Aminatou 100 cards",
+        "Meren"
+      ],
+      "terminationReason": "win",
+      "turns": 24,
+      "winner": "Seat B",
+      "wallClockMs": 307,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 32,
+      "seed": 1032,
+      "decks": [
+        "Meren",
+        "UrDragon"
+      ],
+      "terminationReason": "win",
+      "turns": 19,
+      "winner": "Seat B",
+      "wallClockMs": 193,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 33,
+      "seed": 1033,
+      "decks": [
+        "Meren",
+        "UrDragon"
+      ],
+      "terminationReason": "win",
+      "turns": 14,
+      "winner": "Seat B",
+      "wallClockMs": 125,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 34,
+      "seed": 1034,
+      "decks": [
+        "UrDragon",
+        "Saheeli"
+      ],
+      "terminationReason": "win",
+      "turns": 18,
+      "winner": "Seat A",
+      "wallClockMs": 251,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 35,
+      "seed": 1035,
+      "decks": [
+        "UrDragon",
+        "Saheeli"
+      ],
+      "terminationReason": "win",
+      "turns": 15,
+      "winner": "Seat A",
+      "wallClockMs": 88,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 36,
+      "seed": 1036,
+      "decks": [
+        "Saheeli",
+        "Aminatou 100 cards"
+      ],
+      "terminationReason": "win",
+      "turns": 23,
+      "winner": "Seat B",
+      "wallClockMs": 261,
+      "violations": 0,
+      "flags": 3
+    },
+    {
+      "game": 37,
+      "seed": 1037,
+      "decks": [
+        "Saheeli",
+        "Aminatou 100 cards"
+      ],
+      "terminationReason": "win",
+      "turns": 28,
+      "winner": "Seat B",
+      "wallClockMs": 955,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 38,
+      "seed": 1038,
+      "decks": [
+        "Aminatou 100 cards",
+        "Meren"
+      ],
+      "terminationReason": "win",
+      "turns": 16,
+      "winner": "Seat A",
+      "wallClockMs": 110,
+      "violations": 0,
+      "flags": 1
+    },
+    {
+      "game": 39,
+      "seed": 1039,
+      "decks": [
+        "Aminatou 100 cards",
+        "Meren"
+      ],
+      "terminationReason": "win",
+      "turns": 18,
+      "winner": "Seat B",
+      "wallClockMs": 207,
+      "violations": 0,
+      "flags": 1
+    }
+  ]
+}

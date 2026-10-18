@@ -131,7 +131,14 @@ export function removalGuard(action: ScorableAction, context: ScoringContext): R
   const named = action.targetIds.map((id) => opponents.flatMap((opponent) => opponent.battlefield ?? []).find((card) => card.id === id)).filter((card): card is CardLike => Boolean(card));
   const pool = opponents.flatMap((opponent) => opponent.battlefield ?? []).filter((card) => !(card.typeLine ?? "").includes("Land"));
   const candidates = named.length > 0 ? named : spell.scope === "creature" ? pool.filter(isCreature) : pool;
-  if (candidates.length === 0) return ALLOWED; // nothing visible to judge (the engine decides legality)
+  if (candidates.length === 0) {
+    // Creature removal with no opposing creature on the table can only be aimed at my own (Swords on my own commander); self-play found
+    // agents casting it anyway. Permanent-scope removal is left to the engine (a land or artifact may be a legal target).
+    if (spell.scope === "creature" && named.length === 0) {
+      return { allowed: false, reason: `removal held: no opposing creature to target, so ${spell.kind === "aura" ? "the Aura" : "the spell"} could only hit your own` };
+    }
+    return ALLOWED;
+  }
 
   const spellCard = (context.you?.hand ?? []).find((card) => card.id === action.cardId);
   const manaValue = spellCard?.manaValue ?? 2;
@@ -471,10 +478,50 @@ export function combatSpellBonus(action: ScorableAction, context: ScoringContext
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------
+// Rule 5: spells that cannot do anything useful (found by the self-play mistake detector, npm run agent:mistakes)
+// ---------------------------------------------------------------------------------------------------------------------------------
+
+const COUNTER_RE = /\bcounter target (?:[a-z-]+ )*(?:spell|ability)\b/;
+
+// Life this spell makes its caster lose as it resolves (an instant/sorcery's "you lose N life", or a permanent's enters trigger).
+// Recurring upkeep/attack triggers, activated abilities and ward costs are not part of casting it.
+export function immediateLifeLoss(action: ScorableAction): number {
+  const text = actionText(action);
+  const head = text.split(".")[0] ?? "";
+  const spell = isInstantOrSorcery(action);
+  let total = 0;
+  for (const sentence of text.split(/(?<=\.)\s+|\n/)) {
+    const lose = sentence.match(/\byou lose (\d+) life\b/);
+    if (!lose) continue;
+    if (/^(?:at the beginning|whenever|ward)\b|:/.test(sentence.trim())) continue;
+    if (!spell && !/^when [^,]*\benters\b/.test(sentence.trim())) continue;
+    total += Number(lose[1]);
+  }
+  return head ? total : 0;
+}
+
+// A counterspell cast with nothing to counter (empty stack, or only my own spells on it) is simply thrown away; a spell that costs more
+// life than I have kills me. Both are exactly specifiable, so they are hard vetoes. Modal spells (Cryptic Command) are left alone.
+export function wastedSpellGuard(action: ScorableAction, context: ScoringContext): GuardVerdict {
+  if (action.actionType !== "cast_spell") return ALLOWED;
+  const text = actionText(action);
+  const name = (action.label ?? "").replace(/^cast\s+/i, "") || "this spell";
+  if (COUNTER_RE.test(text) && !/\bchoose (?:one|two|three|up to)\b/.test(text)) {
+    const mine = context.you?.id;
+    const others = stackItems(context).filter((item) => !mine || item.actorSeatId !== mine);
+    if (others.length === 0) return { allowed: false, reason: `${name} held: there is nothing from an opponent on the stack to counter` };
+  }
+  const loss = immediateLifeLoss(action);
+  const life = context.you?.life;
+  if (loss > 0 && life !== undefined && life <= loss) return { allowed: false, reason: `${name} held: it makes you lose ${loss} life and you only have ${life}` };
+  return ALLOWED;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------
 
 export function evaluatePlayGuards(action: ScorableAction, context: ScoringContext): { vetoed: boolean; reasons: string[] } {
   const reasons: string[] = [];
-  for (const verdict of [sacrificeGuard(action, context), removalGuard(action, context), protectionGuard(action, context), situationalTimingGuard(action, context)]) {
+  for (const verdict of [sacrificeGuard(action, context), removalGuard(action, context), protectionGuard(action, context), situationalTimingGuard(action, context), wastedSpellGuard(action, context)]) {
     if (!verdict.allowed && verdict.reason) reasons.push(verdict.reason);
   }
   return { vetoed: reasons.length > 0, reasons };
