@@ -16912,7 +16912,10 @@ function chooseRemovalTarget(
   if (candidates.length === 0) return undefined;
 
   const opponentCandidates = candidates.filter((entry) => entry.seatId !== casterSeatId);
-  const pool = opponentCandidates.length > 0 ? opponentCandidates : candidates;
+  // Never fall back to the caster's OWN permanents (Exorcise exiling my own Patchwork Banner, Swords on my own commander): with only own
+  // targets left the deterministic chooser has no target, so the spell is not offered/cast. A human's explicit pick bypasses this chooser.
+  const pool = opponentCandidates;
+  if (pool.length === 0) return undefined;
   // Ward doesn't make a target illegal, just costly (see payWardIfNeeded) — prefer a ward-free
   // target when one is equally available, so the caster isn't paying a tax for no reason.
   const unwardedPool = pool.filter((entry) => cardWardAmount(entry.card.oracleText) === undefined);

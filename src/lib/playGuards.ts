@@ -56,6 +56,8 @@ type StackItem = NonNullable<ScoringContext["stack"]>[number];
 export interface RemovalSpell {
   kind: "destroy" | "exile" | "bounce" | "damage" | "shrink" | "aura";
   scope: "creature" | "permanent";
+  // The permanent types the target phrase names (destroy/exile only).
+  types?: Array<"creature" | "artifact" | "enchantment" | "planeswalker" | "permanent">;
 }
 
 const NOUN = "([a-z,' -]*?)";
@@ -73,8 +75,19 @@ export function parseTargetedRemoval(action: ScorableAction): RemovalSpell | und
     return undefined;
   }
 
-  const destroyExile = text.match(new RegExp(`\\b(destroy|exile) target ${NOUN}(creature|permanent)\\b(?! cards?)(?! you (?:control|own))`));
-  if (destroyExile) return { kind: destroyExile[1] as "destroy" | "exile", scope: destroyExile[3] === "permanent" ? "permanent" : "creature" };
+  // "Destroy/exile target <types>" -- creature, artifact, enchantment, planeswalker, permanent or a mix ("artifact, enchantment, or creature with
+  // power 4 or greater"). Graveyard cards and "you control" targets are not removal of an opposing permanent.
+  const destroyExile = text.match(/\b(destroy|exile) target ([a-z,' -]+?)(?= with | that | an opponent|\.|$)/);
+  if (destroyExile) {
+    const sentence = text.slice(destroyExile.index ?? 0).split(".")[0] ?? "";
+    const phrase = destroyExile[2];
+    if (!/\bcards?\b/.test(phrase) && !/\byou (?:control|own)\b/.test(sentence)) {
+      const types = (["creature", "artifact", "enchantment", "planeswalker", "permanent"] as const).filter((type) => new RegExp(`\\b${type}s?\\b`).test(phrase));
+      if (types.length > 0) {
+        return { kind: destroyExile[1] as "destroy" | "exile", scope: types.every((type) => type === "creature" || type === "planeswalker") ? "creature" : "permanent", types: [...types] };
+      }
+    }
+  }
 
   if (new RegExp(`\\breturn target ${NOUN}(creature|permanent)\\b(?! cards?)(?! you (?:control|own))[^.]* to (?:its|their) owner's hand`).test(text)) {
     return { kind: "bounce", scope: "creature" };
@@ -133,15 +146,20 @@ export function removalGuard(action: ScorableAction, context: ScoringContext): R
   const opponents = context.opponents ?? [];
   const named = action.targetIds.map((id) => opponents.flatMap((opponent) => opponent.battlefield ?? []).find((card) => card.id === id)).filter((card): card is CardLike => Boolean(card));
   const pool = opponents.flatMap((opponent) => opponent.battlefield ?? []).filter((card) => !(card.typeLine ?? "").includes("Land"));
-  const candidates = named.length > 0 ? named : spell.scope === "creature" ? pool.filter(isCreature) : pool;
+  const typed = spell.types && !spell.types.includes("permanent") ? spell.types : undefined;
+  const matchesTypes = (card: CardLike) => (typed ?? []).some((type) => (type === "creature" ? isCreature(card) : (card.typeLine ?? "").includes(type === "artifact" ? "Artifact" : type === "enchantment" ? "Enchantment" : "Planeswalker")));
+  const candidates = named.length > 0 ? named : spell.scope === "creature" ? pool.filter(isCreature) : typed ? pool.filter(matchesTypes) : pool;
   if (candidates.length === 0) {
-    // Creature removal with no opposing creature on the table can only be aimed at my own (Swords on my own commander); self-play found
-    // agents casting it anyway. Permanent-scope removal is left to the engine (a land or artifact may be a legal target).
-    if (spell.scope === "creature" && named.length === 0) {
-      return { allowed: false, reason: `removal held: no opposing creature to target, so ${spell.kind === "aura" ? "the Aura" : "the spell"} could only hit your own` };
+    // Removal with no opposing legal target on the table (no creature for creature removal, no artifact/enchantment/creature for Exorcise or
+    // Putrefy-style text) can only be aimed at my own permanents (Swords on my own commander); self-play found agents casting it anyway.
+    // Plain "target permanent" removal is left to the engine (a land may be a legal target).
+    if ((spell.scope === "creature" || typed) && named.length === 0) {
+      return { allowed: false, reason: `removal held: no opposing ${typed ? typed.join("/") : "creature"} to target, so ${spell.kind === "aura" ? "the Aura" : "the spell"} could only hit your own` };
     }
     return ALLOWED;
   }
+  // Non-creature (or mixed) targets: the threat bar below is a creature yardstick, so the only requirement is that an opposing target exists.
+  if (spell.scope === "permanent" && typed?.some((type) => type === "artifact" || type === "enchantment")) return { allowed: true, bestTarget: candidates[0] };
 
   const spellCard = (context.you?.hand ?? []).find((card) => card.id === action.cardId);
   const manaValue = spellCard?.manaValue ?? 2;

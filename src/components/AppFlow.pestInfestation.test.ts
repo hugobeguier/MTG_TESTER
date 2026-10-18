@@ -49,11 +49,12 @@ describe("applyRemovalEffect — destroy_up_to_x (Pest Infestation)", () => {
 
   it("destroys exactly chosenX legal targets, not more, not fewer when enough exist", () => {
     const artifacts = Array.from({ length: 3 }, (_, i) => card({ id: `art-${i}`, name: `Artifact ${i}`, typeLine: "Artifact" }));
-    const caster = seat({ id: "caster", name: "Me", kind: "human", board: { hand: [], battlefield: artifacts } });
-    const s = session([caster]);
+    const caster = seat({ id: "caster", name: "Me", kind: "human" });
+    const opponent = seat({ id: "opp", name: "Opp", kind: "agent", board: { hand: [], battlefield: artifacts } });
+    const s = session([caster, opponent]);
     const effect = { kind: "destroy_up_to_x" as const, targetType: "artifact_or_enchantment" as const };
     const result = applyRemovalEffect(s, "caster", "Pest Infestation", pestInfestation, effect, 2);
-    const after = result.seats.find((item) => item.id === "caster")!;
+    const after = result.seats.find((item) => item.id === "opp")!;
     expect(after.board.battlefield).toHaveLength(1);
     expect(after.board.graveyard).toHaveLength(2);
   });
@@ -71,11 +72,12 @@ describe("applyRemovalEffect — destroy_up_to_x (Pest Infestation)", () => {
 
   it("destroys whatever legal targets exist even when fewer than chosenX", () => {
     const artifacts = [card({ id: "art-0", name: "Artifact 0", typeLine: "Artifact" })];
-    const caster = seat({ id: "caster", name: "Me", kind: "human", board: { hand: [], battlefield: artifacts } });
-    const s = session([caster]);
+    const caster = seat({ id: "caster", name: "Me", kind: "human" });
+    const opponent = seat({ id: "opp", name: "Opp", kind: "agent", board: { hand: [], battlefield: artifacts } });
+    const s = session([caster, opponent]);
     const effect = { kind: "destroy_up_to_x" as const, targetType: "artifact_or_enchantment" as const };
     const result = applyRemovalEffect(s, "caster", "Pest Infestation", pestInfestation, effect, 5);
-    const after = result.seats.find((item) => item.id === "caster")!;
+    const after = result.seats.find((item) => item.id === "opp")!;
     expect(after.board.battlefield).toHaveLength(0);
     expect(after.board.graveyard).toHaveLength(1);
   });

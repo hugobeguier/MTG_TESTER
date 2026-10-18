@@ -43,3 +43,32 @@ describe("modal removal does not destroy the caster's own permanent", () => {
     expect(after.seats[0].board.battlefield.map((c) => c.id)).toContain("sphere");
   });
 });
+
+describe("single-target removal never falls back to the caster's own permanent", () => {
+  const seatWith = (id: string, cards: VisibleCard[]) => seat(id, cards);
+  it("Exorcise with only my own artifact on the table exiles nothing", () => {
+    const spell = real("Exorcise", "spell");
+    const effect = parseRemovalEffect(spell.oracleText);
+    expect(effect).toBeDefined();
+    const banner = real("Patchwork Banner", "banner");
+    const after = applyRemovalEffect(session([seatWith("a", [banner]), seatWith("b", [])]), "a", "Exorcise", spell, effect!);
+    expect(after.seats[0].board.battlefield.map((c) => c.id)).toContain("banner");
+  });
+  it("Exorcise prefers the opponent's artifact when both sides have one", () => {
+    const spell = real("Exorcise", "spell");
+    const effect = parseRemovalEffect(spell.oracleText)!;
+    const mine = real("Patchwork Banner", "mine");
+    const theirs = real("Sol Ring", "theirs");
+    const after = applyRemovalEffect(session([seatWith("a", [mine]), seatWith("b", [theirs])]), "a", "Exorcise", spell, effect);
+    expect(after.seats[0].board.battlefield.map((c) => c.id)).toContain("mine");
+    expect(after.seats[1].board.battlefield.map((c) => c.id)).not.toContain("theirs");
+  });
+  it("Putrefy (destroy target artifact or creature) does not destroy my own creature when the opponent has none", () => {
+    const spell = real("Putrefy", "spell");
+    const effect = parseRemovalEffect(spell.oracleText);
+    expect(effect).toBeDefined();
+    const bears = real("Grizzly Bears", "bears", { power: "2", toughness: "2", typeLine: "Creature — Bear" });
+    const after = applyRemovalEffect(session([seatWith("a", [bears]), seatWith("b", [])]), "a", "Putrefy", spell, effect!);
+    expect(after.seats[0].board.battlefield.map((c) => c.id)).toContain("bears");
+  });
+});
