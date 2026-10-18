@@ -1,4 +1,5 @@
 // Deterministic "don't make this specific dumb play" guards for agent seats (casual-Commander sensible, not cEDH optimizing).
+// (A 4th rule, situationalTimingGuard — fogs, combat tricks, attacker removal with no attackers — follows the same pattern.)
 // Three rules, each a pure function over a ScorableAction + ScoringContext so they can be unit-tested with real oracle text:
 //   1. sacrificeGuard    — don't sacrifice your own permanents for a trivial payoff (Viscera Seer scrying away the board).
 //   2. removalGuard      — don't spend creature removal / removal Auras on a non-threat.
@@ -330,10 +331,150 @@ export function sacrificeGuard(action: ScorableAction, context: ScoringContext):
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------
+// Rule 4: situational / combat-only timing
+// ---------------------------------------------------------------------------------------------------------------------------------
+
+function isInstantOrSorcery(action: ScorableAction): boolean {
+  const head = (actionText(action).split(".")[0] ?? "");
+  return /\b(?:instant|sorcery)\b/.test(head) && !/\b(?:creature|enchantment|artifact|land|planeswalker)\b/.test(head);
+}
+
+interface CombatView {
+  inCombat: boolean;
+  attackersAtMe: CardLike[];
+  oppAttackers: CardLike[];
+  oppBlockers: CardLike[];
+  myCombat: CardLike[];
+  oppCombat: CardLike[];
+}
+
+function combatView(context: ScoringContext): CombatView {
+  const mineIds = myCardIds(context);
+  const me = context.you?.id;
+  const oppCreatures = (context.opponents ?? []).flatMap((opponent) => opponent.battlefield ?? []).filter(isCreature);
+  const myCreatures = (context.you?.battlefield ?? []).filter(isCreature);
+  const oppAttackers = oppCreatures.filter((card) => card.attacking);
+  const attackersAtMe = oppAttackers.filter((card) => !card.attackTargetId || card.attackTargetId === me || mineIds.has(card.attackTargetId));
+  const phase = (context.phase ?? "").toLowerCase();
+  const anyAttacking = oppAttackers.length > 0 || myCreatures.some((card) => card.attacking);
+  const inCombat = phase ? /\bdeclare (?:attackers|blockers)\b|\bcombat damage\b|^combat$/.test(phase) : anyAttacking;
+  return {
+    inCombat,
+    attackersAtMe,
+    oppAttackers,
+    oppBlockers: oppCreatures.filter((card) => card.blocking),
+    myCombat: myCreatures.filter((card) => card.attacking || card.blocking),
+    oppCombat: oppCreatures.filter((card) => card.attacking || card.blocking)
+  };
+}
+
+const FOG_RE = /\bprevent all (?:combat )?damage that would be dealt\b/;
+const X_ATTACKERS_RE = /\bnumber of (?:attacking )?creatures attacking you\b|\bfor each creature attacking you\b/;
+const ATTACKER_REMOVAL_RE = /\b(?:destroy|exile) (?:target|all|each) (?:tapped )?(?:attacking|blocking) creatures?\b/;
+const PUMP_RE = /\b(?:gets?|get) \+(\d+|x)\/\+(\d+|x)\b/;
+const NOT_PURE_PUMP_RE = /\b(?:draw|create|destroy|exile|search|return|counter target|deals? (?:\d+|x) damage|gains? \d+ life|untap|tap target|choose (?:one|two|three|up to))\b/;
+
+// A spell that only has value in a specific game situation (a fog / "X = creatures attacking you", a combat trick, removal of an
+// attacking creature, anything that names attacking/blocking creatures) is held unless that situation is actually on the table.
+export function situationalTimingGuard(action: ScorableAction, context: ScoringContext): GuardVerdict {
+  if (action.actionType !== "cast_spell" || !isInstantOrSorcery(action)) return ALLOWED;
+  const text = actionText(action);
+  if (!text || /\bchoose (?:one|two|three|up to)\b/.test(text)) return ALLOWED;
+  const view = combatView(context);
+  const name = (action.label ?? "").replace(/^cast\s+/i, "") || "this spell";
+  const life = Math.max(1, context.you?.life ?? 40);
+  const where = view.inCombat ? "this combat" : "outside combat";
+
+  // (a) fog / combat-damage prevention / "X = creatures attacking you"
+  if (FOG_RE.test(text) || X_ATTACKERS_RE.test(text)) {
+    if (!view.inCombat) return { allowed: false, reason: `${name} held: it only matters once creatures are attacking you, and it is ${where} (it would do nothing now)` };
+    if (view.attackersAtMe.length === 0) return { allowed: false, reason: `${name} held: no creature is attacking you or your permanents` };
+    const power = totalPower(view.attackersAtMe);
+    if (power < 3 && power < life / 4) return { allowed: false, reason: `${name} held: the ${power} combat damage coming at you is not worth a card` };
+    return ALLOWED;
+  }
+
+  // (c) removal of attacking/blocking creatures (Settle the Wreckage, "destroy target attacking creature")
+  if (ATTACKER_REMOVAL_RE.test(text)) {
+    const blocking = /\bblocking creatures?\b/.test(text);
+    const pool = blocking ? view.oppBlockers : view.attackersAtMe;
+    if (!view.inCombat || pool.length === 0) return { allowed: false, reason: `${name} held: there is no ${blocking ? "blocking" : "attacking"} creature to hit ${where}` };
+    if (/\b(?:all|each) (?:tapped )?(?:attacking|blocking) creatures\b/.test(text) && pool.length < 2 && totalPower(pool) < 4) {
+      return { allowed: false, reason: `${name} held: a mass exile/destroy of attackers is wasted on so small an attack` };
+    }
+    return ALLOWED; // whether the (single) target is worth a removal spell is removalGuard's call
+  }
+
+  // (e) generic: the text names attacking / blocking creatures and none exist
+  const namesAttackers = /\battacking\b|\bcreatures? attacking you\b/.test(text) && !/\btapped and attacking\b|\bthat's attacking\b/.test(text);
+  const namesBlockers = /\bblocking\b|\bblocked creature\b/.test(text);
+  if (namesAttackers || namesBlockers) {
+    const attackers = (context.opponents ?? []).flatMap((opponent) => opponent.battlefield ?? []).concat(context.you?.battlefield ?? []).filter((card) => card.attacking);
+    const blockers = (context.opponents ?? []).flatMap((opponent) => opponent.battlefield ?? []).concat(context.you?.battlefield ?? []).filter((card) => card.blocking);
+    if ((namesAttackers && attackers.length === 0) || (namesBlockers && !namesAttackers && blockers.length === 0)) {
+      return { allowed: false, reason: `${name} held: its text needs ${namesAttackers ? "attacking" : "blocking"} creatures and there are none right now` };
+    }
+  }
+
+  // (b) combat tricks / pump spells
+  const pump = text.match(PUMP_RE);
+  if (pump && /\buntil end of turn\b/.test(text) && !NOT_PURE_PUMP_RE.test(text)) {
+    const bonusP = pump[1] === "x" ? 3 : Number(pump[1]);
+    const bonusT = pump[2] === "x" ? 3 : Number(pump[2]);
+    const mass = /\bcreatures you control get\b/.test(text);
+    const mine = view.myCombat;
+    const outcomeChanges = mine.some((creature) =>
+      view.oppCombat.some((enemy) => {
+        if (hasIndestructible(creature) && hasIndestructible(enemy)) return false;
+        const toughness = parseNum(creature.toughness) ?? 0;
+        const power = parseNum(creature.power) ?? 0;
+        const enemyPower = parseNum(enemy.power) ?? 0;
+        const enemyToughness = parseNum(enemy.toughness) ?? 0;
+        const diesBefore = !hasIndestructible(creature) && (hasDeathtouch(enemy) || enemyPower >= toughness);
+        const diesAfter = !hasIndestructible(creature) && (hasDeathtouch(enemy) || enemyPower >= toughness + bonusT);
+        const killsBefore = !hasIndestructible(enemy) && (hasDeathtouch(creature) || power >= enemyToughness);
+        const killsAfter = !hasIndestructible(enemy) && (hasDeathtouch(creature) || power + bonusP >= enemyToughness);
+        return (diesBefore && !diesAfter) || (!killsBefore && killsAfter);
+      })
+    );
+    const minOppLife = Math.min(...(context.opponents ?? []).map((opponent) => opponent.life ?? 40), 999);
+    // Lethal: my attackers, after the pump, minus one blocked body per potential blocker, reach the lowest life total.
+    const attackers = (context.you?.battlefield ?? []).filter((card) => isCreature(card) && (view.inCombat ? card.attacking : !card.tapped && !card.summoningSick));
+    const boosted = attackers.map((card) => Math.max(0, parseNum(card.power) ?? 0) + (mass ? bonusP : 0)).sort((a, b) => b - a);
+    if (!mass && boosted.length > 0) boosted[0] += bonusP;
+    const blockersLeft = view.inCombat
+      ? view.oppBlockers.length
+      : (context.opponents ?? []).flatMap((opponent) => opponent.battlefield ?? []).filter((card) => isCreature(card) && !card.tapped).length;
+    const lethal = boosted.slice(Math.min(blockersLeft, boosted.length)).reduce((sum, value) => sum + value, 0) >= minOppLife;
+
+    if (view.inCombat) {
+      if (mine.length === 0) return { allowed: false, reason: `${name} held: none of your creatures is in combat, so a pump trick has nothing to improve` };
+      if (outcomeChanges || lethal) return ALLOWED;
+      return { allowed: false, reason: `${name} held: the pump would not save a creature, kill a creature or make the attack lethal — keep it for when it changes the combat` };
+    }
+    if (lethal) return ALLOWED;
+    return { allowed: false, reason: `${name} held: a pump spell cast ${where} with no lethal attack available just wastes it` };
+  }
+
+  return ALLOWED;
+}
+
+// The positive side of the rule: a combat-only spell (fog, "X = attackers", attacker removal, an outcome-changing pump) that the guard
+// ALLOWS during a real combat is exactly when it should be cast, so it must outscore passing even though scoreHoldInstants penalizes
+// casting an instant onto an empty stack. Returns the score bonus (0 when not applicable).
+export function combatSpellBonus(action: ScorableAction, context: ScoringContext): number {
+  if (action.actionType !== "cast_spell" || !isInstantOrSorcery(action)) return 0;
+  const text = actionText(action);
+  if (!(FOG_RE.test(text) || X_ATTACKERS_RE.test(text) || ATTACKER_REMOVAL_RE.test(text) || (PUMP_RE.test(text) && !NOT_PURE_PUMP_RE.test(text)))) return 0;
+  if (!combatView(context).inCombat || !situationalTimingGuard(action, context).allowed) return 0;
+  return 7;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------
 
 export function evaluatePlayGuards(action: ScorableAction, context: ScoringContext): { vetoed: boolean; reasons: string[] } {
   const reasons: string[] = [];
-  for (const verdict of [sacrificeGuard(action, context), removalGuard(action, context), protectionGuard(action, context)]) {
+  for (const verdict of [sacrificeGuard(action, context), removalGuard(action, context), protectionGuard(action, context), situationalTimingGuard(action, context)]) {
     if (!verdict.allowed && verdict.reason) reasons.push(verdict.reason);
   }
   return { vetoed: reasons.length > 0, reasons };

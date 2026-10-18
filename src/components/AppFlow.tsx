@@ -20717,6 +20717,7 @@ function agentCardSnapshot(card: VisibleCard) {
     tapped: card.tapped,
     summoningSick: card.summoningSick,
     attacking: card.attacking,
+    attackTargetId: card.attacking ? card.attackTargetId : undefined,
     blocking: card.blocking,
     counters: card.counters,
     oracleText: card.oracleText,

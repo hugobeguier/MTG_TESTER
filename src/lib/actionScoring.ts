@@ -1,6 +1,6 @@
 import { attackEconomics, defenderOf, threatShares } from "./strategy";
 import { mustAttackEachCombat } from "./combatRestrictions";
-import { evaluatePlayGuards } from "./playGuards";
+import { combatSpellBonus, evaluatePlayGuards } from "./playGuards";
 import { declineFreeAttackReason, freeAttackBonus } from "./freeAttack";
 import { scoreGangBlockRisk, scoreInterferenceTiming, scoreOwnBoardWipe, scoreRemovalAftermath } from "./lookAhead";
 import { canLegallyBlock, hasDeathtouch, hasDoubleStrike, hasFirstStrike, hasFlying, hasIndestructible, hasInfect, hasKeyword, hasLifelink, hasMenace, hasReach, hasTrample, parseNum, simulateDuel } from "./combatSim";
@@ -53,6 +53,9 @@ export interface CardLike {
   token?: boolean;
   attacking?: boolean;
   blocking?: boolean;
+  // Who an attacking creature is attacking (a seat id or a planeswalker/battle id); read by playGuards.situationalTimingGuard.
+  attackTargetId?: string;
+  summoningSick?: boolean;
 }
 
 export interface ScoringContext {
@@ -716,6 +719,8 @@ export function scoreLegalAction(action: ScorableAction, context: ScoringContext
   scoreOwnBoardWipe(action, context, delta);
   scoreRemovalAftermath(action, context, delta);
   scoreInterferenceTiming(action, context, delta);
+  const combatBonus = combatSpellBonus(action, context);
+  if (combatBonus > 0) delta(combatBonus, "a combat-only spell with the exact combat situation it exists for on the table");
 
   // Hard guards last: a vetoed play sinks below every legal alternative (pass/end turn are always offered) and is flagged so the
   // live route can also overrule an LLM that picked it anyway.

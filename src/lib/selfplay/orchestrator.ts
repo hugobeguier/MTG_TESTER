@@ -260,6 +260,8 @@ function toCardLike(card: VisibleCard): CardLike {
     oracleText: card.oracleText,
     token: card.token ? true : undefined,
     attacking: card.attacking,
+    attackTargetId: card.attacking ? card.attackTargetId : undefined,
+    summoningSick: card.summoningSick,
     blocking: card.blocking,
     commander: card.commander ? true : undefined
   };
