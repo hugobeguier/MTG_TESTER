@@ -205,6 +205,32 @@ function build(): Record<string, MistakeScenario> {
     };
   }
 
+  // (11) + (12) Wrath of God in hand against two 3/3s: the wipe must come BEFORE the creature, and never after it.
+  {
+    const wrath = handCard("Wrath of God", "Sorcery", 4, "Destroy all creatures. They can't be regenerated.");
+    const giantInHand = handCard("Test Giant", "Creature — Giant", 5, "");
+    const theirs = [perm("Hill Giant", "Creature — Giant", 4, "3", "3", ""), perm("Hill Giant", "Creature — Giant", 4, "3", "3", "")];
+    const castGiant: ScorableAction = { ...castAction(giantInHand) };
+    const castWrath = castAction(wrath);
+    scenarios["creature-before-wrath"] = {
+      category: "sequencing_wipe_after_creature",
+      description: "Wrath of God (castable, net-positive) and a 5-mana creature in hand with 9 mana: the creature is cast first and the wipe then kills it or is held back",
+      purpose: "main_phase",
+      context: context("main_phase", "precombat main phase", { hand: [wrath, { ...giantInHand, power: "4", toughness: "4" }], availableMana: { total: 9 } }, [{ id: "opp", name: "Opp", life: 40, battlefield: theirs }]),
+      legalActions: [castGiant, castWrath, pass],
+      badActionId: castGiant.id
+    };
+    const fresh = perm("Test Giant", "Creature — Giant", 5, "4", "4", "", { enteredTurn: 7, summoningSick: true });
+    scenarios["wrath-after-creature"] = {
+      category: "sequencing_wipe_after_creature",
+      description: "The 5-mana creature is already on the battlefield (cast this turn); Wrath of God would kill it for a marginal gain",
+      purpose: "main_phase",
+      context: context("main_phase", "precombat main phase", { hand: [wrath], battlefield: [fresh], availableMana: { total: 4 } }, [{ id: "opp", name: "Opp", life: 40, battlefield: theirs }]),
+      legalActions: [castWrath, pass],
+      badActionId: castWrath.id
+    };
+  }
+
   return scenarios;
 }
 

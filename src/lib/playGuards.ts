@@ -12,6 +12,7 @@ import type { CardLike, ScorableAction, ScoringContext } from "./actionScoring";
 import { creatureValue } from "./strategy";
 import { hasDeathtouch, hasIndestructible, parseNum, simulateDuel } from "./combatSim";
 import { untappedBlockersFor } from "./freeAttack";
+import { wipeSequencingGuard } from "./wipeSequencing";
 import { mustAttackEachCombat } from "./combatRestrictions";
 
 type Opponent = NonNullable<ScoringContext["opponents"]>[number];
@@ -562,7 +563,7 @@ export function suicideAttackGuard(action: ScorableAction, context: ScoringConte
 
 export function evaluatePlayGuards(action: ScorableAction, context: ScoringContext): { vetoed: boolean; reasons: string[] } {
   const reasons: string[] = [];
-  for (const verdict of [sacrificeGuard(action, context), removalGuard(action, context), protectionGuard(action, context), situationalTimingGuard(action, context), wastedSpellGuard(action, context), suicideAttackGuard(action, context)]) {
+  for (const verdict of [sacrificeGuard(action, context), removalGuard(action, context), protectionGuard(action, context), situationalTimingGuard(action, context), wastedSpellGuard(action, context), suicideAttackGuard(action, context), wipeSequencingGuard(action, context)]) {
     if (!verdict.allowed && verdict.reason) reasons.push(verdict.reason);
   }
   return { vetoed: reasons.length > 0, reasons };

@@ -16478,6 +16478,7 @@ function moveCardAcrossSeatsCore(
     // Tapped lands (shock/check/"unless") enter tapped on every path, not only when the caller remembered to ask.
     tapped: destinationZone === "battlefield" ? Boolean(options.tapped) || entersBattlefieldTapped(card, session.seats.find((seat) => seat.id === destinationSeatId)) : false,
     summoningSick: destinationZone === "battlefield" ? card.typeLine.includes("Creature") : undefined,
+    enteredTurn: destinationZone === "battlefield" ? session.turn : undefined,
     counters: destinationZone === "battlefield" && isPlaneswalkerCard(card) ? withInitialLoyaltyCounters(card) : undefined
   };
 
@@ -20731,6 +20732,7 @@ function agentCardSnapshot(card: VisibleCard) {
     loyalty: card.loyalty,
     tapped: card.tapped,
     summoningSick: card.summoningSick,
+    enteredTurn: card.enteredTurn,
     attacking: card.attacking,
     attackTargetId: card.attacking ? card.attackTargetId : undefined,
     blocking: card.blocking,

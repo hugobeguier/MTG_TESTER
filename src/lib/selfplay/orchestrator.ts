@@ -285,6 +285,7 @@ function toCardLike(card: VisibleCard): CardLike {
     attacking: card.attacking,
     attackTargetId: card.attacking ? card.attackTargetId : undefined,
     summoningSick: card.summoningSick,
+    enteredTurn: card.enteredTurn,
     blocking: card.blocking,
     commander: card.commander ? true : undefined
   };

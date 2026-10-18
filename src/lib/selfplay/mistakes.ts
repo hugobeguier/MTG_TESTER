@@ -16,6 +16,7 @@ import { freeAttackVerdict, untappedBlockersFor } from "@/lib/freeAttack";
 import { immediateLifeLoss, parseTargetedRemoval, protectionGuard, removalGuard, sacrificeGuard, situationalTimingGuard } from "@/lib/playGuards";
 import { simulateDuel, parseNum } from "@/lib/combatSim";
 import { creatureValue } from "@/lib/strategy";
+import { freshOwnPermanents, plannedWipe, wipeVictims } from "@/lib/wipeSequencing";
 import type { GameSession, VisibleCard } from "@/lib/types";
 import type { AuditMeta } from "./audit";
 import type { Brain, BrainRequest } from "./brains";
@@ -35,7 +36,8 @@ export type MistakeCategory =
   | "repeated_activation"
   | "suicide_attack"
   | "pointless_block"
-  | "self_lethal_life_cost";
+  | "self_lethal_life_cost"
+  | "sequencing_wipe_after_creature";
 
 export const ALL_CATEGORIES: MistakeCategory[] = [
   "pointless_sacrifice",
@@ -52,7 +54,8 @@ export const ALL_CATEGORIES: MistakeCategory[] = [
   "repeated_activation",
   "suicide_attack",
   "pointless_block",
-  "self_lethal_life_cost"
+  "self_lethal_life_cost",
+  "sequencing_wipe_after_creature"
 ];
 
 export interface MistakeFlag {
@@ -130,6 +133,19 @@ export function analyzeDecision(point: DecisionPoint, chosen: ScorableAction, sc
       // Everyone else's creatures combined (a wipe hits the whole table): a mistake when it costs me more than it costs them all.
       const theirs = (context.opponents ?? []).reduce((sum, o) => sum + (o.battlefield ?? []).filter(isCreatureCard).reduce((s, card) => s + creatureValue(card), 0), 0);
       if (mine.length >= 2 && mineValue >= 6 && mineValue > theirs) add("own_wipe_while_ahead", `board wipe cast with my creature value ${mineValue.toFixed(0)} against ${theirs.toFixed(0)} for the whole rest of the table`, [name]);
+    }
+  }
+
+  // Deploying a permanent that a wipe I am about to cast this turn would kill (the wipe should come first), or wiping my own fresh permanents.
+  if (chosen.actionType === "cast_spell" || chosen.actionType === "cast_commander") {
+    const card = handCard(context, chosen);
+    const wipe = card && !/Instant|Sorcery/.test(card.typeLine ?? "") ? plannedWipe(context, card.id) : undefined;
+    if (card && wipe && wipeVictims(wipe.oracleText ?? "", [card]).length > 0) {
+      add("sequencing_wipe_after_creature", `cast ${card.name} while ${wipe.name} (castable and worth casting this turn) would kill it; wipe first`, [card.name ?? name, wipe.name ?? "wipe"]);
+    }
+    const fresh = wipeVictims(cleanDetail(chosen), freshOwnPermanents(context));
+    if (chosen.actionType === "cast_spell" && fresh.length > 0 && fresh.reduce((sum, c) => sum + creatureValue(c), 0) >= 3) {
+      add("sequencing_wipe_after_creature", `${name} wipes my own ${fresh.map((c) => c.name).join(", ")}, which entered this turn`, [name, ...fresh.map((c) => c.name ?? "?")]);
     }
   }
 
@@ -316,14 +332,32 @@ export class MistakeRecorder {
     if (meta.seatId && lostSeats.has(meta.seatId)) return;
     let mineLost = 0;
     let theirsLost = 0;
+    const freshLost: string[] = [];
     const lostNames: string[] = [];
     for (const [id, entry] of before) {
       if (after.has(id) || lostSeats.has(entry.seatId)) continue;
       const value = isLandCard(entry.card as unknown as CardLike) || entry.card.token ? 0.5 : Math.max(entry.card.manaValue, creatureValue(entry.card as unknown as CardLike));
       if (entry.seatId === meta.seatId) {
+        if (entry.card.enteredTurn === prev.turn && meta.actionType === "cast_spell" && !entry.card.token && value >= 2) freshLost.push(entry.card.name);
         mineLost += value;
         lostNames.push(entry.card.name);
       } else theirsLost += value;
+    }
+    if (freshLost.length > 0) {
+      const seat = prev.seats.find((s) => s.id === meta.seatId);
+      this.log.records.push({
+        category: "sequencing_wipe_after_creature",
+        message: `${meta.actionLabel ?? "a spell"} killed my own ${freshLost.join(", ")}, which entered this turn`,
+        cardNames: freshLost,
+        game: this.game,
+        turn: meta.turn,
+        phase: meta.phase,
+        seat: seat?.name ?? meta.seatId ?? "?",
+        purpose: "outcome",
+        state: { life: Object.fromEntries(prev.seats.map((s) => [s.name, s.life])), hand: (seat?.board.hand ?? []).map((c) => c.name), battlefield: Object.fromEntries(prev.seats.map((s) => [s.name, s.board.battlefield.filter((c) => !c.typeLine.includes("Land")).map((c) => c.name)])), openMana: 0, stack: [] },
+        chosen: meta.actionLabel ?? meta.actionType,
+        alternatives: []
+      });
     }
     // Only own losses clearly caused by this action count; losses of a few cheap permanents are noise.
     if (mineLost >= 6 && mineLost > theirsLost * 1.2) {

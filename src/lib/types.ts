@@ -300,6 +300,8 @@ export interface VisibleCard {
   zone: ZoneName;
   tapped?: boolean;
   summoningSick?: boolean;
+  // GameSession.turn at which this permanent last entered the battlefield (set by playCardFromZone); lets agents see what was cast THIS turn.
+  enteredTurn?: number;
   attacking?: boolean;
   // Damage marked on a creature this turn (rule 120.6): it dies when this reaches its toughness, and it all wears off in the cleanup step.
   damage?: number;

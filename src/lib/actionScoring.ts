@@ -2,6 +2,7 @@ import { attackEconomics, defenderOf, threatShares } from "./strategy";
 import { mustAttackEachCombat } from "./combatRestrictions";
 import { combatSpellBonus, evaluatePlayGuards } from "./playGuards";
 import { declineFreeAttackReason, freeAttackBonus } from "./freeAttack";
+import { scoreWipeSequencing } from "./wipeSequencing";
 import { scoreGangBlockRisk, scoreInterferenceTiming, scoreOwnBoardWipe, scoreRemovalAftermath } from "./lookAhead";
 import { canLegallyBlock, hasDeathtouch, hasDoubleStrike, hasFirstStrike, hasFlying, hasIndestructible, hasInfect, hasKeyword, hasLifelink, hasMenace, hasReach, hasTrample, parseNum, simulateDuel } from "./combatSim";
 
@@ -56,6 +57,8 @@ export interface CardLike {
   // Who an attacking creature is attacking (a seat id or a planeswalker/battle id); read by playGuards.situationalTimingGuard.
   attackTargetId?: string;
   summoningSick?: boolean;
+  // GameSession.turn when it entered the battlefield; equal to the context turn = entered this turn (wipe sequencing, wipeSequencing.ts).
+  enteredTurn?: number;
 }
 
 export interface ScoringContext {
@@ -726,6 +729,7 @@ export function scoreLegalAction(action: ScorableAction, context: ScoringContext
   scoreGangBlockRisk(action, context, delta);
   scoreOwnBoardWipe(action, context, delta);
   scoreRemovalAftermath(action, context, delta);
+  scoreWipeSequencing(action, context, delta);
   scoreInterferenceTiming(action, context, delta);
   const combatBonus = combatSpellBonus(action, context);
   if (combatBonus > 0) delta(combatBonus, "a combat-only spell with the exact combat situation it exists for on the table");
