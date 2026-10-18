@@ -16914,7 +16914,9 @@ function chooseRemovalTarget(
   const opponentCandidates = candidates.filter((entry) => entry.seatId !== casterSeatId);
   // Never fall back to the caster's OWN permanents (Exorcise exiling my own Patchwork Banner, Swords on my own commander): with only own
   // targets left the deterministic chooser has no target, so the spell is not offered/cast. A human's explicit pick bypasses this chooser.
-  const pool = opponentCandidates;
+  // Humans keep the fallback: a legal cast whose only legal targets are their own permanents must stay castable.
+  const casterIsHuman = session.seats.find((seat) => seat.id === casterSeatId)?.kind === "human";
+  const pool = opponentCandidates.length > 0 || !casterIsHuman ? opponentCandidates : candidates;
   if (pool.length === 0) return undefined;
   // Ward doesn't make a target illegal, just costly (see payWardIfNeeded) — prefer a ward-free
   // target when one is equally available, so the caster isn't paying a tax for no reason.
@@ -17978,7 +17980,7 @@ function removalEffectHasLegalTarget(session: GameSession, casterSeatId: string,
 // resolution time — mirrors the exact same removalEffectHasLegalTarget check applyRemovalEffect
 // itself uses below, just run one step earlier, before mana and the card are spent on something
 // that can never do anything.
-function hasResolvableRemovalTarget(session: GameSession, casterSeatId: string, card: VisibleCard): boolean {
+export function hasResolvableRemovalTarget(session: GameSession, casterSeatId: string, card: VisibleCard): boolean {
   const effect = parseRemovalEffect(etbEffectText(card.oracleText));
   if (!effect) return true;
   return removalEffectHasLegalTarget(session, casterSeatId, card, effect);

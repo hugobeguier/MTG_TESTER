@@ -1,6 +1,6 @@
 // Self-play mistake detector findings: the agent's choosers must not pick options that only hurt the caster (real Oracle text).
 import { describe, expect, it } from "vitest";
-import { applyRemovalEffect, findEnterAsCopyTarget, parseEnterAsCopyEffect } from "@/components/AppFlow";
+import { applyRemovalEffect, findEnterAsCopyTarget, hasResolvableRemovalTarget, parseEnterAsCopyEffect } from "@/components/AppFlow";
 import { parseRemovalEffect } from "@/lib/removalSpells";
 import { loadCardCatalog, lookupCard } from "@/lib/cardCatalog";
 import type { GameSession, PlayerSeat, VisibleCard } from "@/lib/types";
@@ -11,8 +11,8 @@ function real(name: string, id: string, extra: Partial<VisibleCard> = {}): Visib
   if (!found) throw new Error(`catalog is missing ${name}`);
   return { manaValue: 0, colors: [], role: "permanent", zone: "battlefield", typeLine: "", oracleText: "", ...found, id, summoningSick: false, ...extra } as VisibleCard;
 }
-function seat(id: string, battlefield: VisibleCard[]): PlayerSeat {
-  return { id, name: id, kind: "agent", life: 40, commanderDamage: {}, zones: { library: 0, hand: 0, battlefield: battlefield.length, graveyard: 0, exile: 0, command: 0 }, board: { hand: [], battlefield, graveyard: [] } };
+function seat(id: string, battlefield: VisibleCard[], kind: "agent" | "human" = "agent"): PlayerSeat {
+  return { id, name: id, kind, life: 40, commanderDamage: {}, zones: { library: 0, hand: 0, battlefield: battlefield.length, graveyard: 0, exile: 0, command: 0 }, board: { hand: [], battlefield, graveyard: [] } };
 }
 function session(seats: PlayerSeat[]): GameSession {
   return { id: "t", createdAt: "", status: "playing", phase: "precombat main phase", turn: 1, xmage: { enabled: false, status: "not_configured", message: "" }, seats, events: [] };
@@ -71,4 +71,14 @@ describe("single-target removal never falls back to the caster's own permanent",
     const after = applyRemovalEffect(session([seatWith("a", [bears]), seatWith("b", [])]), "a", "Putrefy", spell, effect!);
     expect(after.seats[0].board.battlefield.map((c) => c.id)).toContain("bears");
   });
+});
+
+describe("the own-permanent restriction is for agents only", () => {
+  for (const [name, mine] of [["Putrefy", () => real("Grizzly Bears", "bears", { power: "2", toughness: "2", typeLine: "Creature — Bear" })], ["Exorcise", () => real("Patchwork Banner", "banner")]] as const) {
+    it(`${name}: a human may cast it with only their own legal target, an agent may not`, () => {
+      const spell = real(name, "spell");
+      expect(hasResolvableRemovalTarget(session([seat("a", [mine()], "human"), seat("b", [])]), "a", spell)).toBe(true);
+      expect(hasResolvableRemovalTarget(session([seat("a", [mine()], "agent"), seat("b", [])]), "a", spell)).toBe(false);
+    });
+  }
 });
