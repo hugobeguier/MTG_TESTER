@@ -190,6 +190,21 @@ function build(): Record<string, MistakeScenario> {
     };
   }
 
+  // (10) A lone valuable attacker into a blocker that kills it and survives.
+  {
+    const hydra = perm("Test Hydra", "Creature — Hydra", 6, "7", "7", "");
+    const ground = perm("Veteran Knight", "Creature — Human Knight", 4, "3", "3", "First strike");
+    const groundAttack: ScorableAction = { id: `attack:${ground.id}`, actionType: "attack", cardId: ground.id, targetIds: ["opp"], label: "attack Opp with Veteran Knight" };
+    scenarios["lone-attacker-into-bigger-blocker"] = {
+      category: "suicide_attack",
+      description: "A lone 3/3 first striker attacks a player whose untapped 7/7 blocks and kills it",
+      purpose: "declare_attackers",
+      context: context("declare_attackers", "declare attackers step", { battlefield: [ground] }, [{ id: "opp", name: "Opp", life: 40, battlefield: [hydra] }]),
+      legalActions: [groundAttack, noAttackers],
+      badActionId: groundAttack.id
+    };
+  }
+
   return scenarios;
 }
 

@@ -10,7 +10,9 @@
 
 import type { CardLike, ScorableAction, ScoringContext } from "./actionScoring";
 import { creatureValue } from "./strategy";
-import { hasDeathtouch, hasIndestructible, parseNum } from "./combatSim";
+import { hasDeathtouch, hasIndestructible, parseNum, simulateDuel } from "./combatSim";
+import { untappedBlockersFor } from "./freeAttack";
+import { mustAttackEachCombat } from "./combatRestrictions";
 
 type Opponent = NonNullable<ScoringContext["opponents"]>[number];
 
@@ -518,10 +520,49 @@ export function wastedSpellGuard(action: ScorableAction, context: ScoringContext
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------
+// Rule 6: suicide attacks
+// ---------------------------------------------------------------------------------------------------------------------------------
+
+const ATTACK_VALUE_TRIGGER_RE = /\bwhenever (?:this creature|[a-z,' -]+?) attacks\b[^.]*\b(?:create|draw|deal|deals|add|gain|put|return|exile|destroy|each opponent|target)\b/;
+
+// An attacker the defender can block and kill without losing the blocker is just given away -- unless the attack achieves something else:
+// it is lethal (alone or with the rest of the team), the creature is forced to attack, it has an
+// attack trigger that pays for itself, it is a commander closing in on 21, or the defender cannot afford to eat every attacker I send
+// (more attackers than creatures that can kill one for free). Cheap bodies (value < 3) are expendable and never vetoed.
+export function suicideAttackGuard(action: ScorableAction, context: ScoringContext): GuardVerdict {
+  if (action.actionType !== "attack") return ALLOWED;
+  const attacker = (context.you?.battlefield ?? []).find((card) => card.id === action.cardId);
+  const targetId = action.targetIds[0];
+  const defender = (context.opponents ?? []).find((opponent) => opponent.id === targetId);
+  if (!attacker || !defender) return ALLOWED; // planeswalker / battle attacks are not judged here
+  if (mustAttackEachCombat({ oracleText: attacker.oracleText ?? "", goaded: attacker.goaded })) return ALLOWED;
+  if (isToken(attacker) || creatureValue(attacker) < 3) return ALLOWED;
+
+  const killers = untappedBlockersFor(attacker, defender).filter((blocker) => {
+    const duel = simulateDuel(attacker, blocker);
+    return duel.attackerDies && !duel.blockerDies;
+  });
+  if (killers.length === 0) return ALLOWED;
+
+  const power = Math.max(0, parseNum(attacker.power) ?? 0);
+  const life = defender.life ?? 40;
+  // Everything of mine that could be sent at this defender this combat (declared already, or still able to attack).
+  const team = (context.you?.battlefield ?? []).filter((card) => isCreature(card) && (card.attacking ? card.attackTargetId === defender.id || !card.attackTargetId : !card.tapped && !card.summoningSick && (parseNum(card.power) ?? 0) > 0));
+  const teamPower = totalPower(team.concat(team.includes(attacker) ? [] : [attacker]));
+  if (power >= life || (teamPower >= life && team.length > killers.length)) return ALLOWED;
+  if (team.length > killers.length) return ALLOWED; // the defender cannot block and kill every attacker
+  if (ATTACK_VALUE_TRIGGER_RE.test(clean(attacker.oracleText))) return ALLOWED;
+  if (attacker.commander && (defender.commanderDamage?.[attacker.id] ?? 0) >= 12) return ALLOWED;
+
+  const killer = killers[0];
+  return { allowed: false, reason: `attack held: ${attacker.name ?? "the attacker"} would be blocked and killed by ${killer.name ?? "an untapped creature"} without killing it, and nothing else (lethal, trample, an attack trigger, a wider attack) makes the attack worth it` };
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------
 
 export function evaluatePlayGuards(action: ScorableAction, context: ScoringContext): { vetoed: boolean; reasons: string[] } {
   const reasons: string[] = [];
-  for (const verdict of [sacrificeGuard(action, context), removalGuard(action, context), protectionGuard(action, context), situationalTimingGuard(action, context), wastedSpellGuard(action, context)]) {
+  for (const verdict of [sacrificeGuard(action, context), removalGuard(action, context), protectionGuard(action, context), situationalTimingGuard(action, context), wastedSpellGuard(action, context), suicideAttackGuard(action, context)]) {
     if (!verdict.allowed && verdict.reason) reasons.push(verdict.reason);
   }
   return { vetoed: reasons.length > 0, reasons };
