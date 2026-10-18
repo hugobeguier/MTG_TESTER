@@ -9,7 +9,7 @@
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { heuristicBrain, type Brain } from "../src/lib/selfplay/brains";
-import { createSelfPlayGame, playGame, type PlayGameResult } from "../src/lib/selfplay/orchestrator";
+import { createSelfPlayGame, playGame, seedRuntime, type PlayGameResult } from "../src/lib/selfplay/orchestrator";
 import { DECK_FILES, computeGameRotation } from "../src/lib/selfplay/rotation";
 import { ALL_CATEGORIES, MistakeRecorder, unguardedHeuristicBrain, type MistakeCategory, type MistakeRecord } from "../src/lib/selfplay/mistakes";
 
@@ -19,34 +19,6 @@ const FOUNDATIONS = [
   ["decks/foundations/TramplesaurusRex.txt", "Tramplesaurus Rex"],
   ["decks/foundations/CallingAllAngels.txt", "Calling All Angels"]
 ] as const;
-
-// Same generator as orchestrator.ts (not exported there). createSelfPlayGame only seeds its own setup; the engine uses Math.random later
-// too (in-game shuffles), so the whole game is run under one seeded Math.random to make seed N reproducible run to run.
-function mulberry32(seed: number): () => number {
-  let state = seed | 0;
-  return function next() {
-    state = (state + 0x6d2b79f5) | 0;
-    let t = Math.imul(state ^ (state >>> 15), 1 | state);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-// Shuffles (crypto.getRandomValues) and card ids (crypto.randomUUID) are replaced by seeded/counter versions per game so a seed reproduces exactly.
-function installDeterministicIds(seed: number) {
-  // The engine shuffles through crypto.getRandomValues (AppFlow.randomInt), which Math.random seeding never reached.
-  const rng = mulberry32(seed * 31 + 7);
-  (globalThis.crypto as unknown as { getRandomValues: (a: Uint32Array) => Uint32Array }).getRandomValues = (array) => {
-    for (let i = 0; i < array.length; i += 1) array[i] = Math.floor(rng() * 4294967296);
-    return array;
-  };
-  let counter = 0;
-  (globalThis.crypto as unknown as { randomUUID: () => string }).randomUUID = () => {
-    counter += 1;
-    const hex = (seed * 100003 + counter).toString(16).padStart(12, "0");
-    return `00000000-0000-4000-8000-${hex.slice(-12)}`;
-  };
-}
 
 interface Args {
   pool: "foundations" | "legacy";
@@ -125,7 +97,7 @@ async function main() {
       seatNames = ["Seat A", "Seat B"];
       forceFirst = rotation.forceFirstSeatIndex;
     }
-    installDeterministicIds(seed);
+    const restoreRuntime = seedRuntime(seed);
     const session = createSelfPlayGame({ deckListPaths: deckFiles, seatNames, forceFirstSeatIndex: forceFirst, seed });
     const idToName = Object.fromEntries(session.seats.map((seat) => [seat.id, seat.name]));
     const recorder = new MistakeRecorder(i, idToName);
@@ -133,8 +105,6 @@ async function main() {
     const brains: Record<string, Brain> = Object.fromEntries(session.seats.map((seat) => [seat.id, wrapped]));
 
     let result: PlayGameResult;
-    const realRandom = Math.random;
-    Math.random = mulberry32(seed * 7919 + 17);
     try {
       result = await playGame(session, brains, { timeoutMs: 120000, onAction: recorder.onAction });
     } catch (error) {
@@ -142,7 +112,7 @@ async function main() {
       console.error(`game ${i} threw: ${error instanceof Error ? error.message : String(error)}`);
       continue;
     } finally {
-      Math.random = realRandom;
+      restoreRuntime();
     }
     if (result.terminationReason === "crash") crashes += 1;
 

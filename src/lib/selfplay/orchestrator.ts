@@ -184,14 +184,37 @@ function mulberry32(seed: number): () => number {
   };
 }
 
+// Seeds everything the engine draws randomness from: Math.random, crypto.getRandomValues (the deck shuffles, AppFlow.randomInt) and
+// crypto.randomUUID (card ids; id-ordered tie-breaks would otherwise differ run to run). Returns a function that restores the originals.
+export function seedRuntime(seed: number): () => void {
+  const cryptoObj = globalThis.crypto as unknown as { getRandomValues: (array: Uint32Array) => Uint32Array; randomUUID: () => string };
+  const original = { random: Math.random, getRandomValues: cryptoObj.getRandomValues, randomUUID: cryptoObj.randomUUID };
+  const rng = mulberry32(seed);
+  const bytes = mulberry32(seed * 31 + 7);
+  let counter = 0;
+  Math.random = rng;
+  cryptoObj.getRandomValues = (array: Uint32Array) => {
+    for (let i = 0; i < array.length; i += 1) array[i] = Math.floor(bytes() * 4294967296);
+    return array;
+  };
+  cryptoObj.randomUUID = () => {
+    counter += 1;
+    return `00000000-0000-4000-8000-${(seed * 100003 + counter).toString(16).padStart(12, "0").slice(-12)}`;
+  };
+  return () => {
+    Math.random = original.random;
+    cryptoObj.getRandomValues = original.getRandomValues;
+    cryptoObj.randomUUID = original.randomUUID;
+  };
+}
+
 function withSeededRandom<T>(seed: number | undefined, fn: () => T): T {
   if (seed === undefined) return fn();
-  const original = Math.random;
-  Math.random = mulberry32(seed);
+  const restore = seedRuntime(seed);
   try {
     return fn();
   } finally {
-    Math.random = original;
+    restore();
   }
 }
 

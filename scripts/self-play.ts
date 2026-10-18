@@ -18,7 +18,7 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { heuristicBrain, ollamaBrain, type Brain } from "../src/lib/selfplay/brains";
-import { createSelfPlayGame, playGame, type PlayGameResult } from "../src/lib/selfplay/orchestrator";
+import { createSelfPlayGame, playGame, seedRuntime, type PlayGameResult } from "../src/lib/selfplay/orchestrator";
 import { SelfPlayStrictViolationError, type AuditCheck, type AuditViolation } from "../src/lib/selfplay/audit";
 import type { Anomaly, AnomalyKind } from "../src/lib/selfplay/anomalies";
 import { DECK_FILES, computeGameRotation } from "../src/lib/selfplay/rotation";
@@ -160,6 +160,8 @@ async function main() {
         : ["Seat A", "Seat B"];
     const seed = args.seed !== undefined ? args.seed + globalIndex : undefined;
 
+    // The whole game (not just setup) runs under the seeded runtime, so a seed reproduces the same game.
+    const restoreRuntime = seed !== undefined ? seedRuntime(seed) : undefined;
     const session = createSelfPlayGame({ deckListPaths: deckFiles, seatNames, forceFirstSeatIndex, seed });
     const brains: Record<string, Brain> = foundations
       ? Object.fromEntries(session.seats.map((seat) => [seat.id, heuristicBrain]))
@@ -178,6 +180,8 @@ async function main() {
     } catch (error) {
       if (error instanceof SelfPlayStrictViolationError) dumpAndExit(error);
       throw error;
+    } finally {
+      restoreRuntime?.();
     }
 
     results.push({ ...result, gameIndex: globalIndex, seatNames, deckFiles, firstSeatIndex: forceFirstSeatIndex, ollamaSeatIndex: args.ollama && !foundations ? ollamaSeatIndex : undefined });

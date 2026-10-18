@@ -14605,7 +14605,7 @@ function parsePhaseOutEffect(effectText: string): boolean {
 // on the battlefield" not working at all, because this parser only ever recognized Estrid's
 // Invocation's narrower "an enchantment you control" wording and Mirrormade's real text matches
 // neither restriction, so it silently entered as a blank, uncopied enchantment instead.
-function parseEnterAsCopyEffect(
+export function parseEnterAsCopyEffect(
   oracleText: string
 ): { extraAbilityText?: string; controlledOnly: boolean; allowedTypes: Array<"artifact" | "enchantment" | "creature">; temporary?: boolean; extraKeyword?: string } | undefined {
   // "As this artifact enters, you may have it become a copy of any creature on the battlefield until end of turn, except it has haste."
@@ -14659,10 +14659,15 @@ function zoneChoiceSpecFor(session: GameSession, seatId: string, effect: ZoneEff
 // Every permanent the copy could legally be of (what the human chooses between).
 function enterAsCopyCandidates(session: GameSession, actingSeatId: string, effect: { controlledOnly: boolean; allowedTypes: Array<"artifact" | "enchantment" | "creature"> }): VisibleCard[] {
   const matchesType = (card: VisibleCard) => effect.allowedTypes.some((type) => card.typeLine.includes(type === "artifact" ? "Artifact" : type === "creature" ? "Creature" : "Enchantment"));
-  return session.seats.filter((seat) => !effect.controlledOnly || seat.id === actingSeatId).flatMap((seat) => seat.board.battlefield).filter((card) => matchesType(card) && !card.phasedOut);
+  // Never offer (or default to) copying a legendary permanent I already control: the legend rule would put one of the two into the graveyard (Cursed Mirror copying my own commander).
+  return session.seats
+    .filter((seat) => !effect.controlledOnly || seat.id === actingSeatId)
+    .flatMap((seat) => seat.board.battlefield.map((card) => ({ card, mine: seat.id === actingSeatId })))
+    .filter(({ card, mine }) => matchesType(card) && !card.phasedOut && !(mine && card.typeLine.includes("Legendary")))
+    .map(({ card }) => card);
 }
 
-function findEnterAsCopyTarget(
+export function findEnterAsCopyTarget(
   session: GameSession,
   actingSeatId: string,
   effect: { controlledOnly: boolean; allowedTypes: Array<"artifact" | "enchantment" | "creature"> },
@@ -14678,7 +14683,7 @@ function findEnterAsCopyTarget(
   const actingSeat = session.seats.find((seat) => seat.id === actingSeatId);
   // "Any creature on the battlefield" (Cursed Mirror): the strongest one, whoever controls it.
   if (effect.allowedTypes.length === 1 && effect.allowedTypes[0] === "creature") {
-    return session.seats.flatMap((seat) => seat.board.battlefield).filter((card) => matchesType(card) && !card.phasedOut).sort((a, b) => effectivePower(b) + effectiveToughness(b) - (effectivePower(a) + effectiveToughness(a)))[0];
+    return enterAsCopyCandidates(session, actingSeatId, effect).sort((a, b) => effectivePower(b) + effectiveToughness(b) - (effectivePower(a) + effectiveToughness(a)))[0];
   }
   const ownMatch = actingSeat?.board.battlefield.find(matchesType);
   if (ownMatch || effect.controlledOnly) return ownMatch;
@@ -18392,7 +18397,17 @@ export function applyRemovalEffect(
       // targeting — skip modes with nothing to do (an empty-graveyard reanimate-shaped mode, a
       // damage mode with no target) rather than burning a "choose N" slot on a guaranteed no-op,
       // and take the first `chooseCount` modes that do have something to do.
-      const viableModes = effect.modes.filter((mode) => removalEffectHasLegalTarget(session, casterSeatId, source, mode));
+      // A targeted destroy/exile/bounce mode whose only legal targets are the caster's own permanents (Collective Resistance destroying your own
+      // Commander's Sphere) is skipped, not taken just because it is legal.
+      const viableModes = effect.modes.filter(
+        (mode) =>
+          removalEffectHasLegalTarget(session, casterSeatId, source, mode) &&
+          (mode.kind === "destroy"
+            ? chooseRemovalTarget(session, casterSeatId, mode.targetType, source, mode.excludedColors, mode.artifactsExcluded, mode.basicsExcluded, true, mode.minToughness, true) !== undefined
+            : mode.kind === "exile" || mode.kind === "bounce"
+              ? chooseRemovalTarget(session, casterSeatId, mode.targetType, source, [], false, false, false, undefined, true) !== undefined
+              : true)
+      );
       // Best modes first (by what each sweeps away from opponents vs from you) instead of printed order: Austere Command
       // always destroyed artifacts and enchantments, your own included, and could never pick the creature modes.
       const chosenModes = viableModes

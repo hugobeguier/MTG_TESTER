@@ -1,0 +1,3596 @@
+{
+  "health": {
+    "games": 120,
+    "seedRange": "1000..1119",
+    "pool": "foundations",
+    "unguarded": false,
+    "finishedPct": 100,
+    "timeouts": 0,
+    "turnCaps": 0,
+    "crashes": 0,
+    "avgTurnsPerSeat": 11.239583333333334,
+    "auditViolations": 0,
+    "decisions": 25085,
+    "winnerSpread": {
+      "Wretched Ranks": 19,
+      "Calling All Angels": 53,
+      "Tramplesaurus Rex": 36,
+      "Reign of Dragons": 12
+    },
+    "actionsByType": {
+      "play_land": 3537,
+      "pass_priority": 10103,
+      "cast_spell": 4915,
+      "cast_commander": 339,
+      "attack": 5512,
+      "block": 679
+    },
+    "decisionsByPurpose": {
+      "main_phase": 18185,
+      "declare_attackers": 5672,
+      "declare_blockers": 986,
+      "declare_blockers_additional": 242
+    },
+    "passRate": 0.40275064779748854,
+    "avgWallClockMs": 734.5833333333334
+  },
+  "categories": {
+    "suicide_attack": {
+      "count": 50,
+      "games": 39,
+      "topCards": [
+        [
+          "Firemane Commando",
+          5
+        ],
+        [
+          "Magda, the Hoardmaster",
+          5
+        ],
+        [
+          "Sarkhan, Dragon Ascendant",
+          5
+        ],
+        [
+          "Managorger Hydra",
+          5
+        ],
+        [
+          "Cryptbreaker",
+          5
+        ],
+        [
+          "Giada, Font of Hope",
+          4
+        ],
+        [
+          "Clifftop Lookout",
+          3
+        ],
+        [
+          "Ghoulcaller Gisa",
+          3
+        ]
+      ],
+      "examples": [
+        {
+          "category": "suicide_attack",
+          "message": "Clifftop Lookout attacks into Zombie Token, Diregraf Colossus, Ghoulcaller Gisa, which can block and kill it without dying (2 attacker(s) vs 3 such blocker(s))",
+          "cardNames": [
+            "Clifftop Lookout",
+            "Zombie Token",
+            "Diregraf Colossus",
+            "Ghoulcaller Gisa"
+          ],
+          "game": 0,
+          "turn": 43,
+          "phase": "declare attackers step",
+          "seat": "Tramplesaurus Rex",
+          "purpose": "declare_attackers",
+          "state": {
+            "life": {
+              "Tramplesaurus Rex": 47,
+              "Wretched Ranks": 29,
+              "Reign of Dragons": 0,
+              "Calling All Angels": 0
+            },
+            "hand": [
+              "Forest",
+              "Forest",
+              "Rishkar's Expertise",
+              "Tranquil Thicket",
+              "Goreclaw, Terror of Qal Sisma"
+            ],
+            "battlefield": {
+              "Tramplesaurus Rex": [
+                "Unnatural Growth",
+                "Swiftfoot Boots",
+                "Garruk's Uprising",
+                "Clifftop Lookout 1/2",
+                "Steel Leaf Champion 5/4(t)",
+                "Colossal Majesty",
+                "Ghalta, Primal Hunger 12/12"
+              ],
+              "Wretched Ranks": [
+                "Zombie Token 2/2(t)",
+                "Zombie Token 2/2(t)",
+                "Zombie Token 2/2(t)",
+                "Zombie Token 2/2(t)",
+                "Zombie Token 2/2(t)",
+                "Zombie Token 2/2(t)",
+                "Zombie Token 2/2(t)",
+                "Zombie Token 2/2(t)",
+                "Zombie Token 2/2(t)",
+                "Zombie Token 2/2(t)",
+                "Zombie Token 2/2(t)",
+                "Zombie Token 2/2(t)",
+                "Zombie Token 2/2(t)",
+                "Zombie Token 2/2(t)",
+                "Zombie Token 2/2(t)",
+                "Zombie Token 2/2(t)",
+                "Zombie Token 2/2(t)",
+                "Zombie Token 2/2(t)",
+                "Zombie Token 2/2",
+                "Endless Ranks of the Dead",
+                "Gravespawn Sovereign 3/3(t)",
+                "Diregraf Colossus 2/2",
+                "Ghoulcaller Gisa 3/4"
+              ],
+              "Reign of Dragons": [],
+              "Calling All Angels": []
+            },
+            "openMana": 1,
+            "stack": []
+          },
+          "chosen": "attack Wretched Ranks with Clifftop Lookout",
+          "alternatives": [
+            {
+              "label": "attack Wretched Ranks with Clifftop Lookout",
+              "score": 0,
+              "vetoed": false
+            },
+            {
+              "label": "declare no attackers",
+              "score": 0,
+              "vetoed": false
+            }
+          ]
+        },
+        {
+          "category": "suicide_attack",
+          "message": "Cemetery Reaper attacks into Firemane Commando, which can block and kill it without dying (1 attacker(s) vs 1 such blocker(s))",
+          "cardNames": [
+            "Cemetery Reaper",
+            "Firemane Commando"
+          ],
+          "game": 2,
+          "turn": 15,
+          "phase": "declare attackers step",
+          "seat": "Wretched Ranks",
+          "purpose": "declare_attackers",
+          "state": {
+            "life": {
+              "Wretched Ranks": 43,
+              "Tramplesaurus Rex": 40,
+              "Calling All Angels": 27,
+              "Reign of Dragons": 40
+            },
+            "hand": [
+              "Swamp",
+              "Ambition's Cost",
+              "Gravespawn Sovereign"
+            ],
+            "battlefield": {
+              "Wretched Ranks": [
+                "Sol Ring(t)",
+                "Cemetery Reaper 2/2",
+                "Headless Rider 3/1"
+              ],
+              "Tramplesaurus Rex": [
+                "Steel Leaf Champion 5/4(t)",
+                "Clue",
+                "Goreclaw, Terror of Qal Sisma 4/3"
+              ],
+              "Calling All Angels": [
+                "Firemane Commando 4/3"
+              ],
+              "Reign of Dragons": [
+                "Dragonspeaker Shaman 2/2"
+              ]
+            },
+            "openMana": 3,
+            "stack": []
+          },
+          "chosen": "attack Calling All Angels with Cemetery Reaper",
+          "alternatives": [
+            {
+              "label": "attack Calling All Angels with Cemetery Reaper",
+              "score": 0,
+              "vetoed": false
+            },
+            {
+              "label": "declare no attackers",
+              "score": 0,
+              "vetoed": false
+            },
+            {
+              "label": "attack Reign of Dragons with Cemetery Reaper",
+              "score": -1,
+              "vetoed": false
+            },
+            {
+              "label": "attack Tramplesaurus Rex with Cemetery Reaper",
+              "score": -2,
+              "vetoed": false
+            }
+          ]
+        },
+        {
+          "category": "suicide_attack",
+          "message": "Dragonspeaker Shaman attacks into Firemane Commando, which can block and kill it without dying (1 attacker(s) vs 1 such blocker(s))",
+          "cardNames": [
+            "Dragonspeaker Shaman",
+            "Firemane Commando"
+          ],
+          "game": 2,
+          "turn": 16,
+          "phase": "declare attackers step",
+          "seat": "Reign of Dragons",
+          "purpose": "declare_attackers",
+          "state": {
+            "life": {
+              "Reign of Dragons": 40,
+              "Tramplesaurus Rex": 40,
+              "Calling All Angels": 27,
+              "Wretched Ranks": 43
+            },
+            "hand": [
+              "Mountain",
+              "Chandra's Ignition",
+              "Mountain"
+            ],
+            "battlefield": {
+              "Reign of Dragons": [
+                "Dragonspeaker Shaman 2/2",
+                "Gadrak, the Crown-Scourge 5/4",
+                "Orb of Dragonkind"
+              ],
+              "Tramplesaurus Rex": [
+                "Steel Leaf Champion 5/4(t)",
+                "Clue",
+                "Goreclaw, Terror of Qal Sisma 4/3"
+              ],
+              "Calling All Angels": [
+                "Firemane Commando 4/3"
+              ],
+              "Wretched Ranks": [
+                "Sol Ring(t)",
+                "Headless Rider 3/1",
+                "Zombie Token 2/2"
+              ]
+            },
+            "openMana": 1,
+            "stack": []
+          },
+          "chosen": "attack Calling All Angels with Dragonspeaker Shaman",
+          "alternatives": [
+            {
+              "label": "attack Calling All Angels with Dragonspeaker Shaman",
+              "score": 2,
+              "vetoed": false
+            },
+            {
+              "label": "attack Tramplesaurus Rex with Dragonspeaker Shaman",
+              "score": 0,
+              "vetoed": false
+            },
+            {
+              "label": "attack Wretched Ranks with Dragonspeaker Shaman",
+              "score": 0,
+              "vetoed": false
+            },
+            {
+              "label": "declare no attackers",
+              "score": 0,
+              "vetoed": false
+            }
+          ]
+        }
+      ]
+    },
+    "tapped_out_into_lethal": {
+      "count": 20,
+      "games": 14,
+      "topCards": [
+        [
+          "Blasphemous Act",
+          8
+        ],
+        [
+          "Ezuri's Predation",
+          2
+        ],
+        [
+          "Surrak, the Hunt Caller",
+          1
+        ],
+        [
+          "Hulking Raptor",
+          1
+        ],
+        [
+          "Austere Command",
+          1
+        ],
+        [
+          "Warstorm Surge",
+          1
+        ],
+        [
+          "Ghalta, Primal Hunger",
+          1
+        ],
+        [
+          "Army of the Damned",
+          1
+        ]
+      ],
+      "examples": [
+        {
+          "category": "tapped_out_into_lethal",
+          "message": "tapped out for Blasphemous Act while an opponent's board can swing ~42 against my 16 life",
+          "cardNames": [
+            "Blasphemous Act"
+          ],
+          "game": 0,
+          "turn": 34,
+          "phase": "precombat main phase",
+          "seat": "Reign of Dragons",
+          "purpose": "main_phase",
+          "state": {
+            "life": {
+              "Reign of Dragons": 16,
+              "Wretched Ranks": 44,
+              "Tramplesaurus Rex": 39,
+              "Calling All Angels": 33
+            },
+            "hand": [
+              "Blasphemous Act",
+              "Unexpected Windfall",
+              "Hazoret's Monument",
+              "Leyline Tyrant",
+              "Breaching Dragonstorm"
+            ],
+            "battlefield": {
+              "Reign of Dragons": [
+                "Orb of Dragonkind",
+                "Sol Ring",
+                "Crucible of Fire"
+              ],
+              "Wretched Ranks": [
+                "Zombie Token 2/2",
+                "Zombie Token 2/2",
+                "Zombie Token 2/2",
+                "Zombie Token 2/2",
+                "Zombie Token 2/2",
+                "Zombie Token 2/2",
+                "Zombie Token 2/2",
+                "Zombie Token 2/2",
+                "Zombie Token 2/2",
+                "Zombie Token 2/2",
+                "Zombie Token 2/2",
+                "Zombie Token 2/2",
+                "Zombie Token 2/2",
+                "Zombie Token 2/2",
+                "Zombie Token 2/2",
+                "Zombie Token 2/2",
+                "Zombie Token 2/2",
+                "Zombie Token 2/2",
+                "Zombie Token 2/2",
+                "Zombie Token 2/2",
+                "Zombie Token 2/2",
+                "Endless Ranks of the Dead"
+              ],
+              "Tramplesaurus Rex": [
+                "Unnatural Growth",
+                "Swiftfoot Boots",
+                "Garruk's Uprising"
+              ],
+              "Calling All Angels": [
+                "Sol Ring(t)",
+                "Swiftfoot Boots",
+                "Arcane Signet"
+              ]
+            },
+            "openMana": 5,
+            "stack": []
+          },
+          "chosen": "cast Blasphemous Act",
+          "alternatives": [
+            {
+              "label": "cast Blasphemous Act",
+              "score": 6,
+              "vetoed": false
+            },
+            {
+              "label": "cast Unexpected Windfall",
+              "score": 3,
+              "vetoed": false
+            },
+            {
+              "label": "cast Hazoret's Monument",
+              "score": 3,
+              "vetoed": false
+            },
+            {
+              "label": "cast Leyline Tyrant",
+              "score": 3,
+              "vetoed": false
+            },
+            {
+              "label": "cast Breaching Dragonstorm",
+              "score": 3,
+              "vetoed": false
+            },
+            {
+              "label": "cast commander Lathliss, Dragon Queen",
+              "score": 3,
+              "vetoed": false
+            }
+          ]
+        },
+        {
+          "category": "tapped_out_into_lethal",
+          "message": "tapped out for Blasphemous Act while an opponent's board can swing ~42 against my 16 life",
+          "cardNames": [
+            "Blasphemous Act"
+          ],
+          "game": 0,
+          "turn": 34,
+          "phase": "postcombat main phase",
+          "seat": "Reign of Dragons",
+          "purpose": "main_phase",
+          "state": {
+            "life": {
+              "Reign of Dragons": 16,
+              "Wretched Ranks": 44,
+              "Tramplesaurus Rex": 39,
+              "Calling All Angels": 33
+            },
+            "hand": [
+              "Blasphemous Act",
+              "Unexpected Windfall",
+              "Hazoret's Monument",
+              "Leyline Tyrant",
+              "Breaching Dragonstorm"
+            ],
+            "battlefield": {
+              "Reign of Dragons": [
+                "Orb of Dragonkind",
+                "Sol Ring",
+                "Crucible of Fire"
+              ],
+              "Wretched Ranks": [
+                "Zombie Token 2/2",
+                "Zombie Token 2/2",
+                "Zombie Token 2/2",
+                "Zombie Token 2/2",
+                "Zombie Token 2/2",
+                "Zombie Token 2/2",
+                "Zombie Token 2/2",
+                "Zombie Token 2/2",
+                "Zombie Token 2/2",
+                "Zombie Token 2/2",
+                "Zombie Token 2/2",
+                "Zombie Token 2/2",
+                "Zombie Token 2/2",
+                "Zombie Token 2/2",
+                "Zombie Token 2/2",
+                "Zombie Token 2/2",
+                "Zombie Token 2/2",
+                "Zombie Token 2/2",
+                "Zombie Token 2/2",
+                "Zombie Token 2/2",
+                "Zombie Token 2/2",
+                "Endless Ranks of the Dead"
+              ],
+              "Tramplesaurus Rex": [
+                "Unnatural Growth",
+                "Swiftfoot Boots",
+                "Garruk's Uprising"
+              ],
+              "Calling All Angels": [
+                "Sol Ring(t)",
+                "Swiftfoot Boots",
+                "Arcane Signet"
+              ]
+            },
+            "openMana": 5,
+            "stack": []
+          },
+          "chosen": "cast Blasphemous Act",
+          "alternatives": [
+            {
+              "label": "cast Blasphemous Act",
+              "score": 6,
+              "vetoed": false
+            },
+            {
+              "label": "cast Unexpected Windfall",
+              "score": 3,
+              "vetoed": false
+            },
+            {
+              "label": "cast Hazoret's Monument",
+              "score": 3,
+              "vetoed": false
+            },
+            {
+              "label": "cast Leyline Tyrant",
+              "score": 3,
+              "vetoed": false
+            },
+            {
+              "label": "cast Breaching Dragonstorm",
+              "score": 3,
+              "vetoed": false
+            },
+            {
+              "label": "cast commander Lathliss, Dragon Queen",
+              "score": 3,
+              "vetoed": false
+            }
+          ]
+        },
+        {
+          "category": "tapped_out_into_lethal",
+          "message": "tapped out for Surrak, the Hunt Caller while an opponent's board can swing ~32 against my 5 life",
+          "cardNames": [
+            "Surrak, the Hunt Caller"
+          ],
+          "game": 0,
+          "turn": 47,
+          "phase": "precombat main phase",
+          "seat": "Tramplesaurus Rex",
+          "purpose": "main_phase",
+          "state": {
+            "life": {
+              "Tramplesaurus Rex": 5,
+              "Wretched Ranks": 17,
+              "Reign of Dragons": 0,
+              "Calling All Angels": 0
+            },
+            "hand": [
+              "Forest",
+              "Tranquil Thicket",
+              "Rishkar, Peema Renegade",
+              "Verdant Sun's Avatar",
+              "Loot, Exuberant Explorer",
+              "Tamiyo's Safekeeping",
+              "Forest",
+              "Ezuri's Predation",
+              "Elemental Bond",
+              "Rhonas's Monument",
+              "Surrak, the Hunt Caller",
+              "Beast Within",
+              "Hulking Raptor",
+              "Forest"
+            ],
+            "battlefield": {
+              "Tramplesaurus Rex": [
+                "Unnatural Growth",
+                "Swiftfoot Boots",
+                "Garruk's Uprising",
+                "Steel Leaf Champion 5/4",
+                "Colossal Majesty",
+                "Goreclaw, Terror of Qal Sisma 4/3",
+                "Regal Imperiosaur 5/4"
+              ],
+              "Wretched Ranks": [
+                "Zombie Token 2/2(t)",
+                "Zombie Token 2/2(t)",
+                "Zombie Token 2/2(t)",
+                "Zombie Token 2/2(t)",
+                "Zombie Token 2/2(t)",
+                "Zombie Token 2/2(t)",
+                "Zombie Token 2/2(t)",
+                "Zombie Token 2/2(t)",
+                "Zombie Token 2/2(t)",
+                "Zombie Token 2/2(t)",
+                "Zombie Token 2/2(t)",
+                "Zombie Token 2/2(t)",
+                "Zombie Token 2/2(t)",
+                "Zombie Token 2/2(t)",
+                "Zombie Token 2/2(t)",
+                "Zombie Token 2/2(t)",
+                "Zombie Token 2/2(t)",
+                "Zombie Token 2/2(t)",
+                "Endless Ranks of the Dead",
+                "Gravespawn Sovereign 3/3(t)",
+                "Ghoulcaller Gisa 3/4(t)"
+              ],
+              "Reign of Dragons": [],
+              "Calling All Angels": []
+            },
+            "openMana": 4,
+            "stack": []
+          },
+          "chosen": "cast Surrak, the Hunt Caller",
+          "alternatives": [
+            {
+              "label": "cast Surrak, the Hunt Caller",
+              "score": 5,
+              "vetoed": false
+            },
+            {
+              "label": "cast Rishkar, Peema Renegade",
+              "score": 3,
+              "vetoed": false
+            },
+            {
+              "label": "cast Loot, Exuberant Explorer",
+              "score": 3,
+              "vetoed": false
+            },
+            {
+              "label": "cast Elemental Bond",
+              "score": 3,
+              "vetoed": false
+            },
+            {
+              "label": "cast Rhonas's Monument",
+              "score": 3,
+              "vetoed": false
+            },
+            {
+              "label": "cast Beast Within",
+              "score": 3,
+              "vetoed": false
+            }
+          ]
+        }
+      ]
+    },
+    "self_inflicted_loss": {
+      "count": 5,
+      "games": 5,
+      "topCards": [
+        [
+          "Giada, Font of Hope",
+          1
+        ],
+        [
+          "Lord of the Undead",
+          1
+        ],
+        [
+          "Cryptbreaker",
+          1
+        ],
+        [
+          "Kalitas, Traitor of Ghet",
+          1
+        ],
+        [
+          "Angel of the Ruins",
+          1
+        ],
+        [
+          "Segovian Angel",
+          1
+        ],
+        [
+          "Thraben Watcher",
+          1
+        ],
+        [
+          "Youthful Valkyrie",
+          1
+        ]
+      ],
+      "examples": [
+        {
+          "category": "self_inflicted_loss",
+          "message": "casting cast Sunblast Angel cost the caster ~9 of permanents (Giada, Font of Hope) against ~4 for everyone else",
+          "cardNames": [
+            "Giada, Font of Hope"
+          ],
+          "game": 11,
+          "turn": 15,
+          "phase": "precombat main phase",
+          "seat": "Calling All Angels",
+          "purpose": "outcome",
+          "state": {
+            "life": {
+              "Calling All Angels": 42,
+              "Wretched Ranks": 33,
+              "Reign of Dragons": 37,
+              "Tramplesaurus Rex": 40
+            },
+            "hand": [
+              "Sunblast Angel",
+              "Destroy Evil",
+              "Archangel of Tithes",
+              "Seraph of the Sword",
+              "Plains"
+            ],
+            "battlefield": {
+              "Calling All Angels": [
+                "Giada, Font of Hope",
+                "Patchwork Banner"
+              ],
+              "Wretched Ranks": [
+                "Zombie Token"
+              ],
+              "Reign of Dragons": [],
+              "Tramplesaurus Rex": [
+                "Sol Ring",
+                "Thrashing Brontodon"
+              ]
+            },
+            "openMana": 0,
+            "stack": []
+          },
+          "chosen": "cast Sunblast Angel",
+          "alternatives": []
+        },
+        {
+          "category": "self_inflicted_loss",
+          "message": "casting cast Mutilate cost the caster ~7 of permanents (Lord of the Undead, Cryptbreaker) against ~5 for everyone else",
+          "cardNames": [
+            "Lord of the Undead",
+            "Cryptbreaker"
+          ],
+          "game": 35,
+          "turn": 26,
+          "phase": "precombat main phase",
+          "seat": "Wretched Ranks",
+          "purpose": "outcome",
+          "state": {
+            "life": {
+              "Calling All Angels": 41,
+              "Wretched Ranks": 33,
+              "Reign of Dragons": 45,
+              "Tramplesaurus Rex": 45
+            },
+            "hand": [
+              "Necrotic Hex",
+              "Mutilate",
+              "Phyrexian Arena"
+            ],
+            "battlefield": {
+              "Calling All Angels": [
+                "Arcane Signet",
+                "Angelic Sleuth"
+              ],
+              "Wretched Ranks": [
+                "Endless Ranks of the Dead",
+                "Lord of the Undead",
+                "Cryptbreaker"
+              ],
+              "Reign of Dragons": [
+                "Fire Diamond",
+                "Dragonstorm Globe",
+                "Outpost Siege"
+              ],
+              "Tramplesaurus Rex": []
+            },
+            "openMana": 0,
+            "stack": []
+          },
+          "chosen": "cast Mutilate",
+          "alternatives": []
+        },
+        {
+          "category": "self_inflicted_loss",
+          "message": "casting cast Headless Rider cost the caster ~6 of permanents (Kalitas, Traitor of Ghet) against ~5 for everyone else",
+          "cardNames": [
+            "Kalitas, Traitor of Ghet"
+          ],
+          "game": 38,
+          "turn": 26,
+          "phase": "precombat main phase",
+          "seat": "Wretched Ranks",
+          "purpose": "outcome",
+          "state": {
+            "life": {
+              "Tramplesaurus Rex": 24,
+              "Calling All Angels": 40,
+              "Wretched Ranks": 38,
+              "Reign of Dragons": 40
+            },
+            "hand": [
+              "Headless Rider",
+              "Crown of Gondor",
+              "Gravespawn Sovereign"
+            ],
+            "battlefield": {
+              "Tramplesaurus Rex": [
+                "Clue",
+                "Challenger Troll"
+              ],
+              "Calling All Angels": [
+                "Endless Atlas",
+                "Angel of Vitality"
+              ],
+              "Wretched Ranks": [
+                "Oversold Cemetery",
+                "Cemetery Tampering",
+                "Kalitas, Traitor of Ghet",
+                "Zombie Token",
+                "Noxious Ghoul",
+                "Zombie Token",
+                "Sol Ring",
+                "Vengeful Dead"
+              ],
+              "Reign of Dragons": [
+                "Nogi, Draco-Zealot",
+                "Dragonstorm Globe"
+              ]
+            },
+            "openMana": 0,
+            "stack": []
+          },
+          "chosen": "cast Headless Rider",
+          "alternatives": []
+        }
+      ]
+    },
+    "unused_mana_castable_left": {
+      "count": 3,
+      "games": 3,
+      "topCards": [
+        [
+          "The Elder Dragon War",
+          1
+        ],
+        [
+          "Fleshbag Marauder",
+          1
+        ],
+        [
+          "Whiptongue Hydra",
+          1
+        ]
+      ],
+      "examples": [
+        {
+          "category": "unused_mana_castable_left",
+          "message": "ended the turn with 6 mana open while The Elder Dragon War was castable (The Elder Dragon War: a wipe now costs me more (~23) than the table (~4) — I would be behind afterwards)",
+          "cardNames": [
+            "The Elder Dragon War"
+          ],
+          "game": 1,
+          "turn": 29,
+          "phase": "postcombat main phase",
+          "seat": "Reign of Dragons",
+          "purpose": "main_phase",
+          "state": {
+            "life": {
+              "Reign of Dragons": 40,
+              "Tramplesaurus Rex": 35,
+              "Calling All Angels": 35,
+              "Wretched Ranks": 15
+            },
+            "hand": [
+              "The Elder Dragon War"
+            ],
+            "battlefield": {
+              "Reign of Dragons": [
+                "Sol Ring",
+                "Arcane Signet",
+                "Hazoret's Monument",
+                "Orb of Dragonkind",
+                "Sarkhan the Masterless",
+                "Drakuseth, Maw of Flames 7/7(t)",
+                "Lathliss, Dragon Queen 6/6(t)"
+              ],
+              "Tramplesaurus Rex": [],
+              "Calling All Angels": [
+                "Patchwork Banner",
+                "Swiftfoot Boots",
+                "Tome of Legends",
+                "Commander's Sphere"
+              ],
+              "Wretched Ranks": [
+                "Arcane Signet(t)",
+                "Patchwork Banner(t)",
+                "Charcoal Diamond(t)",
+                "Phyrexian Arena",
+                "Disciple of Bolas 2/1"
+              ]
+            },
+            "openMana": 6,
+            "stack": []
+          },
+          "chosen": "pass this phase",
+          "alternatives": [
+            {
+              "label": "pass this phase",
+              "score": 0,
+              "vetoed": false
+            },
+            {
+              "label": "end turn and skip remaining phases",
+              "score": 0,
+              "vetoed": false
+            },
+            {
+              "label": "cast The Elder Dragon War",
+              "score": -1,
+              "vetoed": false
+            }
+          ]
+        },
+        {
+          "category": "unused_mana_castable_left",
+          "message": "ended the turn with 4 mana open while Fleshbag Marauder was castable (Fleshbag Marauder: a wipe now costs me more (~29) than the table (~22) — I would be behind afterwards)",
+          "cardNames": [
+            "Fleshbag Marauder"
+          ],
+          "game": 38,
+          "turn": 38,
+          "phase": "postcombat main phase",
+          "seat": "Wretched Ranks",
+          "purpose": "main_phase",
+          "state": {
+            "life": {
+              "Wretched Ranks": 36,
+              "Tramplesaurus Rex": 0,
+              "Calling All Angels": 12,
+              "Reign of Dragons": 21
+            },
+            "hand": [
+              "Fleshbag Marauder"
+            ],
+            "battlefield": {
+              "Wretched Ranks": [
+                "Oversold Cemetery",
+                "Cemetery Tampering",
+                "Zombie Token 2/2(t)",
+                "Sol Ring",
+                "Vengeful Dead 3/2(t)",
+                "Zombie Token 2/2(t)",
+                "Crown of Gondor",
+                "Zombie Token 2/2(t)",
+                "Gravespawn Sovereign 3/3(t)",
+                "Zul Ashur, Lich Lord 2/2(t)",
+                "Ghoulcaller Gisa 3/4(t)",
+                "Bontu's Monument"
+              ],
+              "Tramplesaurus Rex": [],
+              "Calling All Angels": [
+                "Endless Atlas",
+                "Marble Diamond",
+                "Thraben Watcher 2/2"
+              ],
+              "Reign of Dragons": [
+                "Dragonstorm Globe",
+                "Carnelian Orb of Dragonkind",
+                "Dragon Tempest",
+                "Lathliss, Dragon Queen 6/6(t)"
+              ]
+            },
+            "openMana": 4,
+            "stack": []
+          },
+          "chosen": "pass this phase",
+          "alternatives": [
+            {
+              "label": "pass this phase",
+              "score": 0,
+              "vetoed": false
+            },
+            {
+              "label": "end turn and skip remaining phases",
+              "score": 0,
+              "vetoed": false
+            },
+            {
+              "label": "cast Fleshbag Marauder",
+              "score": -1,
+              "vetoed": false
+            }
+          ]
+        },
+        {
+          "category": "unused_mana_castable_left",
+          "message": "ended the turn with 7 mana open while Whiptongue Hydra was castable (Whiptongue Hydra: a wipe now costs me more (~42) than the table (~27) — I would be behind afterwards)",
+          "cardNames": [
+            "Whiptongue Hydra"
+          ],
+          "game": 104,
+          "turn": 37,
+          "phase": "postcombat main phase",
+          "seat": "Tramplesaurus Rex",
+          "purpose": "main_phase",
+          "state": {
+            "life": {
+              "Tramplesaurus Rex": 22,
+              "Wretched Ranks": 0,
+              "Reign of Dragons": 0,
+              "Calling All Angels": 15
+            },
+            "hand": [
+              "Whiptongue Hydra"
+            ],
+            "battlefield": {
+              "Tramplesaurus Rex": [
+                "Surrak, the Hunt Caller 5/4(t)",
+                "Garruk's Uprising",
+                "Arasta of the Endless Web 3/5(t)",
+                "Beast Token 3/3(t)",
+                "Elvish Mystic 1/1(t)",
+                "Ghalta, Primal Hunger 12/12(t)",
+                "Fyndhorn Elves 1/1(t)",
+                "Birds of Paradise 0/1(t)"
+              ],
+              "Wretched Ranks": [],
+              "Reign of Dragons": [],
+              "Calling All Angels": [
+                "Angelic Field Marshal 3/3(t)",
+                "Swiftfoot Boots",
+                "Angel of Finality 3/4(t)",
+                "Herald of War 3/3(t)",
+                "Angelic Sleuth 2/3(t)",
+                "Marble Diamond"
+              ]
+            },
+            "openMana": 7,
+            "stack": []
+          },
+          "chosen": "pass this phase",
+          "alternatives": [
+            {
+              "label": "pass this phase",
+              "score": 0,
+              "vetoed": false
+            },
+            {
+              "label": "end turn and skip remaining phases",
+              "score": 0,
+              "vetoed": false
+            },
+            {
+              "label": "cast Whiptongue Hydra",
+              "score": -1,
+              "vetoed": false
+            }
+          ]
+        }
+      ]
+    },
+    "own_wipe_while_ahead": {
+      "count": 3,
+      "games": 3,
+      "topCards": [
+        [
+          "Mutilate",
+          1
+        ],
+        [
+          "Cleansing Nova",
+          1
+        ],
+        [
+          "Day of Judgment",
+          1
+        ]
+      ],
+      "examples": [
+        {
+          "category": "own_wipe_while_ahead",
+          "message": "board wipe cast with my creature value 7 against 5 for the whole rest of the table",
+          "cardNames": [
+            "Mutilate"
+          ],
+          "game": 35,
+          "turn": 26,
+          "phase": "precombat main phase",
+          "seat": "Wretched Ranks",
+          "purpose": "main_phase",
+          "state": {
+            "life": {
+              "Wretched Ranks": 33,
+              "Calling All Angels": 41,
+              "Reign of Dragons": 45,
+              "Tramplesaurus Rex": 45
+            },
+            "hand": [
+              "Necrotic Hex",
+              "Mutilate",
+              "Phyrexian Arena"
+            ],
+            "battlefield": {
+              "Wretched Ranks": [
+                "Endless Ranks of the Dead",
+                "Lord of the Undead 2/2",
+                "Cryptbreaker 1/1"
+              ],
+              "Calling All Angels": [
+                "Arcane Signet(t)",
+                "Angelic Sleuth 2/3"
+              ],
+              "Reign of Dragons": [
+                "Fire Diamond(t)",
+                "Dragonstorm Globe(t)",
+                "Outpost Siege"
+              ],
+              "Tramplesaurus Rex": []
+            },
+            "openMana": 6,
+            "stack": []
+          },
+          "chosen": "cast Mutilate",
+          "alternatives": [
+            {
+              "label": "cast Mutilate",
+              "score": 3,
+              "vetoed": false
+            },
+            {
+              "label": "cast Phyrexian Arena",
+              "score": 3,
+              "vetoed": false
+            },
+            {
+              "label": "cast commander Ghoulcaller Gisa",
+              "score": 3,
+              "vetoed": false
+            },
+            {
+              "label": "pass this phase",
+              "score": 0,
+              "vetoed": false
+            },
+            {
+              "label": "end turn and skip remaining phases",
+              "score": 0,
+              "vetoed": false
+            }
+          ]
+        },
+        {
+          "category": "own_wipe_while_ahead",
+          "message": "board wipe cast with my creature value 25 against 25 for the whole rest of the table",
+          "cardNames": [
+            "Cleansing Nova"
+          ],
+          "game": 54,
+          "turn": 17,
+          "phase": "precombat main phase",
+          "seat": "Calling All Angels",
+          "purpose": "main_phase",
+          "state": {
+            "life": {
+              "Calling All Angels": 43,
+              "Tramplesaurus Rex": 39,
+              "Wretched Ranks": 41,
+              "Reign of Dragons": 30
+            },
+            "hand": [
+              "Cleansing Nova",
+              "Plains",
+              "Plains",
+              "Sol Ring",
+              "Plains"
+            ],
+            "battlefield": {
+              "Calling All Angels": [
+                "Giada, Font of Hope 2/2",
+                "Wojek Investigator 2/4",
+                "Lyra Dawnbringer 5/5"
+              ],
+              "Tramplesaurus Rex": [
+                "Elvish Mystic 1/1(t)",
+                "Ripjaw Raptor 4/5(t)",
+                "Gigantosaurus 10/10"
+              ],
+              "Wretched Ranks": [
+                "Bad Moon",
+                "Ayara, First of Locthwain 2/3"
+              ],
+              "Reign of Dragons": [
+                "Arcane Signet"
+              ]
+            },
+            "openMana": 6,
+            "stack": []
+          },
+          "chosen": "cast Cleansing Nova",
+          "alternatives": [
+            {
+              "label": "cast Cleansing Nova",
+              "score": 3,
+              "vetoed": false
+            },
+            {
+              "label": "cast Sol Ring",
+              "score": 3,
+              "vetoed": false
+            },
+            {
+              "label": "pass this phase",
+              "score": 0,
+              "vetoed": false
+            },
+            {
+              "label": "end turn and skip remaining phases",
+              "score": 0,
+              "vetoed": false
+            }
+          ]
+        },
+        {
+          "category": "own_wipe_while_ahead",
+          "message": "board wipe cast with my creature value 22 against 22 for the whole rest of the table",
+          "cardNames": [
+            "Day of Judgment"
+          ],
+          "game": 72,
+          "turn": 34,
+          "phase": "precombat main phase",
+          "seat": "Calling All Angels",
+          "purpose": "main_phase",
+          "state": {
+            "life": {
+              "Calling All Angels": 26,
+              "Wretched Ranks": 0,
+              "Reign of Dragons": 0,
+              "Tramplesaurus Rex": 22
+            },
+            "hand": [
+              "Day of Judgment"
+            ],
+            "battlefield": {
+              "Calling All Angels": [
+                "Angel of Finality 3/4",
+                "Herald of Eternal Dawn 6/6",
+                "Firemane Commando 4/3",
+                "Patchwork Banner"
+              ],
+              "Wretched Ranks": [],
+              "Reign of Dragons": [],
+              "Tramplesaurus Rex": [
+                "Fyndhorn Elves 1/1(t)",
+                "Tangleweave Armor",
+                "Phyrexian Germ Token 0/0(t)",
+                "Whisperer of the Wilds 0/2(t)",
+                "Garruk's Packleader 4/4(t)",
+                "Carnage Tyrant 7/6"
+              ]
+            },
+            "openMana": 9,
+            "stack": []
+          },
+          "chosen": "cast Day of Judgment",
+          "alternatives": [
+            {
+              "label": "cast Day of Judgment",
+              "score": 3,
+              "vetoed": false
+            },
+            {
+              "label": "pass this phase",
+              "score": 0,
+              "vetoed": false
+            },
+            {
+              "label": "end turn and skip remaining phases",
+              "score": 0,
+              "vetoed": false
+            }
+          ]
+        }
+      ]
+    },
+    "pointless_block": {
+      "count": 3,
+      "games": 3,
+      "topCards": [
+        [
+          "Speaker of the Heavens",
+          3
+        ],
+        [
+          "Llanowar Tribe",
+          1
+        ],
+        [
+          "Ayara, First of Locthwain",
+          1
+        ],
+        [
+          "Beast Token",
+          1
+        ]
+      ],
+      "examples": [
+        {
+          "category": "pointless_block",
+          "message": "Speaker of the Heavens blocks Llanowar Tribe and dies without killing it, to save only 3 damage (life 48)",
+          "cardNames": [
+            "Speaker of the Heavens",
+            "Llanowar Tribe"
+          ],
+          "game": 64,
+          "turn": 47,
+          "phase": "declare blockers step",
+          "seat": "Calling All Angels",
+          "purpose": "declare_blockers",
+          "state": {
+            "life": {
+              "Calling All Angels": 48,
+              "Wretched Ranks": 0,
+              "Reign of Dragons": 0,
+              "Tramplesaurus Rex": 1
+            },
+            "hand": [],
+            "battlefield": {
+              "Calling All Angels": [
+                "Righteous Valkyrie 2/4(t)",
+                "Sol Ring",
+                "Archangel of Tithes 3/5(t)",
+                "Search the Premises",
+                "Mind Stone",
+                "Spirit Token 1/1(t)",
+                "Spirit Token 1/1(t)",
+                "Grasp of Fate",
+                "Speaker of the Heavens 1/1"
+              ],
+              "Wretched Ranks": [],
+              "Reign of Dragons": [],
+              "Tramplesaurus Rex": [
+                "Colossal Majesty",
+                "Llanowar Tribe 3/3(t)",
+                "Clue",
+                "Rhonas's Monument",
+                "Beast Whisperer 2/3(t)",
+                "Ghalta, Primal Hunger 12/12(t)"
+              ]
+            },
+            "openMana": 7,
+            "stack": []
+          },
+          "chosen": "block Llanowar Tribe with Speaker of the Heavens",
+          "alternatives": [
+            {
+              "label": "block Llanowar Tribe with Speaker of the Heavens",
+              "score": 0,
+              "vetoed": false
+            },
+            {
+              "label": "declare no blockers",
+              "score": 0,
+              "vetoed": false
+            }
+          ]
+        },
+        {
+          "category": "pointless_block",
+          "message": "Speaker of the Heavens blocks Ayara, First of Locthwain and dies without killing it, to save only 2 damage (life 43)",
+          "cardNames": [
+            "Speaker of the Heavens",
+            "Ayara, First of Locthwain"
+          ],
+          "game": 74,
+          "turn": 21,
+          "phase": "declare blockers step",
+          "seat": "Calling All Angels",
+          "purpose": "declare_blockers",
+          "state": {
+            "life": {
+              "Calling All Angels": 43,
+              "Tramplesaurus Rex": 32,
+              "Wretched Ranks": 42,
+              "Reign of Dragons": 16
+            },
+            "hand": [
+              "Angelic Destiny",
+              "Search the Premises",
+              "Herald of Eternal Dawn"
+            ],
+            "battlefield": {
+              "Calling All Angels": [
+                "Giada, Font of Hope 2/2",
+                "Tome of Legends",
+                "Speaker of the Heavens 1/1",
+                "Righteous Valkyrie 2/4(t)"
+              ],
+              "Tramplesaurus Rex": [
+                "Llanowar Elves 1/1(t)"
+              ],
+              "Wretched Ranks": [
+                "Gravecrawler 2/1(t)",
+                "Disciple of Griselbrand 1/1(t)",
+                "Undead Augur 2/2(t)",
+                "Ayara, First of Locthwain 2/3(t)",
+                "Oversold Cemetery",
+                "Ghoulcaller Gisa 3/4"
+              ],
+              "Reign of Dragons": [
+                "Goldlust Triad 4/3",
+                "Sol Ring"
+              ]
+            },
+            "openMana": 1,
+            "stack": []
+          },
+          "chosen": "block Ayara, First of Locthwain with Speaker of the Heavens",
+          "alternatives": [
+            {
+              "label": "block Ayara, First of Locthwain with Speaker of the Heavens",
+              "score": 0,
+              "vetoed": false
+            },
+            {
+              "label": "declare no blockers",
+              "score": 0,
+              "vetoed": false
+            },
+            {
+              "label": "block Ayara, First of Locthwain with Giada, Font of Hope",
+              "score": -1,
+              "vetoed": false
+            }
+          ]
+        },
+        {
+          "category": "pointless_block",
+          "message": "Speaker of the Heavens blocks Beast Token and dies without killing it, to save only 3 damage (life 50)",
+          "cardNames": [
+            "Speaker of the Heavens",
+            "Beast Token"
+          ],
+          "game": 106,
+          "turn": 27,
+          "phase": "declare blockers step",
+          "seat": "Calling All Angels",
+          "purpose": "declare_blockers",
+          "state": {
+            "life": {
+              "Calling All Angels": 50,
+              "Tramplesaurus Rex": 9,
+              "Wretched Ranks": 14,
+              "Reign of Dragons": 0
+            },
+            "hand": [
+              "Radiant Fountain",
+              "Angel of the Ruins",
+              "Plains"
+            ],
+            "battlefield": {
+              "Calling All Angels": [
+                "Inspiring Overseer 2/1(t)",
+                "Archangel of Tithes 3/5(t)",
+                "Linvala, the Preserver 5/5(t)",
+                "Speaker of the Heavens 1/1"
+              ],
+              "Tramplesaurus Rex": [
+                "Beast Token 3/3(t)",
+                "Hulking Raptor 5/3(t)",
+                "Challenger Troll 6/5(t)",
+                "Beast Whisperer 2/3",
+                "Yeva, Nature's Herald 4/4"
+              ],
+              "Wretched Ranks": [
+                "Lord of the Accursed 2/3(t)",
+                "Lord of the Undead 2/2(t)",
+                "Gravecrawler 2/1(t)",
+                "Bad Moon",
+                "Midnight Reaper 3/2"
+              ],
+              "Reign of Dragons": []
+            },
+            "openMana": 1,
+            "stack": []
+          },
+          "chosen": "block Beast Token with Speaker of the Heavens",
+          "alternatives": [
+            {
+              "label": "block Beast Token with Speaker of the Heavens",
+              "score": 0,
+              "vetoed": false
+            },
+            {
+              "label": "declare no blockers",
+              "score": 0,
+              "vetoed": false
+            }
+          ]
+        }
+      ]
+    },
+    "repeated_activation": {
+      "count": 2,
+      "games": 2,
+      "topCards": [
+        [
+          "Gravecrawler from the graveyard",
+          2
+        ]
+      ],
+      "examples": [
+        {
+          "category": "repeated_activation",
+          "message": "cast Gravecrawler from the graveyard chosen 3 times in the same phase",
+          "cardNames": [
+            "Gravecrawler from the graveyard"
+          ],
+          "game": 33,
+          "turn": 40,
+          "phase": "precombat main phase",
+          "seat": "Wretched Ranks",
+          "purpose": "main_phase",
+          "state": {
+            "life": {
+              "Wretched Ranks": 33,
+              "Reign of Dragons": 28,
+              "Tramplesaurus Rex": 0,
+              "Calling All Angels": 38
+            },
+            "hand": [],
+            "battlefield": {
+              "Wretched Ranks": [
+                "Cemetery Tampering",
+                "Grave Titan 6/6",
+                "Zombie Token 2/2",
+                "Zombie Token 2/2",
+                "Bonehoard",
+                "Undead Augur 2/2"
+              ],
+              "Reign of Dragons": [
+                "Sarkhan, Dragon Ascendant 2/2(t)",
+                "Basilisk Collar",
+                "Swiftfoot Boots"
+              ],
+              "Tramplesaurus Rex": [],
+              "Calling All Angels": [
+                "Always Watching",
+                "Clue",
+                "Court of Grace",
+                "Mind Stone",
+                "Dazzling Angel 2/3"
+              ]
+            },
+            "openMana": 3,
+            "stack": []
+          },
+          "chosen": "cast Gravecrawler from the graveyard",
+          "alternatives": [
+            {
+              "label": "cast Gravecrawler from the graveyard",
+              "score": 3,
+              "vetoed": false
+            },
+            {
+              "label": "pass this phase",
+              "score": 0,
+              "vetoed": false
+            },
+            {
+              "label": "end turn and skip remaining phases",
+              "score": 0,
+              "vetoed": false
+            }
+          ]
+        },
+        {
+          "category": "repeated_activation",
+          "message": "cast Gravecrawler from the graveyard chosen 3 times in the same phase",
+          "cardNames": [
+            "Gravecrawler from the graveyard"
+          ],
+          "game": 64,
+          "turn": 29,
+          "phase": "precombat main phase",
+          "seat": "Wretched Ranks",
+          "purpose": "main_phase",
+          "state": {
+            "life": {
+              "Wretched Ranks": 5,
+              "Reign of Dragons": 0,
+              "Tramplesaurus Rex": 32,
+              "Calling All Angels": 51
+            },
+            "hand": [
+              "Barren Moor"
+            ],
+            "battlefield": {
+              "Wretched Ranks": [
+                "Sol Ring(t)",
+                "Dissection Tools",
+                "Undead Butler 1/2",
+                "Liliana's Mastery",
+                "Zombie Token 2/2",
+                "Zombie Token 2/2"
+              ],
+              "Reign of Dragons": [],
+              "Tramplesaurus Rex": [
+                "Tangleweave Armor",
+                "Colossal Majesty",
+                "Llanowar Tribe 3/3",
+                "Clue"
+              ],
+              "Calling All Angels": [
+                "Righteous Valkyrie 2/4(t)",
+                "Sol Ring",
+                "Archangel of Tithes 3/5(t)",
+                "Metropolis Reformer 2/3",
+                "Search the Premises",
+                "Mind Stone",
+                "Spirit Token 1/1(t)",
+                "Spirit Token 1/1(t)"
+              ]
+            },
+            "openMana": 1,
+            "stack": []
+          },
+          "chosen": "cast Gravecrawler from the graveyard",
+          "alternatives": [
+            {
+              "label": "cast Gravecrawler from the graveyard",
+              "score": 3,
+              "vetoed": false
+            },
+            {
+              "label": "pass this phase",
+              "score": 0,
+              "vetoed": false
+            },
+            {
+              "label": "end turn and skip remaining phases",
+              "score": 0,
+              "vetoed": false
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "flagCounts": {
+    "pointless_sacrifice": 0,
+    "removal_on_low_threat": 0,
+    "idle_protection_spell": 0,
+    "combat_spell_outside_combat": 0,
+    "declined_free_attack": 0,
+    "unused_mana_castable_left": 3,
+    "missed_land_drop": 0,
+    "spell_no_target_or_effect": 0,
+    "own_wipe_while_ahead": 3,
+    "self_inflicted_loss": 5,
+    "tapped_out_into_lethal": 20,
+    "repeated_activation": 2,
+    "suicide_attack": 50,
+    "pointless_block": 3,
+    "self_lethal_life_cost": 0
+  },
+  "engineGaps_unmodeledSpellsCastWithNoEffect": [
+    [
+      "Mana Geyser",
+      22
+    ]
+  ],
+  "games": [
+    {
+      "game": 0,
+      "seed": 1000,
+      "decks": [
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels"
+      ],
+      "terminationReason": "win",
+      "turns": 48,
+      "winner": "Wretched Ranks",
+      "wallClockMs": 3478,
+      "violations": 0,
+      "flags": 5
+    },
+    {
+      "game": 1,
+      "seed": 1001,
+      "decks": [
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks"
+      ],
+      "terminationReason": "win",
+      "turns": 46,
+      "winner": "Calling All Angels",
+      "wallClockMs": 773,
+      "violations": 0,
+      "flags": 1
+    },
+    {
+      "game": 2,
+      "seed": 1002,
+      "decks": [
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons"
+      ],
+      "terminationReason": "win",
+      "turns": 38,
+      "winner": "Wretched Ranks",
+      "wallClockMs": 465,
+      "violations": 0,
+      "flags": 2
+    },
+    {
+      "game": 3,
+      "seed": 1003,
+      "decks": [
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex"
+      ],
+      "terminationReason": "win",
+      "turns": 48,
+      "winner": "Calling All Angels",
+      "wallClockMs": 899,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 4,
+      "seed": 1004,
+      "decks": [
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels"
+      ],
+      "terminationReason": "win",
+      "turns": 33,
+      "winner": "Tramplesaurus Rex",
+      "wallClockMs": 795,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 5,
+      "seed": 1005,
+      "decks": [
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks"
+      ],
+      "terminationReason": "win",
+      "turns": 52,
+      "winner": "Tramplesaurus Rex",
+      "wallClockMs": 620,
+      "violations": 0,
+      "flags": 1
+    },
+    {
+      "game": 6,
+      "seed": 1006,
+      "decks": [
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons"
+      ],
+      "terminationReason": "win",
+      "turns": 33,
+      "winner": "Wretched Ranks",
+      "wallClockMs": 669,
+      "violations": 0,
+      "flags": 1
+    },
+    {
+      "game": 7,
+      "seed": 1007,
+      "decks": [
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex"
+      ],
+      "terminationReason": "win",
+      "turns": 37,
+      "winner": "Reign of Dragons",
+      "wallClockMs": 667,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 8,
+      "seed": 1008,
+      "decks": [
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels"
+      ],
+      "terminationReason": "win",
+      "turns": 45,
+      "winner": "Calling All Angels",
+      "wallClockMs": 590,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 9,
+      "seed": 1009,
+      "decks": [
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks"
+      ],
+      "terminationReason": "win",
+      "turns": 43,
+      "winner": "Tramplesaurus Rex",
+      "wallClockMs": 685,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 10,
+      "seed": 1010,
+      "decks": [
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons"
+      ],
+      "terminationReason": "win",
+      "turns": 51,
+      "winner": "Calling All Angels",
+      "wallClockMs": 905,
+      "violations": 0,
+      "flags": 1
+    },
+    {
+      "game": 11,
+      "seed": 1011,
+      "decks": [
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex"
+      ],
+      "terminationReason": "win",
+      "turns": 81,
+      "winner": "Tramplesaurus Rex",
+      "wallClockMs": 757,
+      "violations": 0,
+      "flags": 3
+    },
+    {
+      "game": 12,
+      "seed": 1012,
+      "decks": [
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels"
+      ],
+      "terminationReason": "win",
+      "turns": 44,
+      "winner": "Calling All Angels",
+      "wallClockMs": 1116,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 13,
+      "seed": 1013,
+      "decks": [
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks"
+      ],
+      "terminationReason": "win",
+      "turns": 31,
+      "winner": "Calling All Angels",
+      "wallClockMs": 863,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 14,
+      "seed": 1014,
+      "decks": [
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons"
+      ],
+      "terminationReason": "win",
+      "turns": 37,
+      "winner": "Tramplesaurus Rex",
+      "wallClockMs": 1002,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 15,
+      "seed": 1015,
+      "decks": [
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex"
+      ],
+      "terminationReason": "win",
+      "turns": 44,
+      "winner": "Tramplesaurus Rex",
+      "wallClockMs": 709,
+      "violations": 0,
+      "flags": 1
+    },
+    {
+      "game": 16,
+      "seed": 1016,
+      "decks": [
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels"
+      ],
+      "terminationReason": "win",
+      "turns": 71,
+      "winner": "Calling All Angels",
+      "wallClockMs": 719,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 17,
+      "seed": 1017,
+      "decks": [
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks"
+      ],
+      "terminationReason": "win",
+      "turns": 41,
+      "winner": "Tramplesaurus Rex",
+      "wallClockMs": 867,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 18,
+      "seed": 1018,
+      "decks": [
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons"
+      ],
+      "terminationReason": "win",
+      "turns": 44,
+      "winner": "Tramplesaurus Rex",
+      "wallClockMs": 590,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 19,
+      "seed": 1019,
+      "decks": [
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex"
+      ],
+      "terminationReason": "win",
+      "turns": 52,
+      "winner": "Calling All Angels",
+      "wallClockMs": 949,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 20,
+      "seed": 1020,
+      "decks": [
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels"
+      ],
+      "terminationReason": "win",
+      "turns": 37,
+      "winner": "Tramplesaurus Rex",
+      "wallClockMs": 382,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 21,
+      "seed": 1021,
+      "decks": [
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks"
+      ],
+      "terminationReason": "win",
+      "turns": 45,
+      "winner": "Calling All Angels",
+      "wallClockMs": 983,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 22,
+      "seed": 1022,
+      "decks": [
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons"
+      ],
+      "terminationReason": "win",
+      "turns": 37,
+      "winner": "Wretched Ranks",
+      "wallClockMs": 993,
+      "violations": 0,
+      "flags": 1
+    },
+    {
+      "game": 23,
+      "seed": 1023,
+      "decks": [
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex"
+      ],
+      "terminationReason": "win",
+      "turns": 46,
+      "winner": "Tramplesaurus Rex",
+      "wallClockMs": 551,
+      "violations": 0,
+      "flags": 1
+    },
+    {
+      "game": 24,
+      "seed": 1024,
+      "decks": [
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels"
+      ],
+      "terminationReason": "win",
+      "turns": 45,
+      "winner": "Calling All Angels",
+      "wallClockMs": 631,
+      "violations": 0,
+      "flags": 1
+    },
+    {
+      "game": 25,
+      "seed": 1025,
+      "decks": [
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks"
+      ],
+      "terminationReason": "win",
+      "turns": 39,
+      "winner": "Tramplesaurus Rex",
+      "wallClockMs": 423,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 26,
+      "seed": 1026,
+      "decks": [
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons"
+      ],
+      "terminationReason": "win",
+      "turns": 31,
+      "winner": "Calling All Angels",
+      "wallClockMs": 1406,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 27,
+      "seed": 1027,
+      "decks": [
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex"
+      ],
+      "terminationReason": "win",
+      "turns": 49,
+      "winner": "Tramplesaurus Rex",
+      "wallClockMs": 605,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 28,
+      "seed": 1028,
+      "decks": [
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels"
+      ],
+      "terminationReason": "win",
+      "turns": 37,
+      "winner": "Wretched Ranks",
+      "wallClockMs": 436,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 29,
+      "seed": 1029,
+      "decks": [
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks"
+      ],
+      "terminationReason": "win",
+      "turns": 38,
+      "winner": "Tramplesaurus Rex",
+      "wallClockMs": 625,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 30,
+      "seed": 1030,
+      "decks": [
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons"
+      ],
+      "terminationReason": "win",
+      "turns": 50,
+      "winner": "Calling All Angels",
+      "wallClockMs": 574,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 31,
+      "seed": 1031,
+      "decks": [
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex"
+      ],
+      "terminationReason": "win",
+      "turns": 58,
+      "winner": "Wretched Ranks",
+      "wallClockMs": 677,
+      "violations": 0,
+      "flags": 1
+    },
+    {
+      "game": 32,
+      "seed": 1032,
+      "decks": [
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels"
+      ],
+      "terminationReason": "win",
+      "turns": 31,
+      "winner": "Calling All Angels",
+      "wallClockMs": 499,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 33,
+      "seed": 1033,
+      "decks": [
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks"
+      ],
+      "terminationReason": "win",
+      "turns": 50,
+      "winner": "Calling All Angels",
+      "wallClockMs": 598,
+      "violations": 0,
+      "flags": 2
+    },
+    {
+      "game": 34,
+      "seed": 1034,
+      "decks": [
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons"
+      ],
+      "terminationReason": "win",
+      "turns": 34,
+      "winner": "Wretched Ranks",
+      "wallClockMs": 747,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 35,
+      "seed": 1035,
+      "decks": [
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex"
+      ],
+      "terminationReason": "win",
+      "turns": 48,
+      "winner": "Calling All Angels",
+      "wallClockMs": 402,
+      "violations": 0,
+      "flags": 3
+    },
+    {
+      "game": 36,
+      "seed": 1036,
+      "decks": [
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels"
+      ],
+      "terminationReason": "win",
+      "turns": 71,
+      "winner": "Wretched Ranks",
+      "wallClockMs": 1284,
+      "violations": 0,
+      "flags": 1
+    },
+    {
+      "game": 37,
+      "seed": 1037,
+      "decks": [
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks"
+      ],
+      "terminationReason": "win",
+      "turns": 43,
+      "winner": "Reign of Dragons",
+      "wallClockMs": 519,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 38,
+      "seed": 1038,
+      "decks": [
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons"
+      ],
+      "terminationReason": "win",
+      "turns": 49,
+      "winner": "Wretched Ranks",
+      "wallClockMs": 685,
+      "violations": 0,
+      "flags": 2
+    },
+    {
+      "game": 39,
+      "seed": 1039,
+      "decks": [
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex"
+      ],
+      "terminationReason": "win",
+      "turns": 48,
+      "winner": "Wretched Ranks",
+      "wallClockMs": 1765,
+      "violations": 0,
+      "flags": 3
+    },
+    {
+      "game": 40,
+      "seed": 1040,
+      "decks": [
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels"
+      ],
+      "terminationReason": "win",
+      "turns": 53,
+      "winner": "Calling All Angels",
+      "wallClockMs": 634,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 41,
+      "seed": 1041,
+      "decks": [
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks"
+      ],
+      "terminationReason": "win",
+      "turns": 40,
+      "winner": "Calling All Angels",
+      "wallClockMs": 829,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 42,
+      "seed": 1042,
+      "decks": [
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons"
+      ],
+      "terminationReason": "win",
+      "turns": 38,
+      "winner": "Tramplesaurus Rex",
+      "wallClockMs": 559,
+      "violations": 0,
+      "flags": 2
+    },
+    {
+      "game": 43,
+      "seed": 1043,
+      "decks": [
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex"
+      ],
+      "terminationReason": "win",
+      "turns": 48,
+      "winner": "Reign of Dragons",
+      "wallClockMs": 646,
+      "violations": 0,
+      "flags": 1
+    },
+    {
+      "game": 44,
+      "seed": 1044,
+      "decks": [
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels"
+      ],
+      "terminationReason": "win",
+      "turns": 53,
+      "winner": "Wretched Ranks",
+      "wallClockMs": 1115,
+      "violations": 0,
+      "flags": 2
+    },
+    {
+      "game": 45,
+      "seed": 1045,
+      "decks": [
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks"
+      ],
+      "terminationReason": "win",
+      "turns": 46,
+      "winner": "Tramplesaurus Rex",
+      "wallClockMs": 654,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 46,
+      "seed": 1046,
+      "decks": [
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons"
+      ],
+      "terminationReason": "win",
+      "turns": 60,
+      "winner": "Reign of Dragons",
+      "wallClockMs": 694,
+      "violations": 0,
+      "flags": 1
+    },
+    {
+      "game": 47,
+      "seed": 1047,
+      "decks": [
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex"
+      ],
+      "terminationReason": "win",
+      "turns": 48,
+      "winner": "Tramplesaurus Rex",
+      "wallClockMs": 707,
+      "violations": 0,
+      "flags": 1
+    },
+    {
+      "game": 48,
+      "seed": 1048,
+      "decks": [
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels"
+      ],
+      "terminationReason": "win",
+      "turns": 43,
+      "winner": "Calling All Angels",
+      "wallClockMs": 701,
+      "violations": 0,
+      "flags": 2
+    },
+    {
+      "game": 49,
+      "seed": 1049,
+      "decks": [
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks"
+      ],
+      "terminationReason": "win",
+      "turns": 54,
+      "winner": "Calling All Angels",
+      "wallClockMs": 776,
+      "violations": 0,
+      "flags": 2
+    },
+    {
+      "game": 50,
+      "seed": 1050,
+      "decks": [
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons"
+      ],
+      "terminationReason": "win",
+      "turns": 49,
+      "winner": "Calling All Angels",
+      "wallClockMs": 766,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 51,
+      "seed": 1051,
+      "decks": [
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex"
+      ],
+      "terminationReason": "win",
+      "turns": 48,
+      "winner": "Calling All Angels",
+      "wallClockMs": 413,
+      "violations": 0,
+      "flags": 1
+    },
+    {
+      "game": 52,
+      "seed": 1052,
+      "decks": [
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels"
+      ],
+      "terminationReason": "win",
+      "turns": 45,
+      "winner": "Tramplesaurus Rex",
+      "wallClockMs": 354,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 53,
+      "seed": 1053,
+      "decks": [
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks"
+      ],
+      "terminationReason": "win",
+      "turns": 89,
+      "winner": "Calling All Angels",
+      "wallClockMs": 844,
+      "violations": 0,
+      "flags": 1
+    },
+    {
+      "game": 54,
+      "seed": 1054,
+      "decks": [
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons"
+      ],
+      "terminationReason": "win",
+      "turns": 37,
+      "winner": "Wretched Ranks",
+      "wallClockMs": 653,
+      "violations": 0,
+      "flags": 1
+    },
+    {
+      "game": 55,
+      "seed": 1055,
+      "decks": [
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex"
+      ],
+      "terminationReason": "win",
+      "turns": 50,
+      "winner": "Tramplesaurus Rex",
+      "wallClockMs": 1339,
+      "violations": 0,
+      "flags": 2
+    },
+    {
+      "game": 56,
+      "seed": 1056,
+      "decks": [
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels"
+      ],
+      "terminationReason": "win",
+      "turns": 33,
+      "winner": "Calling All Angels",
+      "wallClockMs": 729,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 57,
+      "seed": 1057,
+      "decks": [
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks"
+      ],
+      "terminationReason": "win",
+      "turns": 47,
+      "winner": "Tramplesaurus Rex",
+      "wallClockMs": 1200,
+      "violations": 0,
+      "flags": 1
+    },
+    {
+      "game": 58,
+      "seed": 1058,
+      "decks": [
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons"
+      ],
+      "terminationReason": "win",
+      "turns": 39,
+      "winner": "Calling All Angels",
+      "wallClockMs": 1082,
+      "violations": 0,
+      "flags": 1
+    },
+    {
+      "game": 59,
+      "seed": 1059,
+      "decks": [
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex"
+      ],
+      "terminationReason": "win",
+      "turns": 38,
+      "winner": "Calling All Angels",
+      "wallClockMs": 442,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 60,
+      "seed": 1060,
+      "decks": [
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels"
+      ],
+      "terminationReason": "win",
+      "turns": 32,
+      "winner": "Calling All Angels",
+      "wallClockMs": 914,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 61,
+      "seed": 1061,
+      "decks": [
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks"
+      ],
+      "terminationReason": "win",
+      "turns": 47,
+      "winner": "Calling All Angels",
+      "wallClockMs": 932,
+      "violations": 0,
+      "flags": 1
+    },
+    {
+      "game": 62,
+      "seed": 1062,
+      "decks": [
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons"
+      ],
+      "terminationReason": "win",
+      "turns": 34,
+      "winner": "Calling All Angels",
+      "wallClockMs": 545,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 63,
+      "seed": 1063,
+      "decks": [
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex"
+      ],
+      "terminationReason": "win",
+      "turns": 33,
+      "winner": "Calling All Angels",
+      "wallClockMs": 930,
+      "violations": 0,
+      "flags": 3
+    },
+    {
+      "game": 64,
+      "seed": 1064,
+      "decks": [
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels"
+      ],
+      "terminationReason": "win",
+      "turns": 47,
+      "winner": "Calling All Angels",
+      "wallClockMs": 862,
+      "violations": 0,
+      "flags": 2
+    },
+    {
+      "game": 65,
+      "seed": 1065,
+      "decks": [
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks"
+      ],
+      "terminationReason": "win",
+      "turns": 55,
+      "winner": "Wretched Ranks",
+      "wallClockMs": 928,
+      "violations": 0,
+      "flags": 3
+    },
+    {
+      "game": 66,
+      "seed": 1066,
+      "decks": [
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons"
+      ],
+      "terminationReason": "win",
+      "turns": 54,
+      "winner": "Wretched Ranks",
+      "wallClockMs": 956,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 67,
+      "seed": 1067,
+      "decks": [
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex"
+      ],
+      "terminationReason": "win",
+      "turns": 48,
+      "winner": "Calling All Angels",
+      "wallClockMs": 549,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 68,
+      "seed": 1068,
+      "decks": [
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels"
+      ],
+      "terminationReason": "win",
+      "turns": 50,
+      "winner": "Calling All Angels",
+      "wallClockMs": 607,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 69,
+      "seed": 1069,
+      "decks": [
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks"
+      ],
+      "terminationReason": "win",
+      "turns": 55,
+      "winner": "Reign of Dragons",
+      "wallClockMs": 798,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 70,
+      "seed": 1070,
+      "decks": [
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons"
+      ],
+      "terminationReason": "win",
+      "turns": 64,
+      "winner": "Calling All Angels",
+      "wallClockMs": 817,
+      "violations": 0,
+      "flags": 4
+    },
+    {
+      "game": 71,
+      "seed": 1071,
+      "decks": [
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex"
+      ],
+      "terminationReason": "win",
+      "turns": 50,
+      "winner": "Tramplesaurus Rex",
+      "wallClockMs": 596,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 72,
+      "seed": 1072,
+      "decks": [
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels"
+      ],
+      "terminationReason": "win",
+      "turns": 52,
+      "winner": "Tramplesaurus Rex",
+      "wallClockMs": 424,
+      "violations": 0,
+      "flags": 1
+    },
+    {
+      "game": 73,
+      "seed": 1073,
+      "decks": [
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks"
+      ],
+      "terminationReason": "win",
+      "turns": 39,
+      "winner": "Tramplesaurus Rex",
+      "wallClockMs": 769,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 74,
+      "seed": 1074,
+      "decks": [
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons"
+      ],
+      "terminationReason": "win",
+      "turns": 52,
+      "winner": "Wretched Ranks",
+      "wallClockMs": 855,
+      "violations": 0,
+      "flags": 1
+    },
+    {
+      "game": 75,
+      "seed": 1075,
+      "decks": [
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex"
+      ],
+      "terminationReason": "win",
+      "turns": 33,
+      "winner": "Tramplesaurus Rex",
+      "wallClockMs": 316,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 76,
+      "seed": 1076,
+      "decks": [
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels"
+      ],
+      "terminationReason": "win",
+      "turns": 35,
+      "winner": "Tramplesaurus Rex",
+      "wallClockMs": 446,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 77,
+      "seed": 1077,
+      "decks": [
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks"
+      ],
+      "terminationReason": "win",
+      "turns": 46,
+      "winner": "Tramplesaurus Rex",
+      "wallClockMs": 610,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 78,
+      "seed": 1078,
+      "decks": [
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons"
+      ],
+      "terminationReason": "win",
+      "turns": 37,
+      "winner": "Tramplesaurus Rex",
+      "wallClockMs": 570,
+      "violations": 0,
+      "flags": 2
+    },
+    {
+      "game": 79,
+      "seed": 1079,
+      "decks": [
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex"
+      ],
+      "terminationReason": "win",
+      "turns": 53,
+      "winner": "Calling All Angels",
+      "wallClockMs": 859,
+      "violations": 0,
+      "flags": 2
+    },
+    {
+      "game": 80,
+      "seed": 1080,
+      "decks": [
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels"
+      ],
+      "terminationReason": "win",
+      "turns": 37,
+      "winner": "Reign of Dragons",
+      "wallClockMs": 614,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 81,
+      "seed": 1081,
+      "decks": [
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks"
+      ],
+      "terminationReason": "win",
+      "turns": 39,
+      "winner": "Wretched Ranks",
+      "wallClockMs": 407,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 82,
+      "seed": 1082,
+      "decks": [
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons"
+      ],
+      "terminationReason": "win",
+      "turns": 40,
+      "winner": "Tramplesaurus Rex",
+      "wallClockMs": 428,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 83,
+      "seed": 1083,
+      "decks": [
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex"
+      ],
+      "terminationReason": "win",
+      "turns": 51,
+      "winner": "Tramplesaurus Rex",
+      "wallClockMs": 586,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 84,
+      "seed": 1084,
+      "decks": [
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels"
+      ],
+      "terminationReason": "win",
+      "turns": 54,
+      "winner": "Calling All Angels",
+      "wallClockMs": 809,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 85,
+      "seed": 1085,
+      "decks": [
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks"
+      ],
+      "terminationReason": "win",
+      "turns": 44,
+      "winner": "Tramplesaurus Rex",
+      "wallClockMs": 382,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 86,
+      "seed": 1086,
+      "decks": [
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons"
+      ],
+      "terminationReason": "win",
+      "turns": 41,
+      "winner": "Wretched Ranks",
+      "wallClockMs": 1229,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 87,
+      "seed": 1087,
+      "decks": [
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex"
+      ],
+      "terminationReason": "win",
+      "turns": 50,
+      "winner": "Tramplesaurus Rex",
+      "wallClockMs": 457,
+      "violations": 0,
+      "flags": 1
+    },
+    {
+      "game": 88,
+      "seed": 1088,
+      "decks": [
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels"
+      ],
+      "terminationReason": "win",
+      "turns": 51,
+      "winner": "Reign of Dragons",
+      "wallClockMs": 522,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 89,
+      "seed": 1089,
+      "decks": [
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks"
+      ],
+      "terminationReason": "win",
+      "turns": 44,
+      "winner": "Calling All Angels",
+      "wallClockMs": 675,
+      "violations": 0,
+      "flags": 2
+    },
+    {
+      "game": 90,
+      "seed": 1090,
+      "decks": [
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons"
+      ],
+      "terminationReason": "win",
+      "turns": 27,
+      "winner": "Calling All Angels",
+      "wallClockMs": 825,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 91,
+      "seed": 1091,
+      "decks": [
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex"
+      ],
+      "terminationReason": "win",
+      "turns": 30,
+      "winner": "Calling All Angels",
+      "wallClockMs": 391,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 92,
+      "seed": 1092,
+      "decks": [
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels"
+      ],
+      "terminationReason": "win",
+      "turns": 36,
+      "winner": "Calling All Angels",
+      "wallClockMs": 341,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 93,
+      "seed": 1093,
+      "decks": [
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks"
+      ],
+      "terminationReason": "win",
+      "turns": 37,
+      "winner": "Reign of Dragons",
+      "wallClockMs": 428,
+      "violations": 0,
+      "flags": 1
+    },
+    {
+      "game": 94,
+      "seed": 1094,
+      "decks": [
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons"
+      ],
+      "terminationReason": "win",
+      "turns": 49,
+      "winner": "Tramplesaurus Rex",
+      "wallClockMs": 577,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 95,
+      "seed": 1095,
+      "decks": [
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex"
+      ],
+      "terminationReason": "win",
+      "turns": 33,
+      "winner": "Calling All Angels",
+      "wallClockMs": 565,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 96,
+      "seed": 1096,
+      "decks": [
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels"
+      ],
+      "terminationReason": "win",
+      "turns": 51,
+      "winner": "Calling All Angels",
+      "wallClockMs": 827,
+      "violations": 0,
+      "flags": 1
+    },
+    {
+      "game": 97,
+      "seed": 1097,
+      "decks": [
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks"
+      ],
+      "terminationReason": "win",
+      "turns": 58,
+      "winner": "Calling All Angels",
+      "wallClockMs": 766,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 98,
+      "seed": 1098,
+      "decks": [
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons"
+      ],
+      "terminationReason": "win",
+      "turns": 37,
+      "winner": "Calling All Angels",
+      "wallClockMs": 554,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 99,
+      "seed": 1099,
+      "decks": [
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex"
+      ],
+      "terminationReason": "win",
+      "turns": 53,
+      "winner": "Wretched Ranks",
+      "wallClockMs": 856,
+      "violations": 0,
+      "flags": 1
+    },
+    {
+      "game": 100,
+      "seed": 1100,
+      "decks": [
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels"
+      ],
+      "terminationReason": "win",
+      "turns": 38,
+      "winner": "Calling All Angels",
+      "wallClockMs": 636,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 101,
+      "seed": 1101,
+      "decks": [
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks"
+      ],
+      "terminationReason": "win",
+      "turns": 36,
+      "winner": "Tramplesaurus Rex",
+      "wallClockMs": 565,
+      "violations": 0,
+      "flags": 2
+    },
+    {
+      "game": 102,
+      "seed": 1102,
+      "decks": [
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons"
+      ],
+      "terminationReason": "win",
+      "turns": 32,
+      "winner": "Calling All Angels",
+      "wallClockMs": 673,
+      "violations": 0,
+      "flags": 1
+    },
+    {
+      "game": 103,
+      "seed": 1103,
+      "decks": [
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex"
+      ],
+      "terminationReason": "win",
+      "turns": 50,
+      "winner": "Tramplesaurus Rex",
+      "wallClockMs": 470,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 104,
+      "seed": 1104,
+      "decks": [
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels"
+      ],
+      "terminationReason": "win",
+      "turns": 40,
+      "winner": "Tramplesaurus Rex",
+      "wallClockMs": 811,
+      "violations": 0,
+      "flags": 1
+    },
+    {
+      "game": 105,
+      "seed": 1105,
+      "decks": [
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks"
+      ],
+      "terminationReason": "win",
+      "turns": 42,
+      "winner": "Reign of Dragons",
+      "wallClockMs": 468,
+      "violations": 0,
+      "flags": 1
+    },
+    {
+      "game": 106,
+      "seed": 1106,
+      "decks": [
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons"
+      ],
+      "terminationReason": "win",
+      "turns": 31,
+      "winner": "Calling All Angels",
+      "wallClockMs": 734,
+      "violations": 0,
+      "flags": 1
+    },
+    {
+      "game": 107,
+      "seed": 1107,
+      "decks": [
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex"
+      ],
+      "terminationReason": "win",
+      "turns": 72,
+      "winner": "Reign of Dragons",
+      "wallClockMs": 690,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 108,
+      "seed": 1108,
+      "decks": [
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels"
+      ],
+      "terminationReason": "win",
+      "turns": 46,
+      "winner": "Reign of Dragons",
+      "wallClockMs": 485,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 109,
+      "seed": 1109,
+      "decks": [
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks"
+      ],
+      "terminationReason": "win",
+      "turns": 33,
+      "winner": "Reign of Dragons",
+      "wallClockMs": 515,
+      "violations": 0,
+      "flags": 1
+    },
+    {
+      "game": 110,
+      "seed": 1110,
+      "decks": [
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons"
+      ],
+      "terminationReason": "win",
+      "turns": 34,
+      "winner": "Calling All Angels",
+      "wallClockMs": 610,
+      "violations": 0,
+      "flags": 1
+    },
+    {
+      "game": 111,
+      "seed": 1111,
+      "decks": [
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex"
+      ],
+      "terminationReason": "win",
+      "turns": 37,
+      "winner": "Calling All Angels",
+      "wallClockMs": 490,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 112,
+      "seed": 1112,
+      "decks": [
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels"
+      ],
+      "terminationReason": "win",
+      "turns": 31,
+      "winner": "Calling All Angels",
+      "wallClockMs": 665,
+      "violations": 0,
+      "flags": 1
+    },
+    {
+      "game": 113,
+      "seed": 1113,
+      "decks": [
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks"
+      ],
+      "terminationReason": "win",
+      "turns": 58,
+      "winner": "Calling All Angels",
+      "wallClockMs": 562,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 114,
+      "seed": 1114,
+      "decks": [
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons"
+      ],
+      "terminationReason": "win",
+      "turns": 34,
+      "winner": "Wretched Ranks",
+      "wallClockMs": 892,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 115,
+      "seed": 1115,
+      "decks": [
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex"
+      ],
+      "terminationReason": "win",
+      "turns": 40,
+      "winner": "Calling All Angels",
+      "wallClockMs": 811,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 116,
+      "seed": 1116,
+      "decks": [
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels"
+      ],
+      "terminationReason": "win",
+      "turns": 45,
+      "winner": "Tramplesaurus Rex",
+      "wallClockMs": 1329,
+      "violations": 0,
+      "flags": 3
+    },
+    {
+      "game": 117,
+      "seed": 1117,
+      "decks": [
+        "ReignOfDragons",
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks"
+      ],
+      "terminationReason": "win",
+      "turns": 37,
+      "winner": "Calling All Angels",
+      "wallClockMs": 923,
+      "violations": 0,
+      "flags": 0
+    },
+    {
+      "game": 118,
+      "seed": 1118,
+      "decks": [
+        "TramplesaurusRex",
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons"
+      ],
+      "terminationReason": "win",
+      "turns": 72,
+      "winner": "Calling All Angels",
+      "wallClockMs": 760,
+      "violations": 0,
+      "flags": 1
+    },
+    {
+      "game": 119,
+      "seed": 1119,
+      "decks": [
+        "CallingAllAngels",
+        "WretchedRanks",
+        "ReignOfDragons",
+        "TramplesaurusRex"
+      ],
+      "terminationReason": "win",
+      "turns": 46,
+      "winner": "Tramplesaurus Rex",
+      "wallClockMs": 499,
+      "violations": 0,
+      "flags": 0
+    }
+  ]
+}
