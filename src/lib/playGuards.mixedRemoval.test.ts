@@ -36,7 +36,35 @@ describe("artifact / enchantment / mixed removal (real Oracle text)", () => {
     expect(removalGuard(castAction("Exorcise"), ctx([], [perm("Sol Ring", "ring")])).allowed).toBe(true);
   });
 
-  it("Putrefy: allowed against an opposing creature, still judged by the threat bar for creature-only removal", () => {
-    expect(removalGuard(castAction("Putrefy"), ctx([], [perm("Grizzly Bears", "bear", { power: "2", toughness: "2", typeLine: "Creature — Bear" })])).allowed).toBe(true);
+  it("Putrefy: an opposing creature is judged by the creature threat bar (a vanilla bear is held, a big threat is allowed)", () => {
+    expect(removalGuard(castAction("Putrefy"), ctx([], [perm("Grizzly Bears", "bear", { power: "2", toughness: "2", typeLine: "Creature — Bear" })])).allowed).toBe(false);
+    expect(removalGuard(castAction("Putrefy"), ctx([], [perm("Grave Titan", "titan", { power: "6", toughness: "6", typeLine: "Creature — Giant" })])).allowed).toBe(true);
+  });
+});
+
+describe("modal and damage removal on tokens (Abrade on a Servo, Bugs2 follow-up)", () => {
+  const servo = (): CardLike => ({ id: "servo", name: "Servo Token", typeLine: "Token Artifact Creature — Servo", oracleText: "", manaValue: 0, power: "1", toughness: "1", token: true });
+  it("Abrade is recognised as modal removal (it used to be skipped entirely, so nothing guarded it)", () => {
+    const spell = parseTargetedRemoval(castAction("Abrade"));
+    expect(spell?.modes).toHaveLength(2);
+    expect(spell?.modes?.map((mode) => mode.kind)).toEqual(["damage", "destroy"]);
+  });
+  it("held when the only target is a 1/1 artifact Servo token — both modes could hit it, neither is worth it", () => {
+    const verdict = removalGuard(castAction("Abrade"), ctx([], [servo()]));
+    expect(verdict.allowed).toBe(false);
+    expect(verdict.reason).toMatch(/removal held/);
+  });
+  it("allowed when a real target exists next to the Servo (a mana rock via the artifact mode, or a creature the 3 damage kills)", () => {
+    expect(removalGuard(castAction("Abrade"), ctx([], [servo(), perm("Sol Ring", "ring")])).allowed).toBe(true);
+    const threat = perm("Vampire Nighthawk", "nh", { power: "2", toughness: "3", typeLine: "Creature — Vampire Shaman", oracleText: "Flying\nDeathtouch\nLifelink", manaValue: 3 });
+    expect(removalGuard(castAction("Abrade"), ctx([], [servo(), threat])).allowed).toBe(true);
+  });
+  it("3 damage cannot kill a 6/6, so Abrade is held against it", () => {
+    const big = perm("Grave Titan", "titan", { power: "6", toughness: "6", typeLine: "Creature — Giant" });
+    expect(removalGuard(castAction("Abrade"), ctx([], [big])).allowed).toBe(false);
+  });
+  it("Smash to Smithereens (plain destroy-artifact) no longer fires at a Servo token either", () => {
+    expect(removalGuard(castAction("Smash to Smithereens"), ctx([], [servo()])).allowed).toBe(false);
+    expect(removalGuard(castAction("Smash to Smithereens"), ctx([], [servo(), perm("Sol Ring", "ring")])).allowed).toBe(true);
   });
 });

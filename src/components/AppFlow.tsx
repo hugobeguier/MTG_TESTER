@@ -17625,7 +17625,10 @@ function chooseDamageTarget(session: GameSession, casterSeatId: string, amount: 
     }
   }
 
-  const lethalCandidates = creatureCandidates.filter((entry) => !hasIndestructible(entry.card) && effectiveToughness(entry.card) <= amount);
+  const allLethal = creatureCandidates.filter((entry) => !hasIndestructible(entry.card) && effectiveToughness(entry.card) <= amount);
+  // "Any target" burn is never spent on a vanilla token or a 1/1 body while a player can take it instead (Lightning Strike on a Servo).
+  const worthKilling = (entry: { card: VisibleCard }) => !(entry.card.token && !entry.card.oracleText.trim()) && (entry.card.manaValue >= 2 || effectivePower(entry.card) >= 2 || entry.card.oracleText.trim().length > 0);
+  const lethalCandidates = targetType === "any" && targetablePlayers.length > 0 ? allLethal.filter(worthKilling) : allLethal;
   if (lethalCandidates.length > 0) {
     const best = lethalCandidates.reduce((a, b) =>
       effectivePower(b.card) + effectiveToughness(b.card) > effectivePower(a.card) + effectiveToughness(a.card) ? b : a

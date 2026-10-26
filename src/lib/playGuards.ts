@@ -58,6 +58,10 @@ export interface RemovalSpell {
   scope: "creature" | "permanent";
   // The permanent types the target phrase names (destroy/exile only).
   types?: Array<"creature" | "artifact" | "enchantment" | "planeswalker" | "permanent">;
+  // Fixed damage (damage spells only): a target whose toughness is above it cannot be killed, so it is never "the threat worth the spell".
+  damage?: number;
+  // A "Choose one —" spell whose every mode is removal (Abrade: 3 damage to a creature OR destroy an artifact): the guard judges the best target across all modes.
+  modes?: RemovalSpell[];
 }
 
 const NOUN = "([a-z,' -]*?)";
@@ -67,7 +71,18 @@ const NOUN = "([a-z,' -]*?)";
 export function parseTargetedRemoval(action: ScorableAction): RemovalSpell | undefined {
   if (action.actionType !== "cast_spell") return undefined;
   const text = actionText(action);
-  if (!text || /\bchoose (?:one|two|three|up to)\b|\bcounter target\b/.test(text)) return undefined;
+  if (!text || /\bcounter target\b/.test(text)) return undefined;
+  // "Choose one — • A • B" where every bullet is itself targeted removal (Abrade): evaluated as the union of its modes. Any non-removal mode (a counter, a
+  // draw, ...) leaves the whole spell alone — the guard cannot tell which mode will be used.
+  if (/\bchoose (?:one|two|three|up to)\b/.test(text)) {
+    if (!/\bchoose one\b/.test(text)) return undefined;
+    const bullets = text.split("•").slice(1).map((bullet) => bullet.trim()).filter(Boolean);
+    if (bullets.length < 2) return undefined;
+    const modes = bullets.map((bullet) => parseTargetedRemoval({ ...action, detail: bullet }));
+    if (modes.some((mode) => !mode || mode.modes)) return undefined;
+    const concrete = modes as RemovalSpell[];
+    return { kind: concrete[0].kind, scope: "permanent", modes: concrete };
+  }
   const isAura = /\baura\b/.test(text.split(".")[0] ?? "") || /\benchant creature\b/.test(text);
 
   if (isAura && /\benchant creature\b(?! you control)/.test(text)) {
@@ -89,11 +104,15 @@ export function parseTargetedRemoval(action: ScorableAction): RemovalSpell | und
     }
   }
 
+  // "The owner of target permanent shuffles it into their library, then reveals the top card..." (Chaos Warp): removal-shaped, premium.
+  if (/\bthe owner of target permanent shuffles it into their library\b/.test(text)) return { kind: "exile", scope: "permanent", types: ["permanent"] };
+
   if (new RegExp(`\\breturn target ${NOUN}(creature|permanent)\\b(?! cards?)(?! you (?:control|own))[^.]* to (?:its|their) owner's hand`).test(text)) {
     return { kind: "bounce", scope: "creature" };
   }
-  if (new RegExp(`\\bdeals? (?:\\d+|x) damage to target ${NOUN}creature\\b(?! you control)(?! card)`).test(text) && !/\bany target\b/.test(text)) {
-    return { kind: "damage", scope: "creature" };
+  const damageMatch = text.match(new RegExp(`\\bdeals? (\\d+|x) damage to target ${NOUN}creature\\b(?! you control)(?! card)`));
+  if (damageMatch && !/\bany target\b/.test(text)) {
+    return { kind: "damage", scope: "creature", ...(/^\d+$/.test(damageMatch[1]) ? { damage: Number(damageMatch[1]) } : {}) };
   }
   if (/\btarget creature (?:an opponent controls )?gets? -(?:\d+|x)\/-(?:\d+|x)/.test(text)) return { kind: "shrink", scope: "creature" };
   return undefined;
@@ -162,10 +181,111 @@ function totalPower(cards: CardLike[] | undefined): number {
   return (cards ?? []).filter(isCreature).reduce((sum, card) => sum + Math.max(0, parseNum(card.power) ?? 0), 0);
 }
 
+// ---------------------------------------------------------------------------------------------------------------------------------
+// Target worth: WHY a permanent deserves a removal spell. One deterministic evaluation, a score plus a list of short human-readable reasons, used by
+// removalGuard as its veto threshold for every removal type, shown to the agent's model in the scored options, and recorded with the decision.
+// The ten questions it answers (mirrored in the agent prompt and docs/agents/system.md):
+//   1 threat to me (damage vs my life, lethal board)   2 can it hurt my permanents (destroy/exile/steal/bounce/tap/damage)   3 does it add or double damage
+//   4 can I block it (flying/menace/trample/unblockable/protection)   5 value engine / combo / artifact-count enabler   6 their commander, attachments, counters
+//   7 vanilla token / 1-1 / cheap to replace   8 cost of the removal vs what it buys (premium removal waits)   9 tempo: am I under lethal pressure, outnumbered
+//   10 summoning sick, death/leave triggers that help them, indestructible/regenerate vs destroy, is its controller even the player threatening me
+// ---------------------------------------------------------------------------------------------------------------------------------
+export interface TargetWorth {
+  score: number;
+  reasons: string[];
+}
+
+export interface RemovalSpellInfo {
+  kind: RemovalSpell["kind"];
+  manaValue: number;
+  // Premium, cheap, unconditional removal (Swords, Path, Chaos Warp): held for a real threat.
+  premium: boolean;
+}
+
+function attachmentsOn(card: CardLike, context: ScoringContext): CardLike[] {
+  const everyone = [...(context.you?.battlefield ?? []), ...(context.opponents ?? []).flatMap((opponent) => opponent.battlefield ?? [])];
+  return everyone.filter((other) => (other as { attachedToId?: string }).attachedToId === card.id);
+}
+
+export function evaluateTargetWorth(card: CardLike, context: ScoringContext, spell?: Pick<RemovalSpellInfo, "kind">): TargetWorth {
+  const reasons: string[] = [];
+  let score = 0;
+  const add = (amount: number, reason: string) => {
+    score += amount;
+    reasons.push(`${reason} (${amount >= 0 ? "+" : ""}${amount.toFixed(1)})`);
+  };
+  const text = clean(card.oracleText);
+  const power = Math.max(0, parseNum(card.power) ?? 0);
+  const myLife = Math.max(1, context.you?.life ?? 40);
+  const mine = context.you?.battlefield ?? [];
+  const myBlockers = mine.filter((other) => isCreature(other) && !other.tapped);
+  const owner = ownerOf(card, context);
+  const ownerPower = totalPower(owner?.battlefield);
+
+  // 1 + base: its body, keywords, engines (creatureValue) and what its power does against MY life (opposingThreat).
+  add(opposingThreat(card, context), isCreature(card) ? "body, keywords and damage against my life" : "what this permanent does for them");
+
+  // 1: lethal pressure from its controller's whole board
+  if (ownerPower >= myLife) add(3, `its controller's board (${ownerPower} power) is lethal against my ${myLife} life`);
+  else if (ownerPower >= myLife * 0.6) add(1.2, `its controller's board (${ownerPower} power) is close to lethal against my ${myLife} life`);
+  // 9: outnumbered
+  const theirAttackers = (owner?.battlefield ?? []).filter((other) => isCreature(other) && !other.tapped).length;
+  if (isCreature(card) && theirAttackers > myBlockers.length + 1) add(0.8, `they have ${theirAttackers} creatures against my ${myBlockers.length} untapped blockers`);
+
+  // 2: can it hurt my permanents
+  if (/\b(?:destroy|exile|sacrifices?)\b[^.]*\b(?:target|each|all|an opponent)\b/.test(text)) add(1.5, "can destroy, exile or force sacrifices of my permanents");
+  if (/\bgain control of\b|\bcontrol (?:target|another)\b/.test(text)) add(2, "can steal my permanents");
+  if (/\bdeals? (?:\d+|x|that much) damage to (?:any target|target (?:creature|player|opponent)|each (?:creature|opponent|player))/.test(text)) add(1.2, "can damage my creatures or me with its abilities");
+  if (/\breturn target [^.]* to (?:its|their) owner's hand\b|\btap target\b|\bdoesn't untap\b/.test(text)) add(0.8, "can bounce or tap down my permanents");
+
+  // 3: adds or multiplies damage
+  if (/\b(?:other )?(?:[a-z]+ )?creatures? you control get \+\d|\bcreatures you control have (?:double strike|trample|haste)\b/.test(text)) add(1.5, "pumps or empowers the creatures that attack me (anthem)");
+  if (/\bdouble (?:the )?damage\b|\bdeals? double\b|\bdouble the power\b/.test(text)) add(2, "doubles damage");
+  if (/\badditional combat phase\b/.test(text)) add(2, "grants extra combat phases");
+  if (/\{[^}]*\}:[^.]*gets? \+(?:\d|x)\/\+0/.test(text)) add(0.8, "can pump itself with spare mana");
+
+  // 4: can I block it?
+  if (hasKeyword(card, "flying") && !mine.some((other) => hasKeyword(other, "flying") || hasKeyword(other, "reach"))) add(1.2, "flying and I have nothing with flying or reach to block it");
+  if (/\bcan'?t be blocked\b/.test(text) && !/\bcan'?t be blocked by\b/.test(text)) add(1.5, "cannot be blocked");
+  if ((hasKeyword(card, "shadow") || hasKeyword(card, "fear") || hasKeyword(card, "intimidate") || hasKeyword(card, "skulk")) && power >= 2) add(1, "evasion that dodges my blockers");
+  if (hasKeyword(card, "menace") && myBlockers.length < 2) add(0.8, "menace and I cannot double-block it");
+  if (hasKeyword(card, "trample") && power >= 4) add(0.6, "trample runs over my chump blockers");
+  if (/\bprotection from\b/.test(text)) add(0.5, "protection makes it hard to block or deal with");
+
+  // 5: engines, tutors, recursion, artifact-count enablers
+  if (/\bsearch your library\b/.test(text)) add(1.2, "tutors for more threats");
+  if (/\breturn [^.]* from (?:your|a) graveyard\b/.test(text)) add(1, "recursion engine");
+  if (/\bextra turn\b|\btake an extra turn\b/.test(text)) add(3, "extra turns");
+  if (/\bfor each artifact you control\b|\baffinity for artifacts\b|\bimprovise\b|\bartifact (?:spells|creatures) you (?:cast|control)\b/.test(text)) add(1.5, "artifact-count / affinity synergy piece");
+  const theirArtifacts = (owner?.battlefield ?? []).filter((other) => (other.typeLine ?? "").includes("Artifact")).length;
+  if ((card.typeLine ?? "").includes("Artifact") && theirArtifacts >= 4 && !isToken(card)) add(0.8, `one of ${theirArtifacts} artifacts powering their artifact synergies`);
+
+  // 6: commander, attachments
+  if (card.commander) reasons.push("it is their commander (already priced into its body value)");
+  const attached = attachmentsOn(card, context);
+  if (attached.length > 0) add(Math.min(2.5, attached.length * 1), `carries ${attached.length} attached Aura/Equipment that would be lost with it`);
+
+  // 7: low value
+  if (isToken(card) && !text) add(-2.5, "vanilla token — cheap to replace, no abilities");
+  else if (isToken(card)) add(-0.8, "a token: removing it costs them no card");
+  else if (!text && power <= 2) add(-1, "no abilities to speak of");
+
+  // 10: misc
+  if (card.summoningSick) add(-0.5, "summoning sick, it cannot attack until their next turn");
+  if (/\bwhen(?:ever)? (?:this (?:creature|permanent)|[^,]+) (?:dies|leaves the battlefield)\b/.test(text)) add(-1.5, "its death/leave trigger pays them back when it is removed");
+  if ((spell?.kind === "destroy" || spell?.kind === "damage") && hasIndestructible(card)) add(-100, "indestructible: destroy/damage does nothing to it");
+  if (/\bregenerate\b/.test(text) && (spell?.kind === "destroy" || spell?.kind === "damage")) add(-2, "it can regenerate");
+  const maxOtherPower = Math.max(0, ...(context.opponents ?? []).filter((opponent) => opponent !== owner).map((opponent) => totalPower(opponent.battlefield)));
+  if (owner && ownerPower > 0 && ownerPower * 4 <= maxOtherPower && ownerPower < myLife * 0.3) add(-1, "its controller is not the opponent threatening me most");
+  return { score, reasons };
+}
+
 export interface RemovalAssessment extends GuardVerdict {
   bestTarget?: CardLike;
   bestThreat?: number;
   threshold?: number;
+  // The target-worth evaluation behind the verdict: who was judged, the score against the bar, and every reason in plain words.
+  worth?: { target: string; score: number; threshold: number; reasons: string[] };
 }
 
 // Is there a target on the table worth spending this removal on? The target is chosen AFTER the cast (legal-action targetIds is usually
@@ -181,48 +301,88 @@ export function removalGuard(action: ScorableAction, context: ScoringContext): R
   const spellColors = spellColorsOf(action);
   const targetable = (card: CardLike) => !card.phasedOut && !hasKeyword(card, "hexproof") && !hasKeyword(card, "shroud") && !isProtectedFromSpell(card, spellColors);
   const pool = opponents.flatMap((opponent) => opponent.battlefield ?? []).filter((card) => !(card.typeLine ?? "").includes("Land") && targetable(card));
-  const typed = spell.types && !spell.types.includes("permanent") ? spell.types : undefined;
-  const matchesTypes = (card: CardLike) => (typed ?? []).some((type) => (type === "creature" ? isCreature(card) : (card.typeLine ?? "").includes(type === "artifact" ? "Artifact" : type === "enchantment" ? "Enchantment" : "Planeswalker")));
-  const candidates = named.length > 0 ? named.filter(targetable) : spell.scope === "creature" ? pool.filter(isCreature) : typed ? pool.filter(matchesTypes) : pool;
+  // One pool per mode (a plain spell is a single mode); a damage spell can only ever kill what its fixed damage reaches.
+  const modes = spell.modes ?? [spell];
+  const poolFor = (mode: RemovalSpell): CardLike[] => {
+    const modeTyped = mode.types && !mode.types.includes("permanent") ? mode.types : undefined;
+    const modeMatches = (card: CardLike) => (modeTyped ?? []).some((type) => (type === "creature" ? isCreature(card) : (card.typeLine ?? "").includes(type === "artifact" ? "Artifact" : type === "enchantment" ? "Enchantment" : "Planeswalker")));
+    const base = mode.scope === "creature" ? pool.filter(isCreature) : modeTyped ? pool.filter(modeMatches) : pool;
+    return mode.kind === "damage" && mode.damage !== undefined ? base.filter((card) => (parseNum(card.toughness) ?? 0) <= mode.damage!) : base;
+  };
+  const typed = spell.modes ? undefined : spell.types && !spell.types.includes("permanent") ? spell.types : undefined;
+  const modePools = modes.flatMap((mode) => poolFor(mode));
+  const candidates = named.length > 0 ? named.filter(targetable) : Array.from(new Map(modePools.map((card) => [card.id, card])).values());
+  if (candidates.length === 0 && spell.kind === "damage" && spell.damage !== undefined && named.length === 0 && pool.some(isCreature)) {
+    return { allowed: false, reason: `removal held: ${spell.damage} damage cannot kill any opposing creature, so it would be wasted` };
+  }
   if (candidates.length === 0) {
     // Removal with no opposing legal target on the table (no creature for creature removal, no artifact/enchantment/creature for Exorcise or
     // Putrefy-style text) can only be aimed at my own permanents (Swords on my own commander); self-play found agents casting it anyway.
     // Plain "target permanent" removal is left to the engine (a land may be a legal target).
-    if ((spell.scope === "creature" || typed) && named.length === 0) {
+    if ((spell.scope === "creature" || typed || spell.modes) && named.length === 0) {
       return { allowed: false, reason: `removal held: no opposing ${typed ? typed.join("/") : "creature"} to target, so ${spell.kind === "aura" ? "the Aura" : "the spell"} could only hit your own` };
     }
     return ALLOWED;
   }
-  // Non-creature (or mixed) targets: the threat bar below is a creature yardstick, so the only requirement is that an opposing target exists.
-  if (spell.scope === "permanent" && typed?.some((type) => type === "artifact" || type === "enchantment")) return { allowed: true, bestTarget: candidates[0] };
+  // Non-creature targets (artifacts, enchantments): a real permanent — not a token, and costing 2+ or carrying rules text — is worth a destroy/exile on its own.
+  // A creature token wearing the artifact type (a Servo), or a vanilla one, is judged like any creature below instead of getting a free pass.
+  // (Open-ended "target permanent" removal such as Chaos Warp is NOT waved through: it goes through the worth threshold below.)
+  const touchesNonCreature = modes.some((mode) => mode.types?.some((type) => type === "artifact" || type === "enchantment"));
+  if (touchesNonCreature) {
+    const worthy = candidates.find((card) => !isCreature(card) && !isToken(card) && ((card.manaValue ?? 0) >= 2 || clean(card.oracleText).length > 0));
+    if (worthy) {
+      const verdict = evaluateTargetWorth(worthy, context, { kind: "destroy" });
+      return { allowed: true, bestTarget: worthy, worth: { target: worthy.name ?? "an artifact or enchantment", score: verdict.score, threshold: 0, reasons: ["a real (non-token) artifact/enchantment with value is worth a destroy effect", ...verdict.reasons] } };
+    }
+  }
 
   const spellCard = (context.you?.hand ?? []).find((card) => card.id === action.cardId);
   const manaValue = spellCard?.manaValue ?? 2;
   const myLife = Math.max(1, context.you?.life ?? 40);
 
   // Ward is a real tax on the removal spell: the target is worth that much less per point of ward cost (at least one point).
-  const scored = candidates.map((card) => ({ card, threat: opposingThreat(card, context) - wardPenalty(card) })).sort((a, b) => b.threat - a.threat);
+  const evaluated = candidates.map((card) => {
+    const worth = evaluateTargetWorth(card, context, { kind: spell.modes ? "exile" : spell.kind });
+    const ward = wardPenalty(card);
+    return { card, threat: worth.score - ward, reasons: ward > 0 ? [...worth.reasons, `ward taxes the spell (-${ward.toFixed(1)})`] : worth.reasons };
+  });
+  const scored = evaluated.sort((a, b) => b.threat - a.threat);
   const best = scored[0];
   const second = scored[1]?.threat ?? 0;
   let threshold = removalMinThreat(manaValue);
+  // Premium cheap unconditional removal (Swords, Path, Chaos Warp) waits for a real threat; burn and narrow removal has a lower bar.
+  // Premium: one-or-two-mana unconditional exile/destroy on a creature (Swords, Path), or open-ended "target permanent" removal (Chaos Warp).
+  const unconditionalCreature = spell.types?.length === 1 && spell.types[0] === "creature" && manaValue <= 2;
+  const openEndedPermanent = spell.types?.length === 1 && spell.types[0] === "permanent";
+  const premium = (spell.kind === "exile" || spell.kind === "destroy") && !spell.modes && (unconditionalCreature || openEndedPermanent);
+  const barNotes: string[] = [];
+  if (premium) {
+    threshold += 1;
+    barNotes.push("premium cheap removal waits for a real threat (bar +1.0)");
+  }
   // The one clear standout on a board of small stuff is worth a little less than the usual bar.
-  if (best.threat >= second + 2) threshold = Math.max(3, threshold - 1);
+  if (best.threat >= second + 2) {
+    threshold = Math.max(3, threshold - 1);
+    barNotes.push("it is the clear standout on the board (bar -1.0)");
+  }
+  const worth = { target: best.card.name ?? "a permanent", score: best.threat, threshold, reasons: [...best.reasons, ...barNotes] };
 
-  if (best.threat >= threshold) return { allowed: true, bestTarget: best.card, bestThreat: best.threat, threshold };
+  if (best.threat >= threshold) return { allowed: true, bestTarget: best.card, bestThreat: best.threat, threshold, worth };
 
   // Threatening lethal: an opponent whose combined power reaches my life, and the target is part of it.
   for (const { card } of scored) {
     const owner = ownerOf(card, context);
     if ((parseNum(card.power) ?? 0) > 0 && totalPower(owner?.battlefield) >= myLife) {
-      return { allowed: true, bestTarget: card, bestThreat: best.threat, threshold };
+      return { allowed: true, bestTarget: card, bestThreat: best.threat, threshold, worth: { ...worth, reasons: [...worth.reasons, "lethal on board: removing a body that is part of it is justified"] } };
     }
   }
   return {
     allowed: false,
-    reason: `removal held: the best target (${best.card.name ?? "a creature"}, threat ${best.threat.toFixed(1)}) is below the ${threshold.toFixed(1)} bar for spending a removal spell — keep it for a real threat`,
+    reason: `removal held: the best target (${best.card.name ?? "a creature"}, worth ${best.threat.toFixed(1)}) is below the ${threshold.toFixed(1)} bar for spending a removal spell — keep it for a real threat. Why: ${worth.reasons.slice(0, 4).join("; ")}`,
     bestTarget: best.card,
     bestThreat: best.threat,
-    threshold
+    threshold,
+    worth
   };
 }
 

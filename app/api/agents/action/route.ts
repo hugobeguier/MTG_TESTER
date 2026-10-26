@@ -90,6 +90,14 @@ export async function POST(request: NextRequest) {
         "the permanent it would target — casting it now just spends it for no reason. Hold it (pass_priority",
         "or take a different action) unless a real removal spell, combat damage, or other threat is actually",
         "about to resolve against something you control.",
+        "Before ANY removal (destroy, exile, bounce, damage, shrink, a modal removal mode, Chaos Warp), answer these about the target and let the",
+        "\"Target worth\" reason on the action guide you: (1) is it a threat to me — damage against my life, a lethal board? (2) can it destroy, exile,",
+        "steal, bounce, tap or damage my permanents? (3) does it add or double damage (anthem, pump, extra combat)? (4) can I block it — flying,",
+        "menace, trample, unblockable, protection? (5) is it a value engine, tutor, recursion, combo or artifact-count piece? (6) is it their commander or",
+        "carrying Auras/Equipment/counters? (7) is it a vanilla token or 1/1, cheap to replace? (8) what does my removal cost versus what it buys — premium cheap",
+        "removal (Swords, Path, Chaos Warp) waits for a real threat; a better target may come. (9) am I under lethal pressure so even small bodies matter?",
+        "(10) is it summoning sick, would its death trigger help them, is it indestructible/regenerating, or is its controller not the player threatening me?",
+        "State the reason you pick in your answer; a target that fails these questions is not worth the spell.",
         "A legal action carrying a vetoReason is forbidden by a deterministic play guard (a pointless sacrifice of your own",
         "permanent, removal spent on a non-threat, or a protection spell with nothing to protect against). Do not choose it —",
         "the system will replace it with the best allowed action anyway.",
@@ -203,7 +211,10 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    return NextResponse.json({ source: "ollama", action, options });
+    // The deterministic target-worth reasoning travels with the decision, so "ask the agent about this decision" can explain WHY the target was worth the spell.
+    const chosenScored = scoredActions.find((candidate) => candidate.id === action.legalActionId);
+    const worthReason = chosenScored?.reasons?.find((reason) => reason.startsWith("Target worth:"));
+    return NextResponse.json({ source: "ollama", action: worthReason ? { ...action, reason: `${action.reason ?? ""} [${worthReason}]`.trim() } : action, options });
   } catch (error) {
     const message =
       error instanceof Error

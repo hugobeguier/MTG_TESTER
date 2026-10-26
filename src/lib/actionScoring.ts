@@ -1,6 +1,6 @@
 import { attackEconomics, defenderOf, threatShares } from "./strategy";
 import { mustAttackEachCombat } from "./combatRestrictions";
-import { combatSpellBonus, evaluatePlayGuards } from "./playGuards";
+import { combatSpellBonus, evaluatePlayGuards, removalGuard } from "./playGuards";
 import { declineFreeAttackReason, freeAttackBonus } from "./freeAttack";
 import { scoreWipeSequencing } from "./wipeSequencing";
 import { scoreGangBlockRisk, scoreInterferenceTiming, scoreOwnBoardWipe, scoreRemovalAftermath } from "./lookAhead";
@@ -727,6 +727,14 @@ function scoreStackResponse(action: ScorableAction, context: ScoringContext, del
   }
 }
 
+// Removal spells carry their target-worth reasoning (why this target is or is not worth the spell) as the FIRST reason, so the agent's model sees it.
+function scoreTargetWorthReasons(action: ScorableAction, context: ScoringContext, delta: (amount: number, reason: string) => void) {
+  if (action.actionType !== "cast_spell") return;
+  const worth = removalGuard(action, context).worth;
+  if (!worth) return;
+  delta(0, `Target worth: ${worth.target} ${worth.score.toFixed(1)}${worth.threshold > 0 ? ` vs bar ${worth.threshold.toFixed(1)}` : ""} — ${worth.reasons.slice(0, 5).join("; ")}`);
+}
+
 export function scoreLegalAction(action: ScorableAction, context: ScoringContext): { score: number; reasons: string[]; vetoReason?: string } {
   let score = BASELINE_SCORE_BY_ACTION_TYPE[action.actionType] ?? 0;
   const reasons: string[] = [];
@@ -735,6 +743,7 @@ export function scoreLegalAction(action: ScorableAction, context: ScoringContext
     reasons.push(reason);
   };
 
+  scoreTargetWorthReasons(action, context, delta);
   scoreLandsBeforeSpells(action, delta);
   scoreRampEarly(action, context, delta);
   scoreOverextendIntoOpenMana(action, context, delta);

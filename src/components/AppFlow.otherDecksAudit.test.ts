@@ -329,3 +329,18 @@ describe("Imprisoned in the Moon", () => {
     expect(restored.power).toBe("6");
   });
 });
+
+describe("burn aimed by an agent never goes to a vanilla token while a player can take it", () => {
+  it("Lightning Strike: the Servo token lives and the opponent takes 3", () => {
+    const servo = { id: "servo", name: "Servo Token", typeLine: "Token Artifact Creature - Servo", power: "1", toughness: "1", oracleText: "", manaValue: 0, colors: [], role: "token", zone: "battlefield", token: true } as VisibleCard;
+    const s = session([seat("a"), seat("b", { battlefield: [servo] })]);
+    const { session: after } = cast("Lightning Strike", s);
+    expect(after.seats[1].life).toBe(37);
+    expect(after.seats[1].board.battlefield.map((c) => c.id)).toEqual(["servo"]);
+    // a real creature the 3 damage kills still draws the burn
+    const nighthawk = real("Vampire Nighthawk", "nh", { power: "2", toughness: "3" });
+    const s2 = session([seat("a"), seat("b", { battlefield: [servo, nighthawk] })]);
+    const killed = runStateBasedActionsPass(cast("Lightning Strike", s2).session).session;
+    expect(killed.seats[1].board.battlefield.map((c) => c.id)).toEqual(["servo"]);
+  });
+});
