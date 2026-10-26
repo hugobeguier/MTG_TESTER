@@ -73,7 +73,7 @@ export function isDeathTriggerClause(clause: string): boolean {
 // parsed from just its own sentence instead of a whole card's oracle text (which might otherwise
 // contain an unrelated clause that happens to match some other commonTriggerEffect pattern first).
 export function isCombatDamageToPlayerClause(clause: string): boolean {
-  return /\b(when|whenever)\b[^.]{0,80}\bdeals combat damage to a player\b/i.test(clause);
+  return /\b(when|whenever)\b[^.]{0,80}\bdeals? combat damage to a player\b/i.test(clause);
 }
 
 // Real oracle text templates every phase-triggered ability ("at the beginning of your upkeep/draw

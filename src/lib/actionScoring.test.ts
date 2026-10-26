@@ -542,3 +542,40 @@ describe("choosing whom to attack (scoring)", () => {
     expect(result.reasons.join(" ")).not.toMatch(/kill this attacker/i);
   });
 });
+
+describe("lethal-aware blocking (Bugs2 #15)", () => {
+  const tenTen = (id: string): CardLike => ({ id, name: `Giant ${id}`, typeLine: "Creature — Giant", power: "10", toughness: "10", attacking: true, attackTargetId: "me" });
+  const chump = (id: string): CardLike => ({ id, name: `Chump ${id}`, typeLine: "Creature — Elf", power: "1", toughness: "1" });
+  it("eight 10/10 attackers against 40 life: every attacker with power 10 must be chumped (7 blockers) rather than skipped", () => {
+    const attackers = Array.from({ length: 8 }, (_, i) => tenTen(`a${i}`));
+    const blockers = Array.from({ length: 7 }, (_, i) => chump(`b${i}`));
+    const context = baseContext({ purpose: "declare_blockers", you: { id: "me", life: 40, battlefield: blockers, hand: [] }, opponents: [{ id: "opp", battlefield: attackers }] });
+    const block = scoreLegalAction(action({ id: "block:b0:a0", actionType: "block", cardId: "b0", targetIds: ["a0"] }), context);
+    const none = scoreLegalAction(action({ id: "no-block", actionType: "pass_priority" }), context);
+    expect(block.score).toBeGreaterThan(none.score + 5);
+  });
+  it("a single non-lethal attacker is still not chump-blocked for nothing", () => {
+    const attackers = [tenTen("a0")];
+    const context = baseContext({ purpose: "declare_blockers", you: { id: "me", life: 40, battlefield: [chump("b0")], hand: [] }, opponents: [{ id: "opp", battlefield: attackers }] });
+    const block = scoreLegalAction(action({ id: "block:b0:a0", actionType: "block", cardId: "b0", targetIds: ["a0"] }), context);
+    expect(block.score).toBeLessThan(0);
+  });
+});
+
+describe("declining a free or required block is vetoed (reasoning.jpg: Malik left Nogi unblocked)", () => {
+  const nogi: CardLike = { id: "nogi", name: "Nogi", typeLine: "Creature — Dragon", power: "3", toughness: "3", attacking: true, attackTargetId: "me" };
+  const rhonas: CardLike = { id: "rhonas", name: "Rhonas the Indomitable", typeLine: "Legendary Creature — God", power: "5", toughness: "5", oracleText: "Deathtouch, indestructible" };
+  it("with an indestructible deathtouch blocker available, 'declare no blockers' is vetoed", () => {
+    const context = baseContext({ purpose: "declare_blockers", you: { id: "me", life: 40, battlefield: [rhonas], hand: [] }, opponents: [{ id: "opp", battlefield: [nogi] }] });
+    const scored = scoreLegalActions([action({ id: "block:rhonas", actionType: "block", cardId: "rhonas", targetIds: ["nogi"], label: "block Nogi with Rhonas" }), action({ id: "no-blocks", actionType: "pass_priority", label: "declare no blockers" })], context);
+    const noBlock = scored.find((entry) => entry.id === "no-blocks")!;
+    expect(noBlock.vetoReason).toMatch(/free block declined/);
+    expect(scored.find((entry) => entry.id === "block:rhonas")!.vetoReason).toBeUndefined();
+  });
+  it("a pointless block is not forced: passing stays allowed when no block is free or required", () => {
+    const grizzly: CardLike = { id: "bear", name: "Bear", typeLine: "Creature", power: "2", toughness: "2" };
+    const context = baseContext({ purpose: "declare_blockers", you: { id: "me", life: 40, battlefield: [grizzly], hand: [] }, opponents: [{ id: "opp", battlefield: [nogi] }] });
+    const scored = scoreLegalActions([action({ id: "block:bear", actionType: "block", cardId: "bear", targetIds: ["nogi"] }), action({ id: "no-blocks", actionType: "pass_priority" })], context);
+    expect(scored.find((entry) => entry.id === "no-blocks")!.vetoReason).toBeUndefined();
+  });
+});

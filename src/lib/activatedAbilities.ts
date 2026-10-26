@@ -86,7 +86,10 @@ const SEARCH_LIBRARY_TO_TOP_PATTERN = new RegExp(
   "i"
 );
 
-export function parseSearchLibraryEffectText(text: string): SearchLibraryEffect | undefined {
+export function parseSearchLibraryEffectText(rawText: string): SearchLibraryEffect | undefined {
+  // Tiamat: "up to five Dragon cards not named Tiamat that each have different names" — in a singleton deck the name restrictions can never
+  // exclude anything (Tiamat is on the battlefield, no two cards share a name), so the clause is dropped and it parses as "up to five Dragon cards".
+  const text = rawText.replace(/\s+not named [^,]+?(?=\s+that each|,)/i, "").replace(/\s+that each have different names/i, "").replace(/\bif you cast it,\s*/i, "").replace(/^[A-Za-z, ]*?\b(?=when(?:ever)? [^.]*, (?:you may )?search your library)/i, "");
   const match = text.match(SEARCH_LIBRARY_PATTERN);
   if (match) {
     const typeWord = match[2]?.trim();
@@ -116,6 +119,8 @@ export function parseSearchLibraryEffectText(text: string): SearchLibraryEffect 
 }
 
 export type SacrificeEffect =
+  // "Put your commander into your hand from the command zone." (Command Beacon)
+  | { kind: "commander_to_hand" }
   // alsoLoseLife: "You draw two cards and lose 2 life." (Infernal Idol) — the life loss half of a compound draw.
   | { kind: "scry" | "surveil" | "draw_cards" | "gain_life" | "lose_life"; amount: number; alsoLoseLife?: number }
   | { kind: "add_counter"; counterKind: string; amount: number }
@@ -325,6 +330,12 @@ export function parseGenericSacrificeAbilities(oracleText: string): SacrificeAbi
 // parseGenericSacrificeAbilities already owns) is declined rather than guessed at.
 export type GenericTapEffect =
   | { kind: "create_tokens" }
+  // "Create a token that's a copy of a card exiled with this artifact. It gains haste. Exile it at the beginning of the next end step." (Mimic Vat)
+  | { kind: "copy_imprinted_card" }
+  // "The next spell you cast this turn has improvise." (Archway of Innovation)
+  | { kind: "next_spell_improvise" }
+  // "Put a +1/+1 counter on this creature." (Outlast, after it is rewritten to "{cost}, {T}: ...")
+  | { kind: "self_counter"; counterKind: string; amount: number }
   // "Draw a card." (Dragon's Hoard, Tome of Legends, Endless Atlas)
   | { kind: "draw_cards"; amount: number }
   // "Target creature can't be blocked this turn." (Rogue's Passage) — your best attacker.
@@ -368,11 +379,9 @@ export interface GenericTapAbility {
   // plain {1} because costMana sums digits only, leaving the {B} free.
   costManaText: string;
   // "Discard a [Type] card" as part of the cost (Fauna Shaman's "{G}, {T}, Discard a creature
-  // card: ..."). Not type-filtered at resolution time — chooseWorstHandCardToDiscard picks
-  // whatever's worst regardless of type, the same simplification parseGenericSacrificeAbilities'
-  // own costDiscard already makes — but the gate (is there anything in hand at all to discard) is
-  // still enforced.
+  // card: ..."); costDiscardType is that Type ("Creature"), so only a matching card in hand can pay it.
   costDiscard: boolean;
+  costDiscardType?: string;
   // "Untap ~." as the ability's own first sentence (this card, or Umbral Mantle-style effects) —
   // tapping to pay the cost still happens, but the permanent ends up untapped once the ability
   // resolves, so it can be activated again the same turn if its cost can be paid again.
@@ -403,7 +412,9 @@ export function parseGenericTapAbilities(oracleText: string): GenericTapAbility[
     .filter(Boolean);
 
   for (const rawClause of clauses) {
-    const clause = stripAbilityWordPrefix(rawClause);
+    // Outlast {W}: "{W}, {T}: Put a +1/+1 counter on this creature. Activate only as a sorcery."
+    const outlast = rawClause.replace(/\([^)]*\)/g, "").trim().match(/^outlast ((?:\{[^}]+\})+)$/i);
+    const clause = outlast ? `${outlast[1]}, {T}: Put a +1/+1 counter on this creature. Activate only as a sorcery.` : stripAbilityWordPrefix(rawClause);
     // Sacrifice-cost tap abilities are parseGenericSacrificeAbilities's shape, not this one.
     if (/\bsacrifice\b/i.test(clause)) continue;
     // "{1}{U}, {T}, Exile seven cards from your graveyard: Add {U}. When you spend this mana to cast a spell or activate an ability, copy that spell or ability."
@@ -446,6 +457,8 @@ export function parseGenericTapAbilities(oracleText: string): GenericTapAbility[
     const manaSymbols = costPrefix.match(/\{(\d+)\}/g) ?? [];
     const costMana = manaSymbols.reduce((total, symbol) => total + (Number.parseInt(symbol.replace(/[{}]/g, ""), 10) || 0), 0);
     const costDiscard = /discard an? (?:[a-z]+ )?card/i.test(costPrefix);
+    const discardTypeWord = costPrefix.match(/discard an? ([a-z]+) card/i)?.[1];
+    const costDiscardType = discardTypeWord && !/^(random|different|other)$/i.test(discardTypeWord) ? discardTypeWord[0].toUpperCase() + discardTypeWord.slice(1).toLowerCase() : undefined;
 
     // "...Activate only if you control three or more lands with the same name." — a restriction, not part of the effect; the
     // full clause keeps it for activateOnlyIfConditionMet.
@@ -463,7 +476,7 @@ export function parseGenericTapAbilities(oracleText: string): GenericTapAbility[
     if (!effect) continue;
 
     const costManaText = (costPrefix.match(/\{[^}]+\}/g) ?? []).filter((symbol) => !/^\{t\}$/i.test(symbol)).join("");
-    abilities.push({ costMana, costManaText, costDiscard, untapsSelf, ...(costRemoveCounter ? { costRemoveCounter } : {}), ...(/pay life equal to the number of colors in your commanders' color identity/i.test(costPrefix) ? { costLifeCommanderColors: true } : {}), effect, clause });
+    abilities.push({ costMana, costManaText, costDiscard, ...(costDiscardType ? { costDiscardType } : {}), untapsSelf, ...(costRemoveCounter ? { costRemoveCounter } : {}), ...(/pay life equal to the number of colors in your commanders' color identity/i.test(costPrefix) ? { costLifeCommanderColors: true } : {}), effect, clause });
   }
 
   return abilities;
@@ -484,12 +497,20 @@ function parseGenericTapEffectText(text: string): GenericTapEffect | undefined {
   if (drawAndLose) return { kind: "draw_and_lose_life", draw: numberWordToInt(drawAndLose[1]) ?? 1, lose: Number.parseInt(drawAndLose[2], 10) };
   const plainDraw = text.match(/^draw (a|one|two|three) cards?\.?$/i);
   if (plainDraw) return { kind: "draw_cards", amount: numberWordToInt(plainDraw[1]) ?? 1 };
-  const graveyardGrant = text.match(/^you may cast target ([a-z ]+?) card from your graveyard this turn\.?$/i);
+  const graveyardGrant =
+    text.match(/^you may cast target ([a-z ]+?) card from your graveyard this turn\.?$/i) ??
+    // "Choose target artifact card in your graveyard. You may cast that card this turn." (Emry, Lurker of the Loch)
+    text.match(/^choose target ([a-z ]+?) card in your graveyard\.\s*you may cast that card this turn\.?(?:\s*\([^)]*\))?$/i);
   if (graveyardGrant) return { kind: "grant_graveyard_cast", cardMatcher: graveyardGrant[1].trim().toLowerCase() };
   const grantAll = text.match(/^all ([a-z]+?)s? gain ([a-z ]+?) until end of turn\.?$/i);
   if (grantAll) return { kind: "grant_keyword_to_all_until_eot", typeMatcher: grantAll[1].toLowerCase(), keyword: grantAll[2].toLowerCase() };
   const zone = parseZoneEffect(text);
   if (zone && (zone.kind === "regrow" || zone.kind === "reanimate" || zone.kind === "graveyard_to_library")) return { kind: "zone_effect", effect: zone };
+
+  const selfCounter = text.match(/^put (an?|one|two|three) (\+1\/\+1) counters? on (?:this creature|it)\.?$/i);
+  if (selfCounter) return { kind: "self_counter", counterKind: selfCounter[2], amount: numberWordToInt(selfCounter[1].toLowerCase()) ?? 1 };
+  if (/^the next spell you cast this turn has improvise\.?(?:\s*\([^)]*\))?$/i.test(text)) return { kind: "next_spell_improvise" };
+  if (/^create a token that'?s a copy of a card exiled with this artifact\. it gains haste\. exile it at the beginning of the next end step\.?$/i.test(text)) return { kind: "copy_imprinted_card" };
 
   if (/\bcreate\b[^.]*\btokens?\b/i.test(text)) {
     return { kind: "create_tokens" };
@@ -640,6 +661,9 @@ export interface GenericManaAbility {
   costDiscard: boolean;
   effectText: string;
   clause: string;
+  // "{X}: Destroy each nonland permanent with mana value X whose controller was dealt combat damage by this creature this turn." (Steel Hellkite):
+  // the only {X}-cost ability recognised here; the caller chooses X (see AppFlow's steelHellkiteXOptions).
+  costHasX?: boolean;
 }
 
 const GENERIC_MANA_CLAUSE_PATTERN = /^((?:(?:\{[^}]+\}|discard a card|pay \d+ life)\s*,?\s*)+):\s*(.+?)\.?\s*$/i;
@@ -653,12 +677,18 @@ export function parseGenericManaAbilities(oracleText: string): GenericManaAbilit
 
   for (const rawClause of clauses) {
     const clause = stripAbilityWordPrefix(rawClause);
+    const xDestroy = /^\{x\}:\s*destroy each nonland permanent with mana value x whose controller was dealt combat damage by this creature this turn\./i.test(clause);
+    if (xDestroy) {
+      abilities.push({ costManaText: "", costLife: 0, costDiscard: false, effectText: clause.replace(/^\{x\}:\s*/i, "").replace(/\s*Activate only once each turn\.?\s*$/i, "").trim(), clause, costHasX: true });
+      continue;
+    }
     if (/\{[tx]\}/i.test(clause) || /\bsacrifice\b/i.test(clause)) continue;
     const match = clause.match(GENERIC_MANA_CLAUSE_PATTERN);
     if (!match) continue;
 
     const costPrefix = match[1];
-    const effectText = match[2].trim();
+    // Reminder text ("(This effect lasts indefinitely.)") is not part of the effect and defeated every exact-shape parser (Memnarch).
+    const effectText = match[2].replace(/\s*\([^)]*\)/g, "").trim();
     if (/^untap\b/i.test(effectText)) continue;
 
     const costDiscard = /discard a card/i.test(costPrefix);
@@ -724,6 +754,7 @@ function parseSacrificeEffectText(text: string): SacrificeEffect | undefined {
   if (/\bsearch your library for a creature card with mana value equal to 1 plus the sacrificed creature'?s mana value, put that card onto the battlefield\b/.test(lower)) {
     return { kind: "search_creature_by_sacrificed_mv" };
   }
+  if (/^put your commander into your hand from the command zone\.?$/.test(lower.trim())) return { kind: "commander_to_hand" };
   if (/\bcreate\b[^.]*\btokens?\b/.test(lower)) return { kind: "create_tokens" };
 
   if (/^transform this (?:land|permanent|artifact|creature|enchantment)\b/.test(lower)) return { kind: "transform_self" };

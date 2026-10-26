@@ -57,6 +57,8 @@ export interface CardLike {
   // Who an attacking creature is attacking (a seat id or a planeswalker/battle id); read by playGuards.situationalTimingGuard.
   attackTargetId?: string;
   summoningSick?: boolean;
+  // Phased out: not on the battlefield for targeting purposes (removalGuard must not count it as a target).
+  phasedOut?: boolean;
   // GameSession.turn when it entered the battlefield; equal to the context turn = entered this turn (wipe sequencing, wipeSequencing.ts).
   enteredTurn?: number;
 }
@@ -451,6 +453,28 @@ function scoreTransformSacrifice(action: ScorableAction, context: ScoringContext
   }
 }
 
+// Lethal-aware blocking: if every creature attacking me would kill me when none is blocked, the fewest, biggest attackers whose blocking leaves me alive
+// must all be blocked — chump blocks included. Returns true when THIS attacker is one of them.
+export function blockIsNeededToSurvive(attacker: CardLike, context: ScoringContext): boolean {
+  const life = context.you?.life ?? 40;
+  const meId = context.you?.id;
+  const attackers = opponentBattlefields(context).filter((card) => card.attacking && (card.typeLine ?? "").includes("Creature") && (meId === undefined || card.attackTargetId === undefined || card.attackTargetId === meId));
+  const powers = attackers.map((card) => Math.max(0, parseNum(card.power) ?? 0)).sort((a, b) => b - a);
+  const total = powers.reduce((sum, power) => sum + power, 0);
+  if (total < life) return false;
+  const blockersAvailable = (context.you?.battlefield ?? []).filter((card) => (card.typeLine ?? "").includes("Creature") && !card.tapped).length;
+  // Fewest blocks (biggest attackers first) that leave strictly less than my life total; if even all blockers can't manage it, block the biggest anyway.
+  let remaining = total;
+  let needed = 0;
+  while (needed < powers.length && remaining >= life && needed < blockersAvailable) {
+    remaining -= powers[needed];
+    needed += 1;
+  }
+  const myPower = Math.max(0, parseNum(attacker.power) ?? 0);
+  const threshold = needed > 0 ? powers[needed - 1] : Infinity;
+  return needed > 0 && myPower >= threshold;
+}
+
 // Mirrors scoreAttackProfitability's trade simulation from the blocker's side. Only "block" and
 // "no blocks" actions from a declare_blockers decision carry a meaningful attacker/blocker pair —
 // everything else (including block actions outside that purpose) is left at baseline.
@@ -472,10 +496,14 @@ function scoreBlockDecision(action: ScorableAction, context: ScoringContext, del
   const duel = simulateDuel(attacker, blocker);
   const blockerDies = duel.blockerDies;
   const attackerDies = duel.attackerDies;
+  const mustChump = blockIsNeededToSurvive(attacker, context);
   if (hasDeathtouch(attacker) && blockerDies) delta(-1, "the attacker has deathtouch: any damage it deals kills the blocker, whatever its toughness");
   if (duel.firstStrikeKillsBlocker && !hasFirstStrike(blocker) && !hasDoubleStrike(blocker)) delta(-1, "first strike kills the blocker before it can deal damage back");
 
-  if (attackerDies && !blockerDies) {
+  if (mustChump && !(attackerDies && !blockerDies)) {
+    // Every attacker is decided on its own, but together they can be lethal: the biggest ones must be blocked (by anything) for me to live.
+    delta(9, "the combined attack is lethal: this attacker is one of the biggest that must be blocked to survive");
+  } else if (attackerDies && !blockerDies) {
     delta(3, "block kills the attacker while the blocker survives");
   } else if (attackerDies && blockerDies) {
     // A trade is only good if what you lose is worth no more than what you take: a 6/6 into a 1/1 deathtouch is a bad trade.
@@ -755,10 +783,32 @@ export function resolveGuardedChoice(scored: ScoredAction[], chosenId: string | 
   return { action: replacement, overridden: true, reason: chosen.vetoReason };
 }
 
+// While a block that kills the attacker and keeps the blocker alive is on offer — or the combined attack is lethal and a block is possible — "declare no
+// blockers" is not an acceptable choice (Malik left Nogi unblocked with an indestructible deathtouch Rhonas).
+export function declineFreeBlockReason(action: ScorableAction, actions: ScorableAction[], context: ScoringContext): string | undefined {
+  if (context.purpose !== "declare_blockers" || action.actionType !== "pass_priority") return undefined;
+  for (const candidate of actions) {
+    if (candidate.actionType !== "block") continue;
+    const blocker = findCard(context.you?.battlefield, candidate.cardId);
+    const attacker = findCard(opponentBattlefields(context), candidate.targetIds[0]);
+    if (!blocker || !attacker) continue;
+    const duel = simulateDuel(attacker, blocker);
+    if (duel.attackerDies && !duel.blockerDies) return `free block declined: ${candidate.label} kills ${attacker.name ?? "the attacker"} and ${blocker.name ?? "the blocker"} survives`;
+    if (blockIsNeededToSurvive(attacker, context)) return `block required: the combined attack is lethal, so ${attacker.name ?? "this attacker"} must be blocked (${candidate.label})`;
+  }
+  return undefined;
+}
+
 export function scoreLegalActions(actions: ScorableAction[], context: ScoringContext): ScoredAction[] {
   return actions
     .map((action) => {
       const scored = { ...action, ...scoreLegalAction(action, context) };
+      const declinedBlock = declineFreeBlockReason(action, actions, context);
+      if (declinedBlock && !scored.vetoReason) {
+        scored.score -= 50;
+        scored.reasons = [...scored.reasons, declinedBlock];
+        scored.vetoReason = declinedBlock;
+      }
       // Passing on a free attack (no possible blocker, nothing forfeited) is vetoed so an LLM choice of it is overruled too.
       const declined = declineFreeAttackReason(action, actions, context);
       if (declined && !scored.vetoReason) {

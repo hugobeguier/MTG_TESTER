@@ -58,7 +58,7 @@
 //    (all of playGame) is already fully deterministic given a fixed starting session, since
 //    heuristicBrain's scoring has no randomness of its own — so this narrower seed still delivers
 //    "the same game replays the same way," just not via a single RNG source end to end.
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import {
   adjustedCastingCost,
@@ -218,8 +218,27 @@ function withSeededRandom<T>(seed: number | undefined, fn: () => T): T {
   }
 }
 
-function readRootDeckList(fileName: string): string {
-  return readFileSync(path.join(process.cwd(), fileName), "utf8");
+// Deck files get renamed from the deck editor ("UrDragon.txt" -> "The Ur Dragon.txt", "WretchedRanks.txt" -> "Wretched Ranks.txt"), so a
+// name that no longer exists on disk is matched against every deck file in the project root and decks/ by letters and digits only.
+export function readRootDeckList(fileName: string): string {
+  const exact = path.join(process.cwd(), fileName);
+  if (existsSync(exact)) return readFileSync(exact, "utf8");
+  const key = (name: string) => path.basename(name, ".txt").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const wanted = key(fileName);
+  const candidates: string[] = [];
+  const walk = (dir: string, recurse: boolean) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (recurse) walk(full, true);
+      } else if (entry.name.toLowerCase().endsWith(".txt")) candidates.push(full);
+    }
+  };
+  walk(process.cwd(), false);
+  if (existsSync(path.join(process.cwd(), "decks"))) walk(path.join(process.cwd(), "decks"), true);
+  const match = candidates.find((file) => key(file) === wanted) ?? candidates.find((file) => key(file).includes(wanted) || wanted.includes(key(file)));
+  if (!match) throw new Error(`Deck file not found: ${fileName}`);
+  return readFileSync(match, "utf8");
 }
 
 function buildBareSeat(id: string, name: string): PlayerSeat {
@@ -437,7 +456,7 @@ function filterSupportedMainPhaseActions(actions: LegalAgentAction[], seat: Play
 //    copy-target-spell effect, a bare static/replacement-effect instant, "reveal the top N, keep a
 //    matching one" digs like Grisly Salvage, a dynamic "draw cards equal to X" count, a mass "gain
 //    indestructible" grant, an edict like "each player sacrifices N creatures," ...).
-function resolveBareSpellEffect(session: GameSession, casterSeatId: string, sourceCard: VisibleCard, chosenX: number | undefined): { session: GameSession; matched: boolean } {
+export function resolveBareSpellEffect(session: GameSession, casterSeatId: string, sourceCard: VisibleCard, chosenX: number | undefined): { session: GameSession; matched: boolean } {
   const rawText = etbEffectText(sourceCard.oracleText);
   let working = session;
   let matched = false;

@@ -3483,3 +3483,86 @@ describe("Return of the Wildspeaker", () => {
     expect(bf.find((c) => c.id === "human")?.temporaryPowerBonus ?? 0).toBe(0);
   });
 });
+
+describe("Fauna Shaman discard cost (real Oracle text)", () => {
+  const forest = () => real("Forest", "f1");
+  const shaman = () => real("Fauna Shaman", "fs");
+  const idx = () => parseGenericTapAbilities(shaman().oracleText).findIndex((a) => a.costDiscard);
+  const inHand = (cards: VisibleCard[]) => seat("a", [shaman(), forest()], { board: { hand: cards, battlefield: [shaman(), forest()], graveyard: [] } });
+
+  it("parses the discard as creature-only", () => {
+    expect(parseGenericTapAbilities(shaman().oracleText)[idx()].costDiscardType).toBe("Creature");
+  });
+
+  it("cannot be activated with only noncreature cards in hand", () => {
+    const hand = [real("Sol Ring", "sr", { zone: "hand" }), real("Forest", "f2", { zone: "hand" })];
+    expect(payGenericTapCost(session([inHand(hand)]), "a", "fs", idx())).toBeUndefined();
+  });
+
+  it("rejects a chosen noncreature card, and discards the creature when one is in hand", () => {
+    const sol = real("Sol Ring", "sr", { zone: "hand" });
+    const bearCard = bear("b1", { zone: "hand" });
+    const s = session([inHand([sol, bearCard])]);
+    const paid = payGenericTapCost(s, "a", "fs", idx(), undefined, "sr");
+    expect(paid?.session.seats[0].board.hand.map((c) => c.id)).toEqual(["sr"]);
+    expect(paid?.session.seats[0].board.graveyard?.map((c) => c.id)).toEqual(["b1"]);
+  });
+});
+
+describe("Athreos, Shroud-Veiled return (real Oracle text)", () => {
+  it("a coin-countered creature that dies or is exiled returns under Athreos' controller's control", () => {
+    const wight = real("Wight of the Reliquary", "w", { counters: [{ kind: "coin", count: 1 }] });
+    const athreos = real("Athreos, Shroud-Veiled", "ath");
+    const triggers = (card: VisibleCard) => findLeavesBattlefieldTriggers(session([seat("me", [athreos]), seat("opp", [])]), "opp", card);
+    expect(triggers(wight).map((t) => t.effect.kind)).toEqual(["return_marked_to_battlefield"]);
+    expect(triggers({ ...wight, counters: undefined })).toHaveLength(0);
+  });
+});
+
+describe("Athreos resolution (real Oracle text)", () => {
+  for (const zone of ["exile", "graveyard"] as const) {
+    it(`returns the card from the opponent's ${zone} to Athreos' controller's battlefield`, () => {
+      const wight = real("Wight of the Reliquary", "w", { counters: [{ kind: "coin", count: 1 }], ownerSeatId: "opp" });
+      const athreos = real("Athreos, Shroud-Veiled", "ath");
+      const opp = seat("opp", [], { board: { hand: [], battlefield: [], graveyard: zone === "graveyard" ? [wight] : [], exile: zone === "exile" ? [wight] : [] } });
+      const s = session([seat("me", [athreos]), opp]);
+      const [trigger] = findLeavesBattlefieldTriggers(s, "opp", wight);
+      const after = resolveTriggerEffect(s, trigger);
+      expect(after.seats[0].board.battlefield.map((c) => c.id)).toContain("w");
+      expect(after.seats[1].board.exile?.length ?? 0).toBe(0);
+      expect(after.seats[1].board.graveyard?.length ?? 0).toBe(0);
+      expect(after.seats[0].board.battlefield.find((c) => c.id === "w")?.counters).toBeUndefined();
+    });
+  }
+});
+
+import { deterministicRuleWorkflow } from "@/lib/rulesAdvisor";
+import { phaseClauseConditionMet } from "./AppFlow";
+describe("Land Tax (real Oracle text)", () => {
+  const land = (id: string) => real("Plains", id);
+  const landTax = () => real("Land Tax", "lt");
+  it("searches for up to THREE basic land cards, into hand", () => {
+    const workflow = deterministicRuleWorkflow({ event: "upkeep_trigger", actorName: "a", sourceCard: landTax(), battlefield: [], hand: [], graveyard: [], exile: [], libraryPreview: [] });
+    expect(workflow?.workflow).toBe("search_library_to_hand");
+    expect(workflow?.maxChoices).toBe(3);
+    expect(workflow?.allowedCardFilter).toMatch(/basic land/i);
+  });
+  it("only when an opponent controls more lands than you", () => {
+    const clause = landTax().oracleText;
+    const mine = (n: number, theirs: number) => session([seat("me", [landTax(), ...Array.from({ length: n }, (_, i) => land(`m${i}`))]), seat("opp", Array.from({ length: theirs }, (_, i) => land(`o${i}`)))]);
+    expect(phaseClauseConditionMet(mine(2, 3), "me", clause)).toBe(true);
+    expect(phaseClauseConditionMet(mine(3, 3), "me", clause)).toBe(false);
+    expect(phaseClauseConditionMet(mine(4, 3), "me", clause)).toBe(false);
+  });
+});
+
+import { phaseConditionBlocks } from "./AppFlow";
+describe("Land Tax gating (real Oracle text)", () => {
+  it("does not trigger when no opponent controls more lands, does when one does", () => {
+    const lt = () => real("Land Tax", "lt");
+    const lands = (prefix: string, n: number) => Array.from({ length: n }, (_, i) => real("Plains", `${prefix}${i}`));
+    const sess = (mine: number, theirs: number) => session([seat("me", [lt(), ...lands("m", mine)]), seat("opp", lands("o", theirs))]);
+    expect(phaseConditionBlocks(sess(3, 3), "me", lt().oracleText)).toBe(true);
+    expect(phaseConditionBlocks(sess(2, 3), "me", lt().oracleText)).toBe(false);
+  });
+});

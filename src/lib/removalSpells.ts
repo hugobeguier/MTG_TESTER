@@ -357,7 +357,7 @@ function parseMassDamage(text: string): MassDamageEffect | undefined {
   if (!match) return undefined;
   const excludeFlying = /\bdeals (?:x|\d+) damage to each creature without flying\b/i.test(text);
   const includePlaneswalkers = /\band each planeswalker\b/i.test(text);
-  const playersMatch = text.match(/\bto each creature(?: without flying)?(?: you don'?t control)?,? and each (opponent|player)\b/i);
+  const playersMatch = text.match(/\bto each (?:non-?[a-z]+ )?creature(?: without flying)?(?: you don'?t control)?,? and each (opponent|player)\b/i);
   const includePlayers = playersMatch ? (playersMatch[1].toLowerCase() === "player" ? ("all" as const) : ("opponents" as const)) : undefined;
   const xDefinition = parseWhereX(text);
   const qualifier = match[2]?.toLowerCase();

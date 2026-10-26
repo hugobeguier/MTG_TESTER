@@ -1,0 +1,52 @@
+# Human-prompt audit of every deck
+
+Goal: whenever a card in any deck gives its HUMAN controller a real choice (target, which permanent, which cards, mode, "up to N", "you may", search results), the human gets a prompt. Agents keep auto-choosing.
+
+Scope: every deck-shaped .txt in the project root and decks/ (Aminatou, Lathliss, Meren, Saheeli, The Ur Dragon, Breena, and the five Foundations precons): 11 decks, 677 unique cards (3 unresolvable DFC names), 438 with choice-shaped wording. Skipped as having no choice: basics, vanilla/keyword creatures, mana rocks, statics, plain draw/gain life.
+
+Method: probes ran the real engine entry points (commonTriggerEffect, findAttackTriggers / findCommonTriggersForPermanentEntered / ...Died, castStructure, spellTargetSlots, phaseEffectText, parseSearchLibraryEffectText, the activated-ability parsers) on the real Oracle text and compared the effect kinds against the prompt paths (openTriggerOptionPrompt, triggerCardPrompt, finishTriggerResolution, the phase-trigger dispatch, cast-time slots). Then fixes + regression tests in `src/components/AppFlow.promptAudit.test.ts`.
+
+## (a) Audited and already prompting correctly (by deck)
+
+Spells with targets or modes go through cast-time slots (castStructure / nextCastPrompt) or labeled targets; ETB destroy/exile/regrow/reanimate go through the resolution-time target pickers; sacrifice outlets and edicts through pendingSacrificeChoices / choose_creature_to_sacrifice; searches through choose_card_from_library; triggers through openTriggerOptionPrompt / triggerCardPrompt.
+
+- Aminatou: Aminatou the Fateshifter (+1 put-back, -1 blink, -6 direction), Aminatou Veil Piercer (surveil), Archaeomancer's Map, Athreos, Debtors' Knell, Starfield of Nyx, Extravagant Replication, Moon-Blessed Cleric, Thriving lands, Swords/Utter End/Void Rend/Return to Dust/Abrade-style spells, Ponder/Portent/Consider, Emeria-style returns, Saheeli's Artistry (modal + targets), Mirrormade/Copy.
+- Meren: Meren end step, Plaguecrafter / Fleshbag / Merciless Executioner / Demon's Disciple / Accursed Marauder (each-player sacrifice picker, discard fallback), Eternal Witness, Ravenous Chupacabra, Shriekmaw, Reclamation Sage ("you may destroy"), Victimize, Reanimate, Animate Dead, Sheoldred WO, Cankerbloom / Insidious Fungus / Caustic Caterpillar (modes), Viscera Seer / Ashnod's Altar / Carrion Feeder / High Market / Birthing Pod / Yawgmoth (sacrifice pick), Grisly Salvage, Entomb / Diabolic Intent / Buried Alive (search), Braids (picker), Blood Artist (player pick), Junji / Atsushi (modal), Solemn / Wood Elves.
+- Saheeli: Sai (sac two artifacts), Myr Battlesphere ETB, Whir/Fabricate (basic search), Thirst for Knowledge (cast), Goldspan-style token makers, Skysovereign (see fixed), Retrofitter Foundry, Cryptbreaker-style discard costs.
+- The Ur-Dragon / Lathliss / Reign of Dragons: Ur-Dragon attack draw + put permanent, Lathliss dragon-from-hand, Scourge of Valkas / Dragon Tempest / Warstorm Surge / Terror of the Peaks (aim the damage), Leyline Tyrant (pay + aim), Outpost Siege / Citadel Siege (mode on entering), Parapet Thrasher (modal), Breaching Dragonstorm, Dragonhawk, Bladewing, Haven of the Spirit Dragon, Orb of Dragonkind, Sarkhan Dragon Ascendant.
+- Calling All Angels: Angel of the Ruins, Grasp of Fate, Emeria Shepherd, Norn's Choirmaster (proliferate), Reya Dawnbringer, Oversold Cemetery, Sephara, Path/Swords/Fateful Absence, Valorous Stance / Destroy Evil / Austere Command / Cleansing Nova (modes).
+- Keen Engineering: Angel-of-the-Ruins-style exile pickers, Kappa Cannoneer, Master Transmuter excepted (see below), Meteor Golem, Aether Spellbomb, Myr Retriever.
+- Tramplesaurus Rex: Rishkar, Peema Renegade (up to two creatures), Thickest in the Thicket, Ram Through / Bite Down (two creatures), Beast Within, Scavenging Ooze, Elder Gargaroth (mode), Clifftop Lookout.
+- Wretched Ranks: Cemetery Reaper, Lord of the Undead, Gravespawn Sovereign, Phyrexian Reclamation, Memorial to Folly, Witch's Cottage, Zul Ashur, Cryptbreaker, Necrotic Hex.
+- Breena: counters (fixed earlier), plus the cards above they share.
+
+## (b) Gaps FIXED
+
+1. **Chandra's Ignition** - the damage dealer was always the strongest creature. Now a labeled "choose the creature you control that deals the damage" prompt (spellTargetSlots + `chosenTargets` in the `creature_damages_everything_else` resolver).
+2. **Consumed by Greed** and **Secret Rendezvous** ("target opponent") - the opponent was auto-picked (biggest board / lowest life). Now a human picks the opponent (same labeled-target path, `opponent_sacrifices_greatest_power` / `you_and_opponent_draw` honour the pick).
+3. **Daretti, Scrap Savant +2** ("Discard up to two cards, then draw that many") - did not parse, so it went to the advisor. Now `discard_any_then_draw` has a `max`; the human picks the discards one at a time with the existing picker, capped at two.
+4. **Tiamat** ("search for up to five Dragon cards not named Tiamat that each have different names", with a Flying keyword line ahead of it) - did not parse as a search. Now parsed deterministically as a five-card hand search, so the human gets the `choose_card_from_library` picker. (The "if you cast it" rider is dropped; singleton makes the name clauses vacuous.)
+5. **Skysovereign, Consul Flagship** and **Tyrant's Familiar** - the damage prompt listed EVERY creature (including the human's own). Now only the opponents' creatures/planeswalkers (defending player's for the Familiar).
+6. **Surrak, the Hunt Caller** (and any upkeep/combat/end-step trigger whose effect is a single effect with a human choice that the trigger prompts already handle: target creature gains keyword, pump a creature, double power counters, up-to-N counters, damage aim, ...) - the human was never asked; the engine used the strongest creature. The phase-trigger dispatch now reuses the trigger prompts, gated on the clause's own "if" condition (new exported `phaseClauseConditionMet`).
+7. **Second and later phase triggers in the same step** (ordered multi-trigger loop) - lacked the modal, echo, graveyard-return, aimed-target prompts the single-trigger path had, so a second trigger auto-resolved. Both paths now share `openHumanPhaseChoice` (e.g. Debtors' Knell + Starfield of Nyx + Reya on the same upkeep).
+8. **Optional ("you may") upkeep/end-step triggers that resolve deterministically** (Cemetery Tampering's "you may mill three", Land Tax's "you may search", Reya/Starfield/Oversold when there is exactly one legal card) - resolved as an automatic yes. A human now gets a Yes/No (`phase_optional`).
+9. **Godless Shrine, Fell the Profane // Fell Mire, Sink into Stupor // Soporific Springs, Sea Gate Restoration // Sea Gate, Reborn, Agadeem / Disciple of Freyalise-style pay-life lands** ("As this land enters, you may pay N life") - the engine decided for the human (paid unless life <= 10). A human's land now enters tapped and a Yes/No ("pay N life to have it untapped") opens from `session.pendingShockChoices`. Agents unchanged.
+10. **"Sacrifice another creature/permanent" in the LLM-planner fallback** (Disciple of Bolas class, `sacrifice_permanent` step) - always auto-picked via choosePlaguecrafterSacrifice. A human with a real choice now gets the sacrifice picker. (The "gain X life / draw X" follow-up that depends on the sacrificed creature is still not modelled; see (c).)
+
+Tests: `src/components/AppFlow.promptAudit.test.ts` (8 tests, real Oracle text). Full suite: 1465 passing; `tsc --noEmit` clean.
+
+## (c) Gaps found, NOT fixed
+
+Each needs either a new engine effect or a new prompt UI, not just routing to an existing prompt.
+
+- **Drakuseth, Maw of Flames** - the "3 damage to each of up to two OTHER targets" half is not modelled at all (only the 4 damage to one target is). Needs a multi-target damage effect + picker.
+- **Orzhov Advokist, Keen Duelist, Parker Luck, Nils (per-player up-to-one counters), Call the Spirit Dragons (which Dragon per colour), Reluctant Role Model (counter kind + target), The Ozolith (move counters), Resourceful Defense, Shadrix Silverquill (two modes on different players), Brudiclad (which token), Master of Ceremonies (opponent choice)** - upkeep/combat/end-step triggers the deterministic engine has no effect for; they fall through to the rules advisor / planner, which auto-resolves without the human's choices. Need per-card effects.
+- **Council's Judgment (vote), Promise of Loyalty (each player picks a creature), Monstrous Onslaught (divided damage), Scheming Symmetry (two players), Parting Gust / gift cards, Agadeem's Awakening (any number of different-mana-value targets), Perch Protection** - no deterministic parser; advisor fallback. Need a vote / divide / multi-target UI.
+- **Protean Hulk** ("any number of creatures with total mana value 6 or less"), **Whir of Invention / Fiend Artisan / Birthing Pod-style "mana value X or less" searches** - the search parser rejects "with mana value ..." filters; need an MV-aware filter on choose_card_from_library.
+- **Hopeful Initiate, Master Transmuter, Command Beacon, Forge of Heroes, Mystic Forge, Disciple of Griselbrand, Hazoret's Monument, Myr Battlesphere (tap X Myr), Hellkite Charger (pay for extra combat), Hellkite Courser, Sidisi (exploit), Sarkhan Soul Aflame, Duplicant, Prototype Portal** - activated or triggered abilities with no deterministic implementation (unparsed => advisor). Need effects + prompts.
+- **Shineshadow Snarl** ("you may reveal a Plains or Swamp card from your hand, else enters tapped") - always enters tapped; the reveal choice is not offered.
+- **Sarkhan Unbroken** (-8 any number of Dragons; +1 add one mana of any colour - colour not chosen), **Phyrexian Altar / Commander's Sphere-style "any color" mana from a sacrifice** - colour is auto-picked.
+- **Disciple of Bolas** - the sacrifice now prompts, but "you gain life and draw cards equal to its power" is not applied after the pick.
+- **Citadel Siege (Dragons mode)** - the opponent-turn "tap target creature that player controls" never fires (phase sweep only covers the active seat); a rules gap rather than a prompt gap.
+- **Yennett, Cryptic Sovereign** - parsed as "draw a card" on attack; the "reveal, you may cast it free if its mana value is odd" choice is not modelled.
+- **Westvale Abbey** ("Sacrifice five creatures") - noted in code as heuristic-only (no multi-select picker for fixed plural sacrifice costs).

@@ -464,11 +464,13 @@ export function deterministicRuleWorkflow(input: RuleAdvisorInput): RuleWorkflow
   }
 
   if (scopedText.includes("search your library") && scopedText.includes("put") && scopedText.includes("hand")) {
+    // "up to three basic land cards" (Land Tax): the count is in the search clause, same as the graveyard branch above.
+    const handSearchCount = numberWordToInt(graveyardSearchCountMatch?.[1]) ?? 1;
     return {
       workflow: "search_library_to_hand",
-      summary: `${input.sourceCard.name} can search the library for a card and put it into hand.`,
+      summary: `${input.sourceCard.name} can search the library for ${handSearchCount === 1 ? "a card" : `up to ${handSearchCount} cards`} and put ${handSearchCount === 1 ? "it" : "them"} into hand.`,
       sourceCardId: input.sourceCard.id,
-      maxChoices: 1,
+      maxChoices: handSearchCount,
       allowedCardFilter: extractSearchedCardType(scopedText) ?? "cards matching the source effect",
       manaValueRestriction: extractManaValueRestriction(scopedText),
       destination: "hand",
@@ -597,6 +599,8 @@ function extractSearchedCardType(text: string): string | undefined {
   const LIST_OF_TYPES = "[a-z][a-z'-]*(?:,\\s*[a-z][a-z'-]*)*(?:,?\\s*or\\s+[a-z][a-z'-]*)?";
   const pluralMatch = text.match(new RegExp(`\\bsearch (?:your|their) library for up to \\w+ (${LIST_OF_TYPES}) cards?\\b`));
   if (pluralMatch) return pluralMatch[1].trim();
+  // "up to three basic land cards" (Land Tax): "basic land" is a two-word type the single-word list grammar above can't capture.
+  if (/\bsearch (?:your|their) library for up to \w+ basic land cards?\b/.test(text)) return "basic land";
   // "a Dragon creature card" (Sarkhan's Triumph): a subtype followed by the card type. The subtype is the filter (a card with it in its type
   // line is that kind of creature); without this the search offered every card in the library.
   const subtypeMatch = text.match(/\bsearch (?:your|their) library for an? ([a-z][a-z'-]*) (?:creature|artifact|enchantment) cards?\b/);
@@ -693,7 +697,7 @@ export async function requestRuleWorkflow(input: RuleAdvisorInput, baseUrl = pro
         {
           role: "system",
           content:
-            "You are an MTG rules workflow classifier. Return JSON only. Do not change game state. Classify what UI workflow is needed for the source card effect using the supplied battlefield, hand, graveyard, exile, and library preview. The sourceCard's oracleText has already been trimmed to only the clause relevant to this event — do not infer or recall other abilities the card might have from training data; classify based solely on the given text. Use scry_cards for scry N, surveil_cards for surveil N, draw_cards for draw N, look_at_top_cards for effects that only look at top N cards, reorder_top_cards for effects that look at top N cards and put them back in any order, search_library_to_hand/search_library_to_battlefield/search_library_to_graveyard/search_library_to_library for library search effects depending on which zone the found card actually goes to — search_library_to_library is for a tutor that puts the found card on top of the library instead of into hand/battlefield/graveyard (e.g. \"search your library for a card, reveal it, then shuffle and put that card on top\") (never open a search of the graveyard itself — the search always happens in the library; the destination is just where the found card ends up). Put N in maxChoices. Prefer manual_review if unsure."
+            "You are an MTG rules workflow classifier. Return JSON only. Do not change game state. Classify what UI workflow is needed for the source card effect using the supplied battlefield, hand, graveyard, exile, and library preview. The sourceCard's oracleText has already been trimmed to only the clause relevant to this event — do not infer or recall other abilities the card might have from training data; classify based solely on the given text. Use scry_cards for scry N, surveil_cards for surveil N, draw_cards for draw N, look_at_top_cards for effects that only look at top N cards, reorder_top_cards for effects that look at top N cards and put them back in any order, search_library_to_hand/search_library_to_battlefield/search_library_to_graveyard/search_library_to_library for library search effects depending on which zone the found card actually goes to — search_library_to_library is for a tutor that puts the found card on top of the library instead of into hand/battlefield/graveyard (e.g. \"search your library for a card, reveal it, then shuffle and put that card on top\") (never open a search of the graveyard itself — the search always happens in the library; the destination is just where the found card ends up). Put N in maxChoices. Prefer manual_review if unsure. A search whose text says \"reveal it\" reveals the found card to everyone. Commander rule 903.9a: a commander that would be put into the graveyard, exile, hand or library may instead go to its owner's command zone (the engine offers this choice; do not classify it as manual_review), which also severs any \"until this leaves the battlefield\" exile link. Commander tax grows only when the commander is cast from the command zone."
         },
         {
           role: "user",

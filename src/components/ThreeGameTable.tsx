@@ -400,6 +400,7 @@ type RuleChoiceView =
       kind: "commander_zone_choice";
       sourceCardName: string;
       prompt: string;
+      fromZone?: "graveyard" | "exile";
     }
   | {
       kind: "discard_to_hand_size";
@@ -1896,6 +1897,15 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
           ) : null}
         </div>
       ) : null}
+      <ExilePlayableTray
+        seat={props.session.seats.find((item) => item.kind === "human")}
+        turn={props.session.turn}
+        onCast={(cardId) => {
+          const human = props.session.seats.find((item) => item.kind === "human");
+          if (human) props.onCastFromExile?.(human.id, cardId);
+        }}
+        onInspect={props.onInspectCard}
+      />
       {props.ruleChoice?.kind === "manual_review" ? (
         <ManualRuleChoiceModal
           choice={props.ruleChoice}
@@ -2498,7 +2508,8 @@ function LibraryLookModal({
                 {card.imageUris?.normal ? <img src={card.imageUris.normal} alt="" /> : <FallbackLargeCard card={card} />}
               </div>
               <strong>{card.name}</strong>
-              <span>{card.typeLine}</span>
+              <span>{[card.manaCost, card.typeLine].filter(Boolean).join(" · ")}</span>
+              {card.oracleText ? <span className="card-oracle">{card.oracleText}</span> : null}
               {look.mode === "vault_look" ? null : (
                 <div className="library-look-actions">
                   {look.mode === "reorder" ? (
@@ -2591,11 +2602,9 @@ function LibrarySearchModal({
         <div className="library-search-results">
           {filteredCards.length === 0 ? <p>No matching cards.</p> : null}
           {filteredCards.map((card) => (
-            <article className="library-search-card" key={card.id}>
-              <div>
-                <strong>{card.name}</strong>
-                <span>{card.typeLine}</span>
-              </div>
+            <article className="library-search-card rich" key={card.id}>
+              <CardThumb card={card} />
+              <CardRowInfo card={card} />
               {destinationChoices?.length ? (
                 <div className="library-search-destination-choices">
                   {destinationChoices.map((choice) => (
@@ -3229,7 +3238,7 @@ function CommanderZoneChoiceModal({
     <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label={`Command zone choice for ${choice.sourceCardName}`} onClick={onDecline}>
       <article className="mana-choice-modal" onClick={(event) => event.stopPropagation()}>
         <header>
-          <p className="eyebrow">Commander in graveyard</p>
+          <p className="eyebrow">Commander in {choice.fromZone ?? "graveyard"}</p>
           <h2>{choice.sourceCardName}</h2>
         </header>
         <p>{choice.prompt}</p>
@@ -3238,7 +3247,7 @@ function CommanderZoneChoiceModal({
             Move to command zone
           </button>
           <button className="inspector-action" type="button" onClick={onDecline}>
-            Leave in graveyard
+            Leave in {choice.fromZone ?? "graveyard"}
           </button>
         </div>
       </article>
@@ -3984,12 +3993,9 @@ function ZoneViewerModal({
         <div className="library-search-results">
           {cards.length === 0 ? <p>No cards in {title.toLowerCase()}.</p> : null}
           {cards.map((card) => (
-            <article className="library-search-card" key={card.id}>
-              {card.imageUris?.normal ? <img src={card.imageUris.normal} alt="" /> : <FallbackHandCard card={card} />}
-              <div>
-                <strong>{card.name}</strong>
-                <span>{card.typeLine}</span>
-              </div>
+            <article className={`library-search-card rich ${canCastFromExile(card) ? "castable" : ""}`} key={card.id}>
+              <CardThumb card={card} />
+              <CardRowInfo card={card} playableNote={zone === "exile" && card.exiledPlayableBySeatId === seat?.id ? exilePlayableNote(card, turn) : undefined} />
               <button type="button" onClick={() => onInspect?.(card)}>Inspect</button>
               {canReturnToHand ? <button type="button" onClick={() => onMoveToHand?.(card.id)}>To Hand</button> : null}
               {canCastFromExile(card) ? <button type="button" onClick={() => onCastFromExile?.(card.id)}>Cast</button> : null}
@@ -4008,6 +4014,57 @@ function ZoneViewerModal({
         </div>
       </article>
     </div>
+  );
+}
+
+// Shared pieces of a "pick a card from a list" row: a card-art thumbnail (hover to enlarge) and the cost,
+// type line and full rules text, so a search/exile list shows what each card does, not only its name.
+function CardThumb({ card }: { card: VisibleCard }) {
+  return card.imageUris?.normal ? <img className="card-thumb" src={card.imageUris.normal} alt={card.name} /> : <FallbackHandCard card={card} />;
+}
+
+function CardRowInfo({ card, playableNote }: { card: VisibleCard; playableNote?: string }) {
+  return (
+    <div>
+      <strong>{card.name}</strong>
+      <span>{[card.manaCost, card.typeLine].filter(Boolean).join(" · ")}</span>
+      {card.power !== undefined ? <span>{card.power}/{card.toughness}</span> : null}
+      {card.oracleText ? <span className="card-oracle">{card.oracleText}</span> : null}
+      {playableNote ? <span className="exile-playable-note">{playableNote}</span> : null}
+    </div>
+  );
+}
+
+function exilePlayableNote(card: VisibleCard, turn: number) {
+  if (card.exiledPlayableUntilTurn !== undefined && turn > card.exiledPlayableUntilTurn) return undefined;
+  return card.exiledPlayableUntilTurn === undefined ? "You may cast this from exile." : card.exiledPlayableUntilTurn === turn ? "You may cast this from exile until end of turn." : `You may cast this from exile through turn ${card.exiledPlayableUntilTurn}.`;
+}
+
+// Always-visible reminder of cards the human can currently cast or play from exile (Count on Luck, impulse draw,
+// "exile ... you may cast it"): without it they just vanish into the exile pile and are easy to forget.
+function ExilePlayableTray({ seat, turn, onCast, onInspect }: { seat?: PlayerSeat; turn: number; onCast?: (cardId: string) => void; onInspect?: (card: VisibleCard) => void }) {
+  if (!seat || seat.kind !== "human") return null;
+  const playable = (seat.board.exile ?? []).filter(
+    (card) => card.exiledPlayableBySeatId === seat.id && (card.exiledPlayableUntilTurn === undefined || turn <= card.exiledPlayableUntilTurn)
+  );
+  if (playable.length === 0) return null;
+  return (
+    <aside className="exile-tray" aria-label="Playable from exile">
+      <h3>Playable from exile</h3>
+      {playable.map((card) => (
+        <div className="exile-tray-card" key={card.id}>
+          <button className="exile-tray-thumb" type="button" onClick={() => onInspect?.(card)} title="Inspect">
+            <CardThumb card={card} />
+          </button>
+          <div>
+            <strong>{card.name}</strong>
+            <span>{[card.manaCost, card.typeLine].filter(Boolean).join(" · ")}</span>
+            <span>{exilePlayableNote(card, turn)}</span>
+          </div>
+          <button type="button" onClick={() => onCast?.(card.id)}>Cast</button>
+        </div>
+      ))}
+    </aside>
   );
 }
 
@@ -4357,13 +4414,15 @@ function addPowerToughnessPlate(group: THREE.Group, card: VisibleCard, x: number
   if (!card.typeLine.includes("Creature")) return;
   const printedPower = Number.parseInt(card.power ?? "", 10);
   const printedToughness = Number.parseInt(card.toughness ?? "", 10);
-  if (!Number.isFinite(printedPower) || !Number.isFinite(printedToughness)) return;
+  // A "*"/"*" creature (Dungrove Elder, Tarmogoyf...) has no printed number to compare with: always show its live P/T, in a neutral blue.
+  const starred = !Number.isFinite(printedPower) || !Number.isFinite(printedToughness);
+  if (starred && card.power === undefined) return;
   const power = effectivePower(card);
   const toughness = effectiveToughness(card);
-  if (power === printedPower && toughness === printedToughness) return;
-  const bigger = power >= printedPower && toughness >= printedToughness;
+  if (!starred && power === printedPower && toughness === printedToughness) return;
+  const bigger = starred || (power >= printedPower && toughness >= printedToughness);
   const text = `${power}/${toughness}`;
-  const key = `pt|${text}|${bigger}`;
+  const key = `pt|${text}|${bigger}|${starred}`;
   let texture = counterBadgeTextureCache.get(key);
   if (!texture) {
     const canvas = document.createElement("canvas");
@@ -4372,7 +4431,7 @@ function addPowerToughnessPlate(group: THREE.Group, card: VisibleCard, x: number
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     roundRect(ctx, 4, 4, 184, 88, 18);
-    ctx.fillStyle = bigger ? "#2f9e44" : "#c92a2a";
+    ctx.fillStyle = starred ? "#1c7ed6" : bigger ? "#2f9e44" : "#c92a2a";
     ctx.fill();
     ctx.lineWidth = 6;
     ctx.strokeStyle = "rgba(0, 0, 0, 0.7)";

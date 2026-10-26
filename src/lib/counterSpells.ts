@@ -3,11 +3,15 @@
 // covered (not "counter target activated/triggered ability") — that's a separate, larger feature
 // since this engine's stack model treats spells and abilities differently.
 
-export type CounterSpellRestriction = "any" | "creature" | "noncreature" | "commander";
+export type CounterSpellRestriction = "any" | "creature" | "noncreature" | "commander" | "types";
 
 export interface CounterSpellAbility {
   restriction: CounterSpellRestriction;
   taxAmount?: number;
+  // restriction "types": "Counter target enchantment, instant, or sorcery spell." (Swan Song), "Counter target instant or sorcery spell." — the card types it may hit.
+  types?: string[];
+  // "Its controller creates a 2/2 blue Bird creature token with flying." (Swan Song): the clause, applied to the COUNTERED spell's controller.
+  controllerTokenClause?: string;
 }
 
 export function parseCounterSpellAbility(oracleText: string): CounterSpellAbility | undefined {
@@ -20,6 +24,16 @@ export function parseCounterSpellAbility(oracleText: string): CounterSpellAbilit
   if (/\bcounter target noncreature spell\b/.test(text)) return { restriction: "noncreature" };
   if (/\bcounter target commander spell\b/.test(text)) return { restriction: "commander" };
   if (/\bcounter target spell\b/.test(text)) return { restriction: "any" };
+
+  const typed = text.match(/\bcounter target ((?:[a-z]+(?:, or |, | or ))*[a-z]+) spell\b/);
+  if (typed) {
+    const known = ["artifact", "creature", "enchantment", "instant", "sorcery", "planeswalker", "land", "battle"];
+    const types = typed[1].split(/, or |, | or /).map((word) => word.trim());
+    if (types.length > 0 && types.every((word) => known.includes(word))) {
+      const rider = oracleText.match(/\bits controller (creates? [^.]+)\./i)?.[1];
+      return { restriction: "types", types: types.map((word) => word.charAt(0).toUpperCase() + word.slice(1)), ...(rider ? { controllerTokenClause: rider } : {}) };
+    }
+  }
 
   return undefined;
 }
@@ -58,6 +72,7 @@ export function counterSpellCanTarget(ability: CounterSpellAbility, targetTypeLi
   if (ability.restriction === "creature") return targetTypeLine.includes("Creature");
   if (ability.restriction === "noncreature") return !targetTypeLine.includes("Creature");
   if (ability.restriction === "commander") return targetIsCommanderSpell;
+  if (ability.restriction === "types") return (ability.types ?? []).some((type) => targetTypeLine.includes(type));
   return true;
 }
 

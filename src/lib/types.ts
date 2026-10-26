@@ -145,6 +145,10 @@ export interface PlayerSeat {
   drawnThisTurn?: { turn: number; count: number };
   // True once this player has created a token this turn (Idol of Oblivion's "activate only if you created a token this turn"); cleared when the turn changes.
   createdTokenThisTurn?: boolean;
+  // Archway of Innovation: "The next spell you cast this turn has improvise."
+  nextSpellHasImprovise?: boolean;
+  // Finale of Revelation (X >= 10): "you have no maximum hand size for the rest of the game".
+  noMaximumHandSize?: boolean;
   kind: SeatKind;
   agentName?: AgentName;
   life: number;
@@ -344,6 +348,23 @@ export interface VisibleCard {
   exiledUntilSourceLeaves?: string;
   // Myriad token copies: "Exile the tokens at end of combat."
   exileAtEndOfCombat?: boolean;
+  // "Exile it at the beginning of the next end step." (Mimic Vat's token, Saheeli the Gifted's -7 copies) — dropped by applyEndStepEffects.
+  exileAtEndStep?: boolean;
+  // Memnarch: "Target permanent becomes an artifact in addition to its other types." (no duration; folded into grantedTypes by the type-grant pass)
+  permanentlyArtifact?: boolean;
+  // Imprisoned in the Moon: what the enchanted permanent was before it became a colorless land (restored when the Aura leaves).
+  imprisonedOriginal?: { typeLine: string; oracleText: string; power?: string; toughness?: string; colors: string[]; abilitiesStripped?: boolean; counters?: VisibleCard["counters"] };
+  // Seat ids this creature dealt combat damage to this turn (Steel Hellkite's "{X}: Destroy each nonland permanent with mana value X whose controller was dealt combat damage by this creature this turn").
+  damagedPlayersThisTurn?: string[];
+  // Set on an artifact the moment its controller taps it for mana (spendManaSources); read once by the Treasure Nabber watcher in the state-based pass, then cleared.
+  justTappedForMana?: boolean;
+  // Treasure Nabber: "gain control of that artifact until the end of your next turn" — the owner to give it back to, and when (the stealer's end step on a later turn than afterTurn).
+  nabbedFromSeatId?: string;
+  nabbedUntil?: { seatId: string; afterTurn: number };
+  // Manifest (Dissection Tools): the real card behind a face-down 2/2.
+  faceDownCardName?: string;
+  // Imprint (Mimic Vat): the id of the permanent this exiled card is imprinted on ("a card exiled with this artifact").
+  imprintedOnId?: string;
   // The human's pick for an "enter as a copy of ..." replacement (Cursed Mirror, Mirrormade), set on the hand card before it is cast; "none" declines.
   chosenCopyTargetId?: string;
   // Vanishing / fading: the time or fade counters have been put on (done lazily at the first upkeep).
@@ -534,6 +555,15 @@ export interface GameSession {
   // The turn the monarch's end-step card was already drawn (so the End Turn shortcut and the end step itself never both draw).
   monarchDrawTurn?: number;
   pendingSacrificeChoices?: Array<{ seatId: string; sourceCardId: string; sourceCardName: string; count: number; typeFilter?: string }>;
+  // "Put N counters on a creature you control" effects that resolved inside a pure session transformer (Breena, the Demagogue) and
+  // still need the human to pick the creature; the picker opens from here (see the pendingCounterChoices drain effect in AppFlow).
+  pendingCounterChoices?: Array<{ seatId: string; sourceCardId: string; sourceCardName: string; counterKind: string; amount: number; restrictToYourControl: boolean }>;
+  // A land with "As this land enters, you may pay N life. If you don't, it enters tapped" that a human just played: it entered tapped and the
+  // yes/no to pay for it untapped opens from here (see the pendingShockChoices drain effect in AppFlow).
+  // A real choice a HUMAN owes in the middle of a pure resolution (Toxic Deluge's X, Council's Judgment's vote, Crackle with Power's targets, Brudiclad's token):
+  // the resolver parks it here and the component opens a prompt (see the pendingPlayerChoices drain effect and resolveDeferredChoice in AppFlow).
+  pendingPlayerChoices?: Array<{ seatId: string; sourceCardId: string; sourceCardName: string; prompt: string; options: Array<{ label: string; value: string }>; resolver: string; data: Record<string, unknown> }>;
+  pendingShockChoices?: Array<{ seatId: string; cardId: string; cardName: string; life: number; revealTypes?: string[] }>;
   pendingAttackDeclarations?: Array<{ seatId: string; card: VisibleCard; defendingSeatId: string }>;
   // Rule 724: the player who is currently the monarch (Court of Grace, Skyline Despot, Marchesa's Decree). They draw
   // an extra card at the beginning of their end step, and a creature that deals combat damage to them makes its

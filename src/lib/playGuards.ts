@@ -10,7 +10,7 @@
 
 import type { CardLike, ScorableAction, ScoringContext } from "./actionScoring";
 import { creatureValue } from "./strategy";
-import { hasDeathtouch, hasIndestructible, parseNum, simulateDuel } from "./combatSim";
+import { hasDeathtouch, hasIndestructible, hasKeyword, parseNum, simulateDuel } from "./combatSim";
 import { untappedBlockersFor } from "./freeAttack";
 import { wipeSequencingGuard } from "./wipeSequencing";
 import { mustAttackEachCombat } from "./combatRestrictions";
@@ -99,6 +99,36 @@ export function parseTargetedRemoval(action: ScorableAction): RemovalSpell | und
   return undefined;
 }
 
+const COLOR_NAME_TO_CODE: Record<string, string> = { white: "W", blue: "U", black: "B", red: "R", green: "G" };
+
+// Colour letters in the leading mana cost of a legal-action detail ("{1}{W} Instant. ...").
+export function spellColorsOf(action: ScorableAction): string[] {
+  const cost = (action.detail ?? "").match(/^\s*((?:\{[^}]+\}\s*)+)/)?.[1] ?? "";
+  return Array.from(new Set((cost.match(/\{([WUBRG])(?:\/[A-Z0-9]+)?\}/g) ?? []).map((symbol) => symbol[1])));
+}
+
+// "protection from white", "protection from red and blue", "protection from everything" (card.keywords entries, or the card's own text).
+export function isProtectedFromSpell(card: CardLike, spellColors: string[]): boolean {
+  const lines = [...(card.keywords ?? []), ...(card.keywords ? [] : (card.oracleText ?? "").split("\n"))].map((line) => line.toLowerCase());
+  for (const line of lines) {
+    const match = line.match(/^protection from ([a-z ,]+)/);
+    if (!match) continue;
+    if (/\beverything\b/.test(match[1])) return true;
+    const words = match[1].split(/[ ,]+/);
+    if (words.some((word) => spellColors.includes(COLOR_NAME_TO_CODE[word] ?? ""))) return true;
+  }
+  return false;
+}
+
+// Ward is a tax on the removal spell: the target is worth that much less (at least one point; one point per ward {1}).
+export function wardPenalty(card: CardLike): number {
+  const entry = (card.keywords ?? []).map((line) => line.toLowerCase()).find((line) => line.startsWith("ward"));
+  const text = entry ?? (card.keywords ? undefined : clean(card.oracleText).match(/\bward\b[^.\n]*/)?.[0]);
+  if (!text) return 0;
+  const amount = Number(text.match(/\d+/)?.[0] ?? 1);
+  return 0.5 + 0.5 * Math.max(1, amount);
+}
+
 function removalMinThreat(spellManaValue: number): number {
   return 4 + Math.max(0, spellManaValue - 2) * 0.5;
 }
@@ -145,10 +175,15 @@ export function removalGuard(action: ScorableAction, context: ScoringContext): R
   if (!spell) return ALLOWED;
   const opponents = context.opponents ?? [];
   const named = action.targetIds.map((id) => opponents.flatMap((opponent) => opponent.battlefield ?? []).find((card) => card.id === id)).filter((card): card is CardLike => Boolean(card));
-  const pool = opponents.flatMap((opponent) => opponent.battlefield ?? []).filter((card) => !(card.typeLine ?? "").includes("Land"));
+  // An opponent's hexproof/shroud or phased-out permanent is not a legal target at all, so it can never be "the threat worth removing"
+  // (a hexproof commander next to a 1/1 Servo made the guard approve Swords, whose only legal target was the Servo).
+  // Protection from the SPELL's colour (read from the leading mana cost of the action detail) or from everything makes it illegal too.
+  const spellColors = spellColorsOf(action);
+  const targetable = (card: CardLike) => !card.phasedOut && !hasKeyword(card, "hexproof") && !hasKeyword(card, "shroud") && !isProtectedFromSpell(card, spellColors);
+  const pool = opponents.flatMap((opponent) => opponent.battlefield ?? []).filter((card) => !(card.typeLine ?? "").includes("Land") && targetable(card));
   const typed = spell.types && !spell.types.includes("permanent") ? spell.types : undefined;
   const matchesTypes = (card: CardLike) => (typed ?? []).some((type) => (type === "creature" ? isCreature(card) : (card.typeLine ?? "").includes(type === "artifact" ? "Artifact" : type === "enchantment" ? "Enchantment" : "Planeswalker")));
-  const candidates = named.length > 0 ? named : spell.scope === "creature" ? pool.filter(isCreature) : typed ? pool.filter(matchesTypes) : pool;
+  const candidates = named.length > 0 ? named.filter(targetable) : spell.scope === "creature" ? pool.filter(isCreature) : typed ? pool.filter(matchesTypes) : pool;
   if (candidates.length === 0) {
     // Removal with no opposing legal target on the table (no creature for creature removal, no artifact/enchantment/creature for Exorcise or
     // Putrefy-style text) can only be aimed at my own permanents (Swords on my own commander); self-play found agents casting it anyway.
@@ -165,7 +200,8 @@ export function removalGuard(action: ScorableAction, context: ScoringContext): R
   const manaValue = spellCard?.manaValue ?? 2;
   const myLife = Math.max(1, context.you?.life ?? 40);
 
-  const scored = candidates.map((card) => ({ card, threat: opposingThreat(card, context) })).sort((a, b) => b.threat - a.threat);
+  // Ward is a real tax on the removal spell: the target is worth that much less per point of ward cost (at least one point).
+  const scored = candidates.map((card) => ({ card, threat: opposingThreat(card, context) - wardPenalty(card) })).sort((a, b) => b.threat - a.threat);
   const best = scored[0];
   const second = scored[1]?.threat ?? 0;
   let threshold = removalMinThreat(manaValue);

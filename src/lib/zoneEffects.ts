@@ -335,7 +335,9 @@ export function parseZoneEffect(oracleText: string): ZoneEffect | undefined {
     if (amount) return { kind: "mill", amount, scope: "you", then: landToTop };
   }
 
-  if (/\bshuffle your graveyard into your library\b/.test(text)) return { kind: "graveyard_to_library", scope: "you" };
+  // "If X is 10 or more, INSTEAD shuffle your graveyard into your library, draw X cards..." (Finale of Revelation) is a conditional alternative of a
+  // draw spell, never an unconditional shuffle — it is owned by spellExtras' finale_of_revelation.
+  if (/\bshuffle your graveyard into your library\b/.test(text) && !/\binstead shuffle your graveyard\b/.test(text)) return { kind: "graveyard_to_library", scope: "you" };
   if (/\btarget player shuffles (?:their|your) graveyard into (?:their|your) library\b/.test(text)) {
     return { kind: "graveyard_to_library", scope: "target_player" };
   }
@@ -344,7 +346,7 @@ export function parseZoneEffect(oracleText: string): ZoneEffect | undefined {
   if (/\bexile target player'?s graveyard\b/.test(text) || /\bexile all cards from target player'?s graveyard\b/.test(text)) {
     return { kind: "exile_graveyard", scope: "target_player" };
   }
-  if (/\beach opponent exiles (?:their|his or her) graveyard\b/.test(text)) return { kind: "exile_graveyard", scope: "each_opponent" };
+  if (/\beach opponent exiles (?:their|his or her) graveyard\b/.test(text) || /\bexile each opponent'?s graveyard\b/.test(text)) return { kind: "exile_graveyard", scope: "each_opponent" };
   if (/\beach player exiles (?:their|his or her) graveyard\b/.test(text)) return { kind: "exile_graveyard", scope: "each_player" };
 
   const gainControl = text.match(/\bgain control of (?:it|target creature)\b/);

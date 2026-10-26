@@ -37,6 +37,28 @@ export type SpellExtraEffect =
   // "The owner of target permanent shuffles it into their library, then reveals the top card of
   // their library. If it's a permanent card, they put it onto the battlefield." (Chaos Warp)
   | { kind: "shuffle_permanent_reveal_top" }
+  // "Draw X cards, then discard a card." (Pull from Tomorrow)
+  | { kind: "draw_x_then_discard"; discard: number }
+  // "Draw three cards. Then discard two cards unless you discard an artifact card." (Thirst for Knowledge)
+  | { kind: "draw_then_discard_unless"; draw: number; discard: number; unlessType: string }
+  // "As an additional cost to cast this spell, pay X life. All creatures get -X/-X until end of turn." (Toxic Deluge)
+  | { kind: "pay_x_life_mass_shrink" }
+  // "Mill five cards, then return a creature card from your graveyard to the battlefield." (Incarnation Technique; demonstrate's copy is not modeled)
+  | { kind: "mill_then_reanimate_creature"; mill: number }
+  // "Each player sacrifices all permanents they control that are one or more colors." (All Is Dust)
+  | { kind: "sacrifice_all_colored_permanents" }
+  // "Return all attacking creatures to their owner's hand." (Aetherize)
+  | { kind: "bounce_all_attackers" }
+  // "Will of the council — Starting with you, each player votes for a nonland permanent you don't control. Exile each permanent with the most votes or tied for most votes." (Council's Judgment)
+  | { kind: "council_judgment" }
+  // Finale of Revelation: draw X; at X >= threshold shuffle the graveyard in, draw X, untap lands and lose the hand-size limit. The spell exiles itself.
+  | { kind: "finale_of_revelation"; threshold: number; untapLands: number }
+  // Reality Heist: look at the top N, take up to M cards of a type, the rest to the bottom in a random order.
+  | { kind: "look_take_type_rest_bottom"; look: number; take: number; cardType: string }
+  // Saheeli's Directive: reveal the top X, put any number of cards of a type with mana value <= X onto the battlefield, the rest to the graveyard.
+  | { kind: "reveal_x_put_cheap_permanents"; cardType: string }
+  // Crackle with Power: multiplier * X damage to each of up to X targets (any target).
+  | { kind: "damage_times_x_to_up_to_x_targets"; multiplier: number }
   // "Target creature you control deals damage equal to its power to each other creature and each
   // opponent." (Chandra's Ignition)
   | { kind: "creature_damages_everything_else" }
@@ -219,6 +241,50 @@ export function parseSpellExtraEffects(text: string): SpellExtraEffect[] {
     const amount = wordToInt(restrictedMana[1]);
     if (amount) effects.push({ kind: "add_restricted_mana", amount, spellType: restrictedMana[2].charAt(0).toUpperCase() + restrictedMana[2].slice(1).toLowerCase() });
   }
+
+  if (/^as an additional cost to cast this spell, pay x life\. all creatures get -x\/-x until end of turn\.?$/i.test(normalized)) effects.push({ kind: "pay_x_life_mass_shrink" });
+  const millReanimate = normalized.match(/^mill (a|one|two|three|four|five|six|seven|eight|\d+) cards?, then return a creature card from your graveyard to the battlefield\.?$/i);
+  if (millReanimate) effects.push({ kind: "mill_then_reanimate_creature", mill: wordToInt(millReanimate[1]) ?? 1 });
+  if (/^each player sacrifices all permanents they control that are one or more colors\.?$/i.test(normalized)) effects.push({ kind: "sacrifice_all_colored_permanents" });
+  if (/^return all attacking creatures to their owner(?:'s|s')? hands?\.?$/i.test(normalized)) effects.push({ kind: "bounce_all_attackers" });
+  if (/^will of the council\s*[—-]\s*starting with you, each player votes for a nonland permanent you don'?t control\. exile each permanent with the most votes or tied for most votes\.?$/i.test(normalized)) effects.push({ kind: "council_judgment" });
+
+  const thirst = normalized.match(/^draw (a|one|two|three|four|five|\d+) cards?\. then discard (a|one|two|three|four|\d+) cards? unless you discard an? ([a-z]+) card\.?$/i);
+  if (thirst) {
+    const draw = wordToInt(thirst[1]);
+    const discard = wordToInt(thirst[2]);
+    if (draw && discard) effects.push({ kind: "draw_then_discard_unless", draw, discard, unlessType: thirst[3].toLowerCase() });
+  }
+
+  // "Draw X cards, then discard a card." (Pull from Tomorrow)
+  const drawXDiscard = normalized.match(/^draw x cards, then discard (a|one|two|three|\d+) cards?\.?$/i);
+  if (drawXDiscard) {
+    const discard = wordToInt(drawXDiscard[1]);
+    if (discard) effects.push({ kind: "draw_x_then_discard", discard });
+  }
+
+  // "Draw X cards. If X is 10 or more, instead shuffle your graveyard into your library, draw X cards, untap up to five lands, and you have no
+  // maximum hand size for the rest of the game. Exile Finale of Revelation." (Finale of Revelation)
+  const finale = normalized.match(/\bdraw x cards\. if x is (\d+) or more, instead shuffle your graveyard into your library, draw x cards, untap up to (a|one|two|three|four|five|six|seven|\d+) lands?, and you have no maximum hand size for the rest of the game\b/i);
+  if (finale) effects.push({ kind: "finale_of_revelation", threshold: Number.parseInt(finale[1], 10), untapLands: wordToInt(finale[2]) ?? 0 });
+
+  // "Look at the top seven cards of your library. You may reveal up to two artifact cards from among them and put them into your hand. Put the rest
+  // on the bottom of your library in a random order." (Reality Heist)
+  const lookTake = normalized.match(/\blook at the top (a|one|two|three|four|five|six|seven|eight|nine|ten|\d+) cards? of your library\. you may reveal up to (a|an|one|two|three|four|\d+) ([a-z]+) cards? from among them and put (?:it|them) into your hand\. put the rest on the bottom of your library in a random order\b/i);
+  if (lookTake) {
+    const look = wordToInt(lookTake[1]);
+    const take = wordToInt(lookTake[2]);
+    if (look && take) effects.push({ kind: "look_take_type_rest_bottom", look, take, cardType: lookTake[3].toLowerCase() });
+  }
+
+  // "Reveal the top X cards of your library. You may put any number of artifact cards with mana value X or less from among them onto the battlefield.
+  // Then put all cards revealed this way that weren't put onto the battlefield into your graveyard." (Saheeli's Directive)
+  const revealPut = normalized.match(/\breveal the top x cards of your library\. you may put any number of ([a-z]+) cards with mana value x or less from among them onto the battlefield\. then put all cards revealed this way that weren't put onto the battlefield into your graveyard\b/i);
+  if (revealPut) effects.push({ kind: "reveal_x_put_cheap_permanents", cardType: revealPut[1].toLowerCase() });
+
+  // "~ deals five times X damage to each of up to X targets." (Crackle with Power)
+  const crackle = normalized.match(/\bdeals (two|three|four|five|six|\d+) times x damage to each of up to x targets\b/i);
+  if (crackle) effects.push({ kind: "damage_times_x_to_up_to_x_targets", multiplier: wordToInt(crackle[1]) ?? 1 });
 
   return effects;
 }

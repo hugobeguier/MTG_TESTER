@@ -1,0 +1,89 @@
+Commander: Breena, the Demagogue
+1 Anguished Unmaking (PIP) 209
+1 Archangel of Tithes (OTJ) 2
+1 Ash Barrens (PLST) CM2-235
+1 Batwing Brume (PLST) EVE-81
+1 Bloodthirsty Blade (CLB) 854
+1 Caves of Koilos (C21) 283
+1 Citadel Siege (FRF) 8
+1 Combat Calligrapher (C21) 14
+1 Command Tower (ELD) 333
+1 Commander's Sphere (C19) 212
+1 Council's Judgment (PLST) CNS-16
+1 Deathbringer Liege (C21) 214
+1 Despark (C20) 209
+1 Duelist's Heritage (JMP) 101
+1 Dusk Legion Duelist (PMOM) 11p
+1 Eiganjo, Seat of the Empire (NEO) 268
+1 Enshrouding Mist (ORI) 13
+1 Envoy of the Ancestors (MH3) 23
+1 Evolving Wilds (PLST) C18-245
+1 Exotic Orchard (C19) 242
+1 Felisa, Fang of Silverquill (CLB) 845
+1 Fetid Heath (A25) 238
+1 Flawless Maneuver (C20) 26
+1 Fracture (STX) 378
+1 Generous Gift (MH1) 11
+1 Ghostly Prison (C19) 64
+1 Gix, Yawgmoth Praetor (TDC) 181
+1 Godless Shrine (EOE) 254
+1 Hall of Heliod's Generosity (MH1) 241
+1 Hopeful Initiate (VOW) 20
+1 Incarnation Technique (C21) 41
+1 Inkshield (DSC) 221
+1 Isolated Chapel (OTC) 301
+1 Kambal, Consul of Allocation (KLD) 183
+1 Keen Duelist (SLD) 828
+1 Knight of the White Orchid (C20) 93
+1 Land Tax (BBD) 94
+1 Lightning Greaves (PLST) C19-217
+1 Loran's Escape (BRO) 14
+1 Mana Tithe (TSR) 26
+1 Mangara, the Diplomat (BLC) 145
+1 Marble Diamond (CMR) 323
+1 Martial Impetus (C20) 28
+1 Master of Ceremonies (NCC) 18
+1 Mister Negative (SPM) 135
+1 Mortify (PLST) C18-186
+1 Myriad Landscape (C14) 61
+1 Nihil Spellbomb (A25) 226
+1 Nils, Discipline Enforcer (C21) 20
+1 Orzhov Advokist (CM2) 34
+1 Orzhov Basilica (CMA) 264
+1 Orzhov Guildgate (GTC) 244
+1 Orzhov Locket (RNA) 236
+1 Parker Luck (SPM) 60
+1 Parting Gust (BLB) 24
+1 Path to Exile (PLST) E02-3
+1 Perch Protection (BLC) 11
+7 Plains (J25) 81
+1 Promise of Loyalty (C21) 21
+1 Reluctant Role Model (DSK) 303
+1 Resourceful Defense (FIC) 251
+1 Retribution of the Ancients (KTK) 85
+1 Rogue's Passage (PLST) C17-272
+1 Scheming Symmetry (M20) 113
+1 Secluded Steppe (CM2) 266
+1 Secret Rendezvous (STX) 26
+1 Selfless Spirit (CLB) 706
+1 Selfless Squire (C21) 103
+1 Shadowspear (PTHB) 236p
+1 Shadrix Silverquill (TDC) 302
+1 Shattered Sanctum (VOW) 264
+1 Shineshadow Snarl (LTC) 331
+1 Sigarda's Summons (VOW) 36
+1 Sign in Blood (MM2) 97
+1 Spectacular Spider-Man (SPM) 14
+6 Swamp (J25) 89
+1 Sword of the Animist (AFC) 218
+1 Swords to Plowshares (PLST) C16-78
+1 Tainted Field (CLB) 919
+1 Temple of Silence (M21) 255
+1 The Ozolith (IKO) 237
+1 Together Forever (BBD) 32
+1 Toxic Deluge (LTC) 209
+1 Vault of Champions (CMR) 360
+1 Vow of Malice (PLST) CM2-82
+1 War Room (CLB) 929
+1 Windborn Muse (C21) 111
+1 Yathan Tombguard (TDM) 100

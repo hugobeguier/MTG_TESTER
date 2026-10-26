@@ -1,2 +1,31 @@
-1. Return of the Wildspeaker did not let me choose one of the two choices
-2. look at the deer.jpg it entered -180 degrees I would like to have it facing the same way the permanent it is attached to. 
+1. When I activated Saheeli The Gifted +1 loyalty ability "The next spell cost is reduced by X" but if I tap "Sol Ring" to then  cast "Hedron Archive" it uses the 2 generic mana even though I had 3 artifacts out so it should of just used 1 generic mana in my pool.
+2. Emry, Lurker of the Loch does not lett me play cards from my graveyard when its tapped
+3. I get this when trying to activate its ability to tap two other artifacts: "You can't pay for Shimmer Dragon's ability right now (no mana)" can you make sure it gives me a prompt to choose what artifacts to tap. I love the prompt that you added for skull clamp where you can select the permanent, more of that please. 
+4. Malik played chaos warp on my creature but I did not get to know the target until I passed priority, which is wrong I need to know what the target is to respond to it. I had Song Bird in my hand ready to counter spell but since I did not get to know the target I guessed that I would get to know it at a later point. But no.
+5. Monstrous Onslaught resolves.
+
+You passed priority.
+
+Swan Song: Counter target enchantment, instant, or sorcery spell. Its controller creates a 2/2 blue Bird creature token with flying..
+
+Swan Song resolves.
+
+You passed priority.
+
+You responds with Swan Song. Waiting for responses.
+
+Can't play a card while "Monstrous Onslaught" is still on the stack - resolve or pass priority first.
+
+Sable casts Monstrous Onslaught using 5 mana. Waiting for responses.
+
+
+6. I have created some tokens now since I used Saheeli's -7 loyalty ability. Creating a token of Talisman of Creativity but it can only tap for Colorless or Blue mana not red for some reason. Same with the Silverbluff Bridge token. Check Talisman.jpg
+7. Thopter Spy Network trigger resolves. You draws 1 card. Shimmer Dragon deals 5 combat damage to Sable. But Shimmer Dragon is no Artifact so this is wrong.
+8. Can we import Token Graphics from somewhere? would be nice having that as well. 
+9. check DungroveElder1.jpg & DungroveElder2.jpg for its problem where it isnt showing its power and toughness.
+10. Tapping Izzet Signet gives me two red mana not one of each, it does not remove one mana either for the tap effect. 
+11. Cannot resolve Memnarch's ablities, I guess it might be because he is Summoning Sick. But Summoning Sickness should only be for tap effects, if it isnt a tap effect it should be able to trigger. 
+12. Thirst for Knowledge did not let me discard a card but it drew 3 cards. 
+13. Hellkite Igniter does not either let me activate its ability. Nothing happens.
+14. Thopter Spy Network triggers even if I have not done any combat damage
+15. Sable had 8 10/10 attacking him and he had 7 blockers ready, but did not use all of them to stay alive.

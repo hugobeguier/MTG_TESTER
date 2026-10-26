@@ -145,6 +145,29 @@ describe("rule 2: removal on non-threats", () => {
   const titan = perm("Grave Titan", "6", 6);
   const nighthawk = perm("Vampire Nighthawk", "2", 3);
 
+  it("a 1/1 Servo token is not worth Swords, and an untargetable (hexproof/phased-out) big creature does not make it worth it", () => {
+    const servo = token("Servo Token", "1", "1");
+    const ctxFor = (theirs: CardLike[]) => ctx({ theirs, hand: [handCard("Swords to Plowshares")] });
+    expect(removalGuard(castAction("Swords to Plowshares"), ctxFor([servo])).allowed).toBe(false);
+    const hexproofTitan = { ...titan, keywords: ["hexproof"] };
+    expect(removalGuard(castAction("Swords to Plowshares"), ctxFor([servo, hexproofTitan])).allowed).toBe(false);
+    expect(removalGuard(castAction("Swords to Plowshares"), ctxFor([servo, { ...titan, phasedOut: true }])).allowed).toBe(false);
+    expect(removalGuard(castAction("Swords to Plowshares"), ctxFor([servo, titan])).allowed).toBe(true);
+  });
+
+  it("ward and protection from the spell's colour lower or remove a target's worth", () => {
+    const servo = token("Servo Token", "1", "1");
+    const swords = castAction("Swords to Plowshares");
+    const ctxFor = (theirs: CardLike[]) => ctx({ theirs, hand: [handCard("Swords to Plowshares")] });
+    // Swords costs {W}: a white-protected titan is not a legal target, so only the Servo is left
+    expect(removalGuard({ ...swords, detail: "{W} Instant. Exile target creature." }, ctxFor([servo, { ...titan, keywords: ["protection from white"] }])).allowed).toBe(false);
+    expect(removalGuard({ ...swords, detail: "{W} Instant. Exile target creature." }, ctxFor([servo, { ...titan, keywords: ["protection from red"] }])).allowed).toBe(true);
+    // ward {5} on a modest creature makes it not worth a premium removal
+    const warded = { ...nighthawk, keywords: ["ward {5}"] };
+    expect(removalGuard(castAction("Murder"), ctx({ theirs: [nighthawk], hand: [handCard("Murder")] })).allowed).toBe(true);
+    expect(removalGuard(castAction("Murder"), ctx({ theirs: [warded], hand: [handCard("Murder")] })).allowed).toBe(false);
+  });
+
   it("recognizes targeted removal and removal Auras but not counterspells or burn that can go face", () => {
     expect(parseTargetedRemoval(castAction("Swords to Plowshares"))?.kind).toBe("exile");
     expect(parseTargetedRemoval(castAction("Murder"))?.kind).toBe("destroy");

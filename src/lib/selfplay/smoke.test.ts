@@ -17,8 +17,7 @@
 // catalog (data/commander-cards.json is not checked into the repo; loadCardCatalog() falls back to
 // a small builtin set with no Sagas in it, and unmatched card names get a generic mock typeLine —
 // see createVisibleFromDeckCard/fallbackTypeLineForCard in AppFlow.tsx).
-import { readFileSync } from "node:fs";
-import path from "node:path";
+import { readRootDeckList } from "./orchestrator";
 import { describe, expect, it } from "vitest";
 import {
   applyDeckToSeat,
@@ -40,9 +39,6 @@ import type { GameSession, PlayerSeat } from "@/lib/types";
 
 type TurnPhase = (typeof TURN_PHASES)[number];
 
-function readRootDeckList(fileName: string): string {
-  return readFileSync(path.join(process.cwd(), fileName), "utf8");
-}
 
 function buildBareSeat(id: string, name: string): PlayerSeat {
   return {

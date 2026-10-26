@@ -2332,3 +2332,51 @@ ol {
   object-fit: cover;
   width: 100%;
 }
+
+/* Deck editor page (/decks) */
+.deck-editor { margin: 0 auto; max-width: 1200px; padding: 1.5rem; }
+.deck-editor-top { align-items: center; display: flex; justify-content: space-between; margin-bottom: 1rem; }
+.deck-editor-back { color: var(--muted); }
+.deck-editor-body { display: grid; gap: 1rem; grid-template-columns: 260px minmax(0, 1fr); }
+.deck-editor-list, .deck-editor-main { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 1rem; }
+.deck-editor-list { align-content: start; display: grid; gap: 0.75rem; }
+.deck-editor-list ul, .deck-editor-search ul { list-style: none; margin: 0; padding: 0; }
+.deck-editor-list li button { display: grid; text-align: left; width: 100%; }
+.deck-editor-list li button span { color: var(--muted); font-size: 0.8rem; }
+.deck-editor-list li button.selected { border-color: var(--green); }
+.deck-editor-main { display: grid; gap: 0.9rem; }
+.deck-editor-main label { color: var(--muted); display: grid; font-size: 0.85rem; gap: 0.45rem; }
+.deck-editor-main em { font-style: normal; opacity: 0.7; }
+.deck-editor-search ul { border: 1px solid var(--line); border-radius: 6px; max-height: 260px; overflow-y: auto; }
+.deck-editor-search li button { background: transparent; border: 0; text-align: left; width: 100%; }
+.deck-editor-text { min-height: 420px; }
+.deck-editor-actions { display: flex; gap: 0.6rem; }
+.deck-editor-validation.ok { color: var(--green); }
+.deck-editor-validation.bad { color: #d96d5f; }
+@media (max-width: 800px) { .deck-editor-body { grid-template-columns: 1fr; } }
+
+/* Deck editor: readable (non-yellow) list and search buttons */
+.deck-editor-list li button { background: var(--panel-2); border: 1px solid var(--line); color: var(--text); font-weight: 600; margin-bottom: 0.4rem; }
+.deck-editor-list li button:hover { border-color: var(--accent); }
+.deck-editor-list li button.selected { background: #2b3a2a; border-color: var(--green); }
+.deck-editor-list li button span { color: var(--muted); font-weight: 400; }
+.deck-editor-search li button { background: var(--panel-2); color: var(--text); font-weight: 400; border-bottom: 1px solid var(--line); }
+.deck-editor-search li button:hover { background: #2b3a2a; }
+.deck-editor-search li button span { color: var(--muted); }
+
+/* Card lists with art + rules text (library search, exile/graveyard viewer) */
+.library-search-card.rich { grid-template-columns: 84px minmax(0, 1fr) auto; }
+.library-search-card.rich .card-thumb { border-radius: 4px; transition: transform 0.12s ease; transform-origin: left center; width: 84px; }
+.library-search-card.rich .card-thumb:hover { position: relative; transform: scale(3.2); z-index: 20; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.7); }
+.library-search-card .card-oracle, .library-look-card .card-oracle { color: var(--text); font-size: 0.8rem; line-height: 1.3; white-space: pre-line; }
+.library-search-card.castable { border-color: var(--green); box-shadow: 0 0 0 1px rgba(115, 180, 122, 0.45); }
+.exile-playable-note { color: var(--green); font-weight: 700; }
+
+/* "Playable from exile" reminder tray */
+.exile-tray { background: var(--panel); border: 2px solid var(--green); border-radius: 8px; bottom: 1rem; box-shadow: 0 0 18px rgba(115, 180, 122, 0.5); display: grid; gap: 0.5rem; left: 1rem; max-height: 60vh; max-width: 340px; overflow-y: auto; padding: 0.7rem; position: fixed; z-index: 30; }
+.exile-tray h3 { color: var(--green); font-size: 0.95rem; margin: 0; }
+.exile-tray-card { align-items: center; display: grid; gap: 0.5rem; grid-template-columns: 56px minmax(0, 1fr) auto; }
+.exile-tray-card div { display: grid; font-size: 0.8rem; gap: 0.15rem; }
+.exile-tray-card span { color: var(--muted); }
+.exile-tray-thumb { background: transparent; border: 0; padding: 0; }
+.exile-tray-thumb img { border-radius: 3px; width: 56px; }
