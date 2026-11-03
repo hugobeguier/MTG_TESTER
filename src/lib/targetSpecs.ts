@@ -100,6 +100,18 @@ export function zoneEffectTargetSpec(effect: ZoneEffect): TargetSpec | undefined
       prompt: `Return target ${effect.subtype ? `${effect.subtype.charAt(0).toUpperCase()}${effect.subtype.slice(1)} card` : effect.targetType === "card" ? "card" : describeTargetType(effect.targetType)} from your graveyard to your hand.`
     };
   }
+  // "Return target creature card from your/a graveyard to the battlefield." (Reanimate, Animate-style spells): chosen as the spell is cast.
+  if (effect.kind === "reanimate") {
+    return {
+      id: "target",
+      zone: "graveyard",
+      permanentType: regrowPermanentType(effect.targetType),
+      controller: effect.anyGraveyard ? "any" : "you",
+      min: 1,
+      max: 1,
+      prompt: `Return target ${effect.targetType === "card" ? "card" : `${effect.targetType} card`} from ${effect.anyGraveyard ? "a graveyard" : "your graveyard"} to the battlefield.`
+    };
+  }
   // "Exile target player's graveyard." (Bojuka Bog): the player is chosen, not picked by a heuristic.
   if (effect.kind === "gain_control") {
     return { id: "target", zone: "battlefield", permanentType: "creature", controller: "any", min: 1, max: 1, prompt: effect.untilEndOfTurn ? "Gain control of target creature until end of turn." : "Gain control of target creature." };

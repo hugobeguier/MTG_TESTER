@@ -7246,6 +7246,30 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         };
       case "exile_self_return_creature_to_hand":
         return { prompt: `${trigger.sourceCardName}: choose a creature card in your graveyard to return to your hand.`, zone: "graveyard", cards: ownGraveyardCreatures, picksNeeded: 1 };
+      // Memnarch / Deathbringer Liege / Soul-Guide Lantern: the target is named when the ability goes on the stack, not at resolution.
+      case "become_artifact_target":
+        return {
+          prompt: `${trigger.sourceCardName}: choose a permanent to become an artifact.`,
+          zone: "battlefield",
+          cards: session.seats.flatMap((seat) => seat.board.battlefield.filter((card) => !hasCardType(card, "Artifact") && !card.phasedOut && (seat.id === controller.id || (!hasShroud(card) && !hasHexproof(card)))).map((card) => ({ seatId: seat.id, cardId: card.id }))),
+          picksNeeded: 1
+        };
+      case "gain_control_target_artifact":
+        return {
+          prompt: `${trigger.sourceCardName}: choose an artifact to gain control of.`,
+          zone: "battlefield",
+          cards: session.seats.filter((seat) => seat.id !== controller.id).flatMap((seat) => seat.board.battlefield.filter((card) => hasCardType(card, "Artifact") && !card.phasedOut && !hasShroud(card) && !hasHexproof(card)).map((card) => ({ seatId: seat.id, cardId: card.id }))),
+          picksNeeded: 1
+        };
+      case "destroy_tapped_creature":
+        return {
+          prompt: `${trigger.sourceCardName}: choose a tapped creature to destroy.`,
+          zone: "battlefield",
+          cards: session.seats.flatMap((seat) => seat.board.battlefield.filter((card) => card.tapped && card.typeLine.includes("Creature") && !card.phasedOut && (seat.id === controller.id || (!hasShroud(card) && !hasHexproof(card)))).map((card) => ({ seatId: seat.id, cardId: card.id }))),
+          picksNeeded: 1
+        };
+      case "exile_card_from_graveyard":
+        return { prompt: `${trigger.sourceCardName}: choose a card in a graveyard to exile.`, zone: "graveyard", cards: session.seats.flatMap((seat) => (seat.board.graveyard ?? []).map((card) => ({ seatId: seat.id, cardId: card.id }))), picksNeeded: 1 };
       default:
         return undefined;
     }
@@ -8369,10 +8393,17 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       // targeted at a player seat instead (see attach_player below); other restrictions this
       // engine doesn't model targeting for (Enchant land/artifact) just enter without attaching
       // rather than being wrongly treated as having "no legal target."
-      const auraAttach =
+      // An Aura aimed at cast time (the human's prompt, or an agent's pre-pick) attaches there if the target is still legal; if it is not, the spell fizzles (608.2b).
+      const castAuraTarget = sourceCard && baseDestination === "battlefield" && isAura(sourceCard) ? action.castChoices?.targets[0] : undefined;
+      const auraAttach: AuraAttachResult | undefined =
         sourceCard && baseDestination === "battlefield" && isAura(sourceCard)
-          ? chooseAuraAttachTarget(current, action.actorSeatId, sourceCard.oracleText)
+          ? castAuraTarget && castAuraTarget.kind === "card"
+            ? castTargetLegal(current, action.actorSeatId, sourceCard, castAuraTarget) && current.seats.find((seat) => seat.id === castAuraTarget.seatId)?.board.battlefield.some((card) => card.id === castAuraTarget.cardId)
+              ? { kind: "attach", seatId: castAuraTarget.seatId, cardId: castAuraTarget.cardId }
+              : { kind: "no_target" }
+            : chooseAuraAttachTarget(current, action.actorSeatId, sourceCard.oracleText)
           : undefined;
+      if (castAuraTarget && auraAttach?.kind === "attach") auraRetargetAsked.current.add(action.cardId);
       const destination = auraAttach?.kind === "no_target" ? "graveyard" : baseDestination;
       const playedSession = playCardFromZone(
         current,
@@ -17830,12 +17861,20 @@ type CastStructure =
   | { kind: "zone"; effect: ZoneEffect }
   | { kind: "extra"; effect: SpellExtraEffect }
   | { kind: "pump"; effect: PumpEffect }
-  | { kind: "targeted"; effect: TargetedEffect };
+  | { kind: "targeted"; effect: TargetedEffect }
+  // An Aura spell targets as it is CAST (rule 303.4a / 601.2c): "Enchant creature [you control]".
+  | { kind: "aura"; restriction: "creature" | "creature_you_control" };
 
 // What a spell does that needs the caster's decisions — only for instants and sorceries (a permanent's enters effect is a trigger, whose
 // targets are chosen when it triggers).
 export function castStructure(card: VisibleCard, chosenX?: number): CastStructure | undefined {
-  if (!card.typeLine.includes("Instant") && !card.typeLine.includes("Sorcery")) return undefined;
+  if (!card.typeLine.includes("Instant") && !card.typeLine.includes("Sorcery")) {
+    if (isAura(card)) {
+      const restriction = enchantRestriction(card.oracleText);
+      if (restriction === "creature" || restriction === "creature_you_control") return { kind: "aura", restriction };
+    }
+    return undefined;
+  }
   const text = etbEffectText(card.oracleText);
   if (parseModalHeader(card.oracleText)) {
     const removal = parseRemovalEffect(text);
@@ -17939,6 +17978,8 @@ export function nextCastPrompt(
     slots = extraSlots(session, seatId, card, structure.effect);
   } else if (structure.kind === "targeted") {
     slots = [{ prompt: `${card.name}: choose a target.`, options: optionsFromSpec(session, seatId, targetedEffectSpec(structure.effect, card.id, card.name), card) }];
+  } else if (structure.kind === "aura") {
+    slots = [{ prompt: `${card.name}: choose the creature to enchant${structure.restriction === "creature_you_control" ? " (a creature you control)" : ""}.`, options: labeledTargetOptions(session, seatId, structure.restriction === "creature_you_control" ? "own_creature" : "any_creature", card) }];
   } else {
     slots = [{ prompt: `${card.name}: choose a creature.`, options: labeledTargetOptions(session, seatId, "any_creature", card) }];
   }
@@ -17961,6 +18002,11 @@ export function agentCastTimeRemovalChoices(session: GameSession, seatId: string
   if (structure?.kind === "extra" && structure.effect.kind === "shuffle_permanent_reveal_top") {
     const pick = chooseRemovalTarget(session, seatId, "nonland_permanent", card) ?? chooseRemovalTarget(session, seatId, "permanent", card);
     return pick ? { targets: [{ kind: "card", seatId: pick.seatId, cardId: pick.card.id }] } : undefined;
+  }
+  // An agent's Aura names its creature as it is cast (the same deterministic choice resolution used to make).
+  if (structure?.kind === "aura") {
+    const attach = chooseAuraAttachTarget(session, seatId, card.oracleText);
+    return attach.kind === "attach" ? { targets: [{ kind: "card", seatId: attach.seatId, cardId: attach.cardId }] } : undefined;
   }
   // A single-verb targeted spell (tap/untap/counter/copy/gain-keyword effects on a chosen target).
   if (structure?.kind === "targeted") {
@@ -25358,6 +25404,11 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
   if (trigger.effect.kind === "destroy_tapped_creature") {
     const holder = session.seats.find((item) => item.id === trigger.controllerSeatId);
     if (!holder) return session;
+    // Named when the ability went on the stack (chosenOption = the picked card id): no second question at resolution.
+    if (trigger.effect.chosenOption) {
+      const picked = session.seats.find((seat) => seat.board.battlefield.some((card) => card.id === trigger.effect.chosenOption));
+      return picked ? resolveDeferredChoice(session, holder.id, trigger.sourceCardId, trigger.sourceCardName, "destroy_pick", {}, `${picked.id}:${trigger.effect.chosenOption}`) : rulesEvent(session, holder.id, `${trigger.sourceCardName}: its target is gone.`);
+    }
     const worth = (card: VisibleCard) => card.manaValue * 2 + Math.max(0, effectivePower(card)) + (card.commander ? 5 : 0);
     const pool = session.seats.flatMap((seat) => seat.board.battlefield.filter((card) => card.tapped && card.typeLine.includes("Creature") && !hasShroud(card) && !(hasHexproof(card) && seat.id !== holder.id) && !card.phasedOut).map((card) => ({ seatId: seat.id, card })));
     if (pool.length === 0) return rulesEvent(session, holder.id, `${trigger.sourceCardName}: no tapped creature to destroy.`);
@@ -25399,6 +25450,7 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
   if (trigger.effect.kind === "become_artifact_target") {
     const holder = session.seats.find((item) => item.id === trigger.controllerSeatId);
     if (!holder) return session;
+    if (trigger.effect.chosenOption) return resolveDeferredChoice(session, holder.id, trigger.sourceCardId, trigger.sourceCardName, "become_artifact", {}, trigger.effect.chosenOption);
     const pool = session.seats.flatMap((seat) => seat.board.battlefield.filter((card) => !hasCardType(card, "Artifact") && !hasShroud(card) && !(hasHexproof(card) && seat.id !== holder.id) && !card.phasedOut).map((card) => ({ seat, card })));
     if (pool.length === 0) return rulesEvent(session, holder.id, `${trigger.sourceCardName}: no nonartifact permanent to target.`);
     if (holder.kind === "human") {
@@ -25411,6 +25463,10 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
   if (trigger.effect.kind === "gain_control_target_artifact") {
     const holder = session.seats.find((item) => item.id === trigger.controllerSeatId);
     if (!holder) return session;
+    if (trigger.effect.chosenOption) {
+      const from = session.seats.find((seat) => seat.board.battlefield.some((card) => card.id === trigger.effect.chosenOption));
+      return from ? resolveDeferredChoice(session, holder.id, trigger.sourceCardId, trigger.sourceCardName, "gain_control_artifact", {}, `${from.id}:${trigger.effect.chosenOption}`) : rulesEvent(session, holder.id, `${trigger.sourceCardName}: its target is gone.`);
+    }
     const pool = session.seats.filter((seat) => seat.id !== holder.id).flatMap((seat) => seat.board.battlefield.filter((card) => hasCardType(card, "Artifact") && !hasShroud(card) && !hasHexproof(card) && !card.phasedOut).map((card) => ({ seat, card })));
     if (pool.length === 0) return rulesEvent(session, holder.id, `${trigger.sourceCardName}: no opposing artifact to take.`);
     if (holder.kind === "human") {
@@ -25457,6 +25513,11 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
     };
     next = rulesEvent(next, owner.id, `${owner.name} manifests dread: a face-down 2/2 enters and ${trigger.sourceCardName} attaches to it${toYard ? `; ${toYard.name} goes to the graveyard` : ""}.`);
     return next;
+  }
+  if (trigger.effect.kind === "exile_card_from_graveyard" && trigger.effect.chosenOption) {
+    const owner = session.seats.find((seat) => (seat.board.graveyard ?? []).some((card) => card.id === trigger.effect.chosenOption));
+    const chosen = owner?.board.graveyard?.find((card) => card.id === trigger.effect.chosenOption);
+    return owner && chosen ? rulesEvent(moveCardAcrossSeats(session, owner.id, chosen.id, chosen.ownerSeatId ?? owner.id, "exile").session, trigger.controllerSeatId, `${trigger.sourceCardName} exiles ${chosen.name} from a graveyard.`) : rulesEvent(session, trigger.controllerSeatId, `${trigger.sourceCardName}: its target is gone.`);
   }
   if (trigger.effect.kind === "exile_card_from_graveyard") {
     const worth = (card: VisibleCard) => card.manaValue + (card.typeLine.includes("Creature") ? 2 : 0);

@@ -27,5 +27,5 @@ Sable casts Monstrous Onslaught using 5 mana. Waiting for responses.
 11. Cannot resolve Memnarch's ablities, I guess it might be because he is Summoning Sick. But Summoning Sickness should only be for tap effects, if it isnt a tap effect it should be able to trigger. 
 12. Thirst for Knowledge did not let me discard a card but it drew 3 cards. 
 13. Hellkite Igniter does not either let me activate its ability. Nothing happens.
-14. Thopter Spy Network triggers even if I have not done any combat damage
+14. Thopter Spy Network triggers even if I have not done any combat damage.
 15. Sable had 8 10/10 attacking him and he had 7 blockers ready, but did not use all of them to stay alive.

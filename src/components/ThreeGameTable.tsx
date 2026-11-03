@@ -650,6 +650,16 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
   // Enlarged read-only preview of the hand card under the mouse (own hand and observer-view agent hands);
   // clicking still opens the full inspector.
   const [hoverPreviewCard, setHoverPreviewCard] = useState<VisibleCard | undefined>();
+  // Hover events from card lists elsewhere on the page (graveyard / exile / library search / look-at-top / prompts) feed the same preview.
+  useEffect(() => {
+    const onHover = (event: Event) => {
+      const detail = (event as CustomEvent<{ card?: VisibleCard; leaveId?: string }>).detail;
+      if (detail?.card) setHoverPreviewCard(detail.card);
+      else if (detail?.leaveId) setHoverPreviewCard((current) => (current?.id === detail.leaveId ? undefined : current));
+    };
+    window.addEventListener(CARD_HOVER_EVENT, onHover);
+    return () => window.removeEventListener(CARD_HOVER_EVENT, onHover);
+  }, []);
   // Now that most priority windows auto-pass instead of stopping the human (see priorityStops.ts),
   // props.pendingAction often goes from set to undefined within the same tick an agent's decision
   // resolves — the stack HUD below used to key directly off props.pendingAction, so a spell an agent
@@ -2504,7 +2514,7 @@ function LibraryLookModal({
           {look.cards.length === 0 ? <p>No cards to look at.</p> : null}
           {look.cards.map((card) => (
             <article className="library-look-card" key={card.id}>
-              <div className="library-look-image">
+              <div className="library-look-image" {...cardHoverHandlers(card)}>
                 {card.imageUris?.normal ? <img src={card.imageUris.normal} alt="" /> : <FallbackLargeCard card={card} />}
               </div>
               <strong>{card.name}</strong>
@@ -4020,7 +4030,22 @@ function ZoneViewerModal({
 // Shared pieces of a "pick a card from a list" row: a card-art thumbnail (hover to enlarge) and the cost,
 // type line and full rules text, so a search/exile list shows what each card does, not only its name.
 function CardThumb({ card }: { card: VisibleCard }) {
-  return card.imageUris?.normal ? <img className="card-thumb" src={card.imageUris.normal} alt={card.name} /> : <FallbackHandCard card={card} />;
+  const hover = cardHoverHandlers(card);
+  return card.imageUris?.normal ? <img className="card-thumb" src={card.imageUris.normal} alt={card.name} {...hover} /> : <div className="card-thumb-fallback" {...hover}><FallbackHandCard card={card} /></div>;
+}
+
+// The enlarged hand-card preview (the .hand-hover-preview popup rendered by ThreeGameTable) is driven by a window event so ANY card list — graveyard,
+// exile, library search, scry/look-at-top, choice prompts — can show it with the same component, size and position as the hand.
+export const CARD_HOVER_EVENT = "mtg-card-hover";
+export function cardHoverHandlers(card: VisibleCard) {
+  return {
+    onMouseEnter: () => {
+      if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(CARD_HOVER_EVENT, { detail: { card } }));
+    },
+    onMouseLeave: () => {
+      if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(CARD_HOVER_EVENT, { detail: { leaveId: card.id } }));
+    }
+  };
 }
 
 function CardRowInfo({ card, playableNote }: { card: VisibleCard; playableNote?: string }) {

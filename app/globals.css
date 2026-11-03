@@ -2367,7 +2367,8 @@ ol {
 /* Card lists with art + rules text (library search, exile/graveyard viewer) */
 .library-search-card.rich { grid-template-columns: 84px minmax(0, 1fr) auto; }
 .library-search-card.rich .card-thumb { border-radius: 4px; transition: transform 0.12s ease; transform-origin: left center; width: 84px; }
-.library-search-card.rich .card-thumb:hover { position: relative; transform: scale(3.2); z-index: 20; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.7); }
+/* (the old scale-on-hover is replaced by the shared .hand-hover-preview popup, see cardHoverHandlers) */
+.card-thumb-fallback { display: block; }
 .library-search-card .card-oracle, .library-look-card .card-oracle { color: var(--text); font-size: 0.8rem; line-height: 1.3; white-space: pre-line; }
 .library-search-card.castable { border-color: var(--green); box-shadow: 0 0 0 1px rgba(115, 180, 122, 0.45); }
 .exile-playable-note { color: var(--green); font-weight: 700; }

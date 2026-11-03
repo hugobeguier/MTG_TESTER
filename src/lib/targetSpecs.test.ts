@@ -86,7 +86,9 @@ describe("zoneEffectTargetSpec", () => {
   });
 
   it("declines effects this phase doesn't cover", () => {
-    expect(zoneEffectTargetSpec({ kind: "reanimate", anyGraveyard: true, targetType: "creature" })).toBeUndefined();
+    // Reanimation is aimed as the spell is cast: any graveyard, or only yours.
+    expect(zoneEffectTargetSpec({ kind: "reanimate", anyGraveyard: true, targetType: "creature" })).toMatchObject({ zone: "graveyard", controller: "any", permanentType: "creature" });
+    expect(zoneEffectTargetSpec({ kind: "reanimate", anyGraveyard: false, targetType: "creature" })).toMatchObject({ zone: "graveyard", controller: "you" });
     expect(zoneEffectTargetSpec({ kind: "mill", amount: 3, scope: "you" })).toBeUndefined();
   });
 
