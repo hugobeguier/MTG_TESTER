@@ -64,7 +64,10 @@ export function isActivatedAbilityClause(clause: string): boolean {
 }
 
 export function isDeathTriggerClause(clause: string): boolean {
-  return /\b(when|whenever)\b[^.]{0,80}\bdies\b/i.test(clause);
+  // Text inside quotation marks is an ability GRANTED to a token or creature ("create a 1/1 Pest token with "When this token dies, you gain
+  // 1 life."" - Beledros Witherbloom, Ribtruss Roaster, Moseo), not a death trigger of the card itself. Left in, the card made a Pest (or
+  // gained life) when IT died, and its own end step / upkeep trigger line was swallowed as a "death clause".
+  return /\b(when|whenever)\b[^.]{0,80}\bdies\b/i.test(clause.replace(/"[^"]*"/g, ""));
 }
 
 // "Whenever a creature you control deals combat damage to a player, ..." (Toski, Bearer of

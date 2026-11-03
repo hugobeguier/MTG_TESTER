@@ -19,6 +19,7 @@ const catalog = buildCatalog(
     record("Counterspell", "Instant", 2, "Counter target spell."),
     record("Tamiyo's Safekeeping", "Instant", 1, "Target permanent you control gains hexproof and indestructible until end of turn. You gain 2 life. (A permanent with hexproof and indestructible can't be the target of spells or abilities your opponents control. Damage and effects that say \"destroy\" don't destroy it.)"),
     record("Heroic Intervention", "Instant", 2, "Permanents you control gain hexproof and indestructible until end of turn."),
+    record("Vanishing", "Enchantment — Aura", 1, "Enchant creature\n{U}{U}: Enchanted creature phases out. (While it's phased out, it's treated as though it doesn't exist. It phases in before its controller untaps during their next untap step.)"),
     record("Swiftfoot Boots", "Artifact — Equipment", 2, "Equipped creature has hexproof and haste.\nEquip {1}"),
     record("Blood Artist", "Creature — Vampire", 2, "Whenever this creature or another creature dies, target player loses 1 life and you gain 1 life."),
     record("Grave Titan", "Creature — Giant", 6, "Deathtouch\nWhenever this creature enters or attacks, create two 2/2 black Zombie creature tokens."),
@@ -265,6 +266,16 @@ describe("rule 3: protection spells", () => {
     const attacker = perm("Grave Titan", "6", 6, { attacking: true });
     const context = ctx({ purpose: "priority_response", phase: "declare blockers step", mine: [blocker], theirs: [attacker] });
     expect(protectionGuard(castAction("Tamiyo's Safekeeping"), context).allowed).toBe(true);
+  });
+
+  it("holds the Vanishing Aura (a reactive phase-out trick) when nothing threatens anything, and releases it when removal is aimed at its creature", () => {
+    const aura = castAction("Vanishing");
+    expect(evaluatePlayGuards(aura, ctx({ mine: [nighthawk, sol] })).vetoed).toBe(true);
+    expect(protectionGuard(aura, ctx({ mine: [nighthawk] })).reason).toMatch(/phase-out Aura held/);
+    const pending = { id: "s1", cardName: "Murder", oracleText: card("Murder").oracleText, actorSeatId: "opp", targetCardIds: [nighthawk.id] };
+    expect(protectionGuard(aura, ctx({ purpose: "priority_response", mine: [nighthawk], stack: [pending], pendingAction: pending })).allowed).toBe(true);
+    // a plain Pacifism-style Aura is untouched by this guard
+    expect(protectionGuard(castAction("Pacifism"), ctx({ mine: [nighthawk] })).allowed).toBe(true);
   });
 
   it("evaluatePlayGuards vetoes a proactive Tamiyo's Safekeeping and the scorer sinks it below passing", () => {

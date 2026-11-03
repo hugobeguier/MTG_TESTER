@@ -490,7 +490,7 @@ export function deterministicRuleWorkflow(input: RuleAdvisorInput): RuleWorkflow
       sourceCardId: input.sourceCard.id,
       maxChoices: 1,
       allowedCardFilter: extractSearchedCardType(scopedText) ?? "cards matching the source effect",
-      manaValueRestriction: extractManaValueRestriction(scopedText),
+      manaValueRestriction: extractManaValueRestriction(scopedText) ?? sacrificedManaValueRestriction(scopedText, input.sourceCard.sacrificedManaValue),
       destination: "battlefield",
       tapped: scopedText.includes("tapped"),
       requiresHumanChoice: true,
@@ -620,6 +620,14 @@ function extractSearchedCardType(text: string): string | undefined {
 //   "N or less."
 // - "mana value N" alone (an exact restriction, no card in this engine's real-card sample uses this
 //   but it's the obvious remaining case).
+// "...with mana value X or less, where X is 2 plus the sacrificed creature's mana value" (Eldritch Evolution): the cap is only known once the additional
+// cost was paid, so it comes from the mana value stamped on the spell then. Without a stamp the search stays unrestricted rather than guessing.
+export function sacrificedManaValueRestriction(text: string, sacrificedManaValue: number | undefined): { op: "lte" | "eq" | "gte"; value: number } | undefined {
+  const match = text.match(/mana value x or less, where x is (\d+) plus the sacrificed creature'?s mana value/i);
+  if (!match || sacrificedManaValue === undefined) return undefined;
+  return { op: "lte", value: Number.parseInt(match[1], 10) + sacrificedManaValue };
+}
+
 export function extractManaValueRestriction(text: string): { op: "lte" | "eq" | "gte"; value: number } | undefined {
   const orLess = text.match(/mana (?:value|cost) (\d+) or less\b/i);
   if (orLess) return { op: "lte", value: Number.parseInt(orLess[1], 10) };

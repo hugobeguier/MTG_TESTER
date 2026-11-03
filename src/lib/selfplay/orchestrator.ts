@@ -784,7 +784,7 @@ function applyMainPhaseAction(
   if (!seat) return { session, changed: false };
 
   if (action.actionType === "play_land" && action.cardId) {
-    const next = playCardFromZone(session, seatId, action.cardId, `${seat.name} plays a land.`, undefined, "battlefield", [], "hand", action.faceIndex);
+    const next = playCardFromZone(session, seatId, action.cardId, `${seat.name} plays a land.`, undefined, "battlefield", [], action.sourceZone === "exile" ? "exile" : "hand", action.faceIndex);
     return { session: next === session ? next : queueEntry(next, seatId, action.cardId), changed: next !== session };
   }
 

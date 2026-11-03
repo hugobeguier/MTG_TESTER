@@ -122,7 +122,8 @@ export type SacrificeEffect =
   // "Put your commander into your hand from the command zone." (Command Beacon)
   | { kind: "commander_to_hand" }
   // alsoLoseLife: "You draw two cards and lose 2 life." (Infernal Idol) — the life loss half of a compound draw.
-  | { kind: "scry" | "surveil" | "draw_cards" | "gain_life" | "lose_life"; amount: number; alsoLoseLife?: number }
+  // alsoGainLife: "You gain 1 life and draw a card." (Izoni, Thousand-Eyed) - the life half of a compound draw.
+  | { kind: "scry" | "surveil" | "draw_cards" | "gain_life" | "lose_life"; amount: number; alsoLoseLife?: number; alsoGainLife?: number }
   | { kind: "add_counter"; counterKind: string; amount: number }
   | { kind: "create_tokens" }
   // "Create X 2/2 black Zombie creature tokens, where X is the sacrificed creature's power." (Ghoulcaller
@@ -130,6 +131,8 @@ export type SacrificeEffect =
   | { kind: "create_tokens_by_sacrificed_power" }
   // "Each opponent loses life equal to the sacrificed creature's power." (Jarad, Golgari Lich Lord)
   | { kind: "drain_by_sacrificed_power" }
+  // "You gain X life and put X +1/+1 counters on target creature you control, where X is the sacrificed creature's power." (Dina, Essence Brewer)
+  | { kind: "gain_life_counters_by_sacrificed_power" }
   // "This creature gets +X/+0 until end of turn, where X is the sacrificed enchantment's mana value." (Demon of Fate's Design)
   | { kind: "pump_self_by_sacrificed_mv" }
   // "Sacrifice a creature: Add {C}{C}." (Ashnod's Altar), "{T}, Sacrifice a creature: Add {B}{B}." (Phyrexian Tower): fixed mana into the pool.
@@ -505,7 +508,8 @@ function parseGenericTapEffectText(text: string): GenericTapEffect | undefined {
   const grantAll = text.match(/^all ([a-z]+?)s? gain ([a-z ]+?) until end of turn\.?$/i);
   if (grantAll) return { kind: "grant_keyword_to_all_until_eot", typeMatcher: grantAll[1].toLowerCase(), keyword: grantAll[2].toLowerCase() };
   const zone = parseZoneEffect(text);
-  if (zone && (zone.kind === "regrow" || zone.kind === "reanimate" || zone.kind === "graveyard_to_library")) return { kind: "zone_effect", effect: zone };
+  // "{T}: Mill two cards." (Skull Prophet): only milling yourself; "target player mills" and the like need a target prompt this ability shape lacks.
+  if (zone && (zone.kind === "regrow" || zone.kind === "reanimate" || zone.kind === "graveyard_to_library" || (zone.kind === "mill" && zone.scope === "you" && !zone.then))) return { kind: "zone_effect", effect: zone };
 
   const selfCounter = text.match(/^put (an?|one|two|three) (\+1\/\+1) counters? on (?:this creature|it)\.?$/i);
   if (selfCounter) return { kind: "self_counter", counterKind: selfCounter[2], amount: numberWordToInt(selfCounter[1].toLowerCase()) ?? 1 };
@@ -704,6 +708,8 @@ export function parseGenericManaAbilities(oracleText: string): GenericManaAbilit
 
 function parseSacrificeEffectText(text: string): SacrificeEffect | undefined {
   const lower = text.toLowerCase();
+  // "You gain X life and put X +1/+1 counters on target creature you control, where X is the sacrificed creature's power." (Dina, Essence Brewer)
+  if (/^you gain x life and put x \+1\/\+1 counters on target creature you control, where x is the sacrificed creature'?s power\.?$/.test(lower.trim())) return { kind: "gain_life_counters_by_sacrificed_power" };
   // One verb on a chosen target (Yawgmoth's -1/-1 counter): checked first so the self-targeting counter parse below can't claim it.
   const targetedEffect = parseTargetedEffect(text);
   if (targetedEffect) return { kind: "targeted_effect", effect: targetedEffect };
@@ -725,7 +731,9 @@ function parseSacrificeEffectText(text: string): SacrificeEffect | undefined {
     const amount = numberWordToInt(drawMatch[1]);
     const alsoLose = lower.match(/\band (?:you )?lose\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+life\b/);
     const alsoLoseLife = alsoLose ? numberWordToInt(alsoLose[1]) : undefined;
-    if (amount) return { kind: "draw_cards", amount, ...(alsoLoseLife ? { alsoLoseLife } : {}) };
+    const alsoGain = lower.match(/\byou gain\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+life and (?:you )?draw\b/);
+    const alsoGainLife = alsoGain ? numberWordToInt(alsoGain[1]) : undefined;
+    if (amount) return { kind: "draw_cards", amount, ...(alsoLoseLife ? { alsoLoseLife } : {}), ...(alsoGainLife ? { alsoGainLife } : {}) };
   }
 
   const gainMatch = lower.match(/\byou gain\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+life\b/);

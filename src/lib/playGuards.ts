@@ -447,7 +447,21 @@ function savesCreatureInCombat(context: ScoringContext, protectionText: string):
   });
 }
 
+// An Aura whose whole point is a reactive phase-out ability ("Enchant creature. {U}{U}: Enchanted creature phases out." - Vanishing). Casting it is a sorcery-speed
+// investment that only pays off if the agent later holds the activation mana up in response to removal, so with nothing threatening a permanent of
+// mine it is a wasted card (an agent was seen casting it on an empty stack for no reason). Treated like a protection spell: held unless something threatens me.
+export function isPhaseOutAura(action: ScorableAction): boolean {
+  if (action.actionType !== "cast_spell") return false;
+  const text = actionText(action);
+  return /\benchant creature\b/.test(text) && /\benchanted creature phases? out\b/.test(text) && !/\benchanted creature (?:gets|has|gains|can't)\b/.test(text);
+}
+
 export function protectionGuard(action: ScorableAction, context: ScoringContext): GuardVerdict {
+  if (isPhaseOutAura(action) && !isProtectionInstant(action)) {
+    const auraText = actionText(action);
+    if (stackItems(context).some((item) => stackItemThreatensMe(item, context, auraText)) || savesCreatureInCombat(context, auraText)) return ALLOWED;
+    return { allowed: false, reason: "phase-out Aura held: nothing threatens your permanents, so spending a card on a reactive trick that can't be cast in response just wastes it" };
+  }
   if (!isProtectionInstant(action)) return ALLOWED;
   const text = actionText(action);
   if (stackItems(context).some((item) => stackItemThreatensMe(item, context, text))) return ALLOWED;

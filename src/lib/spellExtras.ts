@@ -88,7 +88,21 @@ export type SpellExtraEffect =
   // "Add {R} for each tapped land your opponents control." (Mana Geyser)
   | { kind: "add_mana_per_tapped_opponent_land"; color: "W" | "U" | "B" | "R" | "G" | "C" }
   // "Add four mana in any combination of colors. Spend this mana only to cast Dragon spells." (Desolation of Smaug)
-  | { kind: "add_restricted_mana"; amount: number; spellType: string };
+  | { kind: "add_restricted_mana"; amount: number; spellType: string }
+  // "Add {B}{B}{B}." (Dark Ritual): a fixed amount of one color.
+  | { kind: "add_fixed_mana"; color: "W" | "U" | "B" | "R" | "G" | "C"; amount: number }
+  // "Destroy each nonland permanent with mana value 2 or less. Add {B} or {G} for each permanent destroyed this way." (Culling Ritual)
+  | { kind: "destroy_each_nonland_at_most"; maxManaValue: number; manaColors: Array<"W" | "U" | "B" | "R" | "G"> }
+  // "Reveal the top four cards of your library. Put all land cards revealed this way into your hand and the rest into your graveyard." (Mulch)
+  | { kind: "mulch"; count: number }
+  // "Each player sacrifices a creature or planeswalker of their choice. If you sacrificed a permanent this way, you may return another permanent card from your graveyard to your hand." (Deadly Brew)
+  | { kind: "each_player_sacrifices_then_regrow" }
+  // "Each opponent loses X life. You gain life equal to the life lost this way." (Exsanguinate)
+  | { kind: "drain_x_each_opponent" }
+  // "Return up to two target creature cards from your graveyard to your hand." (Find)
+  | { kind: "return_creatures_from_graveyard"; count: number }
+  // "You may put two +1/+1 counters on a creature you control. Then all creatures get -4/-4 until end of turn." (Finality)
+  | { kind: "counters_then_mass_shrink"; counters: number; shrink: number };
 
 const WORDS: Record<string, number> = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13 };
 
@@ -243,6 +257,22 @@ export function parseSpellExtraEffects(text: string): SpellExtraEffect[] {
   }
 
   if (/^as an additional cost to cast this spell, pay x life\. all creatures get -x\/-x until end of turn\.?$/i.test(normalized)) effects.push({ kind: "pay_x_life_mass_shrink" });
+  const fixedMana = normalized.match(/^add ((?:\{[wubrgc]\})+)\.?$/i);
+  if (fixedMana) {
+    const symbols = fixedMana[1].match(/\{[wubrgc]\}/gi) ?? [];
+    const colors = new Set(symbols.map((symbol) => symbol[1].toUpperCase()));
+    if (colors.size === 1) effects.push({ kind: "add_fixed_mana", color: [...colors][0] as "W" | "U" | "B" | "R" | "G" | "C", amount: symbols.length });
+  }
+  const cull = normalized.match(/^destroy each nonland permanent with mana value (\d+) or less\. add \{([wubrg])\} or \{([wubrg])\} for each permanent destroyed this way\.?$/i);
+  if (cull) effects.push({ kind: "destroy_each_nonland_at_most", maxManaValue: Number.parseInt(cull[1], 10), manaColors: [cull[2].toUpperCase(), cull[3].toUpperCase()] as Array<"W" | "U" | "B" | "R" | "G"> });
+  const mulch = normalized.match(/^reveal the top (a|one|two|three|four|five|six|\d+) cards? of your library\. put all land cards revealed this way into your hand and the rest into your graveyard\.?$/i);
+  if (mulch) effects.push({ kind: "mulch", count: wordToInt(mulch[1]) ?? 4 });
+  if (/^each player sacrifices a creature or planeswalker of their choice\. if you sacrificed a permanent this way, you may return another permanent card from your graveyard to your hand\.?$/i.test(normalized)) effects.push({ kind: "each_player_sacrifices_then_regrow" });
+  if (/^each opponent loses x life\. you gain life equal to the life lost this way\.?$/i.test(normalized)) effects.push({ kind: "drain_x_each_opponent" });
+  const returnCreatures = normalized.match(/^return up to (one|two|three|\d+) target creature cards? from your graveyard to your hand\.?$/i);
+  if (returnCreatures) effects.push({ kind: "return_creatures_from_graveyard", count: wordToInt(returnCreatures[1]) ?? 1 });
+  const finality = normalized.match(/^you may put (one|two|three|four|\d+) \+1\/\+1 counters? on a creature you control\. then all creatures get -(\d+)\/-(\d+) until end of turn\.?$/i);
+  if (finality) effects.push({ kind: "counters_then_mass_shrink", counters: wordToInt(finality[1]) ?? 2, shrink: Number.parseInt(finality[2], 10) });
   const millReanimate = normalized.match(/^mill (a|one|two|three|four|five|six|seven|eight|\d+) cards?, then return a creature card from your graveyard to the battlefield\.?$/i);
   if (millReanimate) effects.push({ kind: "mill_then_reanimate_creature", mill: wordToInt(millReanimate[1]) ?? 1 });
   if (/^each player sacrifices all permanents they control that are one or more colors\.?$/i.test(normalized)) effects.push({ kind: "sacrifice_all_colored_permanents" });

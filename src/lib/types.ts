@@ -145,6 +145,9 @@ export interface PlayerSeat {
   drawnThisTurn?: { turn: number; count: number };
   // True once this player has created a token this turn (Idol of Oblivion's "activate only if you created a token this turn"); cleared when the turn changes.
   createdTokenThisTurn?: boolean;
+  // This player's life when the current turn began (written at each turn change). "Gained life this turn" is read as life now above this; a gain
+  // followed by an equal loss in the same turn is missed (no per-event life-gain log exists).
+  lifeAtTurnStart?: number;
   // Archway of Innovation: "The next spell you cast this turn has improvise."
   nextSpellHasImprovise?: boolean;
   // Finale of Revelation (X >= 10): "you have no maximum hand size for the rest of the game".
@@ -306,6 +309,10 @@ export interface VisibleCard {
   summoningSick?: boolean;
   // GameSession.turn at which this permanent last entered the battlefield (set by playCardFromZone); lets agents see what was cast THIS turn.
   enteredTurn?: number;
+  // The zone this permanent entered the battlefield from (stamped next to enteredTurn on every entry path that knows it: moveCardAcrossSeats,
+  // playCardFromZone, tutor-to-battlefield). Undefined for tokens/copies (they come from no zone) and for old saves. "If they entered or were cast
+  // from a graveyard" (Twilight Diviner) reads this.
+  enteredFrom?: ZoneName;
   attacking?: boolean;
   // Damage marked on a creature this turn (rule 120.6): it dies when this reaches its toughness, and it all wears off in the cleanup step.
   damage?: number;
@@ -388,6 +395,9 @@ export interface VisibleCard {
   exileEndStepDamage?: { sourceName: string; controllerSeatId: string; amount: number };
   // "Until end of turn, Nogi becomes a Dragon ..." — the type line before the temporary change, restored at end of turn.
   temporaryOriginalTypeLine?: string;
+  // Eldritch Evolution / Natural Order-style "mana value X or less, where X is 2 plus the sacrificed creature's mana value": the mana value of the
+  // creature sacrificed as this spell's additional cost, stamped on the spell when the cost is paid.
+  sacrificedManaValue?: number;
   // Hideaway: the land whose "look at the top N, exile one face down" put this card here.
   hideawaySourceId?: string;
   // "As this enters, choose Khans or Dragons." (Outpost Siege): the label picked, which gates the matching bullet.
@@ -597,6 +607,8 @@ export interface GameSession {
   // Damage dealt to each player so far this turn (any source, combat or not): Spinerock Knoll's "an opponent was dealt 7 or more
   // damage this turn". Starts over whenever the turn number changes.
   damageThisTurn?: { turn: number; bySeat: Record<string, number> };
+  // Creatures that died under each player's control so far this turn (Gorma, the Gullet's "for each creature that died under your control this turn").
+  creaturesDiedThisTurn?: { turn: number; bySeat: Record<string, number> };
   // Rule 500.7: "Take an extra turn after this one." (Temporal Mastery, Time Warp, ...) — a FIFO
   // queue of seatIds, consumed one entry per turn-change instead of the normal rotation. Queuing
   // rather than mutating activePlayerId/turn order directly means the two turn-change call sites

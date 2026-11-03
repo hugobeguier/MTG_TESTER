@@ -8,6 +8,7 @@ import {
   moveCommanderToCommandZone,
   moveLibraryCardToDestination,
   playCardFromZone,
+  recordCommanderCast,
   resolveTriggerEffect,
   returnLinkedExiles,
   revealLandTypes,
@@ -142,12 +143,13 @@ describe("commander exiled -> command zone (rule 903.9a)", () => {
     const exiled = moveCardAcrossSeats(session([seat("h", { battlefield: [cmdr] }, { kind: "human" })]), "h", "cmdr", "h", "exile").session;
     const inCommand = moveCommanderToCommandZone(exiled, "h", "cmdr");
     expect(inCommand.seats[0].board.commander?.commanderTax).toBe(0);
-    const cast1 = playCardFromZone(inCommand, "h", "cmdr", undefined, undefined, "battlefield", [], "command");
+    // The tax is raised when the cast is announced (recordCommanderCast), not when the spell resolves.
+    const cast1 = playCardFromZone(recordCommanderCast(inCommand, "h", "cmdr"), "h", "cmdr", undefined, undefined, "battlefield", [], "command");
     const onBoard = cast1.seats[0].board.battlefield.find((c) => c.id === "cmdr")!;
     expect(onBoard.commanderTax).toBe(2);
     const bounced = moveCardAcrossSeats(cast1, "h", "cmdr", "h", "hand").session;
     expect(bounced.seats[0].board.commander?.commanderTax).toBe(2);
-    const cast2 = playCardFromZone(bounced, "h", "cmdr", undefined, undefined, "battlefield", [], "command");
+    const cast2 = playCardFromZone(recordCommanderCast(bounced, "h", "cmdr"), "h", "cmdr", undefined, undefined, "battlefield", [], "command");
     expect(cast2.seats[0].board.battlefield.find((c) => c.id === "cmdr")!.commanderTax).toBe(4);
   });
 

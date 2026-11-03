@@ -154,6 +154,8 @@ export async function requestAgentAction(input: {
       body: JSON.stringify({
         model,
         stream: false,
+        // Hard backstop on generated tokens (a normal decision is ~100; deliberation ~600).
+        options: { num_predict: input.requireDeliberation ? 1500 : 500 },
         format: {
           type: "object",
           properties: {
@@ -164,9 +166,13 @@ export async function requestAgentAction(input: {
             legalActionId: { type: "string" },
             targetIds: { type: "array", items: { type: "string" } },
             cardId: { type: "string" },
-            manaPlan: { type: "string" },
-            reason: { type: "string" },
-            deliberation: { type: "string" },
+            // Length caps: the prompt asks for 1-2 sentences, but a free-text field with no grammar
+            // limit sometimes runs away (measured: a mulligan "reason" of 450+ tokens taking 14s, and
+            // repeated 40s timeouts that fell back to the heuristic anyway). Caps are generous for
+            // a real answer and bound the worst case.
+            manaPlan: { type: "string", maxLength: 300 },
+            reason: { type: "string", maxLength: 600 },
+            deliberation: { type: "string", maxLength: 3000 },
             fallbackAction: { type: "string", enum: ["pass_priority", "end_turn"] }
           },
           required: ["actionType", "legalActionId", "targetIds", "reason", "fallbackAction"]

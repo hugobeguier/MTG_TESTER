@@ -99,7 +99,13 @@ export interface ShouldStopInput {
 export function shouldStopForPriority(input: ShouldStopInput): StopReason | undefined {
   // Never stop for a response that doesn't exist — this policy only ever removes stops that
   // canReceivePriorityForPendingAction's own affordability check would otherwise have opened.
-  if (!input.hasLegalResponse) return undefined;
+  if (!input.hasLegalResponse) {
+    // The one exception: a step the player explicitly ticked on SOMEONE ELSE's turn ("wants to pass end step") always asks,
+    // even with nothing castable — a ticked box is the player saying "stop me here". Own-turn stops are enforced by the
+    // human auto-advance effect instead, and every other kind of stop still needs a real response to be worth interrupting.
+    if (input.actionType === "phase" && !input.actionIsMine && input.settings.phaseStops[stopKey(input.phase, input.turnOwnerSeatIndex)]) return "phase_stop";
+    return undefined;
+  }
   if (input.settings.fullControl) return "full_control";
   if (input.holdOnce) return "hold_once";
   // Checked BEFORE the "my own phase-pass" exemption below: entering a ticked phase (e.g. your own

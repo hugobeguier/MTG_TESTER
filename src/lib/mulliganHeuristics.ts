@@ -127,7 +127,7 @@ function immediatelyAvailableLandColors(card: VisibleCard): Set<ManaColor> | und
   return matchedManaLine ? colors : undefined;
 }
 
-function producedColors(card: VisibleCard): Set<ManaColor> {
+export function producedColors(card: VisibleCard): Set<ManaColor> {
   if (isLand(card)) {
     const immediate = immediatelyAvailableLandColors(card);
     if (immediate) return immediate;

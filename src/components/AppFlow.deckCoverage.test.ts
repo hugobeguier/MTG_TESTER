@@ -16,6 +16,7 @@ const DECKS: Array<[string, number]> = [
   ["The Ur Dragon.txt", 44],
   ["Saheeli.txt", 16],
   ["decks/custom/Breena, the Demagogue.txt", 34],
+  ["decks/custom/Meren of Clan Nel Toth Built on my Own.txt", 33],
   ["decks/foundations/Calling All Angels.txt", 4],
   ["decks/foundations/Keen Engineering.txt", 13],
   ["decks/foundations/Reign Of Dragons.txt", 9],

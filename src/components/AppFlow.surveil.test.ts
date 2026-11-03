@@ -54,14 +54,18 @@ describe("applyZoneEffect — surveil", () => {
       card({ id: "1", name: "Forest", typeLine: "Basic Land — Forest" }),
       card({ id: "2", name: "Bear", typeLine: "Creature — Bear" }),
       card({ id: "3", name: "Island", typeLine: "Basic Land — Island" }),
-      card({ id: "4", name: "Wolf", typeLine: "Creature — Wolf" })
+      card({ id: "4", name: "Wolf", typeLine: "Creature — Wolf" }),
+      // a healthy library below the looked-at cards (the agent never mills itself down to a nearly empty library)
+      ...Array.from({ length: 40 }, (_, i) => card({ id: `pad${i}`, name: "Padding", typeLine: "Creature — Bear" }))
     ];
-    const player = seat({ id: "p", name: "You", kind: "human", library, board: { hand: [], battlefield: [] } });
+    // An agent bins lands once flooded (more lands than it wants, see src/lib/surveilScoring.ts); with fewer it keeps them.
+    const inPlay = Array.from({ length: 6 }, (_, i) => card({ id: `bf${i}`, name: "Swamp", typeLine: "Basic Land — Swamp", zone: "battlefield" }));
+    const player = seat({ id: "p", name: "You", kind: "agent", library, board: { hand: [], battlefield: inPlay } });
     const result = applyZoneEffect(session([player]), "p", "Otherworldly Gaze", { kind: "surveil", amount: 3 });
     const seatAfter = result.seats[0];
 
     expect(seatAfter.board.graveyard?.map((c) => c.name)).toEqual(["Forest", "Island"]);
-    expect(seatAfter.library?.map((c) => c.name)).toEqual(["Bear", "Wolf"]);
+    expect(seatAfter.library?.slice(0, 2).map((c) => c.name)).toEqual(["Bear", "Wolf"]);
     expect(result.events[0].message).toContain("Forest, Island");
   });
 
