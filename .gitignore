@@ -18,3 +18,5 @@ data/xmage-source
 bench/selfplay-results/
 bench/mistakes/
 advisor-log.jsonl
+*.tsbuildinfo
+*.stackdump
