@@ -117,7 +117,16 @@ export function wipeSequencingGuard(action: ScorableAction, context: ScoringCont
 
 function handWipes(context: ScoringContext, exceptCardId: string | undefined): CardLike[] {
   const mana = context.you?.availableMana?.total ?? 0;
-  return (context.you?.hand ?? []).filter((card) => card.id !== exceptCardId && (card.manaValue ?? 0) <= mana && wipeScope(card.oracleText ?? "") !== undefined && !(card.typeLine ?? "").includes("Land"));
+  return (context.you?.hand ?? []).flatMap(castableHalves).filter((card) => card.id !== exceptCardId && (card.manaValue ?? 0) <= mana && wipeScope(card.oracleText ?? "") !== undefined && !(card.typeLine ?? "").includes("Land"));
+}
+
+// A split card (Find // Finality) is cast as ONE half, at that half's own cost and with that half's own text: the card-level numbers (8 mana, both
+// texts) describe a spell nobody can cast. Each castable half (not an aftermath half) is judged as its own spell.
+function castableHalves(card: CardLike): CardLike[] {
+  if (!card.faces || card.faces.length !== 2 || card.faces.some((face) => !face.manaCost || /Land|Room/.test(face.typeLine))) return [card];
+  return card.faces
+    .filter((face) => !/^\s*aftermath\b/im.test(face.oracleText))
+    .map((face) => ({ ...card, name: face.name, typeLine: face.typeLine, oracleText: face.oracleText, manaValue: (face.manaCost!.match(/\{[^}]+\}/g) ?? []).reduce((total, symbol) => total + (Number.parseInt(symbol.slice(1, -1), 10) || (/^\{[XYZ]\}$/.test(symbol) ? 0 : 1)), 0) }));
 }
 
 // A wipe in hand that is worth casting THIS turn (net-positive on the board as it stands, i.e. without the permanent I am about to deploy).

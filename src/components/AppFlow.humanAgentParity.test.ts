@@ -161,7 +161,7 @@ function between(start: RegExp, end: RegExp, from = 0): string {
 // Prompt kinds only a human ever sees. Each one is created behind a seat.kind === "human" gate (the agent decides inline, with the deterministic
 // choosers named in docs/agents/system.md); a NEW kind must either get a branch in resolveAgentRuleChoice or be added here on purpose.
 const HUMAN_ONLY_RULE_CHOICE_KINDS = new Set([
-  "choose_cast_copy", "choose_cast_x", "choose_cast_alt", "choose_cast_targets", "choose_spell_modes", "choose_dig_card", "choose_labeled_target",
+  "choose_cast_copy", "choose_cast_x", "choose_cast_alt", "choose_cast_face", "choose_cast_targets", "choose_spell_modes", "choose_dig_card", "choose_labeled_target",
   "choose_creature_from_graveyards", "choose_creature_to_sacrifice", "choose_each_player_sacrifice", "choose_creature_to_sacrifice_for_cast",
   "choose_modal_option", "choose_proliferate_targets", "choose_effect_target", "choose_creature_on_battlefield", "choose_aura_attach_target",
   "choose_equip_target", "commander_zone_choice", "choose_trigger_option", "choose_creature_for_grant", "choose_trigger_card",

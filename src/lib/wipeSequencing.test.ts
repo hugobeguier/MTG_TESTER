@@ -98,3 +98,34 @@ describe("LLM path: an LLM that picks the creature first is overruled", () => {
     expect(decision.reason).toMatch(/cast the wipe first/);
   });
 });
+
+describe("a split card in hand is judged half by half", () => {
+  // Real Find // Finality: the card-level mana value is the SUM of both halves (8), but Finality alone costs 6.
+  const findFinality: CardLike & { faces: Array<{ name: string; typeLine: string; manaCost: string; oracleText: string }> } = {
+    id: "ff",
+    name: "Find // Finality",
+    typeLine: "Sorcery // Sorcery",
+    manaValue: 8,
+    oracleText: "Find: Return up to two target creature cards from your graveyard to your hand.\n\nFinality: You may put two +1/+1 counters on a creature you control. Then all creatures get -4/-4 until end of turn.",
+    faces: [
+      { name: "Find", typeLine: "Sorcery", manaCost: "{B/G}{B/G}", oracleText: "Return up to two target creature cards from your graveyard to your hand." },
+      { name: "Finality", typeLine: "Sorcery", manaCost: "{4}{B}{G}", oracleText: "You may put two +1/+1 counters on a creature you control. Then all creatures get -4/-4 until end of turn." }
+    ]
+  };
+  it("Finality (6 mana) is a planned wipe with 6 mana available even though the whole card reads 8, so a creature it would kill waits", () => {
+    const giant = cast("Test Giant", "Creature — Giant", 3, "");
+    giant.card.power = "4";
+    giant.card.toughness = "4";
+    const context = ctx({ hand: [findFinality, giant.card], availableMana: { total: 6 } }, giants);
+    const scored = scoreLegalActions([giant.action, pass], context);
+    expect(scored.find((s) => s.id === giant.action.id)!.reasons.join(" ")).toMatch(/Finality.*would kill it/);
+  });
+  it("with only 2 mana available (Find, not Finality) nothing is held for a wipe", () => {
+    const giant = cast("Test Giant", "Creature — Giant", 2, "");
+    giant.card.power = "4";
+    giant.card.toughness = "4";
+    const context = ctx({ hand: [findFinality, giant.card], availableMana: { total: 2 } }, giants);
+    const scored = scoreLegalActions([giant.action, pass], context);
+    expect(scored.find((s) => s.id === giant.action.id)!.reasons.join(" ")).not.toMatch(/wipe first/);
+  });
+});

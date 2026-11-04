@@ -105,6 +105,7 @@ import {
   legalAttackActions,
   legalBlockActions,
   legalMainPhaseActions,
+  checkMoveLegal,
   cardWithFaceManaCost,
   manaValueFromManaCost,
   maxAffordableX,
@@ -138,6 +139,7 @@ import {
   type LegalAgentAction
 } from "@/components/AppFlow";
 import { deterministicRuleWorkflow } from "@/lib/rulesAdvisor";
+import { decideWithGate } from "@/lib/moveLegality";
 import { parseSearchLibraryEffectText, type SearchLibraryEffect } from "@/lib/activatedAbilities";
 import { loadCardCatalog, lookupCard } from "@/lib/cardCatalog";
 import { createDeckFromList } from "@/lib/deckParser";
@@ -362,6 +364,14 @@ export interface SelfPlayOptions {
   onAction?: (prev: GameSession, next: GameSession, meta: AuditMeta) => void;
 }
 
+// A move the central legality gate refused ("rejected": never committed) or that the engine applied into a no-op ("noop": nothing spent or moved).
+export interface GateEvent {
+  kind: "rejected" | "noop";
+  seatId: string;
+  label: string;
+  reason: string;
+}
+
 export interface DecisionCounts {
   [seatId: string]: { [source: string]: number };
 }
@@ -389,6 +399,8 @@ export interface PlayGameResult {
   // does, just surfaces suspicious-looking moments (see that module's own header) for a human to spot
   // check, ranked by how often each kind recurs across a batch (scripts/self-play.ts's report).
   anomalies: Anomaly[];
+  // Moves the central legality gate refused (never committed) and moves that were applied into a no-op. A healthy run has zero "noop" events.
+  gateEvents: GateEvent[];
 }
 
 const MAX_MAIN_PHASE_ACTIONS = 40;
@@ -823,7 +835,7 @@ function applyMainPhaseAction(
     const baseCost = graveyardPermission?.costText ? manaValueFromManaCost(graveyardPermission.costText) : card.manaValue;
     const fixedCost = adjustedCastingCost(seat, costCard, baseCost, fromGraveyard ? "graveyard" : "hand", session.activePlayerId, session.seats);
     const chosenX = maxAffordableX(seat, costCard, fixedCost);
-    const totalCost = totalCastingCost(seat, costCard, baseCost, chosenX);
+    const totalCost = totalCastingCost(seat, costCard, baseCost, chosenX, session.seats);
     const payment = chooseManaSourcesForCost(seat, costCard, totalCost, undefined, session.seats);
     if (!payment.ok) return { session, changed: false };
     // A flashback instant/sorcery is exiled after it resolves instead of returning to the graveyard.
@@ -870,30 +882,44 @@ async function runMainPhase(
   landPlaysThisTurn: Set<string>,
   recordDecision: (seatId: string, source: string) => void,
   afterAction: (prev: GameSession, next: GameSession, meta: AuditMeta) => void,
-  recordSpellCoverage: (matched: boolean, cardName: string) => void
+  recordSpellCoverage: (matched: boolean, cardName: string) => void,
+  recordGate: (event: GateEvent) => void = () => undefined
 ): Promise<GameSession> {
   let guard = 0;
   const activatedLoyaltyKeys = new Set<string>();
+  // Actions that were chosen but turned out to do nothing when applied: excluded for the rest of this phase (not marked used for later phases).
+  const deadThisPhase = new Set<string>();
   while (guard < MAX_MAIN_PHASE_ACTIONS) {
     guard += 1;
     const seat = session.seats.find((item) => item.id === seatId);
     if (!seat || seat.hasLost) break;
     const hasPlayedLand = landPlaysMade(landPlaysThisTurn, `${seatId}:${session.turn}`) >= landDropsAllowed(seat);
-    const rawActions = legalMainPhaseActions(seat, hasPlayedLand, session.activePlayerId, session.turn, activatedLoyaltyKeys, session);
-    const legalActions = filterSupportedMainPhaseActions(rawActions, seat);
+    const regenerate = () => filterSupportedMainPhaseActions(legalMainPhaseActions(seat, hasPlayedLand, session.activePlayerId, session.turn, activatedLoyaltyKeys, session), seat).filter((item) => !deadThisPhase.has(item.id));
     const context = buildScoringContext(session, seatId, "main_phase");
-    const decision = await brain({ seatId, seatName: seat.name, purpose: "main_phase", legalActions, context });
-    recordDecision(seatId, decision.source);
-    const legal = legalActions.find((item) => item.id === decision.action.legalActionId);
+    let brainSource = "heuristic";
+    // The same central gate the live game uses (moveLegality.ts): reject -> exclude -> re-decide (capped) -> best remaining legal action -> pass.
+    const gated = await decideWithGate({
+      regenerate,
+      ask: async (options, notes) => {
+        const decision = await brain({ seatId, seatName: seat.name, purpose: "main_phase", legalActions: options, context: notes.length ? ({ ...context, rejectedProposals: notes } as typeof context) : context });
+        brainSource = decision.source;
+        return decision.action;
+      },
+      check: (candidate) => checkMoveLegal(session, seatId, candidate, { mode: "agent", hasPlayedLand, activeSeatId: session.activePlayerId, stackEmpty: true, fresh: regenerate() }),
+      onReject: (rejection) => recordGate({ kind: "rejected", seatId, label: rejection.label, reason: rejection.reason })
+    });
+    recordDecision(seatId, brainSource);
+    const legal = gated.action;
     if (!legal || legal.actionType === "pass_priority" || legal.actionType === "end_turn") break;
 
     const prev = session;
     const applied = applyMainPhaseAction(session, seatId, legal);
     if (!applied.changed) {
-      // Enumerator offered it, but applying it produced no change (e.g. a payment that the
-      // enumerator thought was legal turned out not to be at apply time) — don't loop forever
-      // re-offering the same dead option; treat this decision as a pass instead.
-      break;
+      // The gate said legal but applying it changed nothing (nothing was spent or moved): exclude it for the rest of the phase and let the seat
+      // pick something else, instead of ending its whole phase. Bounded by MAX_MAIN_PHASE_ACTIONS.
+      deadThisPhase.add(legal.id);
+      recordGate({ kind: "noop", seatId, label: legal.label, reason: "applying the action changed nothing" });
+      continue;
     }
     if (legal.actionType === "play_land") recordLandPlay(landPlaysThisTurn, `${seatId}:${session.turn}`);
     if (applied.spellEffectMatched !== undefined && applied.spellEffectCardName !== undefined) {
@@ -1071,6 +1097,7 @@ export async function playGame(session: GameSession, brains: Record<string, Brai
   const auditState: AuditState = createAuditState(session);
   const anomalyState: AnomalyState = createAnomalyState();
   const decisionCounts: DecisionCounts = {};
+  const gateEvents: GateEvent[] = [];
   const landPlaysThisTurn = new Set<string>();
   const spellEffectCoverage = { matched: 0, unmatched: 0 };
   const unmatchedSpellCards: Record<string, number> = {};
@@ -1139,7 +1166,7 @@ export async function playGame(session: GameSession, brains: Record<string, Brai
           }
           case "precombat main phase":
           case "postcombat main phase": {
-            session = await runMainPhase(session, activeSeat.id, brains[activeSeat.id], landPlaysThisTurn, recordDecision, afterAction, recordSpellCoverage);
+            session = await runMainPhase(session, activeSeat.id, brains[activeSeat.id], landPlaysThisTurn, recordDecision, afterAction, recordSpellCoverage, (event) => gateEvents.push(event));
             session = drainDeathTriggers(session);
             break;
           }
@@ -1212,7 +1239,8 @@ export async function playGame(session: GameSession, brains: Record<string, Brai
       wallClockMs: Date.now() - startedAt,
       spellEffectCoverage,
       unmatchedSpellCards,
-      anomalies: anomalyState.anomalies
+      anomalies: anomalyState.anomalies,
+      gateEvents
     };
   }
 
@@ -1226,6 +1254,7 @@ export async function playGame(session: GameSession, brains: Record<string, Brai
     wallClockMs: Date.now() - startedAt,
     spellEffectCoverage,
     unmatchedSpellCards,
-    anomalies: anomalyState.anomalies
+    anomalies: anomalyState.anomalies,
+    gateEvents
   };
 }

@@ -15,7 +15,9 @@ export interface StackItemLike {
   sourceCardName?: string;
   message?: string;
   // Spells: modes/targets chosen as the spell was cast.
-  castChoices?: { targets: ChosenTarget[] };
+  castChoices?: { targets: ChosenTarget[]; modes?: number[] };
+  // Modal spells: the text of each chosen mode, resolved by the caller from the card's own modes (castChoices.modes indexes them).
+  modeLabels?: string[];
   // Counterspell responses: the id of the stack item being countered.
   counterTargetId?: string;
   // Triggers/abilities: a chosen target is stored encoded in chosenOption ("p:seat", "c:seat:card" or bare card ids).
@@ -37,6 +39,8 @@ export interface StackItemDescription {
   controller: string;
   controllerSeatId: string;
   summary: string;
+  // The modes a modal spell was cast with ("choose one" shows its mode even when no mode has a target).
+  modes: string[];
   targets: StackTarget[];
   // The effect text says "target" but nothing was recorded (e.g. an agent that picks on resolution).
   targetsPending: boolean;
@@ -135,7 +139,11 @@ export function describeStackItem(session: GameSession, item: StackItemLike, sta
 
   const summary = summaryFor(item);
   const mentionsTarget = /\btargets?\b/i.test(item.sourceCard?.oracleText ?? "");
-  const targetsPending = item.type !== "phase" && targets.length === 0 && mentionsTarget;
+  // A permanent spell (a creature, artifact...) has no target of its own on the stack: "when this enters, destroy target creature" targets only
+  // when that ability triggers, so it is not "pending". An Aura is the exception: it targets as it is cast.
+  const typeLine = item.sourceCard?.typeLine ?? "";
+  const permanentSpell = item.type === "spell" && typeLine !== "" && !/\b(Instant|Sorcery)\b/.test(typeLine) && !/\bAura\b/.test(typeLine);
+  const targetsPending = item.type !== "phase" && !permanentSpell && targets.length === 0 && mentionsTarget;
   const affectsHuman = humanSeat !== undefined && controllerSeatId !== humanSeat.id && targets.some((target) => target.seatId === humanSeat.id);
 
   return {
@@ -143,6 +151,7 @@ export function describeStackItem(session: GameSession, item: StackItemLike, sta
     controller,
     controllerSeatId,
     summary,
+    modes: item.type === "spell" ? item.modeLabels ?? [] : [],
     targets,
     targetsPending,
     affectsPlayerSeatId: affectsHuman ? humanSeat.id : undefined

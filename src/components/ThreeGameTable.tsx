@@ -205,6 +205,12 @@ function StackDescriptionBlock({ description, humanSeatId }: { description?: Sta
       </div>
       {affectsYou ? <span className="stack-target-badge">Targets you / your stuff - consider responding</span> : null}
       {description.summary ? <p className="stack-desc-summary">{description.summary}</p> : null}
+      {description.modes.length > 0 ? (
+        <p className="stack-desc-modes">
+          <b>{description.modes.length === 1 ? "Mode chosen: " : "Modes chosen: "}</b>
+          {description.modes.join(" / ")}
+        </p>
+      ) : null}
       {description.targets.length > 0 ? (
         <ul className="stack-targets">
           {description.targets.map((target, index) => {

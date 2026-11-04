@@ -21,6 +21,7 @@ import type {
 } from "@/lib/types";
 import { deserializeTurnCounters, isCleanSaveStop, SAVE_FORMAT_VERSION, serializeTurnCounters, type GameSnapshot, type SavedGameSummary } from "@/lib/saveGame";
 import { deterministicRuleWorkflow, eventRelevantOracleText, type RuleWorkflow } from "@/lib/rulesAdvisor";
+import { createRejectionLedger, decideWithGate, illegalResult, legalResult, validateProposal, type LegalityResult } from "@/lib/moveLegality";
 import type { PrimitiveActionPlan, PrimitiveActionStep } from "@/lib/primitiveActionPlan";
 import { evaluateOpeningHand } from "@/lib/mulliganHeuristics";
 import { scoreSurveil } from "@/lib/surveilScoring";
@@ -666,6 +667,19 @@ type PendingRuleChoice =
       options: Array<{ value: number; label: string }>;
       resume: { seatId: string; cardId: string; position?: { x: number; z: number }; sourceZone: "hand" | "command" | "exile" | "graveyard" | "library"; faceIndex?: number; sacrificeTargets?: VisibleCard[] };
     }
+  // A split / Adventure card with more than one castable half: the caster picks which half to cast (and pays only that half's cost) before anything is paid.
+  | {
+      id: string;
+      kind: "choose_cast_face";
+      controllerSeatId: string;
+      sourceCardId: string;
+      sourceCardName: string;
+      prompt: string;
+      options: Array<{ faceIndex: number; label: string }>;
+      resume:
+        | { via: "playCard"; seatId: string; cardId: string; position?: { x: number; z: number }; sourceZone: "hand" | "command" | "exile" | "graveyard" | "library"; sacrificeTargets?: VisibleCard[] }
+        | { via: "respondWithCard"; cardId: string; sourceZone: "hand" | "exile" };
+    }
   | {
       id: string;
       kind: "choose_cast_alt";
@@ -692,7 +706,7 @@ type PendingRuleChoice =
       answers: CastChoices;
       resume:
         | { via: "playCard"; seatId: string; cardId: string; position?: { x: number; z: number }; sourceZone: "hand" | "command" | "exile" | "graveyard" | "library"; faceIndex?: number; sacrificeTargets?: VisibleCard[]; altChoice?: "alt" | "normal" }
-        | { via: "respondWithCard"; cardId: string; sourceZone: "hand" | "exile"; sacrificeTargets?: VisibleCard[] };
+        | { via: "respondWithCard"; cardId: string; sourceZone: "hand" | "exile"; faceIndex?: number; sacrificeTargets?: VisibleCard[] };
     }
   // A cast "choose one / choose two" spell (Austere Command, Valorous Stance, Collective Resistance, Profane Command): the human picks
   // the modes one at a time, then they all apply together (their targets are chosen automatically when more than one mode is picked).
@@ -1702,6 +1716,14 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   const [basicLandFetchSearch, setBasicLandFetchSearch] = useState<BasicLandFetchSearchState | undefined>();
   const [pendingAction, setPendingAction] = useState<PendingAction | undefined>();
   const [stackActions, setStackActions] = useState<PendingAction[]>([]);
+  // Always-current views of state for the legality gate: an agent decision awaits an LLM call, so the render-time `session` captured by its closure can be
+  // stale by the time the answer arrives. The gate re-validates the proposal against these, never against the stale closure.
+  const latestSessionRef = useRef(session);
+  latestSessionRef.current = session;
+  const latestPendingActionRef = useRef(pendingAction);
+  latestPendingActionRef.current = pendingAction;
+  const latestActiveSeatIdRef = useRef(activeSeatId);
+  latestActiveSeatIdRef.current = activeSeatId;
   const [priorityPasses, setPriorityPasses] = useState<string[]>([]);
   // The human's priority-stop preferences (src/lib/priorityStops.ts) — starts at the hardcoded
   // defaults (matches server-rendered markup) and is swapped for whatever persisted on a prior visit
@@ -1895,7 +1917,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         chooseManaSourcesForCost(humanSeat, selectedHandCard, selectedHandCard.manaValue, undefined, session.seats).ok)
     : false;
   const selectedCardFaceOptions = selectedHandCard
-    ? handCardFaceOptions(humanSeat, selectedHandCard, hasPlayedLandThisTurn(humanSeat.id, session.turn), activeSeatId, poolForSeat(humanSeat.id), session.seats)
+    ? handCardFaceOptions(humanSeat, selectedHandCard, hasPlayedLandThisTurn(humanSeat.id, session.turn), activeSeatId, poolForSeat(humanSeat.id), session.seats, session)
     : undefined;
   const inspectedRoomLockedFaceIndex = (() => {
     if (!inspectedCard) return undefined;
@@ -3287,7 +3309,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     return () => window.clearTimeout(timer);
   }, [mode, gameStage, pendingRuleChoice, session.seats]);
 
-  async function requestAgentDecision(seat: PlayerSeat, purpose: string, legalActions: LegalAgentAction[], sessionOverride?: GameSession) {
+  async function requestAgentDecision(seat: PlayerSeat, purpose: string, legalActions: LegalAgentAction[], sessionOverride?: GameSession, rejectionNotes?: string[]) {
     if (legalActions.length === 0) return undefined;
     // No judgment call to make when there's exactly one legal option — skip the LLM round trip
     // entirely rather than spending a model call on a forced play (e.g. only pass_priority is legal).
@@ -3329,7 +3351,8 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       body: JSON.stringify({
         agentName: seat.agentName ?? seat.name,
         seatName: seat.name,
-        context: decisionContext,
+        // rejectedProposals: moves the legality gate already refused in THIS decision (with the reason), so the model does not pick them again.
+        context: rejectionNotes?.length ? { ...decisionContext, rejectedProposals: rejectionNotes } : decisionContext,
         legalActions
       })
     });
@@ -3364,11 +3387,33 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   async function decideAgentTurnAction(seat: PlayerSeat, requestKey: string) {
     try {
       const phaseKey = `${session.turn}:${seat.id}:${session.phase}`;
-      const legalActions = legalMainPhaseActions(seat, hasPlayedLandThisTurn(seat.id, session.turn), activeSeatId, session.turn, loyaltyActivationsThisTurn.current, session).filter(
-        (candidate) => !agentBannedCasts.current.has(`${phaseKey}:${candidate.id}`)
-      );
-      const action = await requestAgentDecision(seat, "main_phase", legalActions);
-      const legal = legalActions.find((item) => item.id === action?.legalActionId) ?? fallbackLegalAction(legalActions);
+      // Legal options from the LIVE state (not the render closure), minus casts that already failed to complete three times this phase.
+      const regenerate = () => {
+        const live = latestSessionRef.current;
+        const liveSeat = live.seats.find((item) => item.id === seat.id) ?? seat;
+        return legalMainPhaseActions(liveSeat, hasPlayedLandThisTurn(seat.id, live.turn), latestActiveSeatIdRef.current, live.turn, loyaltyActivationsThisTurn.current, live).filter(
+          (candidate) => !agentBannedCasts.current.has(`${phaseKey}:${candidate.id}`)
+        );
+      };
+      // Central legality gate (src/lib/moveLegality.ts, checkMoveLegal): a proposal that is stale, hallucinated or illegal is REJECTED (nothing changes), logged,
+      // excluded from this decision's options, and the seat decides again — at most MAX_DECISION_REJECTIONS times, then the best remaining legal action, else pass.
+      const decision = await decideWithGate({
+        regenerate,
+        ask: (options, notes) => requestAgentDecision(seat, "main_phase", options, undefined, notes),
+        check: (candidate) => {
+          const live = latestSessionRef.current;
+          return checkMoveLegal(live, seat.id, candidate, {
+            mode: "agent",
+            hasPlayedLand: hasPlayedLandThisTurn(seat.id, live.turn),
+            activeSeatId: latestActiveSeatIdRef.current,
+            stackEmpty: !latestPendingActionRef.current,
+            fresh: regenerate()
+          });
+        },
+        onReject: (rejection) => addEvent(`${seat.name} tried ${rejection.label} but it is not legal: ${rejection.reason}; nothing was spent.`, seat.id, "Rules action")
+      });
+      const action = decision.proposal;
+      const legal = decision.action;
       if (!legal) {
         advanceTurn();
         return;
@@ -3412,8 +3457,18 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         const opponents = workingSession.seats.filter((item) => item.id !== seat.id && !item.hasLost);
         const legalActions = legalAttackActions(currentSeat, opponents);
         if (!legalActions.some((item) => item.actionType === "attack")) break;
-        const action = await requestAgentDecision(currentSeat, "declare_attackers", legalActions, workingSession);
-        const legal = legalActions.find((item) => item.id === action?.legalActionId);
+        // Same central gate: an attacker that is tapped/summoning sick/gone is rejected with a reason and the agent re-decides; if it cannot name a legal
+        // attacker it declares no more attackers (never an attack the rules forbid).
+        const attackSession = workingSession;
+        const decision = await decideWithGate({
+          regenerate: () => legalAttackActions(attackSession.seats.find((item) => item.id === seat.id) ?? currentSeat, opponents),
+          ask: (options, notes) => requestAgentDecision(currentSeat, "declare_attackers", options, attackSession, notes),
+          check: (candidate) => checkMoveLegal(attackSession, seat.id, candidate, { mode: "agent", hasPlayedLand: true, activeSeatId, stackEmpty: true, fresh: legalActions }),
+          onReject: (rejection) => addEvent(`${seat.name} tried ${rejection.label} but it is not legal: ${rejection.reason}.`, seat.id, "Rules action"),
+          preferPass: true
+        });
+        const action = decision.proposal;
+        const legal = decision.action;
         if (!legal || legal.actionType !== "attack" || !legal.cardId) break;
         workingSession = declareAttack(workingSession, seat.id, legal.cardId, legal.targetIds[0]);
         workingSession = {
@@ -3468,9 +3523,30 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         passPriority();
         return;
       }
-      const legalActions = legalPriorityActions(seat, actionOnStack, activeSeatId, session);
-      const action = await requestAgentDecision(seat, "priority_response", legalActions);
-      const legal = legalActions.find((item) => item.id === action?.legalActionId) ?? fallbackLegalAction(legalActions);
+      // Same central gate as the main phase. The live state is read after the (possibly slow) model call: if the stack moved on meanwhile
+      // (the spell resolved, was countered) the proposed response is stale and rejected instead of cast into the wrong situation.
+      const regenerate = () => {
+        const live = latestSessionRef.current;
+        const liveSeat = live.seats.find((item) => item.id === seat.id) ?? seat;
+        const livePending = latestPendingActionRef.current;
+        if (!livePending || livePending.id !== actionOnStack.id) return [{ id: "pass-priority", actionType: "pass_priority" as const, targetIds: [], label: "pass priority" }];
+        return legalPriorityActions(liveSeat, livePending, latestActiveSeatIdRef.current, live);
+      };
+      const decision = await decideWithGate({
+        regenerate,
+        ask: (options, notes) => requestAgentDecision(seat, "priority_response", options, undefined, notes),
+        check: (candidate) =>
+          checkMoveLegal(latestSessionRef.current, seat.id, candidate, {
+            mode: "agent",
+            hasPlayedLand: true,
+            activeSeatId: latestActiveSeatIdRef.current,
+            stackEmpty: !latestPendingActionRef.current,
+            fresh: regenerate()
+          }),
+        onReject: (rejection) => addEvent(`${seat.name} tried ${rejection.label} but it is not legal: ${rejection.reason}; nothing was spent.`, seat.id, "Rules action")
+      });
+      const action = decision.proposal;
+      const legal = decision.action;
       if (!legal) {
         passPriority();
         return;
@@ -3501,8 +3577,15 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         const legalActions = legalBlockActions(session, choice).filter((item) => item.actionType !== "block" || !chosenBlockerIds.includes(item.cardId ?? ""));
         if (!legalActions.some((item) => item.actionType === "block")) break;
         const purpose = chosenBlockerIds.length > 0 ? "declare_blockers_additional" : "declare_blockers";
-        const action = await requestAgentDecision(seat, purpose, legalActions);
-        const legal = legalActions.find((item) => item.id === action?.legalActionId);
+        const blockDecision = await decideWithGate({
+          regenerate: () => legalBlockActions(latestSessionRef.current, choice).filter((item) => item.actionType !== "block" || !chosenBlockerIds.includes(item.cardId ?? "")),
+          ask: (options, notes) => requestAgentDecision(seat, purpose, options, undefined, notes),
+          check: (candidate) => checkMoveLegal(latestSessionRef.current, seat.id, candidate, { mode: "agent", hasPlayedLand: true, activeSeatId, stackEmpty: true, fresh: legalActions }),
+          onReject: (rejection) => addEvent(`${seat.name} tried ${rejection.label} but it is not legal: ${rejection.reason}.`, seat.id, "Rules action"),
+          preferPass: true
+        });
+        const action = blockDecision.proposal;
+        const legal = blockDecision.action;
         if (!legal || legal.actionType !== "block" || !legal.cardId) {
           noBlockReason = action?.reason ?? "";
           break;
@@ -3697,6 +3780,13 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       passPriority();
       return;
     }
+    // Backstop gate (the decision loop already validated this): target, lockout, timing. Nothing is spent when it refuses.
+    const gate = checkMoveLegal(session, seat.id, { id: `respond${sourceZone === "exile" ? "-exile" : ""}:${cardId}`, actionType: "cast_spell", cardId, sourceZone: sourceZone === "exile" ? "exile" : undefined, targetIds: [], label: `respond with ${card.name}` }, { mode: "human", hasPlayedLand: true, activeSeatId, stackEmpty: false });
+    if (!gate.legal) {
+      addEvent(`${seat.name} tried to respond with ${card.name} but it is not legal: ${gate.reason}; nothing was spent.`, seat.id, "Rules action");
+      passPriority();
+      return;
+    }
     const fixedCost = adjustedCastingCost(seat, card, card.manaValue, sourceZone === "exile" ? "exile" : "hand", activeSeatId, session.seats);
     const chosenX = maxAffordableX(seat, card, fixedCost);
     const adjustedCost = totalCastingCost(seat, card, card.manaValue, chosenX, session.seats);
@@ -3711,7 +3801,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     const counterTargetId = counterAbility && pendingAction.type === "spell" ? pendingAction.id : undefined;
     // Targets are named as the response is put on the stack (rule 601.2c), same as an agent's main-phase cast, so the human sees them and can respond.
     const castChoices = card.faces?.length ? undefined : agentCastTimeRemovalChoices(session, seat.id, card, chosenX > 0 ? chosenX : undefined);
-    const targetText = stackTargetText(session, castChoices?.targets ?? [], counterTargetId && pendingAction.type === "spell" ? pendingAction.cardName ?? "a spell" : undefined);
+    const targetText = stackTargetText(session, castChoices?.targets ?? [], counterTargetId && pendingAction.type === "spell" ? pendingAction.cardName ?? "a spell" : undefined, castModeLabels(card, chosenX > 0 ? chosenX : undefined, castChoices));
     const action: PendingAction = {
       id: crypto.randomUUID(),
       type: "spell",
@@ -5392,7 +5482,41 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     const dfcSplit = modalDoubleFacedLandSplit(card);
     const doors = roomDoorFaces(card);
     const spellFaces = independentlyCastableSpellFaces(card);
+    // A split / Adventure card cast from the hand with no half named (a drag onto the table, "Play Selected", ...): Magic makes the caster CHOOSE one half
+    // and pay only that half's cost. Without this the whole card was priced at both halves' costs added together (8 for Find // Finality) and always
+    // resolved as its first half. The decision is per half: cost, timing, targets. One castable half is cast directly; several ask the human.
+    if (faceIndex === undefined && spellFaces && sourceZone === "hand") {
+      const decision = castFaceDecision(session, seat, card, activeSeatId, seat.kind === "human" ? poolForSeat(seatId) : undefined);
+      if (decision.kind === "single") {
+        faceIndex = decision.faceIndex;
+      } else if (decision.kind === "choose") {
+        const usable = decision.options.filter((option) => option.castable && option.payable);
+        if (seat.kind === "human") {
+          setPendingRuleChoice({
+            id: crypto.randomUUID(),
+            kind: "choose_cast_face",
+            controllerSeatId: seatId,
+            sourceCardId: cardId,
+            sourceCardName: card.name,
+            prompt: `${card.name}: which half do you cast? You pay only that half's cost.`,
+            options: usable.map((option) => ({ faceIndex: option.faceIndex, label: option.label })),
+            resume: { via: "playCard", seatId, cardId, position, sourceZone, sacrificeTargets: preChosenSacrificeTargets }
+          });
+          setSelectedHandCardId(undefined);
+          return;
+        }
+        faceIndex = usable[0].faceIndex;
+      } else if (decision.kind === "unpayable") {
+        const why = decision.options.map((option) => `${option.label.replace(/^Cast /, "")} ${option.castable ? "cannot be paid" : "cannot be cast right now"}`).join("; ");
+        addEvent(`${seat.name} cannot cast ${card.name}: ${why}.`, seatId, "Mana");
+        setSelectedHandCardId(undefined);
+        return;
+      }
+    }
     const playingAsLand = dfcSplit ? faceIndex === dfcSplit.landIndex : isLandCard(card);
+    // From here on the half that was chosen decides timing and targets; the combined card never does.
+    const chosenHalf = spellFaces && faceIndex !== undefined ? spellFaces[faceIndex] : undefined;
+    const timingCard = chosenHalf ? { ...card, name: chosenHalf.name, typeLine: chosenHalf.typeLine, oracleText: chosenHalf.oracleText } : card;
 
     // Sorcery-speed timing (rule 305.3 for lands, 307.5/601.3a-adjacent for sorcery-speed spells):
     // lands and any card that isn't instant-speed can only be played on the caster's own turn,
@@ -5402,12 +5526,34 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     // battlefield during e.g. the draw step (or an opponent's turn) would silently succeed: the
     // card moves, and for lands it also burns the turn's one-land allowance with nothing to show
     // for it, leaving the player unable to play a land later in their real main phase.
-    if ((playingAsLand || !(canCastAtInstantSpeed(card, seatHasFlashGrant(seat, card)) || (sourceZone === "exile" && card.exiledPlayableAnyTime))) && (activeSeatId !== seatId || !isMainPhase(session.phase))) {
+    if ((playingAsLand || !(canCastAtInstantSpeed(timingCard, seatHasFlashGrant(seat, timingCard)) || (sourceZone === "exile" && card.exiledPlayableAnyTime))) && (activeSeatId !== seatId || !isMainPhase(session.phase))) {
       addEvent(
         `${seat.name} can only ${playingAsLand ? "play a land" : `cast ${card.name}`} during a main phase on their own turn.`,
         seatId,
         "Timing"
       );
+      setSelectedHandCardId(undefined);
+      return;
+    }
+
+    // Central legality gate (checkMoveLegal, src/lib/moveLegality.ts) — the same rules check the agents' decisions go through, so a human's play
+    // and an agent's play are refused for the same reasons, with a stated reason, before any mana is spent or any card moves.
+    const playGate = checkMoveLegal(
+      session,
+      seatId,
+      {
+        id: `${playingAsLand ? "play-land" : sourceZone === "command" ? "cast-commander" : "cast"}:${cardId}`,
+        actionType: playingAsLand ? "play_land" : sourceZone === "command" ? "cast_commander" : "cast_spell",
+        cardId,
+        sourceZone: sourceZone === "exile" || sourceZone === "graveyard" || sourceZone === "library" ? sourceZone : undefined,
+        faceIndex,
+        targetIds: [],
+        label: card.name
+      },
+      { mode: "human", hasPlayedLand: hasPlayedLandThisTurn(seatId, session.turn), activeSeatId, stackEmpty: true }
+    );
+    if (!playGate.legal) {
+      addEvent(`${seat.name} cannot ${playingAsLand ? "play" : "cast"} ${card.name}: ${playGate.reason}.`, seatId, "Rules action");
       setSelectedHandCardId(undefined);
       return;
     }
@@ -5565,8 +5711,8 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     // for agents (legalMainPhaseActions builds their action list from it); a human clicking "Play
     // Selected" went straight through to payment, so e.g. Animate Dead with nothing in any graveyard
     // would cast, resolve, and fizzle into the graveyard instead of never being castable.
-    if (!hasResolvableTarget(session, seatId, card)) {
-      addEvent(`${seat.name} cannot cast ${card.name}; there is no legal target.`, seatId, "Mana");
+    if (!hasResolvableTarget(session, seatId, timingCard)) {
+      addEvent(`${seat.name} cannot cast ${timingCard.name}; there is no legal target.`, seatId, "Mana");
       setSelectedHandCardId(undefined);
       return;
     }
@@ -5684,7 +5830,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       : doorFace
         ? cardWithFaceManaCost(card, doorFace.manaCost)
         : spellFace
-          ? cardWithFaceManaCost(card, spellFace.manaCost)
+          ? spellFaceCostCard(card, spellFace)
           : card;
     const baseCost = useTapAlt && tapAlt
       ? manaValueFromManaCost(tapAlt.costManaText)
@@ -5810,7 +5956,9 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     const castTypeLine = doorFace?.typeLine ?? spellFace?.typeLine ?? (dfcSplit ? dfcSplit.spellFace.typeLine : card.typeLine);
     const spentManaText = payment.source === "tapped" ? ` using ${availableMana} mana` : ` spending ${formatManaPoolPayment(payment.spent)}`;
     const xText = chosenX > 0 ? ` (X=${chosenX})` : "";
-    const finalCastChoices = castChoices ?? (seat.kind !== "human" && !doorFace && !spellFace && !dfcSplit && sourceZone !== "command" ? agentCastTimeRemovalChoices(session, seatId, card, chosenX > 0 ? chosenX : undefined) : undefined);
+    // An agent picks its modes and targets now (rule 601.2c); for an Adventure/Omen/split/modal-DFC spell face that is the face's own text.
+    const castFace = castFaceCard(card, doorFace ?? spellFace ?? (dfcSplit ? dfcSplit.spellFace : undefined));
+    const finalCastChoices = castChoices ?? (seat.kind !== "human" && sourceZone !== "command" ? agentCastTimeRemovalChoices(session, seatId, castFace, chosenX > 0 ? chosenX : undefined) : undefined);
     const action: PendingAction = {
       id: crypto.randomUUID(),
       type: "spell",
@@ -5832,7 +5980,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         doorFace ? faceIndex : spellFace ? faceIndex : dfcSplit ? dfcSplit.spellIndex : !doors && card.faces?.length === 2 ? 0 : undefined,
       chosenX: chosenX > 0 ? chosenX : undefined,
       castChoices: finalCastChoices,
-      message: `${seat.name} casts ${castName}${xText}${seat.kind !== "human" ? stackTargetText(session, finalCastChoices?.targets ?? []) : ""}${sourceZone === "command" ? " from the command zone" : sourceZone === "exile" ? " from exile" : sourceZone === "graveyard" ? (flashbackCostText ? " with flashback" : " from the graveyard") : sourceZone === "library" ? " from the top of their library" : ""}${spentManaText}.`
+      message: `${seat.name} casts ${castName}${xText}${stackTargetText(session, finalCastChoices?.targets ?? [], undefined, castModeLabels(castFace, chosenX > 0 ? chosenX : undefined, finalCastChoices))}${sourceZone === "command" ? " from the command zone" : sourceZone === "exile" ? " from exile" : sourceZone === "graveyard" ? (flashbackCostText ? " with flashback" : " from the graveyard") : sourceZone === "library" ? " from the top of their library" : ""}${spentManaText}.`
     };
     if (usesOnceEachTurnFreeCast) {
       setSession((current) => ({
@@ -6048,6 +6196,12 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     // with no way to pick Destroy Enchantment or Proliferate.
     if (card && ability?.effect.kind === "removal" && ability.effect.effect.kind === "modal" && ability.effect.effect.chooseCount === 1 && seat?.kind === "human") {
       const modalEffect = ability.effect.effect;
+      // Rule 602.2b/601.2c: an ability with no legal target for any mode cannot be activated. Checked BEFORE the cost is paid; paying (sacrificing the
+      // source) and then finding no viable mode used to silently throw the permanent away for nothing.
+      if (!modalEffect.modes.some((mode) => removalEffectHasLegalTarget(session, seatId, card, mode))) {
+        addEvent(`${card.name} cannot be activated: none of its modes has a legal target. Nothing was sacrificed or paid.`, seatId, "Rules action");
+        return;
+      }
       const paid = payGenericSacrificeCost(session, seatId, cardId, abilityIndex, humanPool);
       if (!paid) return;
       if (paid.poolSpent) {
@@ -6875,13 +7029,39 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   // a response window" flow) or an exiled card they currently have play permission for — gated by
   // the same canCastAtInstantSpeed check either way, so an exiled sorcery still isn't offered as a
   // response, only an exiled instant/flash card is.
-  function respondWithCard(cardId: string, sourceZone: "hand" | "exile", preChosenSacrificeTargets?: VisibleCard[], castChoices?: CastChoices) {
+  function respondWithCard(cardId: string, sourceZone: "hand" | "exile", preChosenSacrificeTargets?: VisibleCard[], castChoices?: CastChoices, faceIndex?: number) {
     if (!pendingAction || prioritySeatId !== humanSeat.id) {
       if (pendingAction) addEvent("You don't have priority right now, so you can't cast that yet.", humanSeat.id, "Timing");
       return;
     }
     const card = sourceZone === "exile" ? findExiledCardAnySeat(session, cardId) : humanSeat.board.hand.find((item) => item.id === cardId);
     if (!card) return;
+    // A split / Adventure card answered with from the hand: the caster chooses ONE half (instant-speed halves only) and pays only that half's cost.
+    const respondFaces = sourceZone === "hand" ? independentlyCastableSpellFaces(card) : undefined;
+    if (respondFaces && faceIndex === undefined) {
+      const decision = castFaceDecision(session, humanSeat, card, activeSeatId, poolForSeat(humanSeat.id), true);
+      if (decision.kind === "single") {
+        faceIndex = decision.faceIndex;
+      } else if (decision.kind === "choose") {
+        setPendingRuleChoice({
+          id: crypto.randomUUID(),
+          kind: "choose_cast_face",
+          controllerSeatId: humanSeat.id,
+          sourceCardId: cardId,
+          sourceCardName: card.name,
+          prompt: `${card.name}: which half do you cast? You pay only that half's cost.`,
+          options: decision.options.filter((option) => option.castable && option.payable).map((option) => ({ faceIndex: option.faceIndex, label: option.label })),
+          resume: { via: "respondWithCard", cardId, sourceZone }
+        });
+        return;
+      } else if (decision.kind === "unpayable") {
+        addEvent(`${humanSeat.name} cannot respond with ${card.name}: ${decision.options.map((option) => `${option.label.replace(/^Cast /, "")} ${option.castable ? "cannot be paid" : "cannot be cast right now"}`).join("; ")}.`, humanSeat.id, "Mana");
+        return;
+      }
+    }
+    const respondHalf = respondFaces && faceIndex !== undefined ? respondFaces[faceIndex] : undefined;
+    // Everything below prices and judges the chosen half (name, type, text, cost), not the combined card.
+    const castView = respondHalf ? spellFaceCostCard(card, respondHalf) : card;
     if (
       sourceZone === "exile" &&
       (card.exiledPlayableBySeatId !== humanSeat.id || (card.exiledPlayableUntilTurn !== undefined && session.turn > card.exiledPlayableUntilTurn))
@@ -6889,12 +7069,16 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       addEvent(`You may not cast ${card.name} from exile (the permission has expired or isn't yours).`, humanSeat.id, "Timing");
       return;
     }
-    if (!canCastAtInstantSpeed(card, seatHasFlashGrant(humanSeat, card)) && !(sourceZone === "exile" && card.exiledPlayableAnyTime)) {
+    if (!canCastAtInstantSpeed(castView, seatHasFlashGrant(humanSeat, castView)) && !(sourceZone === "exile" && card.exiledPlayableAnyTime)) {
       addEvent(`${humanSeat.name} cannot respond with ${card.name}; it is not playable at instant speed.`, humanSeat.id, "Mana");
       return;
     }
-    if (!hasResolvableTarget(session, humanSeat.id, card)) {
+    if (!hasResolvableTarget(session, humanSeat.id, castView)) {
       addEvent(`${humanSeat.name} cannot respond with ${card.name}; there is no legal target.`, humanSeat.id, "Mana");
+      return;
+    }
+    if (spellCastLockedOut(session, humanSeat.id, activeSeatId) || castRestrictedByTurnCount(session, card)) {
+      addEvent(`${humanSeat.name} cannot respond with ${card.name}: an effect stops this player from casting spells right now.`, humanSeat.id, "Rules action");
       return;
     }
     // Same interactive detour as playCard's own — see choose_creature_to_sacrifice_for_cast's doc
@@ -6914,13 +7098,13 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
           sourceCardId: cardId,
           sourceCardName: card.name,
           prompt: `${card.name}: choose a creature to sacrifice as an additional cost.`,
-          resumeVia: "respondWithCard",
+          resumeVia: "respondWithCard", faceIndex: respondHalf ? faceIndex : undefined,
           sourceZone
         });
         return;
       }
     }
-    const counterAbility = parseCounterSpellAbility(card.oracleText);
+    const counterAbility = parseCounterSpellAbility(castView.oracleText);
     // The agent path (legalPriorityActions) already refuses to even offer a type-restricted
     // counterspell ("counter target creature/noncreature/commander spell") against an illegal
     // target — this mirrors that same check for a human's own respond flow, which previously had
@@ -6928,7 +7112,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     // spell would spend the mana and card, then silently do nothing useful at resolution, with no
     // explanation of why. Checked before mana leaves the pool, same as the no-legal-target check
     // above, so a rejected response doesn't cost anything.
-    if (counterAbility && !parseModalHeader(card.oracleText)) {
+    if (counterAbility && !parseModalHeader(castView.oracleText)) {
       const counterTargetCard = pendingAction.type === "spell" ? findSpellSourceCard(session, pendingAction) : undefined;
       const isCommanderSpell = pendingAction.type === "spell" && pendingAction.sourceZone === "command";
       const legalCounterTarget =
@@ -6944,28 +7128,28 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         return;
       }
     }
-    const fixedCost = adjustedCastingCost(humanSeat, card, card.manaValue, sourceZone === "exile" ? "exile" : "hand", activeSeatId, session.seats) + targetingTax(session, humanSeat.id, castChoices?.targets ?? []);
+    const fixedCost = adjustedCastingCost(humanSeat, castView, castView.manaValue, sourceZone === "exile" ? "exile" : "hand", activeSeatId, session.seats) + targetingTax(session, humanSeat.id, castChoices?.targets ?? []);
     const pool = poolForSeat(humanSeat.id);
     // canReceivePriorityForPendingAction already offers this priority window whenever untapped
     // lands could cover the cost, not only when mana is already floating — payment must accept the
     // same fallback (auto-tap, same as the agent path and acceptMiracleOffer), or a human who
     // hasn't manually pre-tapped can never actually resolve an instant-speed response even though
     // they were given the chance to try.
-    const chosenX = manaPoolTotal(pool) > 0 ? maxAffordableX(humanSeat, card, fixedCost, pool) : maxAffordableX(humanSeat, card, fixedCost);
-    const respondWaived = card.manaValue > 0 && adjustedCastingCost(humanSeat, card, card.manaValue, sourceZone === "exile" ? "exile" : "hand", activeSeatId, session.seats) === 0;
-    const adjustedCost = respondWaived ? fixedCost : totalCastingCost(humanSeat, card, card.manaValue, chosenX, session.seats);
-    const payment = payCastingCost(humanSeat.id, humanSeat, card, adjustedCost);
+    const chosenX = manaPoolTotal(pool) > 0 ? maxAffordableX(humanSeat, castView, fixedCost, pool) : maxAffordableX(humanSeat, castView, fixedCost);
+    const respondWaived = castView.manaValue > 0 && adjustedCastingCost(humanSeat, castView, castView.manaValue, sourceZone === "exile" ? "exile" : "hand", activeSeatId, session.seats) === 0;
+    const adjustedCost = respondWaived ? fixedCost : totalCastingCost(humanSeat, castView, castView.manaValue, chosenX, session.seats);
+    const payment = payCastingCost(humanSeat.id, humanSeat, castView, adjustedCost);
     const availableMana = payment.ok ? manaPoolTotal(payment.spent) : selectedManaTotal(humanSeat, payment.sourceIds);
     if (!isLandCard(card) && !payment.ok) {
-      addEvent(cannotPayMessage(humanSeat, card, availableMana, adjustedCost, payment.reason), humanSeat.id, "Mana");
+      addEvent(cannotPayMessage(humanSeat, castView, availableMana, adjustedCost, payment.reason), humanSeat.id, "Mana");
       return;
     }
     const manaSourceIds = isLandCard(card) ? [] : payment.sourceIds;
     if (!castChoices && !isLandCard(card)) {
       const answers: CastChoices = { targets: [] };
-      const firstPrompt = nextCastPrompt(session, humanSeat.id, card, chosenX > 0 ? chosenX : undefined, answers);
+      const firstPrompt = nextCastPrompt(session, humanSeat.id, castView, chosenX > 0 ? chosenX : undefined, answers);
       if (firstPrompt) {
-        openCastPrompt(firstPrompt, { planCard: card, chosenX: chosenX > 0 ? chosenX : undefined, answers, resume: { via: "respondWithCard", cardId, sourceZone, sacrificeTargets: preChosenSacrificeTargets } });
+        openCastPrompt(firstPrompt, { planCard: castView, chosenX: chosenX > 0 ? chosenX : undefined, answers, resume: { via: "respondWithCard", cardId, sourceZone, faceIndex: respondHalf ? faceIndex : undefined, sacrificeTargets: preChosenSacrificeTargets } });
         return;
       }
     }
@@ -6978,14 +7162,15 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       type: "spell",
       actorSeatId: humanSeat.id,
       cardId,
-      cardName: card.name,
-      cardTypeLine: card.typeLine,
+      cardName: castView.name,
+      cardTypeLine: castView.typeLine,
       sourceZone: sourceZone === "exile" ? "exile" : undefined,
       manaSourceIds,
+      faceIndex: respondHalf ? faceIndex : undefined,
       chosenX: chosenX > 0 ? chosenX : undefined,
       counterTargetId,
       castChoices,
-      message: `${humanSeat.name} responds with ${card.name}${chosenX > 0 ? ` (X=${chosenX})` : ""}${sourceZone === "exile" ? " from exile" : ""}.`
+      message: `${humanSeat.name} responds with ${castView.name}${chosenX > 0 ? ` (X=${chosenX})` : ""}${stackTargetText(session, castChoices?.targets ?? [], counterTargetId && pendingAction.type === "spell" ? pendingAction.cardName ?? "a spell" : undefined, castModeLabels(castView, chosenX > 0 ? chosenX : undefined, castChoices))}${sourceZone === "exile" ? " from exile" : ""}.`
     };
     if (sourceZone === "hand") setSelectedHandCardId(undefined);
     beginPendingAction(action, "Stack", preChosenSacrificeTargets);
@@ -8421,7 +8606,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
           allowedCardFilter?: string;
         }
       | undefined;
-    let capturedAdvisorCall: { event: "spell_resolved_to_battlefield" | "spell_resolved_to_graveyard"; seatId: string; sourceCard: VisibleCard } | undefined;
+    let capturedAdvisorCall: { event: "spell_resolved_to_battlefield" | "spell_resolved_to_graveyard"; seatId: string; sourceCard: VisibleCard; castTargets?: ChosenTarget[] } | undefined;
     let capturedStaticInterpreterCall: { seatId: string; card: VisibleCard } | undefined;
     // Mana a resolving spell adds (Mana Geyser) — mana pools live in this component's React state, not
     // in the session the updater below returns, so it's captured here and added after the updater runs.
@@ -9002,7 +9187,9 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
           capturedAdvisorCall = {
             event: destination === "battlefield" ? "spell_resolved_to_battlefield" : "spell_resolved_to_graveyard",
             seatId: action.actorSeatId,
-            sourceCard
+            sourceCard,
+            // Targets named as an advisor-planned spell was cast (see agentPlannedCastChoices).
+            castTargets: castStruct === undefined ? action.castChoices?.targets : undefined
           };
         }
         if (destination === "battlefield") {
@@ -9094,7 +9281,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       }
       if (capturedAdvisorCall) {
         const advisorCall = capturedAdvisorCall;
-        void consultRulesAdvisor(advisorCall.event, advisorCall.seatId, advisorCall.sourceCard);
+        void consultRulesAdvisor(advisorCall.event, advisorCall.seatId, advisorCall.sourceCard, advisorCall.castTargets);
       }
       if (capturedStaticInterpreterCall) {
         const staticCall = capturedStaticInterpreterCall;
@@ -9139,12 +9326,11 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     if (rawTriggers.length === 0) return;
     // An agent's targeted trigger aims as it goes on the stack (rule 603.3d), so the human sees the target in the stack panel and can respond to it.
     const triggers = rawTriggers.map((trigger) => {
-      if (trigger.effect.kind !== "targeted_effect" || trigger.effect.chosenOption !== undefined) return trigger;
+      if (trigger.effect.chosenOption !== undefined) return trigger;
       const controller = session.seats.find((seat) => seat.id === trigger.controllerSeatId);
-      const source = findPermanentById(session, trigger.sourceCardId);
-      if (!controller || controller.kind === "human" || !source) return trigger;
-      const picked = pickTargetedEffectTarget(session, trigger.controllerSeatId, source, trigger.effect.effect);
-      return picked ? { ...trigger, effect: { ...trigger.effect, chosenOption: encodeChosenTarget(picked) } } : trigger;
+      if (!controller || controller.kind === "human") return trigger;
+      const chosen = agentTargetedTriggerKinds.has(trigger.effect.kind) ? agentTriggerTarget(session, trigger) : undefined;
+      return chosen ? { ...trigger, effect: { ...trigger.effect, chosenOption: chosen } } : trigger;
     });
     // A human's modal trigger (its mode) and targeted triggers (their targets) are decided as the trigger goes onto the stack, so the
     // opponents see the choice before they respond. Only modes and targets: costs and "you may" amounts are still settled on resolution.
@@ -9163,7 +9349,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     beginPendingAction(firstTrigger, "Trigger");
   }
 
-  async function consultRulesAdvisor(event: string, seatId: string, sourceCard: VisibleCard) {
+  async function consultRulesAdvisor(event: string, seatId: string, sourceCard: VisibleCard, castTargets?: ChosenTarget[]) {
     const seat = session.seats.find((item) => item.id === seatId);
     if (!seat) return;
     // A card with no oracle text at all (a plain vanilla creature — Alpine Grizzly, Balduvian
@@ -9181,7 +9367,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     // primitive-action planner instead of silently doing nothing, same as this function's own
     // fallback-of-last-resort role for the shapes it DOES recognize.
     if (!shouldConsultRulesAdvisor(event, sourceCard)) {
-      void consultPrimitiveActionPlanner(event, seatId, sourceCard);
+      void consultPrimitiveActionPlanner(event, seatId, sourceCard, castTargets);
       return;
     }
 
@@ -9261,7 +9447,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   // site). Same shape as consultRulesAdvisor itself: cache check, fetch, apply, degrade safely on
   // failure — reuses ruleWorkflowCacheKey's (event, oracleText) key convention against the sibling
   // primitiveActionPlanCache rather than inventing a new key scheme.
-  async function consultPrimitiveActionPlanner(event: string, seatId: string, sourceCard: VisibleCard) {
+  async function consultPrimitiveActionPlanner(event: string, seatId: string, sourceCard: VisibleCard, castTargets?: ChosenTarget[]) {
     const seat = session.seats.find((item) => item.id === seatId);
     if (!seat) return;
     // Nothing left once scoped to this event (e.g. a creature whose entire oracle text is an
@@ -9284,7 +9470,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         if (cached.plan.optional) {
           offerOptionalPrimitivePlan(seatId, sourceCard, cached.plan.steps, cached.plan.summary);
         } else {
-          setSession((current) => applyPrimitiveActionPlan(current, seatId, sourceCard, cached.plan.steps));
+          setSession((current) => applyPrimitiveActionPlan(current, seatId, sourceCard, cached.plan.steps, castTargets));
           addEvent(
             `${sourceCard.name}: ${cached.plan.summary || "resolved via the primitive-action fallback"} (cached)${cached.usedXMageGrounding ? " — grounded via XMage reference" : ""}.`,
             seatId,
@@ -9335,7 +9521,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         if (result.plan.optional) {
           offerOptionalPrimitivePlan(seatId, sourceCard, result.plan.steps, result.plan.summary);
         } else {
-          setSession((current) => applyPrimitiveActionPlan(current, seatId, sourceCard, result.plan.steps));
+          setSession((current) => applyPrimitiveActionPlan(current, seatId, sourceCard, result.plan.steps, castTargets));
           addEvent(
             `${sourceCard.name}: ${result.plan.summary || "resolved via the primitive-action fallback"}${result.usedXMageGrounding ? " — grounded via XMage reference" : ""}.`,
             seatId,
@@ -10503,7 +10689,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     if (choice.resumeVia === "playCard") {
       playCard(choice.controllerSeatId, choice.sourceCardId, choice.position, choice.sourceZone, choice.faceIndex, [chosenCard]);
     } else {
-      respondWithCard(choice.sourceCardId, choice.sourceZone === "command" || choice.sourceZone === "graveyard" || choice.sourceZone === "library" ? "hand" : choice.sourceZone, [chosenCard]);
+      respondWithCard(choice.sourceCardId, choice.sourceZone === "command" || choice.sourceZone === "graveyard" || choice.sourceZone === "library" ? "hand" : choice.sourceZone, [chosenCard], undefined, choice.faceIndex);
     }
   }
 
@@ -10539,6 +10725,20 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       seats: current.seats.map((item) => (item.id === resume.seatId ? { ...item, board: { ...item.board, hand: item.board.hand.map((card) => (card.id === resume.cardId ? { ...card, chosenCopyTargetId: picked } : card)) } } : item))
     }));
     window.setTimeout(() => playCard(resume.seatId, resume.cardId, resume.position, resume.sourceZone, resume.faceIndex, resume.sacrificeTargets), 50);
+  }
+
+  // The human picked which half of a split / Adventure card to cast: replay the cast naming that half.
+  function completeCastFace(index: number) {
+    const choice = pendingRuleChoice;
+    if (!choice || choice.kind !== "choose_cast_face") return;
+    const picked = choice.options[index];
+    if (!picked) return;
+    setPendingRuleChoice(undefined);
+    const resume = choice.resume;
+    window.setTimeout(() => {
+      if (resume.via === "playCard") playCard(resume.seatId, resume.cardId, resume.position, resume.sourceZone, picked.faceIndex, resume.sacrificeTargets);
+      else respondWithCard(resume.cardId, resume.sourceZone, undefined, undefined, picked.faceIndex);
+    }, 0);
   }
 
   function completeCastAlt(index: number) {
@@ -10590,7 +10790,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     const resume = choice.resume;
     window.setTimeout(() => {
       if (resume.via === "playCard") playCard(resume.seatId, resume.cardId, resume.position, resume.sourceZone, resume.faceIndex, resume.sacrificeTargets, answers, resume.altChoice);
-      else respondWithCard(resume.cardId, resume.sourceZone, resume.sacrificeTargets, answers);
+      else respondWithCard(resume.cardId, resume.sourceZone, resume.sacrificeTargets, answers, resume.faceIndex);
     }, 0);
   }
 
@@ -10631,6 +10831,10 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   }
 
   function chooseModalOption(index: number) {
+    if (pendingRuleChoice?.kind === "choose_cast_face") {
+      completeCastFace(index);
+      return;
+    }
     if (pendingRuleChoice?.kind === "choose_cast_alt") {
       completeCastAlt(index);
       return;
@@ -13540,8 +13744,10 @@ export function legalMainPhaseActions(
     const spellFaces = independentlyCastableSpellFaces(card);
     if (spellFaces) {
       spellFaces.forEach((face, index) => {
-        const shim = cardWithFaceManaCost(card, face.manaCost);
-        const baseCost = manaValueFromManaCost(face.manaCost);
+        // An aftermath half is only castable from the graveyard; every half is priced from its OWN cost, type and text (never the combined card's).
+        if (!spellFaceCastableFromHand(face)) return;
+        const shim = spellFaceCostCard(card, face);
+        const baseCost = shim.manaValue;
         const fixedCost = adjustedCastingCost(seat, shim, baseCost, "hand", activeSeatId, session.seats);
         const chosenX = maxAffordableX(seat, shim, fixedCost);
         const totalCost = totalCastingCost(seat, shim, baseCost, chosenX, session.seats);
@@ -16141,6 +16347,112 @@ function triggerDamageAiming(session: GameSession, trigger: Extract<PendingActio
   return undefined;
 }
 
+// Rule 603.3d: a triggered ability's target is chosen as it goes on the stack. An agent's targeted trigger used to pick it only as it resolved, so
+// the stack panel showed nothing to respond to. Returns the encoded target (the same string a human's pick is stored as in effect.chosenOption:
+// "p:seat" / "c:seat:card" for the damage kinds, a bare card id for the counter/pump/destroy kinds) for the kinds whose resolution already reads it,
+// or undefined when the trigger needs no target or nothing is legal (resolution then keeps its own pick).
+const agentTargetedTriggerKinds = new Set<string>([
+  "targeted_effect", "damage_effect", "context_power_damage", "add_counter", "pump_target_creature", "double_power_counters", "target_creature_gains_keyword",
+  "destroy_tapped_creature", "aura_reanimate", "exile_card_from_graveyard", "become_artifact_target", "gain_control_target_artifact"
+]);
+
+function agentTriggerTarget(session: GameSession, trigger: Extract<PendingAction, { type: "trigger" }>): string | undefined {
+  const seatId = trigger.controllerSeatId;
+  const mine = session.seats.find((seat) => seat.id === seatId);
+  const source = findPermanentById(session, trigger.sourceCardId);
+  const effect = trigger.effect;
+  const bare = (pick: { seatId: string; card: VisibleCard } | undefined) => pick?.card.id;
+  switch (effect.kind) {
+    case "targeted_effect": {
+      const picked = source ? pickTargetedEffectTarget(session, seatId, source, effect.effect) : undefined;
+      return picked ? encodeChosenTarget(picked) : undefined;
+    }
+    // "Deals N damage to any target" (Scourge of Valkas, Dragon Tempest): the same deterministic damage chooser a spell uses.
+    case "damage_effect": {
+      if (!source || effect.effect.kind === "modal") return undefined;
+      const picked = agentRemovalEffectTarget(session, seatId, source, effect.effect, undefined, false);
+      return picked ? encodeChosenTarget(picked) : undefined;
+    }
+    // Warstorm Surge: the entering creature deals damage equal to its power.
+    case "context_power_damage": {
+      const entering = trigger.contextCardId ? findPermanentById(session, trigger.contextCardId) : undefined;
+      const power = entering ? Math.max(0, effectivePower(entering)) : 0;
+      if (!entering || power <= 0) return undefined;
+      const aim = chooseDamageTarget(session, seatId, power, "any", entering);
+      if (!aim) return undefined;
+      return encodeChosenTarget(aim.kind === "player" ? { kind: "player", seatId: aim.seat.id } : { kind: "card", seatId: aim.seatId, cardId: aim.card.id });
+    }
+    case "add_counter": {
+      if (effect.scope !== "target_creature" && effect.scope !== "target_creature_you_control") return undefined;
+      return bare(chooseCounterTarget(targetableView(session, seatId, source ?? ({ id: trigger.sourceCardId, name: trigger.sourceCardName, typeLine: "", oracleText: "", colors: [], manaValue: 0, role: "effect", zone: "battlefield" } as VisibleCard)), seatId, effect.counterKind, effect.scope === "target_creature_you_control"));
+    }
+    case "pump_target_creature":
+    case "double_power_counters":
+      return bare(mine && strongestControlledCreature(mine) ? { seatId, card: strongestControlledCreature(mine)! } : undefined);
+    case "target_creature_gains_keyword": {
+      const keywords = effect.keywords;
+      const best = (mine?.board.battlefield ?? [])
+        .filter((card) => card.typeLine.includes("Creature") && !keywords.every((keyword) => hasKeyword(card, keyword)))
+        .sort((a, b) => Number(Boolean(b.summoningSick)) - Number(Boolean(a.summoningSick)) || effectivePower(b) - effectivePower(a))[0];
+      return best?.id;
+    }
+    // "You may destroy target creature if it's tapped": the opposing tapped creature worth the most.
+    case "destroy_tapped_creature": {
+      const worth = (card: VisibleCard) => card.manaValue * 2 + Math.max(0, effectivePower(card)) + (card.commander ? 5 : 0);
+      const pool = session.seats
+        .filter((seat) => seat.id !== seatId)
+        .flatMap((seat) => seat.board.battlefield.filter((card) => card.tapped && card.typeLine.includes("Creature") && !hasShroud(card) && !hasHexproof(card) && !card.phasedOut));
+      return [...pool].sort((a, b) => worth(b) - worth(a))[0]?.id;
+    }
+    // Animate Dead and friends: the best creature card in any graveyard.
+    case "aura_reanimate":
+      return chooseReanimationTarget(session, seatId, true, "creature")?.card.id;
+    // Soul-Guide Lantern: an opponent's best graveyard card, else any.
+    case "exile_card_from_graveyard": {
+      const worth = (card: VisibleCard) => card.manaValue + (card.typeLine.includes("Creature") ? 2 : 0);
+      const pool = session.seats.flatMap((seat) => (seat.board.graveyard ?? []).map((card) => ({ seatId: seat.id, card })));
+      return [...pool].sort((a, b) => Number(b.seatId !== seatId) - Number(a.seatId !== seatId) || worth(b.card) - worth(a.card))[0]?.card.id;
+    }
+    // Memnarch: an agent turns one of its own nonartifact permanents into an artifact (a creature first, else its best other permanent).
+    case "become_artifact_target": {
+      const pool = (mine?.board.battlefield ?? []).filter((card) => !hasCardType(card, "Artifact") && !card.phasedOut && !hasShroud(card));
+      return [...pool].sort((a, b) => Number(b.typeLine.includes("Creature")) - Number(a.typeLine.includes("Creature")) || b.manaValue - a.manaValue)[0]?.id;
+    }
+    case "gain_control_target_artifact": {
+      const pool = session.seats
+        .filter((seat) => seat.id !== seatId)
+        .flatMap((seat) => seat.board.battlefield.filter((card) => hasCardType(card, "Artifact") && !hasShroud(card) && !hasHexproof(card) && !card.phasedOut));
+      return [...pool].sort((a, b) => b.manaValue + Math.max(0, effectivePower(b)) - (a.manaValue + Math.max(0, effectivePower(a))))[0]?.id;
+    }
+    default:
+      return undefined;
+  }
+}
+
+// Rule 608.2b for a triggered ability: a target recorded when it went on the stack that has since left (or become hexproof/protected) makes the
+// ability do nothing, instead of quietly swapping in a different target at resolution.
+function recordedTriggerTargetGone(session: GameSession, trigger: Extract<PendingAction, { type: "trigger" }>): boolean {
+  const recorded = trigger.effect.chosenOption;
+  if (!recorded) return false;
+  const kind = trigger.effect.kind;
+  const source = findPermanentById(session, trigger.sourceCardId) ?? ({ id: trigger.sourceCardId, name: trigger.sourceCardName, typeLine: "", oracleText: "", colors: [], manaValue: 0, role: "effect", zone: "battlefield" } as VisibleCard);
+  if (kind === "damage_effect" || kind === "context_power_damage") {
+    const aimed = decodeChosenTarget(recorded);
+    return aimed !== undefined && !castTargetLegal(session, trigger.controllerSeatId, source, aimed);
+  }
+  const battlefieldKind =
+    (trigger.effect.kind === "add_counter" && (trigger.effect.scope === "target_creature" || trigger.effect.scope === "target_creature_you_control")) ||
+    ["pump_target_creature", "double_power_counters", "target_creature_gains_keyword", "destroy_tapped_creature", "become_artifact_target", "gain_control_target_artifact"].includes(kind);
+  if (battlefieldKind) {
+    const owner = session.seats.find((seat) => seat.board.battlefield.some((card) => card.id === recorded));
+    return !owner || !castTargetLegal(session, trigger.controllerSeatId, source, { kind: "card", seatId: owner.id, cardId: recorded });
+  }
+  if (kind === "aura_reanimate" || kind === "exile_card_from_graveyard") {
+    return !session.seats.some((seat) => (seat.board.graveyard ?? []).some((card) => card.id === recorded));
+  }
+  return false;
+}
+
 function encodeChosenTarget(target: ChosenTarget): string {
   return target.kind === "player" ? "p:" + target.seatId : "c:" + target.seatId + ":" + target.cardId;
 }
@@ -18048,6 +18360,10 @@ function zoneSlots(session: GameSession, seatId: string, source: VisibleCard, ef
   return spec ? [{ prompt: `${source.name}: ${spec.prompt}`, options: optionsFromSpec(session, seatId, spec, source) }] : [];
 }
 
+// The spellExtras shapes that name targets as the spell is cast (rule 601.2c): Bite Down's two creatures, Chandra's Ignition's creature, Chaos Warp's
+// permanent, "target permanent you control gains ...", and the "target opponent" ones (Consumed by Greed, Secret Rendezvous).
+const CAST_TARGETED_EXTRA_KINDS: string[] = ["creature_bites", "grant_keywords", "shuffle_permanent_reveal_top", "creature_damages_everything_else", "opponent_sacrifices_greatest_power", "you_and_opponent_draw"];
+
 type CastStructure =
   | { kind: "removal"; effect: Exclude<RemovalEffect, { kind: "modal" }> }
   | { kind: "removal_modal"; modal: Extract<RemovalEffect, { kind: "modal" }> }
@@ -18081,7 +18397,7 @@ export function castStructure(card: VisibleCard, chosenX?: number): CastStructur
   if (removal && removal.kind !== "modal") return { kind: "removal", effect: removal };
   const zone = parseZoneEffect(text);
   if (zone) return { kind: "zone", effect: zone };
-  const extra = parseSpellExtraEffects(text).find((effect) => effect.kind === "creature_bites" || effect.kind === "grant_keywords" || effect.kind === "shuffle_permanent_reveal_top");
+  const extra = parseSpellExtraEffects(text).find((effect) => CAST_TARGETED_EXTRA_KINDS.includes(effect.kind));
   if (extra) return { kind: "extra", effect: extra };
   const pump = parseTargetedPump(chosenX !== undefined ? substituteX(text, chosenX) : text);
   if (pump) return { kind: "pump", effect: pump };
@@ -18103,6 +18419,12 @@ function extraSlots(session: GameSession, seatId: string, source: VisibleCard, e
   }
   if (effect.kind === "grant_keywords") {
     return [{ prompt: `${source.name}: choose a permanent you control to gain ${effect.keywords.join(" and ")} until end of turn.`, options: labeledTargetOptions(session, seatId, "own_permanent", source) }];
+  }
+  if (effect.kind === "creature_damages_everything_else") {
+    return [{ prompt: `${source.name}: choose the creature you control that deals the damage.`, options: labeledTargetOptions(session, seatId, "own_creature", source) }];
+  }
+  if (effect.kind === "opponent_sacrifices_greatest_power" || effect.kind === "you_and_opponent_draw") {
+    return [{ prompt: `${source.name}: choose a target opponent.`, options: labeledTargetOptions(session, seatId, "player", source) }];
   }
   return [];
 }
@@ -18187,7 +18509,9 @@ export function nextCastPrompt(
 }
 
 // " targeting Grizzly Bears, Sable" for the event log when an agent casts a spell with recorded targets; a countered spell is named too.
-function stackTargetText(session: GameSession, targets: ChosenTarget[], counteredName?: string): string {
+// A modal spell also names its chosen modes: " (chooses: Destroy target creature.; Gain 3 life.) targeting ...".
+export function stackTargetText(session: GameSession, targets: ChosenTarget[], counteredName?: string, modeLabels: string[] = []): string {
+  const modeText = modeLabels.length > 0 ? ` (chooses: ${modeLabels.join("; ")})` : "";
   const names = targets.map((target) => {
     const seat = session.seats.find((item) => item.id === target.seatId);
     if (target.kind === "player") return seat?.name ?? "a player";
@@ -18195,46 +18519,249 @@ function stackTargetText(session: GameSession, targets: ChosenTarget[], countere
     return card ? `${card.name} (${seat?.name ?? "?"}'s)` : "a card";
   });
   if (counteredName) names.push(counteredName);
-  return names.length > 0 ? ` targeting ${names.join(", ")}` : "";
+  return `${modeText}${names.length > 0 ? ` targeting ${names.join(", ")}` : ""}`;
 }
 
-// An agent's single-target destroy/exile/bounce instant or sorcery used to pick its target only as it resolved, so the stack showed no
-// target for it. Pick it as it is cast instead (same deterministic chooser the resolution used), so it is recorded in castChoices and
-// visible to opponents, and re-checked for legality on resolution. Everything else keeps its existing resolution-time pick.
-export function agentCastTimeRemovalChoices(session: GameSession, seatId: string, card: VisibleCard, chosenX?: number): CastChoices | undefined {
-  if (card.faces?.length) return undefined;
-  const structure = castStructure(card);
-  // Chaos Warp: "the owner of target permanent shuffles it into their library" — the agent aims at an opposing permanent as it casts, so the human sees it on the stack.
-  if (structure?.kind === "extra" && structure.effect.kind === "shuffle_permanent_reveal_top") {
-    const pick = chooseRemovalTarget(session, seatId, "nonland_permanent", card) ?? chooseRemovalTarget(session, seatId, "permanent", card);
-    return pick ? { targets: [{ kind: "card", seatId: pick.seatId, cardId: pick.card.id }] } : undefined;
-  }
-  // An agent's Aura names its creature as it is cast (the same deterministic choice resolution used to make).
-  if (structure?.kind === "aura") {
-    const attach = chooseAuraAttachTarget(session, seatId, card.oracleText);
-    return attach.kind === "attach" ? { targets: [{ kind: "card", seatId: attach.seatId, cardId: attach.cardId }] } : undefined;
-  }
-  // A single-verb targeted spell (tap/untap/counter/copy/gain-keyword effects on a chosen target).
-  if (structure?.kind === "targeted") {
-    const picked = pickTargetedEffectTarget(session, seatId, card, structure.effect);
-    return picked ? { targets: [picked] } : undefined;
-  }
-  if (structure?.kind !== "removal") return undefined;
-  const effect = structure.effect;
+// The session as seen by the seat that is about to aim `source`: opposing permanents `source` could never legally target (shroud, hexproof,
+// protection) are hidden, so the cast-time pickers below never choose something that would fizzle on resolution.
+function targetableView(session: GameSession, controllerSeatId: string, source: VisibleCard): GameSession {
+  return {
+    ...session,
+    seats: session.seats.map((seat) =>
+      seat.id === controllerSeatId
+        ? seat
+        : { ...seat, board: { ...seat.board, battlefield: seat.board.battlefield.filter((card) => !hasShroud(card) && !hasHexproof(card) && !isProtectedFrom(card, source)) } }
+    )
+  };
+}
+
+function cardTarget(pick: { seatId: string; card: VisibleCard } | undefined): ChosenTarget | undefined {
+  return pick ? { kind: "card", seatId: pick.seatId, cardId: pick.card.id } : undefined;
+}
+
+// The opponent a "target player" spell is aimed at: not eliminated, no player hexproof; `prefer` orders the candidates.
+function agentOpponentTarget(session: GameSession, seatId: string, prefer: (a: PlayerSeat, b: PlayerSeat) => number): ChosenTarget | undefined {
+  const opponents = session.seats.filter((seat) => seat.id !== seatId && !seat.hasLost && !playerHasHexproof(seat)).sort(prefer);
+  return opponents[0] ? { kind: "player", seatId: opponents[0].id } : undefined;
+}
+
+// One removal-shaped effect (or one mode of a modal) -> the target the agent aims it at; undefined when it needs none or nothing is legal.
+// `inModal`: a mode of a modal spell is only taken against opponents (see removalModeViable).
+function agentRemovalEffectTarget(session: GameSession, seatId: string, card: VisibleCard, effect: Exclude<RemovalEffect, { kind: "modal" }>, chosenX: number | undefined, inModal: boolean): ChosenTarget | undefined {
   // Direct damage ("deals 3 damage to any target"): the same deterministic damage chooser resolution used, run as the spell is cast.
   if (effect.kind === "damage") {
     const amount = effect.amount === "X" ? (effect.xDefinition ? resolveDynamicAmount(session, seatId, effect.xDefinition) : chosenX ?? 0) : effect.amount;
     if (amount <= 0) return undefined;
     const aim = chooseDamageTarget(session, seatId, amount, effect.targetType, card);
     if (!aim) return undefined;
-    return { targets: [aim.kind === "player" ? { kind: "player", seatId: aim.seat.id } : { kind: "card", seatId: aim.seatId, cardId: aim.card.id }] };
+    return aim.kind === "player" ? { kind: "player", seatId: aim.seat.id } : { kind: "card", seatId: aim.seatId, cardId: aim.card.id };
   }
-  if (effect.kind !== "destroy"&& effect.kind !== "exile" && effect.kind !== "bounce") return undefined;
-  const target =
-    effect.kind === "destroy"
-      ? chooseRemovalTarget(session, seatId, effect.targetType, card, effect.excludedColors, effect.artifactsExcluded, effect.basicsExcluded, true, effect.minToughness, effect.opponentOnly)
-      : chooseRemovalTarget(session, seatId, effect.targetType, card);
-  return target ? { targets: [{ kind: "card", seatId: target.seatId, cardId: target.card.id }] } : undefined;
+  if (effect.kind === "grant_keywords") return cardTarget(chooseCounterTarget(targetableView(session, seatId, card), seatId, "+1/+1", true));
+  if (effect.kind === "destroy") {
+    return cardTarget(chooseRemovalTarget(session, seatId, effect.targetType, card, effect.excludedColors, effect.artifactsExcluded, effect.basicsExcluded, true, effect.minToughness, inModal ? true : effect.opponentOnly));
+  }
+  if (effect.kind === "exile" || effect.kind === "bounce") {
+    return cardTarget(inModal ? chooseRemovalTarget(session, seatId, effect.targetType, card, [], false, false, false, undefined, true) : chooseRemovalTarget(session, seatId, effect.targetType, card));
+  }
+  return undefined;
+}
+
+// A reanimate/regrow/gain-control/"target player's graveyard" spell: the graveyard card(s), permanent or player it names as it is cast
+// (the same deterministic choosers applyZoneEffect used to run only on resolution).
+function agentZoneEffectTargets(session: GameSession, seatId: string, card: VisibleCard, effect: ZoneEffect): ChosenTarget[] | undefined {
+  const inGraveyard = (pick: { seatId: string; card: VisibleCard } | undefined): ChosenTarget[] | undefined => (pick ? [{ kind: "card", seatId: pick.seatId, cardId: pick.card.id }] : undefined);
+  switch (effect.kind) {
+    case "reanimate": {
+      const maxManaValue =
+        effect.manaValueCeiling === "graveyard_permanent_count"
+          ? (session.seats.find((seat) => seat.id === seatId)?.board.graveyard ?? []).filter((item) => !item.typeLine.includes("Instant") && !item.typeLine.includes("Sorcery")).length
+          : undefined;
+      return inGraveyard(chooseReanimationTarget(session, seatId, effect.anyGraveyard, effect.targetType, maxManaValue));
+    }
+    case "regrow": {
+      const pick = chooseRegrowTarget(session, seatId, effect.targetType, effect.subtype);
+      return pick ? [{ kind: "card", seatId, cardId: pick.id }] : undefined;
+    }
+    case "gain_control": {
+      const pick = cardTarget(chooseControlTarget(targetableView(session, seatId, card), seatId));
+      return pick ? [pick] : undefined;
+    }
+    case "mill": {
+      if (effect.scope !== "target_player") return undefined;
+      const pick = agentOpponentTarget(session, seatId, () => 0);
+      return pick ? [pick] : undefined;
+    }
+    case "graveyard_to_library": {
+      if (effect.scope !== "target_player") return undefined;
+      const pick = agentOpponentTarget(session, seatId, (a, b) => Number((b.board.graveyard ?? []).length > 0) - Number((a.board.graveyard ?? []).length > 0));
+      return pick ? [pick] : undefined;
+    }
+    case "exile_graveyard": {
+      if (effect.scope !== "target_player") return undefined;
+      const seatPick = session.seats.find((seat) => seat.id === chooseGraveyardExileTarget(session, seatId));
+      return seatPick && (seatPick.id === seatId || !playerHasHexproof(seatPick)) ? [{ kind: "player", seatId: seatPick.id }] : undefined;
+    }
+    // Victimize: the graveyard creatures it returns (the creature it sacrifices stays an as-it-resolves choice).
+    case "sacrifice_then_reanimate": {
+      const cards = chooseCreatureCardsFromOwnGraveyard(session, seatId, effect.targetCount);
+      return cards ? cards.map((item) => ({ kind: "card" as const, seatId, cardId: item.id })) : undefined;
+    }
+    default:
+      return undefined;
+  }
+}
+
+// "Target creature gets +X/+X / -X/-X [and gains ...] until end of turn": a buff goes on the agent's own creature, a shrink on an opposing one
+// that the spell could legally target.
+function agentPumpTarget(session: GameSession, seatId: string, card: VisibleCard, effect: PumpEffect): ChosenTarget | undefined {
+  const pick = choosePumpTarget(targetableView(session, seatId, card), seatId, effect, effect.another ? card.id : undefined);
+  if (!pick) return undefined;
+  const beneficial = effect.power + effect.toughness >= 0;
+  if (beneficial !== (pick.seatId === seatId)) return undefined;
+  return cardTarget(pick);
+}
+
+// The spellExtras shapes that name targets: Bite Down's dealer + victim, Chandra's Ignition's dealer, "target permanent you control gains ...",
+// and the two "target opponent" spells.
+function agentExtraEffectTargets(session: GameSession, seatId: string, card: VisibleCard, effect: SpellExtraEffect): ChosenTarget[] | undefined {
+  const caster = session.seats.find((seat) => seat.id === seatId);
+  const view = targetableView(session, seatId, card);
+  switch (effect.kind) {
+    case "shuffle_permanent_reveal_top": {
+      const pick = chooseRemovalTarget(session, seatId, "nonland_permanent", card) ?? chooseRemovalTarget(session, seatId, "permanent", card);
+      const target = cardTarget(pick);
+      return target ? [target] : undefined;
+    }
+    case "creature_bites": {
+      const dealer = strongestControlledCreature(caster);
+      const power = dealer ? Math.max(0, effectivePower(dealer)) : 0;
+      if (!dealer || power <= 0) return undefined;
+      const aim = chooseDamageTarget(view, seatId, power, "creature", dealer);
+      if (!aim || aim.kind !== "creature") return undefined;
+      return [
+        { kind: "card", seatId, cardId: dealer.id },
+        { kind: "card", seatId: aim.seatId, cardId: aim.card.id }
+      ];
+    }
+    case "creature_damages_everything_else": {
+      const dealer = strongestControlledCreature(caster);
+      return dealer && effectivePower(dealer) > 0 ? [{ kind: "card", seatId, cardId: dealer.id }] : undefined;
+    }
+    case "grant_keywords": {
+      const target = cardTarget(chooseCounterTarget(view, seatId, "+1/+1", true));
+      return target ? [target] : undefined;
+    }
+    case "opponent_sacrifices_greatest_power": {
+      // The opponent whose best creature is the biggest (same threat bias the untargeted pick used).
+      const best = (seat: PlayerSeat) => (strongestControlledCreature(seat) ? effectivePower(strongestControlledCreature(seat)!) : -1);
+      const pick = agentOpponentTarget(session, seatId, (a, b) => best(b) - best(a));
+      const chosen = pick && pick.kind === "player" ? session.seats.find((seat) => seat.id === pick.seatId) : undefined;
+      return pick && chosen && best(chosen) >= 0 ? [pick] : undefined;
+    }
+    case "you_and_opponent_draw": {
+      // The weakest (lowest life) opponent, so the symmetric draw doesn't feed the biggest threat.
+      const pick = agentOpponentTarget(session, seatId, (a, b) => a.life - b.life);
+      return pick ? [pick] : undefined;
+    }
+    default:
+      return undefined;
+  }
+}
+
+// An agent's modal spell: which modes it takes (the same viability and ordering resolution used) and each taken mode's target, in order.
+function agentModalCastChoices(session: GameSession, seatId: string, card: VisibleCard, structure: Extract<CastStructure, { kind: "removal_modal" | "generic_modal" }>, chosenX?: number): CastChoices | undefined {
+  const modes: number[] = [];
+  const targets: ChosenTarget[] = [];
+  if (structure.kind === "removal_modal") {
+    const ranked = structure.modal.modes
+      .map((mode, index) => ({ mode, index }))
+      .filter(({ mode }) => removalModeViable(session, seatId, card, mode))
+      .map((entry) => ({ ...entry, score: removalModeScore(session, seatId, entry.mode) }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, structure.modal.chooseCount);
+    for (const { mode, index } of ranked) {
+      if (removalSlots(session, seatId, card, mode).length > 0) {
+        const target = agentRemovalEffectTarget(session, seatId, card, mode, chosenX, true);
+        if (!target) continue;
+        targets.push(target);
+      }
+      modes.push(index);
+    }
+  } else {
+    const modal = structure.modal;
+    const viable = modal.modes
+      .map((mode, index) => ({ mode, index }))
+      .filter(({ mode, index }) => genericModalModeHasLegalTarget(session, seatId, mode) && !(modal.distinctPerTurn && session.onceEachTurnEffectsUsed?.includes(`${session.turn}:${card.id}:mode:${index}`)))
+      .slice(0, modal.chooseCount);
+    for (const { mode, index } of viable) {
+      if (genericModeSlots(session, seatId, card, mode).length > 0) {
+        const target = agentGenericModeTarget(session, seatId, card, mode, chosenX);
+        if (!target) continue;
+        targets.push(target);
+      }
+      modes.push(index);
+    }
+  }
+  return modes.length > 0 ? { modes, targets } : undefined;
+}
+
+function agentGenericModeTarget(session: GameSession, seatId: string, card: VisibleCard, mode: GenericModalMode, chosenX?: number): ChosenTarget | undefined {
+  if (mode.kind === "zone") return agentZoneEffectTargets(session, seatId, card, mode.effect)?.[0];
+  if (mode.kind === "removal" && mode.effect.kind !== "modal") return agentRemovalEffectTarget(session, seatId, card, mode.effect, chosenX, true);
+  if (mode.kind === "pump") return agentPumpTarget(session, seatId, card, mode.effect);
+  if (mode.kind === "trigger" && mode.effect.kind === "targeted_effect") return pickTargetedEffectTarget(session, seatId, card, mode.effect.effect);
+  return undefined;
+}
+
+// Rule 601.2c: modes and targets are chosen as the spell is cast. An agent's spell used to pick them only as it resolved, so the stack showed
+// nothing the human could respond to. Pick them as it is cast instead (the same deterministic choosers resolution used), record them in
+// castChoices, and let resolution re-check them (castTargetLegal / applyCast*, rule 608.2b). `card` is the face actually being cast.
+// Anything this does not recognise returns undefined and keeps its resolution-time pick.
+export function agentCastTimeRemovalChoices(session: GameSession, seatId: string, card: VisibleCard, chosenX?: number): CastChoices | undefined {
+  const structure = castStructure(card, chosenX);
+  if (!structure) return card.typeLine.includes("Instant") || card.typeLine.includes("Sorcery") ? agentPlannedCastChoices(session, seatId, card) : undefined;
+  // An agent's Aura names its creature as it is cast (the same deterministic choice resolution used to make).
+  if (structure.kind === "aura") {
+    const attach = chooseAuraAttachTarget(session, seatId, card.oracleText);
+    return attach.kind === "attach" ? { targets: [{ kind: "card", seatId: attach.seatId, cardId: attach.cardId }] } : undefined;
+  }
+  // A single-verb targeted spell (tap/untap/counter/copy/gain-keyword effects on a chosen target).
+  if (structure.kind === "targeted") {
+    const picked = pickTargetedEffectTarget(session, seatId, card, structure.effect);
+    return picked ? { targets: [picked] } : undefined;
+  }
+  if (structure.kind === "removal") {
+    const target = agentRemovalEffectTarget(session, seatId, card, structure.effect, chosenX, false);
+    return target ? { targets: [target] } : undefined;
+  }
+  if (structure.kind === "pump") {
+    const target = agentPumpTarget(session, seatId, card, structure.effect);
+    return target ? { targets: [target] } : undefined;
+  }
+  if (structure.kind === "zone") {
+    const targets = agentZoneEffectTargets(session, seatId, card, structure.effect);
+    return targets ? { targets } : undefined;
+  }
+  if (structure.kind === "extra") {
+    const targets = agentExtraEffectTargets(session, seatId, card, structure.effect);
+    return targets ? { targets } : undefined;
+  }
+  return agentModalCastChoices(session, seatId, card, structure, chosenX);
+}
+
+// The card as one face of it is cast: a Room door, an Adventure/Omen/split spell half or a modal-DFC's spell face reads as that face's name,
+// type line and text (its combined oracle text would otherwise be parsed as a single spell).
+function castFaceCard(card: VisibleCard, face: { name: string; typeLine: string; oracleText: string } | undefined): VisibleCard {
+  return face ? { ...card, name: face.name, typeLine: face.typeLine, oracleText: face.oracleText } : card;
+}
+
+// "Mode 1; Mode 2" for the log and stack panel: the chosen modes of a modal spell, by the card's own mode text.
+export function castModeLabels(card: VisibleCard, chosenX: number | undefined, choices: CastChoices | undefined): string[] {
+  if (!choices?.modes?.length) return [];
+  const structure = castStructure(card, chosenX);
+  if (structure?.kind === "removal_modal") return choices.modes.map((index) => (structure.modal.modes[index] ? describeRemovalMode(structure.modal.modes[index]) : `Mode ${index + 1}`));
+  if (structure?.kind === "generic_modal") return choices.modes.map((index) => structure.modal.modes[index]?.text ?? `Mode ${index + 1}`);
+  return [];
 }
 
 // Is a target chosen at cast time still legal as the spell resolves? An illegal one makes the spell fizzle (rule 608.2b).
@@ -18268,7 +18795,10 @@ export function applyCastRemoval(session: GameSession, casterSeatId: string, sou
 
 // Same for a non-removal modal spell's chosen modes.
 export function applyCastGenericModes(session: GameSession, casterSeatId: string, source: VisibleCard, modal: GenericModalEffect, choices: CastChoices): GameSession {
-  let next = session;
+  // "Choose one that hasn't been chosen this turn": each mode taken is used up for the turn (applyGenericModalEffect does the same).
+  let next: GameSession = modal.distinctPerTurn
+    ? { ...session, onceEachTurnEffectsUsed: [...(session.onceEachTurnEffectsUsed ?? []), ...(choices.modes ?? []).map((index) => `${session.turn}:${source.id}:mode:${index}`)] }
+    : session;
   let used = 0;
   for (const index of choices.modes ?? []) {
     const mode = modal.modes[index];
@@ -19467,6 +19997,19 @@ function describeRemovalTargetType(targetType: RemovalTargetType): string {
   return targetType.replace(/_/g, " ");
 }
 
+// Can this mode of a modal removal spell be taken at all? A targeted destroy/exile/bounce mode whose only legal targets are the caster's own
+// permanents is not viable, so it is never taken just because it is legal.
+function removalModeViable(session: GameSession, casterSeatId: string, source: VisibleCard, mode: Exclude<RemovalEffect, { kind: "modal" }>): boolean {
+  return (
+    removalEffectHasLegalTarget(session, casterSeatId, source, mode) &&
+    (mode.kind === "destroy"
+      ? chooseRemovalTarget(session, casterSeatId, mode.targetType, source, mode.excludedColors, mode.artifactsExcluded, mode.basicsExcluded, true, mode.minToughness, true) !== undefined
+      : mode.kind === "exile" || mode.kind === "bounce"
+        ? chooseRemovalTarget(session, casterSeatId, mode.targetType, source, [], false, false, false, undefined, true) !== undefined
+        : true)
+  );
+}
+
 // How good a mode is for its caster: what a sweeper takes from OPPONENTS minus what it takes from the caster. Single-target
 // modes just score a flat 1 (their legality is already checked).
 function removalModeScore(session: GameSession, casterSeatId: string, mode: Exclude<RemovalEffect, { kind: "modal" }>): number {
@@ -19647,6 +20190,114 @@ export function hasResolvableTarget(session: GameSession, casterSeatId: string, 
   );
 }
 
+export interface MoveCheckContext {
+  /** "agent": the action must also be a currently-offered option (`fresh`) and its mana must be payable. "human": rules checks only; payment is interactive. */
+  mode: "agent" | "human";
+  /** Has this seat already used its land drop(s) this turn? */
+  hasPlayedLand: boolean;
+  activeSeatId: string | undefined;
+  /** True when nothing is on the stack (sorcery-speed plays need this; instant-speed responses need the opposite). */
+  stackEmpty: boolean;
+  /** Agent mode: the legal options regenerated from the LIVE state. The action must be one of them (catches stale ids, double-casts, a second land drop, ...). */
+  fresh?: LegalAgentAction[];
+}
+
+// The central rules gate (see src/lib/moveLegality.ts): is this proposed move legal RIGHT NOW, and if not, why. Pure; never mutates the session. Humans and
+// agents share it. It only refuses what the Magic rules forbid or what the engine cannot perform; a legal-but-pointless play (a wrath with no creatures, a
+// draw spell with an empty library) is allowed here and left to the play guards (playGuards.ts).
+export function checkMoveLegal(session: GameSession, seatId: string, action: LegalAgentAction, ctx: MoveCheckContext): LegalityResult {
+  if (action.actionType === "pass_priority" || action.actionType === "end_turn" || action.actionType === "keep_hand" || action.actionType === "mulligan") return legalResult();
+  const seat = session.seats.find((item) => item.id === seatId);
+  if (!seat || seat.hasLost) return illegalResult("that player is not in the game");
+  const ownMainWithEmptyStack = ctx.activeSeatId === seatId && isMainPhase(session.phase) && ctx.stackEmpty;
+  const isResponse = action.id.startsWith("respond");
+  const zone: "hand" | "command" | "exile" | "graveyard" | "library" =
+    action.actionType === "cast_commander" ? "command" : action.sourceZone === "exile" ? "exile" : action.sourceZone === "graveyard" ? "graveyard" : action.sourceZone === "library" ? "library" : "hand";
+
+  if (action.actionType === "play_land" || action.actionType === "cast_spell" || action.actionType === "cast_commander") {
+    const card =
+      zone === "command"
+        ? seat.board.commander
+        : zone === "exile"
+          ? findExiledCardAnySeat(session, action.cardId ?? "")
+          : zone === "graveyard"
+            ? seat.board.graveyard?.find((item) => item.id === action.cardId)
+            : zone === "library"
+              ? (seat.library ?? [])[0]?.id === action.cardId ? (seat.library ?? [])[0] : undefined
+              : seat.board.hand.find((item) => item.id === action.cardId);
+    if (!card || (zone === "command" && card.id !== action.cardId)) {
+      return illegalResult(`the card is not in ${zone === "hand" ? "the hand" : `the ${zone}`} any more`, "stale");
+    }
+    if (zone === "exile" && (card.exiledPlayableBySeatId !== seatId || (card.exiledPlayableUntilTurn !== undefined && session.turn > card.exiledPlayableUntilTurn))) {
+      return illegalResult("there is no longer permission to play it from exile");
+    }
+    if (zone === "graveyard" && !graveyardCastPermission(card, { seatId, turn: session.turn, controllerBattlefield: seat.board.battlefield })) {
+      return illegalResult("it has no flashback or other permission to be cast from the graveyard");
+    }
+    if (zone === "library" && !libraryTopCastPermission(card, seat.board.battlefield)) {
+      return illegalResult("nothing lets it be cast from the top of the library");
+    }
+    const split = modalDoubleFacedLandSplit(card);
+    const playingAsLand = action.actionType === "play_land" || (split !== undefined && action.faceIndex === split.landIndex);
+    if (playingAsLand) {
+      if (!ownMainWithEmptyStack) return illegalResult("a land can only be played in the player's own main phase with an empty stack", "illegal");
+      if (ctx.hasPlayedLand) return illegalResult("the land drop for this turn is already used");
+      return ctx.mode === "agent" && ctx.fresh ? membershipVerdict(action, ctx.fresh) : legalResult();
+    }
+    // The chosen half decides everything about the cast: its own type (timing), text (targets) and name — never the combined card's.
+    const face = action.faceIndex !== undefined ? (split && action.faceIndex === split.spellIndex ? split.spellFace : independentlyCastableSpellFaces(card)?.[action.faceIndex]) : undefined;
+    if (face && zone === "hand" && !spellFaceCastableFromHand(face)) return illegalResult(`${face.name} is an aftermath half and can only be cast from the graveyard`);
+    const targetCard = face ? { ...card, name: face.name, typeLine: face.typeLine, oracleText: face.oracleText } : card;
+    const instantSpeed = canCastAtInstantSpeed(targetCard, seatHasFlashGrant(seat, targetCard)) || (zone === "exile" && Boolean(card.exiledPlayableAnyTime));
+    if (isResponse) {
+      if (ctx.stackEmpty) return illegalResult("there is nothing on the stack to respond to");
+      if (!instantSpeed) return illegalResult(`${targetCard.name} is not an instant and has no flash`);
+    } else if (!ownMainWithEmptyStack && !instantSpeed) {
+      return illegalResult(`${targetCard.name} can only be cast in the player's own main phase with an empty stack`);
+    }
+    if (spellCastLockedOut(session, seatId, ctx.activeSeatId)) return illegalResult("an effect stops this player from casting spells right now");
+    if (castRestrictedByTurnCount(session, card)) return illegalResult(`${card.name} cannot be cast during the first three turns of the game`);
+    if (!hasResolvableTarget(session, seatId, targetCard)) {
+      const unsupported = seat.kind !== "human" && AGENT_UNSUPPORTED_SPELL_TEXT.some((pattern) => pattern.test(targetCard.oracleText));
+      return illegalResult(
+        unsupported
+          ? `${card.name} has an effect the engine cannot carry out for an automated player`
+          : `${card.name} has no legal target or an additional cost that cannot be paid (nothing to sacrifice or discard)`
+      );
+    }
+    return ctx.mode === "agent" && ctx.fresh ? membershipVerdict(action, ctx.fresh, "its mana cost cannot be paid or an extra condition is not met") : legalResult();
+  }
+
+  if (action.actionType === "activate_ability") {
+    const onBattlefield = seat.board.battlefield.find((item) => item.id === action.cardId);
+    const inHand = seat.board.hand.find((item) => item.id === action.cardId);
+    if (!onBattlefield && !(action.abilityKind === "cycling" && inHand)) return illegalResult("the source is no longer where the ability can be activated", "stale");
+    const sorcerySpeed = action.abilityKind === "loyalty_ability" || action.abilityKind === "equip" || action.abilityKind === "unlock_room_door";
+    if (sorcerySpeed && !ownMainWithEmptyStack) return illegalResult("this ability can only be activated in the player's own main phase with an empty stack");
+    return ctx.mode === "agent" && ctx.fresh
+      ? membershipVerdict(action, ctx.fresh, "a cost cannot be paid (tapped, summoning sick, nothing to sacrifice or discard, not enough mana or life) or its condition is not met")
+      : legalResult();
+  }
+
+  if (action.actionType === "attack") {
+    const attacker = seat.board.battlefield.find((item) => item.id === action.cardId);
+    if (!attacker) return illegalResult("the attacker is no longer on the battlefield", "stale");
+    if (attacker.tapped) return illegalResult(`${attacker.name} is tapped`);
+    if (!canAttack(attacker, seat.board.battlefield)) return illegalResult(`${attacker.name} cannot attack (summoning sick or restricted)`);
+    return ctx.mode === "agent" && ctx.fresh ? membershipVerdict(action, ctx.fresh) : legalResult();
+  }
+
+  if (action.actionType === "block") {
+    return ctx.mode === "agent" && ctx.fresh ? membershipVerdict(action, ctx.fresh, "that creature cannot legally block this attacker") : legalResult();
+  }
+  return legalResult();
+}
+
+function membershipVerdict(action: LegalAgentAction, fresh: LegalAgentAction[], reason = "it is not currently a legal option"): LegalityResult {
+  const verdict = validateProposal(action.id, fresh);
+  return verdict.legal ? legalResult() : illegalResult(reason, verdict.code);
+}
+
 // "Target creature you control deals damage ..." (Bite Down, Chandra's Ignition) and the other
 // spellExtras shapes that need something on the board — casting them with nothing to point at just
 // wastes the card (Bite Down fizzled six times in a 40-game self-play batch because the agent cast it
@@ -19671,6 +20322,10 @@ function hasResolvableSpellExtraTarget(session: GameSession, casterSeatId: strin
       case "each_other_player_sacrifices":
       case "opponent_sacrifices_greatest_power":
         return opposingCreature;
+      // "Return up to two creature cards from your graveyard to your hand" (Find, Regrowth-style): legal with no target, but an agent would just throw the card
+      // away. A human may still cast it (the rules allow zero targets for "up to").
+      case "return_creatures_from_graveyard":
+        return caster?.kind === "human" || (caster?.board.graveyard ?? []).some((item) => item.typeLine.includes("Creature"));
       default:
         return true;
     }
@@ -20009,15 +20664,7 @@ export function applyRemovalEffect(
       // and take the first `chooseCount` modes that do have something to do.
       // A targeted destroy/exile/bounce mode whose only legal targets are the caster's own permanents (Collective Resistance destroying your own
       // Commander's Sphere) is skipped, not taken just because it is legal.
-      const viableModes = effect.modes.filter(
-        (mode) =>
-          removalEffectHasLegalTarget(session, casterSeatId, source, mode) &&
-          (mode.kind === "destroy"
-            ? chooseRemovalTarget(session, casterSeatId, mode.targetType, source, mode.excludedColors, mode.artifactsExcluded, mode.basicsExcluded, true, mode.minToughness, true) !== undefined
-            : mode.kind === "exile" || mode.kind === "bounce"
-              ? chooseRemovalTarget(session, casterSeatId, mode.targetType, source, [], false, false, false, undefined, true) !== undefined
-              : true)
-      );
+      const viableModes = effect.modes.filter((mode) => removalModeViable(session, casterSeatId, source, mode));
       // Best modes first (by what each sweeps away from opponents vs from you) instead of printed order: Austere Command
       // always destroyed artifacts and enchantments, your own included, and could never pick the creature modes.
       const chosenModes = viableModes
@@ -21289,13 +21936,14 @@ export type PrimitiveAction =
   // which already looks the card up wherever it currently sits.
   | { kind: "move_card_zone"; from: "hand" | "graveyard"; to: "hand" | "graveyard" | "exile" | "library_top"; filter: "worst" | "best" | "any"; count: number };
 
-function applyPrimitiveAction(session: GameSession, casterSeatId: string, sourceCard: VisibleCard, action: PrimitiveAction): GameSession {
+// `preChosen`: the target recorded when the spell was cast (a planned step then uses it instead of picking one again).
+function applyPrimitiveAction(session: GameSession, casterSeatId: string, sourceCard: VisibleCard, action: PrimitiveAction, preChosen?: ChosenTarget): GameSession {
   const seatName = session.seats.find((seat) => seat.id === casterSeatId)?.name ?? "Player";
   switch (action.kind) {
     case "removal":
-      return applyRemovalEffect(session, casterSeatId, sourceCard.name, sourceCard, action.effect, action.chosenX);
+      return applyRemovalEffect(session, casterSeatId, sourceCard.name, sourceCard, action.effect, action.chosenX, preChosen);
     case "zone":
-      return applyZoneEffect(session, casterSeatId, sourceCard.name, action.effect, action.chosenX);
+      return applyZoneEffect(session, casterSeatId, sourceCard.name, action.effect, action.chosenX, preChosen);
     case "draw_cards":
       return drawMultipleForSeat(session, casterSeatId, action.amount, `${sourceCard.name} resolves. ${seatName} draws ${action.amount} card${action.amount === 1 ? "" : "s"}.`);
     case "draw_then_put_back":
@@ -21311,7 +21959,7 @@ function applyPrimitiveAction(session: GameSession, casterSeatId: string, source
     case "untap_target":
       return applyTapUntapPrimitive(session, casterSeatId, sourceCard, action.targetType, false);
     case "pump_target":
-      return applyTargetedPumpEffect(session, casterSeatId, sourceCard, action.effect);
+      return applyTargetedPumpEffect(session, casterSeatId, sourceCard, action.effect, preChosen);
     case "mass_pump":
       return applyMassPumpEffect(session, casterSeatId, sourceCard.name, action.effect);
     case "mass_bounce":
@@ -21486,7 +22134,38 @@ function mapPrimitiveActionStep(step: PrimitiveActionStep): PrimitiveAction | un
 // Folds a whole LLM-produced plan over applyPrimitiveAction one step at a time — steps that fail to
 // map (mapPrimitiveActionStep returning undefined) are simply skipped rather than aborting the rest
 // of the plan, so a model getting one step wrong doesn't also cost the steps it got right.
-function applyPrimitiveActionPlan(session: GameSession, seatId: string, sourceCard: VisibleCard, steps: PrimitiveActionStep[]): GameSession {
+// Does this planned step aim at a target (and which of the target pickers above can name one at cast time)?
+function planActionNeedsTarget(action: PrimitiveAction): boolean {
+  if (action.kind === "pump_target") return true;
+  if (action.kind === "zone") return zoneEffectTargetSpec(action.effect) !== undefined;
+  return action.kind === "removal" && ["damage", "destroy", "exile", "bounce", "grant_keywords"].includes(action.effect.kind);
+}
+
+// An agent's spell the deterministic parsers do not understand is resolved from a Rules Advisor (LLM) plan: text -> steps, which carry no target
+// ids (the deterministic appliers pick those). The plan is fetched asynchronously, so only when this card text's plan is already cached (a
+// repeat cast, or a card whose plan was fetched earlier this session) can its targets be named at cast time; they are recorded in castChoices
+// and handed to the same steps on resolution (applyPrimitiveActionPlan's castTargets), which re-check them. First-ever cast: unchanged.
+function agentPlannedCastChoices(session: GameSession, seatId: string, card: VisibleCard): CastChoices | undefined {
+  if (!/\btargets?\b/i.test(card.oracleText)) return undefined;
+  const cached = primitiveActionPlanCache.get(ruleWorkflowCacheKey("spell_resolved_to_graveyard", card.oracleText));
+  if (!cached || cached.plan.declined || cached.plan.optional || cached.plan.condition) return undefined;
+  const targets: ChosenTarget[] = [];
+  for (const step of cached.plan.steps) {
+    const action = mapPrimitiveActionStep(step);
+    if (!action || !planActionNeedsTarget(action)) continue;
+    const target =
+      action.kind === "removal" ? (action.effect.kind === "modal" ? undefined : agentRemovalEffectTarget(session, seatId, card, action.effect, action.chosenX, false)) :
+      action.kind === "zone" ? agentZoneEffectTargets(session, seatId, card, action.effect)?.[0] :
+      action.kind === "pump_target" ? agentPumpTarget(session, seatId, card, action.effect) :
+      undefined;
+    // One unnamed target would shift the rest out of step with the steps that consume them: keep the resolution-time pick instead.
+    if (!target) return undefined;
+    targets.push(target);
+  }
+  return targets.length > 0 ? { targets } : undefined;
+}
+
+function applyPrimitiveActionPlan(session: GameSession, seatId: string, sourceCard: VisibleCard, steps: PrimitiveActionStep[], castTargets?: ChosenTarget[]): GameSession {
   // "drain" already moves the caster's own life for a Blood Artist-style effect — the prompt tells
   // the model never to also emit a life_change step for that same gain, but a small local model
   // doesn't reliably follow that (reproduced live: Blood Artist parsed as drain + a redundant
@@ -21496,9 +22175,19 @@ function applyPrimitiveActionPlan(session: GameSession, seatId: string, sourceCa
   // make the model perfectly reliable here.
   const hasDrainStep = steps.some((step) => step.kind === "drain");
   const dedupedSteps = hasDrainStep ? steps.filter((step) => !(step.kind === "life_change" && (step.lifeDelta ?? 0) > 0)) : steps;
+  let usedTargets = 0;
   return dedupedSteps.reduce((current, step) => {
     const action = mapPrimitiveActionStep(step);
-    return action ? applyPrimitiveAction(current, seatId, sourceCard, action) : current;
+    if (!action) return current;
+    // Targets named as the spell was cast go to the steps that aim at something, in order; one that is no longer legal does nothing (608.2b).
+    if (castTargets && planActionNeedsTarget(action)) {
+      const named = castTargets[usedTargets++];
+      if (!named || !castTargetLegal(current, seatId, sourceCard, named)) {
+        return rulesEvent(current, seatId, `${sourceCard.name}'s target is no longer legal; that part of the spell does nothing.`);
+      }
+      return applyPrimitiveAction(current, seatId, sourceCard, action, named);
+    }
+    return applyPrimitiveAction(current, seatId, sourceCard, action);
   }, session);
 }
 
@@ -22308,7 +22997,9 @@ function pendingActionSourceCard(session: GameSession, action: PendingAction): V
 function withPendingActionSourceCard(session: GameSession, action: PendingAction, stack: PendingAction[] = []): PendingAction & { sourceCard?: VisibleCard; description?: StackItemDescription } {
   const sourceCard = pendingActionSourceCard(session, action);
   // Who controls it, what it does and what it targets (src/lib/stackDescription.ts), for the stack HUD's target lines and "targets you" badge.
-  const description = action.type === "phase" ? undefined : describeStackItem(session, { ...action, sourceCard } as StackItemLike, stack as StackItemLike[]);
+  const faceCard = sourceCard && action.type === "spell" ? applyChosenFaceToCard(sourceCard, action.faceIndex) : sourceCard;
+  const modeLabels = faceCard && action.type === "spell" ? castModeLabels(faceCard, action.chosenX, action.castChoices) : undefined;
+  const description = action.type === "phase" ? undefined : describeStackItem(session, { ...action, sourceCard, modeLabels } as StackItemLike, stack as StackItemLike[]);
   return { ...action, sourceCard, description };
 }
 
@@ -24853,6 +25544,9 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
   const chainCount = (session.triggerChainGuard?.turn === session.turn ? session.triggerChainGuard.count : 0) + 1;
   session = { ...session, triggerChainGuard: { turn: session.turn, count: chainCount } };
   if (trigger.effect.condition && !triggerConditionMet(session, trigger, trigger.effect.condition)) return session;
+  if (recordedTriggerTargetGone(session, trigger)) {
+    return rulesEvent(session, trigger.controllerSeatId, `${trigger.sourceCardName}'s target is no longer legal; the ability does nothing.`);
+  }
   if (chainCount > MAX_TRIGGER_RESOLUTIONS_PER_TURN) {
     return {
       ...session,
@@ -26839,6 +27533,9 @@ function ruleChoiceView(
     if (choice.kind === "choose_cast_copy") {
       return { kind: "choose_modal_option" as const, sourceCardName: choice.sourceCardName, prompt: choice.prompt, options: choice.options.map((option, index) => ({ index, label: option.label })) };
     }
+    if (choice.kind === "choose_cast_face") {
+      return { kind: "choose_modal_option" as const, sourceCardName: choice.sourceCardName, prompt: choice.prompt, options: choice.options.map((option, index) => ({ index, label: option.label })) };
+    }
     if (choice.kind === "choose_cast_alt") {
       return { kind: "choose_modal_option" as const, sourceCardName: choice.sourceCardName, prompt: choice.prompt, options: [{ index: 0, label: choice.altLabel }, { index: 1, label: "Pay the normal mana cost" }] };
     }
@@ -28715,6 +29412,80 @@ export function cardWithFaceManaCost(card: VisibleCard, manaCost: string | undef
   return { ...card, manaCost };
 }
 
+// A SPLIT card (Find // Finality, Fire // Ice, Turn // Burn, Appeal // Authority): two spell halves side by side. Rule 708.4: in every zone but the
+// stack it has the combined characteristics of both halves (so its card-level manaValue is the SUM, 8 for Find // Finality); only on the stack does it
+// have just the one half that was cast. An Adventure / Omen card (Bonecrusher Giant // Stomp) is also two castable faces, but is not a split card.
+export function isSplitSpellCard(card: VisibleCard): boolean {
+  const faces = independentlyCastableSpellFaces(card);
+  return Boolean(faces && !faces.some((face) => /Adventure|Omen/.test(face.typeLine)));
+}
+
+// "Aftermath (Cast this spell only from your graveyard.)" - that half is never castable from the hand.
+export function spellFaceCastableFromHand(face: CardFaceRecord): boolean {
+  return !/^\s*aftermath\b/im.test(face.oracleText);
+}
+
+// The card as it is while ONE half is being cast: that half's own name, type, text, cost and mana value (rule 708.4 / 715.3), so cost reducers,
+// timing, targets and affordability all read the half and never the combined card.
+export function spellFaceCostCard(card: VisibleCard, face: CardFaceRecord): VisibleCard {
+  return { ...card, name: face.name, typeLine: face.typeLine, oracleText: face.oracleText, manaCost: face.manaCost, manaValue: manaValueFromManaCost(face.manaCost) };
+}
+
+export interface CastFaceOption {
+  faceIndex: number;
+  faceName: string;
+  label: string;
+  /** Timing, aftermath and target rules allow casting this half right now. */
+  castable: boolean;
+  /** The half's OWN cost (after reductions, not counting X) can be paid. */
+  payable: boolean;
+}
+
+// One entry per castable half of a split / Adventure card, each priced from its OWN cost. A human pays from the floating pool; an agent from untapped sources.
+// `session` (optional) adds the timing and legal-target checks per half; without it only the aftermath rule is applied.
+export function castFaceOptions(
+  seat: PlayerSeat,
+  card: VisibleCard,
+  activeSeatId: string | undefined,
+  pool: ManaPool | undefined,
+  allSeats: PlayerSeat[],
+  session?: GameSession,
+  response = false
+): CastFaceOption[] | undefined {
+  const faces = independentlyCastableSpellFaces(card);
+  if (!faces) return undefined;
+  return faces.map((face, index) => {
+    const costCard = spellFaceCostCard(card, face);
+    const fixedCost = adjustedCastingCost(seat, costCard, costCard.manaValue, "hand", activeSeatId, allSeats);
+    // Only the non-X portion has to be payable to offer the half at all (X = 0 is always legal).
+    const payable = pool ? payCostFromPool(pool, costCard, fixedCost).ok : chooseManaSourcesForCost(seat, costCard, fixedCost, undefined, allSeats).ok;
+    let castable = spellFaceCastableFromHand(face);
+    if (castable && session) {
+      const instant = canCastAtInstantSpeed(costCard, seatHasFlashGrant(seat, costCard));
+      const sorcerySpeedOk = !response && activeSeatId === seat.id && isMainPhase(session.phase);
+      castable = (instant || sorcerySpeedOk) && hasResolvableTarget(session, seat.id, costCard);
+    }
+    return { faceIndex: index, faceName: face.name, label: `Cast ${face.name} (${face.manaCost ?? "no cost"})`, castable, payable };
+  });
+}
+
+export type CastFaceDecision =
+  | { kind: "none" }
+  | { kind: "unpayable"; options: CastFaceOption[] }
+  | { kind: "single"; faceIndex: number; options: CastFaceOption[] }
+  | { kind: "choose"; options: CastFaceOption[] };
+
+// What casting a multi-half card from the hand should do when the caller did not say which half: nothing to decide (an ordinary card), no half is
+// castable right now, exactly one is (just cast that one), or several are (the human must be asked which one).
+export function castFaceDecision(session: GameSession, seat: PlayerSeat, card: VisibleCard, activeSeatId: string | undefined, pool?: ManaPool, response = false): CastFaceDecision {
+  const options = castFaceOptions(seat, card, activeSeatId, pool, session.seats, session, response);
+  if (!options) return { kind: "none" };
+  const usable = options.filter((option) => option.castable && option.payable);
+  if (usable.length === 0) return { kind: "unpayable", options };
+  if (usable.length === 1) return { kind: "single", faceIndex: usable[0].faceIndex, options };
+  return { kind: "choose", options };
+}
+
 function xSymbolCount(manaCost: string | undefined): number {
   const symbols = manaCost?.match(/\{[^}]+\}/g) ?? [];
   return symbols.filter((symbol) => symbol.toUpperCase() === "{X}").length;
@@ -28845,20 +29616,21 @@ function unlockSecondRoomDoor(card: VisibleCard, newFaceIndex: number): VisibleC
   };
 }
 
-interface HandCardFaceOption {
+export interface HandCardFaceOption {
   faceIndex: number;
   actionKind: "play_land" | "cast_spell";
   label: string;
   payable: boolean;
 }
 
-function handCardFaceOptions(
+export function handCardFaceOptions(
   seat: PlayerSeat,
   card: VisibleCard,
   hasPlayedLand: boolean,
   activeSeatId: string | undefined,
   manaPool: ManaPool,
-  allSeats: PlayerSeat[]
+  allSeats: PlayerSeat[],
+  session?: GameSession
 ): HandCardFaceOption[] | undefined {
   const split = modalDoubleFacedLandSplit(card);
   if (split) {
@@ -28895,23 +29667,16 @@ function handCardFaceOptions(
     });
   }
 
-  const spellFaces = independentlyCastableSpellFaces(card);
-  if (spellFaces) {
-    return spellFaces.map((face, index) => {
-      const shim = cardWithFaceManaCost(card, face.manaCost);
-      const baseCost = manaValueFromManaCost(face.manaCost);
-      const fixedCost = adjustedCastingCost(seat, shim, baseCost, "hand", activeSeatId, allSeats);
-      // Only the non-X portion needs to be payable to offer the option at all — paying X=0 is
-      // always a legal choice, same as every other X spell (maxAffordableX/chosenX pick the actual
-      // amount at cast time in playCard, not here).
-      const payment = payCostFromPool(manaPool, shim, fixedCost);
-      return {
-        faceIndex: index,
-        actionKind: "cast_spell" as const,
-        label: `Cast ${face.name} (${face.manaCost ?? "no cost"})`,
-        payable: payment.ok
-      };
-    });
+  // Split / Adventure / Omen cards: one button per half, each priced from its OWN cost and greyed out unless that half is castable now (affordable,
+  // right timing, a legal target, not an aftermath half).
+  const faceOptions = castFaceOptions(seat, card, activeSeatId, manaPool, allSeats, session);
+  if (faceOptions) {
+    return faceOptions.map((option) => ({
+      faceIndex: option.faceIndex,
+      actionKind: "cast_spell" as const,
+      label: option.label,
+      payable: option.payable && option.castable
+    }));
   }
 
   return undefined;
@@ -29038,6 +29803,13 @@ function payCostFromPool(pool: ManaPool, card: VisibleCard, totalCost: number) {
     }
     next[color] -= requirement.colors[color];
   }
+  for (const options of requirement.hybrids) {
+    const pick = [...options].sort((a, b) => next[b] - next[a])[0];
+    if (next[pick] < 1) {
+      return { ok: false as const, sourceIds: [], pool, reason: `missing ${options.join(" or ")} mana` };
+    }
+    next[pick] -= 1;
+  }
   if (manaPoolTotal(next) < requirement.generic) {
     return { ok: false as const, sourceIds: [], pool, reason: `missing ${requirement.generic - manaPoolTotal(next)} generic mana` };
   }
@@ -29063,6 +29835,14 @@ export function chooseManaSourcesForCost(seat: PlayerSeat, card: VisibleCard, to
       chosen.add(source.id);
       pool[color] += manaProducedBy(source, seat);
     }
+  }
+
+  for (const options of requirement.hybrids) {
+    const source = sources.find((candidate) => !chosen.has(candidate.id) && options.some((color) => choicesFor(candidate).includes(color)));
+    if (!source) return { ok: false as const, sourceIds: [...chosen], reason: `missing ${options.join(" or ")} mana` };
+    chosen.add(source.id);
+    const color = options.find((option) => choicesFor(source).includes(option)) ?? options[0];
+    pool[color] += manaProducedBy(source, seat);
   }
 
   // Improvise: each untapped artifact that is not itself a mana source pays for {1} of the generic cost, saving lands.
@@ -29113,6 +29893,9 @@ function anyColorManaSpendingActive(allSeats: PlayerSeat[]): boolean {
 
 function manaRequirementForCard(card: VisibleCard, totalCost: number, anyColorSpendingActive = false) {
   const colors: Record<ColoredMana, number> = { W: 0, U: 0, B: 0, R: 0, G: 0 };
+  // Hybrid symbols ({B/G}, {W/U}, ...): each is paid with EITHER of its two colors. Before this they were counted as plain generic
+  // mana, so Find // Finality's {B/G}{B/G} was payable with any two lands (white, say).
+  const hybrids: ColoredMana[][] = [];
   // A cost of 0 means genuinely free (Omniscience's "without paying their mana costs," Mind's
   // Dilation's exile-cast permission, ...), not "0 generic, but still pay the card's own colored
   // pips" — without this, the loop below computed colored requirements straight from the card's
@@ -29120,16 +29903,18 @@ function manaRequirementForCard(card: VisibleCard, totalCost: number, anyColorSp
   // spent) real colored sources for a spell that should have cost nothing at all, and refused to
   // cast it entirely for anyone without those specific colors untapped. Reproduced live as
   // Omniscience not actually letting spells be cast for free.
-  if (totalCost <= 0) return { colors, generic: 0 };
+  if (totalCost <= 0) return { colors, hybrids, generic: 0 };
   // Every colored pip becomes payable with any color of mana (Mycosynth Lattice) — folded entirely
   // into the generic requirement rather than tracked per-color, since chooseManaSourcesForCost's
   // colored loop only exists to demand a source of that SPECIFIC color.
-  if (anyColorSpendingActive) return { colors, generic: totalCost };
+  if (anyColorSpendingActive) return { colors, hybrids, generic: totalCost };
   const symbols = card.manaCost?.match(/\{[^}]+\}/g) ?? [];
   for (const symbol of symbols) {
     const value = symbol.replace(/[{}]/g, "").toUpperCase();
     if (value in colors) {
       colors[value as ColoredMana] += 1;
+    } else if (/^[WUBRG]\/[WUBRG]$/.test(value)) {
+      hybrids.push(value.split("/") as ColoredMana[]);
     }
   }
   if (symbols.length === 0 && totalCost > 0) {
@@ -29138,9 +29923,9 @@ function manaRequirementForCard(card: VisibleCard, totalCost: number, anyColorSp
       if (color !== "C") colors[color] += 1;
     }
   }
-  const coloredTotal = Object.values(colors).reduce((total, value) => total + value, 0);
+  const coloredTotal = Object.values(colors).reduce((total, value) => total + value, 0) + hybrids.length;
   const generic = Math.max(0, totalCost - coloredTotal);
-  return { colors, generic };
+  return { colors, hybrids, generic };
 }
 
 function manaPoolDifference(before: ManaPool, after: ManaPool) {
@@ -30923,6 +31708,19 @@ export function playCardFromZone(
             loyalty: frontFace.loyalty,
             imageUris: frontFace.imageUris ?? card.imageUris,
             unlockedFaceIndices: [0]
+          }
+        : {}),
+      // Rule 708.4: a split card is only ever one half while it is on the stack; once it lands in the graveyard it is the whole card again
+      // (name "Find // Finality", both halves' text, combined mana value), not just the half that was cast.
+      ...(destination === "graveyard" && faceIndex !== undefined && isSplitSpellCard(sourceCard)
+        ? {
+            name: sourceCard.name,
+            typeLine: sourceCard.typeLine,
+            oracleText: sourceCard.oracleText,
+            manaCost: sourceCard.manaCost,
+            manaValue: sourceCard.manaValue,
+            imageUris: sourceCard.imageUris,
+            unlockedFaceIndices: sourceCard.unlockedFaceIndices
           }
         : {}),
       zone: destination,

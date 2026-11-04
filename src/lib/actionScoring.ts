@@ -44,6 +44,8 @@ export interface CardLike {
   role?: string;
   tapped?: boolean;
   oracleText?: string;
+  // Both halves of a split / Adventure card in hand, each with its own cost and text (the card-level fields are the combined card's).
+  faces?: Array<{ name: string; typeLine: string; manaCost?: string; oracleText: string }>;
   // Goaded: must attack each combat if able.
   goaded?: unknown;
   // The keywords the card actually has right now (printed, granted by other permanents, until-end-of-turn). When present this is the
