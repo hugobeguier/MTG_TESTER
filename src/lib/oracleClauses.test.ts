@@ -129,8 +129,24 @@ describe("parseEmblemGrant", () => {
         '−9: You get an emblem with "At the beginning of your end step, you may cast target artifact card from your graveyard without paying its mana cost."'
       )
     ).toEqual({
-      text: "At the beginning of your end step, you may cast target artifact card from your graveyard without paying its mana cost."
+      text: "At the beginning of your end step, you may cast target artifact card from your graveyard without paying its mana cost.",
+      clauses: ["At the beginning of your end step, you may cast target artifact card from your graveyard without paying its mana cost."]
     });
+  });
+
+  it("returns EVERY quoted ability of a multi-clause emblem (Saheeli, Filigree Master -4; Sarkhan the Dragonspeaker -6)", () => {
+    expect(parseEmblemGrant('−4: You get an emblem with "Artifact creatures you control get +1/+1" and "Artifact spells you cast cost {1} less to cast."')?.clauses).toEqual([
+      "Artifact creatures you control get +1/+1",
+      "Artifact spells you cast cost {1} less to cast."
+    ]);
+    expect(parseEmblemGrant('−6: You get an emblem with "At the beginning of your draw step, draw two additional cards" and "At the beginning of your end step, discard your hand."')?.clauses).toHaveLength(2);
+  });
+
+  it("keeps nested single-quoted abilities and ignores text after the quote (Arlinn Kord, Kiora Master of the Depths)", () => {
+    expect(parseEmblemGrant(`−6: You get an emblem with "Creatures you control have haste and '{T}: This creature deals damage equal to its power to any target.'"`)?.clauses).toEqual([
+      "Creatures you control have haste and '{T}: This creature deals damage equal to its power to any target.'"
+    ]);
+    expect(parseEmblemGrant('−8: You get an emblem with "Whenever a creature you control enters, you may have it fight target creature." Then create three 8/8 blue Octopus creature tokens.')?.clauses).toHaveLength(1);
   });
 
   it("returns undefined for text with no emblem grant", () => {
@@ -140,11 +156,12 @@ describe("parseEmblemGrant", () => {
 
 describe("parseAdditionalSacrificeCost", () => {
   it("recognizes Village Rites' single-creature additional cost", () => {
-    expect(parseAdditionalSacrificeCost("As an additional cost to cast this spell, sacrifice a creature.\nDraw two cards.")).toEqual({ count: 1 });
+    expect(parseAdditionalSacrificeCost("As an additional cost to cast this spell, sacrifice a creature.\nDraw two cards.")).toEqual({ count: 1, permanentType: "creature" });
+    expect(parseAdditionalSacrificeCost("As an additional cost to cast this spell, sacrifice a land.\nSearch your library for up to two basic land cards, put them onto the battlefield, then shuffle.")).toEqual({ count: 1, permanentType: "land" });
   });
 
   it("recognizes a two-creature additional cost", () => {
-    expect(parseAdditionalSacrificeCost("As an additional cost to cast this spell, sacrifice two creatures.")).toEqual({ count: 2 });
+    expect(parseAdditionalSacrificeCost("As an additional cost to cast this spell, sacrifice two creatures.")).toEqual({ count: 2, permanentType: "creature" });
   });
 
   it("does not match a plain resolution-effect sacrifice (not an additional cost)", () => {

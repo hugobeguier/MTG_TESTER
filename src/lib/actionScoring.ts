@@ -4,6 +4,7 @@ import { combatSpellBonus, evaluatePlayGuards, removalGuard } from "./playGuards
 import { declineFreeAttackReason, freeAttackBonus } from "./freeAttack";
 import { scoreWipeSequencing } from "./wipeSequencing";
 import { scoreGangBlockRisk, scoreInterferenceTiming, scoreOwnBoardWipe, scoreRemovalAftermath } from "./lookAhead";
+import { BLOCK_WEIGHTS, TERRIBLE_BLOCK_LOSS, assessBlock, bestBlockPlan, describeAssessment } from "./blockValuation";
 import { canLegallyBlock, hasDeathtouch, hasDoubleStrike, hasFirstStrike, hasFlying, hasIndestructible, hasInfect, hasKeyword, hasLifelink, hasMenace, hasReach, hasTrample, parseNum, simulateDuel } from "./combatSim";
 
 export { simulateDuel };
@@ -54,6 +55,9 @@ export interface CardLike {
   // True for the owner's commander (the deck's engine — losing it costs more than its stats say).
   commander?: boolean;
   token?: boolean;
+  // Planeswalker loyalty and the {2}-per-death commander tax; read by blockValuation (what a block protects).
+  loyalty?: string;
+  commanderTax?: number;
   attacking?: boolean;
   blocking?: boolean;
   // Who an attacking creature is attacking (a seat id or a planeswalker/battle id); read by playGuards.situationalTimingGuard.
@@ -103,6 +107,8 @@ export interface ScoringContext {
   // passed on and waiting below it) — see AppFlow.tsx's pendingActionSourceCard for how oracleText
   // gets attached.
   pendingAction?: StackItemLike;
+  // declare_blockers_additional only: ids of the creatures already chosen to block this attacker (so a gang block can be valued as a group).
+  blockingSoFar?: string[];
 }
 
 // A spell/ability on the stack as the agent sees it. actorSeatId is who put it there; targetCardIds/targetSeatIds are the targets
@@ -489,6 +495,17 @@ function scoreBlockDecision(action: ScorableAction, context: ScoringContext, del
   // A creature already blocks this attacker: another body only joins if it survives the attacker (free extra damage); one that would die
   // without a reason is just thrown away (mistake detector: "pointless_block", gang-adding at the +2 baseline every time).
   if (context.purpose === "declare_blockers_additional") {
+    const already = (context.blockingSoFar ?? []).map((id) => findCard(context.you?.battlefield, id)).filter((card): card is CardLike => Boolean(card));
+    if (already.length > 0) {
+      // Value the group against the group so far: a second body that turns a pointless chump into a kill (or saves the thing under attack) is worth it.
+      const before = assessBlock(attacker, already, context);
+      const after = assessBlock(attacker, [...already, blocker], context);
+      const improvement = after.net - before.net;
+      if (improvement >= BLOCK_WEIGHTS.worthwhileNet) {
+        delta(Math.min(12, Math.max(0.5, improvement * 0.5)), `adding this blocker improves the block: ${describeAssessment(after)}`);
+        return;
+      }
+    }
     if (simulateDuel(attacker, blocker).blockerDies) delta(-3, "an additional blocker that would die just feeds the attacker a second creature");
     else delta(1, "an additional blocker that survives adds damage for free");
     return;
@@ -508,25 +525,20 @@ function scoreBlockDecision(action: ScorableAction, context: ScoringContext, del
   } else if (attackerDies && !blockerDies) {
     delta(3, "block kills the attacker while the blocker survives");
   } else if (attackerDies && blockerDies) {
-    // A trade is only good if what you lose is worth no more than what you take: a 6/6 into a 1/1 deathtouch is a bad trade.
-    const worth = (card: CardLike) => (card.manaValue ?? 0) + (parseNum(card.power) ?? 0) + (parseNum(card.toughness) ?? 0);
-    const life = context.you?.life ?? 40;
-    if (worth(blocker) > worth(attacker) + 3 && life > attackerPower * 2) {
-      delta(-3, "block trades a much more valuable creature for a cheap one");
-    } else {
-      delta(1, "block trades with the attacker");
-    }
+    // A trade is good when what it saves plus what it kills is worth at least what it loses (a 6/6 into a 1/1 deathtouch is not).
+    const a = assessBlock(attacker, [blocker], context);
+    if (a.net >= BLOCK_WEIGHTS.worthwhileNet) delta(Math.min(12, Math.max(1, a.net * 0.5)), `good trade: ${describeAssessment(a)}`);
+    else if (a.net > -1.5) delta(1, `block trades with the attacker: ${describeAssessment(a)}`);
+    else delta(-3, `block trades a much more valuable creature for a cheap one: ${describeAssessment(a)}`);
   } else if (!attackerDies && blockerDies) {
-    const life = context.you?.life ?? 40;
-    if (life <= attackerPower) {
-      delta(2, "chump block needed to avoid taking lethal or near-lethal damage");
-    } else {
-      // Block's baseline score is +2 (BASELINE_SCORE_BY_ACTION_TYPE), so this needs to outweigh
-      // that on its own to actually rank below declining to block, not just cancel it out to a tie.
-      delta(-3, "blocker dies for no value against a survivable attacker");
-    }
+    // Chump block: NOT judged by "the attacker survives" alone but by what the block protects (life, a planeswalker, a commander) against the blocker's worth.
+    // Block's baseline score is +2 (BASELINE_SCORE_BY_ACTION_TYPE), so a bad chump needs -3 to actually rank below declining to block.
+    const a = assessBlock(attacker, [blocker], context);
+    if (a.net >= BLOCK_WEIGHTS.worthwhileNet) delta(Math.min(12, Math.max(0.5, a.net * 0.5)), `worthwhile chump block: ${describeAssessment(a)}`);
+    else delta(-3, `blocker dies for less than it saves: ${describeAssessment(a)}`);
   } else {
-    delta(1, "block absorbs damage with no losses on either side");
+    const a = assessBlock(attacker, [blocker], context);
+    delta(1 + Math.min(3, a.saved * 0.25), `block absorbs damage with no losses: ${describeAssessment(a)}`);
   }
 
   if (hasDeathtouch(blocker) && !attackerDies && duel.blockerDealt === 0) {
@@ -797,7 +809,9 @@ export function resolveGuardedChoice(scored: ScoredAction[], chosenId: string | 
 // While a block that kills the attacker and keeps the blocker alive is on offer — or the combined attack is lethal and a block is possible — "declare no
 // blockers" is not an acceptable choice (Malik left Nogi unblocked with an indestructible deathtouch Rhonas).
 export function declineFreeBlockReason(action: ScorableAction, actions: ScorableAction[], context: ScoringContext): string | undefined {
-  if (context.purpose !== "declare_blockers" || action.actionType !== "pass_priority") return undefined;
+  if (action.actionType !== "pass_priority") return undefined;
+  if (context.purpose === "declare_blockers_additional") return declineWorthwhileGangReason(actions, context);
+  if (context.purpose !== "declare_blockers") return undefined;
   for (const candidate of actions) {
     if (candidate.actionType !== "block") continue;
     const blocker = findCard(context.you?.battlefield, candidate.cardId);
@@ -807,13 +821,79 @@ export function declineFreeBlockReason(action: ScorableAction, actions: Scorable
     if (duel.attackerDies && !duel.blockerDies) return `free block declined: ${candidate.label} kills ${attacker.name ?? "the attacker"} and ${blocker.name ?? "the blocker"} survives`;
     if (blockIsNeededToSurvive(attacker, context)) return `block required: the combined attack is lethal, so ${attacker.name ?? "this attacker"} must be blocked (${candidate.label})`;
   }
+  // Value-based referee: when the thing under attack (a commander planeswalker, a planeswalker that would die, life near lethal) is worth clearly
+  // more than the blockers it costs, "declare no blockers" is overruled and the best (cheapest) block is taken instead.
+  const plan = bestPlanFor(actions, context);
+  if (plan && plan.assessment.net >= BLOCK_WEIGHTS.mandatoryNet && plan.assessment.saved + plan.assessment.killGain >= BLOCK_WEIGHTS.mandatoryNet + plan.assessment.lost) {
+    return `block required by value: ${plan.attackerName} should be blocked with ${plan.blockers.map((card) => card.name ?? "a creature").join(" + ")}: ${describeAssessment(plan.assessment)}`;
+  }
   return undefined;
+}
+
+function bestPlanFor(actions: ScorableAction[], context: ScoringContext) {
+  const blockActions = actions.filter((candidate) => candidate.actionType === "block");
+  const attacker = findCard(opponentBattlefields(context), blockActions[0]?.targetIds[0]);
+  if (!attacker) return undefined;
+  const blockers = blockActions.map((candidate) => findCard(context.you?.battlefield, candidate.cardId)).filter((card): card is CardLike => Boolean(card));
+  if (blockers.length === 0) return undefined;
+  const plan = bestBlockPlan(attacker, blockers, context);
+  return plan ? { ...plan, attackerName: attacker.name ?? "the attacker" } : undefined;
+}
+
+// After the first blocker is down: stopping is overruled while a further blocker clearly pays for itself (the second half of a gang block).
+function declineWorthwhileGangReason(actions: ScorableAction[], context: ScoringContext): string | undefined {
+  const already = (context.blockingSoFar ?? []).map((id) => findCard(context.you?.battlefield, id)).filter((card): card is CardLike => Boolean(card));
+  if (already.length === 0) return undefined;
+  const blockActions = actions.filter((candidate) => candidate.actionType === "block");
+  const attacker = findCard(opponentBattlefields(context), blockActions[0]?.targetIds[0]);
+  if (!attacker) return undefined;
+  const before = assessBlock(attacker, already, context);
+  for (const candidate of blockActions) {
+    const blocker = findCard(context.you?.battlefield, candidate.cardId);
+    if (!blocker) continue;
+    const after = assessBlock(attacker, [...already, blocker], context);
+    if (after.net - before.net >= BLOCK_WEIGHTS.mandatoryNet) return `gang block required by value: adding ${blocker.name ?? "a blocker"} ${describeAssessment(after)}`;
+  }
+  return undefined;
+}
+
+// A block that throws away a valuable creature for almost nothing (and is not part of a worthwhile gang block, not needed to survive) is vetoed.
+export function terribleBlockReason(action: ScorableAction, actions: ScorableAction[], context: ScoringContext): string | undefined {
+  if (context.purpose !== "declare_blockers" || action.actionType !== "block") return undefined;
+  const blocker = findCard(context.you?.battlefield, action.cardId);
+  const attacker = findCard(opponentBattlefields(context), action.targetIds[0]);
+  if (!blocker || !attacker || blockIsNeededToSurvive(attacker, context)) return undefined;
+  const single = assessBlock(attacker, [blocker], context);
+  if (single.net > BLOCK_WEIGHTS.terribleNet || single.lost < TERRIBLE_BLOCK_LOSS || single.attackerDies) return undefined;
+  const plan = bestPlanFor(actions, context);
+  if (plan && plan.blockers.some((card) => card.id === blocker.id) && plan.assessment.net > single.net) return undefined;
+  return `terrible block: ${blocker.name ?? "the blocker"} would be thrown away for almost nothing: ${describeAssessment(single)}`;
 }
 
 export function scoreLegalActions(actions: ScorableAction[], context: ScoringContext): ScoredAction[] {
   return actions
     .map((action) => {
       const scored = { ...action, ...scoreLegalAction(action, context) };
+      if (context.purpose === "declare_blockers" && action.actionType === "block") {
+        // The first blocker of a worthwhile gang block is scored for the whole gang (the others join in declare_blockers_additional).
+        const blocker = findCard(context.you?.battlefield, action.cardId);
+        const attacker = findCard(opponentBattlefields(context), action.targetIds[0]);
+        const plan = blocker && attacker ? bestPlanFor(actions, context) : undefined;
+        if (blocker && attacker && plan && plan.blockers.length > 1 && plan.blockers.some((card) => card.id === blocker.id)) {
+          const single = assessBlock(attacker, [blocker], context);
+          if (plan.assessment.net - single.net >= BLOCK_WEIGHTS.worthwhileNet) {
+            const bonus = Math.min(12, (plan.assessment.net - single.net) * 0.5) + (single.net < BLOCK_WEIGHTS.worthwhileNet ? 3 : 0);
+            scored.score += bonus;
+            scored.reasons = [...scored.reasons, `starts a gang block with ${plan.blockers.map((card) => card.name ?? "a creature").join(" + ")}: ${describeAssessment(plan.assessment)}`];
+          }
+        }
+        const terrible = terribleBlockReason(action, actions, context);
+        if (terrible && !scored.vetoReason) {
+          scored.score -= 50;
+          scored.reasons = [...scored.reasons, terrible];
+          scored.vetoReason = terrible;
+        }
+      }
       const declinedBlock = declineFreeBlockReason(action, actions, context);
       if (declinedBlock && !scored.vetoReason) {
         scored.score -= 50;

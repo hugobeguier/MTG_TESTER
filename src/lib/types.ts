@@ -1,3 +1,5 @@
+import type { DelayedPhaseTrigger } from "./phaseTriggers";
+
 export type SeatKind = "human" | "agent";
 
 export type ZoneName =
@@ -632,6 +634,9 @@ export interface GameSession {
   // ANY seat's upkeep step begins (this is "the next turn's upkeep" overall, not each player's own
   // next upkeep), then cleared regardless of whether the queue was empty.
   pendingUpkeepDraws?: Array<{ seatId: string; amount: number; sourceName: string }>;
+  // One-shot delayed "at the beginning of the next end step / your next upkeep" triggers created by resolved effects (rule 603.7). The phase-trigger
+  // registry (src/lib/phaseTriggers.ts) puts each on the stack the first time its step begins after creation and removes it.
+  delayedPhaseTriggers?: DelayedPhaseTrigger[];
   // Rule 603.2/700.4-adjacent: "Whenever one or more cards leave your graveyard, ..." (Willow Geist,
   // Insidious Roots) — same "pure transformer notices something happened but has no access to the
   // trigger-queueing machinery" shape as pendingDeaths/pendingEntries/pendingCombatDamageToPlayer

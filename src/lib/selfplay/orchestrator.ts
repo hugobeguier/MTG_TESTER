@@ -308,7 +308,9 @@ function toCardLike(card: VisibleCard): CardLike {
     summoningSick: card.summoningSick,
     enteredTurn: card.enteredTurn,
     blocking: card.blocking,
-    commander: card.commander ? true : undefined
+    commander: card.commander ? true : undefined,
+    loyalty: card.loyalty,
+    commanderTax: card.commanderTax
   };
 }
 
@@ -1065,7 +1067,7 @@ async function runDeclareBlockersStep(
       const rawActions = legalBlockActions(session, choice).filter((item) => item.actionType !== "block" || !chosenBlockerIds.includes(item.cardId ?? ""));
       if (!rawActions.some((item) => item.actionType === "block")) break;
       const purpose = chosenBlockerIds.length > 0 ? "declare_blockers_additional" : "declare_blockers";
-      const context = buildScoringContext(session, choice.defenderSeatId, purpose);
+      const context = { ...buildScoringContext(session, choice.defenderSeatId, purpose), ...(chosenBlockerIds.length > 0 ? { blockingSoFar: [...chosenBlockerIds] } : {}) };
       const decision = await brain({ seatId: choice.defenderSeatId, seatName: defenderSeat.name, purpose, legalActions: rawActions, context });
       recordDecision(choice.defenderSeatId, decision.source);
       const legal = rawActions.find((item) => item.id === decision.action.legalActionId);

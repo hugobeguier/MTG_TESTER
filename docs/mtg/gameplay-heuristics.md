@@ -117,6 +117,8 @@ Read a creature's `keywords` array in the context, not its rules text: it lists 
 
 Before blocking, work out the fight with these rules: who deals damage first, who dies, who survives. Do not block just because the blocker has more power or toughness; check whether the attacker has deathtouch or first strike. A trade is only good when the creature you lose is worth no more than the creature you kill.
 
+A block is worth making when what it saves is at least what it costs; "the blocker dies and the attacker survives" is NOT by itself a reason to decline. Look at what the attacker is attacking: a planeswalker that would die (above all your commander planeswalker, whose loss sends it to the command zone and adds {2} to every later cast), a planeswalker whose loyalty matters, a high-value creature, or your life total when the hit would leave you low or dead. Chump-block with the cheapest creature that can legally block (a token first) when the thing protected is worth clearly more. Do not chump when the planeswalker survives anyway with plenty of loyalty, when other attackers kill it regardless, when you have lots of life, or when the only blocker is a valuable creature. Trample means a chump only absorbs the blocker's toughness; deathtouch kills any blocker. Two or three cheap creatures together can kill an attacker none of them could alone.
+
 ## Strategy: weigh what an attack gains against what it risks
 
 Every attack is a trade. Before attacking, and when choosing whom to attack, put numbers on both sides and compare them:
@@ -142,4 +144,5 @@ These came out of thousands of simulated decisions; avoid them unless the board 
 - **Tapping out while the table can kill you next turn.** Count what the opponents' creatures can deal to you after your own blockers are accounted for. If that is lethal, spend mana on blockers, removal or a sweeper, not on a mana rock or an enchantment, and keep an instant-speed answer up when you have one.
 - **A board wipe when you are ahead.** Compare the value of your creatures with the value of everyone else's combined; a sweeper is for when you lose less than the table does.
 - **A spell with no target or no effect.** Do not cast removal when only your own creature could be the target, a counterspell with nothing on the stack, or a spell that costs more life than you have.
-- **Extra blockers that only die.** Add a second blocker to a block only if it survives the attacker.
+- **Extra blockers that only die.** Add a second blocker to a block only if it survives the attacker, or if together the blockers kill the attacker or save what it is attacking for less than they cost.
+- **Letting a planeswalker or commander die to save a token.** A 1/1 token costs far less than a commander planeswalker; block with the token.

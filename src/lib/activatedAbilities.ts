@@ -693,7 +693,9 @@ export function parseGenericManaAbilities(oracleText: string): GenericManaAbilit
     const costPrefix = match[1];
     // Reminder text ("(This effect lasts indefinitely.)") is not part of the effect and defeated every exact-shape parser (Memnarch).
     const effectText = match[2].replace(/\s*\([^)]*\)/g, "").trim();
-    if (/^untap\b/i.test(effectText)) continue;
+    // "{3}: Untap this artifact." belongs to parseSelfUntapAbilities, but "Pay 10 life: Untap all lands you control." (Beledros Witherbloom)
+    // is a real effect of its own: with no {T} in its cost it is not restricted by summoning sickness (rule 302.6).
+    if (/^untap\b/i.test(effectText) && !/^untap all lands you control$/i.test(effectText.replace(/\s*activate only once each turn\.?\s*$/i, "").replace(/\.$/, ""))) continue;
 
     const costDiscard = /discard a card/i.test(costPrefix);
     const costManaText = (costPrefix.match(/\{[^}]+\}/g) ?? []).join("");

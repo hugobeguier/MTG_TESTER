@@ -144,6 +144,38 @@ describe("Gorma, the Gullet", () => {
   });
 });
 
+describe("Gorma, the Gullet: real oracle wording and who gets the counters", () => {
+  const counters = (s: GameSession, seatId: string, id: string) => s.seats.find((x) => x.id === seatId)!.board.battlefield.find((c) => c.id === id)!.counters?.find((c) => c.kind === "+1/+1")?.count;
+  const place = (s: GameSession, seatId: string, cards: VisibleCard[]) => ({ ...s, seats: s.seats.map((x) => (x.id === seatId ? { ...x, board: { ...x.board, battlefield: [...x.board.battlefield, ...cards] } } : x)) });
+  it("uses the real text: nontoken creatures you control, deaths under your control this turn", () => {
+    const text = real("Gorma, the Gullet", "g").oracleText;
+    expect(text).toMatch(/Nontoken creatures you control enter with an additional \+1\/\+1 counter on them for each creature that died under your control this turn/);
+  });
+  it("Gorma entering after deaths gets no counters from its own ability", () => {
+    const dead = destroy(session([seat("a", [bear("d1"), bear("d2")]), seat("o", [])]), ["d1", "d2"]);
+    const withGorma = place(dead, "a", [real("Gorma, the Gullet", "gorma", { power: "3", toughness: "3" })]);
+    expect(counters(applyEntersWithCounterReplacements(withGorma, "a", "gorma"), "a", "gorma")).toBeUndefined();
+  });
+  it("another creature entering gets one counter per creature that died under its controller this turn, tokens included in the count", () => {
+    const base = session([seat("a", [real("Gorma, the Gullet", "gorma"), bear("d1"), bear("tok", { token: true }), bear("d3")], { kind: "human" }), seat("o", [bear("od")])]);
+    let s = destroy(base, ["d1", "tok"]);
+    s = destroyCreatures(s, [{ seatId: "o", cardId: "od", message: "od dies." }], "test");
+    expect(s.creaturesDiedThisTurn).toEqual({ turn: 1, bySeat: { a: 2, o: 1 } });
+    s = place(s, "a", [bear("n1")]);
+    expect(counters(applyEntersWithCounterReplacements(s, "a", "n1"), "a", "n1")).toBe(2);
+  });
+  it("only counts the Gorma controller's own deaths, and resets on a new turn", () => {
+    const base = session([seat("a", [real("Gorma, the Gullet", "gorma")]), seat("o", [bear("od")])]);
+    let s = destroyCreatures(base, [{ seatId: "o", cardId: "od", message: "od dies." }], "test");
+    s = place(s, "a", [bear("n1")]);
+    expect(counters(applyEntersWithCounterReplacements(s, "a", "n1"), "a", "n1")).toBeUndefined();
+    const died = destroy(place(base, "a", [bear("d1")]), ["d1"]);
+    const entered = place(died, "a", [bear("n2")]);
+    expect(counters(applyEntersWithCounterReplacements(entered, "a", "n2"), "a", "n2")).toBe(1);
+    expect(counters(applyEntersWithCounterReplacements({ ...entered, turn: 2 }, "a", "n2"), "a", "n2")).toBeUndefined();
+  });
+});
+
 describe("Willow Geist: gains life equal to its power when it dies", () => {
   it("counts its +1/+1 counters", () => {
     const geist = real("Willow Geist", "wg", { power: "2", toughness: "2", counters: [{ kind: "+1/+1", count: 2 }] });

@@ -2388,3 +2388,14 @@ ol {
 .exile-tray-card span { color: var(--muted); }
 .exile-tray-thumb { background: transparent; border: 0; padding: 0; }
 .exile-tray-thumb img { border-radius: 3px; width: 56px; }
+
+/* Card-image pickers (discard to hand size, put on library, connive, return a land, blink, basic-land fetch) */
+.mana-choice-modal.card-pick-modal { max-width: min(680px, calc(100vw - 2rem)); max-height: calc(100vh - 2rem); overflow-y: auto; }
+.card-pick-grid { display: grid; gap: 0.6rem; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); max-height: 56vh; overflow-y: auto; padding: 0.25rem; }
+.card-pick { background: transparent; border: 2px solid transparent; border-radius: 8px; color: var(--text, #f2f0e8); cursor: pointer; display: grid; gap: 0.25rem; padding: 0.25rem; text-align: center; }
+.card-pick:hover, .card-pick:focus-visible { border-color: rgba(242, 240, 232, 0.5); outline: none; }
+.card-pick.selected { background: rgba(210, 170, 70, 0.18); border-color: #d6b255; box-shadow: 0 0 0 1px #d6b255; }
+.card-pick .card-thumb, .card-pick .card-thumb-fallback { border-radius: 6px; width: 100%; }
+.card-pick .card-thumb-fallback { aspect-ratio: 5 / 7; background: #1b2018; border: 1px solid rgba(242, 240, 232, 0.2); font-size: 0.72rem; overflow: hidden; padding: 0.3rem; }
+.card-pick-name { font-size: 0.78rem; font-weight: 600; line-height: 1.2; }
+.card-pick-detail { color: var(--muted, #aaa); font-size: 0.68rem; line-height: 1.2; }

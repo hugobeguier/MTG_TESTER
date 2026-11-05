@@ -24,12 +24,16 @@ describe("shouldStopForPriority", () => {
     ).toBeUndefined();
   });
 
-  it("a ticked step on someone else's turn stops even with no legal response, but an unticked one does not", () => {
-    expect(shouldStopForPriority(baseInput({ phase: "end step", turnOwnerSeatIndex: 1, hasLegalResponse: false }))).toBe("phase_stop");
+  it("a ticked step on someone else's turn does NOT stop when there is no legal response", () => {
+    expect(shouldStopForPriority(baseInput({ phase: "end step", turnOwnerSeatIndex: 1, hasLegalResponse: false }))).toBeUndefined();
     expect(shouldStopForPriority(baseInput({ phase: "upkeep step", turnOwnerSeatIndex: 1, hasLegalResponse: false }))).toBeUndefined();
-    // Not for a spell/trigger window, and not for my own phase-pass (own-turn stops are enforced by the auto-advance effect).
     expect(shouldStopForPriority(baseInput({ phase: "end step", turnOwnerSeatIndex: 1, hasLegalResponse: false, actionType: "spell" }))).toBeUndefined();
     expect(shouldStopForPriority(baseInput({ phase: "precombat main phase", turnOwnerSeatIndex: 0, hasLegalResponse: false, actionIsMine: true }))).toBeUndefined();
+  });
+
+  it("a ticked step on someone else's turn stops when a legal response exists, an unticked one does not", () => {
+    expect(shouldStopForPriority(baseInput({ phase: "end step", turnOwnerSeatIndex: 1 }))).toBe("phase_stop");
+    expect(shouldStopForPriority(baseInput({ phase: "upkeep step", turnOwnerSeatIndex: 1 }))).toBeUndefined();
   });
 
   it("stops for full control whenever a response exists", () => {

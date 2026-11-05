@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { VisibleCard } from "./types";
+import { parsePhaseTriggers } from "./phaseTriggers";
 import { cardsLeaveGraveyardEffectText, deathEffectText, etbEffectText } from "./oracleClauses";
 import { ollamaFetch, OLLAMA_TIMEOUT_MS } from "./ollama";
 
@@ -486,9 +487,10 @@ export function deterministicRuleWorkflow(input: RuleAdvisorInput): RuleWorkflow
   ) {
     return {
       workflow: "search_library_to_battlefield",
-      summary: `${input.sourceCard.name} can search the library and put a card onto the battlefield.`,
+      summary: (numberWordToInt(graveyardSearchCountMatch?.[1]) ?? 1) > 1 ? `${input.sourceCard.name} can search the library for up to ${numberWordToInt(graveyardSearchCountMatch?.[1])} cards and put them onto the battlefield.` : `${input.sourceCard.name} can search the library and put a card onto the battlefield.`,
       sourceCardId: input.sourceCard.id,
-      maxChoices: 1,
+      // "up to two basic land cards" (Harrow): the count is in the search clause. This used to be hardcoded to 1, so Harrow fetched a single land.
+      maxChoices: numberWordToInt(graveyardSearchCountMatch?.[1]) ?? 1,
       allowedCardFilter: extractSearchedCardType(scopedText) ?? "cards matching the source effect",
       manaValueRestriction: extractManaValueRestriction(scopedText) ?? sacrificedManaValueRestriction(scopedText, input.sourceCard.sacrificedManaValue),
       destination: "battlefield",
@@ -530,8 +532,9 @@ export function eventRelevantOracleText(event: string, oracleText: string): stri
   return oracleText;
 }
 
+// Same wording knowledge as the engine's phase-trigger registry (src/lib/phaseTriggers.ts): your / each / each player's / each opponent's upkeep.
 function isUpkeepTriggeredText(text: string) {
-  return text.includes("at the beginning of your upkeep") || text.includes("at the beginning of each upkeep");
+  return parsePhaseTriggers(text).some((spec) => spec.phase === "upkeep step" && !spec.keyword) || text.includes("at the beginning of your upkeep") || text.includes("at the beginning of each upkeep");
 }
 
 function isOnlyTappedConditionText(oracleText: string): boolean {

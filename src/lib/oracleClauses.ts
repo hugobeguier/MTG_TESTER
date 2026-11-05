@@ -208,9 +208,22 @@ export function isStaticBoostClause(clause: string): boolean {
 // the granting ability's own text (the "You get an emblem with" wrapper itself, any surrounding
 // mode text) is irrelevant once the emblem exists — from then on it only ever acts through its own
 // captured text, same as a permanent acts through its own oracleText.
-export function parseEmblemGrant(oracleText: string): { text: string } | undefined {
-  const match = oracleText.match(/you get an emblem with\s+"([^"]+)"/i);
-  return match ? { text: match[1] } : undefined;
+// Some emblems print several abilities as a quoted list joined by "and" (Saheeli, Filigree Master:
+// 'You get an emblem with "Artifact creatures you control get +1/+1" and "Artifact spells you cast
+// cost {1} less to cast."'; Sarkhan the Dragonspeaker, Tamiyo the Moon Sage, Teferi Who Slows the
+// Sunset). `clauses` lists every quoted ability in order; `text` stays the first one (the old shape).
+export function parseEmblemGrant(oracleText: string): { text: string; clauses: string[] } | undefined {
+  const start = oracleText.match(/you get an emblem with\s+"([^"]+)"/i);
+  if (!start || start.index === undefined) return undefined;
+  const clauses = [start[1].trim()];
+  const rest = oracleText.slice(start.index + start[0].length);
+  const more = /^\s*(?:,\s*)?(?:and\s+)?"([^"]+)"/i;
+  let remaining = rest;
+  for (let next = remaining.match(more); next; next = remaining.match(more)) {
+    clauses.push(next[1].trim());
+    remaining = remaining.slice(next[0].length);
+  }
+  return { text: clauses[0], clauses };
 }
 
 // "As an additional cost to cast this spell, sacrifice a creature." (Village Rites, Altar's Reap,
@@ -219,11 +232,14 @@ export function parseEmblemGrant(oracleText: string): { text: string } | undefin
 // creature "sacrifice a/an creature" shape, the overwhelmingly common real-world form of this cost;
 // a numbered/multi-permanent or non-creature ("sacrifice an artifact/land/permanent") variant isn't
 // recognized here.
-export function parseAdditionalSacrificeCost(oracleText: string): { count: number } | undefined {
-  const match = oracleText.toLowerCase().match(/as an additional cost to cast this spell,\s*sacrifice (a|an|two|three)\s+creatures?\b/);
+// Also covers a land / artifact / enchantment / (nonland) permanent ("sacrifice a land" — Harrow). A qualified
+// creature ("sacrifice a green creature") is NOT matched. `permanentType` says which kind of permanent may pay it.
+export type AdditionalSacrificeType = "creature" | "land" | "artifact" | "enchantment" | "permanent" | "nonland permanent";
+export function parseAdditionalSacrificeCost(oracleText: string): { count: number; permanentType: AdditionalSacrificeType } | undefined {
+  const match = oracleText.toLowerCase().match(/as an additional cost to cast this spell,\s*sacrifice (a|an|two|three)\s+(creature|land|artifact|enchantment|nonland permanent|permanent)s?\b/);
   if (!match) return undefined;
   const count = match[1] === "two" ? 2 : match[1] === "three" ? 3 : 1;
-  return { count };
+  return { count, permanentType: match[2] as AdditionalSacrificeType };
 }
 
 // "As an additional cost to cast this spell, discard a card." (Unexpected Windfall, ...) — rule
@@ -425,7 +441,12 @@ export function cardMatchesTypeFilter(typeLine: string, filter: string): boolean
     .split(/,| or /)
     .map((part) => part.trim())
     .filter((part) => part.length > 0)
-    .some((part) => normalizedTypeLine.includes(part));
+    .some((part) => {
+      // "permanent card" (Tezzeret, Artifice Master's emblem): no card's type line says "permanent"; it means anything that is not an instant or a sorcery.
+      if (part === "permanent") return !/\b(?:instant|sorcery)\b/.test(normalizedTypeLine);
+      if (part === "nonland permanent") return !/\b(?:instant|sorcery|land)\b/.test(normalizedTypeLine);
+      return normalizedTypeLine.includes(part);
+    });
 }
 
 // "Whenever ~ attacks, add X mana in any combination of colors, where X is the total power of

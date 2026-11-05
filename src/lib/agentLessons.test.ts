@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { formatDecisionForChat, formatLessonsForPrompt, summarizeSituation, type AgentLesson } from "./agentLessons";
+import { buildAgentChatSystemPrompt, formatDecisionForChat, formatLessonsForPrompt, lessonsForAgent, mentionedSeatNames, summarizeSituation, type AgentLesson } from "./agentLessons";
 
 const lesson = (overrides: Partial<AgentLesson>): AgentLesson => ({
   id: "1",
@@ -95,5 +95,27 @@ describe("card texts for the agent chat", () => {
     expect(text).toContain("Sacrifice another creature or artifact");
     expect(text).not.toContain("Plains");
     expect(cardTextsMentioned("nothing relevant here", cards)).toBe("");
+  });
+});
+
+describe("agent chat prompt is pinned to the selected seat", () => {
+  const base = { seatName: "Malik", otherSeatNames: ["Veyra", "Human"], decisionText: "The decision being discussed:\nDeathbonnet Hulk attacked.", eventsText: "- [Veyra] Veyra has no creatures to block with." };
+  it("names the other players, tags log lines and says only the selected seat answers", () => {
+    const prompt = buildAgentChatSystemPrompt(base);
+    expect(prompt).toContain("You are Malik");
+    expect(prompt).toContain("The other players are: Veyra, Human");
+    expect(prompt).toContain("only lines tagged [Malik] are yours");
+    expect(prompt).toContain("- [Veyra] Veyra has no creatures to block with.");
+    expect(prompt).not.toContain("You are Veyra");
+  });
+  it("adds an extra pin when the human mentions another seat", () => {
+    expect(mentionedSeatNames("I was talking about Malik not Veyra", ["Malik", "Veyra", "Human"])).toEqual(["Malik", "Veyra"]);
+    const prompt = buildAgentChatSystemPrompt({ ...base, humanMessages: ["I was talking about Malik not Veyra"] });
+    expect(prompt).toContain("mention Malik, Veyra");
+    expect(buildAgentChatSystemPrompt({ ...base, humanMessages: ["why?"] })).not.toContain("messages mention");
+  });
+  it("only that agent's saved lessons reach its chat", () => {
+    const lessons = [lesson({ id: "m", agentName: "Malik" }), lesson({ id: "v", agentName: "Veyra" })];
+    expect(lessonsForAgent(lessons, "Malik").map((l) => l.id)).toEqual(["m"]);
   });
 });

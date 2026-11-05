@@ -16,6 +16,7 @@ import * as THREE from "three";
 import type { AgentReasoning, GameSession, PlayerSeat, VisibleCard } from "@/lib/types";
 import type { AgentLesson } from "@/lib/agentLessons";
 import { effectivePower, effectiveToughness } from "@/lib/counters";
+import { cardPickOptions, toggleCardSelection } from "@/lib/cardPick";
 import {
   parseGenericManaAbilities,
   parseGenericSacrificeAbilities,
@@ -633,6 +634,8 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
   const [draggingHandCardId, setDraggingHandCardId] = useState<string | undefined>();
   const [draggingZone, setDraggingZone] = useState<DraggedZone | undefined>();
   const [zoneView, setZoneView] = useState<{ seatId: string; zone: TableZone } | undefined>();
+  // The seat whose emblems are being read (click the life plate of a player wearing the EMBLEM badge).
+  const [emblemSeatId, setEmblemSeatId] = useState<string | undefined>();
   // Toggles the 3D life-total plates (addLifeTotalPlate) between life totals and commander damage
   // taken — a button flips this, and it's threaded into rebuildDynamicScene the same way
   // selectedCardId already is, since both need a full scene rebuild to actually change what's drawn
@@ -965,6 +968,10 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
       if (data?.kind === "zone" && data.seatId && data.zone) {
         setZoneView({ seatId: data.seatId, zone: data.zone });
       }
+      // The life plate of a player who has an emblem: show what their emblems do (public information, any seat).
+      if (data?.kind === "player" && data.seatId && (propsRef.current.session.seats.find((seat) => seat.id === data.seatId)?.emblems?.length ?? 0) > 0) {
+        setEmblemSeatId(data.seatId);
+      }
     };
 
     const updateHoveredCard = (event: PointerEvent) => {
@@ -981,7 +988,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
 
       hoveredCardRef.current = data?.kind === "card" && data.card && data.seatId && data.location ? (data as CardUserData) : undefined;
       const hovered = hoveredCardRef.current;
-      renderer.domElement.style.cursor = hovered?.location === "battlefield" && hovered.seatId === propsRef.current.session.seats.find((seat) => seat.kind === "human")?.id ? "grab" : hovered || data?.kind === "zone" ? "pointer" : "";
+      renderer.domElement.style.cursor = hovered?.location === "battlefield" && hovered.seatId === propsRef.current.session.seats.find((seat) => seat.kind === "human")?.id ? "grab" : hovered || data?.kind === "zone" || (data?.kind === "player" && (propsRef.current.session.seats.find((seat) => seat.id === data.seatId)?.emblems?.length ?? 0) > 0) ? "pointer" : "";
     };
 
     const getTablePosition = (event: PointerEvent, seatId: string) => {
@@ -1979,7 +1986,8 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
         <AgentReasoningModal
           seat={props.session.seats.find((seat) => seat.id === reasoningSeatId)}
           reasoning={props.agentReasoning?.[reasoningSeatId]}
-          recentEvents={props.session.events.slice(0, 40).map((event) => event.message).reverse()}
+          recentEvents={props.session.events.slice(0, 40).map((event) => taggedChatEvent(event, props.session.seats)).reverse()}
+          otherSeatNames={props.session.seats.filter((item) => item.id !== reasoningSeatId).map((item) => item.name)}
           thinking={Boolean(props.agentThinking?.[reasoningSeatId])}
           onClose={() => setReasoningSeatId(undefined)}
         />
@@ -2021,6 +2029,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
           }}
         />
       ) : null}
+      {emblemSeatId ? <EmblemInspector seat={props.session.seats.find((seat) => seat.id === emblemSeatId)} onClose={() => setEmblemSeatId(undefined)} /> : null}
       {priorityStopsOpen ? (
         <PriorityStopsModal
           settings={props.priorityStopSettings ?? DEFAULT_STOP_SETTINGS}
@@ -3008,16 +3017,24 @@ const AGENT_REASONING_PURPOSE_LABELS: Record<string, string> = {
   declare_blockers: "Declaring blockers"
 };
 
+// A game-log line for the agent chat prompt, tagged with the player it concerns so the model cannot mistake another seat's play for its own.
+function taggedChatEvent(event: { message: string; seatId?: string }, seats: PlayerSeat[]): string {
+  const name = event.seatId ? seats.find((seat) => seat.id === event.seatId)?.name : undefined;
+  return name ? `[${name}] ${event.message}` : event.message;
+}
+
 function AgentReasoningModal({
   seat,
   reasoning,
   recentEvents,
+  otherSeatNames,
   thinking,
   onClose
 }: {
   seat?: PlayerSeat;
   reasoning?: AgentReasoning;
   recentEvents?: string[];
+  otherSeatNames?: string[];
   thinking: boolean;
   onClose?: () => void;
 }) {
@@ -3060,6 +3077,7 @@ function AgentReasoningModal({
         body: JSON.stringify({
           agentName,
           seatName,
+          otherSeatNames: otherSeatNames ?? [],
           decision: {
             purpose: reasoning.purpose,
             turn: reasoning.turn,
@@ -3281,11 +3299,7 @@ function DiscardToHandSizeModal({
   const [selected, setSelected] = useState<string[]>([]);
 
   function toggle(cardId: string) {
-    setSelected((current) => {
-      if (current.includes(cardId)) return current.filter((id) => id !== cardId);
-      if (current.length >= choice.requiredDiscards) return current;
-      return [...current, cardId];
-    });
+    setSelected((current) => toggleCardSelection(current, cardId, choice.requiredDiscards));
   }
 
   // No backdrop-dismiss: this discard is a required action (rule 514.2 for the real cleanup-step
@@ -3293,7 +3307,7 @@ function DiscardToHandSizeModal({
   // optional review, so unlike the other rule-choice modals this one has nothing for onClick to call.
   return (
     <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label="Discard a card">
-      <article className="mana-choice-modal" onClick={(event) => event.stopPropagation()}>
+      <article className="mana-choice-modal card-pick-modal" onClick={(event) => event.stopPropagation()}>
         <header>
           <p className="eyebrow">{choice.sourceCardName ?? "Cleanup step"}</p>
           <h2>{choice.sourceCardName ? "Discard a card" : "Discard to hand size"}</h2>
@@ -3302,20 +3316,7 @@ function DiscardToHandSizeModal({
         <p>
           Selected {selected.length}/{choice.requiredDiscards}
         </p>
-        <div className="modal-actions discard-hand-list">
-          {choice.hand.map((card) => (
-            <button
-              key={card.id}
-              type="button"
-              className="inspector-action"
-              aria-pressed={selected.includes(card.id)}
-              onClick={() => toggle(card.id)}
-            >
-              {selected.includes(card.id) ? "✓ " : ""}
-              {card.name}
-            </button>
-          ))}
-        </div>
+        <CardPickGrid cards={choice.hand} selectedIds={selected} onToggle={toggle} label="Cards in your hand" />
         <div className="modal-actions">
           <button
             className="inspector-action"
@@ -3341,18 +3342,14 @@ function PutCardsOnLibraryModal({
   const [selected, setSelected] = useState<string[]>([]);
 
   function toggle(cardId: string) {
-    setSelected((current) => {
-      if (current.includes(cardId)) return current.filter((id) => id !== cardId);
-      if (current.length >= choice.requiredCount) return current;
-      return [...current, cardId];
-    });
+    setSelected((current) => toggleCardSelection(current, cardId, choice.requiredCount));
   }
 
   // No backdrop-dismiss: this is a mandatory part of resolving the source ability (e.g. Aminatou,
   // the Fateshifter's +1), not an optional review — same reasoning as DiscardToHandSizeModal.
   return (
     <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label={`Put cards on top of library for ${choice.sourceCardName}`}>
-      <article className="mana-choice-modal" onClick={(event) => event.stopPropagation()}>
+      <article className="mana-choice-modal card-pick-modal" onClick={(event) => event.stopPropagation()}>
         <header>
           <p className="eyebrow">{choice.sourceCardName}</p>
           <h2>Put cards on top of library</h2>
@@ -3361,20 +3358,7 @@ function PutCardsOnLibraryModal({
         <p>
           Selected {selected.length}/{choice.requiredCount}
         </p>
-        <div className="modal-actions discard-hand-list">
-          {choice.hand.map((card) => (
-            <button
-              key={card.id}
-              type="button"
-              className="inspector-action"
-              aria-pressed={selected.includes(card.id)}
-              onClick={() => toggle(card.id)}
-            >
-              {selected.includes(card.id) ? "✓ " : ""}
-              {card.name}
-            </button>
-          ))}
-        </div>
+        <CardPickGrid cards={choice.hand} selectedIds={selected} onToggle={toggle} label="Cards in your hand" />
         <div className="modal-actions">
           <button
             className="inspector-action"
@@ -3403,26 +3387,13 @@ function ConniveDiscardModal({
   // not an optional review — same reasoning as PutCardsOnLibraryModal/DiscardToHandSizeModal.
   return (
     <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label={`${choice.sourceCardName} connives`}>
-      <article className="mana-choice-modal" onClick={(event) => event.stopPropagation()}>
+      <article className="mana-choice-modal card-pick-modal" onClick={(event) => event.stopPropagation()}>
         <header>
           <p className="eyebrow">{choice.sourceCardName}</p>
           <h2>Connive: choose a card to discard</h2>
         </header>
         <p>{choice.prompt}</p>
-        <div className="modal-actions discard-hand-list">
-          {choice.hand.map((card) => (
-            <button
-              key={card.id}
-              type="button"
-              className="inspector-action"
-              aria-pressed={selected === card.id}
-              onClick={() => setSelected(card.id)}
-            >
-              {selected === card.id ? "✓ " : ""}
-              {card.name}
-            </button>
-          ))}
-        </div>
+        <CardPickGrid cards={choice.hand} selectedIds={selected ? [selected] : []} onToggle={(cardId) => setSelected(cardId)} label="Cards in your hand" />
         <div className="modal-actions">
           <button className="inspector-action" type="button" disabled={!selected} onClick={() => onConfirm?.(selected ? [selected] : [])}>
             Discard
@@ -3446,26 +3417,13 @@ function ReturnLandToHandModal({
   // optional review — same reasoning as ConniveDiscardModal.
   return (
     <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label={`${choice.sourceCardName}: return a land`}>
-      <article className="mana-choice-modal" onClick={(event) => event.stopPropagation()}>
+      <article className="mana-choice-modal card-pick-modal" onClick={(event) => event.stopPropagation()}>
         <header>
           <p className="eyebrow">{choice.sourceCardName}</p>
           <h2>Return a land to your hand</h2>
         </header>
         <p>{choice.prompt}</p>
-        <div className="modal-actions discard-hand-list">
-          {choice.lands.map((card) => (
-            <button
-              key={card.id}
-              type="button"
-              className="inspector-action"
-              aria-pressed={selected === card.id}
-              onClick={() => setSelected(card.id)}
-            >
-              {selected === card.id ? "✓ " : ""}
-              {card.name}
-            </button>
-          ))}
-        </div>
+        <CardPickGrid cards={choice.lands} selectedIds={selected ? [selected] : []} onToggle={(cardId) => setSelected(cardId)} label="Lands you control" />
         <div className="modal-actions">
           <button className="inspector-action" type="button" disabled={!selected} onClick={() => onConfirm?.(selected ? [selected] : [])}>
             Return to hand
@@ -3489,26 +3447,13 @@ function ChoosePermanentToBlinkModal({
   // not an optional review — same reasoning as ReturnLandToHandModal just above.
   return (
     <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label={`${choice.sourceCardName}: choose a permanent`}>
-      <article className="mana-choice-modal" onClick={(event) => event.stopPropagation()}>
+      <article className="mana-choice-modal card-pick-modal" onClick={(event) => event.stopPropagation()}>
         <header>
           <p className="eyebrow">{choice.sourceCardName}</p>
           <h2>Exile and return a permanent you own</h2>
         </header>
         <p>{choice.prompt}</p>
-        <div className="modal-actions discard-hand-list">
-          {choice.permanents.map((card) => (
-            <button
-              key={card.id}
-              type="button"
-              className="inspector-action"
-              aria-pressed={selected === card.id}
-              onClick={() => setSelected(card.id)}
-            >
-              {selected === card.id ? "✓ " : ""}
-              {card.name}
-            </button>
-          ))}
-        </div>
+        <CardPickGrid cards={choice.permanents} selectedIds={selected ? [selected] : []} onToggle={(cardId) => setSelected(cardId)} label="Permanents you own" />
         <div className="modal-actions">
           <button className="inspector-action" type="button" disabled={!selected} onClick={() => onConfirm?.(selected ? [selected] : [])}>
             Exile and return
@@ -3759,7 +3704,8 @@ function MyriadSearchModal({
         <div className="library-search-results">
           {filteredCards.length === 0 ? <p>No matching basic lands.</p> : null}
           {filteredCards.map((card) => (
-            <article className={`library-search-card ${selectedIds.includes(card.id) ? "selected" : ""}`} key={card.id}>
+            <article className={`library-search-card rich ${selectedIds.includes(card.id) ? "selected" : ""}`} key={card.id}>
+              <CardThumb card={card} />
               <div>
                 <strong>{card.name}</strong>
                 <span>{card.typeLine}</span>
@@ -3802,7 +3748,8 @@ function BasicLandFetchModal({
         <div className="library-search-results">
           {cards.length === 0 ? <p>No basic lands found.</p> : null}
           {cards.map((card) => (
-            <article className="library-search-card" key={card.id}>
+            <article className="library-search-card rich" key={card.id}>
+              <CardThumb card={card} />
               <div>
                 <strong>{card.name}</strong>
                 <span>{card.typeLine}</span>
@@ -4054,6 +4001,26 @@ export function cardHoverHandlers(card: VisibleCard) {
   };
 }
 
+// A grid of card-art tiles for "choose cards" prompts (hand discards, put back, bounce, blink): each tile is a button with the same selection semantics the
+// old name-only buttons had (aria-pressed), the shared hover preview (mouse and keyboard focus), and the card name always printed under the art.
+function CardPickGrid({ cards, selectedIds, onToggle, label }: { cards: VisibleCard[]; selectedIds: string[]; onToggle: (cardId: string) => void; label: string }) {
+  const options = cardPickOptions(cards, selectedIds);
+  return (
+    <div className="card-pick-grid" role="group" aria-label={label}>
+      {cards.map((card, index) => {
+        const option = options[index];
+        const hover = cardHoverHandlers(card);
+        return (
+          <button key={card.id} type="button" className={`card-pick${option.selected ? " selected" : ""}`} aria-pressed={option.selected} aria-label={option.ariaLabel} title={option.detail || option.name} onClick={() => onToggle(card.id)} onFocus={hover.onMouseEnter} onBlur={hover.onMouseLeave}>
+            <CardThumb card={card} />
+            <span className="card-pick-name">{option.selected ? "✓ " : ""}{option.name}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function CardRowInfo({ card, playableNote }: { card: VisibleCard; playableNote?: string }) {
   return (
     <div>
@@ -4099,6 +4066,35 @@ function ExilePlayableTray({ seat, turn, onCast, onInspect }: { seat?: PlayerSea
   );
 }
 
+// Rule 111.7-111.9: emblems are public and last the rest of the game, so every player can read every seat's: which planeswalker made it and what
+// each of its abilities says (an emblem with several abilities keeps one per line).
+function EmblemInspector({ seat, onClose }: { seat: PlayerSeat | undefined; onClose: () => void }) {
+  const emblems = seat?.emblems ?? [];
+  return (
+    <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label={`${seat?.name ?? "Player"}'s emblems`} onClick={onClose}>
+      <article className="card-inspector" style={{ gridTemplateColumns: "1fr", maxWidth: 560 }} onClick={(event) => event.stopPropagation()}>
+        <button className="card-inspector-close" type="button" onClick={onClose} aria-label="Close emblems">
+          x
+        </button>
+        <div className="card-inspector-detail">
+          <p className="eyebrow">Emblems</p>
+          <h2>{seat?.name ?? "Player"}</h2>
+          <span>An emblem lasts for the rest of the game and cannot be removed.</span>
+          {emblems.length === 0 ? <p>No emblems.</p> : null}
+          {emblems.map((emblem) => (
+            <section key={emblem.id} aria-label={`Emblem from ${emblem.sourceName}`} style={{ marginTop: "0.8rem" }}>
+              <strong>Emblem from {emblem.sourceName}</strong>
+              {emblem.oracleText.split("\n").map((line, index) => (
+                <p key={index}>{line}</p>
+              ))}
+            </section>
+          ))}
+        </div>
+      </article>
+    </div>
+  );
+}
+
 function FallbackHandCard({ card }: { card: VisibleCard }) {
   return (
     <div className="three-hand-fallback">
@@ -4117,6 +4113,9 @@ function buildTableRenderKey(session: GameSession, selectedCardId: string | unde
     seats: session.seats.map((seat) => ({
       id: seat.id,
       life: seat.life,
+      // The corner badges on the life plate (emblem count, experience) are painted into its texture, so they must be part of the rebuild key.
+      emblems: seat.emblems?.length ?? 0,
+      experience: seat.experienceCounters ?? 0,
       zones: {
         library: seat.zones.library,
         hand: seat.zones.hand,
@@ -4236,7 +4235,8 @@ function rebuildDynamicScene(
     // small and clustered at center this time to keep any perspective skew as minor as possible.
     addLifeTotalPlate(group, seat, area.x > 0 ? 0.38 : -0.38, area.z > 0 ? 0.27 : -0.27, showCommanderDamage, cardMeshesRef, {
       monarch: session.monarchSeatId === seat.id,
-      initiative: session.initiativeSeatId === seat.id
+      initiative: session.initiativeSeatId === seat.id,
+      emblems: seat.emblems?.length ?? 0
     });
   });
 }
@@ -4761,7 +4761,7 @@ function addLifeTotalPlate(
   z: number,
   showCommanderDamage: boolean,
   cardMeshesRef: MutableRefObject<THREE.Object3D[]>,
-  tokens: { monarch: boolean; initiative: boolean } = { monarch: false, initiative: false }
+  tokens: { monarch: boolean; initiative: boolean; emblems?: number } = { monarch: false, initiative: false }
 ) {
   const canvas = document.createElement("canvas");
   canvas.width = 220;
@@ -4813,6 +4813,16 @@ function addLifeTotalPlate(
     context.textAlign = "left";
     context.fillText("INITIATIVE", 14, badgeY + 19);
     context.textAlign = "center";
+  }
+  // Emblems (planeswalker ultimates) are public and permanent: a purple badge in the bottom-right corner (the top-left stack is monarch/initiative,
+  // the top-right is experience); clicking the plate opens the list of what each emblem does (EmblemInspector).
+  if ((tokens.emblems ?? 0) > 0) {
+    context.fillStyle = "rgba(142,84,214,0.95)";
+    roundRect(context, canvas.width - 76, canvas.height - 32, 68, 24, 8);
+    context.fill();
+    context.fillStyle = "#f2f0e8";
+    context.font = "bold 12px Arial";
+    context.fillText(`EMBLEM x${tokens.emblems}`, canvas.width - 42, canvas.height - 16);
   }
   const experienceCounters = seat.experienceCounters ?? 0;
   if (experienceCounters > 0) {

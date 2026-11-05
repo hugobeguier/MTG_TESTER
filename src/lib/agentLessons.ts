@@ -117,3 +117,56 @@ export function formatDecisionForChat(decision: DecisionRecord): string {
     .filter(Boolean)
     .join("\n");
 }
+
+// Lessons for the debug chat: only the ones saved for THIS agent (a lesson from another seat's decision is not evidence about this one).
+export function lessonsForAgent(lessons: AgentLesson[], agentName: string): AgentLesson[] {
+  return lessons.filter((lesson) => lesson.agentName === agentName);
+}
+
+// The other players whose names the human's messages mention ("I was talking about Malik not Veyra"), so the prompt can pin the conversation to one seat.
+export function mentionedSeatNames(text: string, seatNames: string[]): string[] {
+  const haystack = text.toLowerCase();
+  const isWordChar = (ch: string | undefined) => ch !== undefined && /[a-z0-9]/.test(ch);
+  return seatNames.filter((name) => {
+    const needle = name.toLowerCase();
+    if (needle.length < 2) return false;
+    for (let at = haystack.indexOf(needle); at !== -1; at = haystack.indexOf(needle, at + 1)) {
+      if (!isWordChar(haystack[at - 1]) && !isWordChar(haystack[at + needle.length])) return true;
+    }
+    return false;
+  });
+}
+
+// System prompt of the "Ask <agent> about this decision" chat. The persona is ONLY the selected seat; every other player is named and the game log lines
+// are tagged with whose they are, so a log line about another player is never read as this agent's own play.
+export function buildAgentChatSystemPrompt(input: {
+  seatName: string;
+  otherSeatNames: string[];
+  decisionText: string;
+  cardTexts?: string;
+  historyText?: string;
+  eventsText?: string;
+  lessonsText?: string;
+  humanMessages?: string[];
+}): string {
+  const mentioned = mentionedSeatNames((input.humanMessages ?? []).join("\n"), [input.seatName, ...input.otherSeatNames]);
+  const others = input.otherSeatNames.filter((name) => name !== input.seatName);
+  return [
+    `You are ${input.seatName}, an AI player in a Magic: The Gathering Commander game. The human watching is asking YOU (${input.seatName}) about a decision YOU made. You are not ${others.join(", ") || "any other player"}: never answer as, or for, another player.`,
+    "Answer in English only, in 2-5 plain sentences. Be honest and specific: use only the facts below, and say so if you cannot tell.",
+    "Do not invent card text or abilities: if something is not in the Oracle text given below, you do not know it - say so. Remember who benefits from an effect (Swords to Plowshares gives the life to the exiled creature's controller, not to you). The heuristic scores are a rule-of-thumb ranking, not your own opinion; mention them when they explain the choice.",
+    "If the human says what they would have done, agree or disagree briefly with a concrete reason, then restate their idea as one short rule you would follow next time.",
+    `The other players are: ${others.join(", ") || "(none)"}. Game log lines are tagged [Player]; only lines tagged [${input.seatName}] are yours. Never describe another player's play, board or blockers as yours.`,
+    mentioned.some((name) => name !== input.seatName)
+      ? `The human's messages mention ${mentioned.join(", ")}. You are ${input.seatName}: talk about ${input.seatName}'s decision above; mention another player only to say what the log shows they did.`
+      : "",
+    input.decisionText,
+    input.cardTexts ?? "",
+    input.historyText ?? "",
+    input.eventsText ?? "",
+    "You only know your own decisions above and what the game log shows. If the human asks about a card or play that is not yours (it was another player's, or you never had that card), say whose play it was according to the log instead of claiming it or denying the card exists.",
+    input.lessonsText ?? ""
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}

@@ -47,6 +47,13 @@ export function parseAllZonesCda(oracleText: string): AllZonesCda | undefined {
   };
 }
 
+// "Old Stickfingers's power and toughness are each equal to the number of creature cards in your graveyard." — counts only the
+// controller's own graveyard CARDS (not permanents), so it is separate from the "you control" and all-graveyards shapes above.
+export function parseOwnGraveyardCda(oracleText: string): CharacteristicDefiningAbility | undefined {
+  const match = oracleText.toLowerCase().match(/power and toughness are each equal to the number of ([a-z ]+?) cards in your graveyard/);
+  return match ? { stat: "both", matcher: match[1].trim() } : undefined;
+}
+
 export type ManaColorLetter = "W" | "U" | "B" | "R" | "G";
 
 export interface DevotionCda {

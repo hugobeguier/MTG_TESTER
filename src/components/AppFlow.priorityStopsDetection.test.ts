@@ -86,12 +86,35 @@ describe("canReceivePriorityForPendingAction — priority Stops detection gap (r
     expect(canReceivePriorityForPendingAction(human, phaseAction("sable"), "sable", s, pools, stops, undefined)).toBe(false);
   });
 
-  it("DOES stop when the human ticked that step on the opponent's turn, even with nothing castable", () => {
+  it("does NOT stop on a ticked opponent end step when the human has nothing castable", () => {
     const bear = card({ id: "bear", name: "Grizzly Bears", typeLine: "Creature — Bear" });
     const human = seat({ id: "human", name: "You", kind: "human", board: { hand: [], battlefield: [bear] } });
     const sable = seat({ id: "sable", name: "Sable", kind: "agent" });
     const s = session([human, sable], "end step");
     const stops: PriorityStopSettings = { ...DEFAULT_STOP_SETTINGS, phaseStops: { [stopKey("end step", 1)]: true } };
+    const pools: Record<string, ManaPool> = { human: emptyPool(), sable: emptyPool() };
+
+    expect(canReceivePriorityForPendingAction(human, phaseAction("sable"), "sable", s, pools, stops, undefined)).toBe(false);
+  });
+
+  it("does NOT stop on a ticked opponent end step when the human holds an instant but has no mana", () => {
+    const bolt = card({ id: "bolt", name: "Lightning Bolt", typeLine: "Instant", oracleText: "Lightning Bolt deals 3 damage to any target.", manaCost: "{R}", manaValue: 1, zone: "hand" });
+    const human = seat({ id: "human", name: "You", kind: "human", board: { hand: [bolt], battlefield: [] } });
+    const sable = seat({ id: "sable", name: "Sable", kind: "agent" });
+    const s = session([human, sable], "end step");
+    const stops: PriorityStopSettings = { ...DEFAULT_STOP_SETTINGS, phaseStops: { [stopKey("end step", 1)]: true } };
+    const pools: Record<string, ManaPool> = { human: emptyPool(), sable: emptyPool() };
+
+    expect(canReceivePriorityForPendingAction(human, phaseAction("sable"), "sable", s, pools, stops, undefined)).toBe(false);
+  });
+
+  it("full control stops at an opponent's unticked step when an affordable instant exists", () => {
+    const bolt = card({ id: "bolt", name: "Lightning Bolt", typeLine: "Instant", oracleText: "Lightning Bolt deals 3 damage to any target.", manaCost: "{R}", manaValue: 1, zone: "hand" });
+    const mountain = card({ id: "m1", name: "Mountain", typeLine: "Basic Land — Mountain" });
+    const human = seat({ id: "human", name: "You", kind: "human", board: { hand: [bolt], battlefield: [mountain] } });
+    const sable = seat({ id: "sable", name: "Sable", kind: "agent" });
+    const s = session([human, sable], "upkeep step");
+    const stops: PriorityStopSettings = { ...DEFAULT_STOP_SETTINGS, phaseStops: {}, fullControl: true };
     const pools: Record<string, ManaPool> = { human: emptyPool(), sable: emptyPool() };
 
     expect(canReceivePriorityForPendingAction(human, phaseAction("sable"), "sable", s, pools, stops, undefined)).toBe(true);
@@ -130,6 +153,60 @@ describe("canReceivePriorityForPendingAction — priority Stops detection gap (r
     // An agent's trigger still needs its controller's pass.
     const agentTrigger = { ...(trigger as object), actorSeatId: "sable", controllerSeatId: "sable" } as never;
     expect(pendingActionRequiredPassesForTest([human, sable], agentTrigger, "human", session([human, sable], "precombat main phase"), pools, stops)).toEqual(["sable"]);
+  });
+
+  describe("agent triggers open a response window for the human (rule 603.3: every trigger gives all players priority)", () => {
+    const bolt = () => card({ id: "bolt", name: "Lightning Bolt", typeLine: "Instant", oracleText: "Lightning Bolt deals 3 damage to any target.", manaCost: "{R}", manaValue: 1, zone: "hand" });
+    const mountain = () => card({ id: "m1", name: "Mountain", typeLine: "Basic Land — Mountain" });
+    const agentTrigger = (id: string, controller = "sable") =>
+      ({ id, type: "trigger" as const, actorSeatId: controller, controllerSeatId: controller, sourceCardId: "c", sourceCardName: "Some Trigger", triggerKind: "common" as const, effect: { kind: "draw", amount: 1 }, message: "" }) as never;
+    const pools: Record<string, ManaPool> = { human: emptyPool(), sable: emptyPool() };
+    const stops: PriorityStopSettings = { ...DEFAULT_STOP_SETTINGS, phaseStops: {} };
+    const sable = () => seat({ id: "sable", name: "Sable", kind: "agent" });
+
+    it("human with an affordable instant is required to pass on an agent's trigger, after the controller", () => {
+      const human = seat({ id: "human", name: "You", kind: "human", board: { hand: [bolt()], battlefield: [mountain()] } });
+      const s = session([human, sable()], "upkeep step");
+      expect(pendingActionRequiredPassesForTest([human, sable()], agentTrigger("t1"), "sable", s, pools, stops)).toEqual(["human", "sable"]);
+    });
+
+    it("human with no legal response is NOT asked; only the controller passes (auto-resolves fast)", () => {
+      const human = seat({ id: "human", name: "You", kind: "human", board: { hand: [bolt()], battlefield: [] } });
+      const s = session([human, sable()], "upkeep step");
+      expect(pendingActionRequiredPassesForTest([human, sable()], agentTrigger("t1"), "sable", s, pools, stops)).toEqual(["sable"]);
+    });
+
+    it("a batch of triggers produces no human prompt when the human has no response", () => {
+      const human = seat({ id: "human", name: "You", kind: "human" });
+      const s = session([human, sable()], "precombat main phase");
+      for (const id of ["a", "b", "c", "d", "e"]) {
+        expect(pendingActionRequiredPassesForTest([human, sable()], agentTrigger(id), "sable", s, pools, stops)).toEqual(["sable"]);
+      }
+    });
+
+    it("full control still only opens the window when a real response exists", () => {
+      const fc: PriorityStopSettings = { ...stops, fullControl: true };
+      const idle = seat({ id: "human", name: "You", kind: "human" });
+      expect(pendingActionRequiredPassesForTest([idle, sable()], agentTrigger("t1"), "sable", session([idle, sable()], "upkeep step"), pools, fc)).toEqual(["sable"]);
+      const ready = seat({ id: "human", name: "You", kind: "human", board: { hand: [bolt()], battlefield: [mountain()] } });
+      expect(pendingActionRequiredPassesForTest([ready, sable()], agentTrigger("t1"), "sable", session([ready, sable()], "upkeep step"), pools, fc)).toContain("human");
+    });
+
+    it("another agent with a real instant-speed response also gets a window on a different agent's trigger", () => {
+      const human = seat({ id: "human", name: "You", kind: "human" });
+      const rook = seat({ id: "rook", name: "Rook", kind: "agent", board: { hand: [bolt()], battlefield: [mountain()] } });
+      const s = session([human, sable(), rook], "upkeep step");
+      const p = { ...pools, rook: emptyPool() };
+      expect(pendingActionRequiredPassesForTest([human, sable(), rook], agentTrigger("t1"), "sable", s, p, stops)).toEqual(["sable", "rook"]);
+    });
+
+    it("the human's own trigger: agents with a real response get a window too, human unchanged", () => {
+      const human = seat({ id: "human", name: "You", kind: "human" });
+      const rook = seat({ id: "rook", name: "Rook", kind: "agent", board: { hand: [bolt()], battlefield: [mountain()] } });
+      const s = session([human, sable(), rook], "upkeep step");
+      const p = { ...pools, rook: emptyPool() };
+      expect(pendingActionRequiredPassesForTest([human, sable(), rook], agentTrigger("t1", "human"), "human", s, p, stops)).toEqual(["rook"]);
+    });
   });
 
   it("does not stop for an untapped Viscera Seer with a legal ability if the phase box isn't ticked (sanity check on the fixture itself)", () => {
