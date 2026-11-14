@@ -33,6 +33,8 @@ export interface DestroyEffect {
   // "Its controller investigates." (Fateful Absence) — the destroyed permanent's controller, not the
   // caster, gets a Clue token.
   controllerInvestigates?: boolean;
+  // "You lose life equal to that permanent's mana value." (Feed the Swarm) — the CASTER pays life, read off the target before it is destroyed.
+  casterLosesLifeEqualToManaValue?: boolean;
   // "Destroy target creature with toughness 4 or greater." (Destroy Evil) — a legal target needs at least this much toughness.
   minToughness?: number;
   // "Destroy target creature an opponent controls." (Ravenous Chupacabra) / "... you don't control" — only other players' permanents may be targeted.
@@ -296,6 +298,7 @@ function parseDestroy(text: string): DestroyEffect | DestroyAllEffect | DestroyA
     basicsExcluded: clause.includes("nonbasic"),
     ...(/\b(?:an opponent controls|you don'?t control|your opponents control)\b/.test(clause) ? { opponentOnly: true } : {}),
     ...(/\bits controller investigates\b/.test(text) ? { controllerInvestigates: true } : {}),
+    ...(/\byou lose life equal to that (?:permanent|creature|enchantment)['’]?s mana value\b/.test(text) ? { casterLosesLifeEqualToManaValue: true } : {}),
     ...(clause.match(/target creature with toughness (\d+) or greater/) ? { minToughness: Number.parseInt(clause.match(/target creature with toughness (\d+) or greater/)![1], 10) } : {})
   };
 }

@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { VisibleCard } from "./types";
 import { parsePhaseTriggers } from "./phaseTriggers";
 import { cardsLeaveGraveyardEffectText, deathEffectText, etbEffectText } from "./oracleClauses";
-import { ollamaFetch, OLLAMA_TIMEOUT_MS } from "./ollama";
+import { ollamaFetch, OLLAMA_TIMEOUT_MS, OLLAMA_KEEP_ALIVE, OLLAMA_NUM_CTX } from "./ollama";
 
 const DestinationSchema = z.preprocess((value) => {
   if (value === null || value === undefined) return undefined;
@@ -689,6 +689,8 @@ export async function requestRuleWorkflow(input: RuleAdvisorInput, baseUrl = pro
     body: JSON.stringify({
       model,
       stream: false,
+      keep_alive: OLLAMA_KEEP_ALIVE,
+      options: { num_ctx: OLLAMA_NUM_CTX },
       format: {
         type: "object",
         properties: {

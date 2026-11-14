@@ -28,6 +28,7 @@ import { scoreSurveil } from "@/lib/surveilScoring";
 import { effectiveAttackTaxAmount, looksLikeAttackTaxCandidate } from "@/lib/staticEffects";
 import { isBoardWipeText } from "@/lib/actionScoring";
 import { counterCount, effectivePower, effectiveToughness } from "@/lib/counters";
+import { shareSessionSeats } from "@/lib/structuralShare";
 import {
   parseGenericManaAbilities,
   parseGenericSacrificeAbilities,
@@ -1156,7 +1157,7 @@ type PendingRuleChoice =
       sourceCardId: string;
       sourceCardName: string;
       prompt: string;
-      options: Array<{ index: number; label: string }>;
+      options: Array<{ index: number; label: string; cardId?: string }>;
       trigger: Extract<PendingAction, { type: "trigger" }>;
       remainingStack: PendingAction[];
       // Set when the question is asked as the trigger goes onto the stack (modes and targets are chosen then, rule 603.3c): the whole
@@ -1466,6 +1467,23 @@ const DEFAULT_PLAYER_DECKLIST = `Commander: Aminatou, Veil Piercer
 // phase out of ever being retried.
 const AGENT_REQUEST_TIMEOUT_MS = 45000;
 
+// In-memory cap on session.events (newest first). Generous: a full Commander game is a few thousand lines.
+const MAX_SESSION_EVENTS = 5000;
+
+// Fixed "let the human watch" pauses between agent steps. They never affect a decision, only wall-clock time, so they scale by one
+// setting: localStorage "mtg-agent-pace" = a multiplier (1 = the original pacing, 0 = instant). Default 0.3 keeps each step visible.
+function agentPaceMs(baseMs: number): number {
+  let scale = 0.3;
+  try {
+    const stored = typeof window !== "undefined" ? window.localStorage.getItem("mtg-agent-pace") : null;
+    const parsed = stored === null ? NaN : Number(stored);
+    if (Number.isFinite(parsed) && parsed >= 0) scale = parsed;
+  } catch {
+    // storage unavailable: keep the default
+  }
+  return Math.round(baseMs * scale);
+}
+
 // Generous enough to cover Ollama's own OLLAMA_WARMUP_TIMEOUT_MS (120s) plus round-trip overhead —
 // this fetch is meant to sit through whatever cold-load time the model needs, unlike
 // AGENT_REQUEST_TIMEOUT_MS above which guards a real, time-boxed decision.
@@ -1534,6 +1552,7 @@ function loadPriorityStopSettings(): PriorityStopSettings {
       stopOnStackResponse: parsed.stopOnStackResponse ?? DEFAULT_STOP_SETTINGS.stopOnStackResponse,
       stopOnAttacked: parsed.stopOnAttacked ?? DEFAULT_STOP_SETTINGS.stopOnAttacked,
       stopOnTargeted: parsed.stopOnTargeted ?? DEFAULT_STOP_SETTINGS.stopOnTargeted,
+      stopOnChoicePrompt: parsed.stopOnChoicePrompt ?? DEFAULT_STOP_SETTINGS.stopOnChoicePrompt,
       fullControl: false // never persist "full control" left on from a previous session
     };
   } catch {
@@ -1708,7 +1727,12 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   // Every session update is routed through here so state-based actions (rule 704) are checked
   // after every single change, instead of relying on scattered call sites to remember to do it.
   const setSession = useCallback((update: GameSession | ((prev: GameSession) => GameSession)) => {
-    rawSetSession((current) => checkStateBasedActions(typeof update === "function" ? update(current) : update));
+    rawSetSession((current) => {
+      const next = checkStateBasedActions(typeof update === "function" ? update(current) : update);
+      // The event log is prepended to on every action and never trimmed; copying/filtering an ever-growing array on each update gets
+      // slower all game. Newest events come first, so dropping the tail only loses the oldest history.
+      return next.events.length > MAX_SESSION_EVENTS ? { ...next, events: next.events.slice(0, MAX_SESSION_EVENTS) } : next;
+    });
   }, []);
   // One-time load of whatever rule-workflow classifications persisted from earlier sessions —
   // localStorage isn't available during SSR, so this has to happen client-side on mount rather than
@@ -1718,6 +1742,9 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   }, []);
   const [activeSeatId, setActiveSeatId] = useState(initialSession.activePlayerId ?? initialSession.seats[1]?.id);
   const [prioritySeatId, setPrioritySeatId] = useState(initialSession.activePlayerId ?? initialSession.seats[1]?.id);
+  // Stable identity for the table's session prop: a fresh `{ ...session }` on every render made everything inside the table that
+  // depends on `props.session` recompute on unrelated re-renders (hover, thinking text, timers).
+  const tableSession = useMemo(() => (session.activePlayerId === activeSeatId ? session : { ...session, activePlayerId: activeSeatId }), [session, activeSeatId]);
   const [selectedHandCardId, setSelectedHandCardId] = useState<string | undefined>();
   const [inspectedCard, setInspectedCard] = useState<VisibleCard | undefined>();
   const [gameStage, setGameStage] = useState<GameStage>("mulligan");
@@ -1769,6 +1796,9 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   const [manaContributions, setManaContributions] = useState<Record<string, ManaContribution[]>>({});
   const [restrictedManaBatches, setRestrictedManaBatches] = useState<Record<string, RestrictedManaBatch[]>>({});
   const [manaChoice, setManaChoice] = useState<ManaChoiceState | undefined>();
+  // The human tucked the open choice box away ("Minimize") to look at the board. The choice itself stays pending; while this is set the
+  // human's own game actions (cast, activate, pass) are refused with a message — see humanActionBlockedByChoice — except tapping lands.
+  const [choiceMinimized, setChoiceMinimized] = useState(false);
   const [setupMessage, setSetupMessage] = useState<string | undefined>();
   const [configs, setConfigs] = useState<SeatConfig[]>(() => createInitialConfigs(initialSession.seats));
   // Saved decks (project-root and decks/ .txt files) offered in each seat's "Load saved deck" dropdown.
@@ -2168,6 +2198,8 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       sessionActivePlayerId: session.activePlayerId,
       seats: session.seats.map((seat) => ({ id: seat.id, name: seat.name, hasLost: Boolean(seat.hasLost), lossReason: seat.lossReason, life: seat.life }))
     });
+    // Diagnostic only; keep the most recent entries so a long game doesn't grow it forever.
+    if ((w.__mtgTurnTrace as unknown[]).length > 300) (w.__mtgTurnTrace as unknown[]).splice(0, (w.__mtgTurnTrace as unknown[]).length - 300);
   }, [activeSeatId, session.activePlayerId, session.turn, session.phase, session.seats]);
 
   useEffect(() => {
@@ -2620,7 +2652,11 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       sourceCardId: next.sourceCardId,
       sourceCardName: next.sourceCardName,
       prompt: next.prompt,
-      options: next.options.map((option, index) => ({ index, label: option.label })),
+      // Values shaped "seatId:cardId" (or a bare card id) point at a card: show its art and text in the picker.
+      options: next.options.map((option, index) => {
+        const maybeId = option.value.split(":").pop() ?? "";
+        return { index, label: option.label, cardId: maybeId && findCardAnywhere(session, maybeId) ? maybeId : undefined };
+      }),
       trigger: makeCommonTrigger(next.seatId, next.seatId, stub, { kind: "deferred_choice", resolver: next.resolver, data: next.data, values: next.options.map((option) => option.value) }, `${next.sourceCardName} resolves.`),
       remainingStack: []
     });
@@ -2958,7 +2994,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       agentDecisionRequests.current.add(key);
       markAgentThinking(prioritySeat.id, true);
       void decideAgentPriorityAction(prioritySeat, pendingAction, key);
-    }, 850);
+    }, agentPaceMs(850));
     return () => window.clearTimeout(timer);
   }, [mode, gameStage, pendingAction, priorityPasses, prioritySeatId, session.seats, session.turn, activeSeatId, manaPools, priorityStopSettings, holdPriorityOnce, humanSeat.id]);
 
@@ -3199,7 +3235,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         const timer = window.setTimeout(() => {
           agentDecisionRequests.current.add(key);
           advanceTurn();
-        }, 700);
+        }, agentPaceMs(700));
         return () => window.clearTimeout(timer);
       }
       const defender = session.seats.find((seat) => seat.id === choice.defenderSeatId);
@@ -3218,7 +3254,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         agentDecisionRequests.current.add(key);
         markAgentThinking(defender.id, true);
         void decideAgentBlockAction(defender, choice, key);
-      }, 1100);
+      }, agentPaceMs(1100));
       return () => window.clearTimeout(timer);
     }
     const activeSeat = session.seats.find((seat) => seat.id === activeSeatId);
@@ -3230,7 +3266,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         agentDecisionRequests.current.add(key);
         fastForwardAgentToEndStep(activeSeat.id);
         agentDecisionRequests.current.delete(key);
-      }, 500);
+      }, agentPaceMs(500));
       return () => window.clearTimeout(timer);
     }
     const actionKey = `${session.turn}:${activeSeat.id}:${session.phase}`;
@@ -3240,7 +3276,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       session.phase === "postcombat main phase" ||
       session.phase === "declare attackers step";
     if (!shouldAskAgent) {
-      const timer = window.setTimeout(() => advanceTurn(), 1100);
+      const timer = window.setTimeout(() => advanceTurn(), agentPaceMs(1100));
       return () => window.clearTimeout(timer);
     }
     const timer = window.setTimeout(() => {
@@ -3251,7 +3287,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       } else {
         void decideAgentTurnAction(activeSeat, actionKey);
       }
-    }, 1100);
+    }, agentPaceMs(1100));
     return () => window.clearTimeout(timer);
   }, [mode, gameStage, pendingAction, libraryLook, pendingRuleChoice, manualLibrarySearch, blockChoice, basicLandFetchSearch, rulesAdvisorPending, activeSeatId, session.phase, session.turn, session.seats]);
 
@@ -3318,7 +3354,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     if (mode !== "game" || gameStage !== "playing" || !pendingRuleChoice) return;
     const controller = session.seats.find((seat) => seat.id === pendingRuleChoice.controllerSeatId);
     if (controller?.kind !== "agent") return;
-    const timer = window.setTimeout(() => resolveAgentRuleChoice(pendingRuleChoice), 900);
+    const timer = window.setTimeout(() => resolveAgentRuleChoice(pendingRuleChoice), agentPaceMs(900));
     return () => window.clearTimeout(timer);
   }, [mode, gameStage, pendingRuleChoice, session.seats]);
 
@@ -5232,6 +5268,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   }
 
   function passPriority() {
+    if (prioritySeatId === humanSeat.id && humanActionBlockedByChoice(humanSeat.id)) return;
     if (!pendingAction) {
       const nextSeat = session.seats[(Math.max(0, session.seats.findIndex((seat) => seat.id === prioritySeatId)) + 1) % session.seats.length];
       setPrioritySeatId(nextSeat.id);
@@ -5428,6 +5465,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     castChoices?: CastChoices,
     altChoice?: "alt" | "normal"
   ) {
+    if (humanActionBlockedByChoice(seatId)) return;
     if (pendingAction) {
       // Something is on the stack and the human clicked a card: an instant/flash card is a RESPONSE, not a main-phase play — route it there instead of refusing
       // (the "Can't play a card while Monstrous Onslaught is still on the stack" dead end).
@@ -6151,6 +6189,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   // choose_card_from_library flow real tutor spells already use takes over: resolveAgentRuleChoice's
   // existing effect auto-resolves it for agent seats, and the human gets the normal search modal.
   function activateGenericSacrificeAbility(seatId: string, cardId: string, abilityIndex: number) {
+    if (humanActionBlockedByChoice(seatId)) return;
     const seat = session.seats.find((item) => item.id === seatId);
     const card = seat?.board.battlefield.find((item) => item.id === cardId);
     const ability = card ? parseGenericSacrificeAbilities(card.oracleText)[abilityIndex] : undefined;
@@ -6347,6 +6386,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   }
 
   function activateGenericTapAbility(seatId: string, cardId: string, abilityIndex: number, chosenDiscardId?: string, chosenCardId?: string, chosenTapIds?: string[]) {
+    if (humanActionBlockedByChoice(seatId)) return;
     const seat = session.seats.find((item) => item.id === seatId);
     const card = seat?.board.battlefield.find((item) => item.id === cardId);
     const ability = card ? parseGenericTapAbilities(card.oracleText)[abilityIndex] : undefined;
@@ -6530,6 +6570,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   }
 
   function activateSelfUntapAbility(seatId: string, cardId: string, abilityIndex: number) {
+    if (humanActionBlockedByChoice(seatId)) return;
     const seat = session.seats.find((item) => item.id === seatId);
     const humanPool = seat?.kind === "human" ? poolForSeat(seatId) : undefined;
     const resolved = resolveSelfUntapAbility(session, seatId, cardId, abilityIndex, humanPool);
@@ -6702,6 +6743,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   // when the inspected card's owner is a human seat) — agents equip through a separate call site
   // straight into resolveEquip, unaffected by this interactive gate.
   function activateEquip(seatId: string, cardId: string) {
+    if (humanActionBlockedByChoice(seatId)) return;
     const seat = session.seats.find((item) => item.id === seatId);
     const card = seat?.board.battlefield.find((item) => item.id === cardId);
     if (!seat || !card) return;
@@ -6750,6 +6792,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   }
 
   function activateManlandAnimation(seatId: string, cardId: string) {
+    if (humanActionBlockedByChoice(seatId)) return;
     const seat = session.seats.find((item) => item.id === seatId);
     const humanPool = seat?.kind === "human" ? poolForSeat(seatId) : undefined;
     const resolved = resolveManlandAnimation(session, seatId, cardId, humanPool);
@@ -7072,6 +7115,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   // the same canCastAtInstantSpeed check either way, so an exiled sorcery still isn't offered as a
   // response, only an exiled instant/flash card is.
   function respondWithCard(cardId: string, sourceZone: "hand" | "exile", preChosenSacrificeTargets?: VisibleCard[], castChoices?: CastChoices, faceIndex?: number) {
+    if (humanActionBlockedByChoice(humanSeat.id)) return;
     if (!pendingAction || prioritySeatId !== humanSeat.id) {
       if (pendingAction) addEvent("You don't have priority right now, so you can't cast that yet.", humanSeat.id, "Timing");
       return;
@@ -7225,6 +7269,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   // window. Route through respondWithCard instead whenever one is open.
   // The Cast button in the graveyard pile viewer (flashback, Gravecrawler, a Zul Ashur grant).
   function activateGraveyardAbility(seatId: string, cardId: string) {
+    if (humanActionBlockedByChoice(seatId)) return;
     const result = activateGraveyardReturnInSession(session, seatId, cardId);
     if (!result.ok) {
       addEvent(result.message, seatId, "Timing");
@@ -7288,7 +7333,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   function openTriggerOptionPrompt(trigger: Extract<PendingAction, { type: "trigger" }>, remainingStack: PendingAction[], queueing?: Array<Extract<PendingAction, { type: "trigger" }>>): boolean {
     const controller = session.seats.find((seat) => seat.id === trigger.controllerSeatId);
     if (!controller || controller.kind !== "human" || trigger.effect.chosenOption !== undefined) return false;
-    const open = (prompt: string, options: Array<{ index: number; label: string }>) => {
+    const open = (prompt: string, options: Array<{ index: number; label: string; cardId?: string }>) => {
       setPendingRuleChoice({ id: crypto.randomUUID(), kind: "choose_trigger_option", controllerSeatId: controller.id, sourceCardId: trigger.sourceCardId, sourceCardName: trigger.sourceCardName, prompt, options, trigger, remainingStack, queueing });
       return true;
     };
@@ -7300,7 +7345,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       if (remaining.length === 0) return false;
       return open(
         `${trigger.sourceCardName}: put which ${effect.filter} cards from your hand onto the battlefield? (${picked.length} chosen)`,
-        [...remaining.map((card, index) => ({ index, label: `${card.name}${card.power !== undefined ? ` (${card.power}/${card.toughness})` : ""}` })), { index: MODAL_DONE_INDEX, label: picked.length > 0 ? "Done" : "Put none" }]
+        [...remaining.map((card, index) => ({ index, label: `${card.name}${card.power !== undefined ? ` (${card.power}/${card.toughness})` : ""}`, cardId: card.id })), { index: MODAL_DONE_INDEX, label: picked.length > 0 ? "Done" : "Put none" }]
       );
     }
     // "Choose two / one or more / any number": one mode per prompt, a Done button once enough are picked.
@@ -9351,6 +9396,21 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     }, 0);
   }
 
+  // A new choice always opens expanded, and a finished one leaves nothing to resume.
+  useEffect(() => {
+    setChoiceMinimized(false);
+  }, [pendingRuleChoice?.id, manaChoice, libraryLook]);
+
+  // True (and logs why) when the human tried to act while a minimized choice is still waiting for an answer. Acting then could overwrite
+  // the parked choice or resolve things out of order, so the player resumes it first. Agents' actions are never blocked.
+  function humanActionBlockedByChoice(seatId?: string): boolean {
+    if (!choiceMinimized) return false;
+    if (seatId !== undefined && seatId !== humanSeat.id) return false;
+    const prompt = pendingRuleChoice && "prompt" in pendingRuleChoice ? pendingRuleChoice.prompt : undefined;
+    addEvent(`Finish the pending choice first${prompt ? ` (${prompt})` : ""} — press Resume at the top of the board.`, humanSeat.id, "Rules action");
+    return true;
+  }
+
   function addEvent(message: string, seatId?: string, detail?: string) {
     setSession((current) => ({
       ...current,
@@ -9984,6 +10044,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   }
 
   function activateLoyaltyAbility(seatId: string, cardId: string, loyaltyCost: number, abilityText: string) {
+    if (humanActionBlockedByChoice(seatId)) return;
     const seat = session.seats.find((item) => item.id === seatId);
     const card = seat?.board.battlefield.find((item) => item.id === cardId);
     if (!seat || !card || !isPlaneswalkerCard(card)) return;
@@ -12128,11 +12189,13 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         Save
       </button>
       <ThreeGameTable
+        choiceMinimized={choiceMinimized}
+        onSetChoiceMinimized={setChoiceMinimized}
         gameStage={gameStage}
         humanMulligans={mulligans[humanSeat.id] ?? 0}
         mulliganReturnCardIds={mulliganReturnCardIds}
         mulliganReturnRequired={Math.max(0, humanSeat.board.hand.length - openingHandKeepSize(mulligans[humanSeat.id] ?? 0))}
-        session={{ ...session, activePlayerId: activeSeatId }}
+        session={tableSession}
         prioritySeatId={prioritySeatId}
         pendingAction={pendingAction ? withPendingActionSourceCard(session, pendingAction, stackActions) : undefined}
         stackActions={stackActions.map((action) => withPendingActionSourceCard(session, action, stackActions))}
@@ -12164,6 +12227,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         onToggleStopOnStackResponse={() => updatePriorityStopSettings((prev) => ({ ...prev, stopOnStackResponse: !prev.stopOnStackResponse }))}
         onToggleStopOnAttacked={() => updatePriorityStopSettings((prev) => ({ ...prev, stopOnAttacked: !prev.stopOnAttacked }))}
         onToggleStopOnTargeted={() => updatePriorityStopSettings((prev) => ({ ...prev, stopOnTargeted: !prev.stopOnTargeted }))}
+        onToggleStopOnChoicePrompt={() => updatePriorityStopSettings((prev) => ({ ...prev, stopOnChoicePrompt: prev.stopOnChoicePrompt === false }))}
         onToggleFullControl={() => updatePriorityStopSettings((prev) => ({ ...prev, fullControl: !prev.fullControl }))}
         holdPriorityOnce={holdPriorityOnce}
         onStopNext={() => setHoldPriorityOnce(true)}
@@ -16358,7 +16422,9 @@ function checkStateBasedActions(session: GameSession): GameSession {
     current = result.session;
     if (!result.changed) break;
   }
-  return current;
+  // The pass rebuilds every seat/board/battlefield array even when it changed nothing; restore the input's references where the
+  // content is equal so effects keyed on session.seats (and the 3D table) don't re-fire after a no-op pass.
+  return shareSessionSeats(session, current);
 }
 
 // "As long as you control five or more enchantments, each other non-Aura enchantment you control
@@ -17321,6 +17387,16 @@ function resetForZoneChange<T extends VisibleCard>(card: T, zone: VisibleCard["z
     attachedToId: undefined,
     attachmentPowerBonus: undefined,
     attachmentToughnessBonus: undefined,
+    // Until-end-of-turn effects (-X/-X, pumps, base P/T, stripped abilities) belong to the old object
+    // too — otherwise a creature killed by a temporary -N/-N and returned the same turn (Meren, Victimize)
+    // re-enters still at 0 toughness and dies again.
+    temporaryPowerBonus: undefined,
+    temporaryToughnessBonus: undefined,
+    temporaryBasePower: undefined,
+    temporaryBaseToughness: undefined,
+    temporaryAbilitiesStripped: undefined,
+    temporaryAnimatedAsCreature: undefined,
+    temporaryGrantedKeywords: undefined,
     grantedKeywords: undefined,
     grantedProtectionColors: undefined,
     grantedManaAbilityText: undefined,
@@ -18622,6 +18698,15 @@ export function nextCastPrompt(
   const options = slot.options.filter((option) => option.target.kind !== "card" || !alreadyPicked.has(option.target.cardId));
   if (options.length === 0) return undefined;
   return { kind: "target", prompt: slot.prompt, options };
+}
+
+// A card by id in any visible zone of any seat (battlefield, hand, graveyard, exile, library) — lets the text-option pickers show real card art.
+function findCardAnywhere(session: GameSession, cardId: string, seatId?: string): VisibleCard | undefined {
+  for (const seat of seatId ? session.seats.filter((item) => item.id === seatId).concat(session.seats.filter((item) => item.id !== seatId)) : session.seats) {
+    const found = [...seat.board.battlefield, ...seat.board.hand, ...(seat.board.graveyard ?? []), ...(seat.board.exile ?? []), ...(seat.library ?? [])].find((card) => card.id === cardId);
+    if (found) return found;
+  }
+  return undefined;
 }
 
 // " targeting Grizzly Bears, Sable" for the event log when an agent casts a spell with recorded targets; a countered spell is named too.
@@ -20932,7 +21017,28 @@ export function applyRemovalEffect(
           ]
         };
       }
-      const destroyedSession = destroyCreatures(warded.session, [{ seatId: target.seatId, cardId: target.card.id, message: `${target.card.name} is destroyed by ${sourceName}.` }], "Rules action");
+      let destroyedSession = destroyCreatures(warded.session, [{ seatId: target.seatId, cardId: target.card.id, message: `${target.card.name} is destroyed by ${sourceName}.` }], "Rules action");
+      // Feed the Swarm: "You lose life equal to that permanent's mana value." — the caster loses it, even if
+      // the target had been indestructible-free; read off the target card captured before destruction.
+      if (effect.casterLosesLifeEqualToManaValue) {
+        const lifeLoss = Math.max(0, target.card.manaValue);
+        if (lifeLoss > 0) {
+          destroyedSession = {
+            ...destroyedSession,
+            seats: destroyedSession.seats.map((seat) => (seat.id === casterSeatId ? { ...seat, life: seat.life - lifeLoss } : seat)),
+            events: [
+              {
+                id: crypto.randomUUID(),
+                at: new Date().toISOString(),
+                seatId: casterSeatId,
+                message: `${destroyedSession.seats.find((seat) => seat.id === casterSeatId)?.name ?? "Player"} loses ${lifeLoss} life from ${sourceName} (${target.card.name}'s mana value).`,
+                detail: "Rules action"
+              },
+              ...destroyedSession.events
+            ]
+          };
+        }
+      }
       // "Its controller investigates." (Fateful Absence) — the Clue goes to whoever controlled the
       // destroyed permanent, not to the caster.
       if (!effect.controllerInvestigates) return destroyedSession;
@@ -27724,7 +27830,7 @@ function ruleChoiceView(
       return { kind: "choose_modal_option" as const, sourceCardName: choice.sourceCardName, prompt: choice.prompt, options: choice.options.map((option, index) => ({ index, label: option.label })) };
     }
     if (choice.kind === "choose_cast_copy") {
-      return { kind: "choose_modal_option" as const, sourceCardName: choice.sourceCardName, prompt: choice.prompt, options: choice.options.map((option, index) => ({ index, label: option.label })) };
+      return { kind: "choose_modal_option" as const, sourceCardName: choice.sourceCardName, prompt: choice.prompt, options: choice.options.map((option, index) => ({ index, label: option.label, card: findCardAnywhere(session, option.cardId, choice.controllerSeatId) })) };
     }
     if (choice.kind === "choose_cast_face") {
       return { kind: "choose_modal_option" as const, sourceCardName: choice.sourceCardName, prompt: choice.prompt, options: choice.options.map((option, index) => ({ index, label: option.label })) };
@@ -27732,8 +27838,10 @@ function ruleChoiceView(
     if (choice.kind === "choose_cast_alt") {
       return { kind: "choose_modal_option" as const, sourceCardName: choice.sourceCardName, prompt: choice.prompt, options: [{ index: 0, label: choice.altLabel }, { index: 1, label: "Pay the normal mana cost" }] };
     }
+    // A card target (a graveyard creature, a permanent) is shown with its art and text, not just its name.
+    const cardForTarget = (target: ChosenTarget | undefined): VisibleCard | undefined => (target?.kind === "card" ? findCardAnywhere(session, target.cardId, target.seatId) : undefined);
     if (choice.kind === "choose_cast_targets") {
-      return { kind: "choose_modal_option" as const, sourceCardName: choice.sourceCardName, prompt: choice.prompt, options: choice.options.map((option, index) => ({ index, label: option.label })) };
+      return { kind: "choose_modal_option" as const, sourceCardName: choice.sourceCardName, prompt: choice.prompt, options: choice.options.map((option, index) => ({ index, label: option.label, card: cardForTarget(option.target) })) };
     }
     if (choice.kind === "choose_spell_modes") {
       return {
@@ -27744,11 +27852,11 @@ function ruleChoiceView(
       };
     }
     if (choice.kind === "choose_dig_card") {
-      return { kind: "choose_modal_option" as const, sourceCardName: choice.sourceCardName, prompt: choice.prompt, options: choice.options.map((option) => ({ index: option.index, label: option.label })) };
+      return { kind: "choose_modal_option" as const, sourceCardName: choice.sourceCardName, prompt: choice.prompt, options: choice.options.map((option) => ({ index: option.index, label: option.label, card: findCardAnywhere(session, option.cardId, choice.controllerSeatId) })) };
     }
     if (choice.kind === "choose_labeled_target") {
       const slot = choice.slots[choice.slotIndex];
-      return { kind: "choose_modal_option" as const, sourceCardName: choice.sourceCardName, prompt: slot.prompt, options: slot.options.map((option, index) => ({ index, label: option.label })) };
+      return { kind: "choose_modal_option" as const, sourceCardName: choice.sourceCardName, prompt: slot.prompt, options: slot.options.map((option, index) => ({ index, label: option.label, card: cardForTarget(option.target) })) };
     }
     if (choice.kind === "choose_creature_for_grant") {
       const owner = session.seats.find((seat) => seat.id === choice.controllerSeatId);
@@ -27771,7 +27879,7 @@ function ruleChoiceView(
         : { kind: "choose_creature_on_battlefield" as const, sourceCardName: choice.sourceCardName, prompt: choice.prompt, actionLabel: "Choose", cards };
     }
     if (choice.kind === "choose_trigger_option") {
-      return { kind: "choose_modal_option" as const, sourceCardName: choice.sourceCardName, prompt: choice.prompt, options: choice.options };
+      return { kind: "choose_modal_option" as const, sourceCardName: choice.sourceCardName, prompt: choice.prompt, options: choice.options.map((option) => ({ ...option, card: option.cardId ? findCardAnywhere(session, option.cardId, choice.controllerSeatId) : undefined })) };
     }
     if (choice.kind === "choose_ability_card_target") {
       return {
@@ -32460,6 +32568,25 @@ function nextPrioritySeatId(
   return actorSeatId;
 }
 
+// Whether resolving `action` will open a choice prompt for this (human) seat — the "last chance to respond first" cases the stop policy
+// should never skip: an edict-style sacrifice or a discard that names this seat, and the human's own optional / option-picking triggers.
+// Deliberately narrow (text patterns for the common shapes, not every possible prompt); a false positive only opens a window the player
+// can pass, and it is still gated by the seat having a real legal response.
+const EDICT_OR_DISCARD_TEXT = /\b(?:each (?:player|opponent|other player)|target (?:player|opponent)|that player|defending player)\b[^.]*?\b(?:sacrifices?|discards?)\b/i;
+export function pendingActionWillPromptSeat(seat: PlayerSeat, action: PendingAction, session: GameSession): boolean {
+  if (seat.kind !== "human") return false;
+  if (action.type === "spell") {
+    const text = findSpellSourceCard(session, action)?.oracleText ?? "";
+    if (!text) return false;
+    if (EDICT_OR_DISCARD_TEXT.test(text)) return true;
+    return action.actorSeatId === seat.id && /\byou sacrifice (?:a|an|one|two|x) /i.test(text);
+  }
+  if (action.type === "trigger" && action.controllerSeatId === seat.id) {
+    return Boolean(action.effect.optional) || action.effect.kind === "put_any_from_hand" || action.effect.kind === "modal";
+  }
+  return false;
+}
+
 export function canReceivePriorityForPendingAction(
   seat: PlayerSeat,
   action: PendingAction,
@@ -32561,7 +32688,8 @@ export function canReceivePriorityForPendingAction(
       // a ticked End Step) configured was asked to pass priority at every single phase of every
       // agent's turn. A phase-pass can never target anyone — there's no effect to be affected by.
       actionAffectsMe: action.type !== "phase" && !isPendingActionLikelyIrrelevantToSeat(seat, action, session),
-      holdOnce: holdPriorityOnceSeatId === seat.id
+      holdOnce: holdPriorityOnceSeatId === seat.id,
+      willPromptMe: pendingActionWillPromptSeat(seat, action, session)
     }) !== undefined
   );
 }
@@ -32715,7 +32843,14 @@ function moveCardBetweenVisibleZonesCore(session: GameSession, seatId: string, c
     cdaToughness: undefined,
     setPowerOverride: undefined,
     setToughnessOverride: undefined,
-    animatedAsCreature: undefined
+    animatedAsCreature: undefined,
+    temporaryPowerBonus: undefined,
+    temporaryToughnessBonus: undefined,
+    temporaryBasePower: undefined,
+    temporaryBaseToughness: undefined,
+    temporaryAbilitiesStripped: undefined,
+    temporaryAnimatedAsCreature: undefined,
+    temporaryGrantedKeywords: undefined
   };
 
   const seats = session.seats.map((seat) => {

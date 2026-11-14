@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { InterpretedEffect } from "./types";
+import { OLLAMA_KEEP_ALIVE, OLLAMA_NUM_CTX } from "./ollama";
 
 const AttackTaxOllamaSchema = z.object({
   isAttackTax: z.boolean(),
@@ -65,6 +66,8 @@ export async function requestAttackTaxInterpretation(
     body: JSON.stringify({
       model,
       stream: false,
+      keep_alive: OLLAMA_KEEP_ALIVE,
+      options: { num_ctx: OLLAMA_NUM_CTX },
       format: {
         type: "object",
         properties: {

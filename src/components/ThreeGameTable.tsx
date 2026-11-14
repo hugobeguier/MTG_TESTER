@@ -2,6 +2,7 @@
 
 import {
   Component,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -60,6 +61,9 @@ interface ThreeGameTableProps {
   humanAttackTargets?: Array<{ targetId: string; label: string }>;
   inspectedCard?: VisibleCard;
   libraryLook?: LibraryLookState;
+  // "Minimize" for the choice boxes: the open box is tucked away (and its backdrop removed) so the board is clickable, while the choice stays pending.
+  choiceMinimized?: boolean;
+  onSetChoiceMinimized?: (minimized: boolean) => void;
   ruleChoice?: RuleChoiceView;
   blockChoice?: BlockChoiceView;
   myriadSearchCards?: VisibleCard[];
@@ -189,6 +193,7 @@ interface ThreeGameTableProps {
   onToggleStopOnStackResponse?: () => void;
   onToggleStopOnAttacked?: () => void;
   onToggleStopOnTargeted?: () => void;
+  onToggleStopOnChoicePrompt?: () => void;
   onToggleFullControl?: () => void;
   holdPriorityOnce?: boolean;
   onStopNext?: () => void;
@@ -333,7 +338,8 @@ type RuleChoiceView =
       kind: "choose_modal_option";
       sourceCardName: string;
       prompt: string;
-      options: Array<{ index: number; label: string }>;
+      // `card`: set when the option is a card target (Victimize's graveyard creatures, ...) so the picker shows its art and text.
+      options: Array<{ index: number; label: string; card?: VisibleCard }>;
     }
   // The general "this effect says target and you control it" choice — see AppFlow.tsx's
   // choose_effect_target PendingRuleChoice for the full rationale. zone picks which UI this renders
@@ -656,6 +662,41 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
   const [actionLogOpen, setActionLogOpen] = useState(false);
   const [actionLogPosition, setActionLogPosition] = useState({ x: 400, y: 144 });
   const [priorityStopsOpen, setPriorityStopsOpen] = useState(false);
+  // "Hide UI": one master toggle that hides every HUD overlay (buttons, Agent Activity / Action Log / Stack panels, agent hands, hover
+  // preview) so the board is unobstructed. CSS-only (see .is-hud-hidden in globals.css), so panels keep their position and open state.
+  // Choice modals are never hidden. Remembered between sessions in localStorage.
+  const [hudHidden, setHudHidden] = useState(false);
+  const [activityCollapsed, setActivityCollapsed] = useState(false);
+  const [actionLogCollapsed, setActionLogCollapsed] = useState(false);
+  useEffect(() => {
+    try {
+      if (window.localStorage.getItem("mtg-hud-hidden") === "1") setHudHidden(true);
+    } catch {
+      // storage unavailable: start with the HUD visible
+    }
+  }, []);
+  const toggleHudHidden = useCallback(() => {
+    setHudHidden((current) => {
+      const next = !current;
+      try {
+        window.localStorage.setItem("mtg-hud-hidden", next ? "1" : "0");
+      } catch {
+        // not persisted; still toggles for this session
+      }
+      return next;
+    });
+  }, []);
+  // H toggles it from anywhere, except while typing in a field or with a modifier held.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() !== "h" || event.ctrlKey || event.metaKey || event.altKey || event.repeat) return;
+      const target = event.target;
+      if (target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "SELECT", "TEXTAREA"].includes(target.tagName))) return;
+      toggleHudHidden();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [toggleHudHidden]);
   // Enlarged read-only preview of the hand card under the mouse (own hand and observer-view agent hands);
   // clicking still opens the full inspector.
   const [hoverPreviewCard, setHoverPreviewCard] = useState<VisibleCard | undefined>();
@@ -1354,8 +1395,49 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
 
   const inspectedOwner = props.inspectedCard ? findCardOwner(props.session, props.inspectedCard.id) : undefined;
 
+  // Minimize for the choice boxes. Every decision box shares the same full-viewport backdrop that blocks the board, so instead of editing
+  // each one, the boxes are wrapped in two "choice layers" that are simply hidden (kept mounted, so picks made so far survive) while
+  // minimized, and one button below minimizes/resumes. Board-click banners (no backdrop) don't need it.
+  const modalChoiceOpen = Boolean(props.manaChoice || props.myriadTapChoice || props.libraryLook || (props.ruleChoice && !boardTargetingChoice));
+  const choiceMinimized = Boolean(props.choiceMinimized) && modalChoiceOpen;
+  const ruleChoiceText = props.ruleChoice as { sourceCardName?: string; prompt?: string } | undefined;
+  const choiceLabel = ruleChoiceText?.prompt ?? ruleChoiceText?.sourceCardName ?? (props.manaChoice ? "Mana choice" : props.libraryLook ? "Library look" : "Choice");
+  const setChoiceMinimized = props.onSetChoiceMinimized;
+  useEffect(() => {
+    if (!modalChoiceOpen || !setChoiceMinimized) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.repeat) return;
+      // Esc belongs to the card inspector / zone viewer when one of them is open on top.
+      if (props.inspectedCard || zoneView) return;
+      setChoiceMinimized(!choiceMinimized);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [modalChoiceOpen, choiceMinimized, setChoiceMinimized, props.inspectedCard, zoneView]);
+  // A click on the dark backdrop itself minimizes instead of reaching the box's own handler, which for several boxes (miracle, optional
+  // trigger, commander zone, cancel-style pickers) would decline or cancel the decision by accident.
+  const choiceLayerProps = {
+    className: choiceMinimized ? "choice-layer is-minimized" : "choice-layer",
+    onClickCapture: (event: React.MouseEvent<HTMLElement>) => {
+      const target = event.target as HTMLElement;
+      if (target.classList?.contains("card-inspector-backdrop") && setChoiceMinimized) {
+        event.stopPropagation();
+        setChoiceMinimized(true);
+      }
+    }
+  };
+
   return (
-    <section className="three-game-shell">
+    <section className={`three-game-shell${hudHidden ? " is-hud-hidden" : ""}`}>
+      <button
+        type="button"
+        className="hud-master-toggle"
+        onClick={toggleHudHidden}
+        aria-pressed={hudHidden}
+        title="Hide or show the panels and buttons (H)"
+      >
+        {hudHidden ? "Show UI" : "Hide UI"}
+      </button>
       <div
         className={`three-board ${draggingHandCardId ? "is-drop-target" : ""}`}
         ref={mountRef}
@@ -1452,7 +1534,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
         })}
       </div>
       {activityOpen ? (
-        <aside className="activity-panel" style={{ left: activityPosition.x, top: activityPosition.y }}>
+        <aside className={`activity-panel${activityCollapsed ? " is-collapsed" : ""}`} style={{ left: activityPosition.x, top: activityPosition.y }}>
           <header
             onPointerDown={beginActivityDrag}
             onPointerMove={moveActivityPanel}
@@ -1463,6 +1545,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
               <strong>Agent Activity</strong>
               <small>Newest first</small>
             </span>
+            <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => setActivityCollapsed((current) => !current)} aria-label={activityCollapsed ? "Expand panel" : "Collapse panel"}>{activityCollapsed ? "+" : "–"}</button>
             <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => setActivityOpen(false)}>x</button>
           </header>
           <div className="activity-feed">
@@ -1473,7 +1556,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
         </aside>
       ) : null}
       {actionLogOpen ? (
-        <aside className="activity-panel" style={{ left: actionLogPosition.x, top: actionLogPosition.y }}>
+        <aside className={`activity-panel${actionLogCollapsed ? " is-collapsed" : ""}`} style={{ left: actionLogPosition.x, top: actionLogPosition.y }}>
           <header
             onPointerDown={beginActionLogDrag}
             onPointerMove={moveActionLogPanel}
@@ -1484,6 +1567,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
               <strong>Action Log</strong>
               <small>Newest first</small>
             </span>
+            <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => setActionLogCollapsed((current) => !current)} aria-label={actionLogCollapsed ? "Expand panel" : "Collapse panel"}>{actionLogCollapsed ? "+" : "–"}</button>
             <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => setActionLogOpen(false)}>x</button>
           </header>
           {/* Newest first, matching session.events' own order (every addEvent call prepends) and
@@ -1778,6 +1862,17 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
           }
         />
       ) : null}
+      {modalChoiceOpen && setChoiceMinimized ? (
+        <button
+          type="button"
+          className={`choice-minimize-toggle${choiceMinimized ? " is-minimized" : ""}`}
+          onClick={() => setChoiceMinimized(!choiceMinimized)}
+          title={choiceMinimized ? "Show the choice box again (Esc)" : "Hide the choice box to use the board; the choice stays pending (Esc)"}
+        >
+          {choiceMinimized ? `Resume choice: ${choiceLabel}` : "Minimize choice (Esc)"}
+        </button>
+      ) : null}
+      <div {...choiceLayerProps}>
       {props.manaChoice ? <ManaChoiceModal choice={props.manaChoice} onChoose={props.onChooseMana} onClose={props.onCancelManaChoice} /> : null}
       {props.myriadTapChoice ? (
         <MyriadTapChoiceModal
@@ -1900,6 +1995,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
           onConfirm={props.onConfirmProliferateTargets}
         />
       ) : null}
+      </div>
       {boardTargetingChoice ? (
         // choose_creature_on_battlefield, choose_aura_attach_target, and a battlefield-zone
         // choose_effect_target are answered by clicking a highlighted card directly on the board
@@ -1929,6 +2025,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
         }}
         onInspect={props.onInspectCard}
       />
+      <div {...choiceLayerProps}>
       {props.ruleChoice?.kind === "manual_review" ? (
         <ManualRuleChoiceModal
           choice={props.ruleChoice}
@@ -1973,6 +2070,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
       {props.ruleChoice?.kind === "distribute_attack_trigger_mana" ? (
         <DistributeManaModal choice={props.ruleChoice} onConfirm={props.onConfirmAttackTriggerManaColors} />
       ) : null}
+      </div>
       {props.blockChoice ? (
         <BlockChoiceModal
           choice={props.blockChoice}
@@ -2039,6 +2137,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
           onToggleStopOnStackResponse={props.onToggleStopOnStackResponse}
           onToggleStopOnAttacked={props.onToggleStopOnAttacked}
           onToggleStopOnTargeted={props.onToggleStopOnTargeted}
+          onToggleStopOnChoicePrompt={props.onToggleStopOnChoicePrompt}
         />
       ) : null}
       {hoverPreviewCard && !props.inspectedCard ? (
@@ -2725,9 +2824,41 @@ function ModalOptionModal({
 }: {
   prompt?: string;
   sourceCardName?: string;
-  options: Array<{ index: number; label: string }>;
+  options: Array<{ index: number; label: string; card?: VisibleCard }>;
   onChoose?: (index: number) => void;
 }) {
+  // Card targets get the same art + oracle text view TargetPickerModal uses, instead of a bare name button.
+  if (options.some((option) => option.card)) {
+    return (
+      <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label={sourceCardName ?? "Choose a target"}>
+        <article className="library-search-modal" onClick={(event) => event.stopPropagation()}>
+          <header>
+            <p className="eyebrow">{sourceCardName ?? "Choose a target"}</p>
+            <h2>Choose a Target</h2>
+            {prompt ? <p>{prompt}</p> : null}
+          </header>
+          <div className="target-picker-row">
+            {options.filter((option) => option.card).map((option) => (
+              <div className="target-picker-entry" key={option.index}>
+                <VisualCard card={option.card!} compact onClick={() => onChoose?.(option.index)} />
+                <span>{option.label}</span>
+                <button type="button" onClick={() => onChoose?.(option.index)}>
+                  Choose
+                </button>
+              </div>
+            ))}
+          </div>
+          <div className="modal-actions">
+            {options.filter((option) => !option.card).map((option) => (
+              <button key={option.index} className="inspector-action" type="button" onClick={() => onChoose?.(option.index)}>
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </article>
+      </div>
+    );
+  }
   return (
     <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label={sourceCardName ?? "Choose one"}>
       <article className="mana-choice-modal" onClick={(event) => event.stopPropagation()}>
@@ -2900,7 +3031,8 @@ function PriorityStopsModal({
   onTogglePhaseStop,
   onToggleStopOnStackResponse,
   onToggleStopOnAttacked,
-  onToggleStopOnTargeted
+  onToggleStopOnTargeted,
+  onToggleStopOnChoicePrompt
 }: {
   settings: PriorityStopSettings;
   seats: PlayerSeat[];
@@ -2909,6 +3041,7 @@ function PriorityStopsModal({
   onToggleStopOnStackResponse?: () => void;
   onToggleStopOnAttacked?: () => void;
   onToggleStopOnTargeted?: () => void;
+  onToggleStopOnChoicePrompt?: () => void;
 }) {
   return (
     <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label="Priority stops" onClick={onClose}>
@@ -2964,6 +3097,10 @@ function PriorityStopsModal({
           <label>
             <input type="checkbox" checked={settings.stopOnTargeted} onChange={onToggleStopOnTargeted} />
             Stop when I or my permanents are targeted
+          </label>
+          <label>
+            <input type="checkbox" checked={settings.stopOnChoicePrompt !== false} onChange={onToggleStopOnChoicePrompt} />
+            Stop when something on the stack is about to ask me to choose (sacrifice, discard, &quot;you may&quot;), so I can respond first
           </label>
         </div>
         <button type="button" onClick={onClose}>Done</button>
@@ -4154,6 +4291,7 @@ function rebuildDynamicScene(
   showCommanderDamage: boolean
 ) {
   if (!group) return;
+  disposeSceneChildren(group);
   group.clear();
   cardMeshesRef.current = [];
 
@@ -4671,6 +4809,22 @@ function addZonePile(
   addTextPlane(group, `${label} ${count}`, x, z + 0.75, rot, 0.42);
 }
 
+// group.clear() only detaches children: their geometries, materials and canvas textures stay allocated on the GPU, so a long game
+// leaked memory on every rebuild. Frees them, except the textures held in the shared caches (card images, counter badges), which are
+// reused by the next rebuild; only textures flagged userData.perRebuild (created fresh per rebuild) are disposed.
+function disposeSceneChildren(group: THREE.Object3D) {
+  group.traverse((object) => {
+    const renderable = object as THREE.Mesh;
+    if (renderable.geometry && !(object as THREE.Sprite).isSprite) renderable.geometry.dispose();
+    const materials = Array.isArray(renderable.material) ? renderable.material : renderable.material ? [renderable.material] : [];
+    for (const material of materials) {
+      const map = (material as THREE.MeshBasicMaterial).map;
+      if (map && map.userData?.perRebuild) map.dispose();
+      material.dispose();
+    }
+  });
+}
+
 function makeCardTexture(card: VisibleCard, selected: boolean) {
   const canvas = document.createElement("canvas");
   canvas.width = 256;
@@ -4706,6 +4860,7 @@ function makeCardTexture(card: VisibleCard, selected: boolean) {
   if (card.power && card.toughness) context.fillText(`${effectivePower(card)}/${effectiveToughness(card)}`, 186, 324);
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
+  texture.userData.perRebuild = true;
   return texture;
 }
 
@@ -4724,6 +4879,7 @@ function addTextPlane(group: THREE.Group, text: string, x: number, z: number, ro
   context.fillText(text, canvas.width / 2, 60);
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
+  texture.userData.perRebuild = true;
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width * 4, width * 0.75), new THREE.MeshBasicMaterial({ map: texture, transparent: true, side: THREE.DoubleSide }));
   mesh.rotation.x = -Math.PI / 2;
   mesh.rotation.z = rot;
@@ -4835,6 +4991,7 @@ function addLifeTotalPlate(
   }
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
+  texture.userData.perRebuild = true;
   // 0.72 wide, not the 0.92 an earlier version used — at the x/z offsets the caller places these four
   // plates on (±0.38/±0.27), 0.92-wide plates overlapped their neighbors by a real, measurable margin
   // (visible in life3.jpg as the plates' corners overlapping instead of meeting edge-to-edge); 0.72

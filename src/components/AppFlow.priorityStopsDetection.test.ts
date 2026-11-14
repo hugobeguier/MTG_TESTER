@@ -222,3 +222,49 @@ describe("canReceivePriorityForPendingAction — priority Stops detection gap (r
     expect(stopped).toBe(false);
   });
 });
+
+describe("choice-prompt stop: a window before something asks the human to choose", () => {
+  const quiet: PriorityStopSettings = {
+    ...DEFAULT_STOP_SETTINGS,
+    phaseStops: {},
+    stopOnStackResponse: false,
+    stopOnAttacked: false,
+    stopOnTargeted: false
+  };
+  const pools: Record<string, ManaPool> = { human: emptyPool(), sable: emptyPool() };
+  const viscera = () => card({ id: "vs", name: "Viscera Seer", typeLine: "Creature — Vampire Wizard", oracleText: "Sacrifice a creature: Scry 1." });
+  const bear = () => card({ id: "bear", name: "Grizzly Bears", typeLine: "Creature — Bear" });
+  const edict = () => card({ id: "edict", name: "Blasphemous Edict", typeLine: "Sorcery", zone: "hand", oracleText: "Each player sacrifices a creature of their choice." });
+  const edictAction = { id: "sp", type: "spell" as const, actorSeatId: "sable", cardId: "edict", cardName: "Blasphemous Edict", cardTypeLine: "Sorcery", manaSourceIds: [], message: "" };
+
+  it("opens a window on an opponent's edict even with every other stop turned off, when a sacrifice ability is available", () => {
+    const human = seat({ id: "human", name: "You", kind: "human", board: { hand: [], battlefield: [viscera(), bear()] } });
+    const sable = seat({ id: "sable", name: "Sable", kind: "agent", board: { hand: [edict()], battlefield: [] } });
+    const s = session([human, sable], "precombat main phase");
+    expect(canReceivePriorityForPendingAction(human, edictAction as never, "sable", s, pools, quiet, undefined)).toBe(true);
+  });
+
+  it("does not open it when the player turned the choice-prompt stop off", () => {
+    const human = seat({ id: "human", name: "You", kind: "human", board: { hand: [], battlefield: [viscera(), bear()] } });
+    const sable = seat({ id: "sable", name: "Sable", kind: "agent", board: { hand: [edict()], battlefield: [] } });
+    const s = session([human, sable], "precombat main phase");
+    expect(canReceivePriorityForPendingAction(human, edictAction as never, "sable", s, pools, { ...quiet, stopOnChoicePrompt: false }, undefined)).toBe(false);
+  });
+
+  it("never opens a window when the player has no legal response at all", () => {
+    const human = seat({ id: "human", name: "You", kind: "human", board: { hand: [], battlefield: [bear()] } });
+    const sable = seat({ id: "sable", name: "Sable", kind: "agent", board: { hand: [edict()], battlefield: [] } });
+    const s = session([human, sable], "precombat main phase");
+    expect(canReceivePriorityForPendingAction(human, edictAction as never, "sable", s, pools, quiet, undefined)).toBe(false);
+  });
+
+  it("opens a window on the human's own optional trigger (no other stop rule covers an own action)", () => {
+    const human = seat({ id: "human", name: "You", kind: "human", board: { hand: [], battlefield: [viscera(), bear()] } });
+    const sable = seat({ id: "sable", name: "Sable", kind: "agent" });
+    const s = session([human, sable], "end step");
+    const trigger = { id: "t1", type: "trigger" as const, actorSeatId: "human", controllerSeatId: "human", sourceCardId: "src", sourceCardName: "Some Engine", triggerKind: "common" as const, effect: { kind: "draw", amount: 1, optional: true }, message: "" };
+    expect(canReceivePriorityForPendingAction(human, trigger as never, "human", s, pools, quiet, undefined)).toBe(true);
+    const mandatory = { ...trigger, effect: { kind: "draw", amount: 1 } };
+    expect(canReceivePriorityForPendingAction(human, mandatory as never, "human", s, pools, quiet, undefined)).toBe(false);
+  });
+});

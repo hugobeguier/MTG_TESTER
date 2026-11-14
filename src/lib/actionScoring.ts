@@ -382,6 +382,23 @@ function scoreProactiveProtectionCast(action: ScorableAction, context: ScoringCo
   delta(-3, "casting a reactive protection effect during your own main phase instead of holding it for a real threat");
 }
 
+// Cumulative upkeep (Mystic Remora, ...): the Nth upkeep costs N times the printed cost, so with {1} the permanent can only be kept for
+// as many turns as the controller has lands (turn 1 costs 1, turn 2 costs 2, ...), and every mana paid is mana not spent developing.
+// Cast on turn 1-3 it is sacrificed after one or two draws; cast with 6+ lands it lives long enough to pay off.
+function scoreCumulativeUpkeepTiming(action: ScorableAction, context: ScoringContext, delta: (amount: number, reason: string) => void) {
+  if (action.actionType !== "cast_spell") return;
+  const text = (action.detail ?? "").replace(/\([^)]*\)/g, "").toLowerCase();
+  if (!/\bcumulative upkeep\b/.test(text) || /\b(?:instant|sorcery)\b/.test(text.split(".")[0] ?? "")) return;
+  const lands = (context.you?.battlefield ?? []).filter((card) => (card.typeLine ?? "").includes("Land")).length;
+  // Upkeep {N} per age counter: how many turns of rising payments the current lands can cover is roughly `lands / printed cost`.
+  const printed = Number.parseInt(/cumulative upkeep\s*\{(\d+)\}/.exec(text)?.[1] ?? "1", 10) || 1;
+  const sustainableTurns = Math.floor(lands / printed);
+  if (sustainableTurns <= 3) delta(-8, `cumulative upkeep: only ${lands} land${lands === 1 ? "" : "s"} can pay for about ${sustainableTurns} upkeep${sustainableTurns === 1 ? "" : "s"} before it must be sacrificed — too early to get value from it`);
+  else if (sustainableTurns === 4) delta(-4, `cumulative upkeep: ${lands} lands sustain it for only about ${sustainableTurns} turns — wait for more mana`);
+  else if (sustainableTurns === 5) delta(-1, `cumulative upkeep: ${lands} lands sustain it for about ${sustainableTurns} turns`);
+  else delta(1, `cumulative upkeep: ${lands} lands sustain it for about ${sustainableTurns} turns of value`);
+}
+
 function scoreUpkeepValue(action: ScorableAction, context: ScoringContext, delta: (amount: number, reason: string) => void) {
   if (action.actionType !== "activate_ability") return;
   if (!/upkeep/i.test(action.detail ?? "")) return;
@@ -770,6 +787,7 @@ export function scoreLegalAction(action: ScorableAction, context: ScoringContext
   scoreHoldInstants(action, context, delta);
   scoreProactiveProtectionCast(action, context, delta);
   scoreUpkeepValue(action, context, delta);
+  scoreCumulativeUpkeepTiming(action, context, delta);
   scoreSacrificeValue(action, context, delta);
   scoreTransformSacrifice(action, context, delta);
   scoreMulliganDecision(action, context, delta);

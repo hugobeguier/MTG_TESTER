@@ -8,7 +8,7 @@
 // card's oracle text with no game-state context at all — it enumerates every ability on the card
 // once, offline, so a bulk run can populate the parsed_cards cache in cardDb.ts.
 import { z } from "zod";
-import { ollamaFetch, OLLAMA_CARD_PARSE_TIMEOUT_MS } from "./ollama";
+import { ollamaFetch, OLLAMA_CARD_PARSE_TIMEOUT_MS, OLLAMA_KEEP_ALIVE, OLLAMA_NUM_CTX } from "./ollama";
 import { LenientPrimitiveActionStepArraySchema, PRIMITIVE_ACTION_STEP_JSON_SCHEMA, filterGroundedSteps } from "./primitiveActionPlan";
 import { getXMageCardByName } from "./cardDb";
 import { xmageReferenceBlurb } from "./xmageGrounding";
@@ -244,6 +244,8 @@ async function callOllama(baseUrl: string, model: string, messages: Array<{ role
       body: JSON.stringify({
         model,
         stream: false,
+        keep_alive: OLLAMA_KEEP_ALIVE,
+        options: { num_ctx: OLLAMA_NUM_CTX },
         format: {
           type: "object",
           properties: {

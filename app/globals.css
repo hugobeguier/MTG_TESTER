@@ -744,6 +744,83 @@ h3 {
   min-width: 32px;
 }
 
+/* "Hide UI" master toggle. Sits outside the group it hides, above the panels (z-index 8), in the free corner right of .top-right. */
+.hud-master-toggle {
+  position: absolute;
+  right: 1rem;
+  top: 1rem;
+  z-index: 9;
+  min-height: 32px;
+  padding: 0 0.6rem;
+  backdrop-filter: blur(10px);
+  background: rgba(20, 24, 18, 0.84);
+  border: 1px solid rgba(242, 240, 232, 0.16);
+  border-radius: 8px;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.75rem;
+}
+
+.hud-master-toggle[aria-pressed="true"] {
+  opacity: 0.55;
+}
+
+.hud-master-toggle[aria-pressed="true"]:hover {
+  opacity: 1;
+}
+
+/* Hides only the informational overlays. The turn/phase HUD, the action-button HUD (Pass Priority, ...) and the Stack panel stay, since
+   hiding those would make the game unplayable; choice modals (.card-inspector-backdrop) are never hidden. */
+.three-game-shell.is-hud-hidden :is(.three-hud.top-right, .three-hud.agent-thinking-strip, .activity-panel, .agent-hand-anchor, .hand-hover-preview) {
+  display: none;
+}
+
+/* Choice boxes ("Minimize"): the layer is layout-neutral (its backdrops position against .three-game-shell as before); when minimized it is
+   hidden but stays mounted, so partial picks survive. The toggle sits above the backdrop (z 20) at the top centre, where the targeting
+   banner (never shown together with a modal choice) normally appears. */
+.choice-layer {
+  display: contents;
+}
+
+.choice-layer.is-minimized {
+  display: none;
+}
+
+.choice-minimize-toggle {
+  position: absolute;
+  left: 50%;
+  top: 1rem;
+  transform: translateX(-50%);
+  z-index: 21;
+  max-width: min(520px, calc(100vw - 32px));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-height: 32px;
+  padding: 0 0.8rem;
+  backdrop-filter: blur(10px);
+  background: rgba(20, 24, 18, 0.92);
+  border: 1px solid rgba(242, 240, 232, 0.25);
+  border-radius: 999px;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.78rem;
+}
+
+.choice-minimize-toggle.is-minimized {
+  background: rgba(70, 52, 10, 0.95);
+  border-color: rgba(255, 207, 92, 0.7);
+}
+
+/* Collapsed panel: header only. */
+.activity-panel.is-collapsed {
+  max-height: none;
+}
+
+.activity-panel.is-collapsed .activity-feed {
+  display: none;
+}
+
 .three-hud.bottom-left {
   bottom: calc(132px + 2.25rem);
   left: 1rem;

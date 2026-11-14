@@ -14,6 +14,11 @@ export const OLLAMA_PING_TIMEOUT_MS = Number(process.env.OLLAMA_PING_TIMEOUT_MS 
 // a full step array per ability, not just resolve one already-scoped clause — meaningfully more
 // output tokens than a single primitive-plan call, so it gets its own, longer budget rather than
 // reusing OLLAMA_TIMEOUT_MS and false-triggering on slow-but-working multi-ability cards.
+// Keep the model resident between calls and give EVERY caller the same context window. A request whose num_ctx differs from the
+// loaded runner's (the agent models set 8192; advisor/parser calls used Ollama's smaller default) makes Ollama restart the runner,
+// reloading weights and discarding the cached prompt prefix. Same value everywhere = no reloads, no change to any answer.
+export const OLLAMA_KEEP_ALIVE = -1;
+export const OLLAMA_NUM_CTX = Number(process.env.OLLAMA_NUM_CTX ?? 8192);
 export const OLLAMA_CARD_PARSE_TIMEOUT_MS = Number(process.env.OLLAMA_CARD_PARSE_TIMEOUT_MS ?? 90000);
 
 // AbortSignal.timeout(ms) makes the fetch reject with a normal DOMException("TimeoutError") on
@@ -51,7 +56,7 @@ export async function warmUpOllamaModel(model: string, baseUrl = process.env.OLL
       {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ model, prompt: "", stream: false })
+        body: JSON.stringify({ model, prompt: "", stream: false, keep_alive: OLLAMA_KEEP_ALIVE, options: { num_ctx: OLLAMA_NUM_CTX } })
       },
       OLLAMA_WARMUP_TIMEOUT_MS
     );
@@ -155,7 +160,8 @@ export async function requestAgentAction(input: {
         model,
         stream: false,
         // Hard backstop on generated tokens (a normal decision is ~100; deliberation ~600).
-        options: { num_predict: input.requireDeliberation ? 1500 : 500 },
+        keep_alive: OLLAMA_KEEP_ALIVE,
+        options: { num_ctx: OLLAMA_NUM_CTX, num_predict: input.requireDeliberation ? 1500 : 500 },
         format: {
           type: "object",
           properties: {
@@ -191,6 +197,14 @@ export async function requestAgentAction(input: {
   }
 
   const body = await response.json();
+  // Ollama silently drops the oldest prompt tokens once the prompt fills num_ctx, so an overfull decision prompt loses its beginning
+  // (the system contract) without any error. prompt_eval_count is the number of prompt tokens it actually evaluated.
+  if (typeof body.prompt_eval_count === "number" && body.prompt_eval_count >= OLLAMA_NUM_CTX - 64) {
+    console.warn(`[ollama] ${model}: prompt used ${body.prompt_eval_count} of ${OLLAMA_NUM_CTX} context tokens — it was probably truncated. Raise OLLAMA_NUM_CTX (and the Modelfiles' num_ctx) or shorten the prompt.`);
+  }
+  if (process.env.OLLAMA_DEBUG_TIMINGS) {
+    console.info(`[ollama] ${model}: prompt_tokens=${body.prompt_eval_count} load_ms=${Math.round((body.load_duration ?? 0) / 1e6)} total_ms=${Math.round((body.total_duration ?? 0) / 1e6)}`);
+  }
   const content = body.message?.content;
   if (typeof content !== "string") {
     throw new Error("Ollama response did not include message.content.");
@@ -221,6 +235,8 @@ export async function requestCommanderDeck(input: {
     body: JSON.stringify({
       model,
       stream: false,
+      keep_alive: OLLAMA_KEEP_ALIVE,
+      options: { num_ctx: OLLAMA_NUM_CTX },
       format: {
         type: "object",
         properties: {
@@ -304,7 +320,7 @@ export async function chatWithAgent(input: { model?: string; system: string; mes
     {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ model, stream: false, messages: [{ role: "system", content: input.system }, ...input.messages] })
+      body: JSON.stringify({ model, stream: false, keep_alive: OLLAMA_KEEP_ALIVE, options: { num_ctx: OLLAMA_NUM_CTX }, messages: [{ role: "system", content: input.system }, ...input.messages] })
     },
     OLLAMA_TIMEOUT_MS
   );

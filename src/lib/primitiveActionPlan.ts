@@ -16,7 +16,7 @@
 // this flat wire shape to the richer internal PrimitiveAction union.
 
 import { z } from "zod";
-import { ollamaFetch, OLLAMA_TIMEOUT_MS } from "./ollama";
+import { ollamaFetch, OLLAMA_TIMEOUT_MS, OLLAMA_KEEP_ALIVE, OLLAMA_NUM_CTX } from "./ollama";
 import { getXMageCardByName } from "./cardDb";
 import { xmageReferenceBlurb } from "./xmageGrounding";
 
@@ -345,6 +345,8 @@ export async function requestPrimitiveActionPlan(input: PrimitiveActionPlanInput
       body: JSON.stringify({
         model,
         stream: false,
+        keep_alive: OLLAMA_KEEP_ALIVE,
+        options: { num_ctx: OLLAMA_NUM_CTX },
         format: {
           type: "object",
           properties: {

@@ -26,7 +26,7 @@ export const TURN_PHASES = [
   "cleanup step"
 ] as const;
 
-export type StopReason = "phase_stop" | "full_control" | "hold_once" | "stack_response" | "attacked" | "targeted";
+export type StopReason = "phase_stop" | "full_control" | "hold_once" | "stack_response" | "attacked" | "targeted" | "choice_prompt";
 
 export interface PriorityStopSettings {
   // Keyed by stopKey(phase, turnOwnerSeatIndex) -> true. Seat INDEX, not seat id — ids are
@@ -38,6 +38,10 @@ export interface PriorityStopSettings {
   stopOnAttacked: boolean;
   // The pending action targets/affects me or my permanents.
   stopOnTargeted: boolean;
+  // The pending spell/trigger will ask me to make a choice when it resolves (an edict's "sacrifice a creature", a discard, an optional
+  // "you may" trigger) — the last chance to respond first, e.g. sacrifice the creature another way. Optional: absent (older saved
+  // settings) means ON.
+  stopOnChoicePrompt?: boolean;
   // Suspend all auto-passing — every window opens, exactly like today's behavior.
   fullControl: boolean;
 }
@@ -73,6 +77,7 @@ export const DEFAULT_STOP_SETTINGS: PriorityStopSettings = {
   stopOnStackResponse: true,
   stopOnAttacked: true,
   stopOnTargeted: true,
+  stopOnChoicePrompt: true,
   fullControl: false
 };
 
@@ -92,6 +97,8 @@ export interface ShouldStopInput {
   actionAffectsMe: boolean;
   // One-shot "stop me on the very next window" flag — cleared by the caller after use.
   holdOnce: boolean;
+  // True when resolving the pending action will open a choice prompt for the seat being asked (see AppFlow's pendingActionWillPromptSeat).
+  willPromptMe?: boolean;
 }
 
 // The single source of truth for "does this priority window actually interrupt the player". Returns
@@ -105,6 +112,9 @@ export function shouldStopForPriority(input: ShouldStopInput): StopReason | unde
   if (!input.hasLegalResponse) return undefined;
   if (input.settings.fullControl) return "full_control";
   if (input.holdOnce) return "hold_once";
+  // Applies to the player's OWN spell/trigger too (rule 117.3b: they act first), which no other stop rule covers: without it an own edict
+  // or "you may" trigger auto-resolved straight into its prompt with no chance to respond.
+  if (input.willPromptMe && input.settings.stopOnChoicePrompt !== false) return "choice_prompt";
   // Checked BEFORE the "my own phase-pass" exemption below: entering a ticked phase (e.g. your own
   // precombat main phase) IS a bare phase-pass action of your own — if the exemption ran first it
   // would swallow every phase stop on your own turn and the grid would do nothing at all.
