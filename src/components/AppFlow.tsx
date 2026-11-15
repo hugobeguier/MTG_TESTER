@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import type {
   AgentAction,
   AgentReasoning,
@@ -68,6 +69,7 @@ import {
   parseExileInsteadOfDyingReplacement,
   parseGainsAbilityGrant,
   parseModalHeader,
+  parseSpellModalHeader,
   parseSagaChapters,
   type SagaChapters
 } from "@/lib/oracleClauses";
@@ -145,7 +147,7 @@ import { removalEffectTargetSpec, zoneEffectTargetSpec } from "@/lib/targetSpecs
 import { classifyTell } from "@/lib/lookAhead";
 import { DEFAULT_STOP_SETTINGS, shouldStopForPriority, stopKey, TURN_PHASES, type PriorityStopSettings } from "@/lib/priorityStops";
 import { collectPhaseTriggers, stackResolutionOrder, anyPhaseTrigger, emblemDisplayName, type DelayedPhaseTrigger, type DelayedReturnCard } from "@/lib/phaseTriggers";
-import { ThreeGameTable } from "./ThreeGameTable";
+import { ThreeGameTable, type StackFeedEntry } from "./ThreeGameTable";
 
 type FlowMode = "setup" | "game";
 type DeckInputMode = "commander" | "decklist";
@@ -224,6 +226,8 @@ type TriggerEffect = (
   | { kind: "artifact_becomes_copy_eot" }
   // The answer to a pendingPlayerChoices prompt; chosenOption indexes the stored options (see resolveDeferredChoice).
   | { kind: "deferred_choice"; resolver: string; data: Record<string, unknown>; values: string[] }
+  // An activated ability whose cost has been paid and whose effect waits on the stack (rule 602.2); resolverId keys the closure that applies it.
+  | { kind: "deferred_ability"; resolverId: string }
   // "When this artifact enters, exile target card from a graveyard." (Soul-Guide Lantern): an opponent's best card, else any.
   | { kind: "exile_card_from_graveyard" }
   // "Manifest dread, then attach this Equipment to that creature." (Dissection Tools): look at the top two, manifest one face down as a 2/2, the other to the graveyard.
@@ -1467,6 +1471,21 @@ const DEFAULT_PLAYER_DECKLIST = `Commander: Aminatou, Veil Piercer
 // phase out of ever being retried.
 const AGENT_REQUEST_TIMEOUT_MS = 45000;
 
+// The resolving "beat": how long a spell/ability/trigger stays visibly "Resolving…" on the stack once everyone has passed, before its effect is
+// applied, so it can be read instead of flashing past. localStorage "mtg-stack-beat" is a multiplier (1 = default, 0 = off, 2 = twice as long).
+function stackBeatMs(action: PendingAction): number {
+  if (action.type === "phase") return 0;
+  let scale = 1;
+  try {
+    const stored = typeof window !== "undefined" ? window.localStorage.getItem("mtg-stack-beat") : null;
+    const parsed = stored === null ? NaN : Number(stored);
+    if (Number.isFinite(parsed) && parsed >= 0) scale = parsed;
+  } catch {
+    // storage unavailable: default beat
+  }
+  return Math.round((action.type === "spell" ? 1800 : 1200) * scale);
+}
+
 // In-memory cap on session.events (newest first). Generous: a full Commander game is a few thousand lines.
 const MAX_SESSION_EVENTS = 5000;
 
@@ -1937,6 +1956,18 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   // so without this the detection effect would re-offer the same already-resolved Aura forever.
   const auraRetargetAsked = useRef<Set<string>>(new Set());
   const stackActionsRef = useRef<PendingAction[]>([]);
+  // The resolving beat (see resolvePendingAction): ids already waiting out their beat (so a second trigger of the same resolution is a no-op),
+  // the newest closure of the real resolver (the beat callback must not run a stale one), and the recent-resolutions feed the table shows.
+  const resolveBeatIds = useRef<Set<string>>(new Set());
+  const resolveNowRef = useRef<(action: PendingAction) => void>(() => undefined);
+  // Activated abilities waiting on the stack: the effect closure per stack item (see putAbilityOnStack), and the newest closures of the
+  // functions those effects call (so an effect that resolves later never runs against a stale view of the game).
+  const abilityResolvers = useRef<Map<string, () => void>>(new Map());
+  const abilityApiRef = useRef<{
+    resolveSacrificeAbilityEffect: (seatId: string, paid: NonNullable<ReturnType<typeof payGenericSacrificeCost>>) => void;
+    resolveTapAbilityEffect: (seatId: string, cardId: string, paid: NonNullable<ReturnType<typeof payGenericTapCost>>, chosenCardId?: string) => void;
+  }>({ resolveSacrificeAbilityEffect: () => undefined, resolveTapAbilityEffect: () => undefined });
+  const [stackFeed, setStackFeed] = useState<StackFeedEntry[]>([]);
   const humanSeat = session.seats.find((seat) => seat.kind === "human") ?? session.seats[0];
   const selectedHandCard = selectedHandCardId ? humanSeat.board.hand.find((card) => card.id === selectedHandCardId) : undefined;
   // A priority window is offered whenever untapped lands could cover the cost, not only once mana
@@ -4240,7 +4271,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         // stated reason were both computed/requested but silently discarded, leaving
         // describeMulliganOutcome's bare "kept/mulliganed N" as the only visible record. Reported
         // live as "I still think they think weird sometimes" with no way to see the reasoning at all.
-        const heuristicHint = evaluateOpeningHand(nextSeat);
+        const heuristicHint = evaluateOpeningHand(nextSeat, count);
         let chosen: AgentAction | undefined;
         // A forceMulligan hand is mulliganed whatever the model says (see overrodeKeep below), so the
         // live Ollama round-trip (~3-4s measured, up to the 40s timeout) can't change the outcome — skip it.
@@ -4251,7 +4282,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
             chosen = undefined;
           }
         }
-        let chosenId = chosen?.legalActionId ?? (agentKeepsHand(nextSeat) ? "keep-hand" : "mulligan");
+        let chosenId = chosen?.legalActionId ?? (agentKeepsHand(nextSeat, count) ? "keep-hand" : "mulligan");
         // heuristicHint.forceMulligan is the same "not a judgment call" tier as the 0/7-lands
         // automatic mulligan — route.ts's system prompt only ever advises the model to defer to the
         // heuristic, and a small local model can still talk itself into keeping a hand this bad with
@@ -4259,6 +4290,9 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         // prompt wording to hold in every case.
         const overrodeKeep = heuristicHint.forceMulligan && chosenId === "keep-hand";
         if (overrodeKeep) chosenId = "mulligan";
+        // After two mulligans each further one costs a card: a hand the heuristic calls keepable (2-5 lands) is kept whatever the model says,
+        // or the agent spirals down to a 4-card hand with nothing to play.
+        if (count >= 2 && heuristicHint.keep && chosenId === "mulligan") chosenId = "keep-hand";
         const decisionLabel = chosenId === "keep-hand" ? `keeps its ${openingHandKeepSize(count)}-card hand` : `mulligans its ${openingHandKeepSize(count)}-card hand`;
         const reasonParts = [
           overrodeKeep ? "overriding the model's proposed keep — hand quality too low to keep" : chosen?.reason?.trim(),
@@ -6194,6 +6228,11 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     const card = seat?.board.battlefield.find((item) => item.id === cardId);
     const ability = card ? parseGenericSacrificeAbilities(card.oracleText)[abilityIndex] : undefined;
     const humanPool = seat?.kind === "human" ? poolForSeat(seatId) : undefined;
+    // "Activate only as a sorcery." (Fiend Artisan, Birthing Pod): only in the controller's own main phase with an empty stack.
+    if (card && ability && hasSorcerySpeedOnlyLimiter(ability.clause) && !(activeSeatId === seatId && isMainPhase(session.phase) && !pendingAction)) {
+      addEvent(`${card.name} can only be activated as a sorcery: during your own main phase with an empty stack.`, seatId, "Rules action");
+      return;
+    }
     if (card && ability?.effect.kind === "search_library") {
       const paid = payGenericSacrificeCost(session, seatId, cardId, abilityIndex, humanPool);
       if (!paid) return;
@@ -6203,18 +6242,21 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       }
       const searchEffect = ability.effect;
       setSession(() => paid.session);
-      setPendingRuleChoice({
-        id: crypto.randomUUID(),
-        kind: "choose_card_from_library",
-        controllerSeatId: seatId,
-        sourceCardId: cardId,
-        sourceCardName: card.name,
-        prompt: `Search your library: ${ability.clause}`,
-        destination: searchEffect.destination,
-        tapped: searchEffect.tapped,
-        maxChoices: searchEffect.count,
-        allowedCardFilter: searchEffect.cardTypeFilter
-      });
+      // The search is the ability's effect: it goes on the stack (cost paid) and opens only when the ability resolves.
+      putAbilityOnStack(seatId, card, ability.clause, () =>
+        setPendingRuleChoice({
+          id: crypto.randomUUID(),
+          kind: "choose_card_from_library",
+          controllerSeatId: seatId,
+          sourceCardId: cardId,
+          sourceCardName: card.name,
+          prompt: `Search your library: ${ability.clause}`,
+          destination: searchEffect.destination,
+          tapped: searchEffect.tapped,
+          maxChoices: searchEffect.count,
+          allowedCardFilter: searchEffect.cardTypeFilter
+        })
+      );
       return;
     }
     // "Sacrifice a creature" (as opposed to "Sacrifice this creature"/"this artifact," i.e.
@@ -6301,9 +6343,32 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     finishPaidSacrificeAbility(seatId, paid);
   }
 
-  // After a sacrifice ability's cost is paid: Birthing Pod opens its mana-value-restricted search (the sacrificed creature is known now);
-  // everything else applies its effect.
+  // After a sacrifice ability's cost is paid (rule 602.2): the cost is committed now and the effect goes on the stack, resolving only once everyone has
+  // had priority. A mana ability (Ashnod's Altar's "Sacrifice a creature: Add {C}{C}") never uses the stack: its mana is added at once.
   function finishPaidSacrificeAbility(seatId: string, paid: NonNullable<ReturnType<typeof payGenericSacrificeCost>>) {
+    setSession(() => paid.session);
+    if (paid.ability.effect.kind === "add_mana") {
+      let pool = poolForSeat(seatId);
+      for (const symbol of paid.ability.effect.symbols.match(/{([wubrgc])}/gi) ?? []) pool = addManaToPool(pool, symbol[1].toUpperCase() as ManaColor, 1);
+      setSeatManaPool(seatId, pool);
+      addEvent(`${paid.card.name} adds ${paid.ability.effect.symbols} to ${session.seats.find((item) => item.id === seatId)?.name ?? "the player"}'s mana pool.`, seatId, "Rules action");
+      return;
+    }
+    putAbilityOnStack(seatId, paid.card, paid.ability.clause, () => abilityApiRef.current.resolveSacrificeAbilityEffect(seatId, paid));
+  }
+
+  // An activated ability (cost already paid) goes on the stack as an ability item; `resolve` runs when it resolves. Shown in the stack dock like a trigger.
+  function putAbilityOnStack(seatId: string, card: VisibleCard, label: string, resolve: () => void) {
+    const resolverId = crypto.randomUUID();
+    abilityResolvers.current.set(resolverId, resolve);
+    const activator = session.seats.find((item) => item.id === seatId);
+    const ability = makeCommonTrigger(seatId, seatId, card, { kind: "deferred_ability", resolverId }, `${activator?.name ?? "A player"} activates ${card.name}: ${label}`);
+    beginPendingAction(ability, "Stack");
+  }
+
+  // The effect of a sacrifice ability, applied when it RESOLVES (the cost was paid and committed at activation): Birthing Pod opens its
+  // mana-value-restricted search (the sacrificed creature is known), the human gets their look windows and targets, everything else applies.
+  function resolveSacrificeAbilityEffect(seatId: string, paid: NonNullable<ReturnType<typeof payGenericSacrificeCost>>) {
     // The human's own choices after the cost is paid (look windows, targets), whichever way the cost was paid - including a sacrifice the
     // human chose from a list - so every route into a sacrifice ability asks the same questions.
     const seat = session.seats.find((item) => item.id === seatId);
@@ -6311,10 +6376,9 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     // Orb of Dragonkind: the human looks at the top cards and picks which Dragon (if any) to take.
     if (seat?.kind === "human" && paid.ability.effect.kind === "dig_type_to_hand") {
       const digEffect = paid.ability.effect;
-      const top = (paid.session.seats.find((item) => item.id === seatId)?.library ?? []).slice(0, digEffect.count);
+      const top = (session.seats.find((item) => item.id === seatId)?.library ?? []).slice(0, digEffect.count);
       const candidates = top.filter((candidate) => candidate.typeLine.toLowerCase().includes(digEffect.typeWord));
       if (candidates.length >= 1) {
-        setSession(() => paid.session);
         setPendingRuleChoice({
           id: crypto.randomUUID(),
           kind: "choose_dig_card",
@@ -6332,41 +6396,45 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     // Scry/surveil from a sacrifice ability: the human looks at the cards and decides.
     if (seat?.kind === "human" && (paid.ability.effect.kind === "scry" || paid.ability.effect.kind === "surveil")) {
       const lookEffect = paid.ability.effect;
-      setSession(() => paid.session);
       startLibraryLook(lookEffect.kind as LibraryLookMode, (lookEffect as { amount: number }).amount + (lookEffect.kind === "surveil" ? surveilBonusForSeat(seat) : 0));
       return;
     }
     // One-verb effects on a chosen target after a sacrifice (Yawgmoth's counter): the human picks it.
     if (seat?.kind === "human" && paid.ability.effect.kind === "targeted_effect") {
       const targeted = paid.ability.effect.effect;
-      setSession(() => paid.session);
       if (maybeRequestTarget(seatId, paid.card, targetedEffectSpec(targeted, paid.card.id, paid.card.name), false, { kind: "targeted", effect: targeted })) return;
     }
     // "Destroy target creature" and friends after a sacrifice (Thrashing Brontodon): the human aims it.
     if (seat?.kind === "human" && paid.ability.effect.kind === "removal" && paid.ability.effect.effect.kind !== "modal") {
       const removalEff = paid.ability.effect.effect;
-      setSession(() => paid.session);
       if (maybeRequestTarget(seatId, paid.card, removalEffectTargetSpec(removalEff, cardId), false, { kind: "removal", effect: removalEff })) return;
-      if (openAbilityDamageAim(seatId, paid.card, removalEff, paid.session)) return;
+      if (openAbilityDamageAim(seatId, paid.card, removalEff, session)) return;
     }
     // "Return target Zombie card from your graveyard to your hand" (Memorial to Folly, Haven of the Spirit Dragon): the human picks the card.
     if (seat?.kind === "human" && paid.ability.effect.kind === "zone_effect") {
       const zoneEff = paid.ability.effect.effect;
-      setSession(() => paid.session);
       if (maybeRequestTarget(seatId, paid.card, zoneChoiceSpecFor(session, seatId, zoneEff, paid.card), false, { kind: "zone", effect: zoneEff })) return;
     }
-    // Ashnod's Altar / Phyrexian Tower: the sacrifice pays for fixed mana that goes straight into the pool.
-    if (paid.ability.effect.kind === "add_mana") {
-      let pool = poolForSeat(seatId);
-      for (const symbol of paid.ability.effect.symbols.match(/\{([wubrgc])\}/gi) ?? []) pool = addManaToPool(pool, symbol[1].toUpperCase() as ManaColor, 1);
-      setSession(() => paid.session);
-      setSeatManaPool(seatId, pool);
-      addEvent(`${paid.card.name} adds ${paid.ability.effect.symbols} to ${session.seats.find((item) => item.id === seatId)?.name ?? "the player"}'s mana pool.`, seatId, "Rules action");
+    // Fiend Artisan: "search for a creature card with mana value X or less" — X was fixed when the cost was paid.
+    if (paid.ability.effect.kind === "search_creature_by_x") {
+      const limit = paid.xValue ?? 0;
+      setPendingRuleChoice({
+        id: crypto.randomUUID(),
+        kind: "choose_card_from_library",
+        controllerSeatId: seatId,
+        sourceCardId: paid.card.id,
+        sourceCardName: paid.card.name,
+        prompt: `${paid.card.name}: search your library for a creature card with mana value ${limit} or less and put it onto the battlefield.`,
+        destination: "battlefield",
+        tapped: false,
+        maxChoices: 1,
+        allowedCardFilter: "creature",
+        manaValueRestriction: { op: "lte", value: limit }
+      });
       return;
     }
     if (paid.ability.effect.kind === "search_creature_by_sacrificed_mv") {
       const wantedValue = Math.max(0, ...paid.sacrificed.map((creature) => creature.manaValue)) + 1;
-      setSession(() => paid.session);
       setPendingRuleChoice({
         id: crypto.randomUUID(),
         kind: "choose_card_from_library",
@@ -6382,7 +6450,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       });
       return;
     }
-    setSession(() => applySacrificeEffect(paid.session, seatId, paid.card, paid.ability.effect, paid.ability.clause, paid.sacrificed));
+    setSession((current) => applySacrificeEffect(current, seatId, paid.card, paid.ability.effect, paid.ability.clause, paid.sacrificed));
   }
 
   function activateGenericTapAbility(seatId: string, cardId: string, abilityIndex: number, chosenDiscardId?: string, chosenCardId?: string, chosenTapIds?: string[]) {
@@ -6476,18 +6544,21 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       }
       const searchEffect = ability.effect;
       setSession(() => paid.session);
-      setPendingRuleChoice({
-        id: crypto.randomUUID(),
-        kind: "choose_card_from_library",
-        controllerSeatId: seatId,
-        sourceCardId: cardId,
-        sourceCardName: card.name,
-        prompt: `Search your library: ${ability.clause}`,
-        destination: searchEffect.destination,
-        tapped: searchEffect.tapped,
-        maxChoices: searchEffect.count,
-        allowedCardFilter: searchEffect.cardTypeFilter
-      });
+      // The search is the ability's effect: it goes on the stack (cost paid) and opens only when the ability resolves.
+      putAbilityOnStack(seatId, card, ability.clause, () =>
+        setPendingRuleChoice({
+          id: crypto.randomUUID(),
+          kind: "choose_card_from_library",
+          controllerSeatId: seatId,
+          sourceCardId: cardId,
+          sourceCardName: card.name,
+          prompt: `Search your library: ${ability.clause}`,
+          destination: searchEffect.destination,
+          tapped: searchEffect.tapped,
+          maxChoices: searchEffect.count,
+          allowedCardFilter: searchEffect.cardTypeFilter
+        })
+      );
       return;
     }
     const paid = payGenericTapCost(session, seatId, cardId, abilityIndex, humanPool, chosenDiscardId, chosenTapIds);
@@ -6505,15 +6576,22 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       addEvent(`${paid.card.name} adds ${paid.ability.effect.symbol}; the spell it pays for will be copied.`, seatId, "Rules action");
       return;
     }
+    // Cost paid and committed; the effect goes on the stack and is applied when the ability resolves (rule 602.2).
+    setSession(() => paid.session);
+    putAbilityOnStack(seatId, paid.card, paid.ability.clause, () => abilityApiRef.current.resolveTapAbilityEffect(seatId, cardId, paid, chosenCardId));
+  }
+
+  // The effect of a {T} ability, applied when it resolves: the human's look windows and targets, then the effect itself.
+  function resolveTapAbilityEffect(seatId: string, cardId: string, paid: NonNullable<ReturnType<typeof payGenericTapCost>>, chosenCardId?: string) {
+    const seat = session.seats.find((item) => item.id === seatId);
     // Loot, Exuberant Explorer: after paying, the human sees the top cards and picks which creature (if any) enters.
     if (seat?.kind === "human" && paid.ability.effect.kind === "dig_creature_to_battlefield") {
       const digEffect = paid.ability.effect;
-      const owner = paid.session.seats.find((item) => item.id === seatId);
+      const owner = session.seats.find((item) => item.id === seatId);
       const landCount = owner?.board.battlefield.filter((permanent) => isLandCard(permanent)).length ?? 0;
       const top = (owner?.library ?? []).slice(0, digEffect.count);
       const candidates = top.filter((candidate) => candidate.typeLine.includes("Creature") && candidate.manaValue <= landCount);
       if (candidates.length >= 1) {
-        setSession(() => paid.session);
         setPendingRuleChoice({
           id: crypto.randomUUID(),
           kind: "choose_dig_card",
@@ -6531,9 +6609,8 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     }
     // "Target creature can't be blocked this turn." (Rogue's Passage): the human chooses the creature after paying.
     if (seat?.kind === "human" && paid.ability.effect.kind === "target_unblockable") {
-      const yours = paid.session.seats.find((item) => item.id === seatId)?.board.battlefield.filter((card) => card.typeLine.includes("Creature")) ?? [];
+      const yours = session.seats.find((item) => item.id === seatId)?.board.battlefield.filter((card) => card.typeLine.includes("Creature")) ?? [];
       if (yours.length >= 2) {
-        setSession(() => paid.session);
         setPendingRuleChoice({ id: crypto.randomUUID(), kind: "choose_creature_for_grant", controllerSeatId: seatId, sourceCardId: cardId, sourceCardName: paid.card.name, prompt: paid.card.name + ": choose the creature that can't be blocked this turn.", keywords: ["can't be blocked"] });
         return;
       }
@@ -6541,19 +6618,17 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     // One-verb effects on a chosen target ({T}: Target creature gains lifelink ...): the human picks it.
     if (seat?.kind === "human" && paid.ability.effect.kind === "targeted_effect") {
       const targeted = paid.ability.effect.effect;
-      setSession(() => paid.session);
       if (maybeRequestTarget(seatId, paid.card, targetedEffectSpec(targeted, paid.card.id, paid.card.name), false, { kind: "targeted", effect: targeted })) return;
     }
     // Lord of the Undead and friends: "return target Zombie card from your graveyard to your hand" — the human picks the card.
     if (seat?.kind === "human" && paid.ability.effect.kind === "zone_effect") {
       const zoneEff = paid.ability.effect.effect;
-      setSession(() => paid.session);
       if (maybeRequestTarget(seatId, paid.card, zoneChoiceSpecFor(session, seatId, zoneEff, paid.card), false, { kind: "zone", effect: zoneEff })) return;
     }
     // Geier Reach Sanitarium: everyone draws, then discards; the human's own discard is their choice.
     if (seat?.kind === "human" && paid.ability.effect.kind === "each_player_loots") {
-      setSession(() => applyGenericTapEffect(paid.session, seatId, cardId, paid.card.name, paid.ability.effect, paid.ability.clause, undefined, { skipDiscardSeatId: seatId }));
-      const owner = paid.session.seats.find((item) => item.id === seatId);
+      setSession((current) => applyGenericTapEffect(current, seatId, cardId, paid.card.name, paid.ability.effect, paid.ability.clause, undefined, { skipDiscardSeatId: seatId }));
+      const owner = session.seats.find((item) => item.id === seatId);
       if (owner && owner.board.hand.length + ((owner.library ?? []).length > 0 ? 1 : 0) >= 1) {
         setPendingRuleChoice({
           id: crypto.randomUUID(),
@@ -6566,7 +6641,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       }
       return;
     }
-    setSession(() => applyGenericTapEffect(paid.session, seatId, cardId, paid.card.name, paid.ability.effect, paid.ability.clause, chosenCardId));
+    setSession((current) => applyGenericTapEffect(current, seatId, cardId, paid.card.name, paid.ability.effect, paid.ability.clause, chosenCardId));
   }
 
   function activateSelfUntapAbility(seatId: string, cardId: string, abilityIndex: number) {
@@ -7867,7 +7942,12 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   }
 
   function finishTriggerResolution(trigger: Extract<PendingAction, { type: "trigger" }>, remainingStack: PendingAction[], accepted: boolean) {
-    if (accepted && trigger.effect.kind === "draw_then_put_back") {
+    if (trigger.effect.kind === "deferred_ability") {
+      // An activated ability resolves: its cost was paid when it was activated; this applies its effect.
+      const resolve = abilityResolvers.current.get(trigger.effect.resolverId);
+      abilityResolvers.current.delete(trigger.effect.resolverId);
+      resolve?.();
+    } else if (accepted && trigger.effect.kind === "draw_then_put_back") {
       // "Draw a card, then put a card from your hand on top of your library" (Aminatou, the
       // Fateshifter's +1, ...) needs a real choice of WHICH card goes back — resolveTriggerEffect
       // is a pure function with no access to pendingRuleChoice, so it used to always auto-pick the
@@ -8333,7 +8413,39 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     if (trigger) resumeAfterTriggerChoice(trigger, [...(choice.remainingStack ?? []), ...capturedTriggers]);
   }
 
+  // Every route into resolution (all passed, nothing to respond to, auto-resolve) comes through here. A spell, ability or trigger first waits out a
+  // short visible "Resolving…" beat on the stack, then really resolves; its result lines are read off the events produced meanwhile.
   function resolvePendingAction(action: PendingAction) {
+    const beat = stackBeatMs(action);
+    if (beat <= 0) {
+      resolvePendingActionNow(action);
+      return;
+    }
+    if (resolveBeatIds.current.has(action.id)) return;
+    resolveBeatIds.current.add(action.id);
+    const view = withPendingActionSourceCard(session, action, stackActionsRef.current) as unknown as StackFeedEntry["view"];
+    const startEventId = session.events[0]?.id;
+    setStackFeed((previous) => [{ id: action.id, view, startEventId, status: "resolving" as const }, ...previous.filter((entry) => entry.id !== action.id)].slice(0, 5));
+    window.setTimeout(() => {
+      resolveBeatIds.current.delete(action.id);
+      // A response was put on the stack while the beat ran: it resolves first and this item comes back through the normal stack resume.
+      const stack = stackActionsRef.current;
+      const index = stack.findIndex((item) => item.id === action.id);
+      if (index >= 0 && index < stack.length - 1) {
+        setStackFeed((previous) => previous.filter((entry) => entry.id !== action.id));
+        return;
+      }
+      // flushSync: resolution used to run inside a click handler, where React applies every state update before the handler returns. The
+      // resolver reads values written inside its own setSession updater (the library search to open, triggers to queue) from a follow-up
+      // timer, so from this timer it must see the same thing: without it the updater had not run yet and Cultivate never opened its search.
+      flushSync(() => resolveNowRef.current(action));
+      setStackFeed((previous) => previous.map((entry) => (entry.id === action.id ? { ...entry, status: "resolved" as const, resolvedAt: Date.now() } : entry)));
+    }, beat);
+  }
+  resolveNowRef.current = resolvePendingActionNow;
+  abilityApiRef.current = { resolveSacrificeAbilityEffect, resolveTapAbilityEffect };
+
+  function resolvePendingActionNow(action: PendingAction) {
     setPendingAction(undefined);
     setPriorityPasses([]);
     if (action.type === "phase") {
@@ -8390,7 +8502,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       // own-graveyard-only version stays on the deterministic path unchanged) and only when it's the
       // spell's entire resolution (no modal header) so deferring here can't silently skip some other
       // simultaneous effect the same card also has.
-      const isModalReanimateCard = sourceCard ? Boolean(parseModalHeader(sourceCard.oracleText)) : false;
+      const isModalReanimateCard = sourceCard ? Boolean(parseSpellModalHeader(sourceCard.oracleText)) : false;
       const reanimateZoneEffect = sourceCard && !isModalReanimateCard ? parseZoneEffect(etbEffectText(sourceCard.oracleText)) : undefined;
       if (actor?.kind === "human" && !action.castChoices && sourceCard && reanimateZoneEffect?.kind === "reanimate" && reanimateZoneEffect.anyGraveyard) {
         const remainingStack = removeStackAction(action.id);
@@ -8699,6 +8811,9 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     // duplicate (phantom) resolution of some other permanent's own ETB trigger re-picking a target
     // once its real target was already gone. Every one-time side effect is captured into an outer
     // variable here instead, and only actually fires once, after setSession returns.
+    // Grisly Salvage-shaped "reveal the top N, you may put a <type> card into your hand, put the rest into your graveyard" cast by the
+    // human: opened as the interactive look window after the updater below (the automatic pick is only for agents).
+    let capturedDigLook: { amount: number; filter?: string } | undefined;
     let capturedHumanPrompt:
       | { kind: "choose_creature_type"; cardId: string; cardName: string }
       | { kind: "choose_color"; cardId: string; cardName: string; excludedColor?: string }
@@ -8960,13 +9075,18 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       // bullet's effect unconditionally regardless of which mode should actually have been chosen
       // (e.g. Profane Command's reanimate mode would always trigger even on a "choose one or both"
       // card, and even if a different mode was the one actually wanted).
-      const isModalCard = Boolean(sourceCard && parseModalHeader(sourceCard.oracleText));
+      // The card's OWN modal text only: a "Choose one —" behind an activated ability's cost (Cankerbloom) is not applied on cast/entry.
+      const isModalCard = Boolean(sourceCard && parseSpellModalHeader(sourceCard.oracleText));
       // Reanimate/mill/regrow/steal-control spells (Reanimate, Regrowth, Threaten, ...) — same
       // "applies regardless of the spell's own destination" reasoning as removal effects above.
       const zoneEffect = sourceCard && !isModalCard ? parseEtbZoneEffect(etbEffectText(sourceCard.oracleText)) : undefined;
       const castZoneTarget = castStruct?.kind === "zone" ? action.castChoices?.targets[0] : undefined;
+      const humanDigLook = zoneEffect?.kind === "look_dig" && zoneEffect.restDestination === "graveyard" && session.seats.find((seat) => seat.id === action.actorSeatId)?.kind === "human";
+      if (zoneEffect?.kind === "look_dig" && humanDigLook) capturedDigLook = { amount: zoneEffect.amount, filter: zoneEffect.cardTypeFilter };
       const zoneResolvedSession =
-        zoneEffect && sourceCard
+        humanDigLook
+          ? removalResolvedSession
+          : zoneEffect && sourceCard
           ? castStruct?.kind === "zone" && zoneEffect.kind !== "sacrifice_then_reanimate" && (!castZoneTarget || !castTargetLegal(removalResolvedSession, action.actorSeatId, sourceCard, castZoneTarget))
             ? rulesEvent(removalResolvedSession, action.actorSeatId, `${sourceCard.name}'s target is no longer legal; it does nothing.`)
             : applyZoneEffect(removalResolvedSession, action.actorSeatId, sourceCard.name, zoneEffect, action.chosenX, castZoneTarget, castStruct?.kind === "zone" ? action.castChoices?.targets : undefined)
@@ -9349,6 +9469,9 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       } else if (!resumeTopStackAction(remainingStack)) {
         setPrioritySeatId(action.actorSeatId);
       }
+      if (capturedDigLook) {
+        startLibraryLook("choose_one_bottom", capturedDigLook.amount, capturedDigLook.filter, undefined, "graveyard");
+      }
       if (capturedHumanPrompt) {
         const prompt = capturedHumanPrompt;
         if (prompt.kind === "choose_creature_type") {
@@ -9395,6 +9518,27 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       }
     }, 0);
   }
+
+  // Who must pass for the top stack item to resolve (drives the priority pips next to the stack). Same call the priority driver makes.
+  const requiredPassesForPanel = useMemo(
+    () =>
+      pendingAction
+        ? pendingActionRequiredPasses(session.seats, pendingAction, activeSeatId, session, manaPools, priorityStopSettings, holdPriorityOnce ? humanSeat.id : undefined)
+        : [],
+    [pendingAction, session, activeSeatId, manaPools, priorityStopSettings, holdPriorityOnce, humanSeat.id]
+  );
+
+  // "When this resolves you'll have to choose" notes for the human, keyed by stack item id (shown on the stack entries).
+  const stackPrompts = useMemo(() => {
+    const notes: Record<string, string> = {};
+    const humanForNotes = session.seats.find((seat) => seat.kind === "human");
+    if (!humanForNotes) return notes;
+    for (const item of [...(pendingAction ? [pendingAction] : []), ...stackActions]) {
+      const note = resolutionPromptNote(humanForNotes, item, session);
+      if (note) notes[item.id] = note;
+    }
+    return notes;
+  }, [pendingAction, stackActions, session]);
 
   // A new choice always opens expanded, and a finished one leaves nothing to resume.
   useEffect(() => {
@@ -12189,6 +12333,10 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
         Save
       </button>
       <ThreeGameTable
+        stackPrompts={stackPrompts}
+        stackFeed={stackFeed}
+        requiredPasses={requiredPassesForPanel}
+        priorityPasses={priorityPasses}
         choiceMinimized={choiceMinimized}
         onSetChoiceMinimized={setChoiceMinimized}
         gameStage={gameStage}
@@ -14075,7 +14223,18 @@ export function legalMainPhaseActions(
   actions.push(...legalActivatedAbilityActions(seat, true, turn, activatedLoyaltyKeys, session, !hasPlayedLand));
   actions.push({ id: "pass-phase", actionType: "pass_priority", targetIds: [], label: "pass this phase" });
   actions.push({ id: "end-turn", actionType: "end_turn", targetIds: [], label: "end turn and skip remaining phases" });
-  return actions;
+  // This list is the stack-empty main-phase list: a "counter target spell" card has nothing to target here (rule 601.2c), so it is never offered.
+  // (Reported live: Sable cast Swan Song on turn 1 with nothing on the stack.) Responses are a separate list that does check the stack.
+  return actions.filter((action) => {
+    if (action.actionType !== "cast_spell" || !action.cardId) return true;
+    const handCard = seat.board.hand.find((card) => card.id === action.cardId);
+    return !handCard || !isTargetedCounterspell(handCard);
+  });
+}
+
+// A card whose spell is "Counter target ... spell" (Swan Song, Counterspell, Negate, ...) and is not a modal card that may have a non-counter mode.
+function isTargetedCounterspell(card: { oracleText: string }): boolean {
+  return Boolean(parseCounterSpellAbility(card.oracleText)) && !parseModalHeader(card.oracleText);
 }
 
 function hasAgentMainPhaseAction(seat: PlayerSeat, hasPlayedLand: boolean, activeSeatId: string | undefined, turn: number, activatedLoyaltyKeys: Set<string>, session: GameSession) {
@@ -14390,6 +14549,12 @@ function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllowed: boo
     if (card.abilitiesStripped) continue;
     parseGenericSacrificeAbilities(card.oracleText).forEach((ability, abilityIndex) => {
       if (!activateOnlyIfConditionMet(ability.clause, seat)) return;
+      // "Activate only as a sorcery." (Fiend Artisan, Birthing Pod): never offered at instant speed.
+      if (hasSorcerySpeedOnlyLimiter(ability.clause) && !sorcerySpeedAllowed) return;
+      // An {X} cost: the engine picks X (see chooseAbilityX); with no fetchable creature the ability is not offered.
+      const abilityX = ability.costX ? chooseAbilityX(session, seat, card, ability) : 0;
+      if (abilityX === undefined) return;
+      const payAbility = ability.costX ? abilityCostWithX(ability, abilityX) : ability;
       // Evolving Wilds/Terramorphic Expanse-style "search a basic land" abilities now also match
       // the general search_library shape below, but isBasicLandFetchAbility already owns them via
       // its own simpler auto-resolving system (basic_land_fetch) — without this, the same physical
@@ -14442,8 +14607,8 @@ function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllowed: boo
       // supply one tap). Without this exclusion a mana-producing sacrifice permanent could pay part
       // of its own cost with itself — reported live as Mind Stone tapping for {C} and then still
       // being sacrificed for its draw ability the same turn.
-      const sacrificeCostTotal = manaValueFromManaCost(ability.costManaText);
-      const affordable = sacrificeCostTotal === 0 || chooseManaSourcesForCost(seat, genericManaAbilityCostShim(ability), sacrificeCostTotal, card.id, session.seats).ok;
+      const sacrificeCostTotal = manaValueFromManaCost(payAbility.costManaText);
+      const affordable = sacrificeCostTotal === 0 || chooseManaSourcesForCost(seat, genericManaAbilityCostShim(payAbility), sacrificeCostTotal, card.id, session.seats).ok;
       if (!affordable) return;
       const sacrificeCards =
         ability.sacrificeTarget === "self"
@@ -14458,7 +14623,7 @@ function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllowed: boo
         sacrificeCardIds: sacrificeCards.map((target) => target.id),
         cardId: card.id,
         targetIds: [],
-        label: `activate ${card.name} (sacrifice ${targetNames.join(", ") || "a creature"})`,
+        label: `activate ${card.name} (sacrifice ${targetNames.join(", ") || "a creature"}${ability.costX ? `, X=${abilityX}` : ""})`,
         detail: ability.clause
       });
     });
@@ -15049,7 +15214,7 @@ export function payGenericSacrificeCost(
   // Undefined for every other caller (search_library's own cost payment, the agent path, "sacrifice
   // this creature" self-sacrifices), which all keep the exact heuristic behavior they had before.
   preChosenSacrificeTargets?: VisibleCard[]
-): { session: GameSession; ability: SacrificeAbility; card: VisibleCard; sacrificed: VisibleCard[]; poolSpent?: ManaPool } | undefined {
+): { session: GameSession; ability: SacrificeAbility; card: VisibleCard; sacrificed: VisibleCard[]; poolSpent?: ManaPool; xValue?: number } | undefined {
   const seat = session.seats.find((item) => item.id === seatId);
   const card = seat?.board.battlefield.find((item) => item.id === cardId);
   if (!seat || !card) return undefined;
@@ -15057,6 +15222,10 @@ export function payGenericSacrificeCost(
   if (!ability || (ability.costTap && card.tapped)) return undefined;
   if (ability.costTap && card.typeLine.includes("Creature") && card.summoningSick && !hasHaste(card)) return undefined;
   if (!activateOnlyIfConditionMet(ability.clause, seat)) return undefined;
+  // An {X} in the cost (Fiend Artisan): the engine picks X, and the cost below is paid with it.
+  const xValue = ability.costX ? chooseAbilityX(session, seat, card, ability) : 0;
+  if (xValue === undefined) return undefined;
+  const payAbility = ability.costX ? abilityCostWithX(ability, xValue) : ability;
 
   const discardCard = ability.costDiscard ? chooseWorstHandCardToDiscard(seat) : undefined;
   if (ability.costDiscard && !discardCard) return undefined;
@@ -15065,8 +15234,8 @@ export function payGenericSacrificeCost(
   // seat at 0 life could still activate a life-cost ability.
   if (ability.costLife > 0 && seat.life < ability.costLife) return undefined;
 
-  const totalManaCost = manaValueFromManaCost(ability.costManaText);
-  const costCard = genericManaAbilityCostShim(ability);
+  const totalManaCost = manaValueFromManaCost(payAbility.costManaText);
+  const costCard = genericManaAbilityCostShim(payAbility);
   const poolPayment = totalManaCost > 0 && humanPool ? payCostFromPool(humanPool, costCard, totalManaCost) : undefined;
   // excludeCardId: cardId — this ability's own {T} already requires the source untapped; it can't
   // also tap itself via a separate mana ability of its own to help pay this same activation's
@@ -15143,7 +15312,7 @@ export function payGenericSacrificeCost(
 
   if (ability.exileSelf) {
     next = rulesEvent(moveCardBetweenVisibleZones(next, seatId, card.id, "exile"), seatId, `${seat.name} exiles ${card.name} to activate it.`);
-    return { session: next, ability, card, sacrificed: sacrificeTargets, poolSpent: poolPayment?.ok ? poolPayment.pool : undefined };
+    return { session: next, ability, card, sacrificed: sacrificeTargets, poolSpent: poolPayment?.ok ? poolPayment.pool : undefined, xValue };
   }
   next = destroyCreatures(
     next,
@@ -15162,7 +15331,7 @@ export function payGenericSacrificeCost(
     "Rules action"
   );
 
-  return { session: next, ability, card, sacrificed: sacrificeTargets, poolSpent: poolPayment?.ok ? poolPayment.pool : undefined };
+  return { session: next, ability, card, sacrificed: sacrificeTargets, poolSpent: poolPayment?.ok ? poolPayment.pool : undefined, xValue };
 }
 
 export function applySacrificeEffect(
@@ -15280,7 +15449,7 @@ export function applySacrificeEffect(
     const drained: GameSession = { ...session, seats: session.seats.map((other) => (victims.some((victim) => victim.id === other.id) ? { ...other, life: other.life - amount } : other)) };
     return rulesEvent(drained, seatId, `${sourceCardName}: each opponent loses ${amount} life.`);
   }
-  if (effect.kind === "search_creature_by_sacrificed_mv") return session;
+  if (effect.kind === "search_creature_by_sacrificed_mv" || effect.kind === "search_creature_by_x") return session;
 
   if (effect.kind === "draw_cards") {
     const drawnOnly = drawMultipleForSeat(session, seatId, effect.amount, `${seat.name} draws ${effect.amount} from ${sourceCardName}.`);
@@ -18435,7 +18604,7 @@ export function spellModePrompt(
   source: VisibleCard,
   chosenX?: number
 ): { chooseCount: number; labels: string[]; removalModes?: Array<Exclude<RemovalEffect, { kind: "modal" }>>; genericModes?: GenericModalMode[]; distinctPerTurn?: boolean } | undefined {
-  if (!parseModalHeader(source.oracleText)) return undefined;
+  if (!parseSpellModalHeader(source.oracleText)) return undefined;
   const removal = parseRemovalEffect(etbEffectText(source.oracleText));
   if (removal?.kind === "modal") {
     const modes = removal.modes.filter((mode) => removalEffectHasLegalTarget(session, controllerSeatId, source, mode));
@@ -20456,6 +20625,8 @@ export function checkMoveLegal(session: GameSession, seatId: string, action: Leg
     } else if (!ownMainWithEmptyStack && !instantSpeed) {
       return illegalResult(`${targetCard.name} can only be cast in the player's own main phase with an empty stack`);
     }
+    // Rule 601.2c: "counter target spell" needs a spell on the stack to target when it is cast — with an empty stack there is no legal target.
+    if (ctx.stackEmpty && isTargetedCounterspell(targetCard)) return illegalResult(`${targetCard.name} needs a spell on the stack to counter, and the stack is empty`);
     if (spellCastLockedOut(session, seatId, ctx.activeSeatId)) return illegalResult("an effect stops this player from casting spells right now");
     if (castRestrictedByTurnCount(session, card)) return illegalResult(`${card.name} cannot be cast during the first three turns of the game`);
     if (!hasResolvableTarget(session, seatId, targetCard)) {
@@ -22518,7 +22689,7 @@ interface GenericModalEffect {
 // behavior removalSpells.ts's own modal parsing already has for modes it can't place.
 export function parseGenericModalEffect(oracleText: string, chosenX: number | undefined): GenericModalEffect | undefined {
   if (parseRemovalEffect(etbEffectText(oracleText))) return undefined;
-  const header = parseModalHeader(oracleText);
+  const header = parseSpellModalHeader(oracleText);
   if (!header) return undefined;
   const modes: GenericModalMode[] = [];
   for (const rawModeText of header.modeTexts) {
@@ -30097,6 +30268,29 @@ export function genericCostShim(amount: number): VisibleCard {
 // it the same way they already do for a real card's casting cost — genericCostShim's plain numeric
 // amount has no color information, which silently treated a colored activation cost (Greed's
 // "{B}, Pay 2 life: Draw a card.") as free, since its digit-only mana-symbol sum found no digits.
+// The cost of an ability with an {X} (Fiend Artisan) once X is chosen: {X} becomes that many generic mana (or nothing at 0).
+function abilityCostWithX(ability: SacrificeAbility, x: number): SacrificeAbility {
+  return { ...ability, costManaText: ability.costManaText.replace(/{X}/gi, x > 0 ? `{${x}}` : "") };
+}
+
+// The X an {X} ability is activated with: the cheapest X that reaches the best creature card in the library the controller can afford, so
+// no mana is paid for a card that cannot be fetched. Undefined when nothing can be fetched (no creature card at or below what is affordable).
+function chooseAbilityX(session: GameSession, seat: PlayerSeat, card: VisibleCard, ability: SacrificeAbility): number | undefined {
+  if (!ability.costX) return 0;
+  const creatureValues = (seat.library ?? []).filter((candidate) => candidate.typeLine.includes("Creature")).map((candidate) => candidate.manaValue);
+  if (creatureValues.length === 0) return undefined;
+  let maxX = -1;
+  for (let x = 0; x <= 15; x += 1) {
+    const paying = abilityCostWithX(ability, x);
+    const total = manaValueFromManaCost(paying.costManaText);
+    if (total > 0 && !chooseManaSourcesForCost(seat, genericManaAbilityCostShim(paying), total, card.id, session.seats).ok) break;
+    maxX = x;
+  }
+  if (maxX < 0) return undefined;
+  const reachable = creatureValues.filter((value) => value <= maxX);
+  return reachable.length > 0 ? Math.max(...reachable) : undefined;
+}
+
 function genericManaAbilityCostShim(ability: { costManaText: string }): VisibleCard {
   return { ...genericCostShim(manaValueFromManaCost(ability.costManaText)), manaCost: ability.costManaText || undefined };
 }
@@ -31820,7 +32014,7 @@ export function resolveAgentMulligans(seats: PlayerSeat[]) {
     if (seat.kind !== "agent") return seat;
     let nextSeat = seat;
     let count = 0;
-    while (!agentKeepsHand(nextSeat) && count < MULLIGAN_HARD_CAP) {
+    while (!agentKeepsHand(nextSeat, count) && count < MULLIGAN_HARD_CAP) {
       if (count >= MULLIGAN_SOFT_CAP && nextSeat.board.hand.some(isLandCard)) break;
       count += 1;
       nextSeat = withOpeningHand(nextSeat, 7, count);
@@ -31840,8 +32034,8 @@ export function resolveAgentMulligans(seats: PlayerSeat[]) {
   return { seats: resolvedSeats, mulligans, keptHands, events };
 }
 
-function agentKeepsHand(seat: PlayerSeat) {
-  return evaluateOpeningHand(seat).keep;
+function agentKeepsHand(seat: PlayerSeat, mulligansTaken = 0) {
+  return evaluateOpeningHand(seat, mulligansTaken).keep;
 }
 
 // The user's own stated preference: a 4-card hand (mulligan count 4, see openingHandKeepSize below)
@@ -32585,6 +32779,18 @@ export function pendingActionWillPromptSeat(seat: PlayerSeat, action: PendingAct
     return Boolean(action.effect.optional) || action.effect.kind === "put_any_from_hand" || action.effect.kind === "modal";
   }
   return false;
+}
+
+// The line shown on a stack entry when resolving it will make this (human) seat choose something, so the player knows this is the moment to
+// respond (sacrifice things their own way, cast the instant) — the choice itself only appears once it resolves, and nothing can be done then.
+export function resolutionPromptNote(seat: PlayerSeat, action: PendingAction, session: GameSession): string | undefined {
+  if (!pendingActionWillPromptSeat(seat, action, session)) return undefined;
+  if (action.type === "trigger") return "When this resolves you'll be asked whether to do it. Respond first if you want to.";
+  const text = action.type === "spell" ? (findSpellSourceCard(session, action)?.oracleText ?? "") : "";
+  if (/\bsacrifices? all\b/i.test(text)) return "When this resolves you sacrifice permanents with no choice. Respond first if you want to deal with them another way.";
+  if (/\bsacrifices?\b/i.test(text)) return "When this resolves you must choose what to sacrifice. Respond first to sacrifice things your own way.";
+  if (/\bdiscards?\b/i.test(text)) return "When this resolves you must choose what to discard. Respond first if you want to play or use cards.";
+  return "When this resolves you'll be asked to choose. Respond first if you want to.";
 }
 
 export function canReceivePriorityForPendingAction(

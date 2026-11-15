@@ -196,47 +196,200 @@ interface ThreeGameTableProps {
   onToggleStopOnChoicePrompt?: () => void;
   onToggleFullControl?: () => void;
   holdPriorityOnce?: boolean;
+  // Recently resolving/resolved stack items (newest first) with their "result" derived from the events produced while they resolved — the
+  // stack shows what each item DID, so the game reads without the log.
+  stackFeed?: StackFeedEntry[];
+  // Per stack item id: "when this resolves you'll have to choose..." — the cue to respond BEFORE the choice appears.
+  stackPrompts?: Record<string, string>;
+  // Seats that must pass before the top stack item resolves, and which of them already have (drives the priority pips).
+  requiredPasses?: string[];
+  priorityPasses?: string[];
   onStopNext?: () => void;
 }
 
-// Who controls a stack item, what it does and what it targets, with a loud badge when it goes after the human.
-function StackDescriptionBlock({ description, humanSeatId }: { description?: StackItemDescription; humanSeatId?: string }) {
-  if (!description) return null;
-  const affectsYou = description.affectsPlayerSeatId !== undefined && description.affectsPlayerSeatId === humanSeatId;
+export interface StackFeedEntry {
+  id: string;
+  view: PendingActionView;
+  // Newest event id when the item began resolving: everything produced after it (newest-first log) is this item's result.
+  startEventId?: string;
+  status: "resolving" | "resolved";
+  resolvedAt?: number;
+}
+
+const STACK_FEED_RESOLVED_VISIBLE_MS = 7000;
+const STACK_FEED_MAX_RESULT_LINES = 4;
+// Bookkeeping lines that say what was put on the stack or who passed, not what the item did.
+const STACK_FEED_NOISE = /\bpassed priority\b|\bcasts?\b|\bonto the stack\b|\btriggered abilit|^Rules advisor/i;
+
+// The lines produced while an item resolved, oldest first, without bookkeeping noise.
+function stackFeedResultLines(events: GameSession["events"], startEventId: string | undefined): string[] {
+  const lines: string[] = [];
+  for (let index = 0; index < events.length && index < 60; index += 1) {
+    const event = events[index];
+    if (startEventId !== undefined && event.id === startEventId) break;
+    if (event.detail === "Mana" || event.detail === "Phase change" || event.detail === "Timing" || event.detail === "Rules advisor") continue;
+    if (STACK_FEED_NOISE.test(event.message)) continue;
+    lines.push(event.message);
+  }
+  return lines.reverse();
+}
+
+function stackFeedName(view: PendingActionView): string {
+  return view.type === "spell" ? view.cardName : view.type === "trigger" ? view.sourceCardName : "Phase change";
+}
+
+interface StackDockProps {
+  // The live stack, top of stack first.
+  items: PendingActionView[];
+  feed: StackFeedEntry[];
+  events: GameSession["events"];
+  seats: PlayerSeat[];
+  requiredPasses: string[];
+  passedSeatIds: string[];
+  prioritySeatId?: string;
+  humanSeatId?: string;
+  humanHasPriority: boolean;
+  prompts: Record<string, string>;
+  // True while a stack item is genuinely waiting for passes (as opposed to the dock just lingering after an auto-resolve).
+  live: boolean;
+  pendingType?: "spell" | "trigger" | "phase";
+  canRespondSelected: boolean;
+  onPass?: () => void;
+  onRespond?: () => void;
+  onRespondSelected?: () => void;
+  onResolveTrigger?: () => void;
+}
+
+// The ONE stack display (Arena-style): the stack as a column of cards on the right, top of stack first, the item that is resolving
+// highlighted, what each item did right under it once it has resolved, who still has to pass, and the stack's own buttons. A fast
+// auto-resolve (nothing to respond to) still shows here as "Resolving…" instead of flashing past.
+function StackDock(props: StackDockProps) {
+  const [now, setNow] = useState(() => Date.now());
+  const hasResolved = props.feed.some((entry) => entry.status === "resolved");
+  useEffect(() => {
+    if (!hasResolved) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 500);
+    return () => window.clearInterval(timer);
+  }, [hasResolved]);
+  const resolvingIds = new Set(props.feed.filter((entry) => entry.status === "resolving").map((entry) => entry.id));
+  const liveIds = new Set(props.items.map((item) => item.id));
+  // An item that is resolving but was never put in the displayed stack (auto-resolve fast path) still gets a row.
+  const extraRows = props.feed.filter((entry) => entry.status === "resolving" && !liveIds.has(entry.id)).map((entry) => entry.view);
+  const rows = [...extraRows, ...props.items];
+  const resolved = props.feed.filter((entry) => entry.status === "resolved" && entry.resolvedAt !== undefined && now - entry.resolvedAt < STACK_FEED_RESOLVED_VISIBLE_MS && !liveIds.has(entry.id)).slice(0, 2);
+  if (rows.length === 0 && resolved.length === 0) return null;
+  const hasPrompts = Object.keys(props.prompts).length > 0;
   return (
-    <div className={`stack-desc${affectsYou ? " targets-you" : ""}`}>
-      <div className="stack-desc-head">
-        <strong>{description.source}</strong>
-        <span>{description.controllerSeatId === humanSeatId ? "yours" : `controlled by ${description.controller}`}</span>
+    <div className="three-hud stack-dock" aria-label="Stack" aria-live="polite">
+      <div className="stack-dock-header">
+        <strong>Stack</strong>
+        <small>{rows.length === 0 ? "empty" : `${rows.length} item${rows.length === 1 ? "" : "s"}`}</small>
+        {props.live ? <PriorityPips seats={props.seats} required={props.requiredPasses} passed={props.passedSeatIds} prioritySeatId={props.prioritySeatId} humanSeatId={props.humanSeatId} /> : null}
       </div>
-      {affectsYou ? <span className="stack-target-badge">Targets you / your stuff - consider responding</span> : null}
-      {description.summary ? <p className="stack-desc-summary">{description.summary}</p> : null}
-      {description.modes.length > 0 ? (
-        <p className="stack-desc-modes">
-          <b>{description.modes.length === 1 ? "Mode chosen: " : "Modes chosen: "}</b>
-          {description.modes.join(" / ")}
-        </p>
+      <div className="stack-dock-scroll">
+        {rows.map((view, index) => {
+          const resolving = resolvingIds.has(view.id);
+          const description = view.type === "phase" ? undefined : view.description;
+          const kind = view.type === "spell" ? "Spell" : view.type === "trigger" ? "Ability" : "Phase";
+          const note = props.prompts[view.id];
+          const affectsYou = description?.affectsPlayerSeatId !== undefined && description.affectsPlayerSeatId === props.humanSeatId;
+          return (
+            <div className={`stack-dock-item${index === 0 ? " is-top" : ""}${resolving ? " is-resolving" : ""}${affectsYou ? " targets-you" : ""}`} key={view.id}>
+              {view.type !== "phase" && view.sourceCard ? <VisualCard card={view.sourceCard} compact /> : null}
+              <div className="stack-dock-body">
+                <div className="stack-feed-head">
+                  <span className="stack-feed-kind">{kind}</span>
+                  <strong>{stackFeedName(view)}</strong>
+                </div>
+                <small className="stack-feed-status">{resolving ? "Resolving…" : index === 0 ? "Resolves next" : "Waiting"}</small>
+                {affectsYou ? <span className="stack-target-badge">Targets you / your stuff — consider responding</span> : null}
+                {description ? (
+                  <p className="stack-feed-meta">
+                    {description.controllerSeatId === props.humanSeatId ? "yours" : description.controller}
+                    {description.modes.length > 0 ? ` · ${description.modes.join(" / ")}` : ""}
+                  </p>
+                ) : null}
+                {description && description.targets.length > 0 ? (
+                  <ul className="stack-dock-targets" aria-label="Targets">
+                    {description.targets.map((target, targetIndex) => (
+                      <li key={`${target.cardId ?? target.seatId}-${targetIndex}`} className={target.seatId === props.humanSeatId ? "is-mine" : undefined}>
+                        {target.label}
+                      </li>
+                    ))}
+                  </ul>
+                ) : description?.targetsPending ? (
+                  <p className="stack-feed-meta">Target chosen as it resolves</p>
+                ) : null}
+                {description?.summary ? <p className="stack-dock-summary">{description.summary}</p> : null}
+                {note ? <p className="stack-prompt-note">⚠ {note}</p> : null}
+              </div>
+            </div>
+          );
+        })}
+        {resolved.map((entry) => {
+          const lines = stackFeedResultLines(props.events, entry.startEventId);
+          const shown = lines.slice(-STACK_FEED_MAX_RESULT_LINES);
+          return (
+            <div className="stack-dock-item is-resolved" key={`done-${entry.id}`}>
+              <div className="stack-dock-body">
+                <div className="stack-feed-head">
+                  <span className="stack-feed-kind">Resolved</span>
+                  <strong>{stackFeedName(entry.view)}</strong>
+                </div>
+                {shown.length > 0 ? (
+                  <ul className="stack-feed-results">
+                    {lines.length > shown.length ? <li className="stack-feed-more">+{lines.length - shown.length} earlier</li> : null}
+                    {shown.map((line, lineIndex) => (
+                      <li key={`${lineIndex}-${line}`}>{line}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="stack-feed-meta">Nothing further happened.</p>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {props.live ? (
+        <div className="stack-dock-footer">
+          <span className={props.humanHasPriority && hasPrompts ? "stack-respond-now" : undefined}>
+            {props.humanHasPriority ? (hasPrompts ? "Your chance to respond, before the choice appears." : "You have priority.") : `${props.seats.find((seat) => seat.id === props.prioritySeatId)?.name ?? "An agent"} has priority.`}
+          </span>
+          <div className="stack-dock-buttons">
+            <button type="button" className="stack-dock-pass" disabled={!props.humanHasPriority} onClick={props.onPass}>Pass Priority</button>
+            <button type="button" disabled={!props.humanHasPriority || !props.canRespondSelected} onClick={props.onRespondSelected}>Respond Selected</button>
+            <button type="button" disabled={!props.humanHasPriority} onClick={props.onRespond}>Review Response</button>
+            {props.pendingType === "trigger" ? (
+              <button type="button" disabled={!props.humanHasPriority} onClick={props.onResolveTrigger}>Resolve Trigger</button>
+            ) : null}
+          </div>
+        </div>
       ) : null}
-      {description.targets.length > 0 ? (
-        <ul className="stack-targets">
-          {description.targets.map((target, index) => {
-            const mine = target.seatId === humanSeatId;
-            return (
-              <li key={`${target.cardId ?? target.seatId}-${index}`} className={mine ? "is-mine" : undefined}>
-                <b>{target.kind === "player" ? (mine ? "You" : target.label) : target.label}</b>
-                <em>{target.kind === "player" ? "player" : mine ? "yours" : `${target.seatName}'s`}</em>
-              </li>
-            );
-          })}
-        </ul>
-      ) : (
-        <span className="stack-no-targets">{description.targetsPending ? "Target not recorded yet (chosen as it resolves)" : "No targets"}</span>
-      )}
     </div>
   );
 }
 
-type PendingActionView =
+// Who has to pass for the top item to resolve and who already has — "all passed, so it resolves" made visible.
+function PriorityPips({ seats, required, passed, prioritySeatId, humanSeatId }: { seats: PlayerSeat[]; required: string[]; passed: string[]; prioritySeatId?: string; humanSeatId?: string }) {
+  const waiting = seats.filter((seat) => required.includes(seat.id));
+  if (waiting.length === 0) return null;
+  return (
+    <div className="priority-pips" aria-label="Priority passes">
+      {waiting.map((seat) => {
+        const hasPassed = passed.includes(seat.id);
+        const hasPriority = !hasPassed && seat.id === prioritySeatId;
+        return (
+          <span key={seat.id} className={`priority-pip${hasPassed ? " is-passed" : ""}${hasPriority ? " has-priority" : ""}`} title={hasPassed ? "passed" : hasPriority ? "has priority" : "waiting"}>
+            {hasPassed ? "✓" : hasPriority ? "●" : "○"} {seat.id === humanSeatId ? "You" : seat.name}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+export type PendingActionView =
   | {
       id: string;
       type: "phase";
@@ -620,6 +773,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
   const sceneRef = useRef<THREE.Scene | null>(null);
   const dynamicGroupRef = useRef<THREE.Group | null>(null);
   const targetHighlightGroupRef = useRef<THREE.Group | null>(null);
+  const stackArrowGroupRef = useRef<THREE.Group | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const cardMeshesRef = useRef<THREE.Object3D[]>([]);
   const frameRef = useRef<number | undefined>(undefined);
@@ -662,9 +816,9 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
   const [actionLogOpen, setActionLogOpen] = useState(false);
   const [actionLogPosition, setActionLogPosition] = useState({ x: 400, y: 144 });
   const [priorityStopsOpen, setPriorityStopsOpen] = useState(false);
-  // "Hide UI": one master toggle that hides every HUD overlay (buttons, Agent Activity / Action Log / Stack panels, agent hands, hover
-  // preview) so the board is unobstructed. CSS-only (see .is-hud-hidden in globals.css), so panels keep their position and open state.
-  // Choice modals are never hidden. Remembered between sessions in localStorage.
+  // "Hide Menu": collapses the top-right button menu (Agent Activity / Action Log / Stops / ...) down to just its own toggle. It does NOT touch
+  // panels that are open (Agent Activity, Action Log, Stack): those stay put until closed with their own buttons. CSS-only (see
+  // .is-hud-hidden in globals.css). Remembered between sessions in localStorage.
   const [hudHidden, setHudHidden] = useState(false);
   const [activityCollapsed, setActivityCollapsed] = useState(false);
   const [actionLogCollapsed, setActionLogCollapsed] = useState(false);
@@ -817,6 +971,12 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
     const targetHighlightGroup = new THREE.Group();
     scene.add(targetHighlightGroup);
     targetHighlightGroupRef.current = targetHighlightGroup;
+
+    // Arrows from each stack item's source to its target(s) (see the stack-arrow effect). Same reasoning as above: a sibling of dynamicGroup so a
+    // board rebuild can't wipe it, rebuilt by its own effect.
+    const stackArrowGroup = new THREE.Group();
+    scene.add(stackArrowGroup);
+    stackArrowGroupRef.current = stackArrowGroup;
 
     const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
     cameraRef.current = camera;
@@ -1231,6 +1391,54 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
     }
   }, [tableRenderKey, boardTargetingKey]);
 
+  // Stack arrows: for each stack item (top four) that has recorded targets, one arrow per target from the item's source to the target on the
+  // board. A spell's source is its caster's life plate; an ability's is the permanent it came from. One target = one arrow, "X targets" = X
+  // arrows from the same source. The top of the stack is gold, the items below it blue. Targets with no mesh on the board (a graveyard
+  // card) are skipped.
+  const stackArrowSpecs = useMemo(() => {
+    const items = displayedAction && !stackTopFirst.some((item) => item.id === displayedAction.id) ? [displayedAction, ...stackTopFirst] : stackTopFirst;
+    return items.slice(0, 4).flatMap((view, index) => {
+      if (view.type === "phase" || !view.description || view.description.targets.length === 0) return [];
+      return [
+        {
+          id: view.id,
+          top: index === 0,
+          fromCardId: view.type === "trigger" ? view.sourceCard?.id : undefined,
+          fromSeatId: view.description.controllerSeatId,
+          targets: view.description.targets.map((target) => ({ cardId: target.kind === "card" ? target.cardId : undefined, seatId: target.seatId }))
+        }
+      ];
+    });
+  }, [displayedAction, stackTopFirst]);
+  const stackArrowKey = JSON.stringify(stackArrowSpecs);
+  useEffect(() => {
+    const group = stackArrowGroupRef.current;
+    if (!group) return;
+    disposeSceneChildren(group);
+    group.clear();
+    const findCardMesh = (cardId: string) =>
+      cardMeshesRef.current.find((mesh) => {
+        const data = mesh.userData as Partial<InteractionUserData>;
+        return data.kind === "card" && data.card?.id === cardId;
+      });
+    const findPlayerMesh = (seatId: string) =>
+      cardMeshesRef.current.find((mesh) => {
+        const data = mesh.userData as Partial<InteractionUserData>;
+        return data.kind === "player" && data.seatId === seatId;
+      });
+    for (const spec of stackArrowSpecs) {
+      const from = (spec.fromCardId ? findCardMesh(spec.fromCardId) : undefined) ?? findPlayerMesh(spec.fromSeatId);
+      if (!from) continue;
+      for (const target of spec.targets) {
+        const to = target.cardId ? findCardMesh(target.cardId) : findPlayerMesh(target.seatId);
+        if (!to || to === from) continue;
+        const arrow = makeStackArrow(from.position, to.position, spec.top ? "#f4c95d" : "#8ab4f8");
+        if (arrow) group.add(arrow);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tableRenderKey, stackArrowKey]);
+
   const activeName = useMemo(
     () => props.session.seats.find((seat) => seat.id === props.session.activePlayerId)?.name ?? "Active player",
     [props.session]
@@ -1429,15 +1637,6 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
 
   return (
     <section className={`three-game-shell${hudHidden ? " is-hud-hidden" : ""}`}>
-      <button
-        type="button"
-        className="hud-master-toggle"
-        onClick={toggleHudHidden}
-        aria-pressed={hudHidden}
-        title="Hide or show the panels and buttons (H)"
-      >
-        {hudHidden ? "Show UI" : "Hide UI"}
-      </button>
       <div
         className={`three-board ${draggingHandCardId ? "is-drop-target" : ""}`}
         ref={mountRef}
@@ -1461,6 +1660,15 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
         <small>Priority: {prioritySeat?.name ?? "None"}</small>
       </div>
       <div className="three-hud top-right">
+        <button
+          type="button"
+          className="hud-master-toggle"
+          onClick={toggleHudHidden}
+          aria-pressed={hudHidden}
+          title="Hide or show this button menu (H). Open panels stay where they are."
+        >
+          {hudHidden ? "Show Menu" : "Hide Menu"}
+        </button>
         <button type="button" onClick={() => setActivityOpen((current) => !current)}>Agent Activity</button>
         <button type="button" onClick={() => setActionLogOpen((current) => !current)}>Action Log</button>
         <button type="button" onClick={() => setPriorityStopsOpen(true)}>Stops</button>
@@ -1602,7 +1810,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
           <div className="hud-actions">
             <div className="mana-pool" aria-label="Floating mana">
               {(["W", "U", "B", "R", "G", "C"] as ManaColor[]).map((color) => (
-                <span className={`mana-symbol mana-${color.toLowerCase()}`} key={color}>
+                <span className={`mana-symbol mana-${color.toLowerCase()} ${(props.manaPool?.[color] ?? 0) > 0 ? "has-mana" : "is-empty"}`} key={color}>
                   {color} {props.manaPool?.[color] ?? 0}
                 </span>
               ))}
@@ -1666,60 +1874,28 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
               {humanIsActive && !props.pendingAction ? "Continue" : "Advance Phase"}
             </button>
             <button type="button" disabled={Boolean(props.pendingAction) || !humanIsActive} onClick={props.onEndTurn}>End Turn</button>
-            <button type="button" disabled={!props.pendingAction || !humanHasPriority} onClick={props.onRespond}>Review Response</button>
-            <button type="button" disabled={!props.pendingAction || !humanHasPriority || !props.selectedCardCanRespond} onClick={props.onRespondWithSelectedCard}>
-              Respond Selected
-            </button>
-            <button type="button" disabled={props.pendingAction?.type !== "trigger" || !humanHasPriority} onClick={props.onResolvePendingTrigger}>
-              Resolve Trigger
-            </button>
-            <button type="button" disabled={!props.pendingAction || !humanHasPriority} onClick={props.onPassPriority}>Pass Priority</button>
           </div>
         )}
       </div>
-      {displayedAction ? (
-        <div className="three-hud bottom-right">
-          <div className="hud-card-detail stack-detail">
-            <strong>{displayedAction.type === "spell" ? "Stack" : displayedAction.type === "trigger" ? "Trigger" : "Phase Change"}</strong>
-            {displayedAction.type !== "phase" && displayedAction.sourceCard ? (
-              <VisualCard card={displayedAction.sourceCard} compact />
-            ) : null}
-            <p>{displayedAction.message}</p>
-            {displayedAction.type !== "phase" ? <StackDescriptionBlock description={displayedAction.description} humanSeatId={human?.id} /> : null}
-            {displayedAction.type === "spell" && displayedAction.cardTypeLine ? (
-              <p className="stack-type-line">{displayedAction.cardTypeLine}</p>
-            ) : null}
-            {stackTopFirst.length > 0 ? (
-              <div className="stack-list" aria-label="Current stack">
-                <span>Top of stack</span>
-                {stackTopFirst.map((action, index) => (
-                  <div className="stack-item" key={action.id}>
-                    <small>{index === 0 ? "Resolving next" : "Below"}</small>
-                    {action.type !== "phase" && action.sourceCard ? (
-                      <VisualCard card={action.sourceCard} compact />
-                    ) : (
-                      <>
-                        <strong>{action.type === "spell" ? action.cardName : action.type === "trigger" ? `${action.sourceCardName} trigger` : "Phase change"}</strong>
-                        {action.type === "spell" && action.cardTypeLine ? <small>{action.cardTypeLine}</small> : null}
-                      </>
-                    )}
-                    {action.type !== "phase" && action !== displayedAction && action.id !== displayedAction.id ? (
-                      <StackDescriptionBlock description={action.description} humanSeatId={human?.id} />
-                    ) : null}
-                  </div>
-                ))}
-              </div>
-            ) : null}
-            {/* Only shown while props.pendingAction is genuinely still live — once the panel is just
-                lingering after auto-resolving (see the display-persistence effect above), priority
-                has typically already moved elsewhere, and repeating a stale "X has priority" line
-                here would be actively misleading rather than merely uninformative. */}
-            {props.pendingAction ? (
-              <span>{humanHasPriority ? "You have priority." : `${prioritySeat?.name ?? "An agent"} has priority.`}</span>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
+      <StackDock
+        items={displayedAction && !stackTopFirst.some((item) => item.id === displayedAction.id) ? [displayedAction, ...stackTopFirst] : stackTopFirst}
+        feed={props.stackFeed ?? []}
+        events={props.session.events}
+        seats={props.session.seats}
+        requiredPasses={props.requiredPasses ?? []}
+        passedSeatIds={props.priorityPasses ?? []}
+        prioritySeatId={props.prioritySeatId}
+        humanSeatId={human?.id}
+        humanHasPriority={humanHasPriority}
+        prompts={props.stackPrompts ?? {}}
+        live={Boolean(props.pendingAction)}
+        pendingType={props.pendingAction?.type}
+        canRespondSelected={Boolean(props.selectedCardCanRespond)}
+        onPass={props.onPassPriority}
+        onRespond={props.onRespond}
+        onRespondSelected={props.onRespondWithSelectedCard}
+        onResolveTrigger={props.onResolvePendingTrigger}
+      />
       {props.inspectedCard ? (
         <CardInspector
           card={props.inspectedCard}
@@ -4807,6 +4983,32 @@ function addZonePile(
   pile.rotation.y = rot;
   group.add(pile);
   addTextPlane(group, `${label} ${count}`, x, z + 0.75, rot, 0.42);
+}
+
+// A flat arrow lying above the table from one position to another (x/z only), stopping short of the target so the head does not sink into the
+// card. Returns undefined when the two points are nearly the same.
+function makeStackArrow(from: THREE.Vector3, to: THREE.Vector3, color: string): THREE.Group | undefined {
+  const dx = to.x - from.x;
+  const dz = to.z - from.z;
+  const length = Math.hypot(dx, dz);
+  const startGap = 0.45;
+  const endGap = 0.55;
+  const headLength = 0.3;
+  const shaftLength = length - startGap - endGap - headLength;
+  if (shaftLength < 0.1) return undefined;
+  const material = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9, depthTest: false, depthWrite: false });
+  const arrow = new THREE.Group();
+  const shaft = new THREE.Mesh(new THREE.BoxGeometry(shaftLength, 0.02, 0.07), material);
+  shaft.position.x = startGap + shaftLength / 2;
+  const head = new THREE.Mesh(new THREE.ConeGeometry(0.14, headLength, 14), material);
+  head.rotation.z = -Math.PI / 2; // the cone's tip points along +x
+  head.position.x = startGap + shaftLength + headLength / 2;
+  shaft.renderOrder = 20;
+  head.renderOrder = 20;
+  arrow.add(shaft, head);
+  arrow.position.set(from.x, 0.55, from.z);
+  arrow.rotation.y = -Math.atan2(dz, dx);
+  return arrow;
 }
 
 // group.clear() only detaches children: their geometries, materials and canvas textures stay allocated on the GPU, so a long game

@@ -142,6 +142,8 @@ export type SacrificeEffect =
   // "Search your library for a creature card with mana value equal to 1 plus the sacrificed creature's mana value, put it onto the
   // battlefield, then shuffle." (Birthing Pod)
   | { kind: "search_creature_by_sacrificed_mv" }
+  // "Search your library for a creature card with mana value X or less, put it onto the battlefield, then shuffle." (Fiend Artisan); X is the {X} in the cost.
+  | { kind: "search_creature_by_x" }
   // "Return target creature card from your graveyard to your hand." (Memorial to Folly)
   | { kind: "zone_effect"; effect: ZoneEffect }
   | { kind: "targeted_effect"; effect: TargetedEffect }
@@ -170,6 +172,8 @@ export type SacrificeEffect =
   | { kind: "removal"; effect: RemovalEffect };
 
 export interface SacrificeAbility {
+  // The cost has an {X} (Fiend Artisan's "{X}{B/G}, {T}, Sacrifice another creature"): the engine picks X when it is activated.
+  costX?: boolean;
   costMana: number;
   // Raw {..} mana symbols from the cost prefix, {T} excluded (e.g. "{1}{B}") — costMana alone is a
   // digit-only sum, so a colored pip like {B} contributes nothing to it; callers pay through this
@@ -305,6 +309,7 @@ export function parseGenericSacrificeAbilities(oracleText: string): SacrificeAbi
 
     const costManaText = (costPrefix.match(/\{[^}]+\}/g) ?? []).filter((symbol) => !/^\{t\}$/i.test(symbol)).join("");
     abilities.push({
+      ...(/\{x\}/i.test(costPrefix) ? { costX: true } : {}),
       costMana,
       costManaText,
       costTap,
@@ -763,6 +768,10 @@ function parseSacrificeEffectText(text: string): SacrificeEffect | undefined {
   if (/\btarget player mills cards equal to the sacrificed creature'?s power\b/.test(lower)) return { kind: "mill_by_sacrificed_power" };
   if (/\bsearch your library for a creature card with mana value equal to 1 plus the sacrificed creature'?s mana value, put that card onto the battlefield\b/.test(lower)) {
     return { kind: "search_creature_by_sacrificed_mv" };
+  }
+  // "Search your library for a creature card with mana value X or less, put it onto the battlefield, then shuffle." (Fiend Artisan) — X is paid in the cost.
+  if (/\bsearch your library for a creature card with mana value x or less, put (?:it|that card) onto the battlefield\b/.test(lower)) {
+    return { kind: "search_creature_by_x" };
   }
   if (/^put your commander into your hand from the command zone\.?$/.test(lower.trim())) return { kind: "commander_to_hand" };
   if (/\bcreate\b[^.]*\btokens?\b/.test(lower)) return { kind: "create_tokens" };

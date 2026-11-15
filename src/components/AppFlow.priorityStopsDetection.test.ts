@@ -268,3 +268,37 @@ describe("choice-prompt stop: a window before something asks the human to choose
     expect(canReceivePriorityForPendingAction(human, mandatory as never, "human", s, pools, quiet, undefined)).toBe(false);
   });
 });
+
+describe("resolutionPromptNote: the stack entry says when resolving it will ask the human to choose", () => {
+  const sable = () => seat({ id: "sable", name: "Sable", kind: "agent" });
+  const human = () => seat({ id: "human", name: "You", kind: "human", board: { hand: [], battlefield: [] } });
+  const spellFrom = (oracleText: string) => {
+    const spellCard = card({ id: "sp", name: "Test Spell", typeLine: "Sorcery", zone: "hand", oracleText });
+    const caster = seat({ id: "sable", name: "Sable", kind: "agent", board: { hand: [spellCard], battlefield: [] } });
+    const action = { id: "a1", type: "spell" as const, actorSeatId: "sable", cardId: "sp", cardName: "Test Spell", cardTypeLine: "Sorcery", manaSourceIds: [], message: "" };
+    return { s: session([human(), caster], "precombat main phase"), action };
+  };
+
+  it("an edict asks you to choose what to sacrifice, and says to respond first", async () => {
+    const { resolutionPromptNote } = await import("./AppFlow");
+    const { s, action } = spellFrom("Each player sacrifices a creature of their choice.");
+    expect(resolutionPromptNote(s.seats[0], action as never, s)).toMatch(/choose what to sacrifice.*Respond first/);
+  });
+  it("a sacrifice-all effect says there is no choice", async () => {
+    const { resolutionPromptNote } = await import("./AppFlow");
+    const { s, action } = spellFrom("Each opponent sacrifices all creatures they control.");
+    expect(resolutionPromptNote(s.seats[0], action as never, s)).toMatch(/no choice/);
+  });
+  it("a discard effect asks what to discard", async () => {
+    const { resolutionPromptNote } = await import("./AppFlow");
+    const { s, action } = spellFrom("Target opponent discards two cards.");
+    expect(resolutionPromptNote(s.seats[0], action as never, s)).toMatch(/discard/);
+  });
+  it("a spell that never asks anything has no note, and agents get none", async () => {
+    const { resolutionPromptNote } = await import("./AppFlow");
+    const { s, action } = spellFrom("Draw two cards.");
+    expect(resolutionPromptNote(s.seats[0], action as never, s)).toBeUndefined();
+    const { s: s2, action: a2 } = spellFrom("Each player sacrifices a creature of their choice.");
+    expect(resolutionPromptNote(s2.seats[1], a2 as never, s2)).toBeUndefined();
+  });
+});

@@ -269,3 +269,116 @@ describe("evaluateOpeningHand", () => {
     expect(combo.score).toBeGreaterThan(midrange.score);
   });
 });
+
+describe("evaluateOpeningHand: stricter on the opening 7 and for 4-5 color commanders", () => {
+  const wubrg = ["W", "U", "B", "R", "G"];
+  const threeColorLandsNoRamp = () => [
+    land("Plains", ["W"]),
+    land("Island", ["U"]),
+    land("Swamp", ["B"]),
+    card({ name: "Cheap Play", role: "creature", manaValue: 2, colors: ["W"] }),
+    card({ name: "Three Drop", role: "creature", manaValue: 3, colors: ["U"] }),
+    card({ name: "Four Drop", role: "creature", manaValue: 4, colors: ["B"] }),
+    card({ name: "Big Spell", role: "creature", manaValue: 6, colors: ["B"] })
+  ];
+
+  it("mulligans a 5-color hand with no early ramp and no Green source", () => {
+    const result = evaluateOpeningHand(seatWithHand(threeColorLandsNoRamp(), wubrg));
+    expect(result.keep).toBe(false);
+    expect(result.reasons.join(" ")).toMatch(/early ramp/);
+    expect(result.reasons.join(" ")).toMatch(/Green/);
+  });
+
+  it("keeps a 5-color hand with early ramp, a Green source, and three or more colors", () => {
+    const hand = [
+      land("Forest", ["G"]),
+      land("Plains", ["W"]),
+      land("Island", ["U"]),
+      card({ name: "Llanowar Elves", role: "ramp", manaValue: 1, colors: ["G"], producedMana: ["G"] }),
+      card({ name: "Cheap Play", role: "creature", manaValue: 2, colors: ["W"] }),
+      card({ name: "Three Drop", role: "creature", manaValue: 3, colors: ["U"] }),
+      card({ name: "Draw Spell", role: "draw", manaValue: 3, colors: ["U"] })
+    ];
+    const result = evaluateOpeningHand(seatWithHand(hand, wubrg));
+    expect(result.keep).toBe(true);
+    expect(result.reasons.join(" ")).not.toMatch(/wants early ramp/);
+  });
+
+  it("relaxes the 4-5 color rules after mulligans so a shrinking hand isn't held to an impossible standard", () => {
+    const strict = evaluateOpeningHand(seatWithHand(threeColorLandsNoRamp(), wubrg), 0);
+    const afterTwo = evaluateOpeningHand(seatWithHand(threeColorLandsNoRamp(), wubrg), 2);
+    expect(afterTwo.score).toBeGreaterThan(strict.score);
+    expect(afterTwo.reasons.join(" ")).not.toMatch(/wants early ramp/);
+  });
+
+  it("does not apply the 4-5 color rules to a two-color commander", () => {
+    const result = evaluateOpeningHand(seatWithHand(threeColorLandsNoRamp(), ["W", "U"]));
+    expect(result.reasons.join(" ")).not.toMatch(/wants early ramp/);
+  });
+
+  it("a hand with 3 lands but nothing castable through turn 4 is a mulligan on the opening 7 but a keep after one mulligan", () => {
+    const hand = [
+      land("Forest", ["G"]),
+      land("Forest", ["G"]),
+      land("Forest", ["G"]),
+      card({ name: "Expensive A", role: "creature", manaValue: 6, colors: ["G"] }),
+      card({ name: "Expensive B", role: "creature", manaValue: 7, colors: ["G"] }),
+      card({ name: "Expensive C", role: "creature", manaValue: 6, colors: ["G"] }),
+      card({ name: "Expensive D", role: "creature", manaValue: 8, colors: ["G"] })
+    ];
+    const opening = evaluateOpeningHand(seatWithHand(hand, ["G"]), 0);
+    expect(opening.score).toBeLessThan(2);
+    expect(opening.keep).toBe(false);
+    expect(evaluateOpeningHand(seatWithHand(hand, ["G"]), 1).keep).toBe(true);
+  });
+});
+
+describe("evaluateOpeningHand: the bars fall as mulligans are taken (no spiral down to a 4-card hand)", () => {
+  const wubrg = ["W", "U", "B", "R", "G"];
+  // The shape from the live report: 2 lands, no ramp, no plays, most of a 5-color identity missing. Scores around -8.
+  const twoLandJunk = () => [
+    land("Plains", ["W"]),
+    land("Swamp", ["B"]),
+    card({ name: "Big A", role: "creature", manaValue: 6, colors: ["G"] }),
+    card({ name: "Big B", role: "creature", manaValue: 7, colors: ["R"] }),
+    card({ name: "Big C", role: "creature", manaValue: 5, colors: ["U"] }),
+    card({ name: "Big D", role: "creature", manaValue: 6, colors: ["G"] }),
+    card({ name: "Big E", role: "creature", manaValue: 8, colors: ["R"] })
+  ];
+
+  it("forces a mulligan on that hand at the free mulligan, but keeps it once two mulligans have been taken", () => {
+    const opening = evaluateOpeningHand(seatWithHand(twoLandJunk(), wubrg), 0);
+    expect(opening.forceMulligan).toBe(true);
+    for (const taken of [2, 3, 4]) {
+      const shrunk = evaluateOpeningHand(seatWithHand(twoLandJunk(), wubrg), taken);
+      expect(shrunk.score).toBeLessThan(0); // still a poor hand...
+      expect(shrunk.forceMulligan).toBe(false); // ...but not forced
+      expect(shrunk.keep).toBe(true);
+    }
+  });
+
+  it("still mulligans a landless or all-land hand however many mulligans were taken", () => {
+    const landless = Array.from({ length: 7 }, (_, i) => card({ name: `Spell ${i}`, role: "creature", manaValue: 3 }));
+    const allLands = Array.from({ length: 7 }, () => land("Forest", ["G"]));
+    for (const taken of [0, 1, 2, 3]) {
+      expect(evaluateOpeningHand(seatWithHand(landless, ["G"]), taken).keep).toBe(false);
+      expect(evaluateOpeningHand(seatWithHand(allLands, ["G"]), taken).keep).toBe(false);
+    }
+  });
+
+  it("after the first mulligan the original -6 bar applies (a -4/-5 hand is not forced), not the strict opening bar", () => {
+    // 2 lands, thin sources, nothing castable, but all colors covered: scores a few points below zero.
+    const hand = [
+      land("Forest", ["G"]),
+      land("Forest", ["G"]),
+      card({ name: "Big A", role: "creature", manaValue: 6, colors: ["G"] }),
+      card({ name: "Big B", role: "creature", manaValue: 7, colors: ["G"] }),
+      card({ name: "Big C", role: "creature", manaValue: 6, colors: ["G"] }),
+      card({ name: "Big D", role: "creature", manaValue: 8, colors: ["G"] }),
+      card({ name: "Big E", role: "creature", manaValue: 6, colors: ["G"] })
+    ];
+    const first = evaluateOpeningHand(seatWithHand(hand, ["G"]), 1);
+    expect(first.score).toBeGreaterThan(-6);
+    expect(first.forceMulligan).toBe(false);
+  });
+});

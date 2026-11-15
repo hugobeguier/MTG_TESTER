@@ -48,6 +48,23 @@ const HIGH_COLOR_IDENTITY_THRESHOLD = 3;
 const MISSING_COLOR_PENALTY = 1;
 const MISSING_COLOR_PENALTY_HIGH_COLOR_IDENTITY = 2;
 
+// A 4-5 color commander is far more demanding than the general rules above: the deck is slow and color-hungry, so a hand without EARLY
+// ramp or without Green (the color that carries the ramp) is much worse than its land count suggests, and the hand needs to cover at least
+// three of the commander's colors to have a real shot at casting things. Stricter on the opening 7, relaxed once the player has already
+// mulliganed (a smaller hand can't afford to be this picky, and it would otherwise spiral down to a handful of cards).
+const FOUR_PLUS_COLOR_THRESHOLD = 4;
+const EARLY_RAMP_MAX_MANA_VALUE = 3;
+const NO_EARLY_RAMP_PENALTY = 3;
+const NO_GREEN_SOURCE_PENALTY = 3;
+const MIN_COLORS_COVERED_FOUR_PLUS = 3;
+const PENALTY_PER_COLOR_SHORT = 2;
+
+function fourPlusColorStrictness(mulligansTaken: number): number {
+  if (mulligansTaken <= 0) return 1;
+  if (mulligansTaken === 1) return 0.5;
+  return 0;
+}
+
 // A hand can rack up this much negative score from a combination of factors (thin mana, no curve,
 // missing colors, ...) without ever tripping the 0/7-lands automatic mulligan above — but it's just
 // as bad in practice, and an LLM asked to weigh it is only ever advised (not required) to defer to
@@ -56,6 +73,19 @@ const MISSING_COLOR_PENALTY_HIGH_COLOR_IDENTITY = 2;
 // cards" instead of the concrete mana problem it had itself identified. Matches the 0/7-lands
 // penalty (-6) as the bar for "this is not a judgment call."
 const HARD_MULLIGAN_SCORE_THRESHOLD = -6;
+
+// Agents were rarely mulliganing: only a score of -6 or worse was forced, a hand scoring exactly 0 (3 lands but no plays through turn 4)
+// still counted as a keep, and everything in between was left to a language model that tends to keep. But the bars must FALL as mulligans
+// are taken, or the agent spirals down to a hopeless 4-card hand (reported live: Malik, a 5-color deck, scored -8 on every 2-land hand and
+// mulliganed down to 4 cards with no lands and no plays). This table's first mulligan is free (it still keeps 7), so:
+//   - opening 7 (free to redo):  forced at -4 or worse; a keep needs +2 (a hand with no play through turn 4 scores about 1)
+//   - after 1 mulligan (still 7): the original bars: forced at -6 or worse; a keep needs 0
+//   - after 2+ mulligans (6 or fewer cards): never forced by score, only for 0 or 7 lands, and any hand with 2-5 lands is a keep; each
+//     further mulligan costs a card, which is worse than nearly any hand that can cast its lands
+const STRICT_HARD_MULLIGAN_SCORE_THRESHOLD = -4;
+const STRICT_KEEP_SCORE_THRESHOLD = 2;
+const KEEPABLE_AFTER_MULLIGANS_MIN_LANDS = 2;
+const KEEPABLE_AFTER_MULLIGANS_MAX_LANDS = 5;
 
 // Archetype-specific emphasis, layered on top of the same land/ramp/curve/draw/interaction scoring
 // every hand gets — the foundation (lands, mana colors) never changes per archetype, since mana
@@ -189,7 +219,7 @@ function hasPlayOnTurn(hand: VisibleCard[], projectedMana: number, availableColo
   );
 }
 
-export function evaluateOpeningHand(seat: PlayerSeat): OpeningHandEvaluation {
+export function evaluateOpeningHand(seat: PlayerSeat, mulligansTaken = 0): OpeningHandEvaluation {
   const hand = seat.board.hand;
   const lands = hand.filter(isLand);
   const ramp = hand.filter(isRamp);
@@ -286,7 +316,11 @@ export function evaluateOpeningHand(seat: PlayerSeat): OpeningHandEvaluation {
 
   const commanderColors = seat.board.commander?.colorIdentity ?? [];
   const missingColors = missingCommanderColors(availableColors, commanderColors);
-  if (missingColors.length > 0) {
+  if (missingColors.length > 0 && commanderColors.length >= FOUR_PLUS_COLOR_THRESHOLD) {
+    // 4-5 colors: a 7-card hand cannot hold every color, so a per-missing-color penalty marks nearly every hand as bad (a 5-color deck
+    // mulliganed 84% of its openers and spiraled to 4 cards). Replaced by the "covers at least three colors" rule below.
+    reasons.push(`missing a mana source for commander color${missingColors.length === 1 ? "" : "s"} ${missingColors.join("")} (not penalized on its own for a ${commanderColors.length}-color deck; see the three-color rule)`);
+  } else if (missingColors.length > 0) {
     const isHighColorIdentity = commanderColors.length >= HIGH_COLOR_IDENTITY_THRESHOLD;
     const penaltyPerColor = isHighColorIdentity ? MISSING_COLOR_PENALTY_HIGH_COLOR_IDENTITY : MISSING_COLOR_PENALTY;
     score -= missingColors.length * penaltyPerColor;
@@ -300,16 +334,46 @@ export function evaluateOpeningHand(seat: PlayerSeat): OpeningHandEvaluation {
     reasons.push("hand covers all commander colors");
   }
 
-  if (!forceMulligan && score <= HARD_MULLIGAN_SCORE_THRESHOLD) {
+  // 4-5 color commanders: want early ramp, a Green source, and at least three of the commander's colors in hand.
+  const strictness = commanderColors.length >= FOUR_PLUS_COLOR_THRESHOLD ? fourPlusColorStrictness(mulligansTaken) : 0;
+  if (strictness > 0) {
+    const earlyRamp = ramp.filter((card) => card.manaValue <= EARLY_RAMP_MAX_MANA_VALUE);
+    if (earlyRamp.length === 0) {
+      const penalty = Math.round(NO_EARLY_RAMP_PENALTY * strictness);
+      score -= penalty;
+      reasons.push(`a ${commanderColors.length}-color deck wants early ramp (mana value ${EARLY_RAMP_MAX_MANA_VALUE} or less) and this hand has none (-${penalty})`);
+    }
+    if (commanderColors.includes("G") && !availableColors.has("G")) {
+      const penalty = Math.round(NO_GREEN_SOURCE_PENALTY * strictness);
+      score -= penalty;
+      reasons.push(`no Green source, and Green is the ramp color for this ${commanderColors.length}-color deck (-${penalty})`);
+    }
+    const covered = commanderColors.filter((color) => availableColors.has(color as ManaColor)).length;
+    if (covered < MIN_COLORS_COVERED_FOUR_PLUS) {
+      const penalty = Math.round((MIN_COLORS_COVERED_FOUR_PLUS - covered) * PENALTY_PER_COLOR_SHORT * strictness);
+      score -= penalty;
+      reasons.push(`covers only ${covered} of the commander's ${commanderColors.length} colors; wants at least ${MIN_COLORS_COVERED_FOUR_PLUS} (-${penalty})`);
+    }
+  }
+
+  // A shrunken hand (two or more mulligans taken) is judged only on whether it has a playable number of lands.
+  if (mulligansTaken >= 2) {
+    const keepable = lands.length >= KEEPABLE_AFTER_MULLIGANS_MIN_LANDS && lands.length <= KEEPABLE_AFTER_MULLIGANS_MAX_LANDS;
+    if (keepable) reasons.push(`after ${mulligansTaken} mulligans, ${lands.length} lands is keepable — going lower costs more than this hand's flaws`);
+    return { keep: !forceMulligan && keepable, score, reasons, forceMulligan };
+  }
+  const hardThreshold = mulligansTaken === 0 ? STRICT_HARD_MULLIGAN_SCORE_THRESHOLD : HARD_MULLIGAN_SCORE_THRESHOLD;
+  const keepThreshold = mulligansTaken === 0 ? STRICT_KEEP_SCORE_THRESHOLD : 0;
+  if (!forceMulligan && score <= hardThreshold) {
     forceMulligan = true;
     reasons.push(`hand quality score ${score} is low enough to force a mulligan outright`);
   }
 
-  return { keep: !forceMulligan && score >= 0, score, reasons, forceMulligan };
+  return { keep: !forceMulligan && score >= keepThreshold, score, reasons, forceMulligan };
 }
 
-export function agentKeepsHand(seat: PlayerSeat) {
-  return evaluateOpeningHand(seat).keep;
+export function agentKeepsHand(seat: PlayerSeat, mulligansTaken = 0) {
+  return evaluateOpeningHand(seat, mulligansTaken).keep;
 }
 
 export function handHasLand(hand: VisibleCard[]): boolean {

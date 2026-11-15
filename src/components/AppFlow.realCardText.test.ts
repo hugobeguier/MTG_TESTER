@@ -3566,3 +3566,91 @@ describe("Land Tax gating (real Oracle text)", () => {
     expect(phaseConditionBlocks(sess(2, 3), "me", lt().oracleText)).toBe(false);
   });
 });
+
+describe("Cankerbloom's modal text belongs to its activated ability, not to the creature spell", () => {
+  it("is not treated as a modal spell: no cast-time mode prompt and no modal effect applied when it enters", async () => {
+    const { parseGenericModalEffect } = await import("./AppFlow");
+    const { parseSpellModalHeader, parseModalHeader } = await import("@/lib/oracleClauses");
+    const bloom = real("Cankerbloom", "cb", { zone: "hand" });
+    expect(parseModalHeader(bloom.oracleText)).toBeDefined(); // the activated ability itself is still modal
+    expect(parseSpellModalHeader(bloom.oracleText)).toBeUndefined();
+    expect(parseGenericModalEffect(bloom.oracleText, undefined)).toBeUndefined();
+    const s = session([seat("a", [bear("art", { typeLine: "Artifact", manaValue: 2 })]), seat("b", [bear("ench", { typeLine: "Enchantment", manaValue: 2 })])]);
+    expect(spellModePrompt(s, "a", bloom)).toBeUndefined();
+  });
+
+  it("a real modal spell and a modal enters trigger still count as modal", async () => {
+    const { parseSpellModalHeader } = await import("@/lib/oracleClauses");
+    expect(parseSpellModalHeader(real("Austere Command", "ac").oracleText)).toBeDefined();
+    expect(parseSpellModalHeader("When this creature enters, choose one —\n• Draw a card.\n• Gain 2 life.")).toBeDefined();
+  });
+});
+
+describe("a counterspell cannot be cast with nothing on the stack (Swan Song, reported live)", () => {
+  const withSwan = () => {
+    const swan = real("Swan Song", "swan", { zone: "hand", manaValue: 1, colors: ["U"] });
+    const island = bear("isl", { name: "Island", typeLine: "Basic Land — Island", role: "land", manaValue: 0, producedMana: ["U"], oracleText: "{T}: Add {U}." });
+    const caster = seat("a", [island], { board: { hand: [swan], battlefield: [island], graveyard: [] } });
+    return { s: session([caster, seat("b", [])]), caster, swan };
+  };
+  it("is not offered in the main-phase action list, and the legality gate refuses it on an empty stack", async () => {
+    const { checkMoveLegal } = await import("./AppFlow");
+    const { s, caster } = withSwan();
+    const main = legalMainPhaseActions(caster, true, "a", 1, new Set(), s);
+    expect(main.some((a) => a.actionType === "cast_spell" && a.cardId === "swan")).toBe(false);
+    const verdict = checkMoveLegal(s, "a", { id: "cast:swan", actionType: "cast_spell", cardId: "swan", targetIds: [], label: "cast Swan Song" }, { mode: "human", hasPlayedLand: true, activeSeatId: "a", stackEmpty: true });
+    expect(verdict.legal).toBe(false);
+    if (!verdict.legal) expect(verdict.reason).toMatch(/spell on the stack/);
+  });
+  it("is still castable as a response when something is on the stack", async () => {
+    const { checkMoveLegal } = await import("./AppFlow");
+    const { s } = withSwan();
+    const verdict = checkMoveLegal(s, "a", { id: "respond:swan", actionType: "cast_spell", cardId: "swan", targetIds: [], label: "respond with Swan Song" }, { mode: "human", hasPlayedLand: true, activeSeatId: "b", stackEmpty: false });
+    expect(verdict.legal).toBe(true);
+  });
+});
+
+describe("Fiend Artisan: {X}{B/G}, {T}, Sacrifice another creature: search for a creature with mana value X or less (reported live: no ability at all)", () => {
+  const land = (id: string, name: string, color: string) => bear(id, { name, typeLine: `Basic Land — ${name}`, role: "land", manaValue: 0, producedMana: [color], oracleText: `{T}: Add {${color}}.` });
+  const setup = (libraryValues: number[]) => {
+    const fiend = real("Fiend Artisan", "fiend");
+    const fodder = bear("fodder", { manaValue: 1 });
+    const lands = [land("l1", "Swamp", "B"), land("l2", "Forest", "G"), land("l3", "Forest", "G")];
+    const library = libraryValues.map((value, index) => bear(`lib${index}`, { name: `Elf ${index}`, zone: "library", manaValue: value }));
+    const me = seat("a", [fiend, fodder, ...lands], { library, zones: { library: library.length, hand: 0, battlefield: 5, graveyard: 0, exile: 0, command: 0 } });
+    return { me, s: session([me, seat("b", [])]) };
+  };
+
+  it("parses with an X cost, the X-or-less search effect, and the sorcery-speed limit in its clause", async () => {
+    const { parseGenericSacrificeAbilities } = await import("@/lib/activatedAbilities");
+    const [ability] = parseGenericSacrificeAbilities(real("Fiend Artisan", "f").oracleText);
+    expect(ability).toMatchObject({ costX: true, costTap: true, sacrificeTarget: "creature", sacrificeExcludesSelf: true, effect: { kind: "search_creature_by_x" } });
+    expect(ability.clause).toMatch(/activate only as a sorcery/i);
+  });
+
+  it("is offered in the main phase with X set to the best creature the lands can reach (3 lands = X 2 at most), and not at instant speed", async () => {
+    const { me, s } = setup([2, 3, 7]);
+    const main = legalMainPhaseActions(me, true, "a", 3, new Set(), s);
+    const activation = main.find((action) => action.abilityKind === "generic_sacrifice" && action.cardId === "fiend");
+    expect(activation?.label).toMatch(/X=2/);
+    const { legalPriorityActions } = await import("./AppFlow");
+    const response = legalPriorityActions(me, { id: "p", type: "phase", actorSeatId: "b", message: "" } as never, "b", s);
+    expect(response.some((action) => action.abilityKind === "generic_sacrifice" && action.cardId === "fiend")).toBe(false);
+  });
+
+  it("is not offered when no creature in the library can be reached (nothing to fetch)", () => {
+    const { me, s } = setup([6, 7]);
+    expect(legalMainPhaseActions(me, true, "a", 3, new Set(), s).some((action) => action.abilityKind === "generic_sacrifice" && action.cardId === "fiend")).toBe(false);
+  });
+
+  it("paying the cost taps Fiend Artisan, taps the mana for X+1, sacrifices the other creature, and reports X", () => {
+    const { s } = setup([2, 3]);
+    const paid = payGenericSacrificeCost(s, "a", "fiend", 0);
+    expect(paid?.xValue).toBe(2);
+    expect(paid?.sacrificed.map((c) => c.id)).toEqual(["fodder"]);
+    const after = paid!.session.seats[0].board;
+    expect(after.battlefield.find((c) => c.id === "fiend")?.tapped).toBe(true);
+    expect(after.battlefield.filter((c) => c.role === "land" && c.tapped)).toHaveLength(3);
+    expect(after.battlefield.some((c) => c.id === "fodder")).toBe(false);
+  });
+});

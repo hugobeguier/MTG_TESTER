@@ -744,34 +744,13 @@ h3 {
   min-width: 32px;
 }
 
-/* "Hide UI" master toggle. Sits outside the group it hides, above the panels (z-index 8), in the free corner right of .top-right. */
-.hud-master-toggle {
-  position: absolute;
-  right: 1rem;
-  top: 1rem;
-  z-index: 9;
-  min-height: 32px;
-  padding: 0 0.6rem;
-  backdrop-filter: blur(10px);
-  background: rgba(20, 24, 18, 0.84);
-  border: 1px solid rgba(242, 240, 232, 0.16);
-  border-radius: 8px;
-  color: var(--text);
-  cursor: pointer;
-  font-size: 0.75rem;
+/* "Hide Menu": the first button of the top-right menu. In the hidden state only this button remains; open panels (Agent Activity, Action
+   Log, Stack), agent hands and the thinking strip are left alone. */
+.three-hud.top-right .hud-master-toggle[aria-pressed="true"] {
+  opacity: 0.75;
 }
 
-.hud-master-toggle[aria-pressed="true"] {
-  opacity: 0.55;
-}
-
-.hud-master-toggle[aria-pressed="true"]:hover {
-  opacity: 1;
-}
-
-/* Hides only the informational overlays. The turn/phase HUD, the action-button HUD (Pass Priority, ...) and the Stack panel stay, since
-   hiding those would make the game unplayable; choice modals (.card-inspector-backdrop) are never hidden. */
-.three-game-shell.is-hud-hidden :is(.three-hud.top-right, .three-hud.agent-thinking-strip, .activity-panel, .agent-hand-anchor, .hand-hover-preview) {
+.three-game-shell.is-hud-hidden .three-hud.top-right > button:not(.hud-master-toggle) {
   display: none;
 }
 
@@ -829,6 +808,244 @@ h3 {
 .three-hud.bottom-right {
   bottom: calc(132px + 0.85rem);
   right: 1rem;
+}
+
+/* "When this resolves you'll have to choose": the cue to respond before the choice box appears. */
+.stack-prompt-note {
+  background: rgba(255, 207, 92, 0.12);
+  border-left: 3px solid rgba(255, 207, 92, 0.85);
+  font-size: 0.74rem;
+  line-height: 1.35;
+  margin: 0;
+  padding: 0.3rem 0.5rem;
+}
+
+.stack-respond-now {
+  color: rgb(255, 207, 92);
+  font-weight: 600;
+}
+
+/* Priority pips under the stack: who still has to pass for the top item to resolve. */
+.priority-pips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.priority-pip {
+  background: rgba(242, 240, 232, 0.08);
+  border: 1px solid rgba(242, 240, 232, 0.16);
+  border-radius: 999px;
+  font-size: 0.7rem;
+  padding: 0.1rem 0.5rem;
+}
+
+.priority-pip.is-passed {
+  color: var(--muted);
+  opacity: 0.8;
+}
+
+.priority-pip.has-priority {
+  background: rgba(255, 207, 92, 0.16);
+  border-color: rgba(255, 207, 92, 0.7);
+}
+
+/* The one stack display (Arena-style): a column docked on the right, ABOVE the hand row. It never reaches under the hand UI: its height is
+   capped to the space between the top-right menu and the hand, and the item list scrolls inside it. */
+.three-hud.stack-dock {
+  bottom: calc(132px + 0.85rem);
+  gap: 0.5rem;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  max-height: calc(100vh - 132px - 13rem);
+  max-width: none;
+  right: 1rem;
+  width: min(280px, 44vw);
+  z-index: 6;
+}
+
+.stack-dock-header {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.stack-dock-header small {
+  color: var(--muted);
+}
+
+.stack-dock-scroll {
+  display: grid;
+  gap: 0.5rem;
+  align-content: start;
+  overflow-y: auto;
+  padding-right: 0.15rem;
+}
+
+.stack-dock-item {
+  background: rgba(242, 240, 232, 0.05);
+  border: 1px solid rgba(242, 240, 232, 0.14);
+  border-radius: 8px;
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: auto minmax(0, 1fr);
+  padding: 0.45rem;
+}
+
+.stack-dock-item:not(:has(.visual-card)) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.stack-dock-item.is-top {
+  border-color: rgba(255, 207, 92, 0.55);
+}
+
+.stack-dock-item.is-resolving {
+  animation: stack-feed-pulse 0.9s ease-in-out infinite;
+  background: rgba(255, 207, 92, 0.1);
+  border-color: rgba(255, 207, 92, 0.9);
+}
+
+.stack-dock-item.is-resolved {
+  border-color: rgba(120, 200, 140, 0.6);
+}
+
+.stack-dock-item.targets-you {
+  border-color: rgba(230, 100, 90, 0.85);
+}
+
+.stack-dock .visual-card.is-compact {
+  width: 84px;
+}
+
+.stack-dock-body {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.stack-dock-targets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.stack-dock-targets li {
+  background: rgba(242, 240, 232, 0.1);
+  border-radius: 999px;
+  font-size: 0.7rem;
+  padding: 0.05rem 0.5rem;
+}
+
+.stack-dock-targets li.is-mine {
+  background: rgba(230, 100, 90, 0.25);
+}
+
+.stack-dock-summary {
+  -webkit-box-orient: vertical;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  font-size: 0.72rem;
+  line-height: 1.3;
+  margin: 0;
+  overflow: hidden;
+}
+
+.stack-dock-footer {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.stack-dock-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.stack-dock-buttons button {
+  flex: 1 1 auto;
+  min-height: 32px;
+}
+
+.stack-dock-pass:not(:disabled) {
+  background: rgba(255, 207, 92, 0.2);
+  border-color: rgba(255, 207, 92, 0.8);
+  font-weight: 600;
+}
+
+.stack-feed-entry {
+  border-left: 3px solid rgba(242, 240, 232, 0.3);
+  display: grid;
+  gap: 0.2rem;
+  padding-left: 0.55rem;
+}
+
+.stack-feed-entry.is-resolving {
+  animation: stack-feed-pulse 0.9s ease-in-out infinite;
+  border-left-color: rgba(255, 207, 92, 0.9);
+}
+
+.stack-feed-entry.is-resolved {
+  border-left-color: rgba(120, 200, 140, 0.8);
+}
+
+.stack-feed-head {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.stack-feed-kind {
+  color: var(--muted);
+  font-size: 0.62rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.stack-feed-status {
+  color: var(--muted);
+  font-size: 0.7rem;
+  margin-left: auto;
+}
+
+.stack-feed-meta {
+  color: var(--muted);
+  font-size: 0.72rem;
+  margin: 0;
+}
+
+.stack-feed-results {
+  display: grid;
+  font-size: 0.78rem;
+  gap: 0.15rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.stack-feed-more {
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+@keyframes stack-feed-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stack-feed-entry.is-resolving {
+    animation: none;
+  }
 }
 
 .three-hand-panel {
@@ -1017,34 +1234,54 @@ h3 {
   text-align: center;
 }
 
+/* The mana pool: deeper colours with white numbers so the amounts read at a glance; a colour holding no mana is dimmed. */
 .mana-symbol {
-  font-size: 0.74rem;
-  padding: 0.25rem 0.45rem;
+  color: #fff;
+  font-size: 0.85rem;
+  padding: 0.3rem 0.5rem;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
+}
+
+.mana-symbol.is-empty {
+  opacity: 0.4;
+}
+
+.mana-symbol.has-mana {
+  border-color: rgba(255, 255, 255, 0.75);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.25);
 }
 
 .mana-w {
-  background: #f2e8c9;
+  background: #7d764c;
 }
 
 .mana-u {
-  background: #9fc7e8;
+  background: #2c6aa0;
 }
 
 .mana-b {
-  background: #9d99a2;
+  background: #4a4650;
 }
 
 .mana-r {
-  background: #e59a76;
+  background: #b04526;
 }
 
 .mana-g {
-  background: #99c58d;
+  background: #3a7a34;
 }
 
 .mana-c {
-  background: #c9c3b4;
+  background: #6b6558;
 }
+
+/* The mana choice buttons (pick a colour for a spell/ability) keep the original pale chips with dark text. */
+.mana-choice-button.mana-w { background: #f2e8c9; }
+.mana-choice-button.mana-u { background: #9fc7e8; }
+.mana-choice-button.mana-b { background: #9d99a2; }
+.mana-choice-button.mana-r { background: #e59a76; }
+.mana-choice-button.mana-g { background: #99c58d; }
+.mana-choice-button.mana-c { background: #c9c3b4; }
 
 .mana-choice-modal {
   background: #10130f;

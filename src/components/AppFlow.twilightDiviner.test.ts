@@ -164,3 +164,28 @@ describe("Twilight Diviner: whenever one or more other creatures you control ent
     expect(mine(after).board.battlefield.some((c) => c.token)).toBe(true);
   });
 });
+
+describe("Twilight Diviner: the live entry routes reach the surveil and the copy ability", () => {
+  it("casting it consults the rules advisor, which classifies the ETB as the surveil workflow (not swallowed by the trigger system or a zone effect)", async () => {
+    const { shouldConsultRulesAdvisor, commonTriggerEffect } = await import("./AppFlow");
+    expect(shouldConsultRulesAdvisor("spell_resolved_to_battlefield", diviner())).toBe(true);
+    // resolution skips the advisor when the card's own ETB is "already handled" by the trigger system: it must not be
+    expect(commonTriggerEffect(diviner().oracleText, "entered")).toBeUndefined();
+    expect(parseEtbZoneEffect(etbEffectText(diviner().oracleText))).toBeUndefined();
+    const workflow = deterministicRuleWorkflow({ event: "spell_resolved_to_battlefield", actorName: "a", sourceCard: diviner(), battlefield: [], hand: [], graveyard: [], exile: [], libraryPreview: [] } as never);
+    expect(workflow).toMatchObject({ workflow: "surveil_cards", maxChoices: 2 });
+  });
+  it("entering by reanimation (Meren, Victimize) reaches both: the surveil (advisor) and, for a creature it reanimates alongside, the copy", () => {
+    const dead = bear("dead", { zone: "graveyard", manaValue: 3 });
+    const s = session([seat("a", [], { board: { hand: [], battlefield: [diviner()], graveyard: [dead] } }), seat("o", [])]);
+    const moved = moveCardAcrossSeats(s, "a", "dead", "a", "battlefield");
+    const triggers = findEntersBatchWatcherTriggers(moved.session, moved.session.pendingEntries!);
+    expect(triggers).toHaveLength(1);
+    expect(triggers[0].effect).toMatchObject({ kind: "copy_token", candidateIds: ["dead"] });
+  });
+  it("a creature that was cast from hand (not a graveyard) does NOT trigger the copy ability: the card requires a graveyard origin", () => {
+    const fromHand = bear("h", { enteredFrom: "hand" });
+    const s = session([seat("a", [diviner(), fromHand]), seat("o", [])]);
+    expect(findEntersBatchWatcherTriggers(s, [{ seatId: "a", card: fromHand }])).toEqual([]);
+  });
+});

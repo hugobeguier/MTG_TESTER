@@ -90,6 +90,21 @@ describe("describeStackItem", () => {
     expect(formatStackTargets(plain)).toBe("no targets");
   });
 
+  it("describes an activated ability on the stack by its own wording, not the permanent's whole rules text", () => {
+    const d = describeStackItem(session, {
+      id: "a1",
+      type: "trigger",
+      actorSeatId: "ai",
+      controllerSeatId: "ai",
+      sourceCardName: "Spore Frog",
+      message: "Sable activates Spore Frog: Sacrifice this creature: Prevent all combat damage that would be dealt this turn.",
+      effect: { kind: "deferred_ability" },
+      sourceCard: { typeLine: "Creature - Frog", oracleText: "Fading 3. Remove a fade counter from this creature: Prevent all combat damage that would be dealt this turn." }
+    });
+    expect(d.source).toBe("Spore Frog");
+    expect(d.summary).toMatch(/^Sable activates Spore Frog: Sacrifice this creature/);
+  });
+
   it("describes a counterspell's stack-item target", () => {
     const stack: StackItemLike[] = [
       { id: "s6", type: "spell", actorSeatId: "me", cardId: "c6", cardName: "Cultivate" },

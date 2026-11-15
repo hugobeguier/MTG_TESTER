@@ -106,6 +106,8 @@ function truncate(text: string, max: number): string {
 }
 
 function summaryFor(item: StackItemLike): string {
+  // An activated ability on the stack: its own wording ("X activates Y: <the ability>"), not the permanent's whole rules text.
+  if (item.type === "trigger" && item.effect?.kind === "deferred_ability" && item.message) return truncate(item.message, 240);
   const oracle = item.sourceCard?.oracleText?.trim();
   if (item.type === "trigger" && oracle) {
     const lines = oracle.split(/\n+/);

@@ -377,6 +377,19 @@ export function parseModalHeader(oracleText: string): ModalHeader | undefined {
   return { chooseCount, modeTexts, ...((everyMode || upTo) && chooseCount > 1 ? { atMost: true } : {}) };
 }
 
+// The modal header of the card's OWN spell/enters text, as opposed to a "Choose one —" that belongs to an activated ability
+// ("{1}, Sacrifice this creature: Choose one — • Destroy target artifact. ..." — Cankerbloom). Reading that one as the card's spell
+// text made a creature ask for modes when cast and apply its sacrifice-ability modes the moment it entered. A header preceded on its
+// own line by "cost:" is an activated ability; a plain spell ("Choose one —") or an enters trigger ("When ~ enters, choose one —") is not.
+export function parseSpellModalHeader(oracleText: string): ModalHeader | undefined {
+  const header = parseModalHeader(oracleText);
+  if (!header) return undefined;
+  const at = oracleText.search(/\bchoose (?:one or more|one or both|any number|up to (?:two|three)|one|two|three)(?: that hasn'?t been chosen this turn)?\s*[—-]\s*/i);
+  if (at < 0) return header;
+  const lineStart = oracleText.lastIndexOf("\n", at) + 1;
+  return oracleText.slice(lineStart, at).includes(":") ? undefined : header;
+}
+
 // "Evolving Wilds/Terramorphic Expanse/Wayfarer's Bauble-style" search-a-basic-land-and-sacrifice
 // ability recognizer — shared between AppFlow.tsx (which resolves the ability) and
 // ThreeGameTable.tsx (which decides whether to show its activate button). This used to be defined
