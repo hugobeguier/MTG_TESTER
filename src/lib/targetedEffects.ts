@@ -30,6 +30,8 @@ export interface TargetedEffect {
   youGainLife?: number;
   youLoseLife?: number;
   youDraw?: number;
+  // "...Tap it." (Gyome, Master Chef): the target creature is also tapped.
+  alsoTap?: boolean;
 }
 
 const NUMBER_WORDS: Record<string, number> = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7 };
@@ -74,6 +76,13 @@ export function parseTargetedEffect(rawText: string): TargetedEffect | undefined
     .trim()
     .toLowerCase()
     .replace(/\.$/, "");
+
+  // "Target creature gains indestructible until end of turn. Tap it." (Gyome): the same effect, and the target is tapped.
+  const thenTap = text.match(/^(.*?)\.\s+tap it$/);
+  if (thenTap) {
+    const inner = parseTargetedEffect(thenTap[1]);
+    if (inner && !inner.alsoTap) return { ...inner, alsoTap: true };
+  }
 
   // A cantrip: "Target creature gains haste until end of turn. Draw a card." (Expedite) — the same effect plus a card for the controller.
   const cantrip = text.match(/^(.*?)\.\s+(draw a card|draw two cards)$/);

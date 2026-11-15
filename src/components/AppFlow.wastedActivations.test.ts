@@ -115,8 +115,13 @@ describe("other self-sacrifice abilities that would be wasted", () => {
     expect(legalMainPhaseActions(me, true, "a", 1, new Set(), s).filter((x) => x.cardId === "mtf" && x.abilityKind === "generic_sacrifice")).toHaveLength(0);
   });
 
-  it("Nihil Spellbomb's graveyard exile has no sacrifice parser, so it is never auto-offered (nothing to waste)", () => {
-    expect(parseGenericSacrificeAbilities(real("Nihil Spellbomb", "nb").oracleText)).toHaveLength(0);
+  it("Nihil Spellbomb's graveyard exile is a sacrifice ability, but an agent is not offered it while no opponent's graveyard holds anything worth exiling", () => {
+    const abilities = parseGenericSacrificeAbilities(real("Nihil Spellbomb", "nb").oracleText);
+    expect(abilities.map((ability) => ability.effect)).toContainEqual({ kind: "zone_effect", effect: { kind: "exile_graveyard", scope: "target_player" } });
+    const bomb = real("Nihil Spellbomb", "nb");
+    const me = seat("a", [bomb], { kind: "agent", board: { hand: [], battlefield: [bomb], graveyard: [] } });
+    const s = session([me, seat("o", [])]);
+    expect(legalMainPhaseActions(me, true, "a", 1, new Set(), s).filter((x) => x.cardId === "nb" && x.abilityKind === "generic_sacrifice")).toHaveLength(0);
   });
 });
 

@@ -80,3 +80,33 @@ export function typeGrantAppliesTo(granteeFilter: string, card: { typeLine: stri
 export function hasCardType(card: { typeLine: string; grantedTypes?: string[] }, type: string): boolean {
   return card.typeLine.includes(type) || Boolean(card.grantedTypes?.includes(type));
 }
+
+// "Other creatures are Food artifacts in addition to their other types and have "{2}, {T}, Sacrifice this permanent: You gain 3 life."" (Ygra,
+// Eater of All): every OTHER creature on the battlefield, whoever controls it, gains the listed types (card types and subtypes, singularized)
+// and the quoted activated ability. Deliberately this one shape.
+export interface OtherCreaturesGrant {
+  addedTypes: string[];
+  abilityText?: string;
+}
+
+export function parseOtherCreaturesGrant(oracleText: string): OtherCreaturesGrant | undefined {
+  for (const rawLine of oracleText.split("\n")) {
+    const match = rawLine.trim().match(/^other creatures are ([A-Za-z][A-Za-z ]*?) in addition to their other types(?: and have "([^"]+)")?\.?$/i);
+    if (!match) continue;
+    const addedTypes = match[1]
+      .trim()
+      .split(/\s+/)
+      .map((word) => {
+        const singular = word.length > 3 && /s$/i.test(word) ? word.slice(0, -1) : word;
+        return singular.charAt(0).toUpperCase() + singular.slice(1).toLowerCase();
+      });
+    return { addedTypes, abilityText: match[2]?.trim() };
+  }
+  return undefined;
+}
+
+// The card's rules text for reading its ACTIVATED abilities: its own, plus any ability another permanent has granted it (Ygra's "have '{2}, {T},
+// Sacrifice this permanent: You gain 3 life.'"). Every place that parses a card's sacrifice/tap abilities goes through this.
+export function abilityOracleText(card: { oracleText: string; grantedAbilityText?: string }): string {
+  return card.grantedAbilityText ? `${card.oracleText}\n${card.grantedAbilityText}` : card.oracleText;
+}

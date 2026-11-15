@@ -3654,3 +3654,143 @@ describe("Fiend Artisan: {X}{B/G}, {T}, Sacrifice another creature: search for a
     expect(after.battlefield.some((c) => c.id === "fodder")).toBe(false);
   });
 });
+
+describe("Ygra, Eater of All: other creatures are Food artifacts and can be sacrificed for 3 life (reported live: did not work properly)", () => {
+  const land = (id: string, name: string, color: string) => bear(id, { name, typeLine: `Basic Land — ${name}`, role: "land", manaValue: 0, producedMana: [color], oracleText: `{T}: Add {${color}}.` });
+  const setup = () => {
+    const ygra = real("Ygra, Eater of All", "ygra");
+    const mine = bear("mine", { name: "My Bear" });
+    const theirs = bear("theirs", { name: "Their Bear" });
+    const lands = [land("l1", "Swamp", "B"), land("l2", "Forest", "G"), land("l3", "Forest", "G")];
+    const a = seat("a", [ygra, mine, ...lands]);
+    const b = seat("b", [theirs]);
+    return { s: runStateBasedActionsPass(session([a, b])).session };
+  };
+  const card = (s: GameSession, id: string) => s.seats.flatMap((x) => x.board.battlefield).find((c) => c.id === id)!;
+
+  it("every OTHER creature, whoever controls it, becomes a Food artifact and gains the sacrifice ability; Ygra and non-creatures do not", () => {
+    const { s } = setup();
+    for (const id of ["mine", "theirs"]) {
+      expect(card(s, id).grantedTypes).toEqual(expect.arrayContaining(["Food", "Artifact"]));
+      expect(card(s, id).grantedAbilityText).toMatch(/Sacrifice this permanent: You gain 3 life/);
+    }
+    expect(card(s, "ygra").grantedTypes ?? []).not.toContain("Food");
+    expect(card(s, "ygra").grantedAbilityText).toBeUndefined();
+    expect(card(s, "l1").grantedAbilityText).toBeUndefined();
+  });
+
+  it("the grant disappears when Ygra leaves the battlefield", () => {
+    const { s } = setup();
+    const without = runStateBasedActionsPass({ ...s, seats: s.seats.map((x) => ({ ...x, board: { ...x.board, battlefield: x.board.battlefield.filter((c) => c.id !== "ygra") } })) }).session;
+    expect(card(without, "mine").grantedAbilityText).toBeUndefined();
+    expect(card(without, "mine").grantedTypes ?? []).not.toContain("Food");
+  });
+
+  it("offers the granted ability ({2}, {T}, sacrifice this permanent: gain 3 life) in the main phase, and paying it sacrifices that creature", async () => {
+    const { s } = setup();
+    const me = s.seats[0];
+    const actions = legalMainPhaseActions(me, true, "a", 3, new Set(), s);
+    const activation = actions.find((action) => action.abilityKind === "generic_sacrifice" && action.cardId === "mine");
+    expect(activation).toBeDefined();
+    const paid = payGenericSacrificeCost(s, "a", "mine", 0);
+    expect(paid?.sacrificed.map((c) => c.id)).toEqual(["mine"]);
+    const after = applySacrificeEffect(paid!.session, "a", paid!.card, paid!.ability.effect, paid!.ability.clause, paid!.sacrificed);
+    expect(after.seats[0].life).toBe(43);
+    expect(after.seats[0].board.battlefield.some((c) => c.id === "mine")).toBe(false);
+  });
+
+  it("a Food going to the graveyard from the battlefield puts two +1/+1 counters on Ygra (a creature counts, since it is a Food)", async () => {
+    const { s } = setup();
+    const dying = card(s, "mine");
+    const { findPutIntoGraveyardTriggers, resolveTriggerEffect } = await import("./AppFlow");
+    const triggers = findPutIntoGraveyardTriggers(s, "a", dying);
+    const ygraTrigger = triggers.find((t) => t.sourceCardName === "Ygra, Eater of All");
+    expect(ygraTrigger).toBeDefined();
+    const after = resolveTriggerEffect(s, ygraTrigger!);
+    const ygra = after.seats[0].board.battlefield.find((c) => c.id === "ygra")!;
+    expect(ygra.counters?.find((counter) => counter.kind === "+1/+1")?.count).toBe(2);
+    // a non-Food (a land) does not trigger it; Ygra herself is not a Food
+    expect(findPutIntoGraveyardTriggers(s, "a", card(s, "l1"))).toEqual([]);
+    expect(findPutIntoGraveyardTriggers(s, "a", card(s, "ygra"))).toEqual([]);
+  });
+});
+
+describe("Ygra's Ward—Sacrifice a Food", () => {
+  const setup = () => {
+    const ygra = real("Ygra, Eater of All", "ygra");
+    const victim = bear("victim", { name: "Their Bear", manaValue: 3 });
+    const cheap = bear("cheap", { name: "Their Cheap Bear", manaValue: 1 });
+    const a = seat("a", [ygra]);
+    const b = seat("b", [victim, cheap]);
+    return runStateBasedActionsPass(session([a, b])).session;
+  };
+  it("the targeting player sacrifices a Food (their cheapest creature, made a Food by Ygra) and the spell goes on", async () => {
+    const { payWardIfNeeded } = await import("./AppFlow");
+    const s = setup();
+    const ygra = s.seats[0].board.battlefield.find((c) => c.id === "ygra")!;
+    const result = payWardIfNeeded(s, "b", ygra, "Test Removal");
+    expect(result.countered).toBe(false);
+    const theirs = result.session.seats[1].board.battlefield.map((c) => c.id);
+    expect(theirs).not.toContain("cheap");
+    expect(theirs).toContain("victim");
+  });
+  it("counters the spell when the targeting player has no Food (no creatures, no Food tokens)", async () => {
+    const { payWardIfNeeded } = await import("./AppFlow");
+    const ygra = real("Ygra, Eater of All", "ygra");
+    const s = runStateBasedActionsPass(session([seat("a", [ygra]), seat("b", [])])).session;
+    expect(payWardIfNeeded(s, "b", s.seats[0].board.battlefield[0], "Test Removal").countered).toBe(true);
+  });
+});
+
+describe("ability audit fixes: Gyome, Selfless Spirit, Spectacular Spider-Man, Nihil Spellbomb, Soul-Guide Lantern", () => {
+  const withBears = () => {
+    const a = seat("a", [bear("bear1"), bear("bear2")]);
+    const b = seat("b", [bear("theirs")]);
+    return session([a, b]);
+  };
+  const kw = (s: GameSession, id: string) => s.seats.flatMap((x) => x.board.battlefield).find((c) => c.id === id)?.temporaryGrantedKeywords ?? [];
+
+  it("Gyome: {1}, Sacrifice a Food: target creature gains indestructible and is tapped", async () => {
+    const { parseGenericSacrificeAbilities } = await import("@/lib/activatedAbilities");
+    const [ability] = parseGenericSacrificeAbilities(real("Gyome, Master Chef", "g").oracleText).filter((a) => a.effect.kind === "targeted_effect");
+    expect(ability).toMatchObject({ costManaText: "{1}", sacrificeTarget: "permanent", sacrificeTargetTypeFilter: "food", effect: { kind: "targeted_effect", effect: { verb: { kind: "gain_keywords", keywords: ["indestructible"] }, alsoTap: true } } });
+    if (ability.effect.kind !== "targeted_effect") throw new Error("unexpected effect");
+    const s = withBears();
+    const after = applyTargetedEffect(s, "a", real("Gyome, Master Chef", "g"), ability.effect.effect, { kind: "card", seatId: "a", cardId: "bear1" });
+    const hit = after.seats[0].board.battlefield.find((c) => c.id === "bear1")!;
+    expect(hit.tapped).toBe(true);
+    expect(kw(after, "bear1")).toContain("indestructible");
+    expect(kw(after, "bear2")).toEqual([]);
+  });
+
+  it("a creature made a Food (Ygra) is a legal 'Sacrifice a Food' for Gyome's cost", async () => {
+    const { matchesPermanentSacrificeFilter } = await import("./AppFlow");
+    const madeFood = { ...bear("fooded"), grantedTypes: ["Artifact", "Food"] } as VisibleCard;
+    const real_food = bear("token", { typeLine: "Artifact — Food" });
+    expect(matchesPermanentSacrificeFilter(madeFood, "food")).toBe(true);
+    expect(matchesPermanentSacrificeFilter(real_food, "food")).toBe(true);
+    expect(matchesPermanentSacrificeFilter(bear("plain"), "food")).toBe(false);
+  });
+
+  it("Selfless Spirit and Spectacular Spider-Man: sacrifice itself, your creatures (not the opponent's) gain the keywords until end of turn", async () => {
+    const { parseGenericSacrificeAbilities } = await import("@/lib/activatedAbilities");
+    for (const [name, keywords] of [["Selfless Spirit", ["indestructible"]], ["Spectacular Spider-Man", ["hexproof", "indestructible"]]] as const) {
+      const card = real(name, "src");
+      const ability = parseGenericSacrificeAbilities(card.oracleText).find((a) => a.effect.kind === "grant_keywords_to_your_creatures");
+      expect(ability, name).toMatchObject({ sacrificeTarget: "self", effect: { kind: "grant_keywords_to_your_creatures", keywords: [...keywords] } });
+      const after = applySacrificeEffect(withBears(), "a", card, ability!.effect, ability!.clause, []);
+      for (const word of keywords) {
+        expect(kw(after, "bear1")).toContain(word);
+        expect(kw(after, "bear2")).toContain(word);
+        expect(kw(after, "theirs")).not.toContain(word);
+      }
+    }
+  });
+
+  it("Nihil Spellbomb and Soul-Guide Lantern: sacrifice to exile a graveyard", async () => {
+    const { parseGenericSacrificeAbilities } = await import("@/lib/activatedAbilities");
+    const effectsOf = (name: string) => parseGenericSacrificeAbilities(real(name, "x").oracleText).map((a) => a.effect);
+    expect(effectsOf("Nihil Spellbomb")).toContainEqual({ kind: "zone_effect", effect: { kind: "exile_graveyard", scope: "target_player" } });
+    expect(effectsOf("Soul-Guide Lantern")).toContainEqual({ kind: "zone_effect", effect: { kind: "exile_graveyard", scope: "each_opponent" } });
+  });
+});

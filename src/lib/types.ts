@@ -263,6 +263,9 @@ export interface VisibleCard {
   // directly in many places, so appending here at the source (via effectiveManaOracleText) is the one
   // choke point instead of rewriting each of them.
   grantedManaAbilityText?: string;
+  // An activated ability granted by another permanent's static ability (Ygra: other creatures "have '{2}, {T}, Sacrifice this permanent: You gain 3
+  // life.'"). Recomputed every state-based-action pass; read through abilityOracleText() (src/lib/typeGrants.ts).
+  grantedAbilityText?: string;
   // "Enchanted/equipped creature loses all abilities" (Utter Insignificance), or "Creatures
   // enchanted player controls lose all abilities" (Overwhelming Splendor) — recomputed every
   // state-based-action pass from current attachments, same pattern as grantedKeywords. hasKeyword()

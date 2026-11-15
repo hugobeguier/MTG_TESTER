@@ -159,6 +159,8 @@ export type SacrificeEffect =
   // failed to parse and the whole ability never appeared as an activatable option. Reported live as
   // "how do I activate Spore Frog's sacrifice ability" — there was no button to click.
   | { kind: "prevent_combat_damage" }
+  // "Creatures you control gain indestructible until end of turn." (Selfless Spirit), "...gain hexproof and indestructible..." (Spectacular Spider-Man).
+  | { kind: "grant_keywords_to_your_creatures"; keywords: string[] }
   // "Exile all graveyards." (Scavenger Grounds)
   | { kind: "exile_all_graveyards" }
   // "Look at the top seven cards of your library. You may reveal a Dragon card from among them and put it into your hand. Put the
@@ -263,7 +265,8 @@ export function parseGenericSacrificeAbilities(oracleText: string): SacrificeAbi
   const clauses = mergeModalBulletClauses(oracleClauses(oracleText)).map((clause) => clause.replace(/\s*\([^)]*\)/g, "").trim());
 
   for (const rawClause of clauses) {
-    const clause = stripAbilityWordPrefix(rawClause);
+    // A card that sacrifices ITSELF by name ("{1}, Sacrifice Spectacular Spider-Man: ...") is the same as "Sacrifice this creature".
+    const clause = stripAbilityWordPrefix(rawClause).replace(/(\b[Ss]acrifice\s+)[A-Z][\w'’,.-]*(?:\s+[A-Z][\w'’,.-]*)*(\s*:)/, "$1this creature$2");
     const match = clause.match(SACRIFICE_CLAUSE_PATTERN);
     if (!match) continue;
 
@@ -717,6 +720,12 @@ function parseSacrificeEffectText(text: string): SacrificeEffect | undefined {
   const lower = text.toLowerCase();
   // "You gain X life and put X +1/+1 counters on target creature you control, where X is the sacrificed creature's power." (Dina, Essence Brewer)
   if (/^you gain x life and put x \+1\/\+1 counters on target creature you control, where x is the sacrificed creature'?s power\.?$/.test(lower.trim())) return { kind: "gain_life_counters_by_sacrificed_power" };
+  // "Creatures you control gain [keyword and keyword] until end of turn." — a team-wide grant, no target.
+  const teamGrant = lower.trim().match(/^creatures you control gain ([a-z ]+?) until end of turn\.?$/);
+  if (teamGrant) {
+    const keywords = teamGrant[1].split(/\s+and\s+|,\s*/).map((word) => word.trim()).filter((word) => ["indestructible", "hexproof", "lifelink", "vigilance", "haste", "trample", "flying", "deathtouch", "menace", "reach", "first strike", "double strike"].includes(word));
+    if (keywords.length > 0) return { kind: "grant_keywords_to_your_creatures", keywords };
+  }
   // One verb on a chosen target (Yawgmoth's -1/-1 counter): checked first so the self-targeting counter parse below can't claim it.
   const targetedEffect = parseTargetedEffect(text);
   if (targetedEffect) return { kind: "targeted_effect", effect: targetedEffect };
@@ -791,7 +800,7 @@ function parseSacrificeEffectText(text: string): SacrificeEffect | undefined {
   if (searchLibrary) return searchLibrary;
 
   const zoneEffect = parseZoneEffect(text.endsWith(".") ? text : `${text}.`);
-  if (zoneEffect && (zoneEffect.kind === "regrow" || zoneEffect.kind === "reanimate" || zoneEffect.kind === "graveyard_to_library")) return { kind: "zone_effect", effect: zoneEffect };
+  if (zoneEffect && (zoneEffect.kind === "regrow" || zoneEffect.kind === "reanimate" || zoneEffect.kind === "graveyard_to_library" || zoneEffect.kind === "exile_graveyard")) return { kind: "zone_effect", effect: zoneEffect };
 
   // Catches "Destroy/Exile/deals damage to/Return target X [to its owner's hand]" shapes, plain or
   // modal ("Choose one — ..."), by reusing removalSpells.ts's own parser rather than re-narrowing

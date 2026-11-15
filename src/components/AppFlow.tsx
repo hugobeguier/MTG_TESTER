@@ -139,7 +139,7 @@ import {
   type ManaColorLetter
 } from "@/lib/characteristics";
 import { matchesTargetType, parseRemovalEffect, type DynamicAmount, type RemovalEffect, type RemovalTargetType } from "@/lib/removalSpells";
-import { hasCardType, parseTypeGrantEffects, typeGrantAppliesTo } from "@/lib/typeGrants";
+import { abilityOracleText, hasCardType, parseOtherCreaturesGrant, parseTypeGrantEffects, typeGrantAppliesTo } from "@/lib/typeGrants";
 import { parseZoneEffect, type LookDigEffect, type RegrowTargetType, type ZoneEffect } from "@/lib/zoneEffects";
 import { legalTargets, targetsStillLegal, type ChosenTarget, type TargetSpec } from "@/lib/targeting";
 import { describeStackItem, type StackItemDescription, type StackItemLike } from "@/lib/stackDescription";
@@ -2276,6 +2276,8 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     processedDeathBatchRef.current = deaths;
     const deathTriggers = [
       ...deaths.flatMap((death) => findCommonTriggersForPermanentDied(session, death.seatId, death.card, death.attachedSourceIds, deaths)),
+      // "Whenever a Food is put into a graveyard from the battlefield" (Ygra): any permanent type, not only creatures.
+      ...deaths.flatMap((death) => findPutIntoGraveyardTriggers(session, death.seatId, death.card)),
       // Mazirek-style "whenever a player sacrifices another permanent" (any permanent type, so not part of the creature-death scan above).
       ...findSacrificeWatcherTriggers(session, deaths)
     ];
@@ -6226,7 +6228,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     if (humanActionBlockedByChoice(seatId)) return;
     const seat = session.seats.find((item) => item.id === seatId);
     const card = seat?.board.battlefield.find((item) => item.id === cardId);
-    const ability = card ? parseGenericSacrificeAbilities(card.oracleText)[abilityIndex] : undefined;
+    const ability = card ? parseGenericSacrificeAbilities(abilityOracleText(card))[abilityIndex] : undefined;
     const humanPool = seat?.kind === "human" ? poolForSeat(seatId) : undefined;
     // "Activate only as a sorcery." (Fiend Artisan, Birthing Pod): only in the controller's own main phase with an empty stack.
     if (card && ability && hasSorcerySpeedOnlyLimiter(ability.clause) && !(activeSeatId === seatId && isMainPhase(session.phase) && !pendingAction)) {
@@ -6457,7 +6459,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     if (humanActionBlockedByChoice(seatId)) return;
     const seat = session.seats.find((item) => item.id === seatId);
     const card = seat?.board.battlefield.find((item) => item.id === cardId);
-    const ability = card ? parseGenericTapAbilities(card.oracleText)[abilityIndex] : undefined;
+    const ability = card ? parseGenericTapAbilities(abilityOracleText(card))[abilityIndex] : undefined;
     const humanPool = seat?.kind === "human" ? poolForSeat(seatId) : undefined;
     if (seat?.kind === "human" && card && ability) {
       // Dry run of the whole cost first, so a human who can't pay gets told why instead of a click
@@ -12043,8 +12045,8 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       !card.typeLine.includes("Creature") &&
       !isEquipment(card) &&
       isAvailableManaSource(card, seat, session.seats) &&
-      !parseGenericSacrificeAbilities(card.oracleText).some((ability) => ability.costTap) &&
-      parseGenericTapAbilities(card.oracleText).length === 0 &&
+      !parseGenericSacrificeAbilities(abilityOracleText(card)).some((ability) => ability.costTap) &&
+      parseGenericTapAbilities(abilityOracleText(card)).length === 0 &&
       !(isBasicLandFetchAbility(card) && basicLandFetchCostRequiresTap(card))
     );
   }
@@ -12116,8 +12118,8 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       seat &&
       card &&
       !card.tapped &&
-      (parseGenericSacrificeAbilities(card.oracleText).some((ability) => ability.costTap) ||
-        parseGenericTapAbilities(card.oracleText).length > 0 ||
+      (parseGenericSacrificeAbilities(abilityOracleText(card)).some((ability) => ability.costTap) ||
+        parseGenericTapAbilities(abilityOracleText(card)).length > 0 ||
         (isBasicLandFetchAbility(card) && basicLandFetchCostRequiresTap(card)))
     ) {
       setInspectedCard(card);
@@ -14547,7 +14549,7 @@ function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllowed: boo
 
   for (const card of seat.board.battlefield) {
     if (card.abilitiesStripped) continue;
-    parseGenericSacrificeAbilities(card.oracleText).forEach((ability, abilityIndex) => {
+    parseGenericSacrificeAbilities(abilityOracleText(card)).forEach((ability, abilityIndex) => {
       if (!activateOnlyIfConditionMet(ability.clause, seat)) return;
       // "Activate only as a sorcery." (Fiend Artisan, Birthing Pod): never offered at instant speed.
       if (hasSorcerySpeedOnlyLimiter(ability.clause) && !sorcerySpeedAllowed) return;
@@ -14581,6 +14583,8 @@ function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllowed: boo
           if (zone.scope === "you" || theirs < 3) return;
         }
       }
+      // Selfless Spirit / Spectacular Spider-Man: an agent sacrifices its creature only IN RESPONSE to something on the stack, never at random.
+      if (seat.kind !== "human" && ability.effect.kind === "grant_keywords_to_your_creatures" && !(stack && stack.length > 0 && !sorcerySpeedAllowed)) return;
       // Spore Frog's fog does nothing outside a combat with attackers.
       if (seat.kind !== "human" && ability.effect.kind === "prevent_combat_damage" && !(/declare blockers|combat damage/i.test(session.phase) && session.seats.some((other) => other.id !== seat.id && other.board.battlefield.some((attacker) => attacker.attacking)))) return;
       if (ability.costTap && card.tapped) return;
@@ -14631,7 +14635,7 @@ function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllowed: boo
 
   for (const card of seat.board.battlefield) {
     if (card.abilitiesStripped) continue;
-    parseGenericTapAbilities(card.oracleText).forEach((ability, abilityIndex) => {
+    parseGenericTapAbilities(abilityOracleText(card)).forEach((ability, abilityIndex) => {
       if (!activateOnlyIfConditionMet(ability.clause, seat)) return;
       if (hasSorcerySpeedOnlyLimiter(ability.clause) && !sorcerySpeedAllowed) return;
       if (ability.costRemoveCounter && counterCount(card, ability.costRemoveCounter) < 1) return;
@@ -15033,7 +15037,7 @@ export function matchesPermanentSacrificeFilter(card: VisibleCard, filter: strin
   return filter
     .toLowerCase()
     .split(/\s+or\s+/)
-    .some((alternative) => alternative === "permanent" || (alternative === "nonland permanent" ? !card.typeLine.includes("Land") : card.typeLine.toLowerCase().includes(alternative.trim())));
+    .some((alternative) => alternative === "permanent" || (alternative === "nonland permanent" ? !card.typeLine.includes("Land") : `${card.typeLine} ${(card.grantedTypes ?? []).join(" ")}`.toLowerCase().includes(alternative.trim())));
 }
 
 function chooseSacrificeTargets(seat: PlayerSeat, typeFilter: string | undefined, count: number, excludeCardId?: string, anyPermanent = false): VisibleCard[] | undefined {
@@ -15218,7 +15222,7 @@ export function payGenericSacrificeCost(
   const seat = session.seats.find((item) => item.id === seatId);
   const card = seat?.board.battlefield.find((item) => item.id === cardId);
   if (!seat || !card) return undefined;
-  const ability = parseGenericSacrificeAbilities(card.oracleText)[abilityIndex];
+  const ability = parseGenericSacrificeAbilities(abilityOracleText(card))[abilityIndex];
   if (!ability || (ability.costTap && card.tapped)) return undefined;
   if (ability.costTap && card.typeLine.includes("Creature") && card.summoningSick && !hasHaste(card)) return undefined;
   if (!activateOnlyIfConditionMet(ability.clause, seat)) return undefined;
@@ -15548,6 +15552,23 @@ export function applySacrificeEffect(
   // interactive prompt wired up for this entry point yet, matching the auto-resolved mana/search
   // choices used elsewhere in this engine).
   if (effect.kind === "targeted_effect") return applyTargetedEffect(session, seatId, sourceCard, effect.effect);
+  // Selfless Spirit / Spectacular Spider-Man: the controller's creatures gain the keywords until end of turn (read off temporaryGrantedKeywords).
+  if (effect.kind === "grant_keywords_to_your_creatures") {
+    const granted = session.seats.map((item) =>
+      item.id !== seatId
+        ? item
+        : {
+            ...item,
+            board: {
+              ...item.board,
+              battlefield: item.board.battlefield.map((permanent) =>
+                hasCardType(permanent, "Creature") ? { ...permanent, temporaryGrantedKeywords: [...(permanent.temporaryGrantedKeywords ?? []), ...effect.keywords] } : permanent
+              )
+            }
+          }
+    );
+    return rulesEvent({ ...session, seats: granted }, seatId, `${seat.name} activates ${sourceCardName}: their creatures gain ${effect.keywords.join(" and ")} until end of turn.`);
+  }
   // Fixed mana from a sacrifice (Ashnod's Altar) goes into the human's pool in finishPaidSacrificeAbility, which has the pool state.
   if (effect.kind === "add_mana") return session;
   const surveilAdjustedAmount = effect.kind === "surveil" ? effect.amount + surveilBonusForSeat(seat) : effect.amount;
@@ -15620,7 +15641,7 @@ export function payGenericTapCost(
   const seat = session.seats.find((item) => item.id === seatId);
   const card = seat?.board.battlefield.find((item) => item.id === cardId);
   if (!seat || !card) return undefined;
-  const ability = parseGenericTapAbilities(card.oracleText)[abilityIndex];
+  const ability = parseGenericTapAbilities(abilityOracleText(card))[abilityIndex];
   if (!ability) return undefined;
   // "Tap three untapped Zombies you control" has no {T} of its own, so the source's own tapped/summoning-sick state is irrelevant.
   if (!ability.costTapCreatures) {
@@ -17409,6 +17430,15 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
   // Reported live as Mycosynth Lattice's own artifact grant not being counted by Saheeli's affinity
   // discount for lands and other nonartifact permanents it should have applied to.
   const globalGrantSources = next.seats.flatMap((seat) => seat.board.battlefield.flatMap((card) => parseTypeGrantEffects(card.oracleText).filter((grant) => grant.global)));
+  // Ygra, Eater of All: "Other creatures are Food artifacts in addition to their other types and have '...'" — every creature on the battlefield other
+  // than the source, whoever controls it, gains the types and the granted activated ability. Sources are gathered across all seats.
+  const otherCreatureGrantSources = next.seats.flatMap((seat) =>
+    seat.board.battlefield.flatMap((card) => {
+      if (card.abilitiesStripped) return [];
+      const grant = parseOtherCreaturesGrant(card.oracleText);
+      return grant ? [{ sourceId: card.id, grant }] : [];
+    })
+  );
   next = {
     ...next,
     seats: next.seats.map((seat) => {
@@ -17422,6 +17452,15 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
             for (const grant of grantSources) {
               if (typeGrantAppliesTo(grant.granteeFilter, card)) grantedSet.add(grant.grantedType);
             }
+            let grantedAbilityTexts: string[] = [];
+            if (hasCardType(card, "Creature")) {
+              for (const source of otherCreatureGrantSources) {
+                if (source.sourceId === card.id) continue;
+                for (const type of source.grant.addedTypes) grantedSet.add(type);
+                if (source.grant.abilityText) grantedAbilityTexts = [...grantedAbilityTexts, source.grant.abilityText];
+              }
+            }
+            const nextGrantedAbilityText = grantedAbilityTexts.length > 0 ? Array.from(new Set(grantedAbilityTexts)).join("\n") : undefined;
             // Starfield of Nyx's conditional "is a creature" grant — same board-state check the
             // creature-characteristics pass above independently uses for its P/T, so combat/removal-
             // targeting (which read grantedTypes via hasCardType, not the CDA fields) see it too.
@@ -17432,9 +17471,9 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
             if (card.temporaryAnimatedAsCreature) grantedSet.add("Creature");
             if (card.permanentlyArtifact) grantedSet.add("Artifact");
             const nextGrantedTypes = grantedSet.size > 0 ? Array.from(grantedSet).sort() : undefined;
-            if (sameList(nextGrantedTypes, card.grantedTypes)) return card;
+            if (sameList(nextGrantedTypes, card.grantedTypes) && nextGrantedAbilityText === card.grantedAbilityText) return card;
             changed = true;
-            return { ...card, grantedTypes: nextGrantedTypes };
+            return { ...card, grantedTypes: nextGrantedTypes, grantedAbilityText: nextGrantedAbilityText };
           })
         }
       };
@@ -17570,6 +17609,7 @@ function resetForZoneChange<T extends VisibleCard>(card: T, zone: VisibleCard["z
     grantedProtectionColors: undefined,
     grantedManaAbilityText: undefined,
     grantedTypes: undefined,
+    grantedAbilityText: undefined,
     attachTimestamp: undefined,
     cdaPower: undefined,
     cdaToughness: undefined,
@@ -20849,7 +20889,7 @@ function hasResolvableGenericCreatureTarget(session: GameSession, casterSeatId: 
 // auto-attempt payment from the caster's untapped mana, same as the existing counterspell-tax
 // payment in resolvePendingAction's counterTargetId branch. Unpayable means the effect is countered.
 // Every targeted spell/ability goes through here, so it is also where "becomes the target" watchers are checked.
-function payWardIfNeeded(session: GameSession, casterSeatId: string, targetCard: VisibleCard, sourceName: string): { session: GameSession; countered: boolean } {
+export function payWardIfNeeded(session: GameSession, casterSeatId: string, targetCard: VisibleCard, sourceName: string): { session: GameSession; countered: boolean } {
   const result = payWardIfNeededCore(session, casterSeatId, targetCard, sourceName);
   return { ...result, session: applyBecomesTargetTriggers(result.session, casterSeatId, targetCard, sourceName) };
 }
@@ -20893,6 +20933,25 @@ function payWardIfNeededCore(session: GameSession, casterSeatId: string, targetC
         affordable ? `${casterSeat.name} pays ${lifeWard} life for ${targetCard.name}'s ward.` : `${targetCard.name}'s ward counters ${sourceName}: ${casterSeat.name} can't pay ${lifeWard} life.`
       ),
       countered: !affordable
+    };
+  }
+  // "Ward—Sacrifice a Food." (Ygra, Eater of All): the targeting player sacrifices a Food they control (a real Food, or any creature made a Food by
+  // Ygra itself), or the spell/ability is countered. The cheapest Food goes: a true Food first, then the weakest creature.
+  if (/\bward\s*[—-]\s*sacrifice an? food\b/i.test(targetCard.oracleText) && casterSeat && casterSeat.id !== (targetCard.ownerSeatId ?? "")) {
+    const foods = casterSeat.board.battlefield.filter((permanent) => permanent.id !== targetCard.id && hasCardType(permanent, "Food"));
+    // Rank: a real Food (its own type line says Food) first, then the lowest mana value.
+    const wardRank = (permanent: VisibleCard) => (permanent.typeLine.includes("Food") ? 0 : 1000) + permanent.manaValue;
+    const food = [...foods].sort((a, b) => wardRank(a) - wardRank(b))[0];
+    if (!food) {
+      return { session: rulesEvent(session, casterSeatId, `${targetCard.name}'s ward counters ${sourceName}: ${casterSeat.name} has no Food to sacrifice.`), countered: true };
+    }
+    return {
+      session: destroyCreatures(
+        rulesEvent(session, casterSeatId, `${casterSeat.name} sacrifices ${food.name} to pay ${targetCard.name}'s ward.`),
+        [{ seatId: casterSeatId, cardId: food.id, message: `${casterSeat.name} sacrifices ${food.name} to pay ${targetCard.name}'s ward.` }],
+        "Rules action"
+      ),
+      countered: false
     };
   }
   if (wardCost === undefined || wardCost <= 0) return { session, countered: false };
@@ -23979,6 +24038,27 @@ function sacrificeWatcherEffect(effectText: string, controller: PlayerSeat): Tri
   const effect = commonTriggerEffect(text, "clause", undefined, controller);
   if (!effect) return undefined;
   return once ? { ...effect, oncePerTurn: true } : effect;
+}
+
+// "Whenever a Food is put into a graveyard from the battlefield, put two +1/+1 counters on Ygra." (Ygra, Eater of All): a watcher on ANY permanent of the
+// named type (a creature counts when it has been made that type, and so do real Food tokens), whoever controls it. Separate from the "dies" scan above, which
+// only reads the word "dies" and only looks at creatures.
+export function findPutIntoGraveyardTriggers(session: GameSession, deadSeatId: string, deadCard: VisibleCard): Array<Extract<PendingAction, { type: "trigger" }>> {
+  const triggers: Array<Extract<PendingAction, { type: "trigger" }>> = [];
+  for (const seat of session.seats) {
+    for (const source of seat.board.battlefield) {
+      if (source.abilitiesStripped || source.id === deadCard.id) continue;
+      for (const clause of oracleClauses(selfNameAsThisCreature(source))) {
+        const match = clause.match(/^whenever an? ([a-z]+) is put into a graveyard from the battlefield, (.+)$/i);
+        if (!match) continue;
+        const type = match[1].charAt(0).toUpperCase() + match[1].slice(1).toLowerCase();
+        if (!hasCardType(deadCard, type)) continue;
+        const effect = commonTriggerEffect(match[2], "clause", undefined, seat);
+        if (effect) triggers.push(makeCommonTrigger(deadSeatId, seat.id, source, effect, `${source.name} triggers because ${deadCard.name} was put into a graveyard.`));
+      }
+    }
+  }
+  return triggers;
 }
 
 export function findCommonTriggersForPermanentDied(
@@ -28972,7 +29052,7 @@ export function applyTargetedEffect(session: GameSession, controllerSeatId: stri
       next = rulesEvent(copied, controllerSeatId, `${source.name}: creates a token that's a copy of ${targetCard.name}.`);
       return next;
     }
-    const change = (card: VisibleCard): VisibleCard => {
+    const changeBase = (card: VisibleCard): VisibleCard => {
       if (verb.kind === "cant_block_source") return { ...card, temporaryGrantedKeywords: [...(card.temporaryGrantedKeywords ?? []), "can't block:" + source.id] };
       if (verb.kind === "add_counters") return applyCounterDelta(card, verb.counterKind, verb.amount);
       if (verb.kind === "gain_keywords") return { ...card, temporaryGrantedKeywords: [...(card.temporaryGrantedKeywords ?? []), ...verb.keywords], grantedKeywords: [...new Set([...(card.grantedKeywords ?? []), ...verb.keywords])] };
@@ -28987,6 +29067,8 @@ export function applyTargetedEffect(session: GameSession, controllerSeatId: stri
       if (verb.kind === "untap") return { ...card, tapped: false };
       return card;
     };
+    // "...Tap it." (Gyome, Master Chef) taps the target after the verb is applied.
+    const change = (card: VisibleCard): VisibleCard => (effect.alsoTap ? { ...changeBase(card), tapped: true } : changeBase(card));
     next = { ...next, seats: next.seats.map((seat) => (seat.id !== target.seatId ? seat : { ...seat, board: { ...seat.board, battlefield: seat.board.battlefield.map((card) => (card.id === target.cardId ? change(card) : card)) } })) };
     const what = verb.kind === "add_counters" ? `gets ${verb.amount} ${verb.counterKind} counter${verb.amount === 1 ? "" : "s"}` : verb.kind === "gain_keywords" ? `gains ${verb.keywords.join(" and ")} until end of turn` : verb.kind === "pump" ? `gets ${verb.power >= 0 ? "+" : ""}${verb.power}/${verb.toughness >= 0 ? "+" : ""}${verb.toughness}${verb.keywords.length ? " and gains " + verb.keywords.join(" and ") : ""} until end of turn` : verb.kind === "tap" ? "becomes tapped" : "becomes untapped";
     next = rulesEvent(next, controllerSeatId, `${source.name}: ${targetCard.name} ${what}.`);
@@ -33044,6 +33126,7 @@ function moveCardBetweenVisibleZonesCore(session: GameSession, seatId: string, c
     grantedProtectionColors: undefined,
     grantedManaAbilityText: undefined,
     grantedTypes: undefined,
+    grantedAbilityText: undefined,
     attachTimestamp: undefined,
     cdaPower: undefined,
     cdaToughness: undefined,

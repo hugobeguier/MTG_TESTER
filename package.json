@@ -16,7 +16,8 @@
     "selfplay": "vite-node -c vitest.config.ts scripts/self-play.ts --",
     "backlog": "vite-node -c vitest.config.ts scripts/card-backlog.ts",
     "choice-audit": "vite-node -c vitest.config.ts scripts/choice-audit.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "audit:abilities": "vite-node -c vitest.config.ts scripts/ability-audit.ts --"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",

@@ -35,6 +35,7 @@ import { libraryTopCastPermission } from "@/lib/libraryCasting";
 import { parseCycling } from "@/lib/cycling";
 import { parseGraveyardReturnAbility } from "@/lib/graveyardAbilities";
 import { parseManlandAnimation } from "@/lib/activatedAbilities";
+import { abilityOracleText } from "@/lib/typeGrants";
 import { hasKeyword as hasOracleKeyword } from "@/lib/keywords";
 import { cardMatchesTypeFilter, isBasicLandFetchAbility } from "@/lib/oracleClauses";
 import { DEFAULT_STOP_SETTINGS, stopKey, TURN_PHASES, type PriorityStopSettings } from "@/lib/priorityStops";
@@ -1923,7 +1924,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
           }
           sacrificeAbilities={
             inspectedOwner?.seat.kind === "human" && inspectedOwner.zone === "battlefield"
-              ? parseGenericSacrificeAbilities(props.inspectedCard.oracleText)
+              ? parseGenericSacrificeAbilities(abilityOracleText(props.inspectedCard))
               : []
           }
           onActivateSacrificeAbility={
@@ -1935,8 +1936,8 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
             inspectedOwner?.seat.kind === "human" &&
             inspectedOwner.zone === "battlefield" &&
             // A tapped permanent can still have an ability that taps OTHER creatures instead (Cryptbreaker).
-            (!props.inspectedCard.tapped || parseGenericTapAbilities(props.inspectedCard.oracleText).some((ability) => ability.costTapCreatures))
-              ? parseGenericTapAbilities(props.inspectedCard.oracleText)
+            (!props.inspectedCard.tapped || parseGenericTapAbilities(abilityOracleText(props.inspectedCard)).some((ability) => ability.costTapCreatures))
+              ? parseGenericTapAbilities(abilityOracleText(props.inspectedCard))
               : []
           }
           onActivateTapAbility={
