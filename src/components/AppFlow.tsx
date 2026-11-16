@@ -157,10 +157,6 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   // stale by the time the answer arrives. The gate re-validates the proposal against these, never against the stale closure.
   const latestSessionRef = useRef(session);
   latestSessionRef.current = session;
-  const latestPendingActionRef = useRef(pendingAction);
-  latestPendingActionRef.current = pendingAction;
-  const latestActiveSeatIdRef = useRef(activeSeatId);
-  latestActiveSeatIdRef.current = activeSeatId;
   const { priorityStopSettings, updatePriorityStopSettings } = usePriorityStopSettings();
   // One-shot "stop me on the very next priority window" flag (the "Stop Next" button) — deliberately
   // session-only (not persisted): armed by a click, consumed the next time beginPendingAction or
@@ -1778,7 +1774,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       const regenerate = () => {
         const live = latestSessionRef.current;
         const liveSeat = live.seats.find((item) => item.id === seat.id) ?? seat;
-        return legalMainPhaseActions(liveSeat, hasPlayedLandThisTurn(seat.id, live.turn), latestActiveSeatIdRef.current, live.turn, loyaltyActivationsThisTurn.current, live).filter(
+        return legalMainPhaseActions(liveSeat, hasPlayedLandThisTurn(seat.id, live.turn), stackStore.ref.current.activeSeatId as string, live.turn, loyaltyActivationsThisTurn.current, live).filter(
           (candidate) => !agentBannedCasts.current.has(`${phaseKey}:${candidate.id}`)
         );
       };
@@ -1792,8 +1788,8 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
           return checkMoveLegal(live, seat.id, candidate, {
             mode: "agent",
             hasPlayedLand: hasPlayedLandThisTurn(seat.id, live.turn),
-            activeSeatId: latestActiveSeatIdRef.current,
-            stackEmpty: !latestPendingActionRef.current,
+            activeSeatId: stackStore.ref.current.activeSeatId as string,
+            stackEmpty: !stackStore.ref.current.pending,
             fresh: regenerate()
           });
         },
@@ -1915,9 +1911,9 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       const regenerate = () => {
         const live = latestSessionRef.current;
         const liveSeat = live.seats.find((item) => item.id === seat.id) ?? seat;
-        const livePending = latestPendingActionRef.current;
+        const livePending = stackStore.ref.current.pending;
         if (!livePending || livePending.id !== actionOnStack.id) return [{ id: "pass-priority", actionType: "pass_priority" as const, targetIds: [], label: "pass priority" }];
-        return legalPriorityActions(liveSeat, livePending, latestActiveSeatIdRef.current, live);
+        return legalPriorityActions(liveSeat, livePending, stackStore.ref.current.activeSeatId as string, live);
       };
       const decision = await decideWithGate({
         regenerate,
@@ -1926,8 +1922,8 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
           checkMoveLegal(latestSessionRef.current, seat.id, candidate, {
             mode: "agent",
             hasPlayedLand: true,
-            activeSeatId: latestActiveSeatIdRef.current,
-            stackEmpty: !latestPendingActionRef.current,
+            activeSeatId: stackStore.ref.current.activeSeatId as string,
+            stackEmpty: !stackStore.ref.current.pending,
             fresh: regenerate()
           }),
         onReject: (rejection) => addEvent(`${seat.name} tried ${rejection.label} but it is not legal: ${rejection.reason}; nothing was spent.`, seat.id, "Rules action")
