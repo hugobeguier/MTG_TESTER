@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import type { AgentAction, AgentReasoning, CardImageUris, ColoredMana, CommanderDeck, GameEvent, GameSession, InterpretedEffect, ManaColor, ManaContribution, ManaPool, PlayerSeat, RestrictedManaBatch, VisibleCard } from "@/lib/types";
-import { deserializeTurnCounters, isCleanSaveStop, SAVE_FORMAT_VERSION, serializeTurnCounters, type GameSnapshot, type SavedGameSummary } from "@/lib/saveGame";
+import { deserializeTurnCounters, isCleanSaveStop, SAVE_FORMAT_VERSION, serializeTurnCounters, type GameSnapshot } from "@/lib/saveGame";
 import { deterministicRuleWorkflow, eventRelevantOracleText, type RuleWorkflow } from "@/lib/rulesAdvisor";
 import { decideWithGate } from "@/lib/moveLegality";
 import type { PrimitiveActionPlan, PrimitiveActionStep } from "@/lib/primitiveActionPlan";
@@ -44,7 +44,7 @@ import { abilityOracleText, hasCardType } from "@/lib/typeGrants";
 import { parseZoneEffect, type ZoneEffect } from "@/lib/zoneEffects";
 import { legalTargets, targetsStillLegal, type ChosenTarget, type TargetSpec } from "@/lib/targeting";
 import { removalEffectTargetSpec, zoneEffectTargetSpec } from "@/lib/targetSpecs";
-import { DEFAULT_STOP_SETTINGS, stopKey, TURN_PHASES, type PriorityStopSettings } from "@/lib/priorityStops";
+import { stopKey, TURN_PHASES } from "@/lib/priorityStops";
 import { anyPhaseTrigger } from "@/lib/phaseTriggers";
 import { activateSteelHellkiteX, applyGenericModalEffect, applyMassBounceEffect, applyMassPumpEffect, applyPrimitiveAction, applyRemovalEffect, applySimpleLifeChange, applySpellExtraEffect, applyTargetedPumpEffect, applyZoneEffect, castTargetLegal, chooseAgentLibraryCardForRuleChoice, chooseRemovalTarget, chooseWorstHandCardToDiscard, discardableHandCards, drawForSeat, drawMultipleForSeat, genericCostShim, genericManaAbilityCostShim, genericModalModeHasLegalTarget, matchesEachPlayerSacrificeFilter, matchesPermanentSacrificeFilter, matchesSacrificeFilter, noLegalTargetEvent, parseCounterAccumulationTrigger, parseGenericModalEffect, parseTargetedPump, putLookedAtCardsOnBottom, removalEffectHasLegalTarget, resolveAgentLibraryLookWorkflow, resolveDynamicAmount, resolveProliferate, substituteX, transformPermanent } from "@/engine/effects";
 export { activateSteelHellkiteX, agentSurveilDecision, applyGenericModalEffect, applyMassBounceEffect, applyMassPumpEffect, applyMill, applyRemovalEffect, applyRevealTopExchange, applySimpleLifeChange, applySpellExtraEffect, applyTargetedPumpEffect, applyZoneEffect, castTargetLegal, chooseAgentLibraryCardForRuleChoice, drawForSeat, drawMultipleForSeat, genericCostShim, matchesPermanentSacrificeFilter, parseGenericModalEffect, parseTargetedPump, payWardIfNeeded, putLookedAtCardsOnBottom, resolveAgentLibraryLookWorkflow, resolveDeferredChoice, resolveSacrificeSelfThenSearch, resolveSearchLibraryPut, substituteX } from "@/engine/effects";
@@ -62,9 +62,14 @@ export { runStateBasedActionsPass, winTheGame } from "@/engine/stateBased";
 import { hasHexproof, hasIndestructible, hasShroud } from "@/engine/damage";
 export { addDamageShieldsFromSpec, applyCombatDamageToTarget } from "@/engine/damage";
 import { ThreeGameTable, type StackFeedEntry } from "./ThreeGameTable";
-import { AGENT_REQUEST_TIMEOUT_MS, MAX_SESSION_EVENTS, agentPaceMs, loadPriorityStopSettings, loadRuleWorkflowCacheOnce, logAdvisorUse, prewarmRuleWorkflowCache, primitiveActionPlanCache, ruleWorkflowCache, ruleWorkflowCacheKey, savePriorityStopSettings, saveRuleWorkflowCache, stackBeatMs, warmUpAgentModel } from "@/lib/agentRuntime";
+import { usePriorityStopSettings } from "./hooks/usePriorityStopSettings";
+import { useDeckLibrary } from "./hooks/useDeckLibrary";
+import { useSavedGames } from "./hooks/useSavedGames";
+import { SetupScreen } from "./SetupScreen";
+import { GameOverDialog } from "./GameOverDialog";
+import { AGENT_REQUEST_TIMEOUT_MS, MAX_SESSION_EVENTS, agentPaceMs, loadRuleWorkflowCacheOnce, logAdvisorUse, prewarmRuleWorkflowCache, primitiveActionPlanCache, ruleWorkflowCache, ruleWorkflowCacheKey, saveRuleWorkflowCache, stackBeatMs, warmUpAgentModel } from "@/lib/agentRuntime";
 import { type BasicLandFetchSearchState, type BlockChoiceState, type LegalAgentAction, type LibraryLookMode, type LibraryLookState, type ManaChoiceState, type ManualLibrarySearchState, type MyriadSearchState, type MyriadTapChoiceState } from "@/engine/flowTypes";
-import { DeckSetupPanel, Status, Topbar, applyDeckToSeat, applyDefaultDecks, createInitialConfigs, fallbackCommander, formatDeckList, inferColors, validateConfigsForPlay, type SavedDeck, type SeatConfig } from "@/components/DeckSetup";
+import { applyDeckToSeat, createInitialConfigs, fallbackCommander, formatDeckList, inferColors, validateConfigsForPlay, type SeatConfig } from "@/components/DeckSetup";
 import { animateEnchantmentSpec, applyEnchantmentAnimation, applyGenericAbilityEffect, applyGenericTapEffect, applySacrificeEffect, canTapForCost, chooseAnnihilatorSacrifices, chooseLandToReturn, choosePermanentToBlink, cycleCardInSession, parseGenericAbilityEffect, payGenericManaCost, payGenericSacrificeCost, payGenericTapCost, resolveEquip, resolveManlandAnimation, resolveSelfUntapAbility, seatVerb, tapCreaturesAltCostFor, zoneChoiceSpecFor } from "@/engine/abilities";
 import { buildAgentDecisionContext, findSpellSourceCard, isStackAction, nextPrioritySeatId, pendingActionRequiredPasses, pendingActionSummary, resolutionPromptNote, shouldConsultRulesAdvisor, withPendingActionSourceCard } from "@/engine/priority";
 import { checkMoveLegal, cumulativeUpkeepCost, fallbackLegalAction, formatLoyaltyCost, hasAgentMainPhaseAction, isCumulativeUpkeepCard, isPendingActionLikelyIrrelevantToSeat, legalMainPhaseActions, legalPriorityActions, loyaltyTurnKey, spellIsImmuneToCounters } from "@/engine/legalActions";
@@ -153,20 +158,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   const latestActiveSeatIdRef = useRef(activeSeatId);
   latestActiveSeatIdRef.current = activeSeatId;
   const [priorityPasses, setPriorityPasses] = useState<string[]>([]);
-  // The human's priority-stop preferences (src/lib/priorityStops.ts) — starts at the hardcoded
-  // defaults (matches server-rendered markup) and is swapped for whatever persisted on a prior visit
-  // once the mount effect below runs, same SSR-safety shape as loadRuleWorkflowCacheOnce.
-  const [priorityStopSettings, setPriorityStopSettingsState] = useState<PriorityStopSettings>(DEFAULT_STOP_SETTINGS);
-  useEffect(() => {
-    setPriorityStopSettingsState(loadPriorityStopSettings());
-  }, []);
-  function updatePriorityStopSettings(updater: (prev: PriorityStopSettings) => PriorityStopSettings) {
-    setPriorityStopSettingsState((prev) => {
-      const next = updater(prev);
-      savePriorityStopSettings(next);
-      return next;
-    });
-  }
+  const { priorityStopSettings, updatePriorityStopSettings } = usePriorityStopSettings();
   // One-shot "stop me on the very next priority window" flag (the "Stop Next" button) — deliberately
   // session-only (not persisted): armed by a click, consumed the next time beginPendingAction or
   // resumeStackAction opens/reopens a window at all, regardless of whether that window ends up
@@ -182,39 +174,8 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   // human's own game actions (cast, activate, pass) are refused with a message — see humanActionBlockedByChoice — except tapping lands.
   const [choiceMinimized, setChoiceMinimized] = useState(false);
   const [setupMessage, setSetupMessage] = useState<string | undefined>();
-  const [configs, setConfigs] = useState<SeatConfig[]>(() => createInitialConfigs(initialSession.seats));
-  // Saved decks (.txt files under decks/) offered in each seat's "Load saved deck" dropdown. The first successful load
-  // also fills still-empty seats with the default Foundations decks (see applyDefaultDecks).
-  const [deckLibrary, setDeckLibrary] = useState<SavedDeck[]>([]);
-  const defaultDecksApplied = useRef(false);
-  useEffect(() => {
-    fetch("/api/decks/library")
-      .then((response) => (response.ok ? response.json() : []))
-      .then((decks: SavedDeck[]) => {
-        setDeckLibrary(decks);
-        if (defaultDecksApplied.current) return;
-        defaultDecksApplied.current = true;
-        setConfigs((current) => applyDefaultDecks(current, decks));
-      })
-      .catch(() => {});
-  }, []);
-  // Saved-game list for the setup screen's Load panel — refetched whenever the setup screen becomes
-  // visible (a save/delete made from elsewhere in this same session, or in another tab, should show
-  // up without a full page reload).
-  const [savedGames, setSavedGames] = useState<SavedGameSummary[]>([]);
-  useEffect(() => {
-    if (mode !== "setup") return;
-    let cancelled = false;
-    fetch("/api/saves")
-      .then((response) => (response.ok ? response.json() : []))
-      .then((list: SavedGameSummary[]) => {
-        if (!cancelled) setSavedGames(list);
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [mode]);
+  const { configs, setConfigs, deckLibrary, defaultDecksApplied } = useDeckLibrary(initialSession.seats);
+  const { savedGames, setSavedGames } = useSavedGames(mode);
   // startGame is async (it awaits an Ollama mulligan decision per agent seat, which can take
   // several seconds each) with nothing else gating re-entry — playBlockedByBuild only reflects
   // per-seat deck-build status, not "a game is currently being started." Without this, clicking
@@ -10529,92 +10490,29 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
 
   if (mode === "setup") {
     return (
-      <main className="app-shell">
-        <Topbar setupSummary={setupSummary} />
-        <section className="status-grid" aria-label="Runtime status">
-          <Status label="Ollama" value={ollama.ok ? "Ready" : "Offline"} detail={ollama.message} />
-          <Status label="XMage" value={session.xmage.status.replace("_", " ")} detail={session.xmage.message} />
-          <Status label="Format" value="Commander" detail="One human plus three AI seats, 40 life, Bracket 3 target." />
-          <Status label="Setup" value={setupSummary} detail="Build AI decks from commanders or validate pasted deck lists." />
-        </section>
-        <section className="setup-board">
-          <div className="setup-heading">
-            <div>
-              <p className="eyebrow">Page 1</p>
-              <h2>Deck Building</h2>
-              {setupMessage ? <p className="setup-play-message">{setupMessage}</p> : null}
-            </div>
-            <button className="play-button" disabled={playBlockedByBuild || gameStarting} type="button" onClick={startGame}>
-              {gameStarting ? "Starting..." : "PLAY"}
-            </button>
-          </div>
-          {savedGames.length > 0 ? (
-            <div className="saved-games-panel">
-              <h3>Saved games</h3>
-              <ul>
-                {savedGames.map((save) => (
-                  <li key={save.id} className="saved-games-row">
-                    <div>
-                      <strong>{save.name}</strong>
-                      <span>
-                        {save.summary} · saved {new Date(save.savedAt).toLocaleString()}
-                        {save.formatVersion !== SAVE_FORMAT_VERSION ? " · incompatible save" : ""}
-                      </span>
-                    </div>
-                    <div className="saved-games-row-actions">
-                      <button type="button" disabled={save.formatVersion !== SAVE_FORMAT_VERSION} onClick={() => loadSavedGame(save.id)}>
-                        Load
-                      </button>
-                      <button type="button" onClick={() => deleteSavedGameEntry(save.id)}>
-                        Delete
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-          <p>
-            <a href="/decks">Create or edit decks</a>
-          </p>
-          <div className="setup-grid">
-            {configs.map((config) => (
-              <DeckSetupPanel config={config} key={config.seatId} library={deckLibrary} onBuild={buildDeck} onUpdate={updateConfig} />
-            ))}
-          </div>
-        </section>
-      </main>
+      <SetupScreen
+        setupSummary={setupSummary}
+        ollama={ollama}
+        xmage={session.xmage}
+        setupMessage={setupMessage}
+        playBlockedByBuild={playBlockedByBuild}
+        gameStarting={gameStarting}
+        onStartGame={startGame}
+        savedGames={savedGames}
+        onLoadSavedGame={loadSavedGame}
+        onDeleteSavedGame={deleteSavedGameEntry}
+        configs={configs}
+        deckLibrary={deckLibrary}
+        onBuildDeck={buildDeck}
+        onUpdateConfig={updateConfig}
+      />
     );
   }
 
   return (
     <main className="app-shell game-shell">
       {session.status === "complete" && !gameOverDismissed ? (
-        <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label="Game over">
-          <article className="mana-choice-modal">
-            <header>
-              <p className="eyebrow">Game over</p>
-              <h2>{session.winnerSeatId ? `${session.seats.find((seat) => seat.id === session.winnerSeatId)?.name ?? "A player"} won!` : "The game ended with no winner."}</h2>
-            </header>
-            <p>{session.seats.filter((seat) => seat.hasLost).map((seat) => `${seat.name}: ${seat.lossReason ?? "lost"}`).join(" · ")}</p>
-            {gameStarting ? (
-              <p>Dealing new hands. Each AI seat decides its mulligan with its own model (and loads it first), so this can take a minute or two - the board changes when they are done.</p>
-            ) : setupMessage ? (
-              <p>{setupMessage}</p>
-            ) : null}
-            <div className="modal-actions">
-              <button type="button" className="inspector-action" disabled={gameStarting} onClick={() => void startGame()}>
-                {gameStarting ? "Restarting..." : "Play again (same decks)"}
-              </button>
-              <button type="button" className="inspector-action" onClick={() => setGameOverDismissed(true)}>
-                Look at the board
-              </button>
-              <button type="button" className="inspector-action" onClick={() => setMode("setup")}>
-                Back to setup
-              </button>
-            </div>
-          </article>
-        </div>
+        <GameOverDialog session={session} gameStarting={gameStarting} setupMessage={setupMessage} onPlayAgain={startGame} onDismiss={() => setGameOverDismissed(true)} onBackToSetup={() => setMode("setup")} />
       ) : null}
       <button className="game-back-button" type="button" onClick={() => setMode("setup")} aria-label="Back to setup">
         ×
