@@ -15,6 +15,8 @@ export interface StackStateHandle {
   update: (action: PendingAction) => void;
   remove: (id: string) => PendingAction[];
   setPending: (action: PendingAction | undefined) => void;
+  setPasses: (passes: string[]) => void;
+  setPrioritySeatId: (seatId: string | undefined) => void;
 }
 
 export function useStackState(initial: { activeSeatId?: string; prioritySeatId?: string }): StackStateHandle {
@@ -36,6 +38,8 @@ export function useStackState(initial: { activeSeatId?: string; prioritySeatId?:
       apply(() => next);
       return remaining;
     },
-    setPending: (action) => apply((s) => ({ ...s, pending: action }))
+    setPending: (action) => apply((s) => ({ ...s, pending: action })),
+    setPasses: (passes) => apply((s) => ({ ...s, passes })),
+    setPrioritySeatId: (seatId) => apply((s) => ({ ...s, prioritySeatId: seatId }))
   };
 }

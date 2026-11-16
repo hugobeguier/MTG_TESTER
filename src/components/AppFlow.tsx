@@ -80,7 +80,7 @@ import { applyEndStepEffects, clearTemporaryBuffs, effectiveMaxHandSize, hasExtr
 import { activateGraveyardReturnInSession, agentTargetedTriggerKinds, agentTriggerTarget, findAnyCombatDamageToOpponentTriggers, findAttackTriggers, findBreenaAttackTriggers, findCardsLeftGraveyardTriggers, findCastTriggers, findCombatDamageToPlayerTriggers, findCommonTriggersForPermanentDied, findEntersBatchWatcherTriggers, findLandRaidTriggers, findLeavesBattlefieldTriggers, findLifeGainTriggers, findMultiAttackTriggers, findPutIntoGraveyardTriggers, findSacrificeWatcherTriggers, grantKeywordsToCreature, hasSorcerySpeedOnlyLimiter, lifeGainReplacementBonus, parseMetalcraftAttackDebuff, triggerDamageAiming } from "@/engine/triggerFinders";
 import { chooseReadAheadChapter, applyAuraAttachToPlayer, applyAuraAttachment, applyChosenColor, applyChosenCreatureType, chooseAuraAttachTarget, chooseBestBasicLandPairForMyriad, entersWithChargeCounterPerKick, entersWithXCounters, exploreCount, getBasicLandFetchOptions, getMyriadLandscapeOptions, grantsExtraTurn, handCardsOfTypes, isSagaCard, loreCounterCount, resolveBasicLandFetchSearch, resolveExplore, resolveMyriadLandscapeSearch, type AuraAttachResult } from "@/engine/etb";
 import { agentCastTimeRemovalChoices, applyCastGenericModes, applyCastRemoval, applyLabeledContinuation, castFaceCard, castModeLabels, castStructure, describeRemovalMode, discardOptions, encodeChosenTarget, findCardAnywhere, hasResolvableTarget, labeledTargetOptions, nextCastPrompt, sacrificeOptions, spellModePrompt, spellTargetSlots, stackTargetText, steelHellkiteXOptions } from "@/engine/castTargets";
-import { useStackState } from "@/hooks/useStackState";
+import { useStackState } from "@/components/hooks/useStackState";
 import { MULLIGAN_HARD_CAP, MULLIGAN_SOFT_CAP, addLibraryLookEvent, agentKeepsHand, isLimDulsVault, keepOpeningHandSize, openingHandBattlefieldCards, openingHandKeepSize, putOpeningHandCardOnBattlefield, resolveAgentLimDulVault, withOpeningHand } from "@/engine/mulligan";
 import { blockChoiceView, ruleChoiceLabel, ruleChoiceView } from "@/components/viewModels";
 export type { LegalAgentAction } from "@/engine/flowTypes";
@@ -129,7 +129,6 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     loadRuleWorkflowCacheOnce();
   }, []);
   const [activeSeatId, setActiveSeatId] = useState(initialSession.activePlayerId ?? initialSession.seats[1]?.id);
-  const [prioritySeatId, setPrioritySeatId] = useState(initialSession.activePlayerId ?? initialSession.seats[1]?.id);
   // Stable identity for the table's session prop: a fresh `{ ...session }` on every render made everything inside the table that
   // depends on `props.session` recompute on unrelated re-renders (hover, thinking text, timers).
   const tableSession = useMemo(() => (session.activePlayerId === activeSeatId ? session : { ...session, activePlayerId: activeSeatId }), [session, activeSeatId]);
@@ -148,10 +147,12 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   const [myriadSearch, setMyriadSearch] = useState<MyriadSearchState | undefined>();
   const [myriadTapChoice, setMyriadTapChoice] = useState<MyriadTapChoiceState | undefined>();
   const [basicLandFetchSearch, setBasicLandFetchSearch] = useState<BasicLandFetchSearchState | undefined>();
-  const stackStore = useStackState({ activeSeatId, prioritySeatId });
-  const { replaceStack: replaceStackActions, push: pushStackAction, update: updateStackAction, remove: removeStackAction, setPending: setPendingAction } = stackStore;
+  const stackStore = useStackState({ activeSeatId, prioritySeatId: initialSession.activePlayerId ?? initialSession.seats[1]?.id });
+  const { replaceStack: replaceStackActions, push: pushStackAction, update: updateStackAction, remove: removeStackAction, setPending: setPendingAction, setPasses: setPriorityPasses, setPrioritySeatId } = stackStore;
   const stackActions = stackStore.state.stack;
   const pendingAction = stackStore.state.pending;
+  const priorityPasses = stackStore.state.passes;
+  const prioritySeatId = stackStore.state.prioritySeatId as string; // was useState<string> (always set); keeps read sites' types
   // Always-current views of state for the legality gate: an agent decision awaits an LLM call, so the render-time `session` captured by its closure can be
   // stale by the time the answer arrives. The gate re-validates the proposal against these, never against the stale closure.
   const latestSessionRef = useRef(session);
@@ -160,7 +161,6 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   latestPendingActionRef.current = pendingAction;
   const latestActiveSeatIdRef = useRef(activeSeatId);
   latestActiveSeatIdRef.current = activeSeatId;
-  const [priorityPasses, setPriorityPasses] = useState<string[]>([]);
   const { priorityStopSettings, updatePriorityStopSettings } = usePriorityStopSettings();
   // One-shot "stop me on the very next priority window" flag (the "Stop Next" button) — deliberately
   // session-only (not persisted): armed by a click, consumed the next time beginPendingAction or

@@ -9,5 +9,6 @@
 * `hooks/usePriorityStopSettings.ts` - state: human priority-stop settings (persisted); returns `{priorityStopSettings, updatePriorityStopSettings}`.
 * `hooks/useDeckLibrary.ts` - state: per-seat `configs`, `deckLibrary` (fetched from /api/decks/library), `defaultDecksApplied` ref.
 * `hooks/useSavedGames.ts` - state: `savedGames` list (refetched from /api/saves when `mode === "setup"`).
+* `hooks/useStackState.ts` - state: stack, pending action, priority passes, priority seat (pure transitions in `engine/stack.ts`); ref-synchronous setters.
 
 Hooks must be called at the same position in `AppFlow()` they were extracted from (React effect order). Engine/rules code lives in `src/engine/`.
