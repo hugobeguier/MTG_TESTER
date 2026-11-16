@@ -681,3 +681,25 @@ in the new module, `export { fn } from "@/engine/..."` (or import and re-export)
   target; bans mass land destruction etc.
 * **Spec** (`mtg-commander-engine-spec.md`): original design document; code comments like "Phase 3a"
   refer to its numbered phases. Not everything in it was built.
+
+## 6. Extraction status
+
+* **`src/engine/mana.ts` - DONE** (50 functions, ~1030 lines). Moved verbatim from Region U: mana pool
+  (`emptyManaPool`, `addManaToPool`, `addPools`, `manaPoolTotal`, `payCostFromPool`, `spendGenericMana`,
+  `manaPoolDifference`, `formatManaPoolPayment`, `attackTriggerManaHeuristicSplit`), source planning
+  (`chooseManaSourcesForCost`, `chooseManaSources`, `manaSourceMayPayFor`, `manaSourceRestrictionMismatch`,
+  `manaRequirementForCard`, `anyColorManaSpendingActive`, `isAvailableManaSource`, `summarizeAvailableMana`,
+  `availableManaForSeat`, `cannotPayMessage`), what a permanent can produce (`manaChoicesForCard(+Raw)`,
+  `costlyTapManaColors`, `splitManaClausesByCost`, `addedManaColors`, `chosenColorManaAbility`,
+  `conditionallyUnavailableColors`, `isBoardConditionMet`, `isRecognizedBoardCondition`, `lifeGainedThisTurn`,
+  `activateOnlyIfConditionMet`, `effectiveManaOracleText`, `stripReminderText`, `normalizeManaColors`,
+  `producibleColorsForLand/FromLands`, `manaColorForBasicLand`, `isManaRock`, `scalingManaAmount`,
+  `manaAmountFromAddClause`, `signetAbility`, `manaProducedBy`, `selectedManaTotal`, `isDragonMana`),
+  and spending/tapping (`spendManaSources`, `tapVisibleCard`, `isSacrificeManaSource`,
+  `manaAbilityCounterRemovalKind`, `depletionSacrificeCounterKind`, `painlandDamageAmount`).
+* **`src/engine/shared.ts` - leaf helpers** the mana code needed: `hasKeyword`, `hasHaste`,
+  `numberWordToInt`, `isLandCard`, `isBasicLandCard`, `basicLandTypes`, `COMMANDER_STARTING_LIFE`.
+  (A subset of the proposed `cardTypes.ts`/`keywords.ts`; split them out later.)
+* AppFlow.tsx imports these and re-exports every previously exported symbol, so test imports are unchanged.
+* Not moved from the proposed mana list: `entersBattlefieldTapped`/`shocklandPayLifeAmount` (belong to `lands.ts`),
+  cost computation (`costs.ts`). `parseGrantedCostReduction` (costs) still calls `isDragonMana` via import.
