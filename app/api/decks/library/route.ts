@@ -3,9 +3,9 @@ import { mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { normalizeDeckFile } from "./normalize";
 
-// Saved decks for the setup screen's dropdowns and the /decks editor: every deck-shaped .txt in the
-// project root and under decks/ (recursively). A file counts as a deck if it has a "Commander:" line
-// or at least 30 lines that start with a card count — which excludes notes files like Bugs2.txt.
+// Saved decks for the setup screen's dropdowns and the /decks editor: every deck-shaped .txt
+// under decks/ (recursively). A file counts as a deck if it has a "Commander:" line
+// or at least 30 lines that start with a card count — which excludes notes files.
 // GET lists them, POST saves (new deck, or overwrite by id), DELETE removes one.
 export const dynamic = "force-dynamic";
 
@@ -23,17 +23,17 @@ async function deckFiles(dir: string, recurse: boolean): Promise<string[]> {
   return files;
 }
 
-// An id is a path relative to the project root; only a .txt directly in the root or anywhere under decks/ is allowed.
+// An id is a path relative to the project root; only a .txt under decks/ is allowed.
 function resolveDeckPath(id: string): string | undefined {
   const full = path.resolve(root(), id);
   const relative = path.relative(root(), full);
   if (!relative || relative.startsWith("..") || path.isAbsolute(relative) || !full.toLowerCase().endsWith(".txt")) return undefined;
   const parts = relative.split(path.sep);
-  return parts.length === 1 || parts[0] === "decks" ? full : undefined;
+  return parts[0] === "decks" ? full : undefined;
 }
 
 export async function GET() {
-  const files = [...(await deckFiles(root(), false)), ...(await deckFiles(path.join(root(), "decks"), true))];
+  const files = [...(await deckFiles(path.join(root(), "decks"), true))];
   const decks: Array<{ id: string; label: string; commander: string; deckList: string; raw: string }> = [];
   for (const file of files) {
     const text = await readFile(file, "utf8");

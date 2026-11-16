@@ -77,7 +77,7 @@ Most of the engine lives, unusually, inside one 34,000-line React component file
 | `src/lib/` | Parsers, AI scoring, persistence, and small rules helpers. Mostly pure functions. `src/lib/selfplay/` is the headless simulator. |
 | `scripts/` | CLI tools (importers, audits, self-play). Run via `npm run ...` (see section 7). |
 | `data/` | `cards.db` (SQLite: card catalog, `parsed_cards` cache, `xmage_cards`), `commander-cards.json`, `edhrec-ranks.json`, `token-art.json`, `agent-lessons.json`, `xmage-source/` (copy of XMage's Java card files), logs. |
-| `decks/` | Deck lists as `.txt` (`foundations/` = the five Foundations precons, `custom/`). Also loose deck `.txt` files in the repo root (Aminatou, Meren, Saheeli, ...). `src/lib/precons.ts` inlines the foundations ones for the client bundle. |
+| `decks/` | Deck lists as `.txt` (`foundations/` = the five Foundations precons, `custom/`). Decks live only here as `.txt` files; the app reads them through `/api/decks/library` (the setup screen fills the default seats from `foundations/` once that loads). |
 | `docs/` | `agents/` (agent prompt contract `system.md`, `real-game-mistakes.md` log, committed mistake reports), `mtg/` (rules/heuristics read into agent prompts), `evals/`, `xmage-bridge.md`, `screenshots/`. |
 | `bench/` | Generated reports: `coverage/` (backlog + choice audit), `mistakes/`, `selfplay-results/`, `agent-scenarios.mjs`. |
 | `ollama/` | Modelfiles for the three agent personas (`veyra`, `malik`, `sable`). |
@@ -103,7 +103,7 @@ Most of the engine lives, unusually, inside one 34,000-line React component file
 |---|---|
 | `types.ts` | `GameSession`, `PlayerSeat`, `VisibleCard`, mana types, `AgentAction`. Section 3. |
 | `cardCatalog.ts`, `cardDb.ts`, `cardParser.ts` | Card catalog (JSON), SQLite store (`parsed_cards`, `xmage_cards`), offline LLM whole-card parser. |
-| `deckParser.ts`, `deckRepair.ts`, `sampleDecks.ts`, `precons.ts`, `bracketPolicy.ts`, `edhrec.ts` | Turning deck lists into `CommanderDeck`, fixing land counts, precon lists, Bracket 3 rules, EDHREC synergy data. |
+| `deckParser.ts`, `deckRepair.ts`, `deckText.ts`, `bracketPolicy.ts`, `edhrec.ts` | Turning deck lists into `CommanderDeck`, fixing land counts, precon lists, Bracket 3 rules, EDHREC synergy data. |
 | `sessionStore.ts`, `saveGame.ts`, `saveStore.ts`, `structuralShare.ts` | Initial session creation; save snapshot types/serialisation (client-safe); SQLite save store (server-only); `shareSessionSeats` keeps unchanged sub-objects referentially equal so React effects do not re-fire. |
 
 **Rules text parsers ("deterministic-first" - regex/template readers returning structured data or `undefined`)**
@@ -675,7 +675,7 @@ in the new module, `export { fn } from "@/engine/..."` (or import and re-export)
 * **Agent lessons** (`agentLessons.ts`, `data/agent-lessons.json`): corrections you type to an agent via
   its chat; fed back into later prompts.
 * **Priority stops** (`priorityStops.ts`): your per-phase preferences for when you get asked to respond.
-* **Foundations precons** (`decks/foundations`, `precons.ts`): the five decks used as default pods
+* **Foundations precons** (`decks/foundations`): the five decks used as default pods, loaded via the deck library API
   (you: Reign of Dragons; agents: the others).
 * **Bracket 3** (`bracketPolicy.ts`, `docs/mtg/bracket-3-policy.md`): the power level agents/deck-builder
   target; bans mass land destruction etc.

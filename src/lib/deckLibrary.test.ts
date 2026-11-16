@@ -14,7 +14,7 @@ const walk = (dir: string, recurse: boolean): string[] =>
   );
 
 // Every deck-shaped file (a "Commander:" line or 30+ card lines), wherever the deck editor has renamed or moved it.
-const files = [...walk(root, false), ...walk(path.join(root, "decks"), true)].filter((file) => {
+const files = [...walk(path.join(root, "decks"), true)].filter((file) => {
   const text = readFileSync(file, "utf8");
   return /^commander:/im.test(text) || text.split(/\r?\n/).filter((line) => /^\d+x?\s+\S/.test(line.trim())).length >= 30;
 });

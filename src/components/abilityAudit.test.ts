@@ -24,7 +24,25 @@ const KNOWN_GAPS = [
   "Priest of Forgotten Gods: {T}, Sacrifice two other creatures: Any number of",
   "Retribution of the Ancients: {B}, Remove X +1/+1 counters from among creatures",
   "Steel Overseer: {T}: Put a +1/+1 counter on each artifact creature you control.",
-  "Tamiyo's Logbook: {5}{U}, {T}: Draw a card. This ability costs {1} less to activate"
+  "Tamiyo's Logbook: {5}{U}, {T}: Draw a card. This ability costs {1} less to activate",
+  // From the decks moved from the repo root into decks/custom (Aminatou, Lathliss, Meren, Saheeli, The Ur Dragon):
+  "Callaphe, Beloved of the Sea: Creatures and enchantments you control have \"Spells your opponents cast that tar",
+  "Estrid's Invocation: You may have this enchantment enter as a copy of an enchantment you control, exc",
+  "Dauthi Voidwalker: {T}, Sacrifice this creature: Choose an exiled card an opponent owns with a void",
+  "Cabal Coffers: {2}, {T}: Add {B} for each Swamp you control.",
+  "Westvale Abbey // Ormendahl, Profane Prince: {5}, {T}, Pay 1 life: Create a 1/1 white and black Human Cleric creature token.",
+  "Takenuma, Abandoned Mire: Channel — {3}{B}, Discard this card: Mill three cards, then return a creature or",
+  "Spymaster's Vault: {B}, {T}: Target creature you control connives X, where X is the number of creat",
+  "Shifting Woodland: Delirium — {2}{G}{G}: This land becomes a copy of target permanent card in your ",
+  "Susur Secundi, Void Altar: 12+ | {1}{B}, {T}, Pay 2 life, Sacrifice a creature: Draw cards equal to the sac",
+  "Boseiju, Who Endures: Channel — {1}{G}, Discard this card: Destroy target artifact, enchantment, or no",
+  "Mox Jasper: {T}: Add one mana of any color. Activate only if you control a Dragon.",
+  "Mox Opal: Metalcraft — {T}: Add one mana of any color. Activate only if you control three ",
+  "Ramos, Dragon Engine: Remove five +1/+1 counters from Ramos: Add {W}{W}{U}{U}{B}{B}{R}{R}{G}{G}. Activ",
+  "Crucible of the Spirit Dragon: {1}, {T}: Put a storage counter on this land.",
+  "Scavenger Regent // Exude Toxin: Ward—Discard a card.",
+  "Mistrise Village: {U}, {T}: The next spell you cast this turn can't be countered.",
+  "Three Tree City: {2}, {T}: Choose a color. Add an amount of mana of that color equal to the numbe"
 ];
 
 function deckFiles(dir: string): string[] {

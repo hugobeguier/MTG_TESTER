@@ -3,7 +3,6 @@ import { z } from "zod";
 import { createDeckFromCards } from "@/lib/deckParser";
 import { loadCardCatalog, lookupCard } from "@/lib/cardCatalog";
 import { agentModelName, requestCommanderDeck, warmUpOllamaModel } from "@/lib/ollama";
-import { createSampleDeck } from "@/lib/sampleDecks";
 import { createDeckFromList } from "@/lib/deckParser";
 import { repairCommanderDeckCards } from "@/lib/deckRepair";
 import { fetchEdhrecSynergyData } from "@/lib/edhrec";
@@ -109,34 +108,15 @@ export async function POST(request: NextRequest) {
       deck
     });
   } catch (error) {
-    const fallback = createSampleDeck(input.agentName, commander, colors, lookup);
-    const cards = repairCommanderDeckCards({
-      commander: fallback.commander,
-      colors: fallback.colors,
-      cards: fallback.cards,
-      catalog: lookup,
-      synergyCards: synergyData?.cards
-    });
-    const deck = createDeckFromCards({
-      owner: fallback.createdBy,
-      commander: fallback.commander,
-      colors: fallback.colors,
-      cards,
-      name: fallback.name,
-      catalog: lookup
-    });
-    return NextResponse.json({
-      source: "fallback",
-      message:
-        error instanceof Error
-          ? `Ollama is unavailable or returned invalid JSON: ${error.message}. Used local role-based fallback.`
-          : "Ollama is unavailable. Used local role-based fallback.",
-      catalog: {
-        source: catalog.source,
-        cardCount: catalog.cards.length,
-        loadedAt: catalog.loadedAt
+    return NextResponse.json(
+      {
+        source: "error",
+        message:
+          error instanceof Error
+            ? `Ollama is unavailable or returned invalid JSON: ${error.message}. Paste a deck list or load a saved deck instead.`
+            : "Ollama is unavailable. Paste a deck list or load a saved deck instead."
       },
-      deck
-    });
+      { status: 502 }
+    );
   }
 }

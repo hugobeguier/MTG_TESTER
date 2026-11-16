@@ -74,7 +74,6 @@ import {
   parseSagaChapters,
   type SagaChapters
 } from "@/lib/oracleClauses";
-import { FOUNDATIONS_AGENT_DECKLISTS, FOUNDATIONS_PLAYER_DECKLIST, commanderFromDeckList } from "@/lib/precons";
 import { needsTokenArt, tokenArtLookupKey } from "@/lib/tokenArt";
 import { parseSpellExtraEffects, type SpellExtraEffect } from "@/lib/spellExtras";
 import { matchWatcherSubject } from "@/lib/triggerWatchers";
@@ -1383,94 +1382,6 @@ const COMMANDER_COLOR_HINTS: Record<string, string[]> = {
   miirym: ["G", "U", "R"]
 };
 
-const DEFAULT_PLAYER_COMMANDER = "Aminatou, Veil Piercer";
-const DEFAULT_PLAYER_DECKLIST = `Commander: Aminatou, Veil Piercer
-1 Adarkar Wastes (DSC) 258
-1 Aminatou, the Fateshifter (C18) 37 *F*
-1 Arcane Denial (DSC) 110
-1 Arcane Sanctum (DSC) 259
-1 Arcane Signet (DSC) 92
-1 Archaeomancer's Map (FIC) 230
-1 Archon of Sun's Grace (J22) 151
-1 Athreos, Shroud-Veiled (DSC) 212
-1 Blasphemous Edict (FDN) 57
-1 Boon of the Spirit Realm (CMM) 720
-1 Brainstorm (DSC) 113
-1 Brainsurge (MH3) 53
-1 Callaphe, Beloved of the Sea (THB) 260
-1 Caves of Koilos (DSC) 268
-1 Command Tower (DSC) 96
-1 Contaminated Aquifer (DMU) 245
-1 Counterspell (A25) 50
-1 Debtors' Knell (GK2) 39
-1 Demon of Fate's Design (DSC) 137
-1 Devastation Tide (LTC) 189
-1 Diabolic Vision (DSC) 87
-1 Doomwake Giant (DSC) 138
-1 Drowned Catacomb (M13) 223
-1 Enhanced Surveillance (MKC) 102
-1 Esper Sentinel (MH2) 12
-1 Estrid's Invocation (MH3) 269
-1 Evolving Wilds (DSC) 274
-1 Extravagant Replication (DSC) 117
-1 Fear of Sleep Paralysis (DSC) 12
-1 Glacial Fortress (PIP) 266
-1 Greed (MH2) 274
-1 Halimar Depths (DSC) 282
-1 Heliod, the Radiant Dawn / Heliod, the Warped Eclipse (MOM) 293
-1 Inkshield (DSC) 221
-1 Inquisitive Glimmer (DSK) 217
-6 Island (DSK) 280
-1 Isolated Chapel (LCC) 337
-1 Ledger Shredder (SNC) 46
-1 Lim-D\u00fbl's Vault (MB2) 87
-1 Mind's Dilation (EMN) 70
-1 Monologue Tax (SLD) 1838
-1 Moon-Blessed Cleric (DSC) 69
-1 Myriad Landscape (PIP) 274
-1 Mystic Remora (ICE) 87
-1 Negate (M12) 69
-1 Obscura Storefront (DSC) 291
-1 Omniscience (M13) 63
-1 One with the Multiverse (DSC) 121
-1 Otherworldly Gaze (DSC) 122
-1 Overwhelming Splendor (HOU) 19
-6 Plains (DSK) 278
-1 Ponder (DSC) 73
-1 Portent (DSC) 74
-1 Prairie Stream (C20) 299
-1 Propaganda (WHO) 219
-1 Redress Fate (DSC) 9
-1 Secret Arcade / Dusty Parlor (DSC) 10
-1 Shadow of the Second Sun (MH3) 402
-1 Shark Typhoon (DSC) 127
-1 Sigil of the Empty Throne (DSC) 103
-1 Soaring Lightbringer (DSC) 11
-1 Sol Ring (DSC) 94
-1 Sphere of Safety (DSC) 104
-1 Starfield of Nyx (CMM) 840
-1 Sunken Palace (M3C) 133
-4 Swamp (DSK) 282
-1 Swords to Plowshares (PIP) 173
-1 Tainted Field (LCC) 356
-1 Talisman of Dominance (WHO) 250
-1 Talisman of Hierarchy (CLB) 878
-1 Talisman of Progress (MKC) 243
-1 Temple of Deceit (OTC) 328
-1 Temple of Silence (DSC) 312
-1 Temporal Mastery (INR) 90
-1 Thriving Heath (DSC) 315
-1 Thriving Isle (DSC) 316
-1 Thriving Moor (DSC) 317
-1 Timely Ward (DSC) 107
-1 Underground River (DSC) 321
-1 Utter End (DSC) 91
-1 Utter Insignificance (MH3) 78
-1 Vanishing (VIS) 48
-1 Virtue of Persistence / Locthwain Scorn (WOE) 281
-1 Void Rend (FIC) 331
-1 Wayfarer's Bauble (PIP) 252
-1 Zur, Eternal Schemer (PDMU) 228p`;
 // TURN_PHASES itself now lives in src/lib/priorityStops.ts (imported above) — single source of
 // truth shared with ThreeGameTable's PriorityStopsModal grid, see that module's own comment.
 
@@ -1831,12 +1742,19 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   const [choiceMinimized, setChoiceMinimized] = useState(false);
   const [setupMessage, setSetupMessage] = useState<string | undefined>();
   const [configs, setConfigs] = useState<SeatConfig[]>(() => createInitialConfigs(initialSession.seats));
-  // Saved decks (project-root and decks/ .txt files) offered in each seat's "Load saved deck" dropdown.
+  // Saved decks (.txt files under decks/) offered in each seat's "Load saved deck" dropdown. The first successful load
+  // also fills still-empty seats with the default Foundations decks (see applyDefaultDecks).
   const [deckLibrary, setDeckLibrary] = useState<SavedDeck[]>([]);
+  const defaultDecksApplied = useRef(false);
   useEffect(() => {
     fetch("/api/decks/library")
       .then((response) => (response.ok ? response.json() : []))
-      .then((decks: SavedDeck[]) => setDeckLibrary(decks))
+      .then((decks: SavedDeck[]) => {
+        setDeckLibrary(decks);
+        if (defaultDecksApplied.current) return;
+        defaultDecksApplied.current = true;
+        setConfigs((current) => applyDefaultDecks(current, decks));
+      })
       .catch(() => {});
   }, []);
   // Saved-game list for the setup screen's Load panel — refetched whenever the setup screen becomes
@@ -3948,20 +3866,22 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       })
     });
     const result = (await response.json()) as {
-      source: "decklist" | "ollama" | "ollama-invalid" | "fallback";
+      source: "decklist" | "ollama" | "ollama-invalid" | "error";
       message: string;
       notes?: string;
-      deck: CommanderDeck;
+      deck?: CommanderDeck;
     };
+    if (!result.deck) {
+      updateConfig(config.seatId, { status: "error", message: result.message || "Deck build failed." });
+      return;
+    }
     const deck = result.deck;
     const activity = [
       result.source === "ollama"
         ? `${config.name} received an Ollama deck draft and the app repaired/validated it against the card catalog.`
-        : result.source === "fallback"
-          ? `${config.name} used the local fallback builder because Ollama was unavailable.`
-          : result.source === "ollama-invalid"
-            ? `${config.name} received an Ollama deck draft, but it still failed validation.`
-            : `${config.name} validated the pasted deck list.`,
+        : result.source === "ollama-invalid"
+          ? `${config.name} received an Ollama deck draft, but it still failed validation.`
+          : `${config.name} validated the pasted deck list.`,
       result.notes ? `Agent notes: ${result.notes}` : undefined,
       `Deck score ${deck.score.total}. ${deck.validation.cardCount} cards. ${deck.validation.gameChangerCount} Game Changers.`,
       ...deck.score.notes
@@ -3977,9 +3897,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
           ? result.message
           : result.source === "ollama"
           ? "Ollama built and validated this deck."
-          : result.source === "fallback"
-            ? result.message
-            : deck.validation.errors[0] ?? result.message,
+          : deck.validation.errors[0] ?? result.message,
       activity
     });
   }
@@ -4223,6 +4141,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     setInspectedCard(undefined);
     setAgentThinking({});
     setAgentReasoning({});
+    defaultDecksApplied.current = true;
     setConfigs(createInitialConfigs(snapshot.session.seats));
     setSetupMessage(undefined);
     setMode("game");
@@ -12927,25 +12846,36 @@ function Status(props: { label: string; value: string; detail: string }) {
   );
 }
 
-// Foundations Commander precons are the default test set: the human seat starts with Wretched
-// Ranks and each agent seat (in seat order) with one of the other three, all in decklist mode so
-// the Build AI Deck window opens pre-filled instead of empty.
+// Default decks come from decks/foundations/*.txt via the deck library API (the seats start empty and
+// are filled by applyDefaultDecks once the library has loaded): the human seat gets Reign Of Dragons and
+// each agent seat (in seat order) one of the other three, all in decklist mode.
+const DEFAULT_HUMAN_DECK_LABEL = "Reign Of Dragons";
+const DEFAULT_AGENT_DECK_LABELS = ["Wretched Ranks", "Tramplesaurus Rex", "Calling All Angels"];
+
 function createInitialConfigs(seats: PlayerSeat[]): SeatConfig[] {
+  return seats.map((seat) => ({
+    seatId: seat.id,
+    name: seat.name,
+    kind: seat.kind,
+    mode: seat.kind === "human" ? "decklist" : "commander",
+    commander: seat.deck?.commander ?? "",
+    deckList: "",
+    deck: undefined,
+    status: "empty",
+    message: "Choose a commander or paste a deck list.",
+    activity: []
+  }));
+}
+
+// Fills seats that still have no deck (nothing typed, loaded or built) with the default Foundations decks.
+function applyDefaultDecks(configs: SeatConfig[], library: SavedDeck[]): SeatConfig[] {
+  const find = (label: string) => library.find((deck) => deck.id.toLowerCase().startsWith("decks/foundations/") && deck.label.toLowerCase() === label.toLowerCase());
   let agentIndex = 0;
-  return seats.map((seat) => {
-    const precon = seat.kind === "human" ? FOUNDATIONS_PLAYER_DECKLIST : FOUNDATIONS_AGENT_DECKLISTS[agentIndex++];
-    return {
-      seatId: seat.id,
-      name: seat.name,
-      kind: seat.kind,
-      mode: precon ? "decklist" : seat.kind === "human" ? "decklist" : "commander",
-      commander: precon ? commanderFromDeckList(precon) : seat.deck?.commander ?? (seat.kind === "human" ? DEFAULT_PLAYER_COMMANDER : ""),
-      deckList: precon ?? (seat.kind === "human" ? DEFAULT_PLAYER_DECKLIST : ""),
-      deck: undefined,
-      status: "empty",
-      message: precon ? "Foundations precon will validate automatically." : "Choose a commander or paste a deck list.",
-      activity: []
-    };
+  return configs.map((config) => {
+    const label = config.kind === "human" ? DEFAULT_HUMAN_DECK_LABEL : DEFAULT_AGENT_DECK_LABELS[agentIndex++];
+    const saved = label ? find(label) : undefined;
+    if (!saved || config.deckList.trim() || config.deck) return config;
+    return { ...config, mode: "decklist", commander: saved.commander, deckList: saved.deckList, message: "Foundations precon will validate automatically." };
   });
 }
 

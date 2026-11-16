@@ -38,7 +38,7 @@ const DB_PATH = path.join(process.cwd(), "data", "cards.db");
 const FAILED_LOG_PATH = path.join(process.cwd(), "data", "failed_cards.log");
 
 // A ~50-card validation set spanning trigger-heavy, activated, static, and keyword-only cards —
-// pulled from the same staples sampleDecks.ts already builds agent decks out of, so a good parse
+// pulled from common Commander staples, so a good parse
 // here is a real signal about parse quality on the cards that actually show up in-game.
 const ICONIC_SAMPLE = [
   "Sol Ring", "Arcane Signet", "Command Tower", "Cultivate", "Kodama's Reach",

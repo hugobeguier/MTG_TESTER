@@ -204,7 +204,7 @@ const KNOWN_LLM_ONLY_PHASE_TRIGGERS = new Set([
   "Rith, Liberated Primeval|end step", "Shadrix Silverquill|beginning of combat step", "The Ozolith|beginning of combat step"
 ]);
 function deckFiles(): string[] {
-  const roots = readdirSync(".").filter((f) => f.endsWith(".txt") && !/Bugs2|Potential/.test(f));
+  const roots: string[] = [];
   return [...roots, ...["decks/custom", "decks/foundations"].flatMap((d) => readdirSync(d).map((f) => `${d}/${f}`))];
 }
 function deckCardNames(file: string): string[] {

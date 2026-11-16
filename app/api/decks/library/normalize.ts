@@ -1,4 +1,4 @@
-import { commanderFromDeckList } from "@/lib/precons";
+import { commanderFromDeckList } from "@/lib/deckText";
 
 // A deck file without a "Commander:" line (Lathliss, Dragon Queen.txt; Aminatou 100 cards.txt) gets one
 // prepended, so the deck parser marks the right card as the commander. The commander is the card

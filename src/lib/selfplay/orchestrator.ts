@@ -221,7 +221,7 @@ function withSeededRandom<T>(seed: number | undefined, fn: () => T): T {
 }
 
 // Deck files get renamed from the deck editor ("UrDragon.txt" -> "The Ur Dragon.txt", "WretchedRanks.txt" -> "Wretched Ranks.txt"), so a
-// name that no longer exists on disk is matched against every deck file in the project root and decks/ by letters and digits only.
+// name that does not exist as a path is matched against every deck file under decks/ by letters and digits only.
 export function readRootDeckList(fileName: string): string {
   const exact = path.join(process.cwd(), fileName);
   if (existsSync(exact)) return readFileSync(exact, "utf8");
@@ -236,7 +236,6 @@ export function readRootDeckList(fileName: string): string {
       } else if (entry.name.toLowerCase().endsWith(".txt")) candidates.push(full);
     }
   };
-  walk(process.cwd(), false);
   if (existsSync(path.join(process.cwd(), "decks"))) walk(path.join(process.cwd(), "decks"), true);
   const match = candidates.find((file) => key(file) === wanted) ?? candidates.find((file) => key(file).includes(wanted) || wanted.includes(key(file)));
   if (!match) throw new Error(`Deck file not found: ${fileName}`);

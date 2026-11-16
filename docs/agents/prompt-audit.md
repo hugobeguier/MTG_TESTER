@@ -2,7 +2,7 @@
 
 Goal: whenever a card in any deck gives its HUMAN controller a real choice (target, which permanent, which cards, mode, "up to N", "you may", search results), the human gets a prompt. Agents keep auto-choosing.
 
-Scope: every deck-shaped .txt in the project root and decks/ (Aminatou, Lathliss, Meren, Saheeli, The Ur Dragon, Breena, and the five Foundations precons): 11 decks, 677 unique cards (3 unresolvable DFC names), 438 with choice-shaped wording. Skipped as having no choice: basics, vanilla/keyword creatures, mana rocks, statics, plain draw/gain life.
+Scope: every deck-shaped .txt in decks/ (Aminatou, Lathliss, Meren, Saheeli, The Ur Dragon, Breena, and the five Foundations precons): 11 decks, 677 unique cards (3 unresolvable DFC names), 438 with choice-shaped wording. Skipped as having no choice: basics, vanilla/keyword creatures, mana rocks, statics, plain draw/gain life.
 
 Method: probes ran the real engine entry points (commonTriggerEffect, findAttackTriggers / findCommonTriggersForPermanentEntered / ...Died, castStructure, spellTargetSlots, phaseEffectText, parseSearchLibraryEffectText, the activated-ability parsers) on the real Oracle text and compared the effect kinds against the prompt paths (openTriggerOptionPrompt, triggerCardPrompt, finishTriggerResolution, the phase-trigger dispatch, cast-time slots). Then fixes + regression tests in `src/components/AppFlow.promptAudit.test.ts`.
 

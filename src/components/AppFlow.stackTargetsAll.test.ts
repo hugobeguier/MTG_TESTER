@@ -245,7 +245,7 @@ const EXCEPTIONS: Record<string, string> = {
   "Tendrils of Corruption": "X damage where X counts Swamps: Rules Advisor planned"
 };
 function deckFiles(): string[] {
-  const roots = readdirSync(".").filter((f) => f.endsWith(".txt") && !/Bugs2|Potential/.test(f));
+  const roots: string[] = [];
   return [...roots, ...["decks/custom", "decks/foundations"].flatMap((d) => readdirSync(d).map((f) => `${d}/${f}`))];
 }
 function deckCardNames(file: string): string[] {

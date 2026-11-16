@@ -11,11 +11,11 @@ import { recognises, stripReminder } from "./clauseCoverage";
 const catalog = loadCardCatalog();
 // Baselines measured when the audits were written (lines the shared recogniser does not claim; see each AppFlow.*Audit/Deck test for the behaviour checks).
 const DECKS: Array<[string, number]> = [
-  ["Aminatou.txt", 45],
-  ["Lathliss, Dragon Queen.txt", 11],
-  ["Meren.txt", 41],
-  ["The Ur Dragon.txt", 44],
-  ["Saheeli.txt", 16],
+  ["decks/custom/Aminatou.txt", 45],
+  ["decks/custom/Lathliss, Dragon Queen.txt", 11],
+  ["decks/custom/Meren.txt", 41],
+  ["decks/custom/The Ur Dragon.txt", 44],
+  ["decks/custom/Saheeli.txt", 16],
   ["decks/custom/Breena, the Demagogue.txt", 35],
   ["decks/custom/Meren of Clan Nel Toth Built on my Own.txt", 33],
   ["decks/foundations/Calling All Angels.txt", 4],
