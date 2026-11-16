@@ -2,7 +2,8 @@
 // Keeps engine modules (mana.ts, later costs.ts/lands.ts, ...) from importing back from AppFlow.
 // AppFlow.tsx imports these and re-exports the ones that were previously public (isLandCard).
 
-import type { VisibleCard } from "@/lib/types";
+import type { EmblemState, PlayerSeat, VisibleCard } from "@/lib/types";
+import { emblemDisplayName } from "@/lib/phaseTriggers";
 import { hasKeyword as hasKeywordText } from "@/lib/keywords";
 
 export const COMMANDER_STARTING_LIFE = 40;
@@ -64,4 +65,28 @@ export function basicLandTypes(card: VisibleCard) {
 
 export function capitalizeWord(word: string) {
   return word.charAt(0).toUpperCase() + word.slice(1);
+}
+
+// A fake card carrying an emblem's own captured rules text, so it can flow through the exact same
+// phase-trigger dispatch (hasPhaseTrigger/applyDeterministicPhaseTrigger/consultRulesAdvisor) a
+// real permanent's phase-triggered ability already does — none of that machinery ever needs to look
+// the source back up in seat.board.battlefield by id, it only ever reads the VisibleCard it was
+// handed directly, so an emblem (which has no battlefield entry at all) can safely stand in as one.
+export function emblemAsShimCard(emblem: EmblemState): VisibleCard {
+  return {
+    id: emblem.id,
+    name: emblemDisplayName(emblem.sourceName),
+    typeLine: "Emblem",
+    oracleText: emblem.oracleText,
+    manaValue: 0,
+    colors: [],
+    colorIdentity: [],
+    role: "effect",
+    zone: "command"
+  };
+}
+
+// The seat's emblems as stand-in cards, for static-effect scans that already walk "the permanents that could grant this" (anthems, cost reducers).
+export function emblemSourceCards(seat: PlayerSeat): VisibleCard[] {
+  return (seat.emblems ?? []).map(emblemAsShimCard);
 }

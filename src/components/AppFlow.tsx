@@ -80,11 +80,18 @@ import { parseSpellExtraEffects, type SpellExtraEffect } from "@/lib/spellExtras
 import { matchWatcherSubject } from "@/lib/triggerWatchers";
 import { isDragonMana, activateOnlyIfConditionMet, addManaToPool, addPools, addedManaColors, anyColorManaSpendingActive, attackTriggerManaHeuristicSplit, availableManaForSeat, cannotPayMessage, chooseManaSources, chooseManaSourcesForCost, chosenColorManaAbility, conditionallyUnavailableColors, costlyTapManaColors, depletionSacrificeCounterKind, effectiveManaOracleText, emptyManaPool, formatManaPoolPayment, isAvailableManaSource, isBoardConditionMet, isManaRock, isRecognizedBoardCondition, isSacrificeManaSource, lifeGainedThisTurn, manaAbilityCounterRemovalKind, manaAmountFromAddClause, manaChoicesForCard, manaChoicesForCardRaw, manaColorForBasicLand, manaPoolDifference, manaPoolTotal, manaProducedBy, manaRequirementForCard, manaSourceMayPayFor, manaSourceRestrictionMismatch, normalizeManaColors, painlandDamageAmount, payCostFromPool, producibleColorsForLand, producibleColorsFromLands, scalingManaAmount, selectedManaTotal, signetAbility, spendGenericMana, spendManaSources, spentManaColors, splitManaClausesByCost, stripReminderText, summarizeAvailableMana, tapVisibleCard } from "@/engine/mana";
 export { attackTriggerManaHeuristicSplit, isDragonMana, chooseManaSourcesForCost, costlyTapManaColors, isAvailableManaSource, isRecognizedBoardCondition, lifeGainedThisTurn, manaAmountFromAddClause, manaChoicesForCard, manaProducedBy, signetAbility, spendManaSources } from "@/engine/mana";
+import { emblemAsShimCard, emblemSourceCards } from "@/engine/shared";
+export { emblemAsShimCard } from "@/engine/shared";
 import { COMMANDER_STARTING_LIFE, basicLandTypes, capitalizeWord, hasHaste, hasKeyword, isBasicLandCard, isLandCard, numberWordToInt } from "@/engine/shared";
 export { isLandCard } from "@/engine/shared";
 import { agentBestCopyCandidate, createTokenCard, parseCreateTokenSpecs, predefinedTokenSpec } from "@/engine/tokens";
 import type { TokenSpec } from "@/engine/tokens";
 export { agentBestCopyCandidate, parseCreateTokenSpecs } from "@/engine/tokens";
+import { adjustedCastingCost, cardWithFaceManaCost, coloredPipCount, fateDesignLifeAltCostKey, findMiracleGranter, hasFateDesignLifeAltCost, hasOmniscienceFreeHandCast, hasOnceEachTurnFreeHandCastPermission, hasSingleKicker, isHistoricCard, manaValueFromManaCost, maxAffordableX, miracleCostFor, onceEachTurnFreeCastKey, parseMiracleCost, parseMultikickerCost, staticCostReduction, totalCastingCost, unlockCostReduction, xSymbolCount } from "@/engine/costs";
+export { adjustedCastingCost, cardWithFaceManaCost, manaValueFromManaCost, maxAffordableX, miracleCostFor, staticCostReduction, totalCastingCost } from "@/engine/costs";
+import { entersBattlefieldTapped, landDropsAllowed, landPlaysMade, landTurnKey, recordLandPlay, shocklandPayLifeAmount } from "@/engine/lands";
+export { entersBattlefieldTapped, landDropsAllowed, landPlaysMade, recordLandPlay, revealLandControlExempt, revealLandTypes, revealableLandCards } from "@/engine/lands";
+import { revealLandControlExempt, revealLandTypes, revealableLandCards } from "@/engine/lands";
 import { graveyardCastPermission } from "@/lib/graveyardCasting";
 import { libraryTopCastPermission } from "@/lib/libraryCasting";
 import { bushidoAmount, canBlockAdditionalCreature, canBlockOnlyFliers, cantUntap, landwalkEvades, mustAttackEachCombat } from "@/lib/combatRestrictions";
@@ -13561,22 +13568,6 @@ function colorsAmongPermanentsControlled(seat: PlayerSeat, excludeCardId: string
   return colors.size;
 }
 
-// "Multikicker {2} (You may pay an additional {2} any number of times as you cast this spell.)"
-// (Everflowing Chalice, ...) — a separate additional-cost mechanic, not an {X} in the printed mana
-// cost, but structurally identical once cast: "pay N more times, get N of something." Reusing the
-// existing chosenX field/maxAffordableX/totalCastingCost machinery for it (see those functions) means
-// this doesn't need its own parallel casting-cost pipeline — a card is never both an {X} spell and
-// multikicker in this codebase's real-card sample, so treating "times kicked" as chosenX is safe.
-function parseMultikickerCost(oracleText: string): number | undefined {
-  const match = oracleText.match(/\b(?:multi)?kicker\s+((?:\{[^}]+\})+)/i);
-  return match ? manaValueFromManaCost(match[1]) : undefined;
-}
-
-// "Kicker {5}{B}" (single kicker, Josu Vess) — paid at most once, unlike multikicker. Rides the same chosenX
-// plumbing, capped at one.
-function hasSingleKicker(oracleText: string): boolean {
-  return /\bkicker\s+(?:\{[^}]+\})+/i.test(oracleText) && !/\bmultikicker\b/i.test(oracleText);
-}
 
 // "This artifact enters with a charge counter on it for each time it was kicked." (Everflowing
 // Chalice, and the rest of the multikicker-charge-counter cycle) — without this, a multikicker
@@ -28504,24 +28495,6 @@ export function shouldConsultRulesAdvisor(event: string, card: VisibleCard) {
   ].some((pattern) => text.includes(pattern));
 }
 
-// A fake card carrying an emblem's own captured rules text, so it can flow through the exact same
-// phase-trigger dispatch (hasPhaseTrigger/applyDeterministicPhaseTrigger/consultRulesAdvisor) a
-// real permanent's phase-triggered ability already does — none of that machinery ever needs to look
-// the source back up in seat.board.battlefield by id, it only ever reads the VisibleCard it was
-// handed directly, so an emblem (which has no battlefield entry at all) can safely stand in as one.
-export function emblemAsShimCard(emblem: EmblemState): VisibleCard {
-  return {
-    id: emblem.id,
-    name: emblemDisplayName(emblem.sourceName),
-    typeLine: "Emblem",
-    oracleText: emblem.oracleText,
-    manaValue: 0,
-    colors: [],
-    colorIdentity: [],
-    role: "effect",
-    zone: "command"
-  };
-}
 
 // Rule 111.2/111.7-111.9: "You get an emblem with ..." — one emblem per grant (an emblem that prints several abilities, Saheeli's
 // "...+1/+1" and "...cost {1} less", is still ONE emblem; its clauses are kept as separate lines of oracleText, which every parser here already
@@ -28547,10 +28520,6 @@ export function addEmblemToSeat(session: GameSession, seatId: string, sourceName
   };
 }
 
-// The seat's emblems as stand-in cards, for static-effect scans that already walk "the permanents that could grant this" (anthems, cost reducers).
-function emblemSourceCards(seat: PlayerSeat): VisibleCard[] {
-  return (seat.emblems ?? []).map(emblemAsShimCard);
-}
 
 // "Search your library for a permanent card, put it onto the battlefield, then shuffle." (the clause of a phase trigger) -> the searched type word.
 export function parseSearchLibraryPutEffect(clauseText: string): { filter: string; tapped: boolean; optional: boolean } | undefined {
@@ -29999,26 +29968,7 @@ export function spellResolutionDestination(session: GameSession, action: Extract
 // Rule 205.2j: an object is historic if it's an artifact, a Saga (or other subtype with the same
 // carve-out), or has the legendary supertype — legendary creatures/enchantments/planeswalkers all
 // qualify via "Legendary" appearing in the type line, not just legendary artifacts.
-function isHistoricCard(card: VisibleCard) {
-  return card.typeLine.includes("Artifact") || card.typeLine.includes("Legendary") || card.typeLine.includes("Saga");
-}
 
-export function manaValueFromManaCost(manaCost: string | undefined): number {
-  if (!manaCost) return 0;
-  const symbols = manaCost.match(/\{[^}]+\}/g) ?? [];
-  let total = 0;
-  for (const raw of symbols) {
-    const value = raw.slice(1, -1);
-    const numeric = Number.parseInt(value, 10);
-    if (!Number.isNaN(numeric)) {
-      total += numeric;
-      continue;
-    }
-    if (value === "X" || value === "Y" || value === "Z") continue;
-    total += 1;
-  }
-  return total;
-}
 
 function twoSidedFaces(card: VisibleCard): [CardFaceRecord, CardFaceRecord] | undefined {
   if (!card.faces || card.faces.length !== 2) return undefined;
@@ -30085,9 +30035,6 @@ export function independentlyCastableSpellFaces(card: VisibleCard): [CardFaceRec
   return faces;
 }
 
-export function cardWithFaceManaCost(card: VisibleCard, manaCost: string | undefined): VisibleCard {
-  return { ...card, manaCost };
-}
 
 // A SPLIT card (Find // Finality, Fire // Ice, Turn // Burn, Appeal // Authority): two spell halves side by side. Rule 708.4: in every zone but the
 // stack it has the combined characteristics of both halves (so its card-level manaValue is the SUM, 8 for Find // Finality); only on the stack does it
@@ -30163,36 +30110,6 @@ export function castFaceDecision(session: GameSession, seat: PlayerSeat, card: V
   return { kind: "choose", options };
 }
 
-function xSymbolCount(manaCost: string | undefined): number {
-  const symbols = manaCost?.match(/\{[^}]+\}/g) ?? [];
-  return symbols.filter((symbol) => symbol.toUpperCase() === "{X}").length;
-}
-
-// This app has no interactive "choose X" prompt, so both agents and humans default to the
-// largest X they can currently afford — the alternative (no default) is what caused the reported
-// bug: X-cost cards carry manaValue 0 (the Scryfall off-stack convention), so with no X selection
-// at all they were always "free" to cast regardless of available mana.
-// Multikicker's per-kick cost stands in for xCount when the card has no {X} of its own — see
-// parseMultikickerCost's comment for why reusing chosenX for "times kicked" is safe here.
-function xOrMultikickerUnitCost(card: VisibleCard): number {
-  const xCount = xSymbolCount(card.manaCost);
-  return xCount > 0 ? xCount : (parseMultikickerCost(card.oracleText) ?? 0);
-}
-
-export function maxAffordableX(seat: PlayerSeat, card: VisibleCard, fixedCost: number, pool?: ManaPool): number {
-  const unitCost = xOrMultikickerUnitCost(card);
-  if (unitCost === 0) return 0;
-  // fixedCost already had up to card.manaValue worth of any pending cost reduction subtracted
-  // (adjustedCastingCost, called by every caller before this). A reduction bigger than the card's
-  // non-X cost has leftover value that a flat-cost card would simply waste — for an X spell that
-  // leftover instead buys extra X, since {X} contributes to the same generic total a reduction
-  // discounts (e.g. Crackle with Power at {X}{R}{R}{R}: 10 artifacts discounts the 3 fixed RRR down
-  // to paying just RRR, then the remaining 7 becomes 7 more X the player didn't have to tap for).
-  const leftoverReduction = Math.max(0, pendingArtifactAffinityReduction(seat) - card.manaValue);
-  const budget = availableManaForSeat(seat, pool) - fixedCost + leftoverReduction;
-  const maxUnits = budget > 0 ? Math.floor(budget / unitCost) : 0;
-  return hasSingleKicker(card.oracleText) ? Math.min(1, maxUnits) : maxUnits;
-}
 
 // A purely-generic fake card, used to reuse chooseManaSourcesForCost for costs that don't come
 // from an actual card's mana cost (e.g. paying an attack tax on declaration).
@@ -30488,470 +30405,6 @@ function canPayForCard(seat: PlayerSeat, card: VisibleCard) {
   return chooseManaSourcesForCost(seat, card, card.manaValue).ok;
 }
 
-// Aminatou, Veil Piercer does not discount normal casting from hand — she grants miracle instead,
-// handled by the miracle-offer flow. sourceZone/activeSeatId are currently unused by either cost
-// reduction this applies (Saheeli's one-turn artifact affinity grant, staticCostReduction's
-// permanent-granted discounts) but kept in the signature for future zone- or turn-scoped reductions.
-// allSeats defaults to just the caster (undercounting a global-board-state discount like
-// selfConditionalCostReduction's) for the handful of callers that don't have every seat on hand —
-// safe-but-conservative there, never an exploit, since underestimating a discount can only ever
-// overcharge, not undercharge.
-// turn/onceEachTurnUsed are optional and only needed for One with the Multiverse's once-per-turn
-// free cast — playCard (the single real cast-commit path both human clicks and agent decisions
-// funnel through) passes the live session values so that check is accurate; the many other, purely
-// informational callers (legal-action listings, cost previews) can omit them, at the cost of that
-// one card's discount possibly showing as available a beat after it's actually been used that turn.
-export function adjustedCastingCost(
-  seat: PlayerSeat,
-  card: VisibleCard,
-  baseCost: number,
-  sourceZone: "hand" | "command" | "exile" | "graveyard" | "library",
-  activeSeatId: string | undefined,
-  allSeats: PlayerSeat[] = [seat],
-  turn?: number,
-  onceEachTurnUsed?: string[]
-) {
-  // Mind's Dilation-style "you may cast that card without paying its mana cost" — the exile-play
-  // permission itself already gates which zone/seat may cast it (see playCard's existing exile
-  // checks); this only waives the cost on top of that, and only while actually casting from exile.
-  if (sourceZone === "exile" && card.exiledPlayableFree) return 0;
-  // "If you control a commander, you may cast this spell without paying its mana cost." (Flawless Maneuver, Fierce Guardianship, Deadly Rollick)
-  if (/if you control a commander, you may cast this spell without paying its mana cost/i.test(card.oracleText) && seat.board.battlefield.some((permanent) => permanent.commander)) return 0;
-  // Omniscience: "You may cast spells from your hand without paying their mana costs." An
-  // unconditional standing permission (contrast Mind's Dilation's one-shot exile trigger above, or
-  // One with the Multiverse's once-per-turn version below — see hasOmniscienceFreeHandCast's own
-  // doc comment for why this card gets its own narrow check rather than a shared "free cast" grammar).
-  if (sourceZone === "hand" && hasOmniscienceFreeHandCast(seat)) return 0;
-  if (
-    sourceZone === "hand" &&
-    turn !== undefined &&
-    hasOnceEachTurnFreeHandCastPermission(seat) &&
-    !(onceEachTurnUsed ?? []).includes(onceEachTurnFreeCastKey(turn, seat.id))
-  ) {
-    return 0;
-  }
-  // Demon of Fate's Design: mana cost waived here (life is charged separately, at playCard's actual
-  // cast-commit site — see hasFateDesignLifeAltCost's own doc comment); only the once-per-turn
-  // budget and "this is an enchantment spell" are checked here.
-  if (
-    sourceZone === "hand" &&
-    turn !== undefined &&
-    card.typeLine.includes("Enchantment") &&
-    // Rule 118.4: can't pay more life than you currently have — falls through to the normal mana
-    // cost below when unaffordable, rather than offering an alt-cost the caster can't actually pay.
-    seat.life >= baseCost &&
-    hasFateDesignLifeAltCost(seat) &&
-    !(onceEachTurnUsed ?? []).includes(fateDesignLifeAltCostKey(turn, seat.id))
-  ) {
-    return 0;
-  }
-  // Rule 601.2f: a plain "costs {N} less to cast" effect can only ever reduce a cost's GENERIC
-  // portion — it can never eliminate a colored mana requirement, no matter how much reduction is
-  // stacked. Floored at coloredPipCount(card) rather than 0, same fix already applied to
-  // miracleCostFor below. The unconditional-0 early returns above (Mind's Dilation, Omniscience,
-  // "without paying its mana cost" effects, ...) are real cast-for-free effects, rules-distinct
-  // from a cost reduction, and correctly bypass this floor entirely.
-  // "Spells you cast cost {1} less to cast for each card your opponents have drawn this turn." (Heliod, the Warped Eclipse)
-  const drawnByOpponents =
-    turn !== undefined && seat.board.battlefield.some((permanent) => !permanent.abilitiesStripped && /spells you cast cost \{1\} less to cast for each card your opponents have drawn this turn/i.test(permanent.oracleText))
-      ? allSeats.filter((other) => other.id !== seat.id && other.drawnThisTurn?.turn === turn).reduce((total, other) => total + (other.drawnThisTurn?.count ?? 0), 0)
-      : 0;
-  return Math.max(
-    coloredPipCount(card),
-    baseCost - drawnByOpponents - pendingArtifactAffinityReduction(seat) - staticCostReduction(seat, card) - selfConditionalCostReduction(card, allSeats) - selfScalingCostReduction(card, seat, allSeats)
-  );
-}
-
-function onceEachTurnFreeCastKey(turn: number, seatId: string): string {
-  return `${turn}:${seatId}:once_each_turn_free_hand_cast`;
-}
-
-function fateDesignLifeAltCostKey(turn: number, seatId: string): string {
-  return `${turn}:${seatId}:fate_design_life_alt_cost`;
-}
-
-// "You may cast spells from your hand without paying their mana costs." (Omniscience) — matched
-// narrowly to this exact wording rather than a general "free cast" grammar, same single-card
-// scoping as parseEnchantmentAnimationEffect/parsePhaseOutEffect elsewhere in this file; One with
-// the Multiverse's similar-sounding permission is "once during each of your turns" (a limited,
-// per-turn version, tracked separately via onceEachTurnEffectsUsed rather than this unconditional
-// check) and is deliberately NOT matched here.
-function hasOmniscienceFreeHandCast(seat: PlayerSeat): boolean {
-  return seat.board.battlefield.some((card) => /\byou may cast spells from your hand without paying (?:their|its) mana costs?\b/i.test(card.oracleText));
-}
-
-// "Once during each of your turns, you may cast a spell from your hand or the top of your library
-// without paying its mana cost." (One with the Multiverse). Scoped to the hand half only — casting
-// from the top of the library isn't modeled (this engine has no "library top is a playable zone"
-// concept; see this card's playCard/adjustedCastingCost callers for where the hand half plugs in).
-function hasOnceEachTurnFreeHandCastPermission(seat: PlayerSeat): boolean {
-  return seat.board.battlefield.some((card) => /\bonce during each of your turns, you may cast a spell from your hand or the top of your library without paying its mana cost\b/i.test(card.oracleText));
-}
-
-// "Once during each of your turns, you may cast an enchantment spell by paying life equal to its
-// mana value rather than paying its mana cost." (Demon of Fate's Design) — an alternative cost, not
-// a discount: the mana cost is waived entirely (handled the same way as the once-per-turn permission
-// above, via adjustedCastingCost returning 0) but a real life cost equal to the spell's own mana
-// value is charged instead, at the same playCard call site that marks the once-key used.
-function hasFateDesignLifeAltCost(seat: PlayerSeat): boolean {
-  return seat.board.battlefield.some((card) =>
-    /\bonce during each of your turns, you may cast an enchantment spell by paying life equal to its mana value rather than paying its mana cost\b/i.test(card.oracleText)
-  );
-}
-
-// hasCardType, not a raw typeLine check: a permanent that's an artifact only via a granted type
-// (Mycosynth Lattice's "All permanents are artifacts in addition to their other types") must count
-// toward Saheeli's affinity discount the same as a printed one. Reported live as Mycosynth Lattice
-// on the battlefield not increasing the discount at all, even though it makes every land and
-// nonartifact permanent an artifact.
-function artifactCount(seat: PlayerSeat) {
-  return seat.board.battlefield.filter((card) => hasCardType(card, "Artifact")).length;
-}
-
-// "[Qualifier] spells you cast cost {N} less to cast." (Goblin Anarchomancer, Herald's Horn,
-// Urza's Incubator, ...) — a static discount granted by a permanent on the caster's own
-// battlefield, stacking across every matching source the same way real Magic cost reducers do.
-// Before this, the only cost reduction this engine modeled at all was Saheeli's one-turn artifact
-// affinity grant (pendingArtifactAffinityReduction) — every always-on reducer from a permanent was
-// silently ignored, so those cards did nothing. Deliberately narrow, matching this codebase's other
-// deterministic parsers: only a flat generic discount is recognized (not "costs {1} less to cast
-// for each artifact you control"-style text printed on the spell itself, which needs to read the
-// spell's own oracle text rather than a granting permanent's, and not effects that reduce colored
-// mana symbols specifically — rule 601.2f, generic-only, matches the existing Saheeli handling).
-// Eminence (The Ur-Dragon, Kaseto, ...) is specifically the ability keyword for "this static effect
-// works from the command zone too, not just the battlefield" — the commander sits in
-// seat.board.commander until actually cast, at which point it moves to the battlefield and this
-// check naturally picks it up from there instead (never both at once), so this can't double-count.
-export function staticCostReduction(seat: PlayerSeat, card: VisibleCard): number {
-  const commander = seat.board.commander;
-  const commanderReduction = commander && /\beminence\b/i.test(commander.oracleText) ? parseGrantedCostReduction(commander, card) : 0;
-  // An emblem's "Artifact spells you cast cost {1} less to cast." (Saheeli, Filigree Master) is a standing reducer like a permanent's.
-  const emblemReduction = emblemSourceCards(seat).reduce((total, source) => total + parseGrantedCostReduction(source, card), 0);
-  return commanderReduction + emblemReduction + seat.board.battlefield.reduce((total, source) => total + parseGrantedCostReduction(source, card), 0);
-}
-
-// "Unlock costs you pay cost {1} less." (Inquisitive Glimmer, ...) — a differently-worded sibling
-// of staticCostReduction/parseGrantedCostReduction above (that one only ever matches "...spells...
-// cost {N} less to cast", nothing about unlocking a Room door), so it needed its own small parser
-// rather than trying to shoehorn "unlock" into the spell-cost regex.
-function unlockCostReduction(seat: PlayerSeat): number {
-  return seat.board.battlefield.reduce((total, source) => {
-    const match = source.oracleText.match(/unlock costs you pay cost \{(\d+)\} less\.?/i);
-    if (!match) return total;
-    const amount = Number.parseInt(match[1], 10);
-    return Number.isFinite(amount) && amount > 0 ? total + amount : total;
-  }, 0);
-}
-
-// "This spell costs {N} less to cast if there are [X] or more creatures on the battlefield."
-// (Blasphemous Edict and the rest of that "discount when the board is already full of creatures"
-// board-wipe family) — self-referential and printed on the spell being cast, unlike
-// staticCostReduction's shape above (a discount granted by some OTHER permanent). "The battlefield"
-// here means every player's creatures, not just the caster's — allSeats is passed in by
-// adjustedCastingCost's callers for exactly this reason.
-function selfConditionalCostReduction(card: VisibleCard, allSeats: PlayerSeat[]): number {
-  const match = card.oracleText.match(/this spell costs \{(\d+)\} less to cast if there are (\w+) or more creatures on the battlefield\.?/i);
-  if (!match) return 0;
-  const amount = Number.parseInt(match[1], 10);
-  const threshold = numberWordToInt(match[2].toLowerCase());
-  if (!Number.isFinite(amount) || amount <= 0 || !threshold) return 0;
-  const creatureCount = allSeats.reduce((total, seat) => total + seat.board.battlefield.filter((permanent) => permanent.typeLine.includes("Creature")).length, 0);
-  return creatureCount >= threshold ? amount : 0;
-}
-
-// A reduction that scales with the board: "This spell costs {1} less to cast for each creature on the battlefield."
-// (Blasphemous Act — every player's creatures) and "This spell costs {X} less to cast, where X is the total power of
-// creatures you control." (Ghalta, Primal Hunger — the caster's only). Neither was understood, so both were always full price.
-function selfScalingCostReduction(card: VisibleCard, caster: PlayerSeat, allSeats: PlayerSeat[]): number {
-  const perCreature = card.oracleText.match(/this spell costs \{(\d+)\} less to cast for each creature on the battlefield/i);
-  if (perCreature) {
-    const each = Number.parseInt(perCreature[1], 10);
-    const creatures = allSeats.reduce((total, seat) => total + seat.board.battlefield.filter((permanent) => permanent.typeLine.includes("Creature")).length, 0);
-    return Number.isFinite(each) ? each * creatures : 0;
-  }
-  // "This spell costs {1} less to cast for each attacking creature." (Ancient Stone Idol)
-  const perAttacker = card.oracleText.match(/this spell costs \{(\d+)\} less to cast for each attacking creature/i);
-  if (perAttacker) {
-    const attackers = allSeats.reduce((total, seat) => total + seat.board.battlefield.filter((permanent) => permanent.attacking).length, 0);
-    return Number.parseInt(perAttacker[1], 10) * attackers;
-  }
-  // Printed "Affinity for artifacts" (Thought Monitor, Reality Heist, Emry): {1} less per artifact the caster controls. (Saheeli's one-turn
-  // grant is a separate, additive pendingArtifactAffinityReduction.)
-  const affinity = card.oracleText.match(/^\s*affinity for ([a-z]+?)s?\b/im);
-  if (affinity) {
-    const type = capitalizeWord(affinity[1].toLowerCase());
-    return caster.board.battlefield.filter((permanent) => hasCardType(permanent, type)).length;
-  }
-  if (/this spell costs \{x\} less to cast, where x is the total power of creatures you control/i.test(card.oracleText)) {
-    return caster.board.battlefield.filter((permanent) => permanent.typeLine.includes("Creature")).reduce((total, permanent) => total + Math.max(0, effectivePower(permanent)), 0);
-  }
-  return 0;
-}
-
-// "[Qualifier] spells [you cast ]cost {N} less to cast." and its "of the chosen type" tribal
-// variant (Urza's Incubator: "Creature spells of the chosen type cost {2} less to cast."; Herald's
-// Horn: "Creature spells you cast of the chosen type cost {1} less to cast.") — the latter only
-// applies once the source has locked in a chosenCreatureType (see pickChosenCreatureType) and the
-// cast card's type line includes that type. Morophon's colored-pip reduction ("cost {W}{U}{B}{R}{G}
-// less to cast") isn't a flat generic amount and is deliberately left unparsed, same "narrow,
-// well-templated shapes only" boundary as the rest of this codebase's cost-reduction parsing.
-// Eminence-keyworded commanders (The Ur-Dragon, Kaseto, ...) print this same reduction with a
-// leading "Eminence — As long as ~ is in the command zone or on the battlefield, other" preamble —
-// matched via the "start of clause OR right after a comma" alternation below, with a leading
-// "other" stripped from the qualifier itself, rather than requiring the whole clause to be nothing
-// but the reduction sentence. Without this, an Eminence card's reduction never matched at all (not
-// a colored-vs-generic-mana issue — rule 601.2f generic-only scope is still correct and unchanged,
-// the clause was silently declined outright regardless of the cast card's cost).
-function parseGrantedCostReduction(source: VisibleCard, castCard: VisibleCard): number {
-  if (isDragonMana(source) && castCard.typeLine.includes("Dragon")) return 1;
-  const clauses = source.oracleText.split("\n").map((line) => line.trim()).filter(Boolean);
-  let total = 0;
-  for (const clause of clauses) {
-    // "Angel spells and Human spells you cast cost {1} less to cast for each +1/+1 counter on this creature." (Herald of War)
-    const perCounter = clause.match(/^([a-z]+) spells and ([a-z]+) spells you cast cost \{(\d+)\} less to cast for each \+1\/\+1 counter on this creature\.?$/i);
-    if (perCounter) {
-      if (!matchesCostReductionQualifier(perCounter[1].toLowerCase(), castCard) && !matchesCostReductionQualifier(perCounter[2].toLowerCase(), castCard)) continue;
-      total += Number.parseInt(perCounter[3], 10) * counterCount(source, "+1/+1");
-      continue;
-    }
-    const match = clause.match(/(?:^|,\s*)(?:other\s+)?(?:([a-z][a-z ]*?)\s+)?spells(?:\s+you cast)?(?:\s+of the chosen type)?(?:\s+you cast)?(?:\s+with power (\d+) or greater)? cost \{(\d+)\} less to cast\.?$/i);
-    if (!match) continue;
-    const qualifier = (match[1] ?? "").toLowerCase().trim();
-    const amount = Number.parseInt(match[3], 10);
-    if (!Number.isFinite(amount) || amount <= 0) continue;
-    // "Creature spells you cast with power 4 or greater cost {2} less" (Goreclaw) — the cast creature's printed power.
-    if (match[2] !== undefined && !(Number.parseInt(castCard.power ?? "", 10) >= Number.parseInt(match[2], 10))) continue;
-    if (/\bof the chosen type\b/i.test(clause)) {
-      if (!source.chosenCreatureType || !castCard.typeLine.includes(source.chosenCreatureType)) continue;
-    }
-    if (qualifier === "" || matchesCostReductionQualifier(qualifier, castCard)) total += amount;
-  }
-  return total;
-}
-
-function matchesCostReductionQualifier(qualifier: string, card: VisibleCard): boolean {
-  if (qualifier === "creature") return card.typeLine.includes("Creature");
-  if (qualifier === "noncreature") return !card.typeLine.includes("Creature");
-  if (qualifier === "instant and sorcery" || qualifier === "instant or sorcery") return card.typeLine.includes("Instant") || card.typeLine.includes("Sorcery");
-  if (qualifier === "artifact") return card.typeLine.includes("Artifact");
-  if (qualifier === "enchantment") return card.typeLine.includes("Enchantment");
-  if (qualifier === "planeswalker") return card.typeLine.includes("Planeswalker");
-  if (qualifier === "legendary") return card.typeLine.includes("Legendary");
-  if (qualifier === "historic") return isHistoricCard(card);
-  // Tribal cost reducers (Urza's Incubator's chosen creature type, Herald's Horn's chosen type,
-  // ...) — match the qualifier word against the type line's own text (creature subtypes live after
-  // the em dash). A multi-word or colored qualifier ("black creature", Bontu's Monument) goes through the
-  // shared qualifier matcher, which knows colors — a plain substring test never matched "black creature".
-  if (/\s/.test(qualifier) || /^(?:white|blue|black|red|green|nontoken|colorless)$/.test(qualifier)) return permanentMatchesQualifier(card, qualifier);
-  return card.typeLine.toLowerCase().includes(qualifier);
-}
-
-// The fixedCost passed to maxAffordableX already had the pending reduction subtracted (capped at
-// baseCost) so it could size how much extra X headroom a leftover reduction buys — but that alone
-// isn't the actual bill once X is chosen: {X} symbols contribute X to the total per copy
-// (xSymbolCount of them), and a "costs {N} less" effect discounts that whole total, not just the
-// non-X portion. Re-deriving the total from baseCost + xCount*chosenX and applying the reduction
-// once here (instead of adding xCount*chosenX on top of the already-discounted fixedCost) is what
-// keeps a leftover reduction from being counted twice: once to justify affording a higher X, and
-// then never actually subtracted from what's paid.
-export function totalCastingCost(seat: PlayerSeat, card: VisibleCard, baseCost: number, chosenX: number, allSeats?: PlayerSeat[]) {
-  const unitCost = xOrMultikickerUnitCost(card);
-  // The spell's own reductions (Ghalta's "costs {X} less, where X is the total power of creatures you control", Blasphemous Act) were part of
-  // adjustedCastingCost - which decides whether a spell is castable - but never of this, which decides what is charged, so the two disagreed.
-  const ownReduction = allSeats ? selfConditionalCostReduction(card, allSeats) + selfScalingCostReduction(card, seat, allSeats) : 0;
-  // Rule 601.2f: same colored-pip floor as adjustedCastingCost above — a flat cost reduction can
-  // never eat into X/multikicker-inflated cost's colored requirement either.
-  return Math.max(coloredPipCount(card), baseCost + unitCost * chosenX - pendingArtifactAffinityReduction(seat) - staticCostReduction(seat, card) - ownReduction);
-}
-
-// Saheeli, the Gifted's second +1: "The next spell you cast this turn has affinity for artifacts.
-// (It costs {1} less to cast for each artifact you control as you cast it.)" — evaluated against
-// artifacts controlled at cast time, not when the loyalty ability was activated.
-function pendingArtifactAffinityReduction(seat: PlayerSeat) {
-  return seat.nextSpellHasArtifactAffinity ? artifactCount(seat) : 0;
-}
-
-function coloredPipCount(card: VisibleCard) {
-  return (card.manaCost?.match(/\{[WUBRG]\}/gi) ?? []).length;
-}
-
-function findMiracleGranter(seat: PlayerSeat): VisibleCard | undefined {
-  return seat.board.battlefield.find(
-    (card) => card.name === "Aminatou, Veil Piercer" || /enchantment cards? in your hand (has|have) miracle/i.test(card.oracleText)
-  );
-}
-
-// staticCostReduction stacks with the granted-miracle discount itself, same as it would with any
-// other cost reduction (rule 601.2f floors the combined total at coloredPipCount, never below it) —
-// previously omitted entirely, so a static reducer on the battlefield (Inquisitive Glimmer, ...)
-// was silently ignored for a miracle cast even though the exact same reduction was already correctly
-// applied for a normal hand cast (adjustedCastingCost). Reported live as Aminatou, Veil Piercer's
-// granted miracle (-4) plus Inquisitive Glimmer's own discount (-1) only ever reducing the cost by
-// 4, not the expected 5.
-export function miracleCostFor(seat: PlayerSeat, card: VisibleCard) {
-  return Math.max(coloredPipCount(card), card.manaValue - 4 - staticCostReduction(seat, card));
-}
-
-// A card's own printed "Miracle {cost}" line (Temporal Mastery: "Miracle {1}{U}"), as opposed to
-// miracleCostFor's estimate — used for a granted-miracle card (Aminatou, Veil Piercer's enchantments)
-// that has no real miracle cost printed on it at all.
-function parseMiracleCost(card: VisibleCard): number | undefined {
-  const match = card.oracleText.match(/\bmiracle\s+((?:\{[^}]+\})+)/i);
-  return match ? manaValueFromManaCost(match[1]) : undefined;
-}
-
-// "Shockland" replacement effect (Steam Vents, Blood Crypt, and the same template on the newer
-// pay-life MDFC lands): the CONTROLLER chooses, at the moment it enters, whether to pay life for an
-// untapped land or take it tapped for free — a real choice, not an unconditional "enters tapped"
-// like a check/fast/slow land. Without this, the generic `/\benters tapped\b/` catch-all below still
-// matched the "...if you don't, it enters tapped" clause (the literal substring is right there),
-// so every shockland always entered tapped with the life-payment option silently unavailable —
-// removing the entire reason these lands exist. Deliberately keyed off the exact replacement-effect
-// wording rather than card names: any land templated this way (Ravnica shocks, the pay-life MDFC
-// lands, future ones) is covered without a name list to maintain.
-function shocklandPayLifeAmount(oracleText: string): number | undefined {
-  const match = oracleText.toLowerCase().match(/as this land enters,? you may pay (\d+) life\.\s*if you don.t,? it enters tapped\b/);
-  return match ? Number.parseInt(match[1], 10) : undefined;
-}
-
-// No interactive prompt (yet) for either seat — paying life for the tempo of an untapped land is
-// correct in the vast majority of real games (Commander's 40 starting life gives a lot of room), so
-// this defaults to paying unless the controller is already in real danger, rather than always taking
-// the free tapped land and just as silently defeating the card's purpose the other way.
-const SHOCKLAND_MINIMUM_SAFE_LIFE = 10;
-
-// "Checkland-style reveal" lands (the Snarls: Frostboil, Furycalm, Shineshadow, Vineglimmer, Choked Estuary-likes, ...):
-// "As this land enters, you may reveal a Mountain or Island card from your hand. If you don't, this land enters tapped."
-// Returns the revealable land types (capitalized), or undefined for any other text. Keyed off the wording, not names.
-export function revealLandTypes(oracleText: string): string[] | undefined {
-  const lower = oracleText.toLowerCase();
-  // Two templates: "...If you don't, this land enters tapped." (Snarls, Gilt-Leaf Palace, Murmuring Bosk) and "...This land enters tapped
-  // unless you revealed a Dragon card this way or you control a Dragon." (Temple of the Dragon Queen, Fortified Beachhead).
-  const match =
-    lower.match(/as (?:this land|~|[^.,]+?) enters,? you may reveal an? ([a-z]+)(?: or (?:an? )?([a-z]+))? card from your hand\.\s*if you don.t,? (?:it|this land|[^.,]+?) enters (?:the battlefield )?tapped/) ??
-    lower.match(/as (?:this land|~|[^.,]+?) enters,? you may reveal an? ([a-z]+)(?: or (?:an? )?([a-z]+))? card from your hand\.\s*(?:this land|it|[^.,]+?) enters (?:the battlefield )?tapped unless you revealed/) ??
-    // "behold" (Theorist's Sanctum): choose a Jace you control OR reveal one from hand — handled like the reveal template.
-    lower.match(/as (?:this land|~|[^.,]+?) enters,? you may behold an? ([a-z]+)()\.\s*if you don.t,? (?:it|this land|[^.,]+?) enters (?:the battlefield )?tapped/);
-  if (!match) return undefined;
-  return [match[1], match[2]].filter((word): word is string => Boolean(word)).map(capitalizeWord);
-}
-
-// "...or you control a Dragon" — the permanent-control alternative to revealing (Temple of the Dragon Queen, Fortified Beachhead).
-export function revealLandControlExempt(card: VisibleCard, controller: PlayerSeat | undefined): boolean {
-  const types = revealLandTypes(card.oracleText);
-  if (!types || !controller || !(/tapped unless you revealed [^.]*\bor you control an? /i.test(card.oracleText) || /you may behold an? [a-z]+\./i.test(card.oracleText))) return false;
-  return controller.board.battlefield.some((permanent) => permanent.id !== card.id && types.some((type) => permanent.typeLine.includes(type)));
-}
-
-// The cards in `hand` that could be revealed for a reveal-land (never the land itself).
-export function revealableLandCards(card: VisibleCard, hand: VisibleCard[]): VisibleCard[] {
-  const types = revealLandTypes(card.oracleText);
-  if (!types) return [];
-  return hand.filter((candidate) => candidate.id !== card.id && types.some((type) => candidate.typeLine.includes(type)));
-}
-
-export function entersBattlefieldTapped(card: VisibleCard, controller?: PlayerSeat, allSeats?: PlayerSeat[]) {
-  const text = card.oracleText.toLowerCase();
-  // Reveal-land: revealing is free, so untapped exactly when something revealable is in hand (a human is asked first on a land DROP).
-  if (revealLandTypes(card.oracleText)) {
-    return !controller || (revealableLandCards(card, controller.board.hand).length === 0 && !revealLandControlExempt(card, controller));
-  }
-  // "This land enters tapped unless your opponents control eight or more lands." (Turbulent Fen and
-  // the rest of that cycle) — counts lands across ALL opponents combined, not just one.
-  const opponentLandsMatch = text.match(/enters (?:the battlefield )?tapped unless your opponents control (\w+) or more lands/);
-  if (opponentLandsMatch) {
-    const needed = numberWordToInt(opponentLandsMatch[1]);
-    if (!controller || !allSeats || needed === undefined) return true;
-    const opponentLands = allSeats.filter((other) => other.id !== controller.id).reduce((sum, other) => sum + other.board.battlefield.filter((permanent) => permanent.typeLine.includes("Land")).length, 0);
-    return opponentLands < needed;
-  }
-  // "This land enters tapped unless you have two or more opponents." (Vault of Champions, the Battlebond friend-or-foe lands)
-  const opponentCountMatch = text.match(/enters (?:the battlefield )?tapped unless you have (\w+) or more opponents/);
-  if (opponentCountMatch) {
-    const needed = numberWordToInt(opponentCountMatch[1]);
-    if (!controller || !allSeats || needed === undefined) return true;
-    return allSeats.filter((other) => other.id !== controller.id && !other.hasLost).length < needed;
-  }
-  const shockCost = shocklandPayLifeAmount(text);
-  if (shockCost !== undefined) {
-    return Boolean(controller) && (controller!.life ?? 40) <= SHOCKLAND_MINIMUM_SAFE_LIFE;
-  }
-  const checkLandMatch = text.match(/enters (?:the battlefield )?tapped unless you control an? ([a-z]+) or an? ([a-z]+)/);
-  if (checkLandMatch) {
-    const types = [checkLandMatch[1], checkLandMatch[2]].map(capitalizeWord);
-    return !controller || !controlsLandType(controller, types);
-  }
-  if (text.includes("enters tapped unless you control two or more basic lands")) {
-    return !controller || controller.board.battlefield.filter((permanent) => basicLandTypes(permanent).length > 0).length < 2;
-  }
-  // "This land enters tapped unless you control a Swamp." (Castle Locthwain) — a single land type, no
-  // "or"; and "...unless you control three or more other Swamps." (Witch's Cottage). Both used to fall to
-  // the catch-all at the bottom, which matches the literal "enters tapped" prefix and so always tapped them.
-  const singleTypeMatch = text.match(/enters (?:the battlefield )?tapped unless you control an? ([a-z]+)\b(?! or\b)/);
-  if (singleTypeMatch) return !controller || !controlsLandType(controller, [capitalizeWord(singleTypeMatch[1])]);
-  const countOtherTypeMatch = text.match(/enters (?:the battlefield )?tapped unless you control (a|one|two|three|four|five|\d+) or more other ([a-z]+?)s?\b/);
-  if (countOtherTypeMatch) {
-    const needed = numberWordToInt(countOtherTypeMatch[1]) ?? 1;
-    const wantedType = capitalizeWord(countOtherTypeMatch[2]);
-    const have = controller ? controller.board.battlefield.filter((permanent) => permanent.id !== card.id && basicLandTypes(permanent).includes(wantedType)).length : 0;
-    return have < needed;
-  }
-  // Fastlands ("...unless you control two or FEWER other lands", Blackcleave Cliffs, ...) and
-  // slowlands ("...two or MORE other lands", Deserted Beach, ...) — heavily played efficient duals
-  // with no handling at all before this: the generic `/\benters tapped\b/` catch-all below matched
-  // the literal "enters tapped unless..." prefix unconditionally, so both cycles always entered
-  // tapped regardless of board state, including turn-1 fastlands that should have come in untapped.
-  const otherLandsMatch = text.match(/enters (?:the battlefield )?tapped unless you control two or (fewer|more) other lands\b/);
-  if (otherLandsMatch) {
-    const otherLandCount = controller ? controller.board.battlefield.filter((permanent) => permanent.typeLine.includes("Land")).length : 0;
-    return otherLandsMatch[1] === "fewer" ? otherLandCount > 2 : otherLandCount < 2;
-  }
-  return (
-    /\benters tapped\b/.test(text) ||
-    /\benters the battlefield tapped\b/.test(text) ||
-    /\benters the battlefield tapped unless\b/.test(text) ||
-    knownEntersTappedCards.has(card.name)
-  );
-}
-
-function controlsLandType(seat: PlayerSeat, types: string[]) {
-  return seat.board.battlefield.some((permanent) => basicLandTypes(permanent).some((type) => types.includes(type)));
-}
-
-const knownEntersTappedCards = new Set([
-  "Bojuka Bog",
-  "Arcane Sanctum",
-  "Contaminated Aquifer",
-  "Halimar Depths",
-  "Myriad Landscape",
-  "Prairie Stream",
-  "Temple of Deceit",
-  "Temple of Silence",
-  "Thriving Heath",
-  "Thriving Isle",
-  "Thriving Moor"
-]);
-
-function landTurnKey(seatId: string, turn: number) {
-  return `${turn}:${seatId}`;
-}
-
-// Land drops: one per turn, plus one for each "You may play an additional land on each of your turns." (Loot, Exuberant Explorer, Exploration).
-export function landDropsAllowed(seat: PlayerSeat): number {
-  return 1 + seat.board.battlefield.filter((card) => !card.abilitiesStripped && /\byou may play an additional land on each of your turns\b/i.test(card.oracleText)).length;
-}
-
-// How many lands a seat has played this turn, kept in a set of keys: the base key for the first, then "<key>:2", "<key>:3", ...
-export function landPlaysMade(plays: Set<string>, key: string): number {
-  let made = plays.has(key) ? 1 : 0;
-  while (plays.has(`${key}:${made + 1}`)) made += 1;
-  return made;
-}
-
-export function recordLandPlay(plays: Set<string>, key: string): void {
-  const made = landPlaysMade(plays, key);
-  plays.add(made === 0 ? key : `${key}:${made + 1}`);
-}
 
 function chooseAgentMainPhaseCard(seat: PlayerSeat, hasPlayedLand: boolean) {
   const unplayedLand = seat.board.hand.find((card) => isLandCard(card));

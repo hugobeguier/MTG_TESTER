@@ -711,3 +711,14 @@ in the new module, `export { fn } from "@/engine/..."` (or import and re-export)
   and `createCopyTokenForSeat` (call `applyEntryEffects`; the former also `checkStateBasedActions` and
   `findCommonTriggersForPermanentEntered`), `resolveCopyOneOfCandidates` (`findPermanentById`, `rulesEvent`,
   `queuePlayerChoice`). Move them after zones/triggers/SBA are extracted.
+
+* **`src/engine/lands.ts` - DONE**, ~160 lines, moved verbatim: `entersBattlefieldTapped`, `shocklandPayLifeAmount`,
+  `SHOCKLAND_MINIMUM_SAFE_LIFE`, `revealLandTypes`, `revealLandControlExempt`, `revealableLandCards`, `controlsLandType`,
+  `knownEntersTappedCards`, and land-drop bookkeeping (`landDropsAllowed`, `landPlaysMade`, `recordLandPlay`, `landTurnKey`).
+* **`src/engine/costs.ts` - DONE (cost computation)**, ~400 lines, moved verbatim: `manaValueFromManaCost`, `cardWithFaceManaCost`,
+  `xSymbolCount`, `maxAffordableX`, `parseMultikickerCost`, `hasSingleKicker`, `adjustedCastingCost`, `totalCastingCost`,
+  `staticCostReduction`, `parseGrantedCostReduction`, self-conditional/scaling/unlock reductions, Saheeli affinity helpers,
+  free-cast / alt-cost permission checks (Omniscience, One with the Multiverse, Demon of Fate's Design), `miracleCostFor`,
+  `parseMiracleCost`, `findMiracleGranter`, `isHistoricCard`. `emblemAsShimCard`/`emblemSourceCards` moved to `shared.ts`.
+  Left in AppFlow.tsx: `spellFaceCostCard`/`castFaceOptions`/`castFaceDecision` (need `canCastAtInstantSpeed`, `hasResolvableTarget`,
+  `isMainPhase`), the additional-cost payers (`payAdditionalDiscardCost`, `sacrificeForAdditionalCost`, ... mutate sessions), `genericCostShim`.
