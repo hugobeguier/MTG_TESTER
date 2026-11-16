@@ -112,12 +112,6 @@ export function useManaUi(ctx: GameContext) {
     setManaContributions((current) => ({ ...current, [seatId]: (current[seatId] ?? []).filter((item) => item.cardId !== cardId) }));
   }
 
-  function addFloatingMana(seatId: string, color: ManaColor) {
-    const seat = session.seats.find((item) => item.id === seatId);
-    setSeatManaPool(seatId, addManaToPool(poolForSeat(seatId), color, color === "C" ? 1 : 1));
-    addEvent(`${seat?.name ?? "Player"} adds ${color} to their mana pool.`, seatId, "Mana");
-  }
-
   // A permanent whose only function is producing mana (a land or a mana rock, not a creature and
   // not equipment) doesn't need the card inspector at all — tapping it for mana is the only thing
   // there is to decide, so a single click should just do it (or open the color-choice modal

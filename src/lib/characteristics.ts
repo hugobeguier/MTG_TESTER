@@ -4,7 +4,7 @@
 // counts, and devotion are all out of scope; those are recognized as "not this pattern" and
 // simply left unparsed rather than guessed at.
 
-export type CdaStat = "both" | "power" | "toughness";
+type CdaStat = "both" | "power" | "toughness";
 
 export interface CharacteristicDefiningAbility {
   stat: CdaStat;

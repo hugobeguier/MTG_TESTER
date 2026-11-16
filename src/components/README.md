@@ -4,7 +4,7 @@
 * `SetupScreen.tsx` - setup-screen JSX (status tiles, PLAY, saved games list, per-seat deck panels). Props only.
 * `GameOverDialog.tsx` - "Game over" modal. Props only.
 * `DeckSetup.tsx` - `DeckSetupPanel`, `Topbar`, `Status`, `SeatConfig`/`SavedDeck`, deck validation and `applyDeckToSeat`.
-* `ThreeGameTable.tsx`, `PlayerBoard.tsx`, `GameTable.tsx`, `VisualCard.tsx`, `ZoneSummary.tsx` - the in-game table UI.
+* `ThreeGameTable.tsx`, `VisualCard.tsx` - the in-game table UI.
 * `viewModels.ts` - `ruleChoiceView` / `blockChoiceView` (what choice dialogs show).
 * `hooks/usePriorityStopSettings.ts` - state: human priority-stop settings (persisted); returns `{priorityStopSettings, updatePriorityStopSettings}`.
 * `hooks/useDeckLibrary.ts` - state: per-seat `configs`, `deckLibrary` (fetched from /api/decks/library), `defaultDecksApplied` ref.

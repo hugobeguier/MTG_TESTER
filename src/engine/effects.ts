@@ -446,7 +446,7 @@ export function castTargetLegal(session: GameSession, controllerSeatId: string, 
 // Keen Duelist ("you and target opponent each reveal the top card of your library") and Parker Luck ("two target players each reveal ..."): both
 // players reveal their top card, each loses life equal to the mana value of the card the OTHER one revealed, then each puts the card they
 // revealed into their hand. The reveal is public, so the log names the cards.
-export function applyRevealTopExchange(session: GameSession, controllerSeatId: string, sourceName: string, ids: [string, string]): GameSession {
+function applyRevealTopExchange(session: GameSession, controllerSeatId: string, sourceName: string, ids: [string, string]): GameSession {
   const [a, b] = ids;
   const seatA = session.seats.find((seat) => seat.id === a);
   const seatB = session.seats.find((seat) => seat.id === b);

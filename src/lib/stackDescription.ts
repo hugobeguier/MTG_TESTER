@@ -25,7 +25,7 @@ export interface StackItemLike {
   sourceCard?: Pick<VisibleCard, "oracleText" | "typeLine"> | undefined;
 }
 
-export interface StackTarget {
+interface StackTarget {
   kind: "player" | "card" | "stack";
   label: string;
   // Controller (permanent) or owner (graveyard/exile card) or the player themself.
@@ -48,7 +48,7 @@ export interface StackItemDescription {
   affectsPlayerSeatId?: string;
 }
 
-export function parseStackTargetToken(token: string): ChosenTarget | undefined {
+function parseStackTargetToken(token: string): ChosenTarget | undefined {
   const parts = token.split(":");
   if (parts[0] === "p" && parts[1]) return { kind: "player", seatId: parts[1] };
   if (parts[0] === "c" && parts[1] && parts[2]) return { kind: "card", seatId: parts[1], cardId: parts[2] };

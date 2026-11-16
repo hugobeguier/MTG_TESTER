@@ -18,7 +18,7 @@ export type PhaseName = (typeof TURN_PHASES)[number];
 //  each_player: every turn, and the effect refers to that turn's player ("each player's upkeep", "that player draws")
 //  opponents: only on an opponent's turn ("each opponent's upkeep")
 //  enchanted_player: the turn of the player an Aura enchants (Shadow of the Second Sun) - not resolved by the registry
-export type PhaseTurnScope = "controller" | "each" | "each_player" | "opponents" | "enchanted_player";
+type PhaseTurnScope = "controller" | "each" | "each_player" | "opponents" | "enchanted_player";
 
 export interface PhaseTriggerSpec {
   phase: PhaseName;
@@ -150,7 +150,7 @@ export function parsePhaseTriggers(oracleText: string): PhaseTriggerSpec[] {
 // --- watchers ------------------------------------------------------------------------------------------------------------------------------
 
 // The minimal shape of a seat / permanent this module reads (structurally satisfied by PlayerSeat / VisibleCard).
-export interface PhaseCardView {
+interface PhaseCardView {
   id: string;
   name: string;
   oracleText: string;
@@ -198,7 +198,7 @@ export function buildPhaseWatchers(seats: PhaseSeatView[]): PhaseWatcher[] {
 }
 
 // Whether a spec's scope puts it on this turn's step.
-export function phaseScopeApplies(scope: PhaseTurnScope, controllerSeatId: string, activeSeatId: string): boolean {
+function phaseScopeApplies(scope: PhaseTurnScope, controllerSeatId: string, activeSeatId: string): boolean {
   if (scope === "controller") return controllerSeatId === activeSeatId;
   if (scope === "opponents") return controllerSeatId !== activeSeatId;
   if (scope === "enchanted_player") return false;
@@ -310,9 +310,4 @@ export function anyPhaseTrigger(seats: PhaseSeatView[], phase: PhaseName, active
   return collectPhaseTriggers(seats, phase, activeSeatId, options).length > 0;
 }
 
-// Only "the number" helper used by tests/consumers that want to describe a spec in the stack text.
-export function describePhaseSpec(spec: PhaseTriggerSpec): string {
-  const when = spec.scope === "controller" ? "your" : spec.scope === "opponents" ? "each opponent's" : spec.scope === "each_player" ? "each player's" : "each";
-  return `At the beginning of ${when} ${spec.phase.replace(/ step$/, "")}${spec.condition ? `, if ${spec.condition}` : ""}: ${spec.effectText}`;
-}
 

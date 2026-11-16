@@ -201,20 +201,6 @@ export function resolveManlandAnimation(session: GameSession, seatId: string, ca
   };
 }
 
-// No dedicated "choose a permanent" UI exists yet (matching how Myriad Landscape/basic-land-fetch
-// already auto-resolve their choices), so this deterministically picks the least costly creature
-// to lose: prefer a token over a real card, then the lowest combined power+toughness.
-function chooseSacrificeTarget(seat: PlayerSeat, typeFilter?: string): VisibleCard | undefined {
-  const creatures = seat.board.battlefield.filter(
-    (card) => card.typeLine.includes("Creature") && (!typeFilter || card.typeLine.toLowerCase().includes(typeFilter.toLowerCase()))
-  );
-  if (creatures.length === 0) return undefined;
-  const tokens = creatures.filter((card) => card.token);
-  const pool = tokens.length > 0 ? tokens : creatures;
-  return pool.reduce((worst, card) =>
-    effectivePower(card) + effectiveToughness(card) < effectivePower(worst) + effectiveToughness(worst) ? card : worst
-  );
-}
 
 // Same "no choice UI, pick deterministically" pattern as chooseSacrificeTarget, for a generic tap
 // ability's "target X you control" (a counter/upgrade or a bounce-to-hand) — every such target this

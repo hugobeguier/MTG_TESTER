@@ -3,7 +3,7 @@
 // covered (not "counter target activated/triggered ability") — that's a separate, larger feature
 // since this engine's stack model treats spells and abilities differently.
 
-export type CounterSpellRestriction = "any" | "creature" | "noncreature" | "commander" | "types";
+type CounterSpellRestriction = "any" | "creature" | "noncreature" | "commander" | "types";
 
 export interface CounterSpellAbility {
   restriction: CounterSpellRestriction;

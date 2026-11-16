@@ -27,7 +27,7 @@ function lenientEnum<T extends readonly [string, ...string[]]>(values: T) {
 // "other" is the deliberate escape hatch for a real trigger (e.g. "whenever you draw a card")
 // that has no runtime hook yet: it's still recorded with its condition text for future review
 // rather than forced into a bucket that would fire it at the wrong time.
-export const TRIGGER_EVENTS = [
+const TRIGGER_EVENTS = [
   "etb",
   "dies",
   "attacks",
@@ -55,7 +55,7 @@ export const AbilitySchema = z.object({
 
 export type Ability = z.infer<typeof AbilitySchema>;
 
-export const CardParseSchema = z.object({
+const CardParseSchema = z.object({
   declined: z.boolean().default(false),
   abilities: z.array(AbilitySchema).default([])
 });

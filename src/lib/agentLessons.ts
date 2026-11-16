@@ -1,7 +1,7 @@
 // Lessons the human gives the agents by chatting with them about a decision ("here is what I would have done"). They are saved on disk between
 // sessions (agentLessonStore.ts) and fed back into the agents' prompt (app/api/agents/action/route.ts).
 
-export interface DecisionOption {
+interface DecisionOption {
   id: string;
   label: string;
   score: number;

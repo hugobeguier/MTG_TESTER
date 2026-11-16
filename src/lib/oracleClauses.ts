@@ -63,7 +63,7 @@ export function isActivatedAbilityClause(clause: string): boolean {
   return !/\b(when|whenever|at the beginning)\b/i.test(preColon);
 }
 
-export function isDeathTriggerClause(clause: string): boolean {
+function isDeathTriggerClause(clause: string): boolean {
   // Text inside quotation marks is an ability GRANTED to a token or creature ("create a 1/1 Pest token with "When this token dies, you gain
   // 1 life."" - Beledros Witherbloom, Ribtruss Roaster, Moseo), not a death trigger of the card itself. Left in, the card made a Pest (or
   // gained life) when IT died, and its own end step / upkeep trigger line was swallowed as a "death clause".
@@ -83,7 +83,7 @@ export function isCombatDamageToPlayerClause(clause: string): boolean {
 // step/end step/...", "at the beginning of combat", "at the beginning of each opponent's upkeep")
 // with this exact phrase — an ETB trigger always uses "when"/"whenever ~ enters" instead, never
 // this wording, so it's a safe, general exclusion rather than a per-phase list.
-export function isPhaseTriggerClause(clause: string): boolean {
+function isPhaseTriggerClause(clause: string): boolean {
   return /\bat the beginning of\b/i.test(clause);
 }
 
@@ -169,7 +169,7 @@ function etbClauses(oracleText: string): string[] {
 // Zombie creature token." (Kalitas, Traitor of Ghet) — a replacement effect (rule 614), never something
 // that happens when the permanent enters. Left in etbEffectText it was read as a plain "create a token"
 // and cast Kalitas for a free Zombie.
-export function isReplacementEffectClause(clause: string): boolean {
+function isReplacementEffectClause(clause: string): boolean {
   return /\bwould\b[^.]*,\s*instead\b/i.test(clause) || /\binstead\b[^.]*\bwould\b/i.test(clause);
 }
 
@@ -197,7 +197,7 @@ export function parseExileInsteadOfDyingReplacement(oracleText: string): ExileIn
 // Undead into a one-shot "each creature gets +1/+1 until end of turn" pump. A real one-shot pump
 // always carries a duration ("until end of turn"), a target, or a trigger/cost wrapper, so those
 // shapes are deliberately NOT treated as static here.
-export function isStaticBoostClause(clause: string): boolean {
+function isStaticBoostClause(clause: string): boolean {
   const text = clause.replace(/\([^)]*\)/g, " ");
   if (!/\bgets?\s+[+-]\d+\/[+-]\d+\b/i.test(text)) return false;
   return !/until end of turn|this turn|\btarget\b|\bwhen\b|\bwhenever\b|at the beginning|:/i.test(text);

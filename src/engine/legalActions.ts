@@ -962,7 +962,7 @@ export function fallbackLegalAction(actions: LegalAgentAction[]) {
 // Agent policy for "Pay N life: Untap all lands you control." (Beledros Witherbloom). The ability is legal for anyone with the life, but
 // paying 10 life is only right when it buys something real: a spell worth casting (mana value 4+) that the lands still untapped cannot
 // pay for NOW but the full set of lands can, and only while the payment leaves a safe life total (20+) so it never walks into lethal.
-export const UNTAP_LANDS_SAFE_LIFE = 20;
+const UNTAP_LANDS_SAFE_LIFE = 20;
 export function untapAllLandsIsWorthIt(seat: PlayerSeat, costLife: number, allSeats?: PlayerSeat[]): boolean {
   if (seat.life - costLife < UNTAP_LANDS_SAFE_LIFE) return false;
   const untappedSeat: PlayerSeat = {
@@ -984,7 +984,7 @@ export function untapAllLandsIsWorthIt(seat: PlayerSeat, costLife: number, allSe
 // resource (no recursion in play) while the library is thinning. A reanimator's graveyard is its engine, so it is never shuffled away
 // without a graveyard-hate response. Empty graveyard: never (nothing to protect or recover).
 const GRAVEYARD_HATE_TEXT = /\bexile\b[^.]{0,80}\bgraveyards?\b|\bexile target card from a graveyard\b|\bexile (?:all )?cards? from (?:a|target|each|all)\b[^.]{0,40}graveyards?|\binto a graveyard from anywhere, exile it instead\b|\bgraveyards? (?:is|are) exiled\b/i;
-export function graveyardHateOnStack(session: GameSession, seat: PlayerSeat, stack: PendingAction[]): boolean {
+function graveyardHateOnStack(session: GameSession, seat: PlayerSeat, stack: PendingAction[]): boolean {
   return stack.some((item) => {
     if (item.actorSeatId === seat.id) return false;
     if (item.type === "trigger" && item.controllerSeatId === seat.id) return false;
@@ -996,7 +996,7 @@ function graveyardIsResource(seat: PlayerSeat): boolean {
   const cards = [...seat.board.battlefield, ...seat.board.hand, ...(seat.board.commander ? [seat.board.commander] : [])];
   return cards.some((card) => !card.abilitiesStripped && /\b(?:from|in) (?:your|a) graveyard\b/i.test(card.oracleText));
 }
-export function graveyardShuffleIsWorthIt(session: GameSession, seat: PlayerSeat, stack: PendingAction[] = []): boolean {
+function graveyardShuffleIsWorthIt(session: GameSession, seat: PlayerSeat, stack: PendingAction[] = []): boolean {
   const graveyardSize = seat.board.graveyard?.length ?? 0;
   if (graveyardSize === 0) return false;
   if (graveyardHateOnStack(session, seat, stack)) return true;
@@ -1016,17 +1016,6 @@ export function seatIsBeingAttacked(session: GameSession, seatId: string): boole
   );
 }
 
-function canPayForCard(seat: PlayerSeat, card: VisibleCard) {
-  return chooseManaSourcesForCost(seat, card, card.manaValue).ok;
-}
 
-function chooseAgentMainPhaseCard(seat: PlayerSeat, hasPlayedLand: boolean) {
-  const unplayedLand = seat.board.hand.find((card) => isLandCard(card));
-  if (unplayedLand && !hasPlayedLand) return unplayedLand;
 
-  const playableSpells = seat.board.hand
-    .filter((card) => !isLandCard(card))
-    .filter((card) => chooseManaSourcesForCost(seat, card, adjustedCastingCost(seat, card, card.manaValue, "hand", seat.id)).ok)
-    .sort((left, right) => right.manaValue - left.manaValue);
-  return playableSpells[0];
-}
+

@@ -1,5 +1,4 @@
 // Shared by scripts/card-backlog.ts and the per-deck coverage test: does ANY deterministic parser claim this oracle line? (Moved out of the script.)
-import { loadCardCatalog } from "@/lib/cardCatalog";
 import { KEYWORD_TABLE } from "@/lib/keywords";
 import { parseRemovalEffect } from "@/lib/removalSpells";
 import { parseZoneEffect } from "@/lib/zoneEffects";

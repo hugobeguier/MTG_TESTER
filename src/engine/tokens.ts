@@ -52,7 +52,7 @@ export function createTokenCard(seatId: string, sourceCardId: string, spec: Toke
 
 // How much an agent wants a token copy of this creature: its own enters-the-battlefield value first (a copy re-runs it), then raw size. A legendary
 // copy would just hit the legend rule, so it is a last resort.
-export function tokenCopyWorth(card: VisibleCard): number {
+function tokenCopyWorth(card: VisibleCard): number {
   const hasEtb = etbEffectText(card.oracleText).trim().length > 0;
   return (hasEtb ? 20 : 0) + card.manaValue * 2 + effectivePower(card) + effectiveToughness(card) - (card.typeLine.includes("Legendary") ? 100 : 0);
 }
@@ -232,7 +232,7 @@ export function predefinedTokenSpec(name: "Treasure" | "Food" | "Clue" | "Blood"
   };
 }
 
-export function parseCreatureTokenDescription(description: string): TokenSpec | undefined {
+function parseCreatureTokenDescription(description: string): TokenSpec | undefined {
   const pt = description.match(/\b(\d+)\/(\d+)\b/);
   const colors = tokenColors(description);
   const abilities = description.match(/\bwith\s+(.+)$/i)?.[1]?.trim();
@@ -262,7 +262,7 @@ export function parseCreatureTokenDescription(description: string): TokenSpec | 
   };
 }
 
-export function tokenColors(description: string) {
+function tokenColors(description: string) {
   const colors: string[] = [];
   const colorMap: Record<string, string> = { white: "W", blue: "U", black: "B", red: "R", green: "G" };
   for (const [word, symbol] of Object.entries(colorMap)) {
@@ -271,7 +271,7 @@ export function tokenColors(description: string) {
   return colors;
 }
 
-export function sentenceCaseAbilities(abilities: string) {
+function sentenceCaseAbilities(abilities: string) {
   return abilities
     .split(/\s+and\s+/i)
     .map((ability) => ability.trim())

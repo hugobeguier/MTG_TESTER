@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
-import type { CardImageUris, CardRecord, DeckCard } from "./types";
+import type { CardRecord } from "./types";
 
 export interface CardCatalog {
   cards: CardRecord[];
@@ -47,12 +47,7 @@ export function getCatalogStatus() {
   };
 }
 
-export function enrichDeckCards(cards: DeckCard[], catalog: CardCatalog): DeckCard[] {
-  return cards.map((card) => {
-    const record = lookupCard(catalog, card.name);
-    return record ? { ...card, name: record.name, cardId: record.id, card: record, role: card.role ?? inferRoleFromCard(record) } : card;
-  });
-}
+
 
 export function lookupCard(catalog: CardCatalog, name: string) {
   return catalog.byName.get(normalizeCardName(name));
@@ -70,9 +65,7 @@ export function normalizeCardName(name: string) {
     .trim();
 }
 
-export function preferredImage(imageUris?: CardImageUris) {
-  return imageUris?.normal ?? imageUris?.large ?? imageUris?.png ?? imageUris?.small ?? imageUris?.borderCrop;
-}
+
 
 export function buildCatalog(cards: CardRecord[], loadedAt: string | undefined, source: CardCatalog["source"]): CardCatalog {
   const byName = new Map<string, CardRecord>();
@@ -92,36 +85,8 @@ export function buildCatalog(cards: CardRecord[], loadedAt: string | undefined, 
   return { cards, byName, loadedAt, source };
 }
 
-function inferRoleFromCard(card: CardRecord) {
-  const spellFace = modalDfcSpellFace(card);
-  if (spellFace) {
-    if (spellFace.typeLine.includes("Creature")) return "creature";
-    if (/draw.*card/i.test(spellFace.oracleText)) return "draw";
-    if (/destroy target|exile target|counter target/i.test(spellFace.oracleText)) return "removal";
-    return "spell";
-  }
-  if (card.typeLine.includes("Land")) return "land";
-  if (card.typeLine.includes("Creature")) return "creature";
-  if (card.typeLine.includes("Artifact") && /add .*mana|mana of any color/i.test(card.oracleText)) return "ramp";
-  if (/draw.*card/i.test(card.oracleText)) return "draw";
-  if (/destroy target|exile target|counter target/i.test(card.oracleText)) return "removal";
-  return "spell";
-}
 
-// A modal double-faced "spell // land" card's combined typeLine (e.g. "Sorcery // Land")
-// would otherwise be misread as a land by the plain substring check above. Requires the
-// non-land face to carry a real printed mana cost, same reasoning as
-// AppFlow.tsx's modalDoubleFacedLandSplit: a transform land's back face (Westvale Abbey ->
-// Ormendahl, Profane Prince) has an empty manaCost since it's never actually cast, so without
-// this check it was misread as a castable spell face and the land got inferred as role
-// "creature" instead of "land".
-function modalDfcSpellFace(card: CardRecord) {
-  if (!card.faces || card.faces.length !== 2) return undefined;
-  const [first, second] = card.faces;
-  if (!first.typeLine.includes("Land") && second.typeLine.includes("Land") && first.manaCost) return first;
-  if (first.typeLine.includes("Land") && !second.typeLine.includes("Land") && second.manaCost) return second;
-  return undefined;
-}
+
 
 const BUILTIN_CARDS: CardRecord[] = [
   {

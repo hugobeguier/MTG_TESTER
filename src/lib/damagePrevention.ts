@@ -36,7 +36,7 @@ export function parseDamagePrevention(rawText: string): DamagePreventionSpec | u
 
 export type DamageSubject = { kind: "player"; seatId: string } | { kind: "permanent"; seatId: string; cardId: string; isCreature: boolean };
 
-export function shieldMatches(shield: DamageShield, subject: DamageSubject, combat: boolean, sourceId: string | undefined, turn: number): boolean {
+function shieldMatches(shield: DamageShield, subject: DamageSubject, combat: boolean, sourceId: string | undefined, turn: number): boolean {
   if (shield.turn !== turn || (shield.combatOnly && !combat)) return false;
   switch (shield.protect.kind) {
     case "player":

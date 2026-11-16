@@ -505,14 +505,14 @@ export function parseSearchLibraryPutEffect(clauseText: string): { filter: strin
 // Emblem "whenever" watchers that return cards: "Whenever an artifact is put into your graveyard from the battlefield, return that card to the
 // battlefield at the beginning of the next end step." (Daretti, Scrap Savant -10) and "Whenever a creature dies, return it to the battlefield
 // under your control at the beginning of the next end step." (Liliana, Heretical Healer -8).
-export interface EmblemReturnWatcher {
+interface EmblemReturnWatcher {
   typeWord: string;
   // Whose graveyard counts: "you" = the emblem controller's own ("your graveyard"), "any" = every player's ("a creature dies").
   graveyardOf: "you" | "any";
   // Who controls the card when it returns: its owner, or the emblem's controller.
   returnsUnder: "owner" | "you";
 }
-export function parseEmblemReturnWatchers(oracleText: string): EmblemReturnWatcher[] {
+function parseEmblemReturnWatchers(oracleText: string): EmblemReturnWatcher[] {
   const out: EmblemReturnWatcher[] = [];
   for (const clause of oracleClauses(oracleText)) {
     const text = clause.replace(/\([^)]*\)/g, "").trim();

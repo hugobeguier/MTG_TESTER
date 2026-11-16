@@ -356,7 +356,7 @@ export function spellFaceCostCard(card: VisibleCard, face: CardFaceRecord): Visi
   return { ...card, name: face.name, typeLine: face.typeLine, oracleText: face.oracleText, manaCost: face.manaCost, manaValue: manaValueFromManaCost(face.manaCost) };
 }
 
-export interface CastFaceOption {
+interface CastFaceOption {
   faceIndex: number;
   faceName: string;
   label: string;
@@ -368,7 +368,7 @@ export interface CastFaceOption {
 
 // One entry per castable half of a split / Adventure card, each priced from its OWN cost. A human pays from the floating pool; an agent from untapped sources.
 // `session` (optional) adds the timing and legal-target checks per half; without it only the aftermath rule is applied.
-export function castFaceOptions(
+function castFaceOptions(
   seat: PlayerSeat,
   card: VisibleCard,
   activeSeatId: string | undefined,

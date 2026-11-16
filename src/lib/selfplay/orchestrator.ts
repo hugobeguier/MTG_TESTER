@@ -97,7 +97,6 @@ import {
   hasVigilance,
   independentlyCastableSpellFaces,
   isAvailableManaSource,
-  isLandCard,
   landDropsAllowed,
   landPlaysMade,
   recordLandPlay,
@@ -366,14 +365,14 @@ export interface SelfPlayOptions {
 }
 
 // A move the central legality gate refused ("rejected": never committed) or that the engine applied into a no-op ("noop": nothing spent or moved).
-export interface GateEvent {
+interface GateEvent {
   kind: "rejected" | "noop";
   seatId: string;
   label: string;
   reason: string;
 }
 
-export interface DecisionCounts {
+interface DecisionCounts {
   [seatId: string]: { [source: string]: number };
 }
 

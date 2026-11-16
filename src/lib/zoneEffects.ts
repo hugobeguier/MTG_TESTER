@@ -10,7 +10,7 @@
 // not Sorcery" definition), so a genuinely land-excluding permanent type needs its own value.
 export type RegrowTargetType = "card" | "permanent" | "nonland_permanent" | "creature" | "land" | "enchantment" | "artifact";
 
-export interface ReanimateEffect {
+interface ReanimateEffect {
   kind: "reanimate";
   // "a graveyard" (any player's) vs "your graveyard" (self only) — Reanimate vs Persist.
   anyGraveyard: boolean;
@@ -28,7 +28,7 @@ export interface ReanimateEffect {
   loseLifeEqualToManaValue?: boolean;
 }
 
-export interface RegrowEffect {
+interface RegrowEffect {
   kind: "regrow";
   targetType: RegrowTargetType;
   // "If it's a Zombie card, draw a card." (Cemetery Recruitment) — the draw only happens when the card
@@ -39,9 +39,9 @@ export interface RegrowEffect {
   subtype?: string;
 }
 
-export type MillScope = "you" | "target_player" | "each_opponent" | "each_player";
+type MillScope = "you" | "target_player" | "each_opponent" | "each_player";
 
-export interface MillEffect {
+interface MillEffect {
   kind: "mill";
   amount: number;
   scope: MillScope;
@@ -55,13 +55,13 @@ export interface MillEffect {
 
 // "You may put a land card from your graveyard on top of your library." (Glowspore Shaman) — a
 // destination this engine had never modeled before: RegrowEffect only ever returns a card to hand.
-export interface PutLandFromGraveyardOnTopEffect {
+interface PutLandFromGraveyardOnTopEffect {
   kind: "put_land_from_graveyard_on_top";
 }
 
-export type GraveyardToLibraryScope = "you" | "target_player";
+type GraveyardToLibraryScope = "you" | "target_player";
 
-export interface GraveyardToLibraryEffect {
+interface GraveyardToLibraryEffect {
   kind: "graveyard_to_library";
   scope: GraveyardToLibraryScope;
 }
@@ -69,19 +69,19 @@ export interface GraveyardToLibraryEffect {
 // "Exile target player's graveyard." (Bojuka Bog) / "Exile all cards from target player's
 // graveyard." (Tormod's Crypt-style) — same four-scope shape as MillScope above, just a whole-zone
 // exile instead of a whole-zone-to-library move.
-export type ExileGraveyardScope = "you" | "target_player" | "each_opponent" | "each_player";
+type ExileGraveyardScope = "you" | "target_player" | "each_opponent" | "each_player";
 
-export interface ExileGraveyardEffect {
+interface ExileGraveyardEffect {
   kind: "exile_graveyard";
   scope: ExileGraveyardScope;
 }
 
-export interface GainControlEffect {
+interface GainControlEffect {
   kind: "gain_control";
   untilEndOfTurn: boolean;
 }
 
-export interface ImpulseDrawEffect {
+interface ImpulseDrawEffect {
   kind: "impulse_draw";
   amount: number;
   // false = playable only this turn ("until end of turn" / "this turn"); true extends the window
@@ -93,7 +93,7 @@ export interface ImpulseDrawEffect {
 // play it for as long as it remains exiled (no time limit). The "search for a specific card" part
 // is resolved with the same "pick the best available" heuristic this engine uses for every other
 // hidden-zone search — see chooseStealAndPlayTarget in AppFlow.tsx.
-export interface StealAndPlayEffect {
+interface StealAndPlayEffect {
   kind: "steal_and_play";
 }
 
@@ -107,7 +107,7 @@ export interface StealAndPlayEffect {
 // four" on this engine's own card data, not an X spell at all, despite the name suggesting
 // otherwise) — drawAmount carries that literal count directly, so the caller doesn't need a chosenX
 // at all for these. Undefined means "this was the literal word X," matching the original shape.
-export interface DrawXThenPutBackEffect {
+interface DrawXThenPutBackEffect {
   kind: "draw_x_then_put_back";
   putBackAmount: number;
   drawAmount?: number;
@@ -121,7 +121,7 @@ export interface DrawXThenPutBackEffect {
 // parser) so both consumers pick it up through the same parseZoneEffect/applyZoneEffect call sites
 // they already have, with no separate wiring. See applySurveilEffect's own comment for the
 // auto-choice it makes once parsed.
-export interface SurveilEffect {
+interface SurveilEffect {
   kind: "surveil";
   amount: number;
 }
@@ -153,7 +153,7 @@ export interface LookDigEffect {
 // which case "if you do" never triggers and the chosen cards just stay in the graveyard — a legal,
 // if pointless, cast. So this deliberately does NOT require a sacrifice-able creature to be castable
 // at all, only the graveyard targets.
-export interface SacrificeThenReanimateEffect {
+interface SacrificeThenReanimateEffect {
   kind: "sacrifice_then_reanimate";
   targetCount: number;
   sacrificeCount: number;
@@ -161,7 +161,7 @@ export interface SacrificeThenReanimateEffect {
 }
 
 // "Return all artifact and enchantment cards from your graveyard to the battlefield." (Redress Fate): no choice, every matching card comes back.
-export interface ReturnAllEffect {
+interface ReturnAllEffect {
   kind: "return_all_to_battlefield";
   types: Array<"artifact" | "enchantment" | "creature" | "land">;
 }

@@ -53,7 +53,7 @@ export function deterministicAttackTax(sourceCardId: string, sourceCardName: str
   return undefined;
 }
 
-export async function requestAttackTaxInterpretation(
+async function requestAttackTaxInterpretation(
   sourceCardId: string,
   sourceCardName: string,
   oracleText: string,

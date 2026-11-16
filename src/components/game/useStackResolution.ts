@@ -75,10 +75,6 @@ export function useStackResolution(ctx: GameContext) {
     replaceStackActions([...current, action]);
   }
 
-  function updateStackAction(action: PendingAction) {
-    replaceStackActions(stackActionsRef.current.map((item) => (item.id === action.id ? action : item)));
-  }
-
   function removeStackAction(actionId: string) {
     const next = stackActionsRef.current.filter((item) => item.id !== actionId);
     replaceStackActions(next);

@@ -12,7 +12,7 @@ import { permanentMatchesQualifier } from "./characteristics";
 // nothing else should call it once a card's category is migrated onto this module (see the phased
 // plan: legality gets shared, preference stays a leaf used exactly once).
 
-export type TargetZone = "battlefield" | "graveyard" | "library" | "player";
+type TargetZone = "battlefield" | "graveyard" | "library" | "player";
 
 export type TargetController = "any" | "you" | "opponent";
 
@@ -43,13 +43,13 @@ export interface TargetSpec {
   prompt: string;
 }
 
-export interface LegalCardTarget {
+interface LegalCardTarget {
   kind: "card";
   seatId: string;
   card: VisibleCard;
 }
 
-export interface LegalPlayerTarget {
+interface LegalPlayerTarget {
   kind: "player";
   seatId: string;
 }

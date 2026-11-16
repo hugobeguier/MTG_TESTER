@@ -3,22 +3,22 @@
 import { useEffect, useMemo } from "react";
 import type { GameSession } from "@/lib/types";
 import { chooseManaSourcesForCost, payCostFromPool } from "@/engine/mana";
-export { attackTriggerManaHeuristicSplit, isDragonMana, chooseManaSourcesForCost, costlyTapManaColors, isAvailableManaSource, isRecognizedBoardCondition, lifeGainedThisTurn, manaAmountFromAddClause, manaChoicesForCard, manaProducedBy, signetAbility, spendManaSources } from "@/engine/mana";
+export { attackTriggerManaHeuristicSplit, chooseManaSourcesForCost, costlyTapManaColors, isAvailableManaSource, isRecognizedBoardCondition, lifeGainedThisTurn, manaAmountFromAddClause, manaChoicesForCard, manaProducedBy, signetAbility, spendManaSources } from "@/engine/mana";
 export { emblemAsShimCard } from "@/engine/shared";
-export { isLandCard } from "@/engine/shared";
+
 export { agentBestCopyCandidate, parseCreateTokenSpecs } from "@/engine/tokens";
 export { adjustedCastingCost, cardWithFaceManaCost, manaValueFromManaCost, maxAffordableX, miracleCostFor, staticCostReduction, totalCastingCost } from "@/engine/costs";
-export { entersBattlefieldTapped, landDropsAllowed, landPlaysMade, recordLandPlay, revealLandControlExempt, revealLandTypes, revealableLandCards } from "@/engine/lands";
+export { entersBattlefieldTapped, landDropsAllowed, landPlaysMade, recordLandPlay, revealLandTypes } from "@/engine/lands";
 import { isPlaneswalkerCard, loyaltyCounterCount } from "@/engine/zones";
 export { applyGraveyardExile, findEnterAsCopyTarget, moveCardBetweenVisibleZones, moveCommanderToCommandZone, parseEnterAsCopyEffect, putLookedAtCardsInGraveyard, shuffleCards } from "@/engine/zones";
-export type { GraveyardReturnOptions } from "@/engine/zones";
+
 import { counterSpellCanTarget, parseCounterSpellAbility } from "@/lib/counterSpells";
 import { stopKey } from "@/lib/priorityStops";
-export { activateSteelHellkiteX, agentSurveilDecision, applyGenericModalEffect, applyMassBounceEffect, applyMassPumpEffect, applyMill, applyRemovalEffect, applyRevealTopExchange, applySimpleLifeChange, applySpellExtraEffect, applyTargetedPumpEffect, applyZoneEffect, castTargetLegal, chooseAgentLibraryCardForRuleChoice, drawForSeat, drawMultipleForSeat, genericCostShim, matchesPermanentSacrificeFilter, parseGenericModalEffect, parseTargetedPump, payWardIfNeeded, putLookedAtCardsOnBottom, resolveAgentLibraryLookWorkflow, resolveDeferredChoice, resolveSacrificeSelfThenSearch, resolveSearchLibraryPut, substituteX } from "@/engine/effects";
-export type { PrimitiveAction } from "@/engine/effects";
-export { applyEntersWithCounterReplacements, applyGraveyardReturn, destroyCreatures, moveCardAcrossSeats, moveLibraryCardToDestination, returnLinkedExiles } from "@/engine/entry";
+export { activateSteelHellkiteX, agentSurveilDecision, applyGenericModalEffect, applyMassBounceEffect, applyMassPumpEffect, applyMill, applyRemovalEffect, applySimpleLifeChange, applySpellExtraEffect, applyTargetedPumpEffect, applyZoneEffect, castTargetLegal, chooseAgentLibraryCardForRuleChoice, drawForSeat, drawMultipleForSeat, genericCostShim, matchesPermanentSacrificeFilter, parseGenericModalEffect, parseTargetedPump, payWardIfNeeded, putLookedAtCardsOnBottom, resolveAgentLibraryLookWorkflow, resolveDeferredChoice, substituteX } from "@/engine/effects";
+
+export { applyEntersWithCounterReplacements, destroyCreatures, moveCardAcrossSeats, moveLibraryCardToDestination, returnLinkedExiles } from "@/engine/entry";
 export { createTokensForSeat } from "@/engine/tokens";
-export { BRAIDS_TYPE_FILTER, applyBraidsEndStep, applyDeterministicPhaseTrigger, applyDigToBattlefield, applyMerenEndStepEffect, applyTargetedEffect, braidsDeclinePenalty, braidsOpponentIds, braidsRunOpponents, braidsSharedTypeFilter, commonTriggerEffect, echoCostText, enterUndercityRoom, findCommonTriggersForPermanentEntered, phaseClauseConditionMet, phaseConditionBlocks, phaseEffectText, phaseEvent, resolveEcho, resolveTriggerEffect, takeInitiative, ventureIntoUndercity } from "@/engine/triggers";
+export { BRAIDS_TYPE_FILTER, applyBraidsEndStep, applyDeterministicPhaseTrigger, applyDigToBattlefield, applyMerenEndStepEffect, applyTargetedEffect, braidsDeclinePenalty, braidsRunOpponents, braidsSharedTypeFilter, commonTriggerEffect, findCommonTriggersForPermanentEntered, phaseClauseConditionMet, phaseConditionBlocks, phaseEffectText, phaseEvent, resolveTriggerEffect, ventureIntoUndercity } from "@/engine/triggers";
 export type { CastChoices } from "@/engine/types";
 export { runStateBasedActionsPass, winTheGame } from "@/engine/stateBased";
 export { addDamageShieldsFromSpec, applyCombatDamageToTarget } from "@/engine/damage";
@@ -53,16 +53,16 @@ export { applyExalted, resolveCombatDamage, cleanupCombat, assignBlockers, attac
 export { validateConfigsForPlay, applyDeckToSeat } from "@/components/DeckSetup";
 export { animateEnchantmentSpec, resolveEquip, payGenericSacrificeCost, applySacrificeEffect, payGenericTapCost, parseGenericAbilityEffect, applyGenericAbilityEffect, payGenericManaCost, applyGenericTapEffect, cycleCardInSession, tapCreaturesAltCostFor } from "@/engine/abilities";
 export { grantsExtraTurn, basicLandFetchBeholdType, resolveBasicLandFetchSearch, chooseBestBasicLandPairForMyriad, applySagaEntryLoreCounterHeadless, advanceSagaLoreCountersHeadless } from "@/engine/etb";
-export { legalMainPhaseActions, legalPriorityActions, checkMoveLegal, UNTAP_LANDS_SAFE_LIFE, untapAllLandsIsWorthIt, graveyardHateOnStack, graveyardShuffleIsWorthIt } from "@/engine/legalActions";
-export type { MoveCheckContext } from "@/engine/legalActions";
-export { recordCommanderCast, applySpellDamagePrevention, spellCastLockedOut, manaFromTappedOpponentLands, payAdditionalDiscardCost, sacrificeForAdditionalCost, additionalSacrificeCandidates, chooseAdditionalCostSacrifice, pathOfAncestryScries, chooseFreeCastCard, markHandCardFreeCastable, spellResolutionDestination, modalDoubleFacedLandSplit, roomDoorFaces, independentlyCastableSpellFaces, isSplitSpellCard, spellFaceCastableFromHand, spellFaceCostCard, castFaceOptions, castFaceDecision, handCardFaceOptions, targetingTax, seatHasFlashGrant, playCardFromZone } from "@/engine/casting";
-export type { CastFaceOption, CastFaceDecision, HandCardFaceOption } from "@/engine/casting";
-export { spellModePrompt, labeledTargetOptions, castStructure, nextCastPrompt, stackTargetText, agentCastTimeRemovalChoices, castModeLabels, applyCastRemoval, applyCastGenericModes, spellTargetSlots, applyLabeledContinuation, steelHellkiteXOptions, hasResolvableRemovalTarget, AGENT_UNSUPPORTED_SPELL_TEXT, hasResolvableTarget } from "@/engine/castTargets";
-export { parseEtbZoneEffect, parseSimpleLifeChange, parseSimpleDrawEffect, parseMassPump, parseMassBounceEffect, hideawayDamageConditionMet, applyDigPick, searchableLibraryCards, remainingLibraryTotalManaValue, addEmblemToSeat, parseSearchLibraryPutEffect, parseEmblemReturnWatchers, findEmblemGraveyardReturns, parseEachPlayerSacrificeEffect, applyEachPlayerSacrificeEffect, applyChosenEachPlayerSacrifice, isBraidsEndStepText, parsePunisherChoiceEffect, applyPunisherChoiceEffect, isLivingDeathEffect, applyLivingDeathEffect, applyCastRevealUntilCreatures } from "@/engine/oneShotEffects";
-export type { EmblemReturnWatcher } from "@/engine/oneShotEffects";
+export { legalMainPhaseActions, legalPriorityActions, checkMoveLegal, untapAllLandsIsWorthIt } from "@/engine/legalActions";
+
+export { recordCommanderCast, applySpellDamagePrevention, spellCastLockedOut, payAdditionalDiscardCost, sacrificeForAdditionalCost, additionalSacrificeCandidates, chooseAdditionalCostSacrifice, pathOfAncestryScries, chooseFreeCastCard, markHandCardFreeCastable, spellResolutionDestination, modalDoubleFacedLandSplit, roomDoorFaces, independentlyCastableSpellFaces, isSplitSpellCard, castFaceDecision, handCardFaceOptions, targetingTax, seatHasFlashGrant, playCardFromZone } from "@/engine/casting";
+
+export { spellModePrompt, castStructure, nextCastPrompt, stackTargetText, agentCastTimeRemovalChoices, castModeLabels, applyCastRemoval, applyCastGenericModes, spellTargetSlots, applyLabeledContinuation, steelHellkiteXOptions, hasResolvableRemovalTarget, AGENT_UNSUPPORTED_SPELL_TEXT, hasResolvableTarget } from "@/engine/castTargets";
+export { parseEtbZoneEffect, parseSimpleLifeChange, parseSimpleDrawEffect, parseMassPump, parseMassBounceEffect, hideawayDamageConditionMet, applyDigPick, searchableLibraryCards, remainingLibraryTotalManaValue, addEmblemToSeat, findEmblemGraveyardReturns, parseEachPlayerSacrificeEffect, applyEachPlayerSacrificeEffect, applyChosenEachPlayerSacrifice, isBraidsEndStepText, parsePunisherChoiceEffect, applyPunisherChoiceEffect, isLivingDeathEffect, applyLivingDeathEffect, applyCastRevealUntilCreatures } from "@/engine/oneShotEffects";
+
 export { findEntersBatchWatcherTriggers, isArchaeomancersMapLandRaidTrigger, findLandRaidTriggers, findSacrificeWatcherTriggers, findPutIntoGraveyardTriggers, findCommonTriggersForPermanentDied, findLeavesBattlefieldTriggers, grantKeywordsToCreature, findLifeGainTriggers, lifeGainReplacementBonus, findMultiAttackTriggers, findAttackTriggers, findCombatDamageToPlayerTriggers, parseAnyCreatureCombatDamageToOpponentTrigger, findAnyCombatDamageToOpponentTriggers, parseBreenaAttackTrigger, findBreenaAttackTriggers, findCardsLeftGraveyardTriggers, findCastTriggers, activateGraveyardReturnInSession } from "@/engine/triggerFinders";
-export { shouldConsultRulesAdvisor, pendingActionRequiredPasses, pendingActionWillPromptSeat, resolutionPromptNote, canReceivePriorityForPendingAction } from "@/engine/priority";
-export { openingHandBattlefieldCards, putOpeningHandCardOnBattlefield, resolveAgentMulligans, withOpeningHand, makeShuffledLibrary, expandDeckCards, resolveAgentLimDulVault } from "@/engine/mulligan";
+export { shouldConsultRulesAdvisor, pendingActionRequiredPasses, resolutionPromptNote, canReceivePriorityForPendingAction } from "@/engine/priority";
+export { openingHandBattlefieldCards, putOpeningHandCardOnBattlefield, resolveAgentMulligans, withOpeningHand, resolveAgentLimDulVault } from "@/engine/mulligan";
 
 
 interface OllamaStatus {

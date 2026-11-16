@@ -118,7 +118,7 @@ export function parseSearchLibraryEffectText(rawText: string): SearchLibraryEffe
   return undefined;
 }
 
-export type SacrificeEffect =
+type SacrificeEffect =
   // "Put your commander into your hand from the command zone." (Command Beacon)
   | { kind: "commander_to_hand" }
   // alsoLoseLife: "You draw two cards and lose 2 life." (Infernal Idol) — the life loss half of a compound draw.

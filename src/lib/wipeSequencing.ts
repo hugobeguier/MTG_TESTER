@@ -138,7 +138,7 @@ export function plannedWipe(context: ScoringContext, exceptCardId: string | unde
 }
 
 // The planned wipe that a permanent-casting action should wait for, if any.
-export function deploymentHeldForWipe(action: ScorableAction, context: ScoringContext): CardLike | undefined {
+function deploymentHeldForWipe(action: ScorableAction, context: ScoringContext): CardLike | undefined {
   if (action.actionType !== "cast_spell" && action.actionType !== "cast_commander") return undefined;
   const card = (context.you?.hand ?? []).find((item) => item.id === action.cardId) ?? (context.you?.commander?.id === action.cardId ? context.you?.commander : undefined);
   if (!card || (card.typeLine ?? "").includes("Instant") || (card.typeLine ?? "").includes("Sorcery")) return undefined;

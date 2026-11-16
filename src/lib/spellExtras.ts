@@ -9,7 +9,7 @@
 
 import { parseWhereX, type DynamicAmount } from "./removalSpells";
 
-export type PumpBasis = DynamicAmount | { kind: "greatest_power_you_control" } | { kind: "fixed"; amount: number };
+type PumpBasis = DynamicAmount | { kind: "greatest_power_you_control" } | { kind: "fixed"; amount: number };
 
 export type SpellExtraEffect =
   // "Target player draws two cards and loses 2 life." (Sign in Blood) — the caster is always the
