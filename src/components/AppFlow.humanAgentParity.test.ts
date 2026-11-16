@@ -129,7 +129,7 @@ describe("Master of Ceremonies: each opponent chooses money, friends or secrets"
 });
 
 describe("agents refuse spells the engine cannot resolve deterministically; humans are not blocked", () => {
-  const names = ["Promise of Loyalty", "Agadeem's Awakening // Agadeem, the Undercrypt", "Batwing Brume"];
+  const names = ["Promise of Loyalty", "Agadeem's Awakening // Agadeem, the Undercrypt"];
   it.each(names)("%s: matched by the refusal list, uncastable for an agent, castable for a human", (name) => {
     const spell = real(name, "sp", { zone: "hand" });
     if (name.startsWith("Agadeem")) {

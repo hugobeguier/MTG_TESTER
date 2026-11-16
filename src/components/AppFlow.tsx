@@ -9,6 +9,7 @@ import type {
   CardImageUris,
   ColoredMana,
   CommanderDeck,
+  DamageShield,
   EmblemState,
   GameEvent,
   GameSession,
@@ -142,6 +143,7 @@ import { matchesTargetType, parseRemovalEffect, type DynamicAmount, type Removal
 import { abilityOracleText, hasCardType, parseOtherCreaturesGrant, parseTypeGrantEffects, typeGrantAppliesTo } from "@/lib/typeGrants";
 import { parseZoneEffect, type LookDigEffect, type RegrowTargetType, type ZoneEffect } from "@/lib/zoneEffects";
 import { legalTargets, targetsStillLegal, type ChosenTarget, type TargetSpec } from "@/lib/targeting";
+import { consumeDamageShields, describeDamageShields, parseDamagePrevention, type DamagePreventionSpec, type DamageSubject } from "@/lib/damagePrevention";
 import { describeStackItem, type StackItemDescription, type StackItemLike } from "@/lib/stackDescription";
 import { removalEffectTargetSpec, zoneEffectTargetSpec } from "@/lib/targetSpecs";
 import { classifyTell } from "@/lib/lookAhead";
@@ -213,6 +215,8 @@ type TriggerEffect = (
   | { kind: "copy_token"; scope: "self" | "context" | "one_of_candidates"; notLegendary?: boolean; payCostText?: string; candidateIds?: string[] }
   // "For each artifact you control, create a token that's a copy of it. Those tokens gain haste. Exile those tokens at the beginning of the next end step." (Saheeli, the Gifted)
   | { kind: "copy_each_artifact_temp" }
+  // "Prevent all damage that would be dealt to you this turn." / "... the next N damage ..." (Selfless Squire's enters trigger): a damage shield, no target.
+  | { kind: "prevent_damage"; spec: DamagePreventionSpec }
   // Memnarch: "Target permanent becomes an artifact in addition to its other types." / "Gain control of target artifact."
   | { kind: "become_artifact_target" }
   | { kind: "gain_control_target_artifact" }
@@ -564,6 +568,8 @@ type PendingAction =
       // A copy made by Sunken Palace's mana: nothing is paid, no cast triggers, and the copy ceases to exist after resolving.
       isCopy?: boolean;
       manaSourceIds: string[];
+      // Colors of mana actually spent to cast it ("if {W} was spent to cast this spell": Batwing Brume).
+      manaSpentColors?: string[];
       position?: { x: number; z: number };
       faceIndex?: number;
       chosenX?: number;
@@ -3901,6 +3907,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       cardTypeLine: card.typeLine,
       sourceZone: sourceZone === "exile" ? "exile" : undefined,
       manaSourceIds: payment.sourceIds,
+      manaSpentColors: spentManaColors(payment.spent),
       chosenX: chosenX > 0 ? chosenX : undefined,
       counterTargetId,
       castChoices,
@@ -6072,6 +6079,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       sourceZone,
       flashback: graveyardPermission?.exileAfter ? true : undefined,
       manaSourceIds: payment.sourceIds,
+      manaSpentColors: spentManaColors(payment.spent),
       position,
       // A genuine transform DFC creature (Heliod, the Radiant Dawn // Heliod, the Warped Eclipse)
       // isn't a Room door, an Adventure/Omen spell face, or an MDFC land — none of doorFace/
@@ -7330,6 +7338,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       cardTypeLine: castView.typeLine,
       sourceZone: sourceZone === "exile" ? "exile" : undefined,
       manaSourceIds,
+      manaSpentColors: payment.ok ? spentManaColors(payment.spent) : undefined,
       faceIndex: respondHalf ? faceIndex : undefined,
       chosenX: chosenX > 0 ? chosenX : undefined,
       counterTargetId,
@@ -8964,43 +8973,12 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       // instant/sorcery rather than an activated sacrifice ability like Spore Frog, whose own
       // separate applySacrificeEffect case is untouched). Applies regardless of the spell's own
       // destination, same reasoning as removalEffect/zoneEffect below.
-      const combatDamagePreventionMatch = sourceCard
-        ? etbEffectText(sourceCard.oracleText).match(/\bprevent all combat damage that would be dealt this turn(?: by non-([a-z]+) creatures)?\b/i)
-        : null;
-      // Inkshield: a shield for the caster only, turning each prevented point into a token.
-      const shieldMatch = sourceCard
-        ? etbEffectText(sourceCard.oracleText).match(/\bprevent all combat damage that would be dealt to you this turn\.(?:\s*for each 1 damage prevented this way, (create [^.]+))?/i)
-        : null;
       // Portent: "Draw a card at the beginning of the next turn's upkeep." (counterspells schedule theirs in their own branch)
       const delayedCasterDraws = sourceCard ? parseDelayedUpkeepDraws(sourceCard.oracleText)?.casterDraws : undefined;
       const delayedBase: GameSession = delayedCasterDraws
         ? { ...tokenResolvedSession, pendingUpkeepDraws: [...(tokenResolvedSession.pendingUpkeepDraws ?? []), { seatId: action.actorSeatId, amount: delayedCasterDraws, sourceName: action.cardName }] }
         : tokenResolvedSession;
-      const shieldedBase: GameSession = shieldMatch
-        ? {
-            ...delayedBase,
-            combatDamageShields: [
-              ...(delayedBase.combatDamageShields ?? []).filter((shield) => shield.turn === delayedBase.turn),
-              { turn: delayedBase.turn, seatId: action.actorSeatId, sourceId: sourceCard!.id, sourceName: sourceCard!.name, tokenClause: shieldMatch[1] }
-            ]
-          }
-        : delayedBase;
-      const combatPreventionSession = combatDamagePreventionMatch
-        ? {
-            ...shieldedBase,
-            combatDamagePrevented: { turn: tokenResolvedSession.turn, exceptType: combatDamagePreventionMatch[1] ? capitalizeWord(combatDamagePreventionMatch[1]) : undefined },
-            events: [
-              {
-                id: crypto.randomUUID(),
-                at: new Date().toISOString(),
-                seatId: action.actorSeatId,
-                message: `${action.cardName}: all combat damage is prevented this turn${combatDamagePreventionMatch[1] ? ` except from ${capitalizeWord(combatDamagePreventionMatch[1])} creatures` : ""}.`,
-                detail: "Rules action"
-              },
-              ...shieldedBase.events
-            ]
-          }
-        : shieldedBase;
+      const combatPreventionSession = sourceCard ? applySpellDamagePrevention(delayedBase, action.actorSeatId, sourceCard, action.castChoices?.targets[0], action.manaSpentColors ?? []) : delayedBase;
       const xCounterSession =
         sourceCard && destination === "battlefield" && action.chosenX && entersWithXCounters(sourceCard.oracleText)
           ? applyEntersWithXCounters(combatPreventionSession, action.actorSeatId, sourceCard.id, action.chosenX)
@@ -13239,7 +13217,12 @@ function attackerLimitedToOneBlocker(attackerSeat: PlayerSeat, attacker: Visible
 // "Prevent all combat damage that would be dealt to this creature." (Seraph of the Sword) — combat damage only; other
 // damage and "destroy" effects still affect it.
 function preventsCombatDamageToSelf(card: VisibleCard): boolean {
-  return !card.abilitiesStripped && /\bprevent all combat damage that would be dealt to this creature\b/i.test(card.oracleText);
+  return !card.abilitiesStripped && /\bprevent all (?:combat )?damage that would be dealt to this creature\b/i.test(card.oracleText);
+}
+
+// "Prevent all damage that would be dealt to this creature." (static, any kind of damage)
+function preventsAllDamageToSelf(card: VisibleCard): boolean {
+  return !card.abilitiesStripped && /\bprevent all damage that would be dealt to this creature\b/i.test(card.oracleText);
 }
 
 // "You have hexproof." (Metropolis Reformer)
@@ -18123,6 +18106,20 @@ export function applyCombatDamageToTarget(
   sourceControllerSeatId?: string,
   damageKind: "combat" | "noncombat" = "combat"
 ): GameSession {
+  if (amount <= 0) return session;
+  amount *= damageDoublingFactor(session, sourceControllerSeatId, target.seat.id);
+  const prevention = applyDamagePrevention(
+    session,
+    target.planeswalker ? { kind: "permanent", seatId: target.seat.id, cardId: target.planeswalker.id, isCreature: false } : { kind: "player", seatId: target.seat.id },
+    target.planeswalker?.name ?? target.seat.name,
+    amount,
+    damageKind === "combat",
+    sourceName,
+    source
+  );
+  if (prevention.remaining <= 0) return prevention.session;
+  session = prevention.session;
+  amount = prevention.remaining;
   let next = applyCombatDamageToTargetCore(session, sourceName, target, amount, source, sourceControllerSeatId, damageKind);
   if (next !== session && damageKind === "combat" && !target.planeswalker && source && sourceControllerSeatId && amount > 0) {
     next = {
@@ -18141,6 +18138,111 @@ export function applyCombatDamageToTarget(
   return destroyCreatures(next, [{ seatId: sourceControllerSeatId, cardId: source.id, message: `${source.name} is destroyed (it dealt damage to ${watcher.name}).` }], "Rules action");
 }
 
+// What a resolving spell's own "prevent ..." text does: the Fog family ("prevent all combat damage that would be dealt this turn[ by non-X creatures]",
+// Arachnogenesis), Batwing Brume's color-conditional halves (read off the mana actually spent), and targeted/self shields on an instant or sorcery
+// ("prevent all combat damage that would be dealt to you this turn" + Inkshield's per-point tokens, "prevent the next N damage ... to target ...").
+// A creature's own enters-trigger goes through commonTriggerEffect's prevent_damage; a pumped target's "it" through applyTargetedPumpEffect.
+export function applySpellDamagePrevention(session: GameSession, seatId: string, sourceCard: VisibleCard, castTarget: ChosenTarget | undefined, manaSpentColors: string[]): GameSession {
+  const text = etbEffectText(sourceCard.oracleText);
+  const brumeFog = /\bprevent all combat damage that would be dealt this turn if \{w\} was spent to cast this spell/i.test(text);
+  const fogMatch = brumeFog ? (manaSpentColors.includes("W") ? ["", undefined] : null) : text.match(/\bprevent all combat damage that would be dealt this turn(?! if\b)(?: by non-([a-z]+) creatures)?\b/i);
+  const parsedSpec = /Instant|Sorcery/.test(sourceCard.typeLine) ? parseDamagePrevention(text) : undefined;
+  let next = parsedSpec && parsedSpec.scope !== "it" ? addDamageShieldsFromSpec(session, seatId, sourceCard, parsedSpec, castTarget) : session;
+  // Batwing Brume's {B} half: each player loses 1 life per attacking creature they control.
+  if (manaSpentColors.includes("B") && /\beach player loses 1 life for each attacking creature they control if \{b\} was spent to cast this spell/i.test(text)) {
+    for (const seat of next.seats) {
+      const attackers = seat.board.battlefield.filter((card) => card.attacking).length;
+      if (attackers > 0) next = rulesEvent({ ...next, seats: next.seats.map((item) => (item.id === seat.id ? { ...item, life: item.life - attackers } : item)) }, seat.id, `${sourceCard.name}: ${seat.name} loses ${attackers} life (one per attacking creature).`);
+    }
+  }
+  if (!fogMatch) return next;
+  return {
+    ...next,
+    combatDamagePrevented: { turn: next.turn, exceptType: fogMatch[1] ? capitalizeWord(fogMatch[1]) : undefined },
+    events: [
+      { id: crypto.randomUUID(), at: new Date().toISOString(), seatId, message: `${sourceCard.name}: all combat damage is prevented this turn${fogMatch[1] ? ` except from ${capitalizeWord(fogMatch[1])} creatures` : ""}.`, detail: "Rules action" },
+      ...next.events
+    ]
+  };
+}
+
+// The single choke point for damage prevention: every damage path (combat, burn, fight/bite, triggers) runs its (already doubled) amount through
+// here before anything is dealt. Returns what is left, logs what was prevented, and fires the "for each 1 damage prevented" follow-ups.
+function applyDamagePrevention(
+  session: GameSession,
+  subject: DamageSubject,
+  subjectName: string,
+  amount: number,
+  combat: boolean,
+  sourceName: string,
+  source?: VisibleCard
+): { session: GameSession; remaining: number } {
+  if (amount <= 0 || !session.damageShields?.length) return { session, remaining: amount };
+  const result = consumeDamageShields(session.damageShields, subject, amount, combat, source?.id, session.turn);
+  if (result.applied.length === 0) return { session, remaining: amount };
+  const preventedTotal = amount - result.remaining;
+  let next: GameSession = { ...session, damageShields: result.shields };
+  next = rulesEvent(next, subject.seatId, `${sourceName}'s ${preventedTotal} ${combat ? "combat " : ""}damage to ${subjectName} is prevented by ${result.applied.map((entry) => entry.shield.sourceName).join(" and ")}.`);
+  for (const { shield, prevented } of result.applied) {
+    const specs = shield.tokenClause ? parseCreateTokenSpecs(shield.tokenClause) : [];
+    if (specs.length > 0) next = createTokensForSeat(next, shield.controllerSeatId, shield.sourceId, specs.map((spec) => ({ ...spec, count: prevented }))).session;
+  }
+  // "Whenever damage that would be dealt to you is prevented, put that many +1/+1 counters on this creature." (Selfless Squire)
+  if (subject.kind === "player") {
+    for (const card of next.seats.find((seat) => seat.id === subject.seatId)?.board.battlefield ?? []) {
+      if (card.abilitiesStripped || !/whenever damage that would be dealt to you is prevented, put that many \+1\/\+1 counters on this creature/i.test(card.oracleText)) continue;
+      next = rulesEvent(applyCounterDeltaAtSession(next, subject.seatId, card.id, "+1/+1", preventedTotal), subject.seatId, `${card.name} gets ${preventedTotal} +1/+1 counter${preventedTotal === 1 ? "" : "s"} (damage was prevented).`);
+    }
+  }
+  return { session: next, remaining: result.remaining };
+}
+
+// Adds shields for a parsed "prevent ..." clause. `target` is what the spell/ability was aimed at (a card or a player); with none, the caster
+// (or their best creature) stands in, the same fallback the other single-target resolvers use.
+export function addDamageShieldsFromSpec(
+  session: GameSession,
+  controllerSeatId: string,
+  source: { id: string; name: string },
+  spec: DamagePreventionSpec,
+  target?: ChosenTarget
+): GameSession {
+  const caster = session.seats.find((seat) => seat.id === controllerSeatId);
+  const fallbackCreature = strongestControlledCreature(caster);
+  const resolved: ChosenTarget | undefined = target ?? (spec.allowsPlayer || !fallbackCreature ? { kind: "player", seatId: controllerSeatId } : { kind: "card", seatId: controllerSeatId, cardId: fallbackCreature.id });
+  const protects: DamageShield["protect"][] = [];
+  switch (spec.scope) {
+    case "you": protects.push({ kind: "player", seatId: controllerSeatId }); break;
+    case "self": protects.push({ kind: "permanent", cardId: source.id }); break;
+    case "controlled_creatures": protects.push({ kind: "controlled_creatures", seatId: controllerSeatId }); break;
+    case "you_and_creatures": protects.push({ kind: "player", seatId: controllerSeatId }, { kind: "controlled_creatures", seatId: controllerSeatId }); break;
+    case "it":
+    case "target":
+      if (resolved) protects.push(resolved.kind === "player" ? { kind: "player", seatId: resolved.seatId } : { kind: "permanent", cardId: resolved.cardId });
+      break;
+    case "source_target":
+      if (resolved?.kind === "card") protects.push({ kind: "from_source", cardId: resolved.cardId });
+      break;
+  }
+  if (protects.length === 0) return session;
+  const shields: DamageShield[] = protects.map((protect, index) => ({
+    id: crypto.randomUUID(),
+    turn: session.turn,
+    sourceId: source.id,
+    sourceName: source.name,
+    controllerSeatId,
+    protect,
+    ...(spec.combatOnly ? { combatOnly: true } : {}),
+    ...(spec.amount !== undefined ? { amount: spec.amount } : {}),
+    ...(spec.tokenClause && index === 0 ? { tokenClause: spec.tokenClause } : {})
+  }));
+  const whom = spec.scope === "you" ? "you" : spec.scope === "controlled_creatures" ? "your creatures" : spec.scope === "you_and_creatures" ? "you and your creatures" : "the target";
+  return rulesEvent(
+    { ...session, damageShields: [...(session.damageShields ?? []).filter((shield) => shield.turn === session.turn), ...shields] },
+    controllerSeatId,
+    `${source.name}: ${spec.amount === undefined ? "all" : `the next ${spec.amount}`} ${spec.combatOnly ? "combat " : ""}damage ${spec.scope === "source_target" ? "dealt by the target" : `to ${whom}`} is prevented this turn.`
+  );
+}
+
 function applyCombatDamageToTargetCore(
   session: GameSession,
   sourceName: string,
@@ -18151,17 +18253,6 @@ function applyCombatDamageToTargetCore(
   damageKind: "combat" | "noncombat" = "combat"
 ): GameSession {
   if (amount <= 0) return session;
-  amount *= damageDoublingFactor(session, sourceControllerSeatId, target.seat.id);
-
-  // Inkshield: this player's combat damage is prevented, and each point prevented makes a token.
-  if (damageKind === "combat" && !target.planeswalker) {
-    const shield = session.combatDamageShields?.find((entry) => entry.turn === session.turn && entry.seatId === target.seat.id);
-    if (shield) {
-      const prevented = rulesEvent(session, target.seat.id, `${sourceName}'s ${amount} combat damage to ${target.seat.name} is prevented by ${shield.sourceName}.`);
-      const specs = shield.tokenClause ? parseCreateTokenSpecs(shield.tokenClause) : [];
-      return specs.length > 0 ? createTokensForSeat(prevented, target.seat.id, shield.sourceId, specs.map((spec) => ({ ...spec, count: amount }))).session : prevented;
-    }
-  }
 
   const base: GameSession =
     source && hasLifelink(source) && sourceControllerSeatId
@@ -18259,8 +18350,13 @@ function dealDamageToCreature(
   sourceControllerSeatId?: string
 ): GameSession {
   const damaged = session.seats.find((seat) => seat.id === targetSeatId)?.board.battlefield.find((card) => card.id === targetCardId);
-  const result = dealDamageToCreatureCore(session, sourceName, targetSeatId, targetCardId, amount, source, sourceControllerSeatId);
-  return damaged && amount > 0 ? applyDealtDamageTriggers(result, targetSeatId, damaged, amount) : result;
+  if (!damaged || amount <= 0) return session;
+  if (preventsAllDamageToSelf(damaged)) return rulesEvent(session, targetSeatId, `${sourceName}'s damage to ${damaged.name} is prevented by ${damaged.name}.`);
+  const doubled = amount * damageDoublingFactor(session, sourceControllerSeatId, targetSeatId);
+  const prevention = applyDamagePrevention(session, { kind: "permanent", seatId: targetSeatId, cardId: targetCardId, isCreature: damaged.typeLine.includes("Creature") }, damaged.name, doubled, false, sourceName, source);
+  if (prevention.remaining <= 0) return prevention.session;
+  const result = dealDamageToCreatureCore(prevention.session, sourceName, targetSeatId, targetCardId, prevention.remaining, source, sourceControllerSeatId);
+  return applyDealtDamageTriggers(result, targetSeatId, damaged, prevention.remaining);
 }
 
 // "Whenever this creature is dealt damage, ..." (Ripjaw Raptor's enrage draw, Metropolis Reformer's lifegain). Resolved on the
@@ -18317,7 +18413,6 @@ function dealDamageToCreatureCore(
   sourceControllerSeatId?: string
 ): GameSession {
   if (amount <= 0) return session;
-  amount *= damageDoublingFactor(session, sourceControllerSeatId, targetSeatId);
   const targetSeat = session.seats.find((seat) => seat.id === targetSeatId);
   const target = targetSeat?.board.battlefield.find((card) => card.id === targetCardId);
   if (!targetSeat || !target) return session;
@@ -20580,9 +20675,7 @@ export const AGENT_UNSUPPORTED_SPELL_TEXT: RegExp[] = [
   // Promise of Loyalty: needs a per-creature "can't attack you" restriction that lasts while the vow counter stays.
   /each player puts a vow counter on a creature they control and sacrifices the rest/i,
   // Agadeem's Awakening: any number of targets with pairwise-different mana values.
-  /return from your graveyard to the battlefield any number of target creature cards that each have a different mana value/i,
-  // Batwing Brume: depends on which colours of mana were spent to cast it.
-  /prevent all combat damage that would be dealt this turn if \{w\} was spent to cast this spell/i
+  /return from your graveyard to the battlefield any number of target creature cards that each have a different mana value/i
 ];
 
 export function hasResolvableTarget(session: GameSession, casterSeatId: string, card: VisibleCard): boolean {
@@ -22230,7 +22323,7 @@ export function applyTargetedPumpEffect(session: GameSession, casterSeatId: stri
   if (!target || (effect.another && target.card.id === sourceCard.id)) return noLegalTargetEvent(session, casterSeatId, sourceCard.name);
   const powerText = `${effect.power >= 0 ? "+" : ""}${effect.power}`;
   const toughnessText = `${effect.toughness >= 0 ? "+" : ""}${effect.toughness}`;
-  return {
+  const pumped: GameSession = {
     ...session,
     seats: session.seats.map((seat) =>
       seat.id === target.seatId
@@ -22268,6 +22361,12 @@ export function applyTargetedPumpEffect(session: GameSession, casterSeatId: stri
       ...session.events
     ]
   };
+  // Enshrouding Mist: "... Prevent all damage that would be dealt to it this turn. If it's renowned, untap it." — "it" is the creature just pumped.
+  const itSpec = parseDamagePrevention(sourceCard.oracleText);
+  if (itSpec?.scope !== "it") return pumped;
+  const shielded = addDamageShieldsFromSpec(pumped, casterSeatId, sourceCard, itSpec, { kind: "card", seatId: target.seatId, cardId: target.card.id });
+  if (!target.card.renowned || !/if it'?s renowned, untap it/i.test(sourceCard.oracleText)) return shielded;
+  return rulesEvent({ ...shielded, seats: shielded.seats.map((seat) => (seat.id !== target.seatId ? seat : { ...seat, board: { ...seat.board, battlefield: seat.board.battlefield.map((card) => (card.id === target.card.id ? { ...card, tapped: false } : card)) } })) }, casterSeatId, `${target.card.name} is renowned and untaps.`);
 }
 
 interface MassPumpEffect {
@@ -23343,19 +23442,58 @@ function simulateBlockedCombat(attackingCard: VisibleCard, blocker: VisibleCard)
 // damage assigned (attackingCard.damageAssignmentOrder, falling back to however they're passed in
 // for the single-blocker case where order is moot).
 function resolveBlockedCombatDamage(
-  session: GameSession,
+  inputSession: GameSession,
   attackerSeatId: string,
   attackingCard: VisibleCard,
   target: { seat: PlayerSeat; planeswalker?: VisibleCard },
   rawBlockers: VisibleCard[]
 ): GameSession {
+  let session = inputSession;
   // A creature blocking two attackers deals its damage to the first one only.
   const blockers = rawBlockers.map((blocker) => (blocker.extraBlockingTargetId === attackingCard.id ? { ...blocker, temporaryPowerBonus: (blocker.temporaryPowerBonus ?? 0) - Math.max(0, effectivePower(blocker)) } : blocker));
   // Twinflame Tyrant: each side's combat damage to the other side's creatures is doubled when its controller has the doubler.
   const doubled = (card: VisibleCard, factor: number): VisibleCard => (factor > 1 ? { ...card, temporaryPowerBonus: (card.temporaryPowerBonus ?? 0) + Math.max(0, effectivePower(card)) * (factor - 1) } : card);
   const attackerFactor = damageDoublingFactor(session, attackerSeatId, target.seat.id);
   const blockerFactor = damageDoublingFactor(session, target.seat.id, attackerSeatId);
-  const outcome = simulateMultiBlockedCombat(doubled(attackingCard, attackerFactor), blockers.map((blocker) => doubled(blocker, blockerFactor)));
+  // "Prevent all damage target creature would deal this turn": that creature deals no damage in this combat.
+  const silenced = (card: VisibleCard): VisibleCard =>
+    (session.damageShields ?? []).some((shield) => shield.turn === session.turn && shield.protect.kind === "from_source" && shield.protect.cardId === card.id)
+      ? { ...card, temporaryPowerBonus: (card.temporaryPowerBonus ?? 0) - Math.max(0, effectivePower(card)) }
+      : card;
+  const rawOutcome = simulateMultiBlockedCombat(silenced(doubled(attackingCard, attackerFactor)), blockers.map((blocker) => silenced(doubled(blocker, blockerFactor))));
+
+  // Prevention shields (Enshrouding Mist, "prevent the next N damage", ...) apply to the damage each creature was assigned; the combat
+  // outcome (deaths, lifelink, -1/-1 counters) is then re-derived from what actually got through. Seraph-style statics are already inside the simulation.
+  const preventedInCombat = (seatId: string, card: VisibleCard, damage: number, source: VisibleCard) => {
+    const result = applyDamagePrevention(session, { kind: "permanent", seatId, cardId: card.id, isCreature: true }, card.name, damage, true, source.name, source);
+    session = result.session;
+    return result.remaining;
+  };
+  for (const [seatId, card, source] of [[target.seat.id, blockers[0], attackingCard], [attackerSeatId, attackingCard, blockers[0]]] as Array<[string, VisibleCard, VisibleCard]>) {
+    if (preventsCombatDamageToSelf(card) && effectivePower(source) > 0) session = rulesEvent(session, seatId, `${source.name}'s combat damage to ${card.name} is prevented by ${card.name}.`);
+  }
+  const outcome: MultiBlockedCombatOutcome = { ...rawOutcome, blockerResults: rawOutcome.blockerResults.map((entry) => ({ ...entry })) };
+  if (session.damageShields?.length) {
+    for (const entry of outcome.blockerResults) {
+      if (entry.damageMarked <= 0) continue;
+      const left = preventedInCombat(target.seat.id, entry.blocker, entry.damageMarked, attackingCard);
+      if (left === entry.damageMarked) continue;
+      entry.minusCounters = Math.min(entry.minusCounters, left);
+      entry.destroyed = !hasIndestructible(entry.blocker) && ((entry.blocker.damage ?? 0) + left >= effectiveToughness(entry.blocker) || (hasDeathtouch(attackingCard) && left > 0));
+      entry.damageMarked = left;
+    }
+    if (outcome.attackerDamageMarked > 0) {
+      const left = preventedInCombat(attackerSeatId, attackingCard, outcome.attackerDamageMarked, blockers[0]);
+      if (left !== outcome.attackerDamageMarked) {
+        const scale = left / outcome.attackerDamageMarked;
+        outcome.blockerResults.forEach((entry) => (entry.lifegain = Math.floor(entry.lifegain * scale)));
+        outcome.attackerMinusCounters = Math.min(outcome.attackerMinusCounters, left);
+        outcome.attackerDestroyed = !hasIndestructible(attackingCard) && ((attackingCard.damage ?? 0) + left >= effectiveToughness(attackingCard) || (left > 0 && blockers.some((blocker) => hasDeathtouch(blocker))));
+        outcome.attackerDamageMarked = left;
+      }
+    }
+    outcome.attackerLifegain = hasLifelink(attackingCard) ? outcome.blockerResults.reduce((total, entry) => total + entry.damageMarked, 0) + outcome.trampleOverflow : 0;
+  }
 
   const destructions: Array<{ seatId: string; cardId: string; message: string }> = [];
   for (const result of outcome.blockerResults) {
@@ -23549,6 +23687,8 @@ function buildAgentDecisionContext(
 ) {
   return {
     ...extra,
+    // Damage-prevention shields live this turn (Fog effects, Inkshield, ...), so an agent doesn't attack into or waste burn on a shielded target.
+    activeDamagePrevention: [...describeDamageShields(session), ...(session.combatDamagePrevented?.turn === session.turn ? [`All combat damage is prevented this turn${session.combatDamagePrevented.exceptType ? ` except from ${session.combatDamagePrevented.exceptType} creatures` : ""}.`] : [])],
     you: agentSeatSnapshot(seat, true),
     opponents: session.seats.filter((item) => item.id !== seat.id && !item.hasLost).map((item) => agentSeatSnapshot(item, false))
   };
@@ -24942,6 +25082,10 @@ export function commonTriggerEffect(
   // this engine's one-effect-per-clause parsing (see the module comment on TriggerEffect); a card
   // with multiple clauses where only one is optional would be mis-flagged, a declared simplification.
   const optional = /\byou may\b/.test(text) || undefined;
+  if (mode === "entered" || mode === "clause") {
+    const preventSpec = parseDamagePrevention(text.replace(/^(?:when|whenever|at the beginning)\b[^,]*,\s*/, ""));
+    if (preventSpec && ["you", "self", "controlled_creatures", "you_and_creatures"].includes(preventSpec.scope)) return { kind: "prevent_damage", spec: preventSpec };
+  }
   if (/^choose left or right\. each player gains control of all nonland permanents other than [^.]+ controlled by the next player in the chosen direction\.?$/.test(text.replace(/\([^)]*\)/g, "").trim())) return { kind: "rotate_control" };
   if (/^until end of turn, each planeswalker you control becomes a 4\/4 red dragon creature and gains flying\.?$/.test(text.replace(/\([^)]*\)/g, "").replace(/^[+\-−]?\d+:\s*/, "").trim())) return { kind: "planeswalkers_become_dragons" };
   const storefront = text
@@ -27561,6 +27705,9 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
     const swapped: GameSession = { ...session, seats: session.seats.map((item) => (item.id === me.id ? { ...item, life: target.life } : item.id === target.id ? { ...item, life: me.life } : item)) };
     // Exchanging with a higher total means I GAIN, not lose: the draw only triggers when my total went down.
     return rulesEvent(swapped, me.id, `${me.name} exchanges life totals with ${target.name} (${me.life} <-> ${target.life}).`);
+  }
+  if (trigger.effect.kind === "prevent_damage") {
+    return addDamageShieldsFromSpec(session, trigger.controllerSeatId, { id: trigger.sourceCardId, name: trigger.sourceCardName }, trigger.effect.spec);
   }
   if (trigger.effect.kind === "copy_each_artifact_temp") {
     const owner = session.seats.find((item) => item.id === trigger.controllerSeatId);
@@ -30662,6 +30809,10 @@ function addManaToPool(pool: ManaPool, color: ManaColor, amount: number) {
 
 function addPools(a: ManaPool, b: ManaPool): ManaPool {
   return { W: a.W + b.W, U: a.U + b.U, B: a.B + b.B, R: a.R + b.R, G: a.G + b.G, C: a.C + b.C };
+}
+
+function spentManaColors(spent: ManaPool | undefined): string[] {
+  return spent ? (Object.keys(spent) as ManaColor[]).filter((color) => spent[color] > 0) : [];
 }
 
 function manaPoolTotal(pool: ManaPool) {

@@ -121,7 +121,7 @@ describe("checkMoveLegal: rejected moves leave the state untouched", () => {
   });
 
   it("unsupported spell text: refused for an agent, still allowed for a human (manual review)", () => {
-    const brume = card({ id: "bb", name: "Batwing Brume", typeLine: "Instant", manaCost: "{1}{W}", manaValue: 2, zone: "hand", oracleText: "Prevent all combat damage that would be dealt this turn if {W} was spent to cast this spell. Prevent all combat damage that would be dealt this turn if {B} was spent to cast this spell." });
+    const brume = card({ id: "bb", name: "Promise of Loyalty", typeLine: "Sorcery", manaCost: "{1}{W}", manaValue: 2, zone: "hand", oracleText: "Each player puts a vow counter on a creature they control and sacrifices the rest. Those creatures can't attack you or planeswalkers you control for as long as they have vow counters on them." });
     const agent = setup({ hand: [brume], battlefield: [plains("p1"), plains("p2")] });
     expectRejected(checkMoveLegal(agent, "me", castAction("bb"), agentCtx(agent)), /cannot carry out/i);
     const human = setup({ hand: [brume], battlefield: [plains("p1"), plains("p2")], kind: "human" });

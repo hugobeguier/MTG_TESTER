@@ -198,6 +198,22 @@ export interface InterpretedEffect {
   interpretedBy: "deterministic" | "ollama";
 }
 
+export interface DamageShield {
+  id: string;
+  turn: number;
+  sourceId: string;
+  sourceName: string;
+  controllerSeatId: string;
+  /** What is protected: a player, one permanent, all creatures a player controls, or "damage dealt BY this permanent". */
+  protect: { kind: "player"; seatId: string } | { kind: "permanent"; cardId: string } | { kind: "controlled_creatures"; seatId: string } | { kind: "from_source"; cardId: string };
+  combatOnly?: boolean;
+  /** Points still preventable ("prevent the next N"); undefined = all damage. */
+  amount?: number;
+  /** "For each 1 damage prevented this way, create ..." (Inkshield): created for the shield controller. */
+  tokenClause?: string;
+  preventedTotal?: number;
+}
+
 export interface VisibleCard {
   id: string;
   name: string;
@@ -608,7 +624,8 @@ export interface GameSession {
   // Rule 508.1: attackers are declared once, at the start of the step. The creatures that could be declared (fixed when the first attacker is
   // chosen) - anything that arrives afterwards (a Utvara Hellkite token, even one given haste) can't join this combat.
   attackPool?: { turn: number; ids: string[] };
-  combatDamageShields?: Array<{ turn: number; seatId: string; sourceId: string; sourceName: string; tokenClause?: string }>;
+  // General damage-prevention shields (src/lib/damagePrevention.ts): every damage path consults these through applyDamagePrevention. Expire when the turn changes.
+  damageShields?: DamageShield[];
   // Damage dealt to each player so far this turn (any source, combat or not): Spinerock Knoll's "an opponent was dealt 7 or more
   // damage this turn". Starts over whenever the turn number changes.
   damageThisTurn?: { turn: number; bySeat: Record<string, number> };
