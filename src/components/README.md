@@ -12,3 +12,5 @@
 * `hooks/useStackState.ts` - state: stack, pending action, priority passes, priority seat (pure transitions in `engine/stack.ts`); ref-synchronous setters.
 
 Hooks must be called at the same position in `AppFlow()` they were extracted from (React effect order). Engine/rules code lives in `src/engine/`.
+
+Stack/priority: `engine/stack.ts` (`StackState` + pure transitions: open window, pass, resolve top, snapshot/restore) and `engine/priority.ts` (who must pass) hold the logic; `hooks/useStackState.ts` wraps it as `stackStore` (`.state` for render, `.ref.current` for always-current reads in timers). AppFlow only wires: it calls `stackStore` methods and derives `stackActions`/`pendingAction`/`priorityPasses`/`prioritySeatId`/`activeSeatId` from it. AppFlow wires, modules own logic.
