@@ -586,3 +586,13 @@ in the new module, `export { fn } from "@/engine/..."` (or import and re-export)
   turn-loop effects all read and write the same ~30 session-level states and ~20 refs (`session`, `pendingAction`, `stackActions`, `manaPools`,
   `pendingRuleChoice`, `priorityPasses`, the `*ThisTurn` refs, `stackActionsRef`...) and call each other freely (resolvePendingActionNow alone is
   1,000 lines). A hook split needs those handlers grouped behind a context object first; do it one cluster at a time (mana state, then combat UI).
+* **Component split, step 2 - DONE: shared-context split of `AppFlow()`.** `AppFlow.tsx` is now ~370 lines (prop types, glue, a few JSX-only derived
+  values, the JSX). All state moved into `components/game/context.ts` (`useGameState`) and every handler/effect moved verbatim into
+  `components/game/use*.ts` hooks that take one `GameContext` (state + setters + refs grouped as `stack`/`mana`/`choices`/`agent`/`turn`, plus `late`).
+  Handlers that live in another hook are reached through `lateFn(ctx, "name")` (call-time lookup on `ctx.late`, which `AppFlow()` fills with every hook's
+  returned functions each render), so mutually-calling handlers did not have to be regrouped and each call still hits the same render's closures.
+  All `useEffect` blocks (originally one contiguous run) sit in `game/useGameEffects.ts` in their original relative order and are called after every
+  handler hook, before the one remaining effect in `AppFlow()`. Bodies are byte-identical to the original; only a destructuring preamble was added per
+  hook. `AppFlow.humanAgentParity.test.ts` now scans `AppFlow.tsx` + `src/engine/*.ts` + `src/components/game/*.ts`. Hook map: `src/components/README.md`.
+  Known leftovers: `useStackResolution.ts` (1.6k lines, contains `resolvePendingActionNow`, ~1k lines on its own) and the effects file (1.2k) are still
+  large; splitting `resolvePendingActionNow` per action type is the next candidate, but needs real design (it is one function with shared locals).

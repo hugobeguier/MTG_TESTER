@@ -149,8 +149,10 @@ function bearOf(id: string) {
 }
 
 // --- static guard: every human choice kind has an agent answer or is declared human-only ---
-// The resolution code moved out of AppFlow.tsx into src/engine/*.ts, so scan AppFlow plus every engine file as one source.
-const source = [readFileSync("src/components/AppFlow.tsx", "utf8"), ...readdirSync("src/engine").filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts")).map((f) => readFileSync(`src/engine/${f}`, "utf8"))].join("\n");
+// The resolution code moved out of AppFlow.tsx into src/engine/*.ts and the handlers into src/components/game/*.ts, so scan AppFlow plus every engine
+// and game/ file as one source.
+const scanDirs = ["src/engine", "src/components/game"];
+const source = [readFileSync("src/components/AppFlow.tsx", "utf8"), ...scanDirs.flatMap((dir) => readdirSync(dir).filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts")).map((f) => readFileSync(`${dir}/${f}`, "utf8")))].join("\n");
 function between(start: RegExp, end: RegExp, from = 0): string {
   const s = source.slice(from);
   const a = s.search(start);
