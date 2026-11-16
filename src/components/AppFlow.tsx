@@ -66,7 +66,7 @@ import { AGENT_REQUEST_TIMEOUT_MS, MAX_SESSION_EVENTS, agentPaceMs, loadPriority
 import { type BasicLandFetchSearchState, type BlockChoiceState, type LegalAgentAction, type LibraryLookMode, type LibraryLookState, type ManaChoiceState, type ManualLibrarySearchState, type MyriadSearchState, type MyriadTapChoiceState } from "@/engine/flowTypes";
 import { DeckSetupPanel, Status, Topbar, applyDeckToSeat, applyDefaultDecks, createInitialConfigs, fallbackCommander, formatDeckList, inferColors, validateConfigsForPlay, type SavedDeck, type SeatConfig } from "@/components/DeckSetup";
 import { animateEnchantmentSpec, applyEnchantmentAnimation, applyGenericAbilityEffect, applyGenericTapEffect, applySacrificeEffect, canTapForCost, chooseAnnihilatorSacrifices, chooseLandToReturn, choosePermanentToBlink, cycleCardInSession, parseGenericAbilityEffect, payGenericManaCost, payGenericSacrificeCost, payGenericTapCost, resolveEquip, resolveManlandAnimation, resolveSelfUntapAbility, seatVerb, tapCreaturesAltCostFor, zoneChoiceSpecFor } from "@/engine/abilities";
-import { buildAgentDecisionContext, findSpellSourceCard, isStackAction, nextPrioritySeatId, pendingActionRequiredPasses, pendingActionSummary, resolutionPromptNote, shouldConsultRulesAdvisor, withPendingActionSourceCard } from "@/engine/priority";
+import { buildAgentDecisionContext, findSpellSourceCard, nextPrioritySeatId, pendingActionRequiredPasses, pendingActionSummary, resolutionPromptNote, shouldConsultRulesAdvisor, withPendingActionSourceCard } from "@/engine/priority";
 import { checkMoveLegal, cumulativeUpkeepCost, fallbackLegalAction, formatLoyaltyCost, hasAgentMainPhaseAction, isCumulativeUpkeepCard, isPendingActionLikelyIrrelevantToSeat, legalMainPhaseActions, legalPriorityActions, loyaltyTurnKey, spellIsImmuneToCounters } from "@/engine/legalActions";
 import { additionalSacrificeCandidates, applyChosenFaceToCard, applySpellDamagePrevention, canCastAtInstantSpeed, castFaceDecision, castRestrictedByTurnCount, chooseAdditionalCostSacrifice, chooseFreeCastCard, handCardFaceOptions, independentlyCastableSpellFaces, manaFromTappedOpponentLands, markHandCardFreeCastable, matchesAdditionalSacrificeType, modalDoubleFacedLandSplit, pathOfAncestryScries, payAdditionalDiscardCost, playCardFromZone, recordCommanderCast, roomDoorFaces, sacrificeForAdditionalCost, seatHasFlashGrant, spellCastLockedOut, spellFaceCostCard, spellResolutionDestination, targetingTax, unlockSecondRoomDoor } from "@/engine/casting";
 import { applyMetalcraftAttackDebuff, assignBlockers, attackLockedOut, canAttack, cleanupCombat, clearCombatState, countCreaturesAttackingSeat, createCombatBlockChoice, forcedAttackers, hasVigilance, legalAttackActions, legalBlockActions, resolveAttackTarget, resolveCombatDamage, resolveHumanUnblockedDamage, totalAttackTax } from "@/engine/combat";
@@ -75,7 +75,7 @@ import { applyEndStepEffects, clearTemporaryBuffs, effectiveMaxHandSize, hasExtr
 import { activateGraveyardReturnInSession, agentTargetedTriggerKinds, agentTriggerTarget, findAnyCombatDamageToOpponentTriggers, findAttackTriggers, findBreenaAttackTriggers, findCardsLeftGraveyardTriggers, findCastTriggers, findCombatDamageToPlayerTriggers, findCommonTriggersForPermanentDied, findEntersBatchWatcherTriggers, findLandRaidTriggers, findLeavesBattlefieldTriggers, findLifeGainTriggers, findMultiAttackTriggers, findPutIntoGraveyardTriggers, findSacrificeWatcherTriggers, grantKeywordsToCreature, hasSorcerySpeedOnlyLimiter, lifeGainReplacementBonus, parseMetalcraftAttackDebuff, triggerDamageAiming } from "@/engine/triggerFinders";
 import { chooseReadAheadChapter, applyAuraAttachToPlayer, applyAuraAttachment, applyChosenColor, applyChosenCreatureType, chooseAuraAttachTarget, chooseBestBasicLandPairForMyriad, entersWithChargeCounterPerKick, entersWithXCounters, exploreCount, getBasicLandFetchOptions, getMyriadLandscapeOptions, grantsExtraTurn, handCardsOfTypes, isSagaCard, loreCounterCount, resolveBasicLandFetchSearch, resolveExplore, resolveMyriadLandscapeSearch, type AuraAttachResult } from "@/engine/etb";
 import { agentCastTimeRemovalChoices, applyCastGenericModes, applyCastRemoval, applyLabeledContinuation, castFaceCard, castModeLabels, castStructure, describeRemovalMode, discardOptions, encodeChosenTarget, findCardAnywhere, hasResolvableTarget, labeledTargetOptions, nextCastPrompt, sacrificeOptions, spellModePrompt, spellTargetSlots, stackTargetText, steelHellkiteXOptions } from "@/engine/castTargets";
-import type { StackState } from "@/engine/stack";
+import { useStackState } from "@/hooks/useStackState";
 import { MULLIGAN_HARD_CAP, MULLIGAN_SOFT_CAP, addLibraryLookEvent, agentKeepsHand, isLimDulsVault, keepOpeningHandSize, openingHandBattlefieldCards, openingHandKeepSize, putOpeningHandCardOnBattlefield, resolveAgentLimDulVault, withOpeningHand } from "@/engine/mulligan";
 import { blockChoiceView, ruleChoiceLabel, ruleChoiceView } from "@/components/viewModels";
 export type { LegalAgentAction } from "@/engine/flowTypes";
@@ -143,8 +143,10 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   const [myriadSearch, setMyriadSearch] = useState<MyriadSearchState | undefined>();
   const [myriadTapChoice, setMyriadTapChoice] = useState<MyriadTapChoiceState | undefined>();
   const [basicLandFetchSearch, setBasicLandFetchSearch] = useState<BasicLandFetchSearchState | undefined>();
-  const [pendingAction, setPendingAction] = useState<PendingAction | undefined>();
-  const [stackActions, setStackActions] = useState<PendingAction[]>([]);
+  const stackStore = useStackState({ activeSeatId, prioritySeatId });
+  const { replaceStack: replaceStackActions, push: pushStackAction, update: updateStackAction, remove: removeStackAction, setPending: setPendingAction } = stackStore;
+  const stackActions = stackStore.state.stack;
+  const pendingAction = stackStore.state.pending;
   // Always-current views of state for the legality gate: an agent decision awaits an LLM call, so the render-time `session` captured by its closure can be
   // stale by the time the answer arrives. The gate re-validates the proposal against these, never against the stale closure.
   const latestSessionRef = useRef(session);
@@ -154,15 +156,6 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   const latestActiveSeatIdRef = useRef(activeSeatId);
   latestActiveSeatIdRef.current = activeSeatId;
   const [priorityPasses, setPriorityPasses] = useState<string[]>([]);
-  // New plain-data home for stack/priority state (src/engine/stack.ts). Not yet the source of truth: the useState values above still drive everything.
-  const [stackState, setStackState] = useState<StackState>(() => ({ activeSeatId, prioritySeatId, pending: undefined, stack: [], passes: [] }));
-  const stackRef = useRef(stackState);
-  const applyStack = (fn: (s: StackState) => StackState) => {
-    stackRef.current = fn(stackRef.current);
-    setStackState(stackRef.current);
-  };
-  void stackState;
-  void applyStack;
   // The human's priority-stop preferences (src/lib/priorityStops.ts) — starts at the hardcoded
   // defaults (matches server-rendered markup) and is swapped for whatever persisted on a prior visit
   // once the mount effect below runs, same SSR-safety shape as loadRuleWorkflowCacheOnce.
@@ -335,7 +328,6 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   // choice below — an Aura stays attached (attachedToId set) for its whole time on the battlefield,
   // so without this the detection effect would re-offer the same already-resolved Aura forever.
   const auraRetargetAsked = useRef<Set<string>>(new Set());
-  const stackActionsRef = useRef<PendingAction[]>([]);
   // The resolving beat (see resolvePendingAction): ids already waiting out their beat (so a second trigger of the same resolution is a no-op),
   // the newest closure of the real resolver (the beat callback must not run a stale one), and the recent-resolutions feed the table shows.
   const resolveBeatIds = useRef<Set<string>>(new Set());
@@ -409,28 +401,6 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
 
   function updateConfig(seatId: string, patch: Partial<SeatConfig>) {
     setConfigs((current) => current.map((config) => (config.seatId === seatId ? { ...config, ...patch } : config)));
-  }
-
-  function replaceStackActions(next: PendingAction[]) {
-    stackActionsRef.current = next;
-    setStackActions(next);
-  }
-
-  function pushStackAction(action: PendingAction) {
-    if (!isStackAction(action)) return;
-    const current = stackActionsRef.current;
-    if (current.some((item) => item.id === action.id)) return;
-    replaceStackActions([...current, action]);
-  }
-
-  function updateStackAction(action: PendingAction) {
-    replaceStackActions(stackActionsRef.current.map((item) => (item.id === action.id ? action : item)));
-  }
-
-  function removeStackAction(actionId: string) {
-    const next = stackActionsRef.current.filter((item) => item.id !== actionId);
-    replaceStackActions(next);
-    return next;
   }
 
   function resumeTopStackAction(stack: PendingAction[]) {
@@ -6760,13 +6730,13 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     }
     if (resolveBeatIds.current.has(action.id)) return;
     resolveBeatIds.current.add(action.id);
-    const view = withPendingActionSourceCard(session, action, stackActionsRef.current) as unknown as StackFeedEntry["view"];
+    const view = withPendingActionSourceCard(session, action, stackStore.ref.current.stack) as unknown as StackFeedEntry["view"];
     const startEventId = session.events[0]?.id;
     setStackFeed((previous) => [{ id: action.id, view, startEventId, status: "resolving" as const }, ...previous.filter((entry) => entry.id !== action.id)].slice(0, 5));
     window.setTimeout(() => {
       resolveBeatIds.current.delete(action.id);
       // A response was put on the stack while the beat ran: it resolves first and this item comes back through the normal stack resume.
-      const stack = stackActionsRef.current;
+      const stack = stackStore.ref.current.stack;
       const index = stack.findIndex((item) => item.id === action.id);
       if (index >= 0 && index < stack.length - 1) {
         setStackFeed((previous) => previous.filter((entry) => entry.id !== action.id));
@@ -7019,7 +6989,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     }
 
     if (action.counterTargetId) {
-      const counterTargetAction = stackActionsRef.current.find((item) => item.id === action.counterTargetId);
+      const counterTargetAction = stackStore.ref.current.stack.find((item) => item.id === action.counterTargetId);
       if (counterTargetAction && counterTargetAction.type === "spell") {
         const counterCardRaw = findSpellSourceCard(session, action);
         const counterAbility = counterCardRaw ? parseCounterSpellAbility(counterCardRaw.oracleText) : undefined;
@@ -7916,7 +7886,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     }
     const [firstTrigger, ...laterTriggers] = triggers;
     if (laterTriggers.length > 0) {
-      replaceStackActions([...stackActionsRef.current, ...laterTriggers]);
+      replaceStackActions([...stackStore.ref.current.stack, ...laterTriggers]);
       addEvent(`${triggers.length} triggered abilities were put onto the stack.`, firstTrigger.controllerSeatId, "Trigger");
     }
     beginPendingAction(firstTrigger, "Trigger");
