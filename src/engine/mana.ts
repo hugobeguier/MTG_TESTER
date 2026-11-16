@@ -5,7 +5,7 @@
 // mana-rock/signet/scaling-amount parsing, and actually tapping/spending sources (spendManaSources).
 // AppFlow.tsx re-exports the previously public symbols so existing importers keep working.
 
-import type { ColoredMana, GameSession, ManaColor, ManaPool, PlayerSeat, VisibleCard } from "@/lib/types";
+import type { ColoredMana, GameSession, ManaColor, ManaPool, PlayerSeat, RestrictedManaBatch, VisibleCard } from "@/lib/types";
 import { countMatchingPermanents, permanentMatchesQualifier } from "@/lib/characteristics";
 import { effectivePower } from "@/lib/counters";
 import { oracleClauses } from "@/lib/oracleClauses";
@@ -1027,3 +1027,9 @@ export function tapVisibleCard(session: GameSession, seatId: string, cardId: str
 export function isDragonMana(source: VisibleCard): boolean {
   return !source.abilitiesStripped && !source.tapped && /\{1\}, \{t\}: add two mana in any combination of colors\. spend this mana only to cast dragon spells/i.test(source.oracleText);
 }
+
+
+// A batch limited to one kind of spell ("only to cast Dragon spells") is usable only for a spell of that type or subtype.
+export function restrictedBatchUsable(batch: RestrictedManaBatch, forCard?: VisibleCard) {
+  return !batch.spellType || Boolean(forCard && forCard.typeLine.toLowerCase().includes(batch.spellType.toLowerCase()));
+}
