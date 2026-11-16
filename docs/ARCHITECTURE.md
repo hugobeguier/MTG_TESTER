@@ -599,3 +599,18 @@ in the new module, `export { fn } from "@/engine/..."` (or import and re-export)
   hook. `AppFlow.humanAgentParity.test.ts` now scans `AppFlow.tsx` + `src/engine/*.ts` + `src/components/game/*.ts`. Hook map: `src/components/README.md`.
   Known leftovers: `useStackResolution.ts` (1.6k lines, contains `resolvePendingActionNow`, ~1k lines on its own) and the effects file (1.2k) are still
   large; splitting `resolvePendingActionNow` per action type is the next candidate, but needs real design (it is one function with shared locals).
+
+---
+
+## 7. Multiplayer relay (`src/lib/multiplayer/`, `app/api/mp/`)
+
+The host's browser runs the game engine and is the authority. The Next server is only a **relay**:
+the host publishes a filtered snapshot per seat, guests (thin clients) get theirs and send intents that
+the relay forwards to the host. See `src/lib/multiplayer/README.md` for the short version.
+
+* Core: `hub.ts` (`MultiplayerHub`, framework-free; singleton via `getHub()` on `globalThis`), wire types and
+  limits in `protocol.ts`, route glue (bearer tokens, zod bodies, SSE response) in `routeUtil.ts`.
+* Transport: Server-Sent Events down (`GET /api/mp/stream?token=`), HTTP POST up. Tokens are random
+  (`crypto.randomBytes`), stored hashed; host token vs per-seat guest token.
+* API lockdown: `middleware.ts` + `apiGuard.ts` return 403 for every `/api/*` except `/api/mp/*` when the Host
+  header is not loopback. Host-header based, so spoofable: a friends-only measure. `MP_ALLOW_REMOTE_API=1` disables it.
