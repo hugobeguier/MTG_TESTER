@@ -11,7 +11,7 @@
 // lives in another hook via lateFn(ctx, "name"): a thin forwarder resolved at call time, so cycles between hooks are fine and each call still lands
 // on the functions of the render the caller closed over (hooks run every render, ctx is rebuilt every render).
 import { type AgentReasoning, type CardImageUris, type GameSession, type ManaContribution, type ManaPool, type RestrictedManaBatch, type VisibleCard } from "@/lib/types";
-import { type BasicLandFetchSearchState, type BlockChoiceState, type LibraryLookState, type ManaChoiceState, type ManualLibrarySearchState, type MyriadSearchState, type MyriadTapChoiceState } from "@/engine/flowTypes";
+import { type BasicLandFetchSearchState, type LibraryLookState, type ManualLibrarySearchState, type MyriadSearchState, type MyriadTapChoiceState } from "@/engine/flowTypes";
 import { MAX_SESSION_EVENTS, loadRuleWorkflowCacheOnce } from "@/lib/agentRuntime";
 import { type PendingAction, type PendingRuleChoice } from "@/engine/types";
 import { type StackFeedEntry } from "@/components/ThreeGameTable";
@@ -20,6 +20,7 @@ import { payGenericSacrificeCost, payGenericTapCost } from "@/engine/abilities";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDeckLibrary } from "@/components/hooks/useDeckLibrary";
 import { useStackState } from "@/components/hooks/useStackState";
+import { useDecisionState } from "@/components/hooks/useDecisionState";
 import { usePriorityStopSettings } from "@/components/hooks/usePriorityStopSettings";
 import { useSavedGames } from "@/components/hooks/useSavedGames";
 import type { useManaUi } from "./useManaUi";
@@ -96,7 +97,8 @@ export function useGameState(initialSession: GameSession) {
   const [libraryLook, setLibraryLook] = useState<LibraryLookState | undefined>();
   const [manualLibrarySearch, setManualLibrarySearch] = useState<ManualLibrarySearchState | undefined>();
   const [pendingRuleChoice, setPendingRuleChoice] = useState<PendingRuleChoice | undefined>();
-  const [blockChoice, setBlockChoice] = useState<BlockChoiceState | undefined>();
+  const decisions = useDecisionState(); // manaChoice + blockChoice live here (one decision per kind); old names/setters are adapters
+  const { manaChoice, blockChoice, setManaChoice, setBlockChoice } = decisions;
   const [selectedBlockerIds, setSelectedBlockerIds] = useState<string[]>([]);
   const [myriadSearch, setMyriadSearch] = useState<MyriadSearchState | undefined>();
   const [myriadTapChoice, setMyriadTapChoice] = useState<MyriadTapChoiceState | undefined>();
@@ -120,7 +122,6 @@ export function useGameState(initialSession: GameSession) {
   const [copyMana, setCopyMana] = useState<Record<string, number>>({});
   const [manaContributions, setManaContributions] = useState<Record<string, ManaContribution[]>>({});
   const [restrictedManaBatches, setRestrictedManaBatches] = useState<Record<string, RestrictedManaBatch[]>>({});
-  const [manaChoice, setManaChoice] = useState<ManaChoiceState | undefined>();
   // The human tucked the open choice box away ("Minimize") to look at the board. The choice itself stays pending; while this is set the
   // human's own game actions (cast, activate, pass) are refused with a message — see humanActionBlockedByChoice — except tapping lands.
   const [choiceMinimized, setChoiceMinimized] = useState(false);
@@ -286,7 +287,7 @@ export function useGameState(initialSession: GameSession) {
   const agentDecisionInfo = useRef<Record<string, Pick<AgentReasoning, "situation" | "options" | "chosenId" | "turn" | "phase">>>({});
   return {
     mode, setMode, session, setSession, activeSeatId, setActiveSeatId, prioritySeatId, setPrioritySeatId, tableSession, selectedHandCardId, setSelectedHandCardId, inspectedCard, setInspectedCard, gameStage, setGameStage, gameOverDismissed, setGameOverDismissed, latestSessionRef, setupMessage, setSetupMessage, configs, setConfigs, deckLibrary, defaultDecksApplied, savedGames, setSavedGames, gameStarting, setGameStarting, autoValidatedDefaultDeck, humanSeat, selectedHandCard,
-    choices: { mulligans, setMulligans, keptHands, setKeptHands, mulliganReturnCardIds, setMulliganReturnCardIds, libraryLook, setLibraryLook, manualLibrarySearch, setManualLibrarySearch, pendingRuleChoice, setPendingRuleChoice, blockChoice, setBlockChoice, selectedBlockerIds, setSelectedBlockerIds, myriadSearch, setMyriadSearch, myriadTapChoice, setMyriadTapChoice, basicLandFetchSearch, setBasicLandFetchSearch, choiceMinimized, setChoiceMinimized, pendingOrderedTriggerResume, commanderZoneChoiceAsked, auraRetargetAsked },
+    choices: { decisions, mulligans, setMulligans, keptHands, setKeptHands, mulliganReturnCardIds, setMulliganReturnCardIds, libraryLook, setLibraryLook, manualLibrarySearch, setManualLibrarySearch, pendingRuleChoice, setPendingRuleChoice, blockChoice, setBlockChoice, selectedBlockerIds, setSelectedBlockerIds, myriadSearch, setMyriadSearch, myriadTapChoice, setMyriadTapChoice, basicLandFetchSearch, setBasicLandFetchSearch, choiceMinimized, setChoiceMinimized, pendingOrderedTriggerResume, commanderZoneChoiceAsked, auraRetargetAsked },
     stack: { stackStore, pendingAction, setPendingAction, stackActions, priorityPasses, setPriorityPasses, priorityStopSettings, updatePriorityStopSettings, holdPriorityOnce, setHoldPriorityOnce, castDispatchInFlight, CAST_DISPATCH_STALE_MS, resolveBeatIds, resolveNowRef, abilityResolvers, abilityApiRef, stackFeed, setStackFeed },
     mana: { manaPools, setManaPools, copyMana, setCopyMana, manaContributions, setManaContributions, restrictedManaBatches, setRestrictedManaBatches, manaChoice, setManaChoice, lastCastManaContributors },
     agent: { rulesAdvisorPending, setRulesAdvisorPending, agentMainActions, agentDecisionRequests, agentThinking, setAgentThinking, agentReasoning, setAgentReasoning, agentStatedPlans, agentCastAttempts, agentBannedCasts, agentDecisionInfo },

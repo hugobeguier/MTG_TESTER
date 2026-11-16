@@ -16,8 +16,8 @@ import { type GameContext, lateFn } from "./context";
 export function useGameSetup(ctx: GameContext) {
   const { mode, setMode, session, setSession, activeSeatId, setActiveSeatId, prioritySeatId, setPrioritySeatId, selectedHandCardId, setSelectedHandCardId, inspectedCard, setInspectedCard, gameStage, setGameStage, setGameOverDismissed, setSetupMessage, configs, setConfigs, defaultDecksApplied, setSavedGames, gameStarting, setGameStarting, humanSeat } = ctx;
   const { agentMainActions, agentDecisionRequests, agentThinking, setAgentThinking, setAgentReasoning, agentStatedPlans } = ctx.agent;
-  const { mulligans, setMulligans, keptHands, setKeptHands, mulliganReturnCardIds, setMulliganReturnCardIds, libraryLook, setLibraryLook, manualLibrarySearch, setManualLibrarySearch, pendingRuleChoice, setPendingRuleChoice, blockChoice, setBlockChoice, selectedBlockerIds, setSelectedBlockerIds, myriadSearch, setMyriadSearch, myriadTapChoice, setMyriadTapChoice, basicLandFetchSearch, setBasicLandFetchSearch, commanderZoneChoiceAsked, auraRetargetAsked } = ctx.choices;
-  const { manaPools, setManaPools, manaContributions, setManaContributions, restrictedManaBatches, setRestrictedManaBatches, manaChoice, setManaChoice } = ctx.mana;
+  const { mulligans, setMulligans, keptHands, setKeptHands, mulliganReturnCardIds, setMulliganReturnCardIds, libraryLook, setLibraryLook, manualLibrarySearch, setManualLibrarySearch, pendingRuleChoice, setPendingRuleChoice, decisions, setBlockChoice, selectedBlockerIds, setSelectedBlockerIds, myriadSearch, setMyriadSearch, myriadTapChoice, setMyriadTapChoice, basicLandFetchSearch, setBasicLandFetchSearch, commanderZoneChoiceAsked, auraRetargetAsked } = ctx.choices;
+  const { manaPools, setManaPools, manaContributions, setManaContributions, restrictedManaBatches, setRestrictedManaBatches, setManaChoice } = ctx.mana;
   const { stackStore, pendingAction, setPendingAction, stackActions, priorityPasses, setPriorityPasses, holdPriorityOnce, setHoldPriorityOnce } = ctx.stack;
   const { landPlaysThisTurn, spellsCastThisTurn, firstDrawThisTurn, loyaltyActivationsThisTurn, phaseTriggersChecked, cleanupDiscardChecked, cleanupRestrictedManaChecked } = ctx.turn;
   const addEvent = lateFn(ctx, "addEvent");
@@ -206,11 +206,10 @@ export function useGameSetup(ctx: GameContext) {
         libraryLook ||
           manualLibrarySearch ||
           pendingRuleChoice ||
-          blockChoice ||
+          decisions.hasOpen || // mana + block choices
           myriadSearch ||
           myriadTapChoice ||
           basicLandFetchSearch ||
-          manaChoice ||
           inspectedCard ||
           selectedHandCardId ||
           selectedBlockerIds.length > 0 ||
