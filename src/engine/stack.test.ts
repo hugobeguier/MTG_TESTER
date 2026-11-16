@@ -181,4 +181,16 @@ describe("stack state", () => {
     expect(cleared.passes).toEqual([]);
     expect(cleared.activeSeatId).toBe("a");
   });
+
+  it("snapshot survives a JSON save/load and a restore is idempotent through snapshot again", () => {
+    const c = ctx(["a", "b", "c"]);
+    let s = openWindow(initialStackState("b"), spell("s1"), c).state;
+    s = passPriority(s, c).state;
+    const loaded = JSON.parse(JSON.stringify(snapshotStack(s)));
+    expect(Object.keys(loaded).sort()).toEqual(["activeSeatId", "priorityPasses", "prioritySeatId"]);
+    const restored = restoreStack(loaded);
+    expect(snapshotStack(restored)).toEqual(loaded);
+    expect(restored.pending).toBeUndefined();
+    expect(restored.stack).toEqual([]);
+  });
 });

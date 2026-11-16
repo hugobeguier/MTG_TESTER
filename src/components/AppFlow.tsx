@@ -2420,11 +2420,9 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       formatVersion: SAVE_FORMAT_VERSION,
       savedAt: new Date().toISOString(),
       session,
-      activeSeatId,
-      prioritySeatId,
+      ...stackStore.snapshot(),
       gameStage,
       holdPriorityOnce,
-      priorityPasses,
       mulligans,
       keptHands,
       manaPools,
@@ -2472,11 +2470,9 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
       return;
     }
     setSession(snapshot.session);
-    setActiveSeatId(snapshot.activeSeatId ?? snapshot.session.seats[1]?.id ?? snapshot.session.seats[0].id);
-    setPrioritySeatId(snapshot.prioritySeatId ?? snapshot.session.seats[1]?.id ?? snapshot.session.seats[0].id);
+    stackStore.restore(snapshot, snapshot.session.seats[1]?.id ?? snapshot.session.seats[0].id); // seats + passes; clears pending and stack
     setGameStage(snapshot.gameStage);
     setHoldPriorityOnce(snapshot.holdPriorityOnce);
-    setPriorityPasses(snapshot.priorityPasses);
     setMulligans(snapshot.mulligans);
     setKeptHands(snapshot.keptHands);
     setManaPools(snapshot.manaPools);
@@ -2506,8 +2502,6 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
     setMyriadSearch(undefined);
     setMyriadTapChoice(undefined);
     setBasicLandFetchSearch(undefined);
-    setPendingAction(undefined);
-    replaceStackActions([]);
     setManaChoice(undefined);
     setSelectedHandCardId(undefined);
     setInspectedCard(undefined);

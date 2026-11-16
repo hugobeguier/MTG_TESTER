@@ -4,7 +4,7 @@
 
 import { useRef, useState } from "react";
 import type { PendingAction } from "@/engine/types";
-import { pushToStack, removeFromStack, updateOnStack, type StackState } from "@/engine/stack";
+import { pushToStack, removeFromStack, restoreStack, snapshotStack, updateOnStack, type StackSnapshotFields, type StackState } from "@/engine/stack";
 
 export interface StackStateHandle {
   state: StackState;
@@ -18,6 +18,9 @@ export interface StackStateHandle {
   setPasses: (passes: string[]) => void;
   setPrioritySeatId: (seatId: string | undefined) => void;
   setActiveSeatId: (seatId: string | undefined) => void;
+  snapshot: () => StackSnapshotFields;
+  // Loads a save: seat/passes from the snapshot (a missing seat falls back to `fallbackSeatId`); pending and stack are emptied.
+  restore: (snap: StackSnapshotFields, fallbackSeatId: string) => void;
 }
 
 export function useStackState(initial: { activeSeatId?: string; prioritySeatId?: string }): StackStateHandle {
@@ -42,6 +45,9 @@ export function useStackState(initial: { activeSeatId?: string; prioritySeatId?:
     setPending: (action) => apply((s) => ({ ...s, pending: action })),
     setPasses: (passes) => apply((s) => ({ ...s, passes })),
     setPrioritySeatId: (seatId) => apply((s) => ({ ...s, prioritySeatId: seatId })),
-    setActiveSeatId: (seatId) => apply((s) => ({ ...s, activeSeatId: seatId }))
+    setActiveSeatId: (seatId) => apply((s) => ({ ...s, activeSeatId: seatId })),
+    snapshot: () => snapshotStack(ref.current),
+    restore: (snap, fallbackSeatId) =>
+      apply(() => restoreStack({ ...snap, activeSeatId: snap.activeSeatId ?? fallbackSeatId, prioritySeatId: snap.prioritySeatId ?? fallbackSeatId }))
   };
 }
