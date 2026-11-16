@@ -577,3 +577,12 @@ in the new module, `export { fn } from "@/engine/..."` (or import and re-export)
   reads an imported binding (checked by script), and each file was verified to import cleanly as the first entry point.
   **Next carve:** split the `AppFlow()` component itself into hooks / sub-components (`useAgentDriver`, `useSaveLoad`, stack UI, choice-prompt handlers).
   Only 3 inner functions were free of React state; the rest need state passed in, so that is a design change, not a mechanical move.
+* **Component split, step 1 - DONE (leaf pieces only).** `AppFlow()` measured: 40 `useState`, 42 `useRef`, 40 `useEffect`, 4 `useMemo`,
+  194 inner functions (~8.4k lines; effects ~1.1k lines). Approx. lines by concern: stack/priority 2.1k, choice prompts 1.5k, cast/activate 1.1k,
+  trigger/phase 1.0k, agent driver 0.5k, mana 0.5k, combat 0.4k, deck/setup 0.2k, save/load 0.15k. Extracted (verbatim, same call position so
+  effect order is unchanged): `components/SetupScreen.tsx`, `components/GameOverDialog.tsx` (props-only JSX) and
+  `components/hooks/{usePriorityStopSettings,useDeckLibrary,useSavedGames}.ts`. See `src/components/README.md`.
+  **Remaining core in `AppFlow()` (~10.6k lines):** the stack/priority resolver, trigger/choice-prompt handlers, casting, combat and the agent
+  turn-loop effects all read and write the same ~30 session-level states and ~20 refs (`session`, `pendingAction`, `stackActions`, `manaPools`,
+  `pendingRuleChoice`, `priorityPasses`, the `*ThisTurn` refs, `stackActionsRef`...) and call each other freely (resolvePendingActionNow alone is
+  1,000 lines). A hook split needs those handlers grouped behind a context object first; do it one cluster at a time (mana state, then combat UI).
