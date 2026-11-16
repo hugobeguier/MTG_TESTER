@@ -11,7 +11,6 @@
 // lives in another hook via lateFn(ctx, "name"): a thin forwarder resolved at call time, so cycles between hooks are fine and each call still lands
 // on the functions of the render the caller closed over (hooks run every render, ctx is rebuilt every render).
 import { type AgentReasoning, type CardImageUris, type GameSession, type ManaContribution, type ManaPool, type RestrictedManaBatch, type VisibleCard } from "@/lib/types";
-import { type BasicLandFetchSearchState, type LibraryLookState, type ManualLibrarySearchState, type MyriadSearchState, type MyriadTapChoiceState } from "@/engine/flowTypes";
 import { MAX_SESSION_EVENTS, loadRuleWorkflowCacheOnce } from "@/lib/agentRuntime";
 import { type PendingAction, type PendingRuleChoice } from "@/engine/types";
 import { type StackFeedEntry } from "@/components/ThreeGameTable";
@@ -94,15 +93,10 @@ export function useGameState(initialSession: GameSession) {
   const [mulligans, setMulligans] = useState<Record<string, number>>({});
   const [keptHands, setKeptHands] = useState<Record<string, boolean>>({});
   const [mulliganReturnCardIds, setMulliganReturnCardIds] = useState<string[]>([]);
-  const [libraryLook, setLibraryLook] = useState<LibraryLookState | undefined>();
-  const [manualLibrarySearch, setManualLibrarySearch] = useState<ManualLibrarySearchState | undefined>();
   const [pendingRuleChoice, setPendingRuleChoice] = useState<PendingRuleChoice | undefined>();
-  const decisions = useDecisionState(); // manaChoice + blockChoice live here (one decision per kind); old names/setters are adapters
-  const { manaChoice, blockChoice, setManaChoice, setBlockChoice } = decisions;
+  const decisions = useDecisionState(); // mana/block choices, library look, library searches, myriad tap live here (one decision per slot); old names/setters are adapters
+  const { manaChoice, blockChoice, setManaChoice, setBlockChoice, libraryLook, setLibraryLook, manualLibrarySearch, setManualLibrarySearch, myriadSearch, setMyriadSearch, myriadTapChoice, setMyriadTapChoice, basicLandFetchSearch, setBasicLandFetchSearch } = decisions;
   const [selectedBlockerIds, setSelectedBlockerIds] = useState<string[]>([]);
-  const [myriadSearch, setMyriadSearch] = useState<MyriadSearchState | undefined>();
-  const [myriadTapChoice, setMyriadTapChoice] = useState<MyriadTapChoiceState | undefined>();
-  const [basicLandFetchSearch, setBasicLandFetchSearch] = useState<BasicLandFetchSearchState | undefined>();
   const stackActions = stackStore.state.stack;
   const pendingAction = stackStore.state.pending;
   const priorityPasses = stackStore.state.passes;

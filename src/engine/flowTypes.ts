@@ -12,6 +12,8 @@ export type LibraryLookMode = "scry" | "surveil" | "reorder" | "choose_one" | "c
 
 export interface LibraryLookState {
   seatId: string;
+  // Portent: the looking player when it differs from seatId (the library owner). Decides who the decision is addressed to.
+  lookerSeatId?: string;
   // Portent: after the reorder, offer "have that player shuffle" (the card that offers it).
   shuffleOfferSource?: string;
   mode: LibraryLookMode;

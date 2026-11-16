@@ -178,6 +178,7 @@ export function useSpecialEffects(ctx: GameContext) {
     const cards = (seat?.library ?? []).slice(0, mode === "scry" ? 1 : count);
     setLibraryLook({
       seatId: targetSeatId ?? humanSeat.id,
+      ...(targetSeatId && targetSeatId !== humanSeat.id ? { lookerSeatId: humanSeat.id } : {}),
       ...(shuffleOfferSource ? { shuffleOfferSource } : {}),
       mode,
       cards,

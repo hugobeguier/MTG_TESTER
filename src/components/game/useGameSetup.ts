@@ -16,7 +16,7 @@ import { type GameContext, lateFn } from "./context";
 export function useGameSetup(ctx: GameContext) {
   const { mode, setMode, session, setSession, activeSeatId, setActiveSeatId, prioritySeatId, setPrioritySeatId, selectedHandCardId, setSelectedHandCardId, inspectedCard, setInspectedCard, gameStage, setGameStage, setGameOverDismissed, setSetupMessage, configs, setConfigs, defaultDecksApplied, setSavedGames, gameStarting, setGameStarting, humanSeat } = ctx;
   const { agentMainActions, agentDecisionRequests, agentThinking, setAgentThinking, setAgentReasoning, agentStatedPlans } = ctx.agent;
-  const { mulligans, setMulligans, keptHands, setKeptHands, mulliganReturnCardIds, setMulliganReturnCardIds, libraryLook, setLibraryLook, manualLibrarySearch, setManualLibrarySearch, pendingRuleChoice, setPendingRuleChoice, decisions, setBlockChoice, selectedBlockerIds, setSelectedBlockerIds, myriadSearch, setMyriadSearch, myriadTapChoice, setMyriadTapChoice, basicLandFetchSearch, setBasicLandFetchSearch, commanderZoneChoiceAsked, auraRetargetAsked } = ctx.choices;
+  const { mulligans, setMulligans, keptHands, setKeptHands, mulliganReturnCardIds, setMulliganReturnCardIds, setLibraryLook, setManualLibrarySearch, pendingRuleChoice, setPendingRuleChoice, decisions, setBlockChoice, selectedBlockerIds, setSelectedBlockerIds, setMyriadSearch, setMyriadTapChoice, setBasicLandFetchSearch, commanderZoneChoiceAsked, auraRetargetAsked } = ctx.choices;
   const { manaPools, setManaPools, manaContributions, setManaContributions, restrictedManaBatches, setRestrictedManaBatches, setManaChoice } = ctx.mana;
   const { stackStore, pendingAction, setPendingAction, stackActions, priorityPasses, setPriorityPasses, holdPriorityOnce, setHoldPriorityOnce } = ctx.stack;
   const { landPlaysThisTurn, spellsCastThisTurn, firstDrawThisTurn, loyaltyActivationsThisTurn, phaseTriggersChecked, cleanupDiscardChecked, cleanupRestrictedManaChecked } = ctx.turn;
@@ -203,13 +203,8 @@ export function useGameSetup(ctx: GameContext) {
       hasPendingAction: Boolean(pendingAction),
       stackActionCount: stackActions.length,
       hasOpenModal: Boolean(
-        libraryLook ||
-          manualLibrarySearch ||
-          pendingRuleChoice ||
-          decisions.hasOpen || // mana + block choices
-          myriadSearch ||
-          myriadTapChoice ||
-          basicLandFetchSearch ||
+        pendingRuleChoice ||
+          decisions.hasOpen || // mana/block choices, library look, library searches, myriad tap
           inspectedCard ||
           selectedHandCardId ||
           selectedBlockerIds.length > 0 ||
