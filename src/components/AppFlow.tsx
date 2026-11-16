@@ -128,7 +128,9 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   useEffect(() => {
     loadRuleWorkflowCacheOnce();
   }, []);
-  const [activeSeatId, setActiveSeatId] = useState(initialSession.activePlayerId ?? initialSession.seats[1]?.id);
+  const stackStore = useStackState({ activeSeatId: initialSession.activePlayerId ?? initialSession.seats[1]?.id, prioritySeatId: initialSession.activePlayerId ?? initialSession.seats[1]?.id });
+  const { replaceStack: replaceStackActions, push: pushStackAction, update: updateStackAction, remove: removeStackAction, setPending: setPendingAction, setPasses: setPriorityPasses, setPrioritySeatId, setActiveSeatId } = stackStore;
+  const activeSeatId = stackStore.state.activeSeatId as string; // was useState<string>; keeps read sites' types
   // Stable identity for the table's session prop: a fresh `{ ...session }` on every render made everything inside the table that
   // depends on `props.session` recompute on unrelated re-renders (hover, thinking text, timers).
   const tableSession = useMemo(() => (session.activePlayerId === activeSeatId ? session : { ...session, activePlayerId: activeSeatId }), [session, activeSeatId]);
@@ -147,8 +149,6 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   const [myriadSearch, setMyriadSearch] = useState<MyriadSearchState | undefined>();
   const [myriadTapChoice, setMyriadTapChoice] = useState<MyriadTapChoiceState | undefined>();
   const [basicLandFetchSearch, setBasicLandFetchSearch] = useState<BasicLandFetchSearchState | undefined>();
-  const stackStore = useStackState({ activeSeatId, prioritySeatId: initialSession.activePlayerId ?? initialSession.seats[1]?.id });
-  const { replaceStack: replaceStackActions, push: pushStackAction, update: updateStackAction, remove: removeStackAction, setPending: setPendingAction, setPasses: setPriorityPasses, setPrioritySeatId } = stackStore;
   const stackActions = stackStore.state.stack;
   const pendingAction = stackStore.state.pending;
   const priorityPasses = stackStore.state.passes;
