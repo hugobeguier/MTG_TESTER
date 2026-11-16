@@ -703,3 +703,11 @@ in the new module, `export { fn } from "@/engine/..."` (or import and re-export)
 * AppFlow.tsx imports these and re-exports every previously exported symbol, so test imports are unchanged.
 * Not moved from the proposed mana list: `entersBattlefieldTapped`/`shocklandPayLifeAmount` (belong to `lands.ts`),
   cost computation (`costs.ts`). `parseGrantedCostReduction` (costs) still calls `isDragonMana` via import.
+
+* **`src/engine/tokens.ts` - PARTIAL (parsing half + pure builders)**, ~276 lines, moved verbatim: `TokenSpec` type,
+  `parseCreateTokenSpecs`, `predefinedTokenSpec`, `parseCreatureTokenDescription`, `tokenColors`,
+  `sentenceCaseAbilities`, `createTokenCard`, `tokenCopyWorth`, `agentBestCopyCandidate`. `capitalizeWord` moved to `shared.ts`.
+  Left in AppFlow.tsx (blocked by AppFlow-resident calls, to avoid a triggers<->tokens cycle): `createTokensForSeat`
+  and `createCopyTokenForSeat` (call `applyEntryEffects`; the former also `checkStateBasedActions` and
+  `findCommonTriggersForPermanentEntered`), `resolveCopyOneOfCandidates` (`findPermanentById`, `rulesEvent`,
+  `queuePlayerChoice`). Move them after zones/triggers/SBA are extracted.

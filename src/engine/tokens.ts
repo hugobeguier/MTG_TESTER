@@ -1,0 +1,276 @@
+// Token parsing and pure token builders, extracted verbatim from components/AppFlow.tsx (see docs/ARCHITECTURE.md section 5).
+// Owns: the TokenSpec type, turning oracle text into TokenSpec[] (parseCreateTokenSpecs, predefinedTokenSpec,
+// parseCreatureTokenDescription), building a token card from a spec (createTokenCard), and agent copy-target scoring.
+// NOT here: createTokensForSeat / createCopyTokenForSeat / resolveCopyOneOfCandidates (they call applyEntryEffects,
+// checkStateBasedActions, findCommonTriggersForPermanentEntered, rulesEvent, queuePlayerChoice, which still live in AppFlow.tsx).
+// AppFlow.tsx re-exports the previously public symbols so existing importers keep working.
+
+import type { PlayerSeat, VisibleCard } from "@/lib/types";
+import { effectivePower, effectiveToughness } from "@/lib/counters";
+import { etbEffectText } from "@/lib/oracleClauses";
+import { capitalizeWord, numberWordToInt } from "@/engine/shared";
+
+export interface TokenSpec {
+  count: number;
+  name: string;
+  colors: string[];
+  typeLine: string;
+  power?: string;
+  toughness?: string;
+  oracleText: string;
+  role: string;
+  // "Create thirteen TAPPED 2/2 black Zombie creature tokens." (Army of the Damned, Necrotic Hex) —
+  // only set when the card says so; absent means the token enters untapped like any other.
+  tapped?: boolean;
+}
+
+export function createTokenCard(seatId: string, sourceCardId: string, spec: TokenSpec): VisibleCard {
+  return {
+    id: `${seatId}-token-${crypto.randomUUID()}`,
+    name: spec.name,
+    typeLine: spec.typeLine,
+    oracleText: spec.oracleText,
+    manaValue: 0,
+    colors: spec.colors,
+    colorIdentity: spec.colors,
+    role: spec.role,
+    zone: "battlefield",
+    token: true,
+    tokenSourceCardId: sourceCardId,
+    ownerSeatId: seatId,
+    power: spec.power,
+    toughness: spec.toughness,
+    summoningSick: spec.typeLine.includes("Creature"),
+    ...(spec.tapped ? { tapped: true } : {})
+  };
+}
+
+// How much an agent wants a token copy of this creature: its own enters-the-battlefield value first (a copy re-runs it), then raw size. A legendary
+// copy would just hit the legend rule, so it is a last resort.
+export function tokenCopyWorth(card: VisibleCard): number {
+  const hasEtb = etbEffectText(card.oracleText).trim().length > 0;
+  return (hasEtb ? 20 : 0) + card.manaValue * 2 + effectivePower(card) + effectiveToughness(card) - (card.typeLine.includes("Legendary") ? 100 : 0);
+}
+
+export function agentBestCopyCandidate(candidates: VisibleCard[]): VisibleCard {
+  return [...candidates].sort((a, b) => tokenCopyWorth(b) - tokenCopyWorth(a))[0];
+}
+
+export function parseCreateTokenSpecs(
+  oracleText: string,
+  dynamicCounterCount?: number,
+  controllerSeat?: PlayerSeat,
+  chosenX?: number,
+  // "Create X 1/2 green Spider creature tokens with reach, where X is the number of creatures
+  // attacking you." (Arachnogenesis) — a board-state count unrelated to any {X} the caster paid
+  // (this card has no {X} in its cost at all), so it needs its own parameter rather than reusing
+  // chosenX. Supplied by the caller, which has the full session (countCreaturesAttackingSeat); this
+  // function only ever sees one controllerSeat, not the other seats' attackers.
+  attackersTargetingCount?: number
+): TokenSpec[] {
+  const specs: TokenSpec[] = [];
+  const normalized = oracleText.replace(/\s+/g, " ");
+  const predefined = [
+    { name: "Treasure", spec: predefinedTokenSpec("Treasure") },
+    { name: "Food", spec: predefinedTokenSpec("Food") },
+    { name: "Clue", spec: predefinedTokenSpec("Clue") },
+    { name: "Blood", spec: predefinedTokenSpec("Blood") },
+    { name: "Powerstone", spec: predefinedTokenSpec("Powerstone") }
+  ];
+
+  for (const item of predefined) {
+    const match = normalized.match(new RegExp(`creates?\\s+(a|an|one|two|three|four|five|six|seven|eight|nine|ten|\\d+)\\s+(tapped\\s+)?${item.name}\\s+tokens?`, "i"));
+    // "...a Treasure token for each opponent who ..." / "...for each nontoken creature that died this turn": a dynamic count this
+    // function can't see (Smuggler's Share, Gadrak — the latter has its own phase-trigger handler). Declined, not silently made 1.
+    const trailing = match ? normalized.slice((match.index ?? 0) + match[0].length) : "";
+    if (match && item.spec && !/^\s*(?:for each|equal to)\b/i.test(trailing)) {
+      specs.push({ ...item.spec, count: numberWordToInt(match[1]) ?? 1, ...(match[2] ? { tapped: true } : {}) });
+    }
+  }
+
+  // "Create twice X 1/1 black and green Pest creature tokens ..." (Pest Infestation) — "twice x" is
+  // a count phrasing no other card in this codebase's real data uses, so it gets its own literal
+  // alternative here rather than a general "N times X" grammar; resolved against chosenX below the
+  // same "not guessed at here" way DamageEffect.amount's own "X" already is. Bare "x" (Arachnogenesis:
+  // "Create X ... tokens, where X is the number of creatures attacking you") is a separate dynamic
+  // basis, resolved against attackersTargetingCount instead — see the "where x is..." check below.
+  const creaturePattern =
+    /creates?\s+(a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|twice x|x|\d+)\s+(?:tapped\s+)?((?:\d+\/\d+\s+)?(?:(?:white|blue|black|red|green|colorless|multicolored)\s+)*(?:[A-Z][a-zA-Z'-]*\s+){0,4}creature tokens?(?: with [^.]+)?)/gi;
+  // "...with reach, where X is the number of creatures attacking you." (Arachnogenesis) — this
+  // clause sits INSIDE the "with [ability]" tail creaturePattern's own capture already grabs (unlike
+  // forEachControlledPattern's basis below, which trails AFTER the match entirely on cards with no
+  // "with ability" tail), so it has to be detected and stripped out of `description` itself rather
+  // than checked against the text following the match.
+  const whereXAttackersPattern = /,?\s*where x is the number of creatures attacking you\b\.?/i;
+  // "...with flying, where X is the number of counters it had on it." (Felisa, Fang of Silverquill) — the count the caller passes as dynamicCounterCount.
+  const whereXCountersPattern = /,?\s*where x is the number of counters it had on it\b\.?/i;
+  const dynamicCounterCountPattern = /for each\s+(?:\+1\/\+1\s+)?counter\s+on\s+(?:this creature|it|this permanent|this artifact)\b/i;
+  // "... creature token for each land you control." (Avenger of Zendikar, and the same "one token
+  // per permanent-type-you-control" shape on similar cards) — a dynamic count that trails AFTER
+  // "creature token(s)" rather than preceding it, so hasUnmodeledDynamicCount's precedingText check
+  // below never sees it; without this, the "a" in "create A ... token" was read as the literal
+  // count, always creating exactly one token regardless of how many lands were actually controlled.
+  const forEachControlledPattern = /^\s*for each ([a-z]+) you control\b/i;
+  // "... Insect creature token for each creature card in your graveyard." (Izoni, Thousand-Eyed) —
+  // same trailing-count shape, counted against the controller's own graveyard by card type.
+  const forEachGraveyardCardPattern = /^\s*for each ([a-z]+) card in your graveyard\b/i;
+  for (const match of normalized.matchAll(creaturePattern)) {
+    const rawDescription = match[2].trim();
+    const whereXAttackersMatch = whereXAttackersPattern.test(rawDescription);
+    const whereXCountersMatch = whereXCountersPattern.test(rawDescription);
+    // Stripped before parseCreatureTokenDescription ever sees it below — otherwise "where X is the
+    // number of creatures attacking you" would be misread as part of the token's own granted-ability
+    // text (it's the trailing half of the same "with reach, where X is..." clause).
+    const description = (whereXAttackersMatch ? rawDescription.replace(whereXAttackersPattern, "") : whereXCountersMatch ? rawDescription.replace(whereXCountersPattern, "") : rawDescription).trim();
+    const matchEnd = (match.index ?? 0) + match[0].length;
+    const forEachControlledMatch = normalized.slice(matchEnd, matchEnd + 60).match(forEachControlledPattern);
+    // "For each 1 damage prevented this way, create a ... token" (Inkshield, ...) — a dynamic count
+    // based on something this engine doesn't track (only the counters-on-source basis above, and
+    // the controlled-permanent-count basis just below, are modeled). The word captured right before
+    // "creature token(s)" in that shape is just the article from "create a ... token," not the real
+    // count, so using it as a literal "1" silently created exactly one token regardless of how much
+    // damage was actually prevented — and since there's no damage-prevention-shield mechanic in
+    // this engine at all yet, no damage was ever prevented either. Declining the token creation here
+    // (rather than confidently guessing "1") at least avoids a misleadingly-partial resolution; the
+    // missing prevention effect itself is a real, separate gap, not something this narrow parser can fix.
+    const precedingText = normalized.slice(Math.max(0, (match.index ?? 0) - 80), match.index ?? 0);
+    const hasUnmodeledDynamicCount =
+      /\bfor each\b/i.test(precedingText) && !dynamicCounterCountPattern.test(precedingText) && !dynamicCounterCountPattern.test(description);
+    if (hasUnmodeledDynamicCount) continue;
+    const forEachGraveyardMatch = normalized.slice(matchEnd, matchEnd + 60).match(forEachGraveyardCardPattern);
+    let count: number;
+    if (forEachGraveyardMatch) {
+      if (!controllerSeat) continue;
+      const wantedType = forEachGraveyardMatch[1].toLowerCase();
+      count = (controllerSeat.board.graveyard ?? []).filter((card) => card.typeLine.toLowerCase().includes(wantedType)).length;
+    } else if (forEachControlledMatch) {
+      // Declined (not created at all) without a controllerSeat to actually count against, rather
+      // than falling back to the meaningless "a" = 1 default — a caller that cares whether this
+      // clause is "handled at all" (skipping a redundant rules-advisor consult) still needs to pass
+      // a seat for that check to mean anything for this shape.
+      if (!controllerSeat) continue;
+      count = controllerSeat.board.battlefield.filter((card) => card.typeLine.toLowerCase().includes(forEachControlledMatch[1].toLowerCase())).length;
+    } else if (match[1].toLowerCase() === "twice x") {
+      // Same "decline what we can't count, don't guess" convention as forEachControlledMatch just
+      // above — without a real chosenX for this cast, defaulting to some fixed number would be a
+      // guess, not a resolution.
+      if (chosenX === undefined) continue;
+      count = chosenX * 2;
+    } else if (whereXCountersMatch) {
+      // Same "decline rather than guess" convention: without the dead creature's real counter total there is no honest count.
+      if (dynamicCounterCount === undefined) continue;
+      count = dynamicCounterCount;
+    } else if (whereXAttackersMatch) {
+      // Arachnogenesis: "where X is the number of creatures attacking you" — same "decline rather
+      // than guess" convention as the other dynamic bases here, without a real attackersTargetingCount.
+      if (attackersTargetingCount === undefined) continue;
+      count = attackersTargetingCount;
+    } else {
+      count = dynamicCounterCount !== undefined && dynamicCounterCountPattern.test(description) ? dynamicCounterCount : (numberWordToInt(match[1]) ?? 1);
+    }
+    const spec = parseCreatureTokenDescription(description);
+    const entersTapped = /^create\s+(?:twice x|\S+)\s+tapped\b/i.test(match[0]);
+    if (spec) specs.push({ ...spec, count, ...(entersTapped ? { tapped: true } : {}) });
+  }
+
+  return specs;
+}
+
+export function predefinedTokenSpec(name: "Treasure" | "Food" | "Clue" | "Blood" | "Powerstone"): TokenSpec {
+  if (name === "Treasure") {
+    return {
+      count: 1,
+      name: "Treasure",
+      colors: [],
+      typeLine: "Token Artifact - Treasure",
+      oracleText: "{T}, Sacrifice this artifact: Add one mana of any color.",
+      role: "token"
+    };
+  }
+  if (name === "Food") {
+    return {
+      count: 1,
+      name: "Food",
+      colors: [],
+      typeLine: "Token Artifact - Food",
+      oracleText: "{2}, {T}, Sacrifice this artifact: You gain 3 life.",
+      role: "token"
+    };
+  }
+  if (name === "Clue") {
+    return {
+      count: 1,
+      name: "Clue",
+      colors: [],
+      typeLine: "Token Artifact - Clue",
+      oracleText: "{2}, Sacrifice this artifact: Draw a card.",
+      role: "token"
+    };
+  }
+  if (name === "Blood") {
+    return {
+      count: 1,
+      name: "Blood",
+      colors: [],
+      typeLine: "Token Artifact - Blood",
+      oracleText: "{1}, {T}, Discard a card, Sacrifice this artifact: Draw a card.",
+      role: "token"
+    };
+  }
+  return {
+    count: 1,
+    name: "Powerstone",
+    colors: [],
+    typeLine: "Token Artifact - Powerstone",
+    oracleText: "{T}: Add {C}. This mana can't be spent to cast a nonartifact spell.",
+    role: "token"
+  };
+}
+
+export function parseCreatureTokenDescription(description: string): TokenSpec | undefined {
+  const pt = description.match(/\b(\d+)\/(\d+)\b/);
+  const colors = tokenColors(description);
+  const abilities = description.match(/\bwith\s+(.+)$/i)?.[1]?.trim();
+  const beforeCreature = description
+    .replace(/\b\d+\/\d+\b/i, "")
+    .replace(/\b(white|blue|black|red|green|colorless|multicolored)\b/gi, "")
+    .replace(/\bwith\s+.+$/i, "")
+    .replace(/\bcreature tokens?\b/i, "")
+    .replace(/\band\b/gi, " ")
+    .trim();
+  // "1/1 colorless Servo artifact creature token": "artifact"/"enchantment" are card TYPES, not subtypes. They used to stay glued to the
+  // subtype ("Token Creature - Servo artifact"), so every Servo/Thopter/Myr/Golem token failed the case-sensitive "Artifact" type checks
+  // (affinity, Chief of the Foundry, Darksteel Juggernaut, Padeem, Skullclamp...).
+  const extraTypes = ["artifact", "enchantment"].filter((type) => new RegExp(`\\b${type}\\b`, "i").test(beforeCreature));
+  const subtypeWords = beforeCreature.replace(/\b(artifact|enchantment)\b/gi, " ").replace(/\s+/g, " ").trim();
+  const subtypes = subtypeWords || (extraTypes.length > 0 ? "" : "Creature");
+  const cardTypes = [...extraTypes.map(capitalizeWord), "Creature"].join(" ");
+  return {
+    count: 1,
+    name: `${subtypes || "Creature"} Token`,
+    colors,
+    typeLine: `Token ${cardTypes}${subtypes ? ` - ${subtypes}` : ""}`,
+    power: pt?.[1] ?? "1",
+    toughness: pt?.[2] ?? "1",
+    oracleText: abilities ? sentenceCaseAbilities(abilities) : "",
+    role: "creature"
+  };
+}
+
+export function tokenColors(description: string) {
+  const colors: string[] = [];
+  const colorMap: Record<string, string> = { white: "W", blue: "U", black: "B", red: "R", green: "G" };
+  for (const [word, symbol] of Object.entries(colorMap)) {
+    if (new RegExp(`\\b${word}\\b`, "i").test(description)) colors.push(symbol);
+  }
+  return colors;
+}
+
+export function sentenceCaseAbilities(abilities: string) {
+  return abilities
+    .split(/\s+and\s+/i)
+    .map((ability) => ability.trim())
+    .filter(Boolean)
+    .map((ability) => ability.charAt(0).toUpperCase() + ability.slice(1))
+    .join(", ");
+}

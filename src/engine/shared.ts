@@ -61,3 +61,7 @@ export function isBasicLandCard(card: VisibleCard) {
 export function basicLandTypes(card: VisibleCard) {
   return ["Plains", "Island", "Swamp", "Mountain", "Forest", "Wastes"].filter((type) => card.name === type || card.typeLine.includes(type));
 }
+
+export function capitalizeWord(word: string) {
+  return word.charAt(0).toUpperCase() + word.slice(1);
+}
