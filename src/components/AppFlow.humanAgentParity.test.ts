@@ -149,7 +149,8 @@ function bearOf(id: string) {
 }
 
 // --- static guard: every human choice kind has an agent answer or is declared human-only ---
-const source = readFileSync("src/components/AppFlow.tsx", "utf8");
+// The resolution code moved out of AppFlow.tsx into src/engine/*.ts, so scan AppFlow plus every engine file as one source.
+const source = [readFileSync("src/components/AppFlow.tsx", "utf8"), ...readdirSync("src/engine").filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts")).map((f) => readFileSync(`src/engine/${f}`, "utf8"))].join("\n");
 function between(start: RegExp, end: RegExp, from = 0): string {
   const s = source.slice(from);
   const a = s.search(start);

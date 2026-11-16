@@ -744,3 +744,27 @@ in the new module, `export { fn } from "@/engine/..."` (or import and re-export)
   /`moveCardAcrossSeats` as one module, or inject a token-creation callback into `destroyCreatures`.
   `createTokensForSeat`/`createCopyTokenForSeat`/`resolveCopyOneOfCandidates` therefore could NOT yet move to tokens.ts
   (`createTokensForSeat` needs SBA + triggers; `createCopyTokenForSeat` needs `applyEntryEffects`; the last needs `createCopyTokenForSeat`).
+
+* **Resolution cluster - DONE (the "hard cut")**. Measured by computing strongly connected components over AppFlow's 611 top-level
+  declarations: two real cycles exist, (a) the entry cycle `applyEntersWithCounterReplacements -> applyDevour -> finishDevour -> destroyCreatures
+  -> createTokensForSeat -> checkStateBasedActions/runStateBasedActionsPass -> moveCardAcrossSeats(+Core) -> applyEntryEffects -> ...` (11 functions)
+  and (b) the effect/trigger cycle `resolveTriggerEffect(+Once) <-> applyPrimitiveAction / applySpellExtraEffect / applyRemovalEffect /
+  resolveDeferredChoice / applyDeterministicPhaseTrigger / dealDamageToCreature ...` (13 functions). The full downward closure of both (202
+  declarations, ~9,500 lines) moved verbatim, split by theme:
+  * `engine/types.ts` - `PendingAction`, `PendingRuleChoice`, `TriggerEffect`, `TriggerCondition`, `PendingTargetedEffect`, `CastChoices`, `LabeledSlot`,
+    `LabeledContinuation`, `TurnPhase` (type-only, no runtime).
+  * `engine/entry.ts` - `applyEntryEffects`, `moveCardAcrossSeats(+Core)`, `moveLibraryCardToDestination`, `returnLinkedExiles`, `applyGraveyardReturn(+Picked)`,
+    `destroyCreatures`, devour / `applyEntersWithCounterReplacements`.
+  * `engine/stateBased.ts` - `checkStateBasedActions`, `runStateBasedActionsPass`, `winTheGame`, Starfield of Nyx helpers.
+  * `engine/damage.ts` - combat/noncombat damage, prevention shields, dealt-damage triggers, keyword predicates (`hasFlying` ...), protection.
+  * `engine/tokens.ts` (extended) - `createTokensForSeat`, `createCopyTokenForSeat`, `resolveCopyOneOfCandidates`.
+  * `engine/triggers.ts` - `findCommonTriggersFor*`, `makeCommonTrigger`, `commonTriggerEffect`, `resolveTriggerEffect(+Once)`, phase/delayed triggers, venture/initiative, Braids/Meren.
+  * `engine/effects.ts` - spell/removal/zone/primitive/generic-modal effect appliers, target choosers, draw/library-look workflows, deferred choices.
+  AppFlow.tsx imports what its component still uses and re-exports every previously exported moved symbol.
+  **Cycle handling:** these modules import each other circularly (entry <-> stateBased <-> triggers <-> effects <-> damage <-> tokens). This is safe because
+  every cross-module reference is a function declaration (hoisted, used only at call time); the only top-level values in these files are literal
+  constants (`CEREMONIES_TOKEN_TEXT`, `PROTECTION_COLOR_CODE`, `ETB_WATCH_TYPE_WORDS`, `MAX_TRIGGER_RESOLUTIONS_PER_TURN`, `IMPRISONED_RE`,
+  `BRAIDS_TYPE_FILTER`) that read no imports. Each module was verified to import cleanly as the first entry point. **Rule for future edits: never add a top-level
+  statement in these files that calls an imported function or reads an imported value.** No callbacks were injected.
+  **Left in AppFlow.tsx:** the `AppFlow()` component (React state/hooks) and everything only it uses (UI handlers, save/load, mulligan, stack UI, agent
+  orchestration) - none of it is in either cycle. `AppFlow.humanAgentParity.test.ts` scans source text, so it now reads AppFlow.tsx plus `src/engine/*.ts`.

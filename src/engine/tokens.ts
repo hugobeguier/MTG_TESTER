@@ -1,14 +1,19 @@
 // Token parsing and pure token builders, extracted verbatim from components/AppFlow.tsx (see docs/ARCHITECTURE.md section 5).
 // Owns: the TokenSpec type, turning oracle text into TokenSpec[] (parseCreateTokenSpecs, predefinedTokenSpec,
 // parseCreatureTokenDescription), building a token card from a spec (createTokenCard), and agent copy-target scoring.
-// NOT here: createTokensForSeat / createCopyTokenForSeat / resolveCopyOneOfCandidates (they call applyEntryEffects,
-// checkStateBasedActions, findCommonTriggersForPermanentEntered, rulesEvent, queuePlayerChoice, which still live in AppFlow.tsx).
+// Also here (moved later): createTokensForSeat / createCopyTokenForSeat / resolveCopyOneOfCandidates. Those call applyEntryEffects,
+// checkStateBasedActions and findCommonTriggersForPermanentEntered, so this file is part of a deliberate import cycle with entry.ts /
+// stateBased.ts / triggers.ts (function declarations used at call time only, so init order is safe).
 // AppFlow.tsx re-exports the previously public symbols so existing importers keep working.
 
-import type { PlayerSeat, VisibleCard } from "@/lib/types";
+import type { GameSession, PlayerSeat, VisibleCard } from "@/lib/types";
 import { effectivePower, effectiveToughness } from "@/lib/counters";
 import { etbEffectText } from "@/lib/oracleClauses";
 import { capitalizeWord, numberWordToInt } from "@/engine/shared";
+import { applyEntryEffects } from "@/engine/entry";
+import { checkStateBasedActions } from "@/engine/stateBased";
+import { findCommonTriggersForPermanentEntered } from "@/engine/triggers";
+import { findPermanentById, queuePlayerChoice, rulesEvent } from "@/engine/zones";
 
 export interface TokenSpec {
   count: number;
@@ -273,4 +278,118 @@ export function sentenceCaseAbilities(abilities: string) {
     .filter(Boolean)
     .map((ability) => ability.charAt(0).toUpperCase() + ability.slice(1))
     .join(", ");
+}
+
+// ---- Session-level token creation (moved from AppFlow.tsx; part of the resolution import cycle, see entry.ts)
+// queueEntries (default on): the new tokens also go into pendingEntries so their "enters" triggers (and other permanents' "whenever a Zombie enters") fire
+// through the usual queue. The spell-resolution caller turns it off because it captures the returned triggers itself.
+export function createTokensForSeat(session: GameSession, seatId: string, sourceCardId: string, rawSpecs: TokenSpec[], options: { queueEntries?: boolean } = {}) {
+  // Draconic Visitor: "If one or more artifact tokens would be created under your control, that many 5/5 red Dragon creature tokens with flying are
+  // created instead." (Treasures, Clues, Thopters, ... all become Dragons.)
+  const replacesArtifactTokens = session.seats
+    .find((seat) => seat.id === seatId)
+    ?.board.battlefield.some((card) => !card.abilitiesStripped && /if one or more artifact tokens would be created under your control, that many 5\/5 red dragon creature tokens with flying are created instead/i.test(card.oracleText));
+  const dragonSpec = replacesArtifactTokens ? parseCreateTokenSpecs("create a 5/5 red Dragon creature token with flying")[0] : undefined;
+  const specs = dragonSpec ? rawSpecs.map((spec) => (spec.typeLine.includes("Artifact") ? { ...dragonSpec, count: spec.count } : spec)) : rawSpecs;
+  const createdTokens = specs.flatMap((spec) =>
+    Array.from({ length: spec.count }, () => createTokenCard(seatId, sourceCardId, spec))
+  );
+  const nextSession: GameSession = {
+    ...session,
+    pendingEntries: options.queueEntries === false || createdTokens.length === 0 ? session.pendingEntries : [...(session.pendingEntries ?? []), ...createdTokens.map((token) => ({ seatId, card: token }))],
+    seats: session.seats.map((seat) =>
+      seat.id === seatId
+        ? {
+            ...seat,
+            createdTokenThisTurn: createdTokens.length > 0 ? true : seat.createdTokenThisTurn,
+            board: {
+              ...seat.board,
+              battlefield: [...seat.board.battlefield, ...createdTokens]
+            },
+            zones: {
+              ...seat.zones,
+              battlefield: seat.zones.battlefield + createdTokens.length
+            }
+          }
+        : seat
+    )
+  };
+  // Run state-based actions before checking ETB-trigger applicability for the same reason as the
+  // spell-resolution pipeline: a created token that only becomes (e.g.) an enchantment via a
+  // separate static ability needs grantedTypes computed before "an enchantment enters" watchers
+  // (including the token's own) can recognize it.
+  // Dragonstorm Globe / Giada: "enters with an additional +1/+1 counter" applies to tokens too (e.g. Dragon tokens).
+  const withReplacementCounters = createdTokens.reduce((acc, token) => applyEntryEffects(acc, seatId, token.id), nextSession);
+  const sbaCheckedSession = checkStateBasedActions(withReplacementCounters);
+  const triggers = createdTokens.flatMap((token) => findCommonTriggersForPermanentEntered(sbaCheckedSession, seatId, token));
+  return { session: sbaCheckedSession, createdTokens, triggers };
+}
+
+// A token copy takes the source's copiable values (name, type line, oracle text, mana cost/value,
+// colors, power/toughness) — not its current counters, attachments, or any other continuous-effect
+// state (rule 707.2), so a fresh minimal object is correct here rather than spreading `source`.
+// Types granted by a separate static ability (e.g. Secret Arcade) aren't copied either; they'll
+// apply fresh to the token on its own if it also matches that effect's scope, via the same
+// grantedTypes recompute every other permanent goes through.
+export function createCopyTokenForSeat(session: GameSession, seatId: string, source: VisibleCard, options: { notLegendary?: boolean; asArtifact?: boolean } = {}): { session: GameSession; token: VisibleCard } {
+  const token: VisibleCard = {
+    id: `${seatId}-token-${crypto.randomUUID()}`,
+    name: source.name,
+    typeLine: (() => {
+      const base = options.notLegendary ? source.typeLine.replace(/\bLegendary\s+/, "") : source.typeLine;
+      return options.asArtifact && !base.includes("Artifact") ? "Artifact " + base : base;
+    })(),
+    oracleText: source.oracleText,
+    manaCost: source.manaCost,
+    manaValue: source.manaValue,
+    colors: source.colors,
+    colorIdentity: source.colorIdentity,
+    // A copy keeps every copiable value the mana code reads: producedMana is what offers EVERY color of a Talisman/Bridge token (it used to lose R).
+    producedMana: source.producedMana,
+    imageUris: source.imageUris,
+    faces: source.faces,
+    unlockedFaceIndices: source.unlockedFaceIndices,
+    role: source.role,
+    zone: "battlefield",
+    token: true,
+    tokenSourceCardId: source.id,
+    ownerSeatId: seatId,
+    power: source.power,
+    toughness: source.toughness,
+    summoningSick: source.typeLine.includes("Creature")
+  };
+  const nextSession: GameSession = {
+    ...session,
+    seats: session.seats.map((seat) =>
+      seat.id === seatId
+        ? { ...seat, createdTokenThisTurn: true, board: { ...seat.board, battlefield: [...seat.board.battlefield, token] }, zones: { ...seat.zones, battlefield: seat.zones.battlefield + 1 } }
+        : seat
+    ),
+    // A token copy entering is an entry like any other: its own "enters" triggers (and other permanents' watchers) fire.
+    pendingEntries: [...(session.pendingEntries ?? []), { seatId, card: token }]
+  };
+  return { session: applyEntryEffects(nextSession, seatId, token.id), token };
+}
+
+// "Create a token that's a copy of one of them." (Twilight Diviner): one candidate copies straight away; with several a human is asked
+// (resolver "copy_token_choice") and an agent takes agentBestCopyCandidate. Candidates that have left the battlefield since the trigger was queued drop out.
+export function resolveCopyOneOfCandidates(session: GameSession, controllerSeatId: string, sourceCardId: string, sourceName: string, candidateIds: string[]): GameSession {
+  const controller = session.seats.find((seat) => seat.id === controllerSeatId);
+  if (!controller) return session;
+  const candidates = candidateIds.map((id) => findPermanentById(session, id)).filter((card): card is VisibleCard => card !== undefined);
+  if (candidates.length === 0) return rulesEvent(session, controllerSeatId, `${sourceName} triggers, but none of the creatures it could copy are still on the battlefield.`);
+  if (candidates.length > 1 && controller.kind === "human") {
+    return queuePlayerChoice(session, {
+      seatId: controllerSeatId,
+      sourceCardId,
+      sourceCardName: sourceName,
+      prompt: `${sourceName}: create a token that's a copy of which creature?`,
+      options: candidates.map((card) => ({ label: `${card.name} (${effectivePower(card)}/${effectiveToughness(card)})`, value: card.id })),
+      resolver: "copy_token_choice",
+      data: {}
+    });
+  }
+  const chosen = candidates.length === 1 ? candidates[0] : agentBestCopyCandidate(candidates);
+  const { session: copied } = createCopyTokenForSeat(session, controllerSeatId, chosen);
+  return rulesEvent(copied, controllerSeatId, `${sourceName} trigger resolves. ${controller.name} creates a token that's a copy of ${chosen.name}.`);
 }
