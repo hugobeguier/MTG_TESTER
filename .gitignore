@@ -20,3 +20,4 @@ bench/mistakes/
 advisor-log.jsonl
 *.tsbuildinfo
 *.stackdump
+.next-mp-test

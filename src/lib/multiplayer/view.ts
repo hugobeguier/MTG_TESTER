@@ -27,6 +27,9 @@ export interface ViewOptions {
   revealedCardIds?: ReadonlySet<string>;
 }
 
+/** Viewer id for a spectator: owns no seat, so every hand, library and prompt is hidden. */
+export const SPECTATOR_VIEWER = "spectator";
+
 const DEFAULT_MAX_EVENTS = 100;
 const REDACTED_NAME = "a card";
 
@@ -125,7 +128,7 @@ function redactEvents(events: GameEvent[], hiddenNames: Set<string>): GameEvent[
 
 /** The session as `viewerSeatId` may see it. Throws if that seat does not exist. Same input + options -> same output. */
 export function filterForSeat(session: GameSession, viewerSeatId: string, options: ViewOptions = {}): GameSession {
-  if (!session.seats.some((seat) => seat.id === viewerSeatId)) throw new Error(`filterForSeat: unknown seat ${viewerSeatId}`);
+  if (viewerSeatId !== SPECTATOR_VIEWER && !session.seats.some((seat) => seat.id === viewerSeatId)) throw new Error(`filterForSeat: unknown seat ${viewerSeatId}`);
   const revealed = options.revealedCardIds ?? new Set<string>();
   const maxEvents = Math.max(0, options.maxEvents ?? DEFAULT_MAX_EVENTS);
   const hiddenNames = hiddenNamesFor(session, viewerSeatId, revealed);
@@ -149,8 +152,10 @@ export function filterForSeat(session: GameSession, viewerSeatId: string, option
  * src/components/game/* (priority, prompts, decisions). The guest UI must be a read-only renderer fed by this view, not run those hooks.
  */
 export function relabelForGuest(session: GameSession, viewerSeatId: string): GameSession {
-  if (!session.seats.some((seat) => seat.id === viewerSeatId)) throw new Error(`relabelForGuest: unknown seat ${viewerSeatId}`);
-  return { ...session, seats: session.seats.map((seat) => ({ ...seat, kind: seat.id === viewerSeatId ? "human" : "agent" })) };
+  // Spectator: the table needs exactly one "human" (its camera/hand panel), so the first human seat (the host) plays that role, shown with a hidden hand.
+  const meId = viewerSeatId === SPECTATOR_VIEWER ? (session.seats.find((seat) => seat.kind === "human") ?? session.seats[0])?.id : viewerSeatId;
+  if (!session.seats.some((seat) => seat.id === meId)) throw new Error(`relabelForGuest: unknown seat ${viewerSeatId}`);
+  return { ...session, seats: session.seats.map((seat) => ({ ...seat, kind: seat.id === meId ? "human" : "agent" })) };
 }
 
 /** filterForSeat + relabelForGuest. Named to avoid clashing with decisions.ts `viewForSeat` (which redacts PendingDecision payloads, not sessions). */

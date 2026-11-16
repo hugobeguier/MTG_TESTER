@@ -40,6 +40,7 @@ import { useGameActions } from "./game/useGameActions";
 import { useRulesAdvisor } from "./game/useRulesAdvisor";
 import { useSpecialEffects } from "./game/useSpecialEffects";
 import { useGameEffects } from "./game/useGameEffects";
+import { useMpHost } from "./game/useMpHost";
 import { findSpellSourceCard, pendingActionRequiredPasses, resolutionPromptNote, withPendingActionSourceCard } from "@/engine/priority";
 import { spellIsImmuneToCounters } from "@/engine/legalActions";
 import { canCastAtInstantSpeed, handCardFaceOptions, roomDoorFaces, seatHasFlashGrant } from "@/engine/casting";
@@ -72,7 +73,7 @@ interface OllamaStatus {
 }
 
 // AppFlow() is glue + JSX. State: game/context.ts (useGameState). Handlers/effects: game/use*.ts hooks sharing one GameContext - see src/components/README.md.
-export function AppFlow({ initialSession, ollama }: { initialSession: GameSession; ollama: OllamaStatus }) {
+export function AppFlow({ initialSession, ollama, multiplayerHost = false }: { initialSession: GameSession; ollama: OllamaStatus; multiplayerHost?: boolean }) {
   const state = useGameState(initialSession);
   const { mode, setMode, session, activeSeatId, prioritySeatId, tableSession, selectedHandCardId, setSelectedHandCardId, inspectedCard, setInspectedCard, gameStage, gameOverDismissed, setGameOverDismissed, setupMessage, configs, deckLibrary, savedGames, gameStarting, humanSeat, selectedHandCard } = state;
   const { agentThinking, agentReasoning } = state.agent;
@@ -86,6 +87,7 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   const { acceptCommanderZoneChoice, acceptMiracleOffer, acceptOptionalTrigger, activateEquip, activateGenericManaAbility, activateGenericSacrificeAbility, activateGenericTapAbility, activateGraveyardAbility, activateLoyaltyAbility, activateManlandAnimation, activateSelfUntapAbility, advanceTurn, buildDeck, cancelRuleChoice, castCommander, castFromExile, castFromGraveyard, changeCounter, changeLife, chooseAuraRetarget, chooseBattlefieldCreatureTarget, chooseColorChoice, chooseCreatureToSacrificeForCast, chooseCreatureTypeChoice, chooseEachPlayerSacrificeTarget, chooseEffectTarget, chooseGraveyardReanimationTarget, chooseModalOption, chooseMyriadLandscapeSearch, chooseMyriadLandscapeTapMana, chooseNextUpkeepTrigger, chooseProliferateTargets, chooseRuleLibraryCard, chooseSacrificeCostTarget, closeLibraryLook, completeBasicLandFetch, completeChoosePermanentToBlink, completeConniveDiscard, completeDiscardChoice, completeMyriadLandscape, completePutCardsOnLibrary, completeReturnLandToHand, confirmAttackTriggerManaColors, confirmEquipTarget, confirmHumanBlockers, currentCleanSaveStopStatus, cycleCard, declareHumanAttack, declineCommanderZoneChoice, declineEffectTarget, declineMiracleOffer, declineOptionalTrigger, deleteSavedGameEntry, drawCard, endTurn, finishRuleLibrarySearch, handleInspectCard, hasPlayedLandThisTurn, keepLibraryLookCardOnTop, keepLimDulVaultCards, keepOpeningHand, loadSavedGame, moveBattlefieldCard, moveCardToExile, moveCardToGraveyard, moveCardToHand, mulliganOpeningHand, openResponseWindow, orderLibraryLookCardOnTop, passHumanBlocks, passPriority, payCumulativeUpkeep, playCard, poolForSeat, putLibraryLookCardInGraveyard, putLibraryLookCardOnBottom, repeatLimDulVault, resolveBasicLandFetch, resolveMyriadLandscape, resolvePendingActionNow, resolvePendingTrigger, resolveSacrificeAbilityEffect, resolveTapAbilityEffect, respondWithSelectedCard, sacrificeRuleChoiceSource, saveGameNow, searchLibraryCardToHand, sendLibraryLookCardToHand, shuffleLibrary, startGame, tapForMana, tapPermanentForMana, toggleHumanBlocker, toggleMulliganReturnCard, toggleTapCard, unlockRoomDoor, updateConfig } = late;
   // All useEffect blocks (original relative order), after every handler hook.
   useGameEffects(ctx);
+  useMpHost(ctx, { enabled: multiplayerHost }); // read-only publisher for /mp/host; no-op otherwise
 
   // A priority window is offered whenever untapped lands could cover the cost, not only once mana
   // is already floating (see canReceivePriorityForPendingAction) — this must accept the same

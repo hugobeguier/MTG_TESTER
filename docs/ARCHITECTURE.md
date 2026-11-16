@@ -614,3 +614,17 @@ the relay forwards to the host. See `src/lib/multiplayer/README.md` for the shor
   (`crypto.randomBytes`), stored hashed; host token vs per-seat guest token.
 * API lockdown: `middleware.ts` + `apiGuard.ts` return 403 for every `/api/*` except `/api/mp/*` when the Host
   header is not loopback. Host-header based, so spoofable: a friends-only measure. `MP_ALLOW_REMOTE_API=1` disables it.
+* **Host page `/mp/host`** (`app/mp/host/page.tsx`): the normal game, `<AppFlow multiplayerHost />`, plus `MpHostPanel` (room code, join URL, guests,
+  status). `AppFlow` only gained the flag and one line, `useMpHost(ctx, {enabled})` (`components/game/useMpHost.ts`): it creates the room, keeps the
+  host SSE stream open, and publishes a snapshot (debounced 150 ms, `rev` strictly increasing, unchanged content skipped via `PublishGate`) to
+  all guest slots on every change, and immediately when a guest joins. It only reads the game context. State machines are pure
+  (`connectionState.ts`), the panel is fed through `hostStatusStore.ts`.
+* **Snapshot** (`snapshot.ts`, `MpSnapshot` v1): `{v, rev, viewer:"spectator", hostName, hostSeatId, session, activeSeatId, prioritySeatId,
+  priorityPasses, requiredPasses, pendingAction, stackActions, gameStage, mulligans, hostManaPool}`. `session` is `buildGuestSession(..., SPECTATOR_VIEWER)`:
+  events trimmed to the newest 100, activePlayerId aligned with the stack store, exactly one `human` seat (the host's, drawn with a hidden hand).
+* **Spectator privacy rule**: a spectator sees NO private data - every hand is same-length stubs, no library contents, no decklists, no pending
+  prompts/decisions of any seat, none of the host's UI state. Residual leaks are the ones listed in `view.ts` (free-text event log) plus free text
+  inside stack items.
+* **Guest page `/mp/join`** (`app/mp/join/page.tsx`): code (from `?code=`) + name -> `POST /rooms/CODE/join` -> seat token kept in `sessionStorage` ->
+  `useMpGuest` (`components/hooks/useMpGuest.ts`: SSE with backoff reconnect; the relay replays the last snapshot) -> `RemoteTable` renders
+  `ThreeGameTable` from the snapshot, read-only. `lib/multiplayer/intentProxy.ts` is the seam M4 wires to `POST /api/mp/intent`.
