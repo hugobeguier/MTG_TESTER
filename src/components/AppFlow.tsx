@@ -36,6 +36,7 @@ import { revealLandControlExempt, revealLandTypes, revealableLandCards } from "@
 import { findSpellSourceCard, isStackAction, nextPrioritySeatId as nextPrioritySeatIdPolicy, pendingActionRequiredPasses as requiredPassesPolicy } from "@/engine/priority";
 export { pendingActionWillPromptSeat, resolutionPromptNote } from "@/engine/priority";
 import { pendingActionWillPromptSeat, resolutionPromptNote } from "@/engine/priority";
+import type { StackState } from "@/engine/stack";
 import { graveyardCastPermission } from "@/lib/graveyardCasting";
 import { libraryTopCastPermission } from "@/lib/libraryCasting";
 import { bushidoAmount, canBlockAdditionalCreature, canBlockOnlyFliers, cantUntap, landwalkEvades, mustAttackEachCombat } from "@/lib/combatRestrictions";
@@ -545,6 +546,15 @@ export function AppFlow({ initialSession, ollama }: { initialSession: GameSessio
   const latestActiveSeatIdRef = useRef(activeSeatId);
   latestActiveSeatIdRef.current = activeSeatId;
   const [priorityPasses, setPriorityPasses] = useState<string[]>([]);
+  // New plain-data home for stack/priority state (src/engine/stack.ts). Not yet the source of truth: the useState values above still drive everything.
+  const [stackState, setStackState] = useState<StackState>(() => ({ activeSeatId, prioritySeatId, pending: undefined, stack: [], passes: [] }));
+  const stackRef = useRef(stackState);
+  const applyStack = (fn: (s: StackState) => StackState) => {
+    stackRef.current = fn(stackRef.current);
+    setStackState(stackRef.current);
+  };
+  void stackState;
+  void applyStack;
   // The human's priority-stop preferences (src/lib/priorityStops.ts) — starts at the hardcoded
   // defaults (matches server-rendered markup) and is swapped for whatever persisted on a prior visit
   // once the mount effect below runs, same SSR-safety shape as loadRuleWorkflowCacheOnce.
