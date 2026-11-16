@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { PlayerSeat } from "@/lib/types";
 import type { PendingAction } from "@/engine/types";
-import { nextPrioritySeatId } from "@/engine/priority";
+import { nextPrioritySeatIdWithPredicate as nextPrioritySeatId } from "@/engine/priority";
 import {
   clearStack,
   initialStackState,

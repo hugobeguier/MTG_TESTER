@@ -87,7 +87,7 @@ Most of the engine lives, unusually, inside one 34,000-line React component file
 
 | File | Purpose |
 |---|---|
-| `AppFlow.tsx` | The engine + game controller + state. ~34k lines. Section 4. |
+| `AppFlow.tsx` | The game controller + React state (the `AppFlow()` component), ~10.8k lines. Engine code is in `src/engine/` (see `src/engine/README.md`). Section 4. |
 | `ThreeGameTable.tsx` (~5.2k) | Three.js 3D table, hand/stack HUD, all the card-picker prompts (discard, blink, scry, targets, mana choice). Receives everything as props from AppFlow. Exports `StackFeedEntry`. |
 | `GameTable.tsx`, `PlayerBoard.tsx`, `ZoneSummary.tsx`, `VisualCard.tsx` | Small, older/simple 2D pieces. |
 | `DeckEditor.tsx` | Deck library editor used by `app/decks`. |
@@ -244,234 +244,35 @@ Other fields worth knowing: `attachedToId` / `attachedToSeatId` (equipment, aura
 
 ---
 
-## 4. Map of `AppFlow.tsx`
+## 4. Map of the code (formerly "Map of AppFlow.tsx")
 
-The key structural fact: **the file is two halves.**
+`src/components/AppFlow.tsx` is now (~10.8k lines) essentially **one React function component, `AppFlow()`**, plus its imports, a few
+UI state types and the re-exports of every moved symbol. Everything inside the component is a closure over React state
+(`session`, `pendingAction`, `stackActions`, `manaPools`, ...): the human/agent *controller* (agent driver, game lifecycle, save/load, human
+casting handlers, stack UI, choice prompts, JSX). The rules engine lives in `src/engine/*.ts`; see **`src/engine/README.md`** for the one-line-per-file map
+and a "to change X open Y" cheat sheet. Locate things by function name, not line number.
 
-* Lines ~1 - 1745: imports, type definitions, constants, small module-level helpers.
-* Lines ~1745 - 12510: **one giant React function component `AppFlow`** (~10,800 lines). Everything
-  inside is a closure over React state (`session`, `pendingAction`, `stackActions`, `manaPools`, ...).
-  This is the human/agent *controller*: it cannot be unit-tested without React, and cannot be moved
-  without passing state around.
-* Lines ~12510 - 34100: **~600 module-level functions**, mostly pure `(session, ...) => session`
-  transformers and rule predicates. This is the actual rules engine and what the tests and the
-  self-play orchestrator import. This is the half that can be extracted.
+| Concern | File |
+|---|---|
+| Component state, agent driver, lifecycle, save/load, handlers, JSX | `src/components/AppFlow.tsx` (inside `AppFlow()`) |
+| Setup screen, deck config, `applyDeckToSeat` | `src/components/DeckSetup.tsx` |
+| Dialog view-models (`ruleChoiceView`, `blockChoiceView`) | `src/components/viewModels.ts` |
+| Agent timeouts, rule-workflow cache, prewarm | `src/lib/agentRuntime.ts` |
+| Mana, costs, lands, tokens | `engine/mana.ts`, `costs.ts`, `lands.ts`, `tokens.ts` |
+| Zone moves, entry, damage, state-based actions | `engine/zones.ts`, `entry.ts`, `damage.ts`, `stateBased.ts` |
+| Trigger discovery / effects | `engine/triggerFinders.ts`, `triggers.ts` |
+| Spell and one-shot effects, ETB, searches, sagas | `engine/effects.ts`, `oneShotEffects.ts`, `etb.ts` |
+| Activated abilities | `engine/abilities.ts` |
+| Casting and cast-time targeting | `engine/casting.ts`, `castTargets.ts` |
+| Combat (restrictions, damage, legal attacks/blocks) | `engine/combat.ts` |
+| Legal actions + move legality gate | `engine/legalActions.ts` |
+| Priority, stack passes, agent decision context | `engine/priority.ts` |
+| Turn structure, phase triggers, rotation | `engine/turnFlow.ts` |
+| Opening hand, mulligans | `engine/mulligan.ts` |
 
-Hint: functions defined with 2-space indentation inside the component are controller code;
-functions starting in column 0 are engine code. Section-comment banners are rare (only at ~12505
-"Hoisted from inside AppFlow", ~18798 cast-time targeting, ~29309 phase triggers on the stack), so
-use the function names below.
-
-### Region A - Header, types, constants (~1-1745)
-
-Types for everything pending (section 3), `SeatConfig`, default decklists, timing constants
-(`AGENT_REQUEST_TIMEOUT_MS`, `MAX_SESSION_EVENTS`), and the rule-advisor cache plumbing:
-`ruleWorkflowCacheKey`, `loadRuleWorkflowCacheOnce`, `cachedRuleSummariesForCard`,
-`prewarmRuleWorkflowCache`, `logAdvisorUse`, plus `stackBeatMs`, `agentPaceMs` (animation pacing),
-`warmUpAgentModel`, `loadPriorityStopSettings`.
-
-### Region B - Component state and wiring (~1745-3390)
-
-`AppFlow()` begins: ~60 `useState`/`useRef` declarations; the `setSession` wrapper (runs
-`checkStateBasedActions` on every update); mana-pool helpers (`poolForSeat`, `spendRestrictedMana`,
-`addFloatingMana`, `payCastingCost`); stack helpers (`pushStackAction`, `resumeTopStackAction`).
-Then ~40 `useEffect` blocks. Two groups:
-
-* **Drain effects** (~2250-2970): one per `session.pending*` queue (see the table in section 3),
-  e.g. the `pendingDeaths` effect, `pendingEntries`, `pendingCombatDamageToPlayer`,
-  `pendingGraveyardDepartures`, `pendingPlayerChoices`, `pendingShockChoices`. They all wait for
-  `!pendingAction` (so a trigger never overwrites an in-flight action).
-* **Autopilot effects** (~3037-3390): priority autopass for the human, and the effects that kick off
-  agent decisions when it is an agent's turn / priority.
-
-### Region C - AI agent driver (~3396-3920)
-
-`requestAgentDecision` (POST to `/api/agents/action`; skips the LLM if only one legal action),
-`decideAgentTurnAction`, `decideAgentAttackers`, `decideAgentPriorityAction`, `decideAgentBlockAction`,
-`applyAgentTurnAction`, `applyAgentPriorityAction`, `agentRespondWithCard`,
-`resolveAgentPendingTrigger`, `shouldAgentFastForwardToEndStep`. Agents never touch state directly:
-they pick a `LegalAgentAction` and these functions call the same handlers as the human UI.
-
-### Region D - Game lifecycle, save/load, mulligan, turn structure (~3921-5500)
-
-`buildDeck`, `startGame` / `startGameInner`, `buildSaveSnapshot`, `saveGameNow`, `applySnapshot`,
-`loadSavedGame`; mulligans (`keepOpeningHand`, `mulliganOpeningHand`, `resolveAgentMulligansWithLLM`);
-turn/phase advance (`advanceTurn`, `endTurn`, `resolvePhaseAdvance`, `resolveEndTurn`,
-`runPhaseActions` = what happens when a step begins: untap, upkeep triggers, draw); sagas
-(`applySagaLoreCounter`, `triggerSagaChapter`, `advanceSagaLoreCounters`); `declareAttack` (~4900,
-queues attack triggers); human block UI (`toggleHumanBlocker`, `confirmHumanBlockers`);
-`passPriority`, `openResponseWindow`, `drawCard`, `cycleCard`, `checkMiracleAfterDraw`.
-
-### Region E - Human casting and abilities (~5496-7400)
-
-`playCard` (~650 lines: play a land or start a cast - face selection, cost, alt costs, X, targets,
-payment, pushing the spell onto the stack), `commitCrime`, `unlockRoomDoor`; activated-ability
-entry points: `activateGenericSacrificeAbility`, `activateGenericTapAbility`,
-`activateSelfUntapAbility`, `activateGenericManaAbility`, `activateEquip`, `activateManlandAnimation`;
-`checkCastTriggeredKeywords` (prowess, extort), `beginPendingAction` (makes something the live stack
-action), `respondWithCard`, `castFromGraveyard`, `castFromExile`.
-
-### Region F - Trigger resolution and spell resolution (~7380-9540)
-
-`beginTriggerResolution`, `openTriggerOptionPrompt`, `triggerCardPrompt`, `completeTriggerCard`,
-`finishTriggerResolution`, `acceptOptionalTrigger` / `declineOptionalTrigger`; then
-**`resolvePendingAction` -> `resolvePendingActionNow`** (~1,100 lines): the big switch that resolves a
-spell (permanent enters, ETB triggers queued, instant/sorcery effects dispatched to the apply*
-functions, goes to graveyard/exile) or a trigger/ability.
-
-### Region G - LLM advisors and effect application (~9534-10300)
-
-`consultRulesAdvisor`, `consultPrimitiveActionPlanner`, `offerOptionalPrimitivePlan`,
-`applyRuleWorkflow` (executes the advisor's `RuleWorkflow` steps), `consultStaticEffectInterpreter`,
-`applyInterpretedEffect`, `queueCommonTriggers`; thin wrappers `changeLife`, `moveCardToGraveyard`,
-`moveCardToExile`, `moveCardToHand`, `changeCounter`; `activateLoyaltyAbility`, `grantEmblem`,
-`castCommander`.
-
-### Region H - Choice prompts, human and agent (~10300-12300)
-
-Land-search flows (`resolveMyriadLandscape`, `resolveBasicLandFetch`), library windows
-(`startLibraryLook`, `startLimDulVaultLook`, `keepLibraryLookCardOnTop`, ...), target pickers
-(`maybeRequestTarget`, `chooseEffectTarget`, `chooseGraveyardReanimationTarget`,
-`chooseSacrificeCostTarget`), cast prompts (`openCastPrompt`, `completeCastX`, `completeCastFace`,
-`completeSpellMode`, `chooseModalOption`), `chooseProliferateTargets`, `completeRuleChoice` /
-`cancelRuleChoice` (human answers), **`resolveAgentRuleChoice`** (deterministic agent answers),
-`acceptMiracleOffer`, mana tapping UI (`tapForMana`, `tapPermanentForMana`, `tapSignet`).
-
-### Region I - JSX and UI chrome (~12300-12510, ~12820-13100)
-
-The component's `return (...)` is short: it renders `<ThreeGameTable ...>` with a huge prop list, plus
-`DeckSetupPanel`, `Topbar`, `Status`. Setup helpers `createInitialConfigs`, `validateConfigsForPlay`,
-`applyDeckToSeat`, `createCommanderCard`.
-
----
-
-**Everything below here is module-level (the engine).** Line ranges are approximate.
-
-### Region J - Phase / combat primitives (~12510-12820, 13105-13430)
-
-`phaseEvent`, `untapForSeat`, `applyExalted`, `resolveCombatDamage`, `cleanupCombat`,
-`assignBlockers`; attack/block legality `canAttack`, `canBlock`, `attackerEvadesBlocker`,
-`creatureCantBlock`, `attackLockedOut`, `resolveAttackTarget`, `markAttackDecided`.
-**Keyword predicates** (~13191-13304): `hasKeyword` (the choke point honouring `abilitiesStripped`),
-`hasFlying`, `hasTrample`, `hasDeathtouch`, `hasIndestructible`, `hasHexproof`, `hasShroud`,
-`hasWard`, `hasHaste`, `playerHasHexproof`, `describeKeywords`.
-
-### Region K - Counters and enters-with-counters (~13373-13890)
-
-`applyCounterDelta`, `applyLoreCounterEtb`, `withInitialLoyaltyCounters`, `applyEntersWithCounterReplacements`
-(+`Core`), `applyEntersWithXCounters`, `applyDevour`, `applyChosenCreatureType/Color`, `resolveExplore`,
-Aura attachment (`chooseAuraAttachTarget`, `applyAuraAttachment`).
-
-### Region L - Legal-action generators (~13890-14860)
-
-`legalMainPhaseActions` (~13931, ~320 lines: land plays, castable spells, commander, loyalty, etc.),
-`legalAttackActions`, `legalPriorityActions` (instant-speed responses), `legalActivatedAbilityActions`
-(~14532, ~320 lines: every activated ability on the board), `legalRoomUnlockActions`,
-`legalBlockActions` (~23553), `fallbackLegalAction`. These produce `LegalAgentAction[]` for both the
-human UI and the AI. `hasAgentMainPhaseAction`, `isTargetedCounterspell`.
-
-### Region M - Activated ability resolution (~14856-16620)
-
-`parseLoyaltyAbilities`, `resolveEquip`, `resolveManlandAnimation`, sacrifice (`payGenericSacrificeCost`,
-`applySacrificeEffect`, `chooseSacrificeTargets`), tap (`payGenericTapCost`, `applyGenericTapEffect`),
-mana abilities as costs (`payGenericManaCost`), `parseGenericAbilityEffect` / `applyGenericAbilityEffect`,
-`transformPermanent`, phase-out, enter-as-copy (`parseEnterAsCopyEffect`, `findEnterAsCopyTarget`),
-and the `choose*` helpers an agent uses to pick targets/discards/sacrifices.
-
-### Region N - State-based actions, death, zone moves (~16617-18130)
-
-`checkStateBasedActions` / **`runStateBasedActionsPass`** (~16876, ~700 lines: lethal damage, 0
-toughness, legend rule, recomputing every `granted*` field, auras falling off, commander damage, loss
-conditions), `winTheGame`, `resetForZoneChange`, `destroyCreatures` (+`Core`),
-`findExileInsteadOfDying`, commander zone (`recordCommanderCast`, `moveCommanderToCommandZone`),
-**`moveCardAcrossSeats`** (~17869: the cross-seat zone mover: reanimate, steal, bounce), `applyEntryEffects`
-(the "non-cast enters" step), `changeControlWithinBattlefield`.
-
-### Region O - Damage (~18126-18500)
-
-`applyCombatDamageToTarget`, **`applyDamagePrevention`** (single choke point, uses `damagePrevention.ts`),
-`dealDamageToCreature`, `applyDealtDamageTriggers`, `markDamageOnCard`, `damageDoublingFactor`.
-
-### Region P - Targets and cast-time choices (~18482-19625)
-
-`chooseRemovalTarget`, `chooseTapUntapTarget`, `chooseDamageTarget` (agent target choice);
-"cast-time targeting" (~18800): `spellModePrompt`, `castStructure`, `nextCastPrompt`,
-`spellTargetSlots`, `optionsFromSpec`, `agentCastTimeRemovalChoices`, `applyCastRemoval`; plus various
-card-specific resolvers (`applyRevealTopExchange`, `applyMasterOfCeremonies`, `activateSteelHellkiteX`).
-**`resolveDeferredChoice`** (~19624) answers a `pendingPlayerChoices` entry by its `resolver` string.
-
-### Region Q - Spell effect application (~19800-22850)
-
-`applySpellExtraEffect` (~19802, ~680 lines), the `hasResolvable*Target` family (is this spell worth
-casting / castable at all), **`checkMoveLegal`** (~20713), additional costs
-(`payAdditionalDiscardCost`, `sacrificeForAdditionalCost`), ward (`payWardIfNeeded`,
-`applyBecomesTargetTriggers`), **`applyRemovalEffect`** (~21119, ~350 lines), reanimation/regrow choosers,
-`applyMill`, `applyZoneEffect` (~21696), surveil/look-dig, drain/draw/discard, pump and mass pump, mass
-bounce, `applyPrimitiveAction` / `applyPrimitiveActionPlan` (executes LLM-planned steps), generic modal
-spells (`parseGenericModalEffect`, `applyGenericModalEffect`).
-
-### Region R - Combat simulation and agent snapshots (~23253-23745)
-
-`simulateBlockedCombat`, `simulateMultiBlockedCombat`, `resolveBlockedCombatDamage`, `legalBlockActions`,
-`pendingActionSummary`, `buildAgentDecisionContext`, `agentSeatSnapshot`, `agentCardSnapshot` (the JSON
-the AI sees), `resolveHumanUnblockedDamage`.
-
-### Region S - Trigger finders and trigger effects (~23743-28100)
-
-* **Finders** (~23743-25016): scan the board and return trigger objects.
-  `findCommonTriggersForPermanentEntered`, `findEntersBatchWatcherTriggers`, `findLandRaidTriggers`,
-  `findCommonTriggersForPermanentDied`, `findSacrificeWatcherTriggers`, `findPutIntoGraveyardTriggers`,
-  `findLeavesBattlefieldTriggers`, `findLifeGainTriggers`, `findAttackTriggers`, `findMultiAttackTriggers`,
-  `findCombatDamageToPlayerTriggers`, `findCastTriggers`, `findCardsLeftGraveyardTriggers`;
-  `makeCommonTrigger` builds the trigger object; `enteredTriggerApplies` / `deathTriggerApplies` filter.
-* **`commonTriggerEffect`** (~25016, ~500 lines): oracle-clause text -> `TriggerEffect`.
-* **Tokens** (~25648-26010): see section 4.1.
-* **`resolveTriggerEffect` / `resolveTriggerEffectOnce`** (~26074 / ~26201, **~1,850 lines**): carries
-  out any `TriggerEffect`. The largest single function.
-* `ruleChoiceView`, `blockChoiceView`, `shouldConsultRulesAdvisor`, `chooseAgentLibraryCardForRuleChoice`.
-
-### Region T - Phase triggers, emblems, end-step effects (~28757-30200)
-
-Emblems (`addEmblemToSeat`, `findEmblemGraveyardReturns`), `phaseTriggeredCards`,
-`planOffTurnPhaseTriggers`, `makePhaseStackTrigger`, `scheduleDelayedPhaseTrigger`,
-**`applyDeterministicPhaseTrigger`** (~29416, ~360 lines), initiative/Undercity (`takeInitiative`,
-`ventureIntoUndercity`), `applyEndStepEffects`, echo, and some card-specific end-step handlers
-(`applyBraidsEndStep`, `applyMerenEndStepEffect`, `applyLivingDeathEffect`, `applyPunisherChoiceEffect`).
-
-### Region U - Casting rules and mana (~30206-32225)
-
-* **Casting rules**: `spellResolutionDestination`, face handling for split/MDFC/room cards
-  (`castFaceOptions`, `modalDoubleFacedLandSplit`, `handCardFaceOptions`), X handling (`maxAffordableX`,
-  `xSymbolCount`), `canCastAtInstantSpeed`, `targetingTax`, attack tax (`totalAttackTax`).
-* **Mana pool and payment** (~30747-30960): `emptyManaPool`, `addManaToPool`, `manaPoolTotal`,
-  `payCostFromPool`, **`chooseManaSourcesForCost`** (~30832, the lands/rocks-to-tap planner),
-  `manaSourceMayPayFor`, `manaRequirementForCard`.
-* **Cost computation** (~30958-31260): `adjustedCastingCost`, `totalCastingCost`, `staticCostReduction`,
-  affinity/improvise/convoke handling, miracle cost.
-* **What mana a permanent can make** (~31337-31800): `costlyTapManaColors`, `addedManaColors`,
-  `conditionallyUnavailableColors`, **`manaChoicesForCard`** (public wrapper) /
-  `manaChoicesForCardRaw`, `isBoardConditionMet`, `activateOnlyIfConditionMet`, `producibleColorsForLand`.
-* **Enters-tapped** (~31838): **`entersBattlefieldTapped`** + shockland/reveal-land helpers
-  (`shocklandPayLifeAmount`, `revealLandTypes`, `revealLandControlExempt`).
-* **Tapping for mana**: `manaProducedBy`, `signetAbility`, `spendManaSources`, `tapVisibleCard`.
-
-### Region V - Opening hand, draws, library, land drops (~32202-32650, ~33740-34100)
-
-`landDropsAllowed`, `recordLandPlay`, `resolveAgentMulligans`, `makeShuffledLibrary`, `drawForSeat`,
-`drawMultipleForSeat`, Lim-Dul's Vault, `moveLibraryCard`, `reorderTopLibraryCards`,
-`moveLibraryCardToDestination`, `createVisibleFromDeckCard`, `shuffleCards`.
-
-### Region W - `playCardFromZone` and priority plumbing (~32643-33160)
-
-`playCardFromZone` (~250 lines: the headless/agent "put this card into play or on the stack"),
-`nextSeatForTurn` (honours `extraTurnsQueue`), `nextPrioritySeatId`, `pendingActionRequiredPasses`,
-`canReceivePriorityForPendingAction`, `rollForStartingSeat`.
-
-### Region X - Visible zone mover, land fetch, sagas (~33144-33740)
-
-**`moveCardBetweenVisibleZones`** (same-seat hand/graveyard/exile mover), `resolveMyriadLandscapeSearch`,
-`resolveBasicLandFetchSearch`, basic-land helpers, headless saga functions (`sagaLoreStepHeadless`,
-`advanceSagaLoreCountersHeadless`).
+Functions defined with 2-space indentation inside `AppFlow()` are controller code (they call setState / read refs; only 3 pure ones were liftable and were
+moved: `restrictedBatchUsable`, `chooseReadAheadChapter`, `applyMetalcraftAttackDebuff`). The old "Region A..X" line-number map was removed because
+those regions now are the engine files above.
 
 ### 4.1 The areas people ask about most
 
@@ -768,3 +569,11 @@ in the new module, `export { fn } from "@/engine/..."` (or import and re-export)
   statement in these files that calls an imported function or reads an imported value.** No callbacks were injected.
   **Left in AppFlow.tsx:** the `AppFlow()` component (React state/hooks) and everything only it uses (UI handlers, save/load, mulligan, stack UI, agent
   orchestration) - none of it is in either cycle. `AppFlow.humanAgentParity.test.ts` scans source text, so it now reads AppFlow.tsx plus `src/engine/*.ts`.
+
+* **Module-level carve of AppFlow.tsx - DONE.** Everything at module level outside `AppFlow()` moved verbatim (scripted, by TypeScript AST) into
+  `engine/{turnFlow,combat,legalActions,abilities,etb,oneShotEffects,triggerFinders,castTargets,casting,priority,mulligan,flowTypes}.ts`,
+  `components/{DeckSetup.tsx,viewModels.ts}` and `lib/agentRuntime.ts`. AppFlow.tsx went from 20.8k to ~10.8k lines and now contains the component only.
+  Same cycle rule as above: the new engine files import each other circularly through hoisted function declarations only; no top-level statement
+  reads an imported binding (checked by script), and each file was verified to import cleanly as the first entry point.
+  **Next carve:** split the `AppFlow()` component itself into hooks / sub-components (`useAgentDriver`, `useSaveLoad`, stack UI, choice-prompt handlers).
+  Only 3 inner functions were free of React state; the rest need state passed in, so that is a design change, not a mechanical move.

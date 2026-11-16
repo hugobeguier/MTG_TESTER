@@ -6,7 +6,7 @@
 
 import type { PlayerSeat } from "@/lib/types";
 import type { PendingAction } from "@/engine/types";
-import { isStackAction, nextPrioritySeatId, pendingActionRequiredPasses, type CanReceivePriority } from "@/engine/priority";
+import { isStackAction, nextPrioritySeatIdWithPredicate as nextPrioritySeatId, pendingActionRequiredPassesWithPredicate as pendingActionRequiredPasses, type CanReceivePriority } from "@/engine/priority";
 
 export interface StackState {
   activeSeatId?: string;
