@@ -722,3 +722,25 @@ in the new module, `export { fn } from "@/engine/..."` (or import and re-export)
   `parseMiracleCost`, `findMiracleGranter`, `isHistoricCard`. `emblemAsShimCard`/`emblemSourceCards` moved to `shared.ts`.
   Left in AppFlow.tsx: `spellFaceCostCard`/`castFaceOptions`/`castFaceDecision` (need `canCastAtInstantSpeed`, `hasResolvableTarget`,
   `isMainPhase`), the additional-cost payers (`payAdditionalDiscardCost`, `sacrificeForAdditionalCost`, ... mutate sessions), `genericCostShim`.
+
+* **`src/engine/zones.ts` - PARTIAL (leaf half of the zone/entry layer)**, ~1,150 lines, 40 symbols moved verbatim: `findPermanentById`,
+  `findExiledCardAnySeat`, `rulesEvent`, `queuePlayerChoice`, `resetForZoneChange`, `withLeaveRecord`, `moveCardBetweenVisibleZones(+Core)`,
+  `moveCommanderToCommandZone`, `changeControlWithinBattlefield`, `destroyCreaturesCore`, `findExileInsteadOfDying`, `CrossSeatZone`,
+  `moveLibraryCard`, `moveTopLibraryCardToHand`, `reorderTopLibraryCards`, `putLookedAtCardsInGraveyard`, `applyPutCardsOnLibrary`,
+  `applyGraveyardToLibrary`, `applyGraveyardExile`, `GraveyardReturnOptions`, counter deltas (`applyCounterDelta(+AtSession)`, `applyLoreCounterEtb`,
+  `loyaltyCounterCount`, `withInitialLoyaltyCounters`), enters-with-counters helpers (`applyEntersWithCounterKind`, `applyEntersWithXCounters`,
+  `applyEntersWithCounterReplacementsCore`, `entersWithFixedCounterKind`, `entersWithCounterPerColorControlled`, `colorsAmongPermanentsControlled`),
+  enter-as-copy (`parseEnterAsCopyEffect`, `enterAsCopyCandidates`, `findEnterAsCopyTarget`, `applyEnterAsCopyOnEntry`), plus helpers
+  `isPlaneswalkerCard`, `possessive`, `shuffleCards`, `randomInt`.
+  **Remaining cycle-blockers** (left in AppFlow.tsx). The one real cycle is
+  `applyEntersWithCounterReplacements -> applyDevour -> finishDevour -> destroyCreatures -> createTokensForSeat -> {checkStateBasedActions,
+  findCommonTriggersForPermanentEntered, applyEntryEffects -> applyEntersWithCounterReplacements}`. It pins: `applyEntersWithCounterReplacements`,
+  `applyDevour`, `finishDevour`, `applyEntryEffects`, `moveCardAcrossSeats(+Core)`, `moveLibraryCardToDestination`, `returnLinkedExiles`,
+  `applyGraveyardReturn(+Picked)` (they all reach `applyEntryEffects` via `moveCardAcrossSeats`) and `destroyCreatures` itself (its Kalitas
+  exile-instead branch calls `createTokensForSeat`; `finishDevour` calls it). Breaking the cycle needs `createTokensForSeat` out of AppFlow, which
+  needs `checkStateBasedActions` + `findCommonTriggersForPermanentEntered` (the SBA/trigger cluster: `runStateBasedActionsPass`, `enteredTriggerApplies`,
+  `makeCommonTrigger`, trigger parsers), whose own closure runs through zones back to these. Cheapest next cut: move the SBA + trigger-finder
+  cluster together with `createTokensForSeat`/`createCopyTokenForSeat`/`resolveCopyOneOfCandidates`/`destroyCreatures`/devour/`applyEntryEffects`
+  /`moveCardAcrossSeats` as one module, or inject a token-creation callback into `destroyCreatures`.
+  `createTokensForSeat`/`createCopyTokenForSeat`/`resolveCopyOneOfCandidates` therefore could NOT yet move to tokens.ts
+  (`createTokensForSeat` needs SBA + triggers; `createCopyTokenForSeat` needs `applyEntryEffects`; the last needs `createCopyTokenForSeat`).
