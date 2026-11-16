@@ -19,7 +19,9 @@ import {
   forcedAttackers,
   legalMainPhaseActions,
   spellResolutionDestination,
-  hasResolvableTarget
+  hasResolvableTarget,
+  parseCreateTokenSpecs,
+  entersBattlefieldTapped
 } from "./AppFlow";
 import { parseSpellExtraEffects } from "@/lib/spellExtras";
 import { deterministicRuleWorkflow } from "@/lib/rulesAdvisor";
@@ -502,3 +504,25 @@ describe("Dina, Essence Brewer's activated ability", () => {
 
 // keep the imports used by later describe blocks
 void [applySpellExtraEffect, findCommonTriggersForPermanentEntered, parseSpellExtraEffects, etbEffectText];
+
+describe("Izoni, Thousand-Eyed: Undergrowth token count", () => {
+  it("creates one Insect per creature card in the controller's graveyard", () => {
+    const izoni = real("Izoni, Thousand-Eyed", "iz");
+    const dead = ["d1", "d2", "d3", "d4", "d5"].map((id) => bear(id, { zone: "graveyard" as const }));
+    const a = seat("a", [izoni]); a.board.graveyard = dead; const s = session([a, seat("o", [])]);
+    const specs = parseCreateTokenSpecs(etbEffectText(izoni.oracleText), undefined, mine(s));
+    expect(specs).toHaveLength(1);
+    expect(specs[0].count).toBe(5);
+  });
+});
+
+describe("Turbulent Fen: enters tapped unless your opponents control eight or more lands", () => {
+  it("counts lands across all opponents combined", () => {
+    const fen = real("Turbulent Fen", "fen");
+    const lands = (n: number, p: string) => Array.from({ length: n }, (_, i) => real("Swamp", `${p}${i}`, { typeLine: "Basic Land — Swamp", oracleText: "({T}: Add {B}.)" } as Partial<VisibleCard>));
+    const enough = session([seat("a", []), seat("o1", lands(4, "x")), seat("o2", lands(4, "y"))]);
+    const short = session([seat("a", []), seat("o1", lands(4, "x")), seat("o2", lands(3, "y"))]);
+    expect(entersBattlefieldTapped(fen, enough.seats[0], enough.seats)).toBe(false);
+    expect(entersBattlefieldTapped(fen, short.seats[0], short.seats)).toBe(true);
+  });
+});

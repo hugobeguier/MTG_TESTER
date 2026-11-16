@@ -17774,7 +17774,10 @@ function destroyCreaturesCore(
   // Gorma, the Gullet: how many creatures died under each player's control this turn.
   const diedCreatures = newDeaths.filter((death) => death.card.typeLine.includes("Creature"));
   const diedThisTurn = diedCreatures.length === 0 ? session.creaturesDiedThisTurn : { turn: session.turn, bySeat: diedCreatures.reduce<Record<string, number>>((acc, death) => ({ ...acc, [death.seatId]: (acc[death.seatId] ?? 0) + 1 }), session.creaturesDiedThisTurn?.turn === session.turn ? { ...session.creaturesDiedThisTurn.bySeat } : {}) };
-  return { ...session, seats, events: [...events, ...session.events], pendingDeaths: [...(session.pendingDeaths ?? []), ...newDeaths], ...(diedThisTurn ? { creaturesDiedThisTurn: diedThisTurn } : {}) };
+  // Every player's nontoken creatures together (Gadrak, the Crown-Scourge: "a Treasure token for each nontoken creature that died this turn").
+  const nontokenDied = diedCreatures.filter((death) => !death.card.token).length;
+  const nontokenDiedThisTurn = nontokenDied === 0 ? session.nontokenCreaturesDiedThisTurn : { turn: session.turn, count: nontokenDied + (session.nontokenCreaturesDiedThisTurn?.turn === session.turn ? session.nontokenCreaturesDiedThisTurn.count : 0) };
+  return { ...session, seats, events: [...events, ...session.events], pendingDeaths: [...(session.pendingDeaths ?? []), ...newDeaths], ...(diedThisTurn ? { creaturesDiedThisTurn: diedThisTurn } : {}), ...(nontokenDiedThisTurn ? { nontokenCreaturesDiedThisTurn: nontokenDiedThisTurn } : {}) };
 }
 
 // Rule 903.8: commander tax is +{2} for each time the commander was CAST from the command zone, whether the
@@ -17949,7 +17952,7 @@ function moveCardAcrossSeatsCore(
     ...resetForZoneChange(card, destinationZone),
     ownerSeatId,
     // Tapped lands (shock/check/"unless") enter tapped on every path, not only when the caller remembered to ask.
-    tapped: destinationZone === "battlefield" ? Boolean(options.tapped) || entersBattlefieldTapped(card, session.seats.find((seat) => seat.id === destinationSeatId)) : false,
+    tapped: destinationZone === "battlefield" ? Boolean(options.tapped) || entersBattlefieldTapped(card, session.seats.find((seat) => seat.id === destinationSeatId), session.seats) : false,
     summoningSick: destinationZone === "battlefield" ? card.typeLine.includes("Creature") : undefined,
     enteredTurn: destinationZone === "battlefield" ? session.turn : undefined,
     // Where it came from (Twilight Diviner's "entered from a graveyard"): reanimation, Meren's end step, flicker (exile) and bounce replays all pass here.
@@ -24083,7 +24086,9 @@ export function findCommonTriggersForPermanentDied(
     const fallenAttachments = (seat.board.graveyard ?? []).filter((card) => attachedSourceIds?.includes(card.id));
     const sources = [...seat.board.battlefield, ...simultaneousDeathsForSeat, ...fallenAttachments];
     for (const source of sources) {
-      const dynamicCounterCount = source.id === deadCard.id ? plusOneCounterCount(deadCard) : undefined;
+      // Felisa, Fang of Silverquill: "create X ... tokens, where X is the number of counters it had on it" counts counters of EVERY kind.
+      // The watcher (Felisa) is a different permanent from the creature that died, so this applies to any source with that wording.
+      const dynamicCounterCount = /\bnumber of counters it had on it\b/i.test(source.oracleText) ? (deadCard.counters ?? []).reduce((sum, counter) => sum + counter.count, 0) : source.id === deadCard.id ? plusOneCounterCount(deadCard) : undefined;
       const effect = modalDeathTriggerEffect(source) ?? commonTriggerEffect(selfNameAsThisCreature(source), "died", dynamicCounterCount);
       if (!effect || !deathTriggerApplies(source, seat.id, deadCard, deadSeatId, attachedSourceIds)) continue;
       const resolvedEffect: TriggerEffect = effect.kind === "gain_life_equal_power" ? { kind: "gain_life", amount: Math.max(0, effectivePower(source)) } : effect;
@@ -25715,7 +25720,10 @@ export function parseCreateTokenSpecs(
 
   for (const item of predefined) {
     const match = normalized.match(new RegExp(`creates?\\s+(a|an|one|two|three|four|five|six|seven|eight|nine|ten|\\d+)\\s+(tapped\\s+)?${item.name}\\s+tokens?`, "i"));
-    if (match && item.spec) {
+    // "...a Treasure token for each opponent who ..." / "...for each nontoken creature that died this turn": a dynamic count this
+    // function can't see (Smuggler's Share, Gadrak — the latter has its own phase-trigger handler). Declined, not silently made 1.
+    const trailing = match ? normalized.slice((match.index ?? 0) + match[0].length) : "";
+    if (match && item.spec && !/^\s*(?:for each|equal to)\b/i.test(trailing)) {
       specs.push({ ...item.spec, count: numberWordToInt(match[1]) ?? 1, ...(match[2] ? { tapped: true } : {}) });
     }
   }
@@ -25734,6 +25742,8 @@ export function parseCreateTokenSpecs(
   // "with ability" tail), so it has to be detected and stripped out of `description` itself rather
   // than checked against the text following the match.
   const whereXAttackersPattern = /,?\s*where x is the number of creatures attacking you\b\.?/i;
+  // "...with flying, where X is the number of counters it had on it." (Felisa, Fang of Silverquill) — the count the caller passes as dynamicCounterCount.
+  const whereXCountersPattern = /,?\s*where x is the number of counters it had on it\b\.?/i;
   const dynamicCounterCountPattern = /for each\s+(?:\+1\/\+1\s+)?counter\s+on\s+(?:this creature|it|this permanent|this artifact)\b/i;
   // "... creature token for each land you control." (Avenger of Zendikar, and the same "one token
   // per permanent-type-you-control" shape on similar cards) — a dynamic count that trails AFTER
@@ -25741,13 +25751,17 @@ export function parseCreateTokenSpecs(
   // below never sees it; without this, the "a" in "create A ... token" was read as the literal
   // count, always creating exactly one token regardless of how many lands were actually controlled.
   const forEachControlledPattern = /^\s*for each ([a-z]+) you control\b/i;
+  // "... Insect creature token for each creature card in your graveyard." (Izoni, Thousand-Eyed) —
+  // same trailing-count shape, counted against the controller's own graveyard by card type.
+  const forEachGraveyardCardPattern = /^\s*for each ([a-z]+) card in your graveyard\b/i;
   for (const match of normalized.matchAll(creaturePattern)) {
     const rawDescription = match[2].trim();
     const whereXAttackersMatch = whereXAttackersPattern.test(rawDescription);
+    const whereXCountersMatch = whereXCountersPattern.test(rawDescription);
     // Stripped before parseCreatureTokenDescription ever sees it below — otherwise "where X is the
     // number of creatures attacking you" would be misread as part of the token's own granted-ability
     // text (it's the trailing half of the same "with reach, where X is..." clause).
-    const description = whereXAttackersMatch ? rawDescription.replace(whereXAttackersPattern, "").trim() : rawDescription;
+    const description = (whereXAttackersMatch ? rawDescription.replace(whereXAttackersPattern, "") : whereXCountersMatch ? rawDescription.replace(whereXCountersPattern, "") : rawDescription).trim();
     const matchEnd = (match.index ?? 0) + match[0].length;
     const forEachControlledMatch = normalized.slice(matchEnd, matchEnd + 60).match(forEachControlledPattern);
     // "For each 1 damage prevented this way, create a ... token" (Inkshield, ...) — a dynamic count
@@ -25763,8 +25777,13 @@ export function parseCreateTokenSpecs(
     const hasUnmodeledDynamicCount =
       /\bfor each\b/i.test(precedingText) && !dynamicCounterCountPattern.test(precedingText) && !dynamicCounterCountPattern.test(description);
     if (hasUnmodeledDynamicCount) continue;
+    const forEachGraveyardMatch = normalized.slice(matchEnd, matchEnd + 60).match(forEachGraveyardCardPattern);
     let count: number;
-    if (forEachControlledMatch) {
+    if (forEachGraveyardMatch) {
+      if (!controllerSeat) continue;
+      const wantedType = forEachGraveyardMatch[1].toLowerCase();
+      count = (controllerSeat.board.graveyard ?? []).filter((card) => card.typeLine.toLowerCase().includes(wantedType)).length;
+    } else if (forEachControlledMatch) {
       // Declined (not created at all) without a controllerSeat to actually count against, rather
       // than falling back to the meaningless "a" = 1 default — a caller that cares whether this
       // clause is "handled at all" (skipping a redundant rules-advisor consult) still needs to pass
@@ -25777,6 +25796,10 @@ export function parseCreateTokenSpecs(
       // guess, not a resolution.
       if (chosenX === undefined) continue;
       count = chosenX * 2;
+    } else if (whereXCountersMatch) {
+      // Same "decline rather than guess" convention: without the dead creature's real counter total there is no honest count.
+      if (dynamicCounterCount === undefined) continue;
+      count = dynamicCounterCount;
     } else if (whereXAttackersMatch) {
       // Arachnogenesis: "where X is the number of creatures attacking you" — same "decline rather
       // than guess" convention as the other dynamic bases here, without a real attackersTargetingCount.
@@ -27184,7 +27207,7 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
     // No "tapped" in the real oracle text (see isArchaeomancersMapLandRaidTrigger) — the land
     // enters exactly like a normal land drop would, subject to its own printed ETB-tapped clause.
     const { session: movedSession } = moveCardAcrossSeats(session, trigger.controllerSeatId, chosenLand.id, trigger.controllerSeatId, "battlefield", {
-      tapped: entersBattlefieldTapped(chosenLand, controllerSeat)
+      tapped: entersBattlefieldTapped(chosenLand, controllerSeat, session.seats)
     });
     return {
       ...movedSession,
@@ -29374,6 +29397,12 @@ export function applyDeterministicPhaseTrigger(session: GameSession, seatId: str
   if (commonTriggerEffect(clauseText, "clause")?.kind === "mill_with_rewards") {
     return resolveTriggerEffect(session, makeCommonTrigger(seatId, seatId, sourceCard, { kind: "mill_with_rewards" }, `${sourceCard.name} triggers at the beginning of your upkeep.`));
   }
+  // Gadrak, the Crown-Scourge: "At the beginning of your end step, create a Treasure token for each nontoken creature that died this turn."
+  if (/\bcreate a treasure token for each nontoken creature that died this turn\b/i.test(clauseText)) {
+    const died = session.nontokenCreaturesDiedThisTurn?.turn === session.turn ? session.nontokenCreaturesDiedThisTurn.count : 0;
+    if (died <= 0) return session;
+    return createTokensForSeat(session, seatId, sourceCard.id, [{ ...predefinedTokenSpec("Treasure"), count: died }]).session;
+  }
   // Ribtruss Roaster: "At the beginning of your end step, create a number of 1/1 black and green Pest creature tokens equal to the number of +1/+1
   // counters on this creature. They have "When this token dies, you gain 1 life.""
   const counterTokens = clauseText.match(/\bcreate a number of (1\/1 [a-z ]+? tokens?) equal to the number of \+1\/\+1 counters on this creature\.\s*they have "([^"]+)"/i);
@@ -31221,22 +31250,36 @@ function splitManaClausesByCost(oracleText: string): { free: string[]; costly: s
     const costMatch = clause.match(/^([^:]+):/);
     if (!costMatch) continue;
     const costText = costMatch[1].toLowerCase();
-    const hasExtraCost = /\bsacrifice\b|\bpay\b|\bdiscard\b|\{[0-9wubrgc]+\}/.test(costText.replace(/\{t\}/g, ""));
+    const hasExtraCost = /\bsacrifice\b|\bpay\b|\bdiscard\b|\bremove\b|\bexile\b|\{[0-9wubrgc/]+\}/.test(costText.replace(/\{t\}/g, ""));
     (hasExtraCost ? costly : free).push(clause);
   }
   return { free, costly };
+}
+
+// Every color a clause's "Add ..." sentence can produce: all the {W}{U}{B}{R}{G}{C} symbols up to the end of that sentence
+// ("Add {W} or {B}." — Isolated Chapel, the Tainted lands; "Add {W}{W}, {W}{B}, or {B}{B}." — Fetid Heath's filter ability;
+// "Add {W}{U}{B}{R}{G}.") plus every color for the "any color / any combination of colors / chosen color" wordings (Prismatic
+// Lens, Cascading Cataracts, Orb of Dragonkind, Crucible of the Spirit Dragon). Reading only the FIRST symbol after "add"
+// let the other half of a two-color or filter ability escape the costly/conditional filters below.
+function addedManaColors(clause: string): string[] {
+  const colors = new Set<string>();
+  for (const match of clause.matchAll(/\badd\b([^.]*)/gi)) {
+    for (const symbol of match[1].matchAll(/\{([wubrgc])\}/gi)) colors.add(symbol[1].toUpperCase());
+    if (/\bany (?:one )?color\b|\bany combination of colors\b|\bany type\b|\bchosen color\b/i.test(match[1])) for (const color of ["W", "U", "B", "R", "G"]) colors.add(color);
+  }
+  if (/\bchoose a color\b[^.]*\.\s*add\b/i.test(clause)) for (const color of ["W", "U", "B", "R", "G"]) colors.add(color);
+  return [...colors];
 }
 
 export function costlyTapManaColors(oracleText: string): Set<string> {
   const { free, costly } = splitManaClausesByCost(oracleText);
   const costlyColors = new Set<string>();
   const freeColors = new Set<string>();
-  for (const clause of costly) {
-    for (const match of clause.matchAll(/add \{([wubrgc])\}/gi)) costlyColors.add(match[1].toUpperCase());
-  }
-  for (const clause of free) {
-    for (const match of clause.matchAll(/add \{([wubrgc])\}/gi)) freeColors.add(match[1].toUpperCase());
-  }
+  // "Add {W}{U}{B}{R}{G}." (Cascading Cataracts' {5},{T} ability) is a run of symbols after one
+  // "add" — capture the whole run, not just the first symbol, or the later colors escape the filter.
+  const symbolsAfterAdd = (clause: string): string[] => addedManaColors(clause);
+  for (const clause of costly) for (const color of symbolsAfterAdd(clause)) costlyColors.add(color);
+  for (const clause of free) for (const color of symbolsAfterAdd(clause)) freeColors.add(color);
   // A color is only actually unavailable "for free" if EVERY clause that produces it carries an
   // extra cost. Sunken Palace has both a plain "{T}: Add {U}." and a separate, genuinely costly
   // "{1}{U}, {T}, Exile seven cards from your graveyard: Add {U}. ..." alternative — before this,
@@ -31445,7 +31488,7 @@ function conditionallyUnavailableColors(oracleText: string, seat: PlayerSeat): S
   for (const clause of clauses) {
     if (!/\bactivate (?:this ability )?only if\b/i.test(clause)) continue;
     if (activateOnlyIfConditionMet(clause, seat)) continue;
-    for (const match of clause.matchAll(/add \{([wubrgc])\}/gi)) colors.add(match[1].toUpperCase());
+    for (const color of addedManaColors(clause)) colors.add(color);
     // "Add one/two/three mana of any [one] color" gated by a condition (Mox Opal, Mox Jasper,
     // Flywheel Racer) — if the condition isn't met, every color is blocked, not just one.
     if (/add (?:one|two|three) mana of any (?:one )?color/i.test(clause)) {
@@ -31456,7 +31499,7 @@ function conditionallyUnavailableColors(oracleText: string, seat: PlayerSeat): S
   // Wilds' plain "{T}: Add {G}." works even while its ferocious "Activate only if ..." {G}{G} clause doesn't.
   for (const clause of clauses) {
     if (/\bactivate (?:this ability )?only if\b/i.test(clause)) continue;
-    for (const match of clause.matchAll(/add \{([wubrgc])\}/gi)) colors.delete(match[1].toUpperCase());
+    for (const color of addedManaColors(clause)) colors.delete(color);
   }
   return colors;
 }
@@ -31583,10 +31626,16 @@ function manaChoicesForCardRaw(card: VisibleCard, seat: PlayerSeat, allSeats?: P
   if (name.includes("talisman of dominance")) return ["C", "U", "B"];
   if (name.includes("talisman of hierarchy")) return ["C", "W", "B"];
   if (name.includes("talisman of progress")) return ["C", "W", "U"];
+  // A two-color signet ("{1}, {T}: Add {W}{B}.") makes exactly its own printed colors; only Arcane Signet's
+  // commander-identity text (handled above) uses the commander's colors. Its {1} is why the generic filters above emptied it.
+  if (name.includes("signet")) {
+    const own = normalizeManaColors(addedManaColors(text));
+    if (own.length > 0) return own;
+  }
   if (name.includes("signet")) return normalizeManaColors(seat.deck?.colors ?? seat.board.commander?.colorIdentity ?? ["C"]);
   if (name === "sol ring") return ["C"];
 
-  const addedColors = [...text.matchAll(/add \{([wubrgc])\}/gi)].map((match) => match[1].toUpperCase()).filter((color) => !costly.has(color));
+  const addedColors = addedManaColors(text).filter((color) => !costly.has(color));
   if (addedColors.length > 0) return normalizeManaColors(addedColors);
 
   // "Add one mana of any color." (Treasure tokens, Insidious Roots' granted ability, ...) — an
@@ -31694,11 +31743,27 @@ export function revealableLandCards(card: VisibleCard, hand: VisibleCard[]): Vis
   return hand.filter((candidate) => candidate.id !== card.id && types.some((type) => candidate.typeLine.includes(type)));
 }
 
-function entersBattlefieldTapped(card: VisibleCard, controller?: PlayerSeat) {
+export function entersBattlefieldTapped(card: VisibleCard, controller?: PlayerSeat, allSeats?: PlayerSeat[]) {
   const text = card.oracleText.toLowerCase();
   // Reveal-land: revealing is free, so untapped exactly when something revealable is in hand (a human is asked first on a land DROP).
   if (revealLandTypes(card.oracleText)) {
     return !controller || (revealableLandCards(card, controller.board.hand).length === 0 && !revealLandControlExempt(card, controller));
+  }
+  // "This land enters tapped unless your opponents control eight or more lands." (Turbulent Fen and
+  // the rest of that cycle) — counts lands across ALL opponents combined, not just one.
+  const opponentLandsMatch = text.match(/enters (?:the battlefield )?tapped unless your opponents control (\w+) or more lands/);
+  if (opponentLandsMatch) {
+    const needed = numberWordToInt(opponentLandsMatch[1]);
+    if (!controller || !allSeats || needed === undefined) return true;
+    const opponentLands = allSeats.filter((other) => other.id !== controller.id).reduce((sum, other) => sum + other.board.battlefield.filter((permanent) => permanent.typeLine.includes("Land")).length, 0);
+    return opponentLands < needed;
+  }
+  // "This land enters tapped unless you have two or more opponents." (Vault of Champions, the Battlebond friend-or-foe lands)
+  const opponentCountMatch = text.match(/enters (?:the battlefield )?tapped unless you have (\w+) or more opponents/);
+  if (opponentCountMatch) {
+    const needed = numberWordToInt(opponentCountMatch[1]);
+    if (!controller || !allSeats || needed === undefined) return true;
+    return allSeats.filter((other) => other.id !== controller.id && !other.hasLost).length < needed;
   }
   const shockCost = shocklandPayLifeAmount(text);
   if (shockCost !== undefined) {
@@ -32551,7 +32616,7 @@ export function playCardFromZone(
     const revealables = destination === "battlefield" && !revealLandControlExempt(card, seat) ? revealableLandCards(card, seat.board.hand) : [];
     if (revealables.length > 0 && seat.kind === "human") shockPrompt = { cardId: card.id, cardName: card.name, life: 0, revealTypes: revealLandTypes(card.oracleText) };
     if (revealables.length > 0 && seat.kind !== "human") revealedForLand = revealables[0].name;
-    const entersTapped = destination === "battlefield" && (humanShockCost !== undefined || (revealables.length > 0 && seat.kind === "human") || entersBattlefieldTapped(card, seat));
+    const entersTapped = destination === "battlefield" && (humanShockCost !== undefined || (revealables.length > 0 && seat.kind === "human") || entersBattlefieldTapped(card, seat, session.seats));
     enteredTapped = entersTapped;
     // Shockland-style "pay life for untapped" replacement — entersBattlefieldTapped already decided
     // whether that life was worth paying; this is just the other half of that same choice, actually
@@ -33769,7 +33834,7 @@ export function moveLibraryCardToDestination(
     const movedCard: VisibleCard = {
       ...card,
       zone: destination === "library" ? "library" : destination,
-      tapped: destination === "battlefield" ? tapped || entersBattlefieldTapped(card, seat) : card.tapped,
+      tapped: destination === "battlefield" ? tapped || entersBattlefieldTapped(card, seat, session.seats) : card.tapped,
       summoningSick: destination === "battlefield" && card.typeLine.includes("Creature") ? true : card.summoningSick,
       enteredFrom: destination === "battlefield" ? ("library" as const) : card.enteredFrom,
       // Same stamp every other entry path sets (moveCardAcrossSeats): "entered this turn" checks (Zurgo, landfall-style conditions) read it.

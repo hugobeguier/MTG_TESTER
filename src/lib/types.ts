@@ -614,6 +614,8 @@ export interface GameSession {
   damageThisTurn?: { turn: number; bySeat: Record<string, number> };
   // Creatures that died under each player's control so far this turn (Gorma, the Gullet's "for each creature that died under your control this turn").
   creaturesDiedThisTurn?: { turn: number; bySeat: Record<string, number> };
+  // Nontoken creatures that died this turn, all players together (Gadrak, the Crown-Scourge).
+  nontokenCreaturesDiedThisTurn?: { turn: number; count: number };
   // Rule 500.7: "Take an extra turn after this one." (Temporal Mastery, Time Warp, ...) — a FIFO
   // queue of seatIds, consumed one entry per turn-change instead of the normal rotation. Queuing
   // rather than mutating activePlayerId/turn order directly means the two turn-change call sites

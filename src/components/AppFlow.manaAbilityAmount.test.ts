@@ -32,3 +32,12 @@ describe("costlyTapManaColors — regression guard for the fix this function doc
     expect(costlyTapManaColors(ARENA_OF_GLORY_ORACLE_TEXT).has("R")).toBe(false);
   });
 });
+
+describe("costlyTapManaColors — Cascading Cataracts", () => {
+  it("treats every color of the {5},{T} 'Add {W}{U}{B}{R}{G}' ability as costly, leaving only {C} free", () => {
+    const text = "{T}: Add {C}.\n{5}, {T}: Add {W}{U}{B}{R}{G}.";
+    const costly = costlyTapManaColors(text);
+    for (const color of ["W", "U", "B", "R", "G"]) expect(costly.has(color)).toBe(true);
+    expect(costly.has("C")).toBe(false);
+  });
+});

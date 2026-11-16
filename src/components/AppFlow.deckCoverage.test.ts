@@ -1,6 +1,7 @@
 // Bulk clause-coverage check over every shipped deck: each oracle line is run through the deterministic parsers (clauseCoverage.recognises).
 // "Unrecognised" lines are NOT necessarily broken (many cards are handled by inline single-card code, and the per-deck audit tests cover those),
 // but the count per deck must never grow: a new card or a parser regression that adds an unrecognised clause fails here.
+// Baselines rose by 1 for Gadrak (Lathliss, Reign Of Dragons) and Felisa (Breena): the shared recogniser used to "recognise" their trailing-count token lines only because the parser silently made 1 token; both now have real handlers (AppFlow.deckAudit.test.ts).
 // To list the offenders run:  UPDATE_COVERAGE=1 npx vitest run src/components/AppFlow.deckCoverage.test.ts  (prints them per deck).
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
@@ -11,15 +12,15 @@ const catalog = loadCardCatalog();
 // Baselines measured when the audits were written (lines the shared recogniser does not claim; see each AppFlow.*Audit/Deck test for the behaviour checks).
 const DECKS: Array<[string, number]> = [
   ["Aminatou.txt", 45],
-  ["Lathliss, Dragon Queen.txt", 10],
+  ["Lathliss, Dragon Queen.txt", 11],
   ["Meren.txt", 41],
   ["The Ur Dragon.txt", 44],
   ["Saheeli.txt", 16],
-  ["decks/custom/Breena, the Demagogue.txt", 34],
+  ["decks/custom/Breena, the Demagogue.txt", 35],
   ["decks/custom/Meren of Clan Nel Toth Built on my Own.txt", 33],
   ["decks/foundations/Calling All Angels.txt", 4],
   ["decks/foundations/Keen Engineering.txt", 13],
-  ["decks/foundations/Reign Of Dragons.txt", 9],
+  ["decks/foundations/Reign Of Dragons.txt", 10],
   ["decks/foundations/Tramplesaurus Rex.txt", 7],
   ["decks/foundations/Wretched Ranks.txt", 4]
 ];
