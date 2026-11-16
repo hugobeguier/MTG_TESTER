@@ -10,39 +10,29 @@ import { auditCard } from "./abilityAudit";
 
 // "Card: start of the ability line" for every activated ability, ability grant or ward cost the engine does not yet carry out.
 const KNOWN_GAPS = [
-  "Disciple of Griselbrand: {1}, Sacrifice a creature: You gain life equal",
-  "Eiganjo, Seat of the Empire: Channel — {2}{W}, Discard this card: It deals 4",
-  "Gix, Yawgmoth Praetor: {4}{B}{B}{B}, Discard X cards: Exile the top X",
-  "Gravespawn Sovereign: Tap five untapped Zombies you control: Put target",
-  "Hall of Heliod's Generosity: {1}{W}, {T}: Put target enchantment card from",
-  "Hopeful Initiate: {2}{W}, Remove two +1/+1 counters from among creatures",
-  "Jarad, Golgari Lich Lord: Sacrifice a Swamp and a Forest: Return this card",
-  "Master Transmuter: {U}, {T}, Return an artifact you control to its owner's",
-  "Mazemind Tome: {2}, {T}, Put a page counter on this artifact: Draw a card.",
-  "Mazemind Tome: {T}, Put a page counter on this artifact: Scry 1.",
-  "Nevinyrral's Disk: {1}, {T}: Destroy all artifacts, creatures, and enchantments.",
-  "Priest of Forgotten Gods: {T}, Sacrifice two other creatures: Any number of",
-  "Retribution of the Ancients: {B}, Remove X +1/+1 counters from among creatures",
-  "Steel Overseer: {T}: Put a +1/+1 counter on each artifact creature you control.",
-  "Tamiyo's Logbook: {5}{U}, {T}: Draw a card. This ability costs {1} less to activate",
+  "Eiganjo, Seat of the Empire: Channel — {2}{W}, Discard this card: It deals 4", // (c) channel (hand-zone activation) with a cost reduction and an attacking/blocking target
+  "Gix, Yawgmoth Praetor: {4}{B}{B}{B}, Discard X cards: Exile the top X", // (c) discard-X cost, exile top X of an opponent's library and play from among them
+  "Hall of Heliod's Generosity: {1}{W}, {T}: Put target enchantment card from", // (c) needs a new 'graveyard card on top of library' zone effect
+  "Hopeful Initiate: {2}{W}, Remove two +1/+1 counters from among creatures", // (c) counters removed 'from among creatures you control' (multi-permanent cost)
+  "Jarad, Golgari Lich Lord: Sacrifice a Swamp and a Forest: Return this card", // (c) graveyard-zone activation with a two-land sacrifice cost
+  "Master Transmuter: {U}, {T}, Return an artifact you control to its owner's", // (c) bounce-an-artifact cost plus put-from-hand-onto-battlefield choice
+  "Priest of Forgotten Gods: {T}, Sacrifice two other creatures: Any number of", // (c) sacrifice-two cost with any-number-of-players targeting
+  "Retribution of the Ancients: {B}, Remove X +1/+1 counters from among creatures", // (c) X counters removed from among creatures, -X/-X to a target
+  "Tamiyo's Logbook: {5}{U}, {T}: Draw a card. This ability costs {1} less to activate", // (c) ability cost reduction per other artifact
   // From the decks moved from the repo root into decks/custom (Aminatou, Lathliss, Meren, Saheeli, The Ur Dragon):
-  "Callaphe, Beloved of the Sea: Creatures and enchantments you control have \"Spells your opponents cast that tar",
-  "Estrid's Invocation: You may have this enchantment enter as a copy of an enchantment you control, exc",
-  "Dauthi Voidwalker: {T}, Sacrifice this creature: Choose an exiled card an opponent owns with a void",
-  "Cabal Coffers: {2}, {T}: Add {B} for each Swamp you control.",
-  "Westvale Abbey // Ormendahl, Profane Prince: {5}, {T}, Pay 1 life: Create a 1/1 white and black Human Cleric creature token.",
-  "Takenuma, Abandoned Mire: Channel — {3}{B}, Discard this card: Mill three cards, then return a creature or",
-  "Spymaster's Vault: {B}, {T}: Target creature you control connives X, where X is the number of creat",
-  "Shifting Woodland: Delirium — {2}{G}{G}: This land becomes a copy of target permanent card in your ",
-  "Susur Secundi, Void Altar: 12+ | {1}{B}, {T}, Pay 2 life, Sacrifice a creature: Draw cards equal to the sac",
-  "Boseiju, Who Endures: Channel — {1}{G}, Discard this card: Destroy target artifact, enchantment, or no",
-  "Mox Jasper: {T}: Add one mana of any color. Activate only if you control a Dragon.",
-  "Mox Opal: Metalcraft — {T}: Add one mana of any color. Activate only if you control three ",
-  "Ramos, Dragon Engine: Remove five +1/+1 counters from Ramos: Add {W}{W}{U}{U}{B}{B}{R}{R}{G}{G}. Activ",
-  "Crucible of the Spirit Dragon: {1}, {T}: Put a storage counter on this land.",
-  "Scavenger Regent // Exude Toxin: Ward—Discard a card.",
-  "Mistrise Village: {U}, {T}: The next spell you cast this turn can't be countered.",
-  "Three Tree City: {2}, {T}: Choose a color. Add an amount of mana of that color equal to the numbe"
+  "Callaphe, Beloved of the Sea: Creatures and enchantments you control have \"Spells your opponents cast that tar", // (c) granted tax on spells that target a permanent
+  "Estrid's Invocation: You may have this enchantment enter as a copy of an enchantment you control, exc", // (c) enter-as-copy replacement with an upkeep trigger granted to the copy
+  "Dauthi Voidwalker: {T}, Sacrifice this creature: Choose an exiled card an opponent owns with a void", // (c) void-counter exile tracking and play-from-exile
+  "Takenuma, Abandoned Mire: Channel — {3}{B}, Discard this card: Mill three cards, then return a creature or", // (c) channel with mill-then-return
+  "Spymaster's Vault: {B}, {T}: Target creature you control connives X, where X is the number of creat", // (c) connive X where X counts creature deaths this turn
+  "Shifting Woodland: Delirium — {2}{G}{G}: This land becomes a copy of target permanent card in your ", // (c) becomes a copy of a graveyard card, delirium-gated
+  "Susur Secundi, Void Altar: 12+ | {1}{B}, {T}, Pay 2 life, Sacrifice a creature: Draw cards equal to the sac", // (c) level-up style 12+ block, sorcery-speed sacrifice draw
+  "Boseiju, Who Endures: Channel — {1}{G}, Discard this card: Destroy target artifact, enchantment, or no", // (c) channel plus opponent's optional search
+  "Ramos, Dragon Engine: Remove five +1/+1 counters from Ramos: Add {W}{W}{U}{U}{B}{B}{R}{R}{G}{G}. Activ", // (c) ten-colored-mana burst into the pool for removing five counters (needs a pool-add mana path)
+  "Crucible of the Spirit Dragon: {1}, {T}: Put a storage counter on this land.", // (c) storage counters are only useful with its Dragon-restricted X mana ability
+  "Scavenger Regent // Exude Toxin: Ward—Discard a card.", // (c) ward-discard needs the ward payment flow extended
+  "Mistrise Village: {U}, {T}: The next spell you cast this turn can't be countered.", // (c) 'next spell can't be countered' flag
+  "Three Tree City: {2}, {T}: Choose a color. Add an amount of mana of that color equal to the numbe" // (c) choose-a-color mana scaled by a chosen creature type
 ];
 
 function deckFiles(dir: string): string[] {

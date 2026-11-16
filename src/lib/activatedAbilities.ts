@@ -133,6 +133,8 @@ type SacrificeEffect =
   | { kind: "drain_by_sacrificed_power" }
   // "You gain X life and put X +1/+1 counters on target creature you control, where X is the sacrificed creature's power." (Dina, Essence Brewer)
   | { kind: "gain_life_counters_by_sacrificed_power" }
+  // "You gain life equal to the sacrificed creature's toughness." (Disciple of Griselbrand)
+  | { kind: "gain_life_by_sacrificed_toughness" }
   // "This creature gets +X/+0 until end of turn, where X is the sacrificed enchantment's mana value." (Demon of Fate's Design)
   | { kind: "pump_self_by_sacrificed_mv" }
   // "Sacrifice a creature: Add {C}{C}." (Ashnod's Altar), "{T}, Sacrifice a creature: Add {B}{B}." (Phyrexian Tower): fixed mana into the pool.
@@ -347,6 +349,12 @@ export type GenericTapEffect =
   | { kind: "next_spell_improvise" }
   // "Put a +1/+1 counter on this creature." (Outlast, after it is rewritten to "{cost}, {T}: ...")
   | { kind: "self_counter"; counterKind: string; amount: number }
+  // "Put a +1/+1 counter on each artifact creature you control." (Steel Overseer): `qualifier` is the words between "each" and "you control".
+  // "Scry 1." (Mazemind Tome)
+  | { kind: "scry"; amount: number }
+  | { kind: "counter_on_each_you_control"; qualifier: string; counterKind: string; amount: number }
+  // "Destroy all artifacts, creatures, and enchantments." (Nevinyrral's Disk): every permanent with ANY of these types, every player's.
+  | { kind: "destroy_all_types"; types: string[] }
   // "Draw a card." (Dragon's Hoard, Tome of Legends, Endless Atlas)
   | { kind: "draw_cards"; amount: number }
   // "Target creature can't be blocked this turn." (Rogue's Passage) — your best attacker.
@@ -399,6 +407,10 @@ export interface GenericTapAbility {
   untapsSelf: boolean;
   // "Remove a gold counter from this artifact" as part of the cost (Dragon's Hoard, Tome of Legends): the counter kind.
   costRemoveCounter?: string;
+  // "Put a page counter on this artifact" as part of the cost (Mazemind Tome): the counter kind.
+  costPutCounter?: string;
+  // "Pay 1 life" as part of the cost (Westvale Abbey).
+  costLife?: number;
   // "Pay life equal to the number of colors in your commanders' color identity" (War Room).
   costLifeCommanderColors?: boolean;
   // "Tap three untapped Zombies you control" (Cryptbreaker): tapping other creatures IS the cost, with no {T} of its own.
@@ -413,7 +425,7 @@ export interface GenericTapAbility {
 // real cost is "{G}, {T}, Discard a creature card:", with {T} in the MIDDLE. The whole cost prefix
 // is captured generically (same shape as parseGenericSacrificeAbilities' own cost prefix) and {T}
 // presence is checked afterward instead, the same way costTap is already derived there.
-const GENERIC_TAP_CLAUSE_PATTERN = /^((?:(?:\{[^}]+\}|discard an? (?:[a-z]+ )?card|remove an? [a-z]+ counter from (?:this|~) [a-z]+|pay life equal to the number of colors in your commanders' color identity)\s*,?\s*)+):\s*(.+?)\.?\s*$/i;
+const GENERIC_TAP_CLAUSE_PATTERN = /^((?:(?:\{[^}]+\}|discard an? (?:[a-z]+ )?card|remove an? [a-z]+ counter from (?:this|~) [a-z]+|put an? [a-z]+ counter on (?:this|~) [a-z]+|pay \d+ life|pay life equal to the number of colors in your commanders' color identity)\s*,?\s*)+):\s*(.+?)\.?\s*$/i;
 
 export function parseGenericTapAbilities(oracleText: string): GenericTapAbility[] {
   const abilities: GenericTapAbility[] = [];
@@ -447,7 +459,7 @@ export function parseGenericTapAbilities(oracleText: string): GenericTapAbility[
       continue;
     }
     // "Tap three untapped Zombies you control: You draw a card and lose 1 life." (Cryptbreaker)
-    const tapCreatures = clause.match(/^tap (a|one|two|three|four|\d+) untapped ([a-z]+)s you control:\s*(.+?)\.?\s*$/i);
+    const tapCreatures = clause.match(/^tap (a|one|two|three|four|five|six|seven|\d+) untapped ([a-z]+)s you control:\s*(.+?)\.?\s*$/i);
     if (tapCreatures) {
       const tapEffect = parseGenericTapEffectText(tapCreatures[3].trim());
       if (tapEffect) {
@@ -475,6 +487,8 @@ export function parseGenericTapAbilities(oracleText: string): GenericTapAbility[
     // full clause keeps it for activateOnlyIfConditionMet.
     effectText = effectText.replace(/\s*Activate (?:this ability )?only [^.]*\.?$/i, "").trim();
     const costRemoveCounter = costPrefix.match(/remove an? ([a-z]+) counter from (?:this|~)/i)?.[1]?.toLowerCase();
+    const costPutCounter = costPrefix.match(/put an? ([a-z]+) counter on (?:this|~)/i)?.[1]?.toLowerCase();
+    const costLife = Number.parseInt(costPrefix.match(/pay (\d+) life/i)?.[1] ?? "0", 10);
 
     let untapsSelf = false;
     const untapMatch = effectText.match(/^untap [^.]+\.\s*/i);
@@ -487,7 +501,7 @@ export function parseGenericTapAbilities(oracleText: string): GenericTapAbility[
     if (!effect) continue;
 
     const costManaText = (costPrefix.match(/\{[^}]+\}/g) ?? []).filter((symbol) => !/^\{t\}$/i.test(symbol)).join("");
-    abilities.push({ costMana, costManaText, costDiscard, ...(costDiscardType ? { costDiscardType } : {}), untapsSelf, ...(costRemoveCounter ? { costRemoveCounter } : {}), ...(/pay life equal to the number of colors in your commanders' color identity/i.test(costPrefix) ? { costLifeCommanderColors: true } : {}), effect, clause });
+    abilities.push({ costMana, costManaText, costDiscard, ...(costDiscardType ? { costDiscardType } : {}), untapsSelf, ...(costRemoveCounter ? { costRemoveCounter } : {}), ...(costPutCounter ? { costPutCounter } : {}), ...(costLife ? { costLife } : {}), ...(/pay life equal to the number of colors in your commanders' color identity/i.test(costPrefix) ? { costLifeCommanderColors: true } : {}), effect, clause });
   }
 
   return abilities;
@@ -519,6 +533,12 @@ function parseGenericTapEffectText(text: string): GenericTapEffect | undefined {
   // "{T}: Mill two cards." (Skull Prophet): only milling yourself; "target player mills" and the like need a target prompt this ability shape lacks.
   if (zone && (zone.kind === "regrow" || zone.kind === "reanimate" || zone.kind === "graveyard_to_library" || (zone.kind === "mill" && zone.scope === "you" && !zone.then))) return { kind: "zone_effect", effect: zone };
 
+  const scryText = text.match(/^scry (\d+|one|two|three)\.?(?:\s*\([^)]*\))?$/i);
+  if (scryText) return { kind: "scry", amount: numberWordToInt(scryText[1].toLowerCase()) ?? Number.parseInt(scryText[1], 10) };
+  const eachCounter = text.match(/^put (an?|one|two|three) (\+1\/\+1) counters? on each ([a-z ]+?) you control\.?$/i);
+  if (eachCounter) return { kind: "counter_on_each_you_control", qualifier: eachCounter[3].toLowerCase(), counterKind: eachCounter[2], amount: numberWordToInt(eachCounter[1].toLowerCase()) ?? 1 };
+  const destroyAll = text.match(/^destroy all ((?:artifacts|creatures|enchantments|lands)(?:,? (?:and )?(?:artifacts|creatures|enchantments|lands))*)\.?$/i);
+  if (destroyAll) return { kind: "destroy_all_types", types: destroyAll[1].toLowerCase().match(/artifact|creature|enchantment|land/g) ?? [] };
   const selfCounter = text.match(/^put (an?|one|two|three) (\+1\/\+1) counters? on (?:this creature|it)\.?$/i);
   if (selfCounter) return { kind: "self_counter", counterKind: selfCounter[2], amount: numberWordToInt(selfCounter[1].toLowerCase()) ?? 1 };
   if (/^the next spell you cast this turn has improvise\.?(?:\s*\([^)]*\))?$/i.test(text)) return { kind: "next_spell_improvise" };
@@ -773,6 +793,7 @@ function parseSacrificeEffectText(text: string): SacrificeEffect | undefined {
   if (/^this creature gets \+x\/\+0 until end of turn, where x is the sacrificed (?:enchantment|artifact|permanent)'?s mana value\.?$/.test(lower.trim())) return { kind: "pump_self_by_sacrificed_mv" };
   const addMana = lower.match(/^add ((?:\{[wubrgc]\})+)\.?$/);
   if (addMana) return { kind: "add_mana", symbols: addMana[1].toUpperCase() };
+  if (/^you gain life equal to the sacrificed creature'?s toughness\.?$/.test(lower.trim())) return { kind: "gain_life_by_sacrificed_toughness" };
   if (/\beach opponent loses life equal to the sacrificed creature'?s power\b/.test(lower)) return { kind: "drain_by_sacrificed_power" };
   if (/\btarget player mills cards equal to the sacrificed creature'?s power\b/.test(lower)) return { kind: "mill_by_sacrificed_power" };
   if (/\bsearch your library for a creature card with mana value equal to 1 plus the sacrificed creature'?s mana value, put that card onto the battlefield\b/.test(lower)) {

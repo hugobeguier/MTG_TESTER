@@ -2,7 +2,7 @@
 // legality check (checkMoveLegal) and the main-phase agent heuristics.
 // Extracted verbatim from components/AppFlow.tsx; AppFlow.tsx re-exports the previously public symbols.
 
-import { abilityCostWithX, chooseAbilityX, chooseCreaturesToTapForCost, chooseEquipTarget, chooseGenericTapTarget, genericAbilityEffectHasLegalTarget, genericManaAbilityAffordable, parseGenericAbilityEffect, parseLoyaltyAbilities, tapCreaturesAltCostFor } from "@/engine/abilities";
+import { abilityCostWithX, chooseAbilityX, destroyAllTypesVictims, chooseCreaturesToTapForCost, chooseEquipTarget, chooseGenericTapTarget, genericAbilityEffectHasLegalTarget, genericManaAbilityAffordable, parseGenericAbilityEffect, parseLoyaltyAbilities, tapCreaturesAltCostFor } from "@/engine/abilities";
 import { AGENT_UNSUPPORTED_SPELL_TEXT, hasResolvableTarget, steelHellkiteXOptions } from "@/engine/castTargets";
 import { additionalSacrificeCandidates, canCastAtInstantSpeed, castRestrictedByTurnCount, independentlyCastableSpellFaces, modalDoubleFacedLandSplit, roomDoorFaces, seatHasFlashGrant, spellCastLockedOut, spellFaceCastableFromHand, spellFaceCostCard } from "@/engine/casting";
 import { canAttack, resolveAttackTarget } from "@/engine/combat";
@@ -602,6 +602,7 @@ export function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllow
       // Sunken Palace's marked mana only helps a human, who spends it from the pool; agents are not offered it.
       if (ability.effect.kind === "add_copy_mana" && seat.kind !== "human") return;
       if (ability.costLifeCommanderColors && seat.life <= commanderColorCount(seat)) return;
+      if (ability.costLife && seat.life <= ability.costLife + 4) return;
       // Hideaway lands (Spinerock Knoll, Mosswort Bridge): worth activating only with a hidden card and the condition already true.
       if (ability.effect.kind === "hideaway_play") {
         // A hidden LAND can only be played with a land drop left (the play-land-from-exile action below), so paying for it with none would be wasted.
@@ -631,6 +632,14 @@ export function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllow
         return;
       }
       if (ability.effect.kind === "search_library" && (seat.library?.length ?? 0) === 0) return;
+      // Steel Overseer: needs a permanent to put the counters on.
+      if (ability.effect.kind === "counter_on_each_you_control" && !seat.board.battlefield.some((c) => permanentMatchesQualifier(c, ability.effect.kind === "counter_on_each_you_control" ? ability.effect.qualifier : ""))) return;
+      // Nevinyrral's Disk: a board wipe is only offered to an agent when it takes clearly more from opponents than from itself (the source counts as lost).
+      if (ability.effect.kind === "destroy_all_types" && seat.kind !== "human") {
+        const victims = destroyAllTypesVictims(session, ability.effect.types);
+        const mine = victims.filter((victim) => victim.seatId === seat.id).length;
+        if (victims.length - mine < mine + 3) return;
+      }
       // Nothing to act on: no creature card in any graveyard to exile, or no legal graveyard target.
       if (ability.effect.kind === "exile_graveyard_creature_then_tokens" && !session.seats.some((s) => (s.board.graveyard ?? []).some((c) => c.typeLine.includes("Creature")))) return;
       if (ability.effect.kind === "zone_effect" && !zoneEffectHasLegalTarget(session, seat.id, ability.effect.effect)) return;

@@ -596,7 +596,24 @@ export function effectiveManaOracleText(card: VisibleCard): string {
   return card.grantedManaAbilityText ? `${base}\n${card.grantedManaAbilityText}` : base;
 }
 
+// "{2}, {T}: Add {B} for each Swamp you control." (Cabal Coffers; Cabal Stronghold-style): a PAID tap that scales with the board. Modelled like a signet,
+// as its NET gain (count - generic cost). The generic cost is paid by tapping other untapped lands (spendManaSources does that), so the source
+// is only usable while enough other lands are untapped and the net gain is at least 1.
+export function scalingPaidManaAbility(oracleText: string): { generic: number; color: ManaColor; noun: string } | undefined {
+  const match = oracleText.replace(/\([^)]*\)/g, "").match(/^\{(\d+)\},\s*\{t\}:\s*add \{([wubrgc])\} for each ([a-z]+) you control\.?\s*$/im);
+  return match ? { generic: Number.parseInt(match[1], 10), color: match[2].toUpperCase() as ManaColor, noun: match[3].toLowerCase() } : undefined;
+}
+
+function otherUntappedLands(card: VisibleCard, seat: PlayerSeat): VisibleCard[] {
+  return seat.board.battlefield.filter((other) => other.id !== card.id && !other.tapped && isLandCard(other));
+}
+
 function manaChoicesForCardRaw(card: VisibleCard, seat: PlayerSeat, allSeats?: PlayerSeat[]): ManaColor[] {
+  const scalingPaid = scalingPaidManaAbility(effectiveManaOracleText(card));
+  if (scalingPaid) {
+    const net = countMatchingPermanents(seat.board.battlefield, scalingPaid.noun) - scalingPaid.generic;
+    return net >= 1 && otherUntappedLands(card, seat).length >= scalingPaid.generic ? [scalingPaid.color] : [];
+  }
   const chosenColorAbility = chosenColorManaAbility(effectiveManaOracleText(card));
   if (chosenColorAbility) {
     const colors: ManaColor[] = [];
@@ -750,6 +767,8 @@ function isManaRock(card: VisibleCard) {
 // without this, every mana source produced a flat 1 (or 2 for Sol Ring), so Cabal Coffers tapped
 // for a single black mana regardless of how many Swamps were actually in play.
 function scalingManaAmount(card: VisibleCard, seat: PlayerSeat): number | undefined {
+  const scalingPaid = scalingPaidManaAbility(effectiveManaOracleText(card));
+  if (scalingPaid) return Math.max(0, countMatchingPermanents(seat.board.battlefield, scalingPaid.noun) - scalingPaid.generic);
   const perControlled = card.oracleText.match(/\badd \{[wubrgc]\} for each ([a-z]+) you control\b/i);
   if (perControlled) {
     const noun = perControlled[1].toLowerCase();
@@ -932,6 +951,13 @@ function depletionSacrificeCounterKind(oracleText: string): string | undefined {
 export function spendManaSources(seat: PlayerSeat, sourceIds: string[]): PlayerSeat {
   if (sourceIds.length === 0) return seat;
   const sourceSet = new Set(sourceIds);
+  // Cabal Coffers' "{2}" is paid by tapping that many OTHER untapped lands, which the net-gain model never lists as sources.
+  for (const id of [...sourceIds]) {
+    const source = seat.board.battlefield.find((card) => card.id === id);
+    const scalingPaid = source ? scalingPaidManaAbility(effectiveManaOracleText(source)) : undefined;
+    if (!source || !scalingPaid) continue;
+    for (const land of otherUntappedLands(source, seat).filter((candidate) => !sourceSet.has(candidate.id)).slice(0, scalingPaid.generic)) sourceSet.add(land.id);
+  }
   const kept: VisibleCard[] = [];
   const sacrificed: VisibleCard[] = [];
   let painDamage = 0;

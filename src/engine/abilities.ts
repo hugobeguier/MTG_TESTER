@@ -5,11 +5,12 @@
 import { isNonAuraEnchantment } from "@/engine/casting";
 import { manaValueFromManaCost } from "@/engine/costs";
 import { applyMill, applyPrimitiveAction, applyZoneEffect, chooseCounterTarget, choosePumpTarget, chooseSacrificeTargets, chooseWorstHandCardToDiscard, discardableHandCards, drawForSeat, drawMultipleForSeat, genericCostShim, genericManaAbilityCostShim, noLegalTargetEvent, parseTargetedPump, removalEffectHasLegalTarget, resolveAgentLibraryLookWorkflow, resolveDeferredChoice, strongestControlledCreature, transformPermanent, zoneEffectHasLegalTarget, type PumpEffect } from "@/engine/effects";
+import { hasIndestructible } from "@/engine/damage";
 import { destroyCreatures, moveCardAcrossSeats, moveLibraryCardToDestination } from "@/engine/entry";
 import { nextTimestamp } from "@/engine/etb";
 import { activateOnlyIfConditionMet, chooseManaSourcesForCost, isBoardConditionMet, payCostFromPool, spendManaSources } from "@/engine/mana";
 import { applyDigPick, commanderColorCount, hideawayDamageConditionMet, surveilBonusForSeat } from "@/engine/oneShotEffects";
-import { basicLandTypes, hasHaste, hasKeyword, isLandCard } from "@/engine/shared";
+import { basicLandTypes, hasHaste, hasKeyword, isLandCard, numberWordToInt } from "@/engine/shared";
 import { createCopyTokenForSeat, createTokensForSeat, parseCreateTokenSpecs } from "@/engine/tokens";
 import { applyDigToBattlefield, applyTargetedEffect, commonTriggerEffect, findPermanentOwnerTarget, hasOnceEachTurnLimiter, resolveTriggerEffect } from "@/engine/triggers";
 import { type PendingAction, type TriggerEffect } from "@/engine/types";
@@ -497,6 +498,13 @@ export function applySacrificeEffect(
     return rulesEvent(created.session, seatId, `${seat.name} activates ${sourceCardName} and creates ${count} ${created.createdTokens[0]?.name ?? "token"}${count === 1 ? "" : "s"}.`);
   }
 
+  // Disciple of Griselbrand: gain life equal to the sacrificed creature's toughness (last-known information, so read off the sacrificed card).
+  if (effect.kind === "gain_life_by_sacrificed_toughness") {
+    const amount = Math.max(0, ...sacrificed.map((creature) => effectiveToughness(creature)));
+    if (amount <= 0) return rulesEvent(session, seatId, `${sourceCardName} resolves, but the sacrificed creature had no toughness.`);
+    return rulesEvent({ ...session, seats: session.seats.map((item) => (item.id === seatId ? { ...item, life: item.life + amount } : item)) }, seatId, `${seat.name} gains ${amount} life from ${sourceCardName}.`);
+  }
+
   if (effect.kind === "pump_self_by_sacrificed_mv") {
     const bonus = sacrificed.reduce((total, permanent) => total + permanent.manaValue, 0);
     return rulesEvent(
@@ -704,7 +712,7 @@ export function payGenericTapCost(
   if (!activateOnlyIfConditionMet(ability.clause, seat)) return undefined;
   if (ability.costRemoveCounter && counterCount(card, ability.costRemoveCounter) < 1) return undefined;
   if (ability.costExileGraveyard && (seat.board.graveyard?.length ?? 0) < ability.costExileGraveyard) return undefined;
-  const lifeCost = ability.costLifeCommanderColors ? commanderColorCount(seat) : 0;
+  const lifeCost = (ability.costLifeCommanderColors ? commanderColorCount(seat) : 0) + (ability.costLife ?? 0);
   if (lifeCost > 0 && seat.life <= lifeCost) return undefined;
   const tapIds = new Set((tappedForCost ?? []).map((creature) => creature.id));
 
@@ -788,6 +796,7 @@ export function payGenericTapCost(
                       ...c,
                       tapped: !ability.untapsSelf,
                       // "Remove a gold counter from this artifact" is part of the cost.
+                      ...(ability.costPutCounter ? { counters: applyCounterDelta(c, ability.costPutCounter, 1).counters } : {}),
                       ...(ability.costRemoveCounter
                         ? { counters: (c.counters ?? []).map((counter) => (counter.kind === ability.costRemoveCounter ? { ...counter, count: counter.count - 1 } : counter)).filter((counter) => counter.count > 0) }
                         : {})
@@ -798,6 +807,18 @@ export function payGenericTapCost(
         : item
     )
   };
+
+  // Mazemind Tome: "When there are four or more page counters on this artifact, exile it. If you do, you gain 4 life." Counters only change as this
+  // cost is paid, so the state trigger is checked right here.
+  if (ability.costPutCounter) {
+    const threshold = card.oracleText.match(/when there are (four|five|six|seven|\d+) or more ([a-z]+) counters on this [a-z]+, exile it\. if you do, you gain (\d+) life/i);
+    const placed = next.seats.find((item) => item.id === seatId)?.board.battlefield.find((c) => c.id === cardId);
+    if (threshold && placed && threshold[2].toLowerCase() === ability.costPutCounter && counterCount(placed, ability.costPutCounter) >= (numberWordToInt(threshold[1].toLowerCase()) ?? Number.parseInt(threshold[1], 10))) {
+      next = moveCardBetweenVisibleZones(next, seatId, cardId, "exile");
+      const gain = Number.parseInt(threshold[3], 10);
+      next = rulesEvent({ ...next, seats: next.seats.map((item) => (item.id === seatId ? { ...item, life: item.life + gain } : item)) }, seatId, `${card.name} is exiled with ${threshold[1]} or more ${ability.costPutCounter} counters, and ${seat.name} gains ${gain} life.`);
+    }
+  }
 
   return { session: next, ability, card, poolSpent: poolPayment?.ok ? poolPayment.pool : undefined };
 }
@@ -1251,6 +1272,12 @@ function addCreatureTypeToTypeLine(typeLine: string, newType: string): string {
   return `${before} — ${newType}${after ? ` ${after}` : ""}`;
 }
 
+// Every non-indestructible permanent of the given plural types ("artifacts", "creatures"...) on the whole battlefield. Also used by the AI gate in legalActions.
+export function destroyAllTypesVictims(session: GameSession, types: string[]): Array<{ seatId: string; card: VisibleCard }> {
+  const wanted = types.map((type) => type.replace(/s$/, ""));
+  return session.seats.flatMap((item) => item.board.battlefield.filter((card) => !hasIndestructible(card) && wanted.some((type) => hasCardType(card, type[0].toUpperCase() + type.slice(1)))).map((card) => ({ seatId: item.id, card })));
+}
+
 export function applyGenericTapEffect(
   session: GameSession,
   seatId: string,
@@ -1277,6 +1304,26 @@ export function applyGenericTapEffect(
       seatId,
       `${seat.name} activates ${sourceCardName}: it gets ${effect.amount} ${effect.counterKind} counter${effect.amount === 1 ? "" : "s"}.`
     );
+  }
+
+  if (effect.kind === "scry") return resolveAgentLibraryLookWorkflow(session, seatId, sourceCardName, "scry_cards", effect.amount + surveilBonusForSeat(seat));
+
+  // Steel Overseer: a counter on each matching permanent you control (the source itself included when it matches).
+  if (effect.kind === "counter_on_each_you_control") {
+    const matched = seat.board.battlefield.filter((card) => permanentMatchesQualifier(card, effect.qualifier));
+    if (matched.length === 0) return rulesEvent(session, seatId, `${sourceCardName} resolves, but you control no ${effect.qualifier}.`);
+    const ids = new Set(matched.map((card) => card.id));
+    return rulesEvent(
+      { ...session, seats: session.seats.map((item) => (item.id !== seatId ? item : { ...item, board: { ...item.board, battlefield: item.board.battlefield.map((card) => (ids.has(card.id) ? applyCounterDelta(card, effect.counterKind, effect.amount) : card)) } })) },
+      seatId,
+      `${seat.name} activates ${sourceCardName}: ${matched.length} ${effect.qualifier} get ${effect.amount} ${effect.counterKind} counter${effect.amount === 1 ? "" : "s"}.`
+    );
+  }
+
+  // Nevinyrral's Disk: destroy every permanent of the listed types; indestructible ones survive (rule 702.12b).
+  if (effect.kind === "destroy_all_types") {
+    const victims = destroyAllTypesVictims(session, effect.types);
+    return destroyCreatures(rulesEvent(session, seatId, `${seat.name} activates ${sourceCardName}: destroy all ${effect.types.join(", ")}.`), victims.map((victim) => ({ seatId: victim.seatId, cardId: victim.card.id, message: `${victim.card.name} is destroyed by ${sourceCardName}.` })), "Rules action");
   }
 
   if (effect.kind === "next_spell_improvise") {
