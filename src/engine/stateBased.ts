@@ -726,10 +726,11 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
   if (lossEvents.length > 0) changed = true;
   next = { ...next, seats: seatsAfterLossChecks, events: [...lossEvents, ...next.events] };
 
-  // Free-for-all: the game ends once at most one player remains standing.
+  // Free-for-all: the game ends once at most one player remains standing. A game that started with a single seat (solo / goldfishing) has no one to
+  // beat, so one survivor is not a win there: it only ends when that lone player loses (nobody remains, no winner).
   if (next.status === "playing") {
     const remaining = next.seats.filter((seat) => !seat.hasLost);
-    if (remaining.length <= 1) {
+    if (remaining.length === 0 || (remaining.length === 1 && next.seats.length > 1)) {
       changed = true;
       next = {
         ...next,
