@@ -17,6 +17,7 @@ import * as THREE from "three";
 import type { AgentReasoning, GameSession, PlayerSeat, VisibleCard } from "@/lib/types";
 import type { AgentLesson } from "@/lib/agentLessons";
 import { effectivePower, effectiveToughness } from "@/lib/counters";
+import { rotateDelta } from "@/lib/cameraPan";
 import { cardPickOptions, toggleCardSelection } from "@/lib/cardPick";
 import {
   parseGenericManaAbilities,
@@ -1249,8 +1250,10 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
         return;
       }
       if (pointer.current.button === 2 || event.shiftKey) {
-        cameraState.current.target.x -= dx * 0.025;
-        cameraState.current.target.z -= dy * 0.025;
+        // Pan relative to the current camera yaw (rotateDelta), not raw world axes, so the drag feels the same at any rotation.
+        const pan = rotateDelta(dx, dy, cameraState.current.yaw, 0.025);
+        cameraState.current.target.x += pan.x;
+        cameraState.current.target.z += pan.z;
       } else {
         cameraState.current.yaw -= dx * 0.006;
         cameraState.current.pitch = THREE.MathUtils.clamp(cameraState.current.pitch - dy * 0.004, -1.25, -0.25);

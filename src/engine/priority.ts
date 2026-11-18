@@ -18,6 +18,7 @@ import { classifyTell } from "@/lib/lookAhead";
 import { deathEffectText, etbEffectText, isActivatedAbilityClause, oracleClauses, parseModalHeader } from "@/lib/oracleClauses";
 import { shouldStopForPriority, type PriorityStopSettings } from "@/lib/priorityStops";
 import { describeStackItem, type StackItemDescription, type StackItemLike } from "@/lib/stackDescription";
+import { remoteSeatCanAct, remoteSeatsCanAct } from "@/lib/multiplayer/remoteSeatPolicy";
 import { type GameSession, type ManaPool, type PlayerSeat, type VisibleCard } from "@/lib/types";
 
 // Without a session, this used to only send the card's NAME for anything on the stack — meaning
@@ -300,9 +301,10 @@ export function pendingActionRequiredPasses(
   session: GameSession,
   manaPools: Record<string, ManaPool>,
   stops: PriorityStopSettings,
-  holdPriorityOnceSeatId: string | undefined
+  holdPriorityOnceSeatId: string | undefined,
+  remoteCanAct: boolean = remoteSeatsCanAct
 ) {
-  return pendingActionRequiredPassesWithPredicate(seats, action, (seat, a) => canReceivePriorityForPendingAction(seat, a, activeSeatId, session, manaPools, stops, holdPriorityOnceSeatId));
+  return pendingActionRequiredPassesWithPredicate(seats, action, (seat, a) => canReceivePriorityForPendingAction(seat, a, activeSeatId, session, manaPools, stops, holdPriorityOnceSeatId, remoteCanAct));
 }
 
 export function nextPrioritySeatId(
@@ -314,9 +316,10 @@ export function nextPrioritySeatId(
   session: GameSession,
   manaPools: Record<string, ManaPool>,
   stops: PriorityStopSettings,
-  holdPriorityOnceSeatId: string | undefined
+  holdPriorityOnceSeatId: string | undefined,
+  remoteCanAct: boolean = remoteSeatsCanAct
 ) {
-  return nextPrioritySeatIdWithPredicate(seats, actorSeatId, passes, action, (seat, a) => canReceivePriorityForPendingAction(seat, a, activeSeatId, session, manaPools, stops, holdPriorityOnceSeatId));
+  return nextPrioritySeatIdWithPredicate(seats, actorSeatId, passes, action, (seat, a) => canReceivePriorityForPendingAction(seat, a, activeSeatId, session, manaPools, stops, holdPriorityOnceSeatId, remoteCanAct));
 }
 
 export function pendingActionRequiredPassesWithPredicate(
@@ -403,9 +406,12 @@ export function canReceivePriorityForPendingAction(
   session: GameSession,
   manaPools: Record<string, ManaPool>,
   stops: PriorityStopSettings,
-  holdPriorityOnceSeatId: string | undefined
+  holdPriorityOnceSeatId: string | undefined,
+  remoteCanAct: boolean = remoteSeatsCanAct
 ) {
   if (seat.hasLost) return false;
+  // A friend's seat that cannot respond yet (no pass/respond intents) is never waited on: it counts as having passed every window.
+  if (!remoteSeatCanAct(seat, remoteCanAct)) return false;
   if (seat.kind === "agent") {
     // Used to unconditionally return true here, meaning every agent seat — even ones holding zero
     // instant-speed cards or usable abilities — had to individually "confirm" passing on every

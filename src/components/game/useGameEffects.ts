@@ -25,6 +25,7 @@ import { isCumulativeUpkeepCard } from "@/engine/legalActions";
 import { isLandCard } from "@/engine/shared";
 import { moveCommanderToCommandZone, rulesEvent } from "@/engine/zones";
 import { needsTokenArt, tokenArtLookupKey } from "@/lib/tokenArt";
+import { remoteSeatCanAct } from "@/lib/multiplayer/remoteSeatPolicy";
 import { nextPrioritySeatId, pendingActionRequiredPasses } from "@/engine/priority";
 import { removalEffectTargetSpec, zoneEffectTargetSpec } from "@/lib/targetSpecs";
 import { seatVerb } from "@/engine/abilities";
@@ -61,6 +62,7 @@ export function useGameEffects(ctx: GameContext) {
   const resolvePendingAction = lateFn(ctx, "resolvePendingAction");
   const resolvePhaseScryOrSurveil = lateFn(ctx, "resolvePhaseScryOrSurveil");
   const setSeatManaPool = lateFn(ctx, "setSeatManaPool");
+  const skipRemoteSeatTurn = lateFn(ctx, "skipRemoteSeatTurn");
   const shouldAgentFastForwardToEndStep = lateFn(ctx, "shouldAgentFastForwardToEndStep");
 
   // TEMP DEBUG (remove before finishing): tracking down a reported "Veyra's turn gets skipped
@@ -766,6 +768,20 @@ export function useGameEffects(ctx: GameContext) {
       }
     }
   }, [session, mode, gameStage, pendingAction, pendingRuleChoice, libraryLook]);
+
+  // A friend whose seat cannot act yet (lib/multiplayer/remoteSeatPolicy) would hold the game forever on their own turn (turn 1 untap included): skip it.
+  useEffect(() => {
+    if (mode !== "game" || gameStage !== "playing" || pendingAction || pendingRuleChoice || libraryLook || manualLibrarySearch || blockChoice) return;
+    const activeSeat = session.seats.find((seat) => seat.id === activeSeatId);
+    if (!activeSeat || activeSeat.hasLost || remoteSeatCanAct(activeSeat)) return;
+    const key = `remote-skip:${session.turn}:${activeSeat.id}`;
+    if (agentDecisionRequests.current.has(key)) return;
+    const timer = window.setTimeout(() => {
+      agentDecisionRequests.current.add(key);
+      skipRemoteSeatTurn(activeSeat.id);
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [mode, gameStage, pendingAction, pendingRuleChoice, libraryLook, manualLibrarySearch, blockChoice, session.turn, session.activePlayerId, activeSeatId]);
 
   useEffect(() => {
     if (mode !== "game" || gameStage !== "playing") return;

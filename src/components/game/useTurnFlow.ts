@@ -224,6 +224,16 @@ export function useTurnFlow(ctx: GameContext) {
     );
   }
 
+  // A friend's seat cannot act yet (remoteSeatsCanAct is false), so its whole turn is skipped by the host the moment it begins: nobody could advance it.
+  function skipRemoteSeatTurn(seatId: string) {
+    const seat = session.seats.find((item) => item.id === seatId);
+    if (!seat) return;
+    addEvent(`${seat.name} cannot take actions yet in multiplayer, so their turn is skipped.`, seatId, "Rules action");
+    setSelectedHandCardId(undefined);
+    setPriorityPasses([]);
+    setSession((current) => (current.activePlayerId === seatId ? resolveEndTurn(current, seatId) : current));
+  }
+
   function resolveEndTurn(rawCurrent: GameSession, seatId: string) {
     // The End Turn shortcut skips the end step, so its "beginning of your end step" effects happen here instead.
     const current = applyEndStepEffects(rawCurrent, seatId);
@@ -591,5 +601,5 @@ export function useTurnFlow(ctx: GameContext) {
     return true;
   }
 
-  return { advanceTurn, applySagaEntryLoreCounter, applySagaReadAhead, endTurn, openCumulativeUpkeepChoice, payCumulativeUpkeep, resolveEndTurn, resolvePhaseAdvance, resolvePhaseScryOrSurveil, sacrificeRuleChoiceSource };
+  return { skipRemoteSeatTurn, advanceTurn, applySagaEntryLoreCounter, applySagaReadAhead, endTurn, openCumulativeUpkeepChoice, payCumulativeUpkeep, resolveEndTurn, resolvePhaseAdvance, resolvePhaseScryOrSurveil, sacrificeRuleChoiceSource };
 }
