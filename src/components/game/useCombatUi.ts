@@ -269,6 +269,14 @@ export function useCombatUi(ctx: GameContext) {
     setSelectedBlockerIds((current) => (current.includes(blockerCardId) ? current.filter((id) => id !== blockerCardId) : [...current, blockerCardId]));
   }
 
+  // A remote friend declares blockers with the creature ids they picked on their own table (their selection never touches the host's selectedBlockerIds).
+  function confirmBlockersFor(blockerCardIds: string[]) {
+    const choice = blockChoice;
+    if (!choice) return;
+    setBlockChoice(undefined);
+    setSession((current) => assignBlockers(current, choice, blockerCardIds));
+  }
+
   function confirmHumanBlockers() {
     const choice = blockChoice;
     if (!choice) return;
@@ -285,11 +293,11 @@ export function useCombatUi(ctx: GameContext) {
     setSession((current) => resolveHumanUnblockedDamage(current, choice));
   }
 
-  function declareHumanAttack(cardId: string, targetId: string) {
-    if (pendingAction || activeSeatId !== humanSeat.id) return;
-    setSession((current) => declareAttack(current, humanSeat.id, cardId, targetId));
+  function declareHumanAttack(cardId: string, targetId: string, actingSeatId: string = humanSeat.id) {
+    if (pendingAction || activeSeatId !== actingSeatId) return;
+    setSession((current) => declareAttack(current, actingSeatId, cardId, targetId));
     setInspectedCard(undefined);
   }
 
-  return { confirmHumanBlockers, declareAttack, declareHumanAttack, passHumanBlocks, toggleHumanBlocker };
+  return { confirmBlockersFor, confirmHumanBlockers, declareAttack, declareHumanAttack, passHumanBlocks, toggleHumanBlocker };
 }

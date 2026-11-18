@@ -25,7 +25,7 @@ import { isCumulativeUpkeepCard } from "@/engine/legalActions";
 import { isLandCard } from "@/engine/shared";
 import { moveCommanderToCommandZone, rulesEvent } from "@/engine/zones";
 import { needsTokenArt, tokenArtLookupKey } from "@/lib/tokenArt";
-import { remoteSeatCanAct } from "@/lib/multiplayer/remoteSeatPolicy";
+import { remoteSeatCanAct, remoteTurnStopSettings } from "@/lib/multiplayer/remoteSeatPolicy";
 import { nextPrioritySeatId, pendingActionRequiredPasses } from "@/engine/priority";
 import { removalEffectTargetSpec, zoneEffectTargetSpec } from "@/lib/targetSpecs";
 import { seatVerb } from "@/engine/abilities";
@@ -33,7 +33,9 @@ import { useEffect } from "react";
 import { type GameContext, lateFn } from "./context";
 
 export function useGameEffects(ctx: GameContext) {
-  const { mode, session, setSession, activeSeatId, prioritySeatId, setPrioritySeatId, gameStage, configs, autoValidatedDefaultDeck, humanSeat } = ctx;
+  const { mode, session, setSession, activeSeatId, prioritySeatId, setPrioritySeatId, gameStage: liveGameStage, configs, autoValidatedDefaultDeck, humanSeat } = ctx;
+  // Paused for a disconnected friend (multiplayer): every effect below treats the game as "not playing", so nothing advances until they are back.
+  const gameStage = ctx.mpPausedFor.length > 0 ? ("paused" as const) : liveGameStage;
   const { rulesAdvisorPending, agentDecisionRequests } = ctx.agent;
   const { libraryLook, manualLibrarySearch, pendingRuleChoice, setPendingRuleChoice, blockChoice, setBlockChoice, basicLandFetchSearch, pendingOrderedTriggerResume, commanderZoneChoiceAsked, auraRetargetAsked } = ctx.choices;
   const { manaPools, restrictedManaBatches } = ctx.mana;
@@ -1162,17 +1164,21 @@ export function useGameEffects(ctx: GameContext) {
       session.phase === "declare blockers step"
     )
       return;
-    if (activeSeatId !== humanSeat.id || priorityStopSettings.fullControl) return;
-    const humanSeatIndex = Math.max(0, session.seats.findIndex((seat) => seat.id === humanSeat.id));
-    if (priorityStopSettings.phaseStops[stopKey(session.phase, humanSeatIndex)]) return;
+    // The active human seat is the host's own or a remote friend's: the friend has no stop grid, so their own turn pauses at remoteTurnStopSettings.
+    const turnSeat = session.seats.find((seat) => seat.id === activeSeatId);
+    if (!turnSeat || turnSeat.kind !== "human") return;
+    const turnStops = turnSeat.remoteSlot !== undefined ? remoteTurnStopSettings(session.seats.indexOf(turnSeat)) : priorityStopSettings;
+    if (turnStops.fullControl) return;
+    const humanSeatIndex = Math.max(0, session.seats.indexOf(turnSeat));
+    if (turnStops.phaseStops[stopKey(session.phase, humanSeatIndex)]) return;
     // Footgun guard: an unticked "declare attackers step" would otherwise sail straight past any
     // real attack the human could still declare — there's no pendingAction/choice state guarding
     // that window the way blockChoice/pendingRuleChoice do for defense, since declareAttack mutates
     // the session directly rather than opening one. Stays regardless of the grid so unticking this
     // one cell can't silently make attacking impossible.
     if (session.phase === "declare attackers step") {
-      const opponents = session.seats.filter((seat) => seat.id !== humanSeat.id && !seat.hasLost);
-      if (legalAttackActions(humanSeat, opponents).length > 0) return;
+      const opponents = session.seats.filter((seat) => seat.id !== turnSeat.id && !seat.hasLost);
+      if (legalAttackActions(turnSeat, opponents).length > 0) return;
     }
     const key = `human-advance:${session.turn}:${session.phase}`;
     if (agentDecisionRequests.current.has(key)) return;

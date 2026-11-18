@@ -510,7 +510,7 @@ export type PendingRuleChoice =
       options: Array<{ faceIndex: number; label: string }>;
       resume:
         | { via: "playCard"; seatId: string; cardId: string; position?: { x: number; z: number }; sourceZone: "hand" | "command" | "exile" | "graveyard" | "library"; sacrificeTargets?: VisibleCard[] }
-        | { via: "respondWithCard"; cardId: string; sourceZone: "hand" | "exile" };
+        | { via: "respondWithCard"; cardId: string; sourceZone: "hand" | "exile"; seatId?: string };
     }
   | {
       id: string;
@@ -538,7 +538,7 @@ export type PendingRuleChoice =
       answers: CastChoices;
       resume:
         | { via: "playCard"; seatId: string; cardId: string; position?: { x: number; z: number }; sourceZone: "hand" | "command" | "exile" | "graveyard" | "library"; faceIndex?: number; sacrificeTargets?: VisibleCard[]; altChoice?: "alt" | "normal" }
-        | { via: "respondWithCard"; cardId: string; sourceZone: "hand" | "exile"; faceIndex?: number; sacrificeTargets?: VisibleCard[] };
+        | { via: "respondWithCard"; cardId: string; sourceZone: "hand" | "exile"; seatId?: string; faceIndex?: number; sacrificeTargets?: VisibleCard[] };
     }
   // A cast "choose one / choose two" spell (Austere Command, Valorous Stance, Collective Resistance, Profane Command): the human picks
   // the modes one at a time, then they all apply together (their targets are chosen automatically when more than one mode is picked).

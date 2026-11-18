@@ -334,34 +334,36 @@ export function useStackResolution(ctx: GameContext) {
   // a response window" flow) or an exiled card they currently have play permission for — gated by
   // the same canCastAtInstantSpeed check either way, so an exiled sorcery still isn't offered as a
   // response, only an exiled instant/flash card is.
-  function respondWithCard(cardId: string, sourceZone: "hand" | "exile", preChosenSacrificeTargets?: VisibleCard[], castChoices?: CastChoices, faceIndex?: number) {
-    if (humanActionBlockedByChoice(humanSeat.id)) return;
-    if (!pendingAction || prioritySeatId !== humanSeat.id) {
-      if (pendingAction) addEvent("You don't have priority right now, so you can't cast that yet.", humanSeat.id, "Timing");
+  function respondWithCard(cardId: string, sourceZone: "hand" | "exile", preChosenSacrificeTargets?: VisibleCard[], castChoices?: CastChoices, faceIndex?: number, actingSeatId?: string) {
+    // A remote friend responds through an intent: `actor` is their seat, the host seat otherwise.
+    const actor = actingSeatId ? (session.seats.find((seat) => seat.id === actingSeatId) ?? humanSeat) : humanSeat;
+    if (humanActionBlockedByChoice(actor.id)) return;
+    if (!pendingAction || prioritySeatId !== actor.id) {
+      if (pendingAction) addEvent("You don't have priority right now, so you can't cast that yet.", actor.id, "Timing");
       return;
     }
-    const card = sourceZone === "exile" ? findExiledCardAnySeat(session, cardId) : humanSeat.board.hand.find((item) => item.id === cardId);
+    const card = sourceZone === "exile" ? findExiledCardAnySeat(session, cardId) : actor.board.hand.find((item) => item.id === cardId);
     if (!card) return;
     // A split / Adventure card answered with from the hand: the caster chooses ONE half (instant-speed halves only) and pays only that half's cost.
     const respondFaces = sourceZone === "hand" ? independentlyCastableSpellFaces(card) : undefined;
     if (respondFaces && faceIndex === undefined) {
-      const decision = castFaceDecision(session, humanSeat, card, activeSeatId, poolForSeat(humanSeat.id), true);
+      const decision = castFaceDecision(session, actor, card, activeSeatId, poolForSeat(actor.id), true);
       if (decision.kind === "single") {
         faceIndex = decision.faceIndex;
       } else if (decision.kind === "choose") {
         setPendingRuleChoice({
           id: crypto.randomUUID(),
           kind: "choose_cast_face",
-          controllerSeatId: humanSeat.id,
+          controllerSeatId: actor.id,
           sourceCardId: cardId,
           sourceCardName: card.name,
           prompt: `${card.name}: which half do you cast? You pay only that half's cost.`,
           options: decision.options.filter((option) => option.castable && option.payable).map((option) => ({ faceIndex: option.faceIndex, label: option.label })),
-          resume: { via: "respondWithCard", cardId, sourceZone }
+          resume: { via: "respondWithCard", cardId, sourceZone, seatId: actor.id }
         });
         return;
       } else if (decision.kind === "unpayable") {
-        addEvent(`${humanSeat.name} cannot respond with ${card.name}: ${decision.options.map((option) => `${option.label.replace(/^Cast /, "")} ${option.castable ? "cannot be paid" : "cannot be cast right now"}`).join("; ")}.`, humanSeat.id, "Mana");
+        addEvent(`${actor.name} cannot respond with ${card.name}: ${decision.options.map((option) => `${option.label.replace(/^Cast /, "")} ${option.castable ? "cannot be paid" : "cannot be cast right now"}`).join("; ")}.`, actor.id, "Mana");
         return;
       }
     }
@@ -370,21 +372,21 @@ export function useStackResolution(ctx: GameContext) {
     const castView = respondHalf ? spellFaceCostCard(card, respondHalf) : card;
     if (
       sourceZone === "exile" &&
-      (card.exiledPlayableBySeatId !== humanSeat.id || (card.exiledPlayableUntilTurn !== undefined && session.turn > card.exiledPlayableUntilTurn))
+      (card.exiledPlayableBySeatId !== actor.id || (card.exiledPlayableUntilTurn !== undefined && session.turn > card.exiledPlayableUntilTurn))
     ) {
-      addEvent(`You may not cast ${card.name} from exile (the permission has expired or isn't yours).`, humanSeat.id, "Timing");
+      addEvent(`You may not cast ${card.name} from exile (the permission has expired or isn't yours).`, actor.id, "Timing");
       return;
     }
-    if (!canCastAtInstantSpeed(castView, seatHasFlashGrant(humanSeat, castView)) && !(sourceZone === "exile" && card.exiledPlayableAnyTime)) {
-      addEvent(`${humanSeat.name} cannot respond with ${card.name}; it is not playable at instant speed.`, humanSeat.id, "Mana");
+    if (!canCastAtInstantSpeed(castView, seatHasFlashGrant(actor, castView)) && !(sourceZone === "exile" && card.exiledPlayableAnyTime)) {
+      addEvent(`${actor.name} cannot respond with ${card.name}; it is not playable at instant speed.`, actor.id, "Mana");
       return;
     }
-    if (!hasResolvableTarget(session, humanSeat.id, castView)) {
-      addEvent(`${humanSeat.name} cannot respond with ${card.name}; there is no legal target.`, humanSeat.id, "Mana");
+    if (!hasResolvableTarget(session, actor.id, castView)) {
+      addEvent(`${actor.name} cannot respond with ${card.name}; there is no legal target.`, actor.id, "Mana");
       return;
     }
-    if (spellCastLockedOut(session, humanSeat.id, activeSeatId) || castRestrictedByTurnCount(session, card)) {
-      addEvent(`${humanSeat.name} cannot respond with ${card.name}: an effect stops this player from casting spells right now.`, humanSeat.id, "Rules action");
+    if (spellCastLockedOut(session, actor.id, activeSeatId) || castRestrictedByTurnCount(session, card)) {
+      addEvent(`${actor.name} cannot respond with ${card.name}: an effect stops this player from casting spells right now.`, actor.id, "Rules action");
       return;
     }
     // Same interactive detour as playCard's own — see choose_creature_to_sacrifice_for_cast's doc
@@ -395,12 +397,12 @@ export function useStackResolution(ctx: GameContext) {
       const additionalSacrificeCost = parseAdditionalSacrificeCost(card.oracleText);
       if (
         additionalSacrificeCost?.count === 1 &&
-        additionalSacrificeCandidates(humanSeat, additionalSacrificeCost, cardId).length > 1
+        additionalSacrificeCandidates(actor, additionalSacrificeCost, cardId).length > 1
       ) {
         setPendingRuleChoice({
           id: crypto.randomUUID(),
           kind: "choose_creature_to_sacrifice_for_cast",
-          controllerSeatId: humanSeat.id,
+          controllerSeatId: actor.id,
           sourceCardId: cardId,
           sourceCardName: card.name,
           prompt: `${card.name}: choose ${additionalSacrificeCost.permanentType === "creature" ? "a creature" : `a ${additionalSacrificeCost.permanentType}`} to sacrifice as an additional cost.`,
@@ -428,46 +430,46 @@ export function useStackResolution(ctx: GameContext) {
         counterSpellCanTarget(counterAbility, counterTargetCard.typeLine, isCommanderSpell);
       if (!legalCounterTarget) {
         addEvent(
-          `${humanSeat.name} cannot respond with ${card.name}; ${pendingAction.type === "spell" ? `it can't legally counter ${pendingAction.cardName}` : "there is no spell on the stack to counter"}.`,
-          humanSeat.id,
+          `${actor.name} cannot respond with ${card.name}; ${pendingAction.type === "spell" ? `it can't legally counter ${pendingAction.cardName}` : "there is no spell on the stack to counter"}.`,
+          actor.id,
           "Mana"
         );
         return;
       }
     }
-    const fixedCost = adjustedCastingCost(humanSeat, castView, castView.manaValue, sourceZone === "exile" ? "exile" : "hand", activeSeatId, session.seats) + targetingTax(session, humanSeat.id, castChoices?.targets ?? []);
-    const pool = poolForSeat(humanSeat.id);
+    const fixedCost = adjustedCastingCost(actor, castView, castView.manaValue, sourceZone === "exile" ? "exile" : "hand", activeSeatId, session.seats) + targetingTax(session, actor.id, castChoices?.targets ?? []);
+    const pool = poolForSeat(actor.id);
     // canReceivePriorityForPendingAction already offers this priority window whenever untapped
     // lands could cover the cost, not only when mana is already floating — payment must accept the
     // same fallback (auto-tap, same as the agent path and acceptMiracleOffer), or a human who
     // hasn't manually pre-tapped can never actually resolve an instant-speed response even though
     // they were given the chance to try.
-    const chosenX = manaPoolTotal(pool) > 0 ? maxAffordableX(humanSeat, castView, fixedCost, pool) : maxAffordableX(humanSeat, castView, fixedCost);
-    const respondWaived = castView.manaValue > 0 && adjustedCastingCost(humanSeat, castView, castView.manaValue, sourceZone === "exile" ? "exile" : "hand", activeSeatId, session.seats) === 0;
-    const adjustedCost = respondWaived ? fixedCost : totalCastingCost(humanSeat, castView, castView.manaValue, chosenX, session.seats);
-    const payment = payCastingCost(humanSeat.id, humanSeat, castView, adjustedCost);
-    const availableMana = payment.ok ? manaPoolTotal(payment.spent) : selectedManaTotal(humanSeat, payment.sourceIds);
+    const chosenX = manaPoolTotal(pool) > 0 ? maxAffordableX(actor, castView, fixedCost, pool) : maxAffordableX(actor, castView, fixedCost);
+    const respondWaived = castView.manaValue > 0 && adjustedCastingCost(actor, castView, castView.manaValue, sourceZone === "exile" ? "exile" : "hand", activeSeatId, session.seats) === 0;
+    const adjustedCost = respondWaived ? fixedCost : totalCastingCost(actor, castView, castView.manaValue, chosenX, session.seats);
+    const payment = payCastingCost(actor.id, actor, castView, adjustedCost);
+    const availableMana = payment.ok ? manaPoolTotal(payment.spent) : selectedManaTotal(actor, payment.sourceIds);
     if (!isLandCard(card) && !payment.ok) {
-      addEvent(cannotPayMessage(humanSeat, castView, availableMana, adjustedCost, payment.reason), humanSeat.id, "Mana");
+      addEvent(cannotPayMessage(actor, castView, availableMana, adjustedCost, payment.reason), actor.id, "Mana");
       return;
     }
     const manaSourceIds = isLandCard(card) ? [] : payment.sourceIds;
     if (!castChoices && !isLandCard(card)) {
       const answers: CastChoices = { targets: [] };
-      const firstPrompt = nextCastPrompt(session, humanSeat.id, castView, chosenX > 0 ? chosenX : undefined, answers);
+      const firstPrompt = nextCastPrompt(session, actor.id, castView, chosenX > 0 ? chosenX : undefined, answers);
       if (firstPrompt) {
-        openCastPrompt(firstPrompt, { planCard: castView, chosenX: chosenX > 0 ? chosenX : undefined, answers, resume: { via: "respondWithCard", cardId, sourceZone, faceIndex: respondHalf ? faceIndex : undefined, sacrificeTargets: preChosenSacrificeTargets } });
+        openCastPrompt(firstPrompt, { planCard: castView, chosenX: chosenX > 0 ? chosenX : undefined, answers, resume: { via: "respondWithCard", cardId, sourceZone, seatId: actor.id, faceIndex: respondHalf ? faceIndex : undefined, sacrificeTargets: preChosenSacrificeTargets } });
         return;
       }
     }
     if (!isLandCard(card) && payment.ok) {
-      applyCastingCostPaymentSideEffect(humanSeat.id, payment);
+      applyCastingCostPaymentSideEffect(actor.id, payment);
     }
     const counterTargetId = counterAbility && pendingAction.type === "spell" ? pendingAction.id : undefined;
     const action: PendingAction = {
       id: crypto.randomUUID(),
       type: "spell",
-      actorSeatId: humanSeat.id,
+      actorSeatId: actor.id,
       cardId,
       cardName: castView.name,
       cardTypeLine: castView.typeLine,
@@ -478,7 +480,7 @@ export function useStackResolution(ctx: GameContext) {
       chosenX: chosenX > 0 ? chosenX : undefined,
       counterTargetId,
       castChoices,
-      message: `${humanSeat.name} responds with ${castView.name}${chosenX > 0 ? ` (X=${chosenX})` : ""}${stackTargetText(session, castChoices?.targets ?? [], counterTargetId && pendingAction.type === "spell" ? pendingAction.cardName ?? "a spell" : undefined, castModeLabels(castView, chosenX > 0 ? chosenX : undefined, castChoices))}${sourceZone === "exile" ? " from exile" : ""}.`
+      message: `${actor.name} responds with ${castView.name}${chosenX > 0 ? ` (X=${chosenX})` : ""}${stackTargetText(session, castChoices?.targets ?? [], counterTargetId && pendingAction.type === "spell" ? pendingAction.cardName ?? "a spell" : undefined, castModeLabels(castView, chosenX > 0 ? chosenX : undefined, castChoices))}${sourceZone === "exile" ? " from exile" : ""}.`
     };
     if (sourceZone === "hand") setSelectedHandCardId(undefined);
     beginPendingAction(action, "Stack", preChosenSacrificeTargets);
@@ -1354,7 +1356,7 @@ export function useStackResolution(ctx: GameContext) {
       // default, so they get an actual say instead of the engine silently deciding for them —
       // overriding it just updates the already-resolved permanent's field directly, no re-resolution
       // needed. Captured rather than fired here — see capturedHumanPrompt's own comment above.
-      if (sourceCard && destination === "battlefield" && action.actorSeatId === humanSeat.id) {
+      if (sourceCard && destination === "battlefield" && session.seats.find((seat) => seat.id === action.actorSeatId)?.kind === "human") {
         if (hasChooseCreatureTypeEtb(sourceCard.oracleText)) {
           capturedHumanPrompt = { kind: "choose_creature_type", cardId: sourceCard.id, cardName: sourceCard.name };
         } else if (chooseColorEtb) {

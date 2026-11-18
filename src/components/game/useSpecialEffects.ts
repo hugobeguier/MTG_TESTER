@@ -166,7 +166,9 @@ export function useSpecialEffects(ctx: GameContext) {
     restDestination?: "bottom" | "graveyard",
     // Portent looks at ANOTHER player's library.
     targetSeatId?: string,
-    shuffleOfferSource?: string
+    shuffleOfferSource?: string,
+    // The player doing the looking (the host seat when omitted; a remote friend's seat for their own scry/surveil/dig).
+    forSeatId?: string
   ) {
     // setLibraryLook must not be called from inside setSession's updater (React may invoke that
     // updater more than once, and other setState calls inside it are unreliable) — computed against
@@ -174,11 +176,12 @@ export function useSpecialEffects(ctx: GameContext) {
     // Reproduced live as Diabolic Vision's "look at the top 5, pick one" window never opening at
     // all: the event log line this same call also wrote could still show up (the returned session
     // object was still correct), while the actual look-window state silently never stuck.
-    const seat = session.seats.find((item) => item.id === (targetSeatId ?? humanSeat.id));
+    const looker = (forSeatId ? session.seats.find((item) => item.id === forSeatId) : undefined) ?? humanSeat;
+    const seat = session.seats.find((item) => item.id === (targetSeatId ?? looker.id));
     const cards = (seat?.library ?? []).slice(0, mode === "scry" ? 1 : count);
     setLibraryLook({
-      seatId: targetSeatId ?? humanSeat.id,
-      ...(targetSeatId && targetSeatId !== humanSeat.id ? { lookerSeatId: humanSeat.id } : {}),
+      seatId: targetSeatId ?? looker.id,
+      ...(targetSeatId && targetSeatId !== looker.id ? { lookerSeatId: looker.id } : {}),
       ...(shuffleOfferSource ? { shuffleOfferSource } : {}),
       mode,
       cards,
@@ -190,13 +193,13 @@ export function useSpecialEffects(ctx: GameContext) {
     });
     addEvent(
       mode === "scry"
-        ? `${humanSeat.name} starts scry ${count}.`
+        ? `${looker.name} starts scry ${count}.`
         : mode === "reorder"
-          ? `${humanSeat.name} looks at the top ${cards.length} card${cards.length === 1 ? "" : "s"} and will put them back in any order.`
+          ? `${looker.name} looks at the top ${cards.length} card${cards.length === 1 ? "" : "s"} and will put them back in any order.`
           : mode === "choose_one_bottom"
-            ? `${humanSeat.name} looks at the top ${cards.length} card${cards.length === 1 ? "" : "s"}, may reveal a ${allowedCardFilter ?? "matching"} card to hand, and will put the rest ${restDestination === "graveyard" ? "into the graveyard" : "on the bottom"}.`
-            : `${humanSeat.name} looks at the top ${cards.length} card${cards.length === 1 ? "" : "s"} to ${mode}.`,
-      humanSeat.id
+            ? `${looker.name} looks at the top ${cards.length} card${cards.length === 1 ? "" : "s"}, may reveal a ${allowedCardFilter ?? "matching"} card to hand, and will put the rest ${restDestination === "graveyard" ? "into the graveyard" : "on the bottom"}.`
+            : `${looker.name} looks at the top ${cards.length} card${cards.length === 1 ? "" : "s"} to ${mode}.`,
+      looker.id
     );
   }
 
@@ -320,5 +323,12 @@ export function useSpecialEffects(ctx: GameContext) {
     setPendingRuleChoice({ ...choice, chosenCardIds, chosenDestinations });
   }
 
-  return { activateBasicLandFetchForAgent, activateMyriadLandscapeForAgent, chooseMyriadLandscapeSearch, chooseMyriadLandscapeTapMana, chooseRuleLibraryCard, completeBasicLandFetch, completeMyriadLandscape, keepLimDulVaultCards, repeatLimDulVault, resolveBasicLandFetch, resolveMyriadLandscape, startLibraryLook, startLimDulVaultLook };
+  function closeMyriadSearch() {
+    setMyriadSearch(undefined);
+  }
+  function closeBasicLandFetchSearch() {
+    setBasicLandFetchSearch(undefined);
+  }
+
+  return { closeBasicLandFetchSearch, closeMyriadSearch, activateBasicLandFetchForAgent, activateMyriadLandscapeForAgent, chooseMyriadLandscapeSearch, chooseMyriadLandscapeTapMana, chooseRuleLibraryCard, completeBasicLandFetch, completeMyriadLandscape, keepLimDulVaultCards, repeatLimDulVault, resolveBasicLandFetch, resolveMyriadLandscape, startLibraryLook, startLimDulVaultLook };
 }

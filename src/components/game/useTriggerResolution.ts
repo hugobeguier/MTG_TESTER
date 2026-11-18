@@ -671,7 +671,7 @@ export function useTriggerResolution(ctx: GameContext) {
           allowedCardFilter: "basic land"
         });
       } else if (room === "lost_well") {
-        startLibraryLook("scry", 2);
+        startLibraryLook("scry", 2, undefined, undefined, undefined, undefined, undefined, trigger.controllerSeatId);
       } else {
         const top = (roomOwner.library ?? []).slice(0, 10);
         const candidates = top.filter((card) => card.typeLine.includes("Creature"));
@@ -731,7 +731,7 @@ export function useTriggerResolution(ctx: GameContext) {
       // The human looks at the cards and decides, instead of the automatic keep-everything-good heuristic.
       const lookSeat = session.seats.find((seat) => seat.id === trigger.controllerSeatId)!;
       const isSurveil = trigger.effect.kind === "surveil_cards";
-      startLibraryLook(isSurveil ? "surveil" : "scry", trigger.effect.amount + (isSurveil ? surveilBonusForSeat(lookSeat) : 0));
+      startLibraryLook(isSurveil ? "surveil" : "scry", trigger.effect.amount + (isSurveil ? surveilBonusForSeat(lookSeat) : 0), undefined, undefined, undefined, undefined, undefined, lookSeat.id);
     } else if (accepted && trigger.effect.kind === "connive") {
       // "Draw a card, then discard a card" (Ledger Shredder, ...) needs a real choice of WHICH
       // card to discard — resolveTriggerEffect is a pure function with no access to

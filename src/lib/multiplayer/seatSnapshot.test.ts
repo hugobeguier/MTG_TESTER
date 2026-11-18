@@ -106,3 +106,56 @@ describe("buildSnapshot for a seated viewer", () => {
     expect(() => buildSnapshot(makeInput(), "seat-zzz")).toThrow();
   });
 });
+
+describe("per-seat prompts (seatPrompts.ts) in a seated snapshot", () => {
+  const promptInput = (): SnapshotInput => {
+    const base = makeInput();
+    const session = { ...base.session, seats: base.session.seats.map((s) => (s.id === "seat-a" ? { ...s, board: { ...s.board, battlefield: s.board.battlefield.map((c) => ({ ...c, attacking: true })) } } : s)) };
+    return withPrompts({ ...base, session });
+  };
+  const withPrompts = (base: SnapshotInput): SnapshotInput =>
+    ({
+      ...base,
+      gameStage: "playing",
+      activeSeatId: "seat-c",
+      prompts: {
+        pendingRuleChoice: { id: "r1", kind: "choose_card_from_library", controllerSeatId: "seat-c", sourceCardId: "x", sourceCardName: "SecretSource-c", prompt: "Search", destination: "hand", maxChoices: 1 } as never,
+        libraryLook: { seatId: "seat-b", mode: "scry", cards: [card("seat-b-l0", "SecretLib-b0", "library")], remaining: 1 },
+        manaChoice: { seatId: "seat-c", cardId: "seat-c-bf", cardName: "SecretMana-c", location: "battlefield", choices: ["G", "U"] },
+        blockChoice: { attackerSeatId: "seat-a", defenderSeatId: "seat-c", attackerCardId: "seat-a-bf", targetId: "seat-c" }
+      },
+      landPlayed: { "seat-b": true }
+    });
+
+  it("gives each seat only the prompts addressed to it, and never puts another seat's prompt content on the wire", () => {
+    const b = buildSnapshot(promptInput(), "seat-b");
+    const c = buildSnapshot(promptInput(), "seat-c");
+    const a = buildSnapshot(promptInput(), "seat-a");
+    expect(b.prompts?.libraryLook?.cards.map((x) => x.name)).toEqual(["SecretLib-b0"]);
+    expect(b.prompts?.ruleChoice).toBeUndefined();
+    expect(b.prompts?.manaChoice).toBeUndefined();
+    expect(b.prompts?.blockChoice).toBeUndefined();
+    expect(c.prompts?.manaChoice).toEqual({ cardName: "SecretMana-c", choices: ["G", "U"] });
+    expect(c.prompts?.blockChoice).toBeDefined();
+    expect(c.prompts?.libraryLook).toBeUndefined();
+    expect(a.prompts?.libraryLook).toBeUndefined();
+    const bJson = JSON.stringify(b);
+    const cJson = JSON.stringify(c);
+    for (const secret of ["SecretMana-c", "SecretSource-c", ...secretsOf("c")]) expect(bJson, secret).not.toContain(secret);
+    for (const secret of ["SecretLib-b0", ...secretsOf("b")]) expect(cJson, secret).not.toContain(secret);
+    // a spectator gets no prompts at all
+    expect(buildSnapshot(promptInput(), "spectator").prompts).toBeUndefined();
+    expect(JSON.stringify(buildSnapshot(promptInput(), "spectator"))).not.toContain("SecretMana-c");
+  });
+
+  it("carries the viewer's own ack, the pause names, and renames the host seat 'You' for guests", () => {
+    const input = promptInput();
+    input.session = { ...input.session, seats: input.session.seats.map((s) => (s.id === "seat-a" ? { ...s, name: "You" } : s)), events: [{ id: "e9", at: "t", seatId: "seat-a", message: "You pass to main phase." }, ...input.session.events] };
+    const snap = buildSnapshot({ ...input, ack: { seq: 7, error: "it is not your turn" }, pausedFor: ["Player c"] }, "seat-b");
+    expect(snap.ack).toEqual({ seq: 7, error: "it is not your turn" });
+    expect(snap.pausedFor).toEqual(["Player c"]);
+    expect(snap.session.seats.find((s) => s.id === "seat-a")?.name).toBe("Hugo");
+    expect(snap.session.events[0].message).toBe("Hugo passes to main phase.");
+    expect(buildSnapshot(input, "spectator").ack).toBeUndefined();
+  });
+});

@@ -17,8 +17,8 @@ export interface IntentEvent {
 export interface IntentEntry<A extends unknown[] = unknown[]> {
   /** zod schema of the args array (a tuple); anything else is rejected before any handler runs. */
   schema: ZodType<A>;
-  /** Game-state check for the acting seat; return a reason to refuse (wrong stage, already decided, ...). */
-  check?: (seatId: string) => string | undefined;
+  /** Game-state check for the acting seat (and the validated args); return a reason to refuse (wrong stage, not your priority, a seat id that is not yours, ...). */
+  check?: (seatId: string, ...args: A) => string | undefined;
   /** Runs the host handler as `seatId`. */
   call: (seatId: string, ...args: A) => void;
 }
@@ -33,9 +33,10 @@ export function dispatchIntent(registry: IntentRegistry, event: IntentEvent, sea
   if (!entry) return { ok: false, reason: `unknown intent ${event.name}` };
   const seatId = seatOfSlot(event.fromSeatId);
   if (!seatId) return { ok: false, reason: "this guest holds no seat" };
-  const parsed = entry.schema.safeParse(event.args);
+  // JSON turns a skipped optional argument (undefined) into null; a table callback never passes null, so read it back as undefined.
+  const parsed = entry.schema.safeParse(Array.isArray(event.args) ? event.args.map((arg) => (arg === null ? undefined : arg)) : event.args);
   if (!parsed.success) return { ok: false, reason: `bad arguments for ${event.name}` };
-  const refusal = entry.check?.(seatId);
+  const refusal = entry.check?.(seatId, ...parsed.data);
   if (refusal) return { ok: false, reason: refusal };
   entry.call(seatId, ...parsed.data);
   return { ok: true };

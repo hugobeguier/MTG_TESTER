@@ -224,9 +224,10 @@ export function useCasting(ctx: GameContext) {
     if (pendingAction) {
       // Something is on the stack and the human clicked a card: an instant/flash card is a RESPONSE, not a main-phase play — route it there instead of refusing
       // (the "Can't play a card while Monstrous Onslaught is still on the stack" dead end).
-      const clicked = seatId === humanSeat.id && (sourceZone === "hand" || sourceZone === "exile") ? humanSeat.board.hand.find((item) => item.id === cardId) : undefined;
-      if (clicked && !isLandCard(clicked) && canCastAtInstantSpeed(clicked, seatHasFlashGrant(humanSeat, clicked))) {
-        respondWithCard(cardId, sourceZone === "exile" ? "exile" : "hand");
+      const clickedSeat = session.seats.find((item) => item.id === seatId);
+      const clicked = clickedSeat?.kind === "human" && (sourceZone === "hand" || sourceZone === "exile") ? clickedSeat.board.hand.find((item) => item.id === cardId) : undefined;
+      if (clicked && !isLandCard(clicked) && canCastAtInstantSpeed(clicked, seatHasFlashGrant(clickedSeat!, clicked))) {
+        respondWithCard(cardId, sourceZone === "exile" ? "exile" : "hand", undefined, undefined, undefined, seatId);
         return;
       }
       // Said out loud: a click that silently does nothing looks like a broken card (Breaching Dragonstorm's free cast).
@@ -1076,7 +1077,7 @@ export function useCasting(ctx: GameContext) {
 
   function castFromExile(seatId: string, cardId: string) {
     if (pendingAction) {
-      respondWithCard(cardId, "exile");
+      respondWithCard(cardId, "exile", undefined, undefined, undefined, seatId);
       return;
     }
     // An Adventure/Omen-shaped card in exile can only be cast as its permanent face from here on
@@ -1216,7 +1217,7 @@ export function useCasting(ctx: GameContext) {
     if (choice.resumeVia === "playCard") {
       playCard(choice.controllerSeatId, choice.sourceCardId, choice.position, choice.sourceZone, choice.faceIndex, [chosenCard]);
     } else {
-      respondWithCard(choice.sourceCardId, choice.sourceZone === "command" || choice.sourceZone === "graveyard" || choice.sourceZone === "library" ? "hand" : choice.sourceZone, [chosenCard], undefined, choice.faceIndex);
+      respondWithCard(choice.sourceCardId, choice.sourceZone === "command" || choice.sourceZone === "graveyard" || choice.sourceZone === "library" ? "hand" : choice.sourceZone, [chosenCard], undefined, choice.faceIndex, choice.controllerSeatId);
     }
   }
 
@@ -1264,7 +1265,7 @@ export function useCasting(ctx: GameContext) {
     const resume = choice.resume;
     window.setTimeout(() => {
       if (resume.via === "playCard") playCard(resume.seatId, resume.cardId, resume.position, resume.sourceZone, picked.faceIndex, resume.sacrificeTargets);
-      else respondWithCard(resume.cardId, resume.sourceZone, undefined, undefined, picked.faceIndex);
+      else respondWithCard(resume.cardId, resume.sourceZone, undefined, undefined, picked.faceIndex, resume.seatId);
     }, 0);
   }
 
@@ -1284,7 +1285,7 @@ export function useCasting(ctx: GameContext) {
     setPendingRuleChoice({
       id: crypto.randomUUID(),
       kind: "choose_cast_targets",
-      controllerSeatId: base.resume.via === "playCard" ? base.resume.seatId : humanSeat.id,
+      controllerSeatId: base.resume.seatId ?? humanSeat.id,
       sourceCardId: base.planCard.id,
       sourceCardName: base.planCard.name,
       planCard: base.planCard,
@@ -1317,7 +1318,7 @@ export function useCasting(ctx: GameContext) {
     const resume = choice.resume;
     window.setTimeout(() => {
       if (resume.via === "playCard") playCard(resume.seatId, resume.cardId, resume.position, resume.sourceZone, resume.faceIndex, resume.sacrificeTargets, answers, resume.altChoice);
-      else respondWithCard(resume.cardId, resume.sourceZone, resume.sacrificeTargets, answers, resume.faceIndex);
+      else respondWithCard(resume.cardId, resume.sourceZone, resume.sacrificeTargets, answers, resume.faceIndex, resume.seatId);
     }, 0);
   }
 

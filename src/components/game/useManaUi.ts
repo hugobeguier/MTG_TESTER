@@ -5,6 +5,7 @@ import { abilityOracleText } from "@/lib/typeGrants";
 import { addManaToPool, addPools, chooseManaSourcesForCost, effectiveManaOracleText, emptyManaPool, isAvailableManaSource, isSacrificeManaSource, manaAbilityCounterRemovalKind, manaChoicesForCard, manaPoolTotal, manaProducedBy, payCostFromPool, restrictedBatchUsable, signetAbility, spendManaSources, tapVisibleCard } from "@/engine/mana";
 import { basicLandFetchCostRequiresTap, isBasicLandFetchAbility } from "@/lib/oracleClauses";
 import { genericCostShim } from "@/engine/effects";
+import { isSimpleManaSourcePermanent } from "@/engine/simpleManaSource";
 import { isEquipment } from "@/lib/attachments";
 import { parseGenericSacrificeAbilities, parseGenericTapAbilities } from "@/lib/activatedAbilities";
 import { type GameContext, lateFn } from "./context";
@@ -12,7 +13,7 @@ import { type GameContext, lateFn } from "./context";
 export function useManaUi(ctx: GameContext) {
   const { session, setSession, setInspectedCard, humanSeat } = ctx;
   const { setMyriadTapChoice } = ctx.choices;
-  const { manaPools, setManaPools, setCopyMana, manaContributions, setManaContributions, restrictedManaBatches, setRestrictedManaBatches, setManaChoice } = ctx.mana;
+  const { manaPools, setManaPools, setCopyMana, manaContributions, setManaContributions, restrictedManaBatches, setRestrictedManaBatches, manaChoice, setManaChoice } = ctx.mana;
   const addEvent = lateFn(ctx, "addEvent");
 
   function poolForSeat(seatId: string) {
@@ -123,27 +124,6 @@ export function useManaUi(ctx: GameContext) {
   // there is to decide, so a single click should just do it (or open the color-choice modal
   // toggleTapCard already shows for multi-color sources), instead of requiring the hidden hover +
   // "T" keyboard shortcut to discover that tapping is even possible.
-  function isSimpleManaSourcePermanent(card: VisibleCard, seat: PlayerSeat) {
-    // A card with a SECOND real ability that also costs {T} isn't "simple" — besides tapping for
-    // mana it has something else worth choosing (a generic sacrifice ability like Mind Stone's "{1},
-    // {T}, Sacrifice this artifact: Draw a card," a generic tap ability, or a land-fetch ability
-    // requiring {T}), so a bare click can't just auto-resolve to the mana tap; it needs the inspector
-    // so that other ability is actually reachable (see the dedicated Myriad Landscape branch above,
-    // and toggleTapCard's own matching dispatch check below, for the same shape).
-    // Used to special-case only Myriad Landscape by name, which meant Mind Stone's identically-shaped
-    // sacrifice ability was silently unreachable by mouse click — reported live: clicking it (or
-    // right-clicking) always just tapped it for mana, with no way to ever reach the sacrifice-draw
-    // ability once it was already tapped.
-    return (
-      !card.typeLine.includes("Creature") &&
-      !isEquipment(card) &&
-      isAvailableManaSource(card, seat, session.seats) &&
-      !parseGenericSacrificeAbilities(abilityOracleText(card)).some((ability) => ability.costTap) &&
-      parseGenericTapAbilities(abilityOracleText(card)).length === 0 &&
-      !(isBasicLandFetchAbility(card) && basicLandFetchCostRequiresTap(card))
-    );
-  }
-
   function handleInspectCard(card: VisibleCard) {
     const ownerSeat = session.seats.find((seat) => seat.board.battlefield.some((item) => item.id === card.id));
     // A battlefield click hands this function whatever card object was baked into the 3D mesh's
@@ -170,11 +150,20 @@ export function useManaUi(ctx: GameContext) {
       }
       return;
     }
-    if (ownerSeat?.id === humanSeat.id && isSimpleManaSourcePermanent(liveCard, humanSeat)) {
+    if (ownerSeat?.id === humanSeat.id && isSimpleManaSourcePermanent(liveCard, humanSeat, session.seats)) {
       toggleTapCard(humanSeat.id, liveCard.id, "battlefield");
       return;
     }
     setInspectedCard(liveCard);
+  }
+
+  // A remote friend clicked one of their own permanents: the same one-click mana tap as above (their table decides locally whether a click is a tap or an inspect, and
+  // only sends this intent for a tap). Never opens the host's inspector.
+  function clickPermanentForSeat(seatId: string, cardId: string) {
+    const seat = session.seats.find((item) => item.id === seatId);
+    const card = seat?.board.battlefield.find((item) => item.id === cardId);
+    if (!seat || seat.kind !== "human" || !card || card.tapped) return;
+    if (card.name === "Myriad Landscape" || isSimpleManaSourcePermanent(card, seat, session.seats)) toggleTapCard(seatId, cardId, "battlefield");
   }
 
   function toggleTapCard(seatId: string, cardId: string, location: "battlefield" | "command") {
@@ -184,7 +173,7 @@ export function useManaUi(ctx: GameContext) {
     // since the "T" keyboard shortcut (see ThreeGameTable's setMovementKey) calls this function
     // directly, bypassing handleInspectCard entirely — without this, that shortcut always just
     // tapped Myriad Landscape for colorless mana with no way to ever reach its search ability.
-    if (seatId === humanSeat.id && location === "battlefield" && card?.name === "Myriad Landscape" && !card.tapped && seat) {
+    if (seat?.kind === "human" && location === "battlefield" && card?.name === "Myriad Landscape" && !card.tapped && seat) {
       // Same pool-first check as handleInspectCard's own Myriad Landscape branch above (this
       // shortcut bypasses that one entirely, so it needs its own copy of the fix too).
       const searchCostShim = genericCostShim(2);
@@ -326,5 +315,16 @@ export function useManaUi(ctx: GameContext) {
     setManaChoice(undefined);
   }
 
-  return { addRestrictedManaBatch, clearAllManaPools, clearManaContributions, clearRestrictedManaForSeat, handleInspectCard, poolForSeat, restrictedManaPoolForSeat, setSeatManaPool, spendRestrictedMana, tapForMana, tapPermanentForMana, toggleTapCard };
+  // Answers to the mana colour box and the Myriad Landscape box (the table callbacks onChooseMana / onCancelManaChoice / onCancelMyriadTapChoice).
+  function chooseManaColor(color: ManaColor) {
+    if (manaChoice) tapForMana(manaChoice.seatId, manaChoice.cardId, manaChoice.location, color);
+  }
+  function cancelManaChoice() {
+    setManaChoice(undefined);
+  }
+  function cancelMyriadTapChoice() {
+    setMyriadTapChoice(undefined);
+  }
+
+  return { cancelManaChoice, cancelMyriadTapChoice, chooseManaColor, addRestrictedManaBatch, clickPermanentForSeat, clearAllManaPools, clearManaContributions, clearRestrictedManaForSeat, handleInspectCard, poolForSeat, restrictedManaPoolForSeat, setSeatManaPool, spendRestrictedMana, tapForMana, tapPermanentForMana, toggleTapCard };
 }

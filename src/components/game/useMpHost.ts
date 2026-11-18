@@ -52,7 +52,19 @@ function readSnapshotInput(ctx: GameContext, hostName: string): SnapshotInput {
     hostManaPool: ctx.mana.manaPools[humanSeat.id],
     manaPools: ctx.mana.manaPools,
     keptHands: ctx.choices.keptHands,
-    mulliganReturnCardIds: ctx.choices.mulliganReturnCardIds
+    mulliganReturnCardIds: ctx.choices.mulliganReturnCardIds,
+    prompts: {
+      pendingRuleChoice: ctx.choices.pendingRuleChoice,
+      libraryLook: ctx.choices.libraryLook,
+      blockChoice: ctx.choices.blockChoice,
+      manaChoice: ctx.mana.manaChoice,
+      myriadTapChoice: ctx.choices.myriadTapChoice,
+      myriadSearch: ctx.choices.myriadSearch,
+      basicLandFetchSearch: ctx.choices.basicLandFetchSearch,
+      manualLibrarySearch: ctx.choices.manualLibrarySearch
+    },
+    landPlayed: Object.fromEntries(session.seats.filter((seat) => seat.kind === "human").map((seat) => [seat.id, ctx.late.hasPlayedLandThisTurn(seat.id, session.turn)])),
+    pausedFor: ctx.mpPausedFor
   };
 }
 
@@ -94,7 +106,7 @@ export function useMpHost(ctx: GameContext, config: MpHostConfig): HostState {
       for (const slot of guestSlots) {
         // A guest sitting at a remote seat gets that seat's view; a guest without a seat (late joiner) is a spectator.
         const seatId = seatForSlot(live.session, slot);
-        const snapshot = buildSnapshot(input, seatId ?? SPECTATOR_VIEWER);
+        const snapshot = buildSnapshot(seatId ? { ...input, ack: acksRef.current[slot] } : input, seatId ?? SPECTATOR_VIEWER);
         const gate = gateFor(slot);
         const rev = gate.admit(snapshotFingerprint(snapshot));
         if (rev === undefined) continue;
@@ -171,8 +183,19 @@ export function useMpHost(ctx: GameContext, config: MpHostConfig): HostState {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled]);
 
-  // Publish on every relevant game-state change (debounced; unchanged snapshots are skipped by the gate).
   const { session, activeSeatId, prioritySeatId, gameStage, mode } = ctx;
+  // Friends whose seat is taken but whose connection is gone: the game waits for them (every game effect is gated by ctx.mpPausedFor).
+  const connectedSlots = new Set(connectedGuests(state).map((g) => g.seatId));
+  const absent = enabled && mode === "game" ? session.seats.filter((seat) => seat.remoteSlot !== undefined && !seat.hasLost && !connectedSlots.has(seat.remoteSlot)).map((seat) => seat.name) : [];
+  const absentKey = JSON.stringify(absent);
+  useEffect(() => {
+    ctx.setMpPausedFor((current) => (JSON.stringify(current) === absentKey ? current : absent));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [absentKey]);
+  const { listenerRef: gameIntentRef, acks } = useMpIntents(ctx, enabled, absent.length > 0);
+  const acksRef = useRef(acks);
+  acksRef.current = acks;
+  // Publish on every relevant game-state change (debounced; unchanged snapshots are skipped by the gate).
   const { pendingAction, stackActions, priorityPasses } = ctx.stack;
   const guestKey = connectedGuests(state)
     .map((g) => g.seatId)
@@ -181,9 +204,8 @@ export function useMpHost(ctx: GameContext, config: MpHostConfig): HostState {
     if (!enabled) return;
     schedule();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, session, activeSeatId, prioritySeatId, gameStage, mode, pendingAction, stackActions, priorityPasses, ctx.choices.mulligans, ctx.choices.keptHands, ctx.choices.mulliganReturnCardIds, ctx.mana.manaPools, guestKey]);
+  }, [enabled, session, activeSeatId, prioritySeatId, gameStage, mode, pendingAction, stackActions, priorityPasses, ctx.choices.mulligans, ctx.choices.keptHands, ctx.choices.mulliganReturnCardIds, ctx.mana.manaPools, guestKey, acks, ctx.mpPausedFor, ctx.choices.pendingRuleChoice, ctx.choices.libraryLook, ctx.choices.blockChoice, ctx.mana.manaChoice, ctx.choices.myriadTapChoice, ctx.choices.myriadSearch, ctx.choices.basicLandFetchSearch, ctx.choices.manualLibrarySearch]);
 
-  const gameIntentRef = useMpIntents(ctx, enabled);
   useMpLobby({ ctx, state, enabled, hostName, tokenRef, intentRef, post, removeGuest: (slot) => dispatch({ type: "guest_removed", seatId: slot }) });
 
   return state;

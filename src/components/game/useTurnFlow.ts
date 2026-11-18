@@ -75,10 +75,10 @@ export function useTurnFlow(ctx: GameContext) {
     beginPendingAction(action, "Priority window");
   }
 
-  function endTurn() {
+  function endTurn(actingSeatId: string = humanSeat.id) {
     if (pendingAction) return;
     const activeSeat = session.seats.find((seat) => seat.id === activeSeatId);
-    if (!activeSeat || activeSeat.id !== humanSeat.id) return;
+    if (!activeSeat || activeSeat.id !== actingSeatId) return;
     // Rule 514.1: discard down to the maximum hand size before the turn actually ends. The
     // shortcut this button takes skips straight past the cleanup step (where that normally
     // happens) to the next player's untap step, so it has to check for this itself instead of
@@ -594,7 +594,7 @@ export function useTurnFlow(ctx: GameContext) {
     // scry is unaffected, only surveil.
     const count = mode === "surveil" ? baseCount + surveilBonusForSeat(seat) : baseCount;
     if (seat.kind === "human") {
-      startLibraryLook(mode, count);
+      startLibraryLook(mode, count, undefined, undefined, undefined, undefined, undefined, seatId);
     } else {
       setSession((current) => resolveAgentLibraryLookWorkflow(current, seatId, sourceCard.name, mode === "scry" ? "scry_cards" : "surveil_cards", count));
     }

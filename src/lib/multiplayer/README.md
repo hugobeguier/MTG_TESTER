@@ -49,3 +49,15 @@ Friend (Hamachi): `http://<host-hamachi-ip>:3000/mp/join`, enter the code and a 
   close over render-time state). `intentProxy.ts` `ACTING_GUEST_INTENTS` must match that registry (stage 3: `onKeepHand`, `onMulligan`, `onToggleMulliganReturnCard`).
 * Mulligans run in parallel: host handlers take an optional seat id; the game goes to "playing" when the last human seat keeps. A friend's leylines are auto-played (not asked yet).
 * `RemoteTable` for a seated friend passes `guestReadOnly` to `ThreeGameTable` (hand selectable/inspectable, all action controls off).
+
+## M4 stage 4: friends play their seat
+
+* `remoteSeatPolicy.ts`: `remoteSeatsCanAct = true`; a remote seat always gets a priority window on a legal response (`priorityStopsForSeat`, full control) and its own turn
+  pauses at `remoteTurnStopSettings` (main phases + declare attackers). The old "skip remote seat turn" effect is now a no-op fallback.
+* `intentSpecs.ts` (pure, shared): every wire intent = zod args + `when` (which game state allows it) + `seatArgs` (must equal the sender's seat). `intentProxy.ts` (guest) takes
+  arity from it; `components/game/mpIntents.ts` (host) builds the registry from it and maps each name to the host handler (handlers take a seat id; one intent per React commit).
+  Each processed intent is acked (`MpSnapshot.ack`: clientSeq + error text) and RemoteTable shows refusals as a toast.
+* `seatPrompts.ts` (pure): per-seat prompts (rule/block/mana/library-look/search boxes, hand hints, attack targets, stack notes) in `MpSnapshot.prompts` for the viewer's seat only
+  (leak test in `seatSnapshot.test.ts`). `viewerText.ts` rewrites the host's "You ..." log lines for guests.
+* Disconnect: a seated friend whose slot is not connected pauses the game (`ctx.mpPausedFor`; useGameEffects treats the stage as "paused"; intents refused; banner on both sides).
+* Host-only controls are hidden for friends (`guestActing`); Save is hidden in /mp/host.

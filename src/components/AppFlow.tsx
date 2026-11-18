@@ -42,6 +42,7 @@ import { useSpecialEffects } from "./game/useSpecialEffects";
 import { useGameEffects } from "./game/useGameEffects";
 import { hostHumanSeat } from "@/lib/multiplayer/seatMap";
 import { useMpHost } from "./game/useMpHost";
+import { MpPauseBanner } from "./MpPauseBanner";
 import { findSpellSourceCard, pendingActionRequiredPasses, resolutionPromptNote, withPendingActionSourceCard } from "@/engine/priority";
 import { spellIsImmuneToCounters } from "@/engine/legalActions";
 import { canCastAtInstantSpeed, handCardFaceOptions, roomDoorFaces, seatHasFlashGrant } from "@/engine/casting";
@@ -86,7 +87,7 @@ export function AppFlow({ initialSession, ollama, multiplayerHost = false }: { i
   const late = {} as HandlerApi;
   const ctx: GameContext = { ...state, late };
   Object.assign(late, useManaUi(ctx), useGameSetup(ctx), useTurnFlow(ctx), useCombatUi(ctx), useStackResolution(ctx), useTriggerResolution(ctx), useCasting(ctx), useAbilities(ctx), useChoicePrompts(ctx), useAgentDriver(ctx), useGameActions(ctx), useRulesAdvisor(ctx), useSpecialEffects(ctx));
-  const { acceptCommanderZoneChoice, acceptMiracleOffer, acceptOptionalTrigger, activateEquip, activateGenericManaAbility, activateGenericSacrificeAbility, activateGenericTapAbility, activateGraveyardAbility, activateLoyaltyAbility, activateManlandAnimation, activateSelfUntapAbility, advanceTurn, buildDeck, cancelRuleChoice, castCommander, castFromExile, castFromGraveyard, changeCounter, changeLife, chooseAuraRetarget, chooseBattlefieldCreatureTarget, chooseColorChoice, chooseCreatureToSacrificeForCast, chooseCreatureTypeChoice, chooseEachPlayerSacrificeTarget, chooseEffectTarget, chooseGraveyardReanimationTarget, chooseModalOption, chooseMyriadLandscapeSearch, chooseMyriadLandscapeTapMana, chooseNextUpkeepTrigger, chooseProliferateTargets, chooseRuleLibraryCard, chooseSacrificeCostTarget, closeLibraryLook, completeBasicLandFetch, completeChoosePermanentToBlink, completeConniveDiscard, completeDiscardChoice, completeMyriadLandscape, completePutCardsOnLibrary, completeReturnLandToHand, confirmAttackTriggerManaColors, confirmEquipTarget, confirmHumanBlockers, currentCleanSaveStopStatus, cycleCard, declareHumanAttack, declineCommanderZoneChoice, declineEffectTarget, declineMiracleOffer, declineOptionalTrigger, deleteSavedGameEntry, drawCard, endTurn, finishRuleLibrarySearch, handleInspectCard, hasPlayedLandThisTurn, keepLibraryLookCardOnTop, keepLimDulVaultCards, keepOpeningHand, loadSavedGame, moveBattlefieldCard, moveCardToExile, moveCardToGraveyard, moveCardToHand, mulliganOpeningHand, openResponseWindow, orderLibraryLookCardOnTop, passHumanBlocks, passPriority, payCumulativeUpkeep, playCard, poolForSeat, putLibraryLookCardInGraveyard, putLibraryLookCardOnBottom, repeatLimDulVault, resolveBasicLandFetch, resolveMyriadLandscape, resolvePendingActionNow, resolvePendingTrigger, resolveSacrificeAbilityEffect, resolveTapAbilityEffect, respondWithSelectedCard, sacrificeRuleChoiceSource, saveGameNow, searchLibraryCardToHand, sendLibraryLookCardToHand, shuffleLibrary, startGame, tapForMana, tapPermanentForMana, toggleHumanBlocker, toggleMulliganReturnCard, toggleTapCard, unlockRoomDoor, updateConfig } = late;
+  const { cancelManaChoice, cancelMyriadTapChoice, chooseManaColor, closeBasicLandFetchSearch, closeLibrarySearch, closeMyriadSearch, openManualLibrarySearch, searchOrChooseLibraryCard, acceptCommanderZoneChoice, acceptMiracleOffer, acceptOptionalTrigger, activateEquip, activateGenericManaAbility, activateGenericSacrificeAbility, activateGenericTapAbility, activateGraveyardAbility, activateLoyaltyAbility, activateManlandAnimation, activateSelfUntapAbility, advanceTurn, buildDeck, cancelRuleChoice, castCommander, castFromExile, castFromGraveyard, changeCounter, changeLife, chooseAuraRetarget, chooseBattlefieldCreatureTarget, chooseColorChoice, chooseCreatureToSacrificeForCast, chooseCreatureTypeChoice, chooseEachPlayerSacrificeTarget, chooseEffectTarget, chooseGraveyardReanimationTarget, chooseModalOption, chooseMyriadLandscapeSearch, chooseMyriadLandscapeTapMana, chooseNextUpkeepTrigger, chooseProliferateTargets, chooseRuleLibraryCard, chooseSacrificeCostTarget, closeLibraryLook, completeBasicLandFetch, completeChoosePermanentToBlink, completeConniveDiscard, completeDiscardChoice, completeMyriadLandscape, completePutCardsOnLibrary, completeReturnLandToHand, confirmAttackTriggerManaColors, confirmEquipTarget, confirmHumanBlockers, currentCleanSaveStopStatus, cycleCard, declareHumanAttack, declineCommanderZoneChoice, declineEffectTarget, declineMiracleOffer, declineOptionalTrigger, deleteSavedGameEntry, drawCard, endTurn, finishRuleLibrarySearch, handleInspectCard, hasPlayedLandThisTurn, keepLibraryLookCardOnTop, keepLimDulVaultCards, keepOpeningHand, loadSavedGame, moveBattlefieldCard, moveCardToExile, moveCardToGraveyard, moveCardToHand, mulliganOpeningHand, openResponseWindow, orderLibraryLookCardOnTop, passHumanBlocks, passPriority, payCumulativeUpkeep, playCard, poolForSeat, putLibraryLookCardInGraveyard, putLibraryLookCardOnBottom, repeatLimDulVault, resolveBasicLandFetch, resolveMyriadLandscape, resolvePendingActionNow, resolvePendingTrigger, resolveSacrificeAbilityEffect, resolveTapAbilityEffect, respondWithSelectedCard, sacrificeRuleChoiceSource, saveGameNow, searchLibraryCardToHand, sendLibraryLookCardToHand, shuffleLibrary, startGame, tapForMana, tapPermanentForMana, toggleHumanBlocker, toggleMulliganReturnCard, toggleTapCard, unlockRoomDoor, updateConfig } = late;
   // All useEffect blocks (original relative order), after every handler hook.
   useGameEffects(ctx);
   useMpHost(ctx, { enabled: multiplayerHost }); // read-only publisher for /mp/host; no-op otherwise
@@ -207,6 +208,7 @@ export function AppFlow({ initialSession, ollama, multiplayerHost = false }: { i
       <button className="game-back-button" type="button" onClick={() => setMode("setup")} aria-label="Back to setup">
         ×
       </button>
+      {multiplayerHost ? null : (
       <button
         className="game-save-button"
         type="button"
@@ -216,6 +218,8 @@ export function AppFlow({ initialSession, ollama, multiplayerHost = false }: { i
       >
         Save
       </button>
+      )}
+      <MpPauseBanner names={state.mpPausedFor} />
       <ThreeGameTable
         stackPrompts={stackPrompts}
         stackFeed={stackFeed}
@@ -238,7 +242,7 @@ export function AppFlow({ initialSession, ollama, multiplayerHost = false }: { i
         manaPool={poolForSeat(humanSeat.id)}
         manaChoice={manaChoice?.seatId === humanSeat.id ? manaChoice : undefined}
         myriadTapChoice={myriadTapChoice?.seatId === humanSeat.id ? myriadTapChoice : undefined}
-        blockChoice={blockChoiceView(session, blockChoice)}
+        blockChoice={blockChoiceView(session, blockChoice?.defenderSeatId === humanSeat.id ? blockChoice : undefined)}
         selectedCardCanRespond={selectedCardCanRespond}
         selectedCardFaceOptions={selectedCardFaceOptions}
         onPlayCardFace={(seatId, cardId, faceIndex) => playCard(seatId, cardId, undefined, "hand", faceIndex)}
@@ -246,7 +250,7 @@ export function AppFlow({ initialSession, ollama, multiplayerHost = false }: { i
         onMulligan={() => mulliganOpeningHand()}
         onToggleMulliganReturnCard={(card) => toggleMulliganReturnCard(card)}
         onAdvanceTurn={advanceTurn}
-        onEndTurn={endTurn}
+        onEndTurn={() => endTurn()}
         onDrawCard={drawCard}
         onInspectCard={handleInspectCard}
         onCloseInspectCard={() => setInspectedCard(undefined)}
@@ -280,7 +284,7 @@ export function AppFlow({ initialSession, ollama, multiplayerHost = false }: { i
         onPayCumulativeUpkeep={payCumulativeUpkeep}
         onSacrificeRuleSource={sacrificeRuleChoiceSource}
         onShuffleLibrary={shuffleLibrary}
-        onOpenLibrarySearch={() => setManualLibrarySearch({ seatId: humanSeat.id, destination: "hand" })}
+        onOpenLibrarySearch={() => openManualLibrarySearch(humanSeat.id)}
         onMoveCardToGraveyard={moveCardToGraveyard}
         onMoveCardToExile={moveCardToExile}
         onMoveCardToHand={moveCardToHand}
@@ -298,7 +302,7 @@ export function AppFlow({ initialSession, ollama, multiplayerHost = false }: { i
         onActivateEquip={activateEquip}
         onActivateManlandAnimation={activateManlandAnimation}
         onChangeLife={changeLife}
-        libraryLook={libraryLook}
+        libraryLook={libraryLook && (libraryLook.lookerSeatId ?? libraryLook.seatId) === humanSeat.id ? libraryLook : undefined}
         ruleChoice={ruleChoiceView(pendingRuleChoice, humanSeat, manualLibrarySearch, session)}
         onAcceptMiracle={acceptMiracleOffer}
         onDeclineMiracle={declineMiracleOffer}
@@ -325,31 +329,22 @@ export function AppFlow({ initialSession, ollama, multiplayerHost = false }: { i
         onChooseBattlefieldCreatureTarget={chooseBattlefieldCreatureTarget}
         onChooseAuraRetarget={chooseAuraRetarget}
         onChooseEquipTarget={confirmEquipTarget}
-        myriadSearchCards={myriadSearch ? getMyriadLandscapeOptions(humanSeat.library ?? []) : undefined}
+        myriadSearchCards={myriadSearch?.seatId === humanSeat.id ? getMyriadLandscapeOptions(humanSeat.library ?? []) : undefined}
         basicLandFetchSearch={
-          basicLandFetchSearch
+          basicLandFetchSearch?.seatId === humanSeat.id
             ? {
                 sourceCardName: basicLandFetchSearch.sourceCardName,
                 cards: getBasicLandFetchOptions(humanSeat.library ?? [])
               }
             : undefined
         }
-        onCloseLibrarySearch={() => {
-          setManualLibrarySearch(undefined);
-          if (pendingRuleChoice?.controllerSeatId === humanSeat.id) cancelRuleChoice();
-        }}
+        onCloseLibrarySearch={() => closeLibrarySearch(humanSeat.id)}
         onChooseNextTrigger={chooseNextUpkeepTrigger}
-        onSearchLibraryCardToHand={(cardId, destination) => {
-          if (pendingRuleChoice?.controllerSeatId === humanSeat.id) {
-            chooseRuleLibraryCard(cardId, destination);
-            return;
-          }
-          searchLibraryCardToHand(cardId);
-        }}
+        onSearchLibraryCardToHand={(cardId, destination) => searchOrChooseLibraryCard(humanSeat.id, cardId, destination)}
         onFinishLibrarySearch={finishRuleLibrarySearch}
-        onCloseMyriadSearch={() => setMyriadSearch(undefined)}
+        onCloseMyriadSearch={closeMyriadSearch}
         onCompleteMyriadSearch={completeMyriadLandscape}
-        onCloseBasicLandFetchSearch={() => setBasicLandFetchSearch(undefined)}
+        onCloseBasicLandFetchSearch={closeBasicLandFetchSearch}
         onCompleteBasicLandFetchSearch={completeBasicLandFetch}
         onKeepLibraryLookCardOnTop={keepLibraryLookCardOnTop}
         onOrderLibraryLookCardOnTop={orderLibraryLookCardOnTop}
@@ -361,11 +356,11 @@ export function AppFlow({ initialSession, ollama, multiplayerHost = false }: { i
         onCloseLibraryLook={closeLibraryLook}
         onSelectHandCard={(card) => setSelectedHandCardId((current) => (current === card.id ? undefined : card.id))}
         onToggleTapCard={toggleTapCard}
-        onChooseMana={(color) => manaChoice && tapForMana(manaChoice.seatId, manaChoice.cardId, manaChoice.location, color)}
-        onCancelManaChoice={() => setManaChoice(undefined)}
+        onChooseMana={chooseManaColor}
+        onCancelManaChoice={cancelManaChoice}
         onChooseMyriadTapMana={chooseMyriadLandscapeTapMana}
         onChooseMyriadTapSearch={chooseMyriadLandscapeSearch}
-        onCancelMyriadTapChoice={() => setMyriadTapChoice(undefined)}
+        onCancelMyriadTapChoice={cancelMyriadTapChoice}
         inspectedCard={inspectedCard}
         selectedCardId={selectedHandCardId}
         lockedRoomDoorFaceIndex={inspectedRoomLockedFaceIndex}

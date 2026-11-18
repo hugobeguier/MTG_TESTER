@@ -404,7 +404,10 @@ export function useRulesAdvisor(ctx: GameContext) {
           count,
           workflow.allowedCardFilter,
           lookWorkflow === "reorder_top_cards" || lookWorkflow === "scry_cards" ? workflow.drawCountAfter : undefined,
-          lookWorkflow === "look_at_top_cards_reveal_type_to_hand" ? workflow.restDestination : undefined
+          lookWorkflow === "look_at_top_cards_reveal_type_to_hand" ? workflow.restDestination : undefined,
+          undefined,
+          undefined,
+          seatId
         );
         return;
       }

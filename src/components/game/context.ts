@@ -90,6 +90,8 @@ export function useGameState(initialSession: GameSession, options: { emptyNonHos
   // depends on `props.session` recompute on unrelated re-renders (hover, thinking text, timers).
   const tableSession = useMemo(() => (session.activePlayerId === activeSeatId ? session : { ...session, activePlayerId: activeSeatId }), [session, activeSeatId]);
   const [selectedHandCardId, setSelectedHandCardId] = useState<string | undefined>();
+  // Multiplayer: names of friends the game is waiting on because they are disconnected (set by useMpHost). While non-empty nothing advances on its own.
+  const [mpPausedFor, setMpPausedFor] = useState<string[]>([]);
   const [inspectedCard, setInspectedCard] = useState<VisibleCard | undefined>();
   const [gameStage, setGameStage] = useState<GameStage>("mulligan");
   const [gameOverDismissed, setGameOverDismissed] = useState(false);
@@ -287,7 +289,7 @@ export function useGameState(initialSession: GameSession, options: { emptyNonHos
   // The situation and scored options of each agent's latest decision (see requestAgentDecision), attached to its reasoning for the 🧠 chat.
   const agentDecisionInfo = useRef<Record<string, Pick<AgentReasoning, "situation" | "options" | "chosenId" | "turn" | "phase">>>({});
   return {
-    mode, setMode, session, setSession, activeSeatId, setActiveSeatId, prioritySeatId, setPrioritySeatId, tableSession, selectedHandCardId, setSelectedHandCardId, inspectedCard, setInspectedCard, gameStage, setGameStage, gameOverDismissed, setGameOverDismissed, latestSessionRef, setupMessage, setSetupMessage, configs, setConfigs, deckLibrary, defaultDecksApplied, savedGames, setSavedGames, gameStarting, setGameStarting, autoValidatedDefaultDeck, humanSeat, selectedHandCard, baseSeats,
+    mpPausedFor, setMpPausedFor, mode, setMode, session, setSession, activeSeatId, setActiveSeatId, prioritySeatId, setPrioritySeatId, tableSession, selectedHandCardId, setSelectedHandCardId, inspectedCard, setInspectedCard, gameStage, setGameStage, gameOverDismissed, setGameOverDismissed, latestSessionRef, setupMessage, setSetupMessage, configs, setConfigs, deckLibrary, defaultDecksApplied, savedGames, setSavedGames, gameStarting, setGameStarting, autoValidatedDefaultDeck, humanSeat, selectedHandCard, baseSeats,
     choices: { decisions, mulligans, setMulligans, keptHands, setKeptHands, keptHandsRef, mulliganReturnCardIds, setMulliganReturnCardIds, libraryLook, setLibraryLook, manualLibrarySearch, setManualLibrarySearch, pendingRuleChoice, setPendingRuleChoice, blockChoice, setBlockChoice, selectedBlockerIds, setSelectedBlockerIds, myriadSearch, setMyriadSearch, myriadTapChoice, setMyriadTapChoice, basicLandFetchSearch, setBasicLandFetchSearch, choiceMinimized, setChoiceMinimized, pendingOrderedTriggerResume, commanderZoneChoiceAsked, auraRetargetAsked },
     stack: { stackStore, pendingAction, setPendingAction, stackActions, priorityPasses, setPriorityPasses, priorityStopSettings, updatePriorityStopSettings, holdPriorityOnce, setHoldPriorityOnce, castDispatchInFlight, CAST_DISPATCH_STALE_MS, resolveBeatIds, resolveNowRef, abilityResolvers, abilityApiRef, stackFeed, setStackFeed },
     mana: { manaPools, setManaPools, copyMana, setCopyMana, manaContributions, setManaContributions, restrictedManaBatches, setRestrictedManaBatches, manaChoice, setManaChoice, lastCastManaContributors },

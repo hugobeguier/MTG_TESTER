@@ -217,7 +217,7 @@ export function useAbilities(ctx: GameContext) {
     // Scry/surveil from a sacrifice ability: the human looks at the cards and decides.
     if (seat?.kind === "human" && (paid.ability.effect.kind === "scry" || paid.ability.effect.kind === "surveil")) {
       const lookEffect = paid.ability.effect;
-      startLibraryLook(lookEffect.kind as LibraryLookMode, (lookEffect as { amount: number }).amount + (lookEffect.kind === "surveil" ? surveilBonusForSeat(seat) : 0));
+      startLibraryLook(lookEffect.kind as LibraryLookMode, (lookEffect as { amount: number }).amount + (lookEffect.kind === "surveil" ? surveilBonusForSeat(seat) : 0), undefined, undefined, undefined, undefined, undefined, seatId);
       return;
     }
     // One-verb effects on a chosen target after a sacrifice (Yawgmoth's counter): the human picks it.

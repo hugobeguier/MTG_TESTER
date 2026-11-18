@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { IntentQueue, dispatchIntent, type IntentEvent, type IntentRegistry } from "./intentDispatch";
-import { createIntentHandlers } from "./intentProxy";
+import { ACTING_GUEST_INTENTS, createIntentHandlers } from "./intentProxy";
+import { INTENT_SPECS, type IntentGameState } from "./intentSpecs";
 import { buildMpIntentRegistry } from "@/components/game/mpIntents";
 
 const seatOfSlot = (slot: string) => ({ "guest-1": "seat-b", "guest-2": "seat-c" })[slot as "guest-1"];
@@ -14,7 +15,15 @@ function setup(over: { inMulligan?: boolean; kept?: Record<string, boolean> } = 
     mulliganOpeningHand: (seatId?: string) => calls.push(["mulligan", seatId]),
     toggleMulliganReturnCard: (card: { id: string }, seatId?: string) => calls.push(["toggle", card.id, seatId])
   };
-  const registry = buildMpIntentRegistry({ handlers: handlers as never, inMulligan: () => over.inMulligan ?? true, hasKept: (id) => Boolean(over.kept?.[id]) });
+  const state: IntentGameState = {
+    gameStage: over.inMulligan === false ? "playing" : "mulligan",
+    hasPendingAction: false,
+    phase: "untap step",
+    owners: {},
+    hasKept: (id) => Boolean(over.kept?.[id]),
+    battlefieldIds: () => []
+  };
+  const registry = buildMpIntentRegistry({ handlers: handlers as never, state });
   return { calls, registry };
 }
 
@@ -93,12 +102,17 @@ describe("IntentQueue", () => {
 });
 
 describe("guest side encoding", () => {
-  it("sends only the card id for the mulligan toggle and plain args otherwise", () => {
+  it("sends only the card id for the mulligan toggle and cuts other args to the schema's arity (a click event never goes on the wire)", () => {
     const sent: Array<[string, unknown[]]> = [];
     const h = createIntentHandlers((name, args) => void sent.push([name, args]));
     h.onToggleMulliganReturnCard({ id: "c1", name: "Big", oracleText: "..." });
-    h.onKeepHand();
-    expect(sent).toEqual([["onToggleMulliganReturnCard", ["c1"]], ["onKeepHand", []]]);
-    expect(Object.keys(h).sort()).toEqual(["onKeepHand", "onMulligan", "onToggleMulliganReturnCard"]);
+    h.onKeepHand({ type: "click" });
+    h.onPlayCard("seat-b", "c9", undefined, "graveyard");
+    h.onPassPriority({ type: "click" });
+    expect(sent).toEqual([["onToggleMulliganReturnCard", ["c1"]], ["onKeepHand", []], ["onPlayCard", ["seat-b", "c9", undefined, "graveyard"]], ["onPassPriority", []]]);
+  });
+  it("the guest proxy and the host whitelist are the same list", () => {
+    expect([...ACTING_GUEST_INTENTS].sort()).toEqual(Object.keys(INTENT_SPECS).sort());
+    expect(Object.keys(buildMpIntentRegistry({ handlers: {} as never, state: {} as never })).sort()).toEqual(Object.keys(INTENT_SPECS).sort());
   });
 });

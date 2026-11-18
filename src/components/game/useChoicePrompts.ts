@@ -28,12 +28,13 @@ import { type GameContext, lateFn } from "./context";
 
 export function useChoicePrompts(ctx: GameContext) {
   const { session, setSession, setSelectedHandCardId, humanSeat } = ctx;
-  const { libraryLook, setLibraryLook, setManualLibrarySearch, pendingRuleChoice, setPendingRuleChoice, pendingOrderedTriggerResume } = ctx.choices;
+  const { libraryLook, setLibraryLook, manualLibrarySearch, setManualLibrarySearch, pendingRuleChoice, setPendingRuleChoice, pendingOrderedTriggerResume } = ctx.choices;
   const { setPriorityPasses } = ctx.stack;
   const { pendingEndTurnAfterDiscard } = ctx.turn;
   const activateGenericManaAbility = lateFn(ctx, "activateGenericManaAbility");
   const activateGenericTapAbility = lateFn(ctx, "activateGenericTapAbility");
   const addEvent = lateFn(ctx, "addEvent");
+  const chooseRuleLibraryCard = lateFn(ctx, "chooseRuleLibraryCard");
   const addRestrictedManaBatch = lateFn(ctx, "addRestrictedManaBatch");
   const beginPendingAction = lateFn(ctx, "beginPendingAction");
   const clearManaContributions = lateFn(ctx, "clearManaContributions");
@@ -214,7 +215,7 @@ export function useChoicePrompts(ctx: GameContext) {
     if (target.seatId !== choice.controllerSeatId) commitCrime(choice.controllerSeatId);
     if (choice.pending.kind === "library_look") {
       if (target.kind === "player" && targetsStillLegal(session, choice.controllerSeatId, choice.spec, choice.sourceCard, [target])) {
-        startLibraryLook("reorder", choice.pending.count, undefined, undefined, undefined, target.seatId, choice.pending.offerShuffle ? choice.sourceCardName : undefined);
+        startLibraryLook("reorder", choice.pending.count, undefined, undefined, undefined, target.seatId, choice.pending.offerShuffle ? choice.sourceCardName : undefined, choice.controllerSeatId);
       }
       return;
     }
@@ -992,15 +993,15 @@ export function useChoicePrompts(ctx: GameContext) {
     setPendingRuleChoice(undefined);
   }
 
-  function searchLibraryCardToHand(cardId: string) {
+  function searchLibraryCardToHand(cardId: string, searcherSeatId: string = manualLibrarySearch?.seatId ?? humanSeat.id) {
     setSession((current) => {
-      const seat = current.seats.find((item) => item.id === humanSeat.id);
+      const seat = current.seats.find((item) => item.id === searcherSeatId);
       const card = seat?.library?.find((item) => item.id === cardId);
       if (!seat || !card) return current;
       return {
         ...current,
         seats: current.seats.map((item) =>
-          item.id === humanSeat.id
+          item.id === searcherSeatId
             ? {
                 ...item,
                 library: (item.library ?? []).filter((libraryCard) => libraryCard.id !== cardId),
@@ -1020,8 +1021,8 @@ export function useChoicePrompts(ctx: GameContext) {
           {
             id: crypto.randomUUID(),
             at: new Date().toISOString(),
-            seatId: humanSeat.id,
-            message: `${humanSeat.name} searches their library for ${card.name} and puts it into hand.`
+            seatId: searcherSeatId,
+            message: `${seat.name} searches their library for ${card.name} and puts it into hand.`
           },
           ...current.events
         ]
@@ -1120,12 +1121,12 @@ export function useChoicePrompts(ctx: GameContext) {
       setPendingRuleChoice({
         id: crypto.randomUUID(),
         kind: "choose_trigger_option",
-        controllerSeatId: humanSeat.id,
+        controllerSeatId: activeLook.lookerSeatId ?? activeLook.seatId,
         sourceCardId: stub.id,
         sourceCardName: activeLook.shuffleOfferSource,
         prompt: `${activeLook.shuffleOfferSource}: have ${targetName} shuffle their library?`,
         options: [{ index: 0, label: "Shuffle" }, { index: 1, label: "Don't shuffle" }],
-        trigger: makeCommonTrigger(humanSeat.id, humanSeat.id, stub, { kind: "shuffle_library", seatId: activeLook.seatId }, `${activeLook.shuffleOfferSource}: shuffle option.`),
+        trigger: makeCommonTrigger(activeLook.lookerSeatId ?? activeLook.seatId, activeLook.lookerSeatId ?? activeLook.seatId, stub, { kind: "shuffle_library", seatId: activeLook.seatId }, `${activeLook.shuffleOfferSource}: shuffle option.`),
         remainingStack: []
       });
     }
@@ -1180,5 +1181,21 @@ export function useChoicePrompts(ctx: GameContext) {
     setLibraryLook(undefined);
   }
 
-  return { acceptCommanderZoneChoice, acceptMiracleOffer, cancelRuleChoice, chooseAuraRetarget, chooseBattlefieldCreatureTarget, chooseColorChoice, chooseCreatureTypeChoice, chooseEachPlayerSacrificeTarget, chooseEffectTarget, chooseGraveyardReanimationTarget, chooseModalOption, chooseNextUpkeepTrigger, chooseProliferateTargets, chooseSacrificeCostTarget, closeLibraryLook, completeDiscardChoice, completeRuleChoice, confirmAttackTriggerManaColors, continueOrderedPhaseTriggers, declineCommanderZoneChoice, declineEffectTarget, declineMiracleOffer, finishRuleLibrarySearch, keepLibraryLookCardOnTop, maybeRequestTarget, openHumanPhaseChoice, openPunisherPrompt, orderLibraryLookCardOnTop, putLibraryLookCardInGraveyard, putLibraryLookCardOnBottom, resolveOrderedPhaseTriggers, searchLibraryCardToHand, sendLibraryLookCardToHand };
+  // The "Search Library" box and its answers, for any seat (the table callbacks onOpenLibrarySearch / onCloseLibrarySearch / onSearchLibraryCardToHand).
+  function openManualLibrarySearch(seatId: string) {
+    setManualLibrarySearch({ seatId, destination: "hand" });
+  }
+  function closeLibrarySearch(seatId: string) {
+    setManualLibrarySearch(undefined);
+    if (pendingRuleChoice?.controllerSeatId === seatId) cancelRuleChoice();
+  }
+  function searchOrChooseLibraryCard(seatId: string, cardId: string, destination?: "hand" | "graveyard" | "battlefield") {
+    if (pendingRuleChoice?.controllerSeatId === seatId) {
+      chooseRuleLibraryCard(cardId, destination);
+      return;
+    }
+    searchLibraryCardToHand(cardId, seatId);
+  }
+
+  return { closeLibrarySearch, openManualLibrarySearch, searchOrChooseLibraryCard, acceptCommanderZoneChoice, acceptMiracleOffer, cancelRuleChoice, chooseAuraRetarget, chooseBattlefieldCreatureTarget, chooseColorChoice, chooseCreatureTypeChoice, chooseEachPlayerSacrificeTarget, chooseEffectTarget, chooseGraveyardReanimationTarget, chooseModalOption, chooseNextUpkeepTrigger, chooseProliferateTargets, chooseSacrificeCostTarget, closeLibraryLook, completeDiscardChoice, completeRuleChoice, confirmAttackTriggerManaColors, continueOrderedPhaseTriggers, declineCommanderZoneChoice, declineEffectTarget, declineMiracleOffer, finishRuleLibrarySearch, keepLibraryLookCardOnTop, maybeRequestTarget, openHumanPhaseChoice, openPunisherPrompt, orderLibraryLookCardOnTop, putLibraryLookCardInGraveyard, putLibraryLookCardOnBottom, resolveOrderedPhaseTriggers, searchLibraryCardToHand, sendLibraryLookCardToHand };
 }

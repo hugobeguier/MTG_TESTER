@@ -178,6 +178,8 @@ interface ThreeGameTableProps {
   spectatorHandLabel?: string;
   /** Multiplayer friend seated at a remote seat who may not act yet: own hand is shown and inspectable, but every action control is hidden/inert. */
   guestReadOnly?: boolean;
+  /** Multiplayer friend who plays their seat: the full action HUD, minus the host-only controls (stops grid, Full Control, Stop Next, Agent Activity). */
+  guestActing?: boolean;
   /** Mulligan step: this seat already kept (hides Keep/Mulligan) and the names of seats still deciding ("Waiting for ... to decide"). */
   mulliganKept?: boolean;
   mulliganWaitingFor?: string[];
@@ -1686,9 +1688,9 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
         >
           {hudHidden ? "Show Menu" : "Hide Menu"}
         </button>
-        <button type="button" onClick={() => setActivityOpen((current) => !current)}>Agent Activity</button>
+        {props.guestActing ? null : <button type="button" onClick={() => setActivityOpen((current) => !current)}>Agent Activity</button>}
         <button type="button" onClick={() => setActionLogOpen((current) => !current)}>Action Log</button>
-        <button type="button" onClick={() => setPriorityStopsOpen(true)}>Stops</button>
+        {props.guestActing ? null : <button type="button" onClick={() => setPriorityStopsOpen(true)}>Stops</button>}
         <button
           type="button"
           className={showCommanderDamage ? "is-active" : undefined}
@@ -1888,6 +1890,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
                 Cycle Selected
               </button>
             ) : null}
+            {props.guestActing ? null : (
             <button
               type="button"
               className={props.priorityStopSettings?.fullControl ? "is-active" : undefined}
@@ -1896,6 +1899,8 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
             >
               Full Control
             </button>
+            )}
+            {props.guestActing ? null : (
             <button
               type="button"
               className={props.holdPriorityOnce ? "is-active" : undefined}
@@ -1905,6 +1910,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
             >
               Stop Next
             </button>
+            )}
             <button type="button" disabled={Boolean(props.pendingAction) || !humanIsActive} onClick={props.onAdvanceTurn}>
               {humanIsActive && !props.pendingAction ? "Continue" : "Advance Phase"}
             </button>

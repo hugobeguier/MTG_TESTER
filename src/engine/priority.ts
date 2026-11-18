@@ -18,7 +18,7 @@ import { classifyTell } from "@/lib/lookAhead";
 import { deathEffectText, etbEffectText, isActivatedAbilityClause, oracleClauses, parseModalHeader } from "@/lib/oracleClauses";
 import { shouldStopForPriority, type PriorityStopSettings } from "@/lib/priorityStops";
 import { describeStackItem, type StackItemDescription, type StackItemLike } from "@/lib/stackDescription";
-import { remoteSeatCanAct, remoteSeatsCanAct } from "@/lib/multiplayer/remoteSeatPolicy";
+import { priorityStopsForSeat, remoteSeatCanAct, remoteSeatsCanAct } from "@/lib/multiplayer/remoteSeatPolicy";
 import { type GameSession, type ManaPool, type PlayerSeat, type VisibleCard } from "@/lib/types";
 
 // Without a session, this used to only send the card's NAME for anything on the stack — meaning
@@ -488,7 +488,7 @@ export function canReceivePriorityForPendingAction(
   const turnOwnerSeatIndex = Math.max(0, session.seats.findIndex((item) => item.id === activeSeatId));
   return (
     shouldStopForPriority({
-      settings: stops,
+      settings: priorityStopsForSeat(seat, stops),
       phase: session.phase,
       turnOwnerSeatIndex,
       actionType: action.type,
