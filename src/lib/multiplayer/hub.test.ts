@@ -138,3 +138,64 @@ describe("MultiplayerHub", () => {
     expect(hub.roomCount).toBe(0);
   });
 });
+
+describe("MultiplayerHub polling fallback", () => {
+  it("poll marks the guest present, announces it once, and lapses after the presence window", () => {
+    const { hub, room, advance } = setup();
+    const host = collect();
+    hub.subscribe(room.hostToken, host.sink);
+    const { seatToken } = hub.join(room.roomCode, "pat");
+    expect(hub.roomInfo(room.roomCode)!.guests[0].connected).toBe(false);
+    const r = hub.poll(seatToken, 0);
+    expect(r).toMatchObject({ seatId: "guest-1", roomCode: room.roomCode });
+    expect(r.message).toBeUndefined();
+    hub.poll(seatToken, 0);
+    expect(host.msgs.filter((m) => m.type === "guest_joined")).toHaveLength(1);
+    expect(hub.roomInfo(room.roomCode)!.guests[0].connected).toBe(true);
+    advance(3000);
+    hub.sweep();
+    expect(host.msgs.some((m) => m.type === "guest_left")).toBe(false);
+    advance(1500);
+    hub.sweep();
+    expect(host.msgs.filter((m) => m.type === "guest_left")).toHaveLength(1);
+    expect(hub.roomInfo(room.roomCode)!.guests[0].connected).toBe(false);
+    hub.poll(seatToken, 0);
+    expect(host.msgs.filter((m) => m.type === "guest_joined")).toHaveLength(2);
+  });
+
+  it("returns only messages newer than afterId; the newest published message wins across kinds", () => {
+    const { hub, room } = setup();
+    const { seatToken } = hub.join(room.roomCode, "pat");
+    hub.publish(room.hostToken, "guest-1", { kind: "lobby" }, 5);
+    const a = hub.poll(seatToken, 0);
+    expect(a.message?.snapshot).toEqual({ kind: "lobby" });
+    expect(hub.poll(seatToken, a.message!.id).message).toBeUndefined();
+    hub.publish(room.hostToken, "all", { table: 1 }, 1); // lower host rev, still newest
+    const b = hub.poll(seatToken, a.message!.id);
+    expect(b.message?.snapshot).toEqual({ table: 1 });
+    expect(b.message!.id).toBeGreaterThan(a.message!.id);
+  });
+
+  it("a stream and a poll together count as one presence; stream close alone does not hide a polling guest", () => {
+    const { hub, room } = setup();
+    const host = collect();
+    hub.subscribe(room.hostToken, host.sink);
+    const { seatToken } = hub.join(room.roomCode, "pat");
+    const unsub = hub.subscribe(seatToken, () => {});
+    hub.poll(seatToken, 0);
+    unsub();
+    expect(host.msgs.filter((m) => m.type === "guest_joined")).toHaveLength(1);
+    expect(host.msgs.some((m) => m.type === "guest_left")).toBe(false);
+  });
+
+  it("reports closed rooms and kicks to polling guests, rejects unknown tokens", () => {
+    const { hub, room } = setup();
+    const a = hub.join(room.roomCode, "a").seatToken;
+    const b = hub.join(room.roomCode, "b").seatToken;
+    expect(status(() => hub.poll("nope", 0))).toBe(401);
+    hub.kick(room.hostToken, "guest-1");
+    expect(hub.poll(a, 0)).toMatchObject({ closed: true, reason: "kicked" });
+    hub.closeRoom(room.hostToken);
+    expect(hub.poll(b, 0)).toMatchObject({ closed: true, reason: "room_closed" });
+  });
+});

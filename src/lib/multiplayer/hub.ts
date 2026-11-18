@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import {
   DEFAULT_MAX_GUESTS,
   HubError,
+  POLL_PRESENCE_MS,
   MAX_INTENTS_PER_SECOND,
   MAX_INTENT_BYTES,
   MAX_PUBLISH_BYTES,
@@ -25,8 +26,23 @@ interface Guest {
   displayName: string;
   tokenHash: string;
   sinks: Set<Sink>;
-  last?: { rev: number; snapshot: unknown };
+  /** Newest message published to this guest; `id` is a hub-assigned counter (not the host's rev), so lobby messages and table snapshots order correctly. */
+  last?: { id: number; rev: number; snapshot: unknown };
   intentTimes: number[];
+  /** Time of the last poll (HTTP fallback transport); presence also holds while a poll is recent. */
+  lastPoll?: number;
+  /** Whether the host has been told this guest is connected (guest_joined sent, guest_left not yet). */
+  announced: boolean;
+}
+
+export interface PollResult {
+  seatId: SlotId;
+  roomCode: string;
+  /** Present only when a message newer than `afterId` exists. */
+  message?: { id: number; rev: number; snapshot: unknown };
+  /** The room was closed or this guest was removed. */
+  closed?: boolean;
+  reason?: "room_closed" | "kicked";
 }
 
 interface Room {
@@ -36,12 +52,15 @@ interface Room {
   hostSinks: Set<Sink>;
   guests: Map<SlotId, Guest>;
   nextSlot: number;
+  msgCounter: number;
   lastHostActivity: number;
 }
 
 export interface HubOptions {
   now?: () => number;
   idleExpiryMs?: number;
+  /** A guest counts as present for this long after its last poll. */
+  pollPresenceMs?: number;
 }
 
 // Tokens are looked up by their SHA-256 hash, so lookup time does not depend on how many leading
@@ -54,10 +73,14 @@ export class MultiplayerHub {
   private tokens = new Map<string, TokenIdentity>();
   private now: () => number;
   private idleExpiryMs: number;
+  private pollPresenceMs: number;
+  /** Token hashes of guests whose room closed / who were kicked, so a poll can say so instead of 401. */
+  private ended = new Map<string, "room_closed" | "kicked">();
 
   constructor(opts: HubOptions = {}) {
     this.now = opts.now ?? Date.now;
     this.idleExpiryMs = opts.idleExpiryMs ?? ROOM_IDLE_EXPIRY_MS;
+    this.pollPresenceMs = opts.pollPresenceMs ?? POLL_PRESENCE_MS;
   }
 
   // ---- rooms ----
@@ -76,6 +99,7 @@ export class MultiplayerHub {
       hostSinks: new Set(),
       guests: new Map(),
       nextSlot: 1,
+      msgCounter: 0,
       lastHostActivity: this.now()
     });
     this.tokens.set(hostTokenHash, { role: "host", roomCode: code });
@@ -100,7 +124,7 @@ export class MultiplayerHub {
     const seatId = `guest-${room.nextSlot++}`;
     const seatToken = newToken();
     const tokenHash = hashToken(seatToken);
-    room.guests.set(seatId, { seatId, displayName, tokenHash, sinks: new Set(), intentTimes: [] });
+    room.guests.set(seatId, { seatId, displayName, tokenHash, sinks: new Set(), intentTimes: [], announced: false });
     this.tokens.set(tokenHash, { role: "guest", roomCode: room.code, seatId });
     // guest_joined is sent to the host when the guest's stream connects (subscribe).
     return { seatToken, seatId };
@@ -147,17 +171,32 @@ export class MultiplayerHub {
       };
     }
     const guest = room.guests.get(id.seatId!)!;
-    const first = guest.sinks.size === 0;
     guest.sinks.add(sink);
     sink({ type: "welcome", seatId: guest.seatId, roomCode: room.code });
     if (guest.last) sink({ type: "snapshot", rev: guest.last.rev, snapshot: guest.last.snapshot });
-    if (first) this.emitToHost(room, { type: "guest_joined", seatId: guest.seatId, displayName: guest.displayName });
+    this.updatePresence(room, guest);
     return () => {
       guest.sinks.delete(sink);
-      if (guest.sinks.size === 0 && room.guests.get(guest.seatId) === guest) {
-        this.emitToHost(room, { type: "guest_left", seatId: guest.seatId });
-      }
+      if (room.guests.get(guest.seatId) === guest) this.updatePresence(room, guest);
     };
+  }
+
+  /**
+   * HTTP fallback for guests whose event stream is blocked/buffered: returns the newest message newer than `afterId`
+   * (ids are the hub's publish counter) and marks the guest present for POLL_PRESENCE_MS.
+   */
+  poll(token: string, afterId: number): PollResult {
+    const ended = this.ended.get(hashToken(token ?? ""));
+    if (ended) return { seatId: "", roomCode: "", closed: true, reason: ended };
+    const id = this.identify(token);
+    if (id?.role !== "guest") throw new HubError(401, "Invalid token");
+    const room = this.rooms.get(id.roomCode)!;
+    const guest = room.guests.get(id.seatId!)!;
+    guest.lastPoll = this.now();
+    this.updatePresence(room, guest);
+    const result: PollResult = { seatId: guest.seatId, roomCode: room.code };
+    if (guest.last && guest.last.id > afterId) result.message = guest.last;
+    return result;
   }
 
   // ---- host commands ----
@@ -169,7 +208,7 @@ export class MultiplayerHub {
     if (toSeatId !== "all" && !targets[0]) throw new HubError(404, "Unknown seat");
     for (const g of targets) {
       if (!g) continue;
-      g.last = { rev, snapshot };
+      g.last = { id: ++room.msgCounter, rev, snapshot };
       for (const sink of [...g.sinks]) sink({ type: "snapshot", rev, snapshot });
     }
   }
@@ -180,8 +219,10 @@ export class MultiplayerHub {
     if (!guest) throw new HubError(404, "Unknown seat");
     room.guests.delete(seatId);
     this.tokens.delete(guest.tokenHash);
+    this.markEnded(guest.tokenHash, "kicked");
     for (const sink of [...guest.sinks]) sink({ type: "error", message: "You were removed from the room" });
     guest.sinks.clear();
+    guest.announced = false;
     this.emitToHost(room, { type: "guest_left", seatId });
   }
 
@@ -212,8 +253,40 @@ export class MultiplayerHub {
     const t = this.now();
     for (const room of [...this.rooms.values()]) {
       if (room.hostSinks.size > 0) room.lastHostActivity = t;
-      else if (t - room.lastHostActivity > this.idleExpiryMs) this.destroyRoom(room);
+      else if (t - room.lastHostActivity > this.idleExpiryMs) {
+        this.destroyRoom(room);
+        continue;
+      }
+      for (const g of room.guests.values()) this.updatePresence(room, g);
     }
+  }
+
+  private isConnected(g: Guest): boolean {
+    return g.sinks.size > 0 || (g.lastPoll !== undefined && this.now() - g.lastPoll < this.pollPresenceMs);
+  }
+
+  /** Tell the host when a guest becomes connected (stream or recent poll) or stops being so. */
+  private updatePresence(room: Room, g: Guest): void {
+    const connected = this.isConnected(g);
+    if (connected && !g.announced) {
+      g.announced = true;
+      this.emitToHost(room, { type: "guest_joined", seatId: g.seatId, displayName: g.displayName });
+    } else if (!connected && g.announced) {
+      g.announced = false;
+      this.emitToHost(room, { type: "guest_left", seatId: g.seatId });
+    }
+  }
+
+  private markEnded(hash: string, reason: "room_closed" | "kicked"): void {
+    if (this.ended.size > 2000) this.ended.delete(this.ended.keys().next().value as string);
+    this.ended.set(hash, reason);
+  }
+
+  /** Run presence checks without waiting for a request (guests that only poll lapse silently). Returns a stop function. */
+  startPresenceTimer(intervalMs = 2000): () => void {
+    const timer = setInterval(() => this.sweep(), intervalMs);
+    (timer as { unref?: () => void }).unref?.();
+    return () => clearInterval(timer);
   }
 
   private destroyRoom(room: Room): void {
@@ -221,6 +294,7 @@ export class MultiplayerHub {
       for (const sink of [...g.sinks]) sink({ type: "room_closed" });
       g.sinks.clear();
       this.tokens.delete(g.tokenHash);
+      this.markEnded(g.tokenHash, "room_closed");
     }
     this.tokens.delete(room.hostTokenHash);
     room.hostSinks.clear();
@@ -249,7 +323,7 @@ export class MultiplayerHub {
     return [...room.guests.values()].map((g) => ({
       seatId: g.seatId,
       displayName: g.displayName,
-      connected: g.sinks.size > 0
+      connected: this.isConnected(g)
     }));
   }
 }
@@ -259,5 +333,10 @@ const HUB_KEY = Symbol.for("mtg-ai.multiplayer.hub");
 /** Process-wide singleton on globalThis (Next may bundle each route separately). */
 export function getHub(): MultiplayerHub {
   const g = globalThis as unknown as Record<symbol, MultiplayerHub | undefined>;
-  return (g[HUB_KEY] ??= new MultiplayerHub());
+  if (!g[HUB_KEY]) {
+    const created = new MultiplayerHub();
+    created.startPresenceTimer();
+    g[HUB_KEY] = created;
+  }
+  return g[HUB_KEY]!;
 }

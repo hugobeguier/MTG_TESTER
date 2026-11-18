@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { getHub, type MultiplayerHub } from "./hub";
-import { HEARTBEAT_INTERVAL_MS, HubError, MAX_PUBLISH_BYTES, type StreamEvent } from "./protocol";
+import { HEARTBEAT_INTERVAL_MS, HubError, MAX_PUBLISH_BYTES, SSE_PADDING_BYTES, type StreamEvent } from "./protocol";
 
 // Shared glue for the thin /api/mp route handlers. Tokens are never logged.
 
@@ -37,6 +37,8 @@ export async function parseBody<T extends z.ZodTypeAny>(req: Request, schema: T)
 }
 
 export const sseFormat = (msg: StreamEvent) => `data: ${JSON.stringify(msg)}\n\n`;
+/** Comment frame of ~2 KB that makes buffering intermediaries flush the response. */
+export const ssePadding = () => `: ${".".repeat(SSE_PADDING_BYTES)}\n\n`;
 export const sseHeartbeat = () => `: hb\n\n`;
 
 /** Build an SSE response bound to a hub token; unsubscribes on cancel or request abort. */
@@ -74,6 +76,7 @@ export function sseResponse(req: Request, token: string): Response {
         if (msg.type === "room_closed" || (msg.type === "error" && !closed)) queueMicrotask(cleanup);
       });
       safe(`retry: 3000\n\n`);
+      safe(ssePadding());
       req.signal.addEventListener("abort", () => cleanup());
     },
     cancel() {

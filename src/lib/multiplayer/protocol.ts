@@ -5,7 +5,11 @@ export const MAX_PUBLISH_BYTES = 2 * 1024 * 1024;
 export const MAX_INTENT_BYTES = 64 * 1024;
 export const MAX_INTENTS_PER_SECOND = 30;
 export const DEFAULT_MAX_GUESTS = 3;
-export const HEARTBEAT_INTERVAL_MS = 15_000;
+export const HEARTBEAT_INTERVAL_MS = 5_000;
+/** A polling guest counts as connected for this long after its last poll. */
+export const POLL_PRESENCE_MS = 4_000;
+/** First-chunk padding for the event stream, so buffering intermediaries (proxies, VPN, antivirus) flush right away. */
+export const SSE_PADDING_BYTES = 2048;
 export const ROOM_IDLE_EXPIRY_MS = 6 * 60 * 60 * 1000;
 
 /** Opaque guest slot id, e.g. "guest-1". The host maps it to a game seat later. */
