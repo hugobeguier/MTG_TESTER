@@ -1,17 +1,30 @@
-// Host -> guest snapshot: what a SPECTATOR may see of the host's live game. Pure and JSON-safe; the host hook (components/game/useMpHost.ts) builds
-// one per change and publishes it through the relay. Built on view.ts (hidden info is stubbed there), so nothing private ever reaches the wire.
+// Host -> guest snapshot: what ONE viewer may see of the host's live game. Pure and JSON-safe; the host hook (components/game/useMpHost.ts) builds
+// one per viewer per change and publishes it through the relay. Built on view.ts (hidden info is stubbed there), so nothing private ever reaches the wire.
 //
-// Spectator privacy rule: NO private data at all - every hand is stubs of the right count, no libraries' contents, no decklists, no pending
-// prompts/decisions of any seat, no host-only UI (inspected card, selection, priority-stop settings, agent reasoning).
+// Two kinds of viewer:
+//  * SPECTATOR_VIEWER (a guest holding no seat): NO private data at all - every hand is stubs of the right count, no libraries' contents, no decklists,
+//    no pending prompts/decisions of any seat, no host-only UI. The host's seat is drawn as the table's "human".
+//  * a seat id (a friend sitting at a remote seat): the same, except that seat's OWN hand/prompts/mulligan state are real and that seat is the table's
+//    only "human" (so the table draws its hand and camera). Other seats (host included) are relabelled "agent" with hidden hands.
 import type { PendingActionView } from "@/components/ThreeGameTable";
 import type { GameSession, ManaPool } from "../types";
+import { mulliganReturnRequired, waitingForNames } from "./mulliganGate";
+import { hostHumanSeat } from "./seatMap";
 import { SPECTATOR_VIEWER, buildGuestSession } from "./view";
 
-export const SNAPSHOT_VERSION = 1;
+export const SNAPSHOT_VERSION = 2;
 /** Events kept in a snapshot (newest first, like GameSession.events). Keeps a snapshot well under MAX_PUBLISH_BYTES. */
 export const SNAPSHOT_MAX_EVENTS = 100;
 
-export type SnapshotViewer = typeof SPECTATOR_VIEWER;
+/** SPECTATOR_VIEWER or the id of the seat the snapshot is built for. */
+export type SnapshotViewer = string;
+
+/** A seated viewer's own opening-hand state (private: it names which of its own cards it will shuffle away). */
+export interface MulliganSeatState {
+  kept: boolean;
+  returnCardIds: string[];
+  returnRequired: number;
+}
 
 /** The host's live state, as the host hook reads it (all public except what view.ts filters out of `session`). */
 export interface SnapshotInput {
@@ -29,6 +42,12 @@ export interface SnapshotInput {
   mulligans?: Record<string, number>;
   /** The host seat's floating mana (public information). */
   hostManaPool?: ManaPool;
+  /** Floating mana per seat id (public information); a seated viewer gets its own as `myManaPool`. */
+  manaPools?: Record<string, ManaPool>;
+  /** Opening hand: which seats have kept (public) ... */
+  keptHands?: Record<string, boolean>;
+  /** ... and the cards each seat has picked to shuffle away (only that seat's entry is ever sent, to that seat). */
+  mulliganReturnCardIds?: Record<string, string[]>;
 }
 
 export interface MpSnapshot {
@@ -36,8 +55,10 @@ export interface MpSnapshot {
   rev: number;
   viewer: SnapshotViewer;
   hostName: string;
-  /** The seat the table treats as "me" (the host's seat; the only `human` in `session`). */
+  /** The host's own seat (real id; its player name is `hostName`). */
   hostSeatId: string;
+  /** Seated viewer: the seat the table draws as "me" (the only `human` in `session`, hand face-up). Absent for a spectator. */
+  mySeatId?: string;
   /** Filtered + relabelled session; activePlayerId already equals activeSeatId. */
   session: GameSession;
   activeSeatId?: string;
@@ -49,15 +70,25 @@ export interface MpSnapshot {
   gameStage: "mulligan" | "playing";
   mulligans: Record<string, number>;
   hostManaPool?: ManaPool;
+  /** Seated viewer's own floating mana. */
+  myManaPool?: ManaPool;
+  /** Names of human seats still deciding their opening hand (empty outside the mulligan step). */
+  mulliganWaiting: string[];
+  /** Seated viewer only, during the mulligan step: own opening-hand state. */
+  mulligan?: MulliganSeatState;
 }
 
-/** Same input + viewer + rev -> same output. Input is not mutated. Only the spectator viewer exists in M3 (seat viewers arrive with intents, M4). */
+/** Same input + viewer + rev -> same output. Input is not mutated. Throws for a seat id the session does not have. */
 export function buildSnapshot(input: SnapshotInput, viewer: SnapshotViewer, rev = 0): MpSnapshot {
-  if (viewer !== SPECTATOR_VIEWER) throw new Error(`buildSnapshot: unsupported viewer ${String(viewer)}`);
+  const mySeat = viewer === SPECTATOR_VIEWER ? undefined : input.session.seats.find((seat) => seat.id === viewer);
+  if (viewer !== SPECTATOR_VIEWER && !mySeat) throw new Error(`buildSnapshot: unknown viewer ${String(viewer)}`);
   // session.events is newest-first (addEvent prepends), so trim from the front before view.ts (which keeps the tail of what it is given).
   const trimmed: GameSession = { ...input.session, events: input.session.events.slice(0, SNAPSHOT_MAX_EVENTS) };
-  const session = buildGuestSession(trimmed, SPECTATOR_VIEWER, { maxEvents: SNAPSHOT_MAX_EVENTS });
-  const hostSeatId = session.seats.find((seat) => seat.kind === "human")?.id ?? session.seats[0]?.id ?? "";
+  const session = buildGuestSession(trimmed, viewer, { maxEvents: SNAPSHOT_MAX_EVENTS });
+  const hostSeatId = (hostHumanSeat(input.session.seats) ?? input.session.seats[0])?.id ?? "";
+  const mulligans = input.mulligans ?? {};
+  const keptHands = input.keptHands ?? {};
+  const inMulligan = input.gameStage === "mulligan";
   const activePlayerId = input.activeSeatId ?? session.activePlayerId;
   return {
     v: SNAPSHOT_VERSION,
@@ -65,6 +96,7 @@ export function buildSnapshot(input: SnapshotInput, viewer: SnapshotViewer, rev 
     viewer,
     hostName: input.hostName,
     hostSeatId,
+    mySeatId: mySeat?.id,
     session: activePlayerId === session.activePlayerId ? session : { ...session, activePlayerId },
     activeSeatId: input.activeSeatId,
     prioritySeatId: input.prioritySeatId,
@@ -73,8 +105,18 @@ export function buildSnapshot(input: SnapshotInput, viewer: SnapshotViewer, rev 
     pendingAction: input.pendingAction,
     stackActions: input.stackActions,
     gameStage: input.gameStage,
-    mulligans: { ...(input.mulligans ?? {}) },
-    hostManaPool: input.hostManaPool
+    mulligans: { ...mulligans },
+    hostManaPool: input.hostManaPool,
+    myManaPool: mySeat ? input.manaPools?.[mySeat.id] : undefined,
+    mulliganWaiting: inMulligan ? waitingForNames(input.session.seats.map((seat) => (seat.id === hostSeatId ? { ...seat, name: input.hostName } : seat)), keptHands) /* the host seat is literally named "You" */ : [],
+    mulligan:
+      mySeat && inMulligan
+        ? {
+            kept: Boolean(keptHands[mySeat.id]),
+            returnCardIds: [...(input.mulliganReturnCardIds?.[mySeat.id] ?? [])],
+            returnRequired: keptHands[mySeat.id] ? 0 : mulliganReturnRequired(mySeat.board.hand, mulligans[mySeat.id] ?? 0)
+          }
+        : undefined
   };
 }
 

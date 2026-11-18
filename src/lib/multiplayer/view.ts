@@ -18,7 +18,8 @@
 //  * A spell in flight on the stack is not in the session, so its name may be redacted from the log until it lands in a public zone (over-redaction, safe).
 //  * Ids of face-down battlefield cards are replaced by an opaque id, so attackTargetId/attachedToId style references to them dangle in the guest view.
 //  * Ids of public cards are left as-is; if a public card's id embeds its name that is already public.
-import type { GameEvent, GameSession, PlayerSeat, VisibleCard } from "../types";
+import { hostHumanSeat } from "./seatMap";
+import type { GameEvent,GameSession, PlayerSeat, VisibleCard } from "../types";
 
 export interface ViewOptions {
   /** Keep the last N events (default 100). */
@@ -153,7 +154,7 @@ export function filterForSeat(session: GameSession, viewerSeatId: string, option
  */
 export function relabelForGuest(session: GameSession, viewerSeatId: string): GameSession {
   // Spectator: the table needs exactly one "human" (its camera/hand panel), so the first human seat (the host) plays that role, shown with a hidden hand.
-  const meId = viewerSeatId === SPECTATOR_VIEWER ? (session.seats.find((seat) => seat.kind === "human") ?? session.seats[0])?.id : viewerSeatId;
+  const meId = viewerSeatId === SPECTATOR_VIEWER ? (hostHumanSeat(session.seats) ?? session.seats[0])?.id : viewerSeatId;
   if (!session.seats.some((seat) => seat.id === meId)) throw new Error(`relabelForGuest: unknown seat ${viewerSeatId}`);
   return { ...session, seats: session.seats.map((seat) => ({ ...seat, kind: seat.id === meId ? "human" : "agent" })) };
 }

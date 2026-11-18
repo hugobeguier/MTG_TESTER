@@ -10,13 +10,27 @@ export function createReadOnlySender(log: Array<{ name: string; args: unknown[] 
   };
 }
 
-/** Table callback props a seated guest will be allowed to use (M4). The spectator gets none: ThreeGameTable hides/disables controls without them. */
-export const ACTING_GUEST_INTENTS = ["onPlayCard", "onPassPriority", "onAdvanceTurn", "onEndTurn", "onDeclareAttack", "onToggleBlocker", "onConfirmBlockers", "onPassBlocks", "onKeepHand", "onMulligan"] as const;
+/**
+ * Table callback props a seated guest may use. Must stay in step with the host's whitelist (components/game/mpIntents.ts buildMpIntentRegistry): a name
+ * missing there is refused by the host. Stage 3 = the opening-hand step only; the spectator gets none (ThreeGameTable hides/disables controls without them).
+ * Later stages add onPlayCard, onPassPriority, onDeclareAttack, ... here and in the host registry.
+ */
+export const ACTING_GUEST_INTENTS = ["onKeepHand", "onMulligan", "onToggleMulliganReturnCard"] as const;
+
+/**
+ * The table hands some callbacks whole objects (a VisibleCard); the wire only carries ids, so the host never reads card data a guest made up
+ * (and the intent stays tiny). Callbacks not listed here are sent as they are.
+ */
+export const INTENT_ARG_ENCODERS: Record<string, (args: unknown[]) => unknown[]> = {
+  onKeepHand: () => [], // the table passes the click event; never forward it
+  onMulligan: () => [],
+  onToggleMulliganReturnCard: ([card]) => [typeof card === "object" && card !== null ? (card as { id?: unknown }).id : card]
+};
 
 /** Builds `{onFoo: (...args) => send("onFoo", args)}` for the given callback names. */
 export function createIntentHandlers(send: IntentSender, names: readonly string[] = ACTING_GUEST_INTENTS): Record<string, (...args: unknown[]) => void> {
   const handlers: Record<string, (...args: unknown[]) => void> = {};
-  for (const name of names) handlers[name] = (...args: unknown[]) => send(name, args);
+  for (const name of names) handlers[name] = (...args: unknown[]) => send(name, INTENT_ARG_ENCODERS[name]?.(args) ?? args);
   return handlers;
 }
 

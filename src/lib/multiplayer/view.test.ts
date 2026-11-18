@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { GameSession, PlayerSeat, VisibleCard } from "../types";
-import { buildGuestSession, filterForSeat, relabelForGuest } from "./view";
+import { SPECTATOR_VIEWER, buildGuestSession, filterForSeat, relabelForGuest } from "./view";
 
 function card(id: string, name: string, zone: VisibleCard["zone"], extra: Partial<VisibleCard> = {}): VisibleCard {
   return { id, name, typeLine: `Secret Type of ${name}`, oracleText: `Secret text of ${name}`, manaCost: "{9}", manaValue: 9, colors: ["R"], role: "x", zone, ...extra };
@@ -136,5 +136,18 @@ describe("relabelForGuest / buildGuestSession", () => {
       expect(JSON.stringify(full)).not.toContain("HandCard-" + (l === "a" ? "b" : "a"));
     }
     expect(JSON.stringify(session)).toBe(before);
+  });
+});
+
+describe("relabelForGuest with a remote human seat", () => {
+  it("spectator view is anchored on the host's human seat, not the remote friend's", () => {
+    const session = makeSession();
+    session.seats[0].kind = "agent"; // seat-a: AI listed first
+    session.seats[1].kind = "human";
+    session.seats[1].remoteSlot = "guest-1"; // seat-b: remote friend
+    session.seats[2].kind = "human"; // seat-c: the host
+    const spectator = relabelForGuest(session, SPECTATOR_VIEWER);
+    expect(spectator.seats.filter((s) => s.kind === "human").map((s) => s.id)).toEqual(["seat-c"]);
+    expect(relabelForGuest(session, "seat-b").seats.filter((s) => s.kind === "human").map((s) => s.id)).toEqual(["seat-b"]);
   });
 });
