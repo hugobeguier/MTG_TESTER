@@ -955,7 +955,7 @@ export function useCasting(ctx: GameContext) {
 
     // Path of Ancestry: its mana spent on a creature spell sharing a type with your commander scries 1.
     if (pathOfAncestryScries(session, caster.id, sourceCard, [...action.manaSourceIds, ...lastCastManaContributors.current])) {
-      if (caster.kind === "human") startLibraryLook("scry", 1);
+      if (caster.kind === "human") startLibraryLook("scry", 1, undefined, undefined, undefined, undefined, undefined, caster.id);
       else setSession((current) => resolveAgentLibraryLookWorkflow(current, caster.id, "Path of Ancestry", "scry_cards", 1));
       addEvent(`Path of Ancestry: ${caster.name} scries 1.`, caster.id, "Rules action");
     }

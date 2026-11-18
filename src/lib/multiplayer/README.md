@@ -62,3 +62,10 @@ Friend (Hamachi): `http://<host-hamachi-ip>:3000/mp/join`, enter the code and a 
   (leak test in `seatSnapshot.test.ts`). `viewerText.ts` rewrites the host's "You ..." log lines for guests.
 * Disconnect: a seated friend whose slot is not connected pauses the game (`ctx.mpPausedFor`; useGameEffects treats the stage as "paused"; intents refused; banner on both sides).
 * Host-only controls are hidden for friends (`guestActing`); Save is hidden in /mp/host.
+
+## Playtest round (hide panel, stops grid, prompts, previews)
+
+* `panelPrefs.ts`: the host's multiplayer UI (`MpHostPanel` overlay + `LobbyHostPanel`) shares one collapsed flag (localStorage, Alt+M, auto-collapsed when a game starts, red dot on the chip for a disconnected friend / paused game / connection error; `hostGameStore` feeds it the app mode).
+* `seatPrompts.promptSlotsForSeat(slots, seatId)` is THE gate for choice boxes: AppFlow feeds the host's table only the prompts addressed to the host's seat; `buildSeatPrompts` uses it for each friend. A prompt opened by a remote caster must pass `forSeatId` to `startLibraryLook` (the default looker is the host).
+* Stops grid: `isMyStopColumn` - only the viewer's own column says "My turn".
+* Table: life plates are turned by the seat's `PLAYER_AREAS.rot`; Left Alt + hover on a battlefield card = big preview (`components/boardPreview.ts`); TOKEN sprite/ribbon; `phasedOut` cards fade to a ghost with a PHASED OUT tag (`components/phaseAnim.ts`).

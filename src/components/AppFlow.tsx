@@ -50,6 +50,7 @@ import { attackLockedOut, canAttack } from "@/engine/combat";
 import { getBasicLandFetchOptions, getMyriadLandscapeOptions } from "@/engine/etb";
 import { mulliganReturnRequired, waitingForNames } from "@/lib/multiplayer/mulliganGate";
 import { blockChoiceView, ruleChoiceView } from "@/components/viewModels";
+import { promptSlotsForSeat } from "@/lib/multiplayer/seatPrompts";
 export type { LegalAgentAction } from "@/engine/flowTypes";
 export { resolvePendingUpkeepDraws, untapForSeat, clearTemporaryBuffs, resolveEndStepExileDamage, hasPhaseTrigger, humanPhaseGraveyardChoice, applyEndStepEffects, makePhaseStackTrigger, planOffTurnPhaseTriggers, scheduleDelayedPhaseTrigger, rollForStartingSeat } from "@/engine/turnFlow";
 export { applyExalted, resolveCombatDamage, cleanupCombat, assignBlockers, attackLockedOut, creatureCantBlock, hasVigilance, resolveAttackTarget, countCreaturesAttackingSeat, legalAttackActions, legalBlockActions, forcedAttackers, totalAttackTax } from "@/engine/combat";
@@ -200,6 +201,8 @@ export function AppFlow({ initialSession, ollama, multiplayerHost = false }: { i
     );
   }
 
+  // The host's screen shows only the prompts addressed to the HOST's seat (a friend's prompts live in their own snapshot).
+  const hostPrompts = promptSlotsForSeat({ pendingRuleChoice, libraryLook, blockChoice, manaChoice, myriadTapChoice, myriadSearch, basicLandFetchSearch, manualLibrarySearch }, humanSeat.id);
   return (
     <main className="app-shell game-shell">
       {session.status === "complete" && !gameOverDismissed ? (
@@ -240,9 +243,9 @@ export function AppFlow({ initialSession, ollama, multiplayerHost = false }: { i
         agentThinking={agentThinking}
         agentReasoning={agentReasoning}
         manaPool={poolForSeat(humanSeat.id)}
-        manaChoice={manaChoice?.seatId === humanSeat.id ? manaChoice : undefined}
-        myriadTapChoice={myriadTapChoice?.seatId === humanSeat.id ? myriadTapChoice : undefined}
-        blockChoice={blockChoiceView(session, blockChoice?.defenderSeatId === humanSeat.id ? blockChoice : undefined)}
+        manaChoice={hostPrompts.manaChoice}
+        myriadTapChoice={hostPrompts.myriadTapChoice}
+        blockChoice={blockChoiceView(session, hostPrompts.blockChoice)}
         selectedCardCanRespond={selectedCardCanRespond}
         selectedCardFaceOptions={selectedCardFaceOptions}
         onPlayCardFace={(seatId, cardId, faceIndex) => playCard(seatId, cardId, undefined, "hand", faceIndex)}
@@ -302,8 +305,8 @@ export function AppFlow({ initialSession, ollama, multiplayerHost = false }: { i
         onActivateEquip={activateEquip}
         onActivateManlandAnimation={activateManlandAnimation}
         onChangeLife={changeLife}
-        libraryLook={libraryLook && (libraryLook.lookerSeatId ?? libraryLook.seatId) === humanSeat.id ? libraryLook : undefined}
-        ruleChoice={ruleChoiceView(pendingRuleChoice, humanSeat, manualLibrarySearch, session)}
+        libraryLook={hostPrompts.libraryLook}
+        ruleChoice={ruleChoiceView(hostPrompts.pendingRuleChoice, humanSeat, hostPrompts.manualLibrarySearch, session)}
         onAcceptMiracle={acceptMiracleOffer}
         onDeclineMiracle={declineMiracleOffer}
         onAcceptOptionalTrigger={acceptOptionalTrigger}
@@ -329,11 +332,11 @@ export function AppFlow({ initialSession, ollama, multiplayerHost = false }: { i
         onChooseBattlefieldCreatureTarget={chooseBattlefieldCreatureTarget}
         onChooseAuraRetarget={chooseAuraRetarget}
         onChooseEquipTarget={confirmEquipTarget}
-        myriadSearchCards={myriadSearch?.seatId === humanSeat.id ? getMyriadLandscapeOptions(humanSeat.library ?? []) : undefined}
+        myriadSearchCards={hostPrompts.myriadSearch ? getMyriadLandscapeOptions(humanSeat.library ?? []) : undefined}
         basicLandFetchSearch={
-          basicLandFetchSearch?.seatId === humanSeat.id
+          hostPrompts.basicLandFetchSearch
             ? {
-                sourceCardName: basicLandFetchSearch.sourceCardName,
+                sourceCardName: hostPrompts.basicLandFetchSearch.sourceCardName,
                 cards: getBasicLandFetchOptions(humanSeat.library ?? [])
               }
             : undefined

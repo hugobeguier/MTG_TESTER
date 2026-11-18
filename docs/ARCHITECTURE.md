@@ -666,3 +666,20 @@ seat is a `SeatConfig` with `remoteSlot` (`"unassigned"` = open for a friend, `"
   (`lib/multiplayer/intentDispatch.ts`) forces the acting seat to the sender's seat, rejects slots without a seat, drops duplicate/old `clientSeq` and runs ONE queued
   intent per React commit (handlers close over render-time state). `ThreeGameTable` prop `guestReadOnly` = seated but not yet allowed to act (hand inspectable, actions off).
 * Not yet: priority/stack/combat/prompt intents; a friend's opening-hand leylines are auto-played.
+
+### Phasing, self-exiling spells and permanent copies (playtest fixes)
+
+* **Phasing** (`src/engine/phasing.ts`): a phased-out permanent is treated as though it does not exist. `VisibleCard.phasedOut` is the steady-state flag the
+  UI renders; `phasedOutIndirectly` marks Auras/Equipment that left with their host (they phase in only with it). Phasing IN happens only as the first action of
+  the untap step of the permanent's controller (`applyPhasingStep`, called first by `untapForSeat`, together with phasing OUT of `Phasing`-keyword permanents).
+  `phaseOutPermanent` is what the Vanishing Aura (`{U}{U}: Enchanted creature phases out`) uses; note the card **Vanishing** (VIS) is an Aura, unrelated to
+  the Vanishing N counter keyword. Everything that finds triggers or aggregates statics skips `phasedOut` (trigger finders, `stateBased` anthems/grants/devotion,
+  `countMatchingPermanents`, cost reducers, mana sources, legal actions, combat, phase-trigger registry); leave-the-battlefield triggers of permanents that were
+  phased IN when they left are unaffected. **UI signal**: every change appends a `GameEvent` with `phasing: { cardId, direction: "out" | "in" }` and the
+  message "<Card> phases out." / "<Card> phases in." for animation; the card view keeps `phasedOut`.
+* **Self-exiling spells**: `playCardFromZone` only stamps `exiledPlayableBySeatId` for an Adventure card going to exile. A spell that merely says "Exile ~"
+  (Temporal Mastery) is simply exiled with no cast-from-exile permission (the "Playable from exile" tray also moved to the top-left so it never covers the hand).
+* **Permanent copies** (Estrid's Invocation, Clone, Mirrormade): the copy keeps the real card in `VisibleCard.copyOriginal`; `resetForZoneChange` restores it, so a
+  copy that is exiled returns as the real card. A non-cast entry by a human with 2+ legal targets queues an `enter_as_copy` player choice
+  (`applyEnterAsCopyOnEntry` / `resolveDeferredChoice`). Estrid's upkeep rider ("you may exile this ... return it to the battlefield under its owner's control") is in
+  `applyDeterministicPhaseTrigger`; humans get the usual yes/no prompt first.

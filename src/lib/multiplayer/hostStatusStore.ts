@@ -32,3 +32,27 @@ export const hostActionsStore = {
     actions = next;
   }
 };
+
+/** Game-side facts the host panel chip needs (set by game/useMpHost.ts): the app mode and the friends the game is paused for. */
+export interface HostGameInfo {
+  mode: string;
+  pausedFor: string[];
+}
+const initialGameInfo: HostGameInfo = { mode: "setup", pausedFor: [] };
+let gameInfo: HostGameInfo = initialGameInfo;
+const gameListeners = new Set<() => void>();
+export const hostGameStore = {
+  get: () => gameInfo,
+  getServer: () => initialGameInfo,
+  set(next: HostGameInfo) {
+    if (next.mode === gameInfo.mode && next.pausedFor.length === gameInfo.pausedFor.length && next.pausedFor.every((name, i) => name === gameInfo.pausedFor[i])) return;
+    gameInfo = next;
+    for (const listener of [...gameListeners]) listener();
+  },
+  subscribe(listener: () => void) {
+    gameListeners.add(listener);
+    return () => {
+      gameListeners.delete(listener);
+    };
+  }
+};

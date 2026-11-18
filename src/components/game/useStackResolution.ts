@@ -1513,7 +1513,8 @@ export function useStackResolution(ctx: GameContext) {
         setPrioritySeatId(action.actorSeatId);
       }
       if (capturedDigLook) {
-        startLibraryLook("choose_one_bottom", capturedDigLook.amount, capturedDigLook.filter, undefined, "graveyard");
+        // Looked at by the CASTER (a remote friend casting Grisly Salvage looks at THEIR library, in THEIR prompt; the default looker is the host).
+        startLibraryLook("choose_one_bottom", capturedDigLook.amount, capturedDigLook.filter, undefined, "graveyard", undefined, undefined, action.actorSeatId);
       }
       if (capturedHumanPrompt) {
         const prompt = capturedHumanPrompt;

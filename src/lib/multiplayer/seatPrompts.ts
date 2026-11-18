@@ -44,6 +44,25 @@ export function promptOwnersOf(slots: PromptSlots): PromptOwners {
   };
 }
 
+/**
+ * The prompt slots addressed to `seatId`, and nothing else. This is the single gate for every choice box: the host's own table is fed only
+ * `promptSlotsForSeat(slots, hostSeatId)` (so a prompt owed by a remote friend -- Grisly Salvage's look at THEIR library -- never shows on, or
+ * accepts answers from, the host's screen), and each friend's snapshot is built from the same function for their own seat.
+ */
+export function promptSlotsForSeat(slots: PromptSlots, seatId: string): PromptSlots {
+  const owners = promptOwnersOf(slots);
+  return {
+    pendingRuleChoice: owners.rule === seatId ? slots.pendingRuleChoice : undefined,
+    libraryLook: owners.look === seatId ? slots.libraryLook : undefined,
+    blockChoice: owners.block === seatId ? slots.blockChoice : undefined,
+    manaChoice: owners.mana === seatId ? slots.manaChoice : undefined,
+    myriadTapChoice: owners.myriadTap === seatId ? slots.myriadTapChoice : undefined,
+    myriadSearch: owners.myriadSearch === seatId ? slots.myriadSearch : undefined,
+    basicLandFetchSearch: owners.basicLand === seatId ? slots.basicLandFetchSearch : undefined,
+    manualLibrarySearch: owners.manualSearch === seatId ? slots.manualLibrarySearch : undefined
+  };
+}
+
 export interface SeatPromptInput extends PromptSlots {
   session: GameSession;
   seatId: string;
@@ -92,14 +111,13 @@ export function buildSeatPrompts(input: SeatPromptInput): SeatPrompts {
   const { session } = input;
   const seat = session.seats.find((item) => item.id === input.seatId) as PlayerSeat;
   const pool = input.manaPool ?? emptyManaPool();
-  const mine = <T extends { seatId: string }>(slot: T | undefined): T | undefined => (slot && slot.seatId === seat.id ? slot : undefined);
-
-  const look = input.libraryLook && (input.libraryLook.lookerSeatId ?? input.libraryLook.seatId) === seat.id ? input.libraryLook : undefined;
-  const block = input.blockChoice?.defenderSeatId === seat.id ? input.blockChoice : undefined;
-  const manaChoice = mine(input.manaChoice);
-  const myriadTap = mine(input.myriadTapChoice);
-  const myriadSearch = mine(input.myriadSearch);
-  const basicFetch = mine(input.basicLandFetchSearch);
+  const mineSlots = promptSlotsForSeat(input, seat.id);
+  const look = mineSlots.libraryLook;
+  const block = mineSlots.blockChoice;
+  const manaChoice = mineSlots.manaChoice;
+  const myriadTap = mineSlots.myriadTapChoice;
+  const myriadSearch = mineSlots.myriadSearch;
+  const basicFetch = mineSlots.basicLandFetchSearch;
 
   const stackPrompts: Record<string, string> = {};
   for (const item of [...(input.pendingAction ? [input.pendingAction] : []), ...input.stackActions]) {
@@ -131,7 +149,7 @@ export function buildSeatPrompts(input: SeatPromptInput): SeatPrompts {
   }
 
   return {
-    ruleChoice: ruleChoiceView(input.pendingRuleChoice, seat, input.manualLibrarySearch, session),
+    ruleChoice: ruleChoiceView(mineSlots.pendingRuleChoice, seat, mineSlots.manualLibrarySearch, session),
     blockChoice: blockChoiceView(session, block),
     manaChoice: manaChoice ? { cardName: manaChoice.cardName, choices: manaChoice.choices } : undefined,
     myriadTapChoice: myriadTap ? { cardName: myriadTap.cardName } : undefined,

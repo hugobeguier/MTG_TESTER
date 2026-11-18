@@ -54,3 +54,8 @@ export function clearHoldOnce(bySeat: Record<string, SeatStopSettings>): Record<
   if (!Object.values(bySeat).some((settings) => settings.holdOnce)) return bySeat;
   return Object.fromEntries(Object.entries(bySeat).map(([id, settings]) => [id, settings.holdOnce ? { ...settings, holdOnce: false } : settings]));
 }
+
+/** The stops-grid column of the viewer's own seat is "My turn"; other seats (agents AND other humans, i.e. friends) are named. */
+export function isMyStopColumn(seat: { id: string; kind: string }, meId: string | undefined): boolean {
+  return meId === undefined ? seat.kind === "human" : seat.id === meId;
+}

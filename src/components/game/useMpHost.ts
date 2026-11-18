@@ -5,7 +5,7 @@ import { useEffect, useReducer, useRef } from "react";
 import { pendingActionRequiredPasses, withPendingActionSourceCard } from "@/engine/priority";
 import type { PendingActionView } from "@/components/ThreeGameTable";
 import { PublishGate, hostReducer, initialHostState, connectedGuests, type HostState } from "@/lib/multiplayer/connectionState";
-import { hostStatusStore } from "@/lib/multiplayer/hostStatusStore";
+import { hostGameStore, hostStatusStore } from "@/lib/multiplayer/hostStatusStore";
 import type { HostEvent } from "@/lib/multiplayer/protocol";
 import { buildSnapshot, snapshotFingerprint, type SnapshotInput } from "@/lib/multiplayer/snapshot";
 import { publishDelayMs } from "@/lib/multiplayer/publishTiming";
@@ -14,6 +14,9 @@ import { SPECTATOR_VIEWER } from "@/lib/multiplayer/view";
 import type { GameContext } from "./context";
 import { useMpIntents } from "./mpIntents";
 import { useMpLobby } from "./useMpLobby";
+
+/** The name friends see for the host (the host's own seat stays "You" internally: engine wording depends on it). */
+export const DEFAULT_HOST_NAME = "Hugo";
 
 export interface MpHostConfig {
   enabled: boolean;
@@ -70,7 +73,7 @@ function readSnapshotInput(ctx: GameContext, hostName: string): SnapshotInput {
 
 export function useMpHost(ctx: GameContext, config: MpHostConfig): HostState {
   const { enabled } = config;
-  const hostName = config.hostName ?? "Host";
+  const hostName = config.hostName ?? DEFAULT_HOST_NAME;
   const [state, dispatch] = useReducer(hostReducer, initialHostState);
   const tokenRef = useRef<string | null>(null);
   // One gate per guest slot: each guest gets its own view (a seated friend's hand, a spectator's stubs), so each has its own rev/fingerprint.
@@ -209,6 +212,11 @@ export function useMpHost(ctx: GameContext, config: MpHostConfig): HostState {
   const connectedSlots = new Set(connectedGuests(state).map((g) => g.seatId));
   const absent = enabled && mode === "game" ? session.seats.filter((seat) => seat.remoteSlot !== undefined && !seat.hasLost && !connectedSlots.has(seat.remoteSlot)).map((seat) => seat.name) : [];
   const absentKey = JSON.stringify(absent);
+  // The panel chip (components/MpHostPanel.tsx) needs the app mode and who the game is paused for.
+  useEffect(() => {
+    if (enabled) hostGameStore.set({ mode, pausedFor: absent });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, mode, absentKey]);
   useEffect(() => {
     ctx.setMpPausedFor((current) => (JSON.stringify(current) === absentKey ? current : absent));
     // eslint-disable-next-line react-hooks/exhaustive-deps

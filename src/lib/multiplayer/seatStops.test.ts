@@ -33,3 +33,14 @@ describe("seat stop settings", () => {
     expect(clearHoldOnce(none)).toBe(none);
   });
 });
+
+import { isMyStopColumn } from "./seatStops";
+describe("stops grid labels", () => {
+  it("only the viewer's own column is 'My turn' (a friend is a second human on the host's table)", () => {
+    const host = { id: "seat-0", kind: "human" };
+    const friend = { id: "seat-1", kind: "human" };
+    expect(isMyStopColumn(host, "seat-0")).toBe(true);
+    expect(isMyStopColumn(friend, "seat-0")).toBe(false);
+    expect(isMyStopColumn(friend, undefined)).toBe(true);
+  });
+});

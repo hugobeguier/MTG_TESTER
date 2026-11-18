@@ -1161,7 +1161,7 @@ export function useChoicePrompts(ctx: GameContext) {
       setLibraryLook(undefined);
       return;
     }
-    setLibraryLook({ seatId: activeLook.seatId, mode: "reorder", cards: remainingCards, remaining: remainingCards.length, orderedCards: [] });
+    setLibraryLook({ seatId: activeLook.seatId, ...(activeLook.lookerSeatId ? { lookerSeatId: activeLook.lookerSeatId } : {}), mode: "reorder", cards: remainingCards, remaining: remainingCards.length, orderedCards: [] });
   }
 
   // Closing the library-look window (the X button, or clicking the backdrop) for every other mode

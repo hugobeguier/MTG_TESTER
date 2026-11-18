@@ -42,6 +42,9 @@ import { cardMatchesTypeFilter, isBasicLandFetchAbility } from "@/lib/oracleClau
 import { DEFAULT_STOP_SETTINGS, stopKey, TURN_PHASES, type PriorityStopSettings } from "@/lib/priorityStops";
 import { VisualCard } from "./VisualCard";
 import { hostHumanSeat } from "@/lib/multiplayer/seatMap";
+import { isMyStopColumn } from "@/lib/multiplayer/seatStops";
+import { PHASE_ANIM_MS, nextPhaseTween, phaseProgress, type PhaseTween } from "@/components/phaseAnim";
+import { battlefieldPreviewCard, isLeftAlt } from "@/components/boardPreview";
 
 type ManaColor = "W" | "U" | "B" | "R" | "G" | "C";
 type ManaPool = Record<ManaColor, number>;
@@ -1191,6 +1194,37 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
       }
     };
 
+    // Left Alt held + pointer over a battlefield card = the same large preview a hand card gets (hoverPreviewCard); releasing Alt hides it.
+    let altHeld = false;
+    let altPreviewId: string | undefined;
+    const syncAltPreview = () => {
+      const hovered = hoveredCardRef.current;
+      const card = altHeld ? battlefieldPreviewCard(hovered?.card, hovered?.location) : undefined;
+      if (card) {
+        altPreviewId = card.id;
+        setHoverPreviewCard(card);
+      } else if (altPreviewId !== undefined) {
+        const gone = altPreviewId;
+        altPreviewId = undefined;
+        setHoverPreviewCard((current) => (current?.id === gone ? undefined : current));
+      }
+    };
+    const onAltKey = (event: KeyboardEvent, down: boolean) => {
+      if (!isLeftAlt(event)) return;
+      // Alt alone would otherwise focus the browser menu bar on release; only swallow it while the pointer is on the table.
+      if (pointerOnTable) event.preventDefault();
+      if (down && event.repeat) return;
+      altHeld = down;
+      syncAltPreview();
+    };
+    let pointerOnTable = false;
+    const onAltDown = (event: KeyboardEvent) => onAltKey(event, true);
+    const onAltUp = (event: KeyboardEvent) => onAltKey(event, false);
+    const onAltBlur = () => {
+      altHeld = false;
+      syncAltPreview();
+    };
+
     const updateHoveredCard = (event: PointerEvent) => {
       const hit = raycastCard(event);
       const data = hit?.object.userData as Partial<InteractionUserData> | undefined;
@@ -1205,6 +1239,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
 
       hoveredCardRef.current = data?.kind === "card" && data.card && data.seatId && data.location ? (data as CardUserData) : undefined;
       const hovered = hoveredCardRef.current;
+      syncAltPreview();
       renderer.domElement.style.cursor = hovered?.location === "battlefield" && hovered.seatId === hostHumanSeat(propsRef.current.session.seats)?.id ? "grab" : hovered || data?.kind === "zone" || (data?.kind === "player" && (propsRef.current.session.seats.find((seat) => seat.id === data.seatId)?.emblems?.length ?? 0) > 0) ? "pointer" : "";
     };
 
@@ -1294,10 +1329,13 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
 
     const onPointerEnter = () => {
       boardInputActive.current = true;
+      pointerOnTable = true;
     };
 
     const onPointerLeave = () => {
+      pointerOnTable = false;
       hoveredCardRef.current = undefined;
+      syncAltPreview();
       draggedBattlefieldCardRef.current = undefined;
       renderer.domElement.style.cursor = "";
       boardInputActive.current = document.activeElement === renderer.domElement;
@@ -1351,8 +1389,14 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
     window.addEventListener("blur", onBlur);
+    window.addEventListener("keydown", onAltDown);
+    window.addEventListener("keyup", onAltUp);
+    window.addEventListener("blur", onAltBlur);
 
     return () => {
+      window.removeEventListener("keydown", onAltDown);
+      window.removeEventListener("keyup", onAltUp);
+      window.removeEventListener("blur", onAltBlur);
       window.removeEventListener("resize", resize);
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
@@ -2346,6 +2390,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
         <PriorityStopsModal
           settings={props.priorityStopSettings ?? DEFAULT_STOP_SETTINGS}
           seats={props.session.seats}
+          meId={human.id}
           onClose={() => setPriorityStopsOpen(false)}
           onTogglePhaseStop={props.onTogglePhaseStop}
           onToggleStopOnStackResponse={props.onToggleStopOnStackResponse}
@@ -2361,6 +2406,8 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
           ) : (
             <FallbackHandCard card={hoverPreviewCard} />
           )}
+          {hoverPreviewCard.token ? <span className="token-ribbon">TOKEN</span> : null}
+          {hoverPreviewCard.phasedOut ? <span className="phased-ribbon">PHASED OUT</span> : null}
         </div>
       ) : null}
       <div className="three-hand-panel" aria-label="Your hand">
@@ -2499,6 +2546,8 @@ function CardInspector({
         </button>
         <div className="card-inspector-image">
           {imageUrl ? <img src={imageUrl} alt="" /> : <FallbackLargeCard card={card} />}
+          {card.token ? <span className="token-ribbon">TOKEN</span> : null}
+          {card.phasedOut ? <span className="phased-ribbon">PHASED OUT</span> : null}
         </div>
         <div className="card-inspector-detail">
           <div>
@@ -3241,6 +3290,7 @@ function ManualRuleChoiceModal({
 function PriorityStopsModal({
   settings,
   seats,
+  meId,
   onClose,
   onTogglePhaseStop,
   onToggleStopOnStackResponse,
@@ -3250,6 +3300,8 @@ function PriorityStopsModal({
 }: {
   settings: PriorityStopSettings;
   seats: PlayerSeat[];
+  /** The viewer's own seat: only that column is "My turn" (a second human, i.e. a friend, is named). */
+  meId?: string;
   onClose?: () => void;
   onTogglePhaseStop?: (phase: string, seatIndex: number) => void;
   onToggleStopOnStackResponse?: () => void;
@@ -3275,7 +3327,7 @@ function PriorityStopsModal({
                 <th scope="col">Phase</th>
                 {seats.map((seat) => (
                   <th scope="col" key={seat.id}>
-                    {seat.kind === "human" ? "My turn" : seat.name}
+                    {isMyStopColumn(seat, meId) ? "My turn" : seat.name}
                   </th>
                 ))}
               </tr>
@@ -3288,7 +3340,7 @@ function PriorityStopsModal({
                     <td key={seat.id}>
                       <input
                         type="checkbox"
-                        aria-label={`Stop at ${phase} on ${seat.kind === "human" ? "my turn" : `${seat.name}'s turn`}`}
+                        aria-label={`Stop at ${phase} on ${isMyStopColumn(seat, meId) ? "my turn" : `${seat.name}'s turn`}`}
                         checked={Boolean(settings.phaseStops[stopKey(phase, seatIndex)])}
                         onChange={() => onTogglePhaseStop?.(phase, seatIndex)}
                       />
@@ -4589,7 +4641,7 @@ function rebuildDynamicScene(
       monarch: session.monarchSeatId === seat.id,
       initiative: session.initiativeSeatId === seat.id,
       emblems: seat.emblems?.length ?? 0
-    });
+    }, area.rot);
   });
 }
 
@@ -4763,6 +4815,106 @@ function addCard(
   group.add(mesh);
   cardMeshesRef.current.push(mesh);
   addCounterBadges(group, card, x, z);
+  addTokenBadge(group, card, x, z);
+  addPhaseVisual(group, mesh, material, card, x, z);
+}
+
+// The scene is rebuilt on every state change, so a card's phase tween lives here (by card id) and survives the rebuild: when `phasedOut` flips, the
+// freshly built mesh starts from where the previous one was and runs to the new state over PHASE_ANIM_MS.
+const phaseTweens = new Map<string, PhaseTween>();
+const PHASE_GHOST_TINT = new THREE.Color("#8fb4d9");
+const phaseLabelTexture = (() => {
+  let cached: THREE.Texture | undefined;
+  return () => {
+    if (cached) return cached;
+    const canvas = document.createElement("canvas");
+    canvas.width = 256;
+    canvas.height = 72;
+    const ctx = canvas.getContext("2d");
+    if (ctx) {
+      roundRect(ctx, 4, 4, 248, 64, 18);
+      ctx.fillStyle = "rgba(30,60,100,0.88)";
+      ctx.fill();
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = "rgba(160,200,255,0.9)";
+      ctx.stroke();
+      ctx.fillStyle = "#dcecff";
+      ctx.font = "bold 34px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("PHASED OUT", 128, 38);
+    }
+    cached = new THREE.CanvasTexture(ctx ? canvas : document.createElement("canvas"));
+    return cached;
+  };
+})();
+
+// A phased-out permanent stays on the table but is clearly inert: a translucent, blue-grey ghost with a "PHASED OUT" tag. Flipping the flag shimmers
+// it out (or back in) instead of snapping.
+function addPhaseVisual(group: THREE.Group, mesh: THREE.Mesh, material: THREE.MeshBasicMaterial, card: VisibleCard, x: number, z: number) {
+  const target = card.phasedOut ? 1 : 0;
+  const now = performance.now();
+  const previous = phaseTweens.get(card.id);
+  if (!previous && target === 0) return; // the common case: never phased, nothing to do
+  const tween = nextPhaseTween(previous, now, target);
+  phaseTweens.set(card.id, tween);
+  const labelMaterial = new THREE.SpriteMaterial({ map: phaseLabelTexture(), transparent: true, depthTest: false, opacity: 0 });
+  const label = new THREE.Sprite(labelMaterial);
+  label.scale.set(0.62, 0.18, 1);
+  label.position.set(x, 0.4, z);
+  label.renderOrder = 13;
+  group.add(label);
+  material.transparent = true;
+  const apply = (time: number) => {
+    const v = phaseProgress(tween, time, target);
+    const moving = time - tween.start < PHASE_ANIM_MS;
+    const shimmer = moving ? 0.08 * Math.sin(time / 45) : 0; // a flicker while it is changing state
+    material.opacity = Math.min(1, Math.max(0.1, 1 - 0.68 * v + shimmer));
+    material.depthWrite = v < 0.5;
+    material.color.copy(new THREE.Color("#ffffff").lerp(PHASE_GHOST_TINT, v * 0.85));
+    labelMaterial.opacity = Math.min(1, v * 1.2);
+    label.visible = v > 0.02;
+    return moving;
+  };
+  if (!apply(now)) return;
+  const tick = (time: number) => {
+    if (!mesh.parent) return; // this mesh was rebuilt away; the next one carries on from the shared tween
+    if (apply(time)) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
+// A clear "TOKEN" tag on every token permanent (copies of creatures included), so the real card and its copy are never confused.
+function addTokenBadge(group: THREE.Group, card: VisibleCard, x: number, z: number) {
+  if (!card.token) return;
+  const key = "token-badge";
+  let texture = counterBadgeTextureCache.get(key);
+  if (!texture) {
+    const canvas = document.createElement("canvas");
+    canvas.width = 192;
+    canvas.height = 64;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    roundRect(ctx, 3, 3, 186, 58, 14);
+    ctx.fillStyle = "rgba(214,120,20,0.94)";
+    ctx.fill();
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = "rgba(255,255,255,0.9)";
+    ctx.stroke();
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 38px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("TOKEN", 96, 34);
+    texture = new THREE.CanvasTexture(canvas);
+    texture.needsUpdate = true;
+    counterBadgeTextureCache.set(key, texture);
+  }
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false }));
+  sprite.scale.set(0.34, 0.113, 1);
+  sprite.position.set(x + 0.2, 0.36, z - 0.44);
+  sprite.renderOrder = 12;
+  group.add(sprite);
 }
 
 interface CounterBadge {
@@ -5157,7 +5309,10 @@ function addLifeTotalPlate(
   z: number,
   showCommanderDamage: boolean,
   cardMeshesRef: MutableRefObject<THREE.Object3D[]>,
-  tokens: { monarch: boolean; initiative: boolean; emblems?: number } = { monarch: false, initiative: false }
+  tokens: { monarch: boolean; initiative: boolean; emblems?: number } = { monarch: false, initiative: false },
+  // The seat's own orientation (PLAYER_AREAS rot, same as its cards): the plate reads upright from ITS side of the table, so seats across the table
+  // from the viewer (whose camera starts behind their own seat) see it turned 180 degrees, like a real life counter.
+  seatRot = 0
 ) {
   const canvas = document.createElement("canvas");
   canvas.width = 220;
@@ -5243,6 +5398,7 @@ function addLifeTotalPlate(
     new THREE.MeshBasicMaterial({ map: texture, transparent: true, side: THREE.DoubleSide })
   );
   mesh.rotation.x = -Math.PI / 2;
+  mesh.rotation.z = seatRot; // in-plane turn about the table's up axis (Euler XYZ: z is applied in the plate's own plane)
   mesh.position.set(x, 0.12, z);
   mesh.userData = { kind: "player", seatId: seat.id } satisfies PlayerUserData;
   group.add(mesh);
