@@ -252,6 +252,7 @@ export function isAvailableManaSource(card: VisibleCard, seat: PlayerSeat, allSe
   // Orb of Dragonkind ("{1}, {T}: Add two mana ... only for Dragon spells") is not a plain mana source: it is modelled as a one-mana discount on
   // Dragon spells (see isDragonMana). Counting it as two free mana as well made a six-mana Dragon castable with three lands.
   if (isDragonMana(card)) return false;
+  if (card.phasedOut) return false;
   return !card.tapped && manaChoicesForCard(card, seat, allSeats).length > 0;
 }
 

@@ -3153,6 +3153,18 @@ export function applyDeterministicPhaseTrigger(session: GameSession, seatId: str
     return resolveRevealExchangeTrigger(session, seatId, sourceCard, "parker");
   }
 
+  // Estrid's Invocation's rider (granted to the copy): "At the beginning of your upkeep, you may exile this enchantment. If you do, return it to the
+  // battlefield under its owner's control." The exiled object stops being a copy (resetForZoneChange restores copyOriginal), so what comes back is the
+  // real Estrid's Invocation, which enters afresh and makes its "may enter as a copy" choice again (a human is asked to pick a NEW enchantment).
+  if (/\byou may exile this (?:enchantment|artifact|permanent|creature)\. if you do, return it to the battlefield under its owner's control\b/i.test(clauseText)) {
+    const live = session.seats.find((item) => item.id === seatId)?.board.battlefield.find((card) => card.id === sourceCard.id);
+    if (!live) return session;
+    const ownerSeatId = live.ownerSeatId ?? seatId;
+    const exiled = moveCardAcrossSeats(session, seatId, live.id, ownerSeatId, "exile").session;
+    const returned = moveCardAcrossSeats(exiled, ownerSeatId, live.id, ownerSeatId, "battlefield").session;
+    return rulesEvent(returned, seatId, `${live.name}: exiled and returned to the battlefield under its owner's control.`);
+  }
+
   // Echo {cost}: the first upkeep after it came under your control, pay it or sacrifice the permanent (agents pay when they can).
   const echoKeyword = clauseText.match(/^echo ((?:\{[^}]+\})+|\d+)/i);
   if (echoKeyword) {

@@ -29,7 +29,7 @@ export function applyExalted(session: GameSession, attackerSeatId: string): Game
   if (lone.temporaryGrantedKeywords?.includes("exalted-applied")) return session;
   const clueExalted = seat.board.battlefield.some((card) => !card.abilitiesStripped && /\bclues you control have exalted\b/i.test(card.oracleText));
   const instances = seat.board.battlefield.reduce((total, card) => {
-    if (card.abilitiesStripped) return total;
+    if ((card.abilitiesStripped || card.phasedOut)) return total;
     let count = hasKeywordText(card.oracleText, "exalted") ? 1 : 0;
     if (clueExalted && card.typeLine.includes("Clue")) count += 1;
     return total + count;
@@ -247,7 +247,7 @@ export function assignBlockers(session: GameSession, choice: BlockChoiceState, b
 // (a caller with no board to check shouldn't wrongly forbid the attack — declareAttack and the legal-action lists
 // pass the real board).
 function attackBlockRestrictionMet(card: VisibleCard, controllerBattlefield?: VisibleCard[]): boolean {
-  if (card.abilitiesStripped || !controllerBattlefield) return true;
+  if ((card.abilitiesStripped || card.phasedOut) || !controllerBattlefield) return true;
   for (const line of card.oracleText.split("\n")) {
     const match = line.replace(/\([^)]*\)/g, "").match(/can'?t attack or block unless you control (?:another|an?) creature with power (\d+) or greater/i);
     if (!match) continue;
@@ -270,7 +270,7 @@ export function canAttack(card: VisibleCard, controllerBattlefield?: VisibleCard
 export function creatureCantBlock(card: VisibleCard): boolean {
   // "Target creature can't block this turn." is recorded as a temporary pseudo-keyword, like "can't be blocked".
   if (card.temporaryGrantedKeywords?.includes("can't block")) return true;
-  if (card.abilitiesStripped) return false;
+  if ((card.abilitiesStripped || card.phasedOut)) return false;
   const shortName = card.name.toLowerCase().split(" // ")[0].split(",")[0].trim();
   return card.oracleText.split("\n").some((line) => {
     const clause = line.replace(/\([^)]*\)/g, "").trim().toLowerCase().replace(/\.$/, "");
@@ -280,7 +280,7 @@ export function creatureCantBlock(card: VisibleCard): boolean {
 
 // "This creature can't be blocked by creatures with power 2 or less." (Steel Leaf Champion)
 function attackerEvadesBlocker(attacker: VisibleCard, blocker: VisibleCard): boolean {
-  if (attacker.abilitiesStripped) return false;
+  if ((attacker.abilitiesStripped || attacker.phasedOut)) return false;
   // "Target creature can't be blocked this turn." (Rogue's Passage) is recorded as a temporary pseudo-keyword.
   if (attacker.temporaryGrantedKeywords?.includes("can't be blocked")) return true;
   if (attacker.oracleText.split("\n").some((line) => /^(?:this creature )?can'?t be blocked\.?$/i.test(line.replace(/\([^)]*\)/g, "").trim()))) return true;
@@ -337,7 +337,7 @@ function hasDoubleStrike(card: VisibleCard) {
 
 // "As long as this creature is attacking, creatures can't block unless their controller pays {1} for each of those creatures."
 function blockTaxPerBlocker(attacker: VisibleCard): number {
-  if (attacker.abilitiesStripped) return 0;
+  if ((attacker.abilitiesStripped || attacker.phasedOut)) return 0;
   const match = attacker.oracleText.match(/as long as this creature is attacking, creatures can'?t block unless their controller pays \{(\d+)\} for each of those creatures/i);
   return match ? Number.parseInt(match[1], 10) : 0;
 }
@@ -923,7 +923,7 @@ export function totalAttackTax(defender: PlayerSeat, targetIsPlaneswalker: boole
   // pays {1} for each of those creatures." (Archangel of Tithes) — read straight from the text, for cards the interpreter
   // hasn't already turned into an attack_tax effect.
   const textTax = defender.board.battlefield
-    .filter((card) => !card.abilitiesStripped && !(card.interpretedEffects ?? []).some((effect) => effect.kind === "attack_tax"))
+    .filter((card) => !(card.abilitiesStripped || card.phasedOut) && !(card.interpretedEffects ?? []).some((effect) => effect.kind === "attack_tax"))
     .reduce((total, card) => {
       const match = card.oracleText.match(/creatures can'?t attack you or planeswalkers you control unless their controller pays \{(\d+)\} for each of those creatures/i);
       if (!match) return total;

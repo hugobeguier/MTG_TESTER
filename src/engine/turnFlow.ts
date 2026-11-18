@@ -7,6 +7,7 @@ import { applyCombatDamageToTarget } from "@/engine/damage";
 import { drawForSeat, drawMultipleForSeat } from "@/engine/effects";
 import { moveCardAcrossSeats } from "@/engine/entry";
 import { isBoardConditionMet, isRecognizedBoardCondition } from "@/engine/mana";
+import { applyPhasingStep } from "@/engine/phasing";
 import { parseSearchLibraryPutEffect } from "@/engine/oneShotEffects";
 import { emblemAsShimCard } from "@/engine/shared";
 import { agentTargetedTriggerKinds, agentTriggerTarget } from "@/engine/triggerFinders";
@@ -46,6 +47,8 @@ export function resolvePendingUpkeepDraws(session: GameSession): GameSession {
 }
 
 export function untapForSeat(session: GameSession, seatId: string): GameSession {
+  // Rule 502.1: the untap step's first turn-based action is phasing — this seat's permanents phase in/out BEFORE anything untaps.
+  session = applyPhasingStep(session, seatId);
   const seat = session.seats.find((item) => item.id === seatId);
   // Rule 701.44b: a permanent with a stun counter removes one stun counter instead of untapping
   // this step — it stays tapped, but the counter comes off, so it untaps normally again once none
@@ -69,11 +72,11 @@ export function untapForSeat(session: GameSession, seatId: string): GameSession 
   // Goad lasts until the goading player's next turn.
   session = { ...session, seats: session.seats.map((other) => ({ ...other, board: { ...other.board, battlefield: other.board.battlefield.map((card) => (card.goaded?.bySeatId === seatId ? { ...card, goaded: undefined } : card)) } })) };
   const untapOrRemoveStun = (card: VisibleCard): VisibleCard => {
-    // Phasing: a phased-in permanent with it phases out as its controller's untap step begins (phased-out ones phase in, just below).
-    if (!card.phasedOut && !card.abilitiesStripped && /^phasing\b/im.test(card.oracleText)) return { ...card, phasedOut: true, attacking: false, blocking: false, tapped: card.tapped };
+    // Phasing already happened (applyPhasingStep below): what is still phased out (just phased out by its Phasing keyword, or phased out indirectly
+    // with its host) does not untap.
+    if (card.phasedOut) return card;
     // "This creature doesn't untap during your untap step." / "Enchanted creature doesn't untap during its controller's untap step."
     if (card.tapped && cantUntap(card, everyPermanent)) return { ...card, summoningSick: false, attacking: false, blocking: false };
-    if (card.phasedOut) return { ...card, phasedOut: false, tapped: false, summoningSick: false, attacking: false, blocking: false };
     if (counterCount(card, "stun") > 0) {
       return opponentStunLockActive
         ? { ...card, summoningSick: false, attacking: false, blocking: false }
@@ -312,7 +315,7 @@ export function hasExtraBeginningPhaseAura(session: GameSession, enchantedSeatId
 export function hasPhaseTrigger(card: VisibleCard, phase: TurnPhase) {
   // A creature that's lost all abilities (abilitiesStripped) can't fire its own phase-triggered
   // ability either — same suppression hasKeyword already applies to its keywords.
-  if (card.abilitiesStripped) return false;
+  if ((card.abilitiesStripped || card.phasedOut)) return false;
   return mergeModalBulletClauses(oracleClauses(card.oracleText)).some(
     (clause) => !isActivatedAbilityClause(clause) && phaseTriggerTextMatches(clause.toLowerCase(), phase)
   );

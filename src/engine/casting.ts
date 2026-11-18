@@ -538,7 +538,7 @@ export function targetingTax(session: GameSession, casterSeatId: string, targets
     if (!owner || !targeted) continue;
     const grants = owner.board.battlefield.some(
       (source) =>
-        !source.abilitiesStripped &&
+        !(source.abilitiesStripped || source.phasedOut) &&
         /creatures and enchantments you control have "spells your opponents cast that target this permanent cost \{1\} more to cast\."/i.test(source.oracleText) &&
         (targeted.typeLine.includes("Creature") || targeted.typeLine.includes("Enchantment"))
     );
@@ -551,7 +551,7 @@ export function seatHasFlashGrant(seat: PlayerSeat, card?: VisibleCard): boolean
   // Timely Ward: flash only if it can target a commander (this checks the caster's own commander on the battlefield).
   if (card && /cast this spell as though it had flash if it targets a commander/i.test(card.oracleText) && seat.board.battlefield.some((permanent) => permanent.commander)) return true;
   return seat.board.battlefield.some((source) => {
-    if (source.abilitiesStripped) return false;
+    if ((source.abilitiesStripped || source.phasedOut)) return false;
     const text = source.oracleText.replace(/\([^)]*\)/g, "");
     if (/\byou may cast spells as though they had flash\b/i.test(text)) return true;
     const scoped = text.match(/\byou may cast ([a-z ]+?) spells as though they had flash\b/i);
@@ -579,6 +579,7 @@ export function playCardFromZone(
   // target — surfaced in the event log below so the copy is visible even if imageUris didn't come
   // through for some reason (e.g. the copied card itself has none).
   let copiedFromName: string | undefined;
+  let playedIsAdventure = false;
 
   // A card exiled by an effect like Mind's Dilation's physically sits in its OWNER's exile zone,
   // not necessarily the seat granted permission to cast it (see the impulse_cast_free trigger
@@ -620,6 +621,7 @@ export function playCardFromZone(
     if (!sourceCard) return seat;
     const card = applyChosenFaceToCard(sourceCard, faceIndex);
     playedName = card.name;
+    playedIsAdventure = card.typeLine.includes("Adventure");
     // A human is asked whether to pay the life (pendingShockChoices): the land enters tapped first, untapped if they pay.
     const humanShockCost = seat.kind === "human" && destination === "battlefield" ? shocklandPayLifeAmount(card.oracleText) : undefined;
     if (humanShockCost !== undefined) shockPrompt = { cardId: card.id, cardName: card.name, life: humanShockCost };
@@ -693,7 +695,9 @@ export function playCardFromZone(
       // applyStealAndPlay already uses for Bribery-style effects (never swept by
       // clearTemporaryBuffs, which only expires a turn-limited exiledPlayableUntilTurn).
       // A flashback spell exiled after resolving (from the graveyard) is NOT castable again from exile.
-      exiledPlayableBySeatId: destination === "exile" && sourceZone !== "graveyard" ? seatId : undefined,
+      // ONLY an Adventure's permanent half is castable from exile afterwards. A spell that merely exiles ITSELF as it finishes
+      // resolving ("Exile Temporal Mastery." / Finale of Revelation / Ral's Outburst-style) grants NO permission to recast it.
+      exiledPlayableBySeatId: destination === "exile" && sourceZone !== "graveyard" && card.typeLine.includes("Adventure") ? seatId : undefined,
       exiledPlayableUntilTurn: undefined,
       graveyardCastGrant: undefined
     };
@@ -726,6 +730,23 @@ export function playCardFromZone(
           // live: even Estrid's Invocation's existing (narrower) copy support left the permanent
           // showing its own card image no matter what it copied.
           imageUris: copyTarget.imageUris ?? enteredCard.imageUris,
+          // A permanent copy remembers what the real card is, so leaving the battlefield (Estrid's Invocation exiled by its upkeep rider) restores it.
+          ...(!copyEffect?.temporary
+            ? {
+                copyOriginal: {
+                  name: enteredCard.name,
+                  typeLine: enteredCard.typeLine,
+                  oracleText: enteredCard.oracleText,
+                  manaCost: enteredCard.manaCost,
+                  manaValue: enteredCard.manaValue,
+                  colors: enteredCard.colors,
+                  colorIdentity: enteredCard.colorIdentity,
+                  power: enteredCard.power,
+                  toughness: enteredCard.toughness,
+                  imageUris: enteredCard.imageUris
+                }
+              }
+            : {}),
           // Cursed Mirror: only until end of turn, with an extra keyword; remember what it really is so it can change back.
           ...(copyEffect?.temporary
             ? {
@@ -798,7 +819,7 @@ export function playCardFromZone(
         id: crypto.randomUUID(),
         at: new Date().toISOString(),
         seatId,
-        message: `${message ?? `${session.seats.find((seat) => seat.id === seatId)?.name ?? "Player"} plays ${playedName}.`}${copiedFromName ? ` It enters as a copy of ${copiedFromName}.` : ""}${enteredTapped ? " It enters tapped." : revealedForLand ? ` Reveals ${revealedForLand} from hand, so it enters untapped.` : shockLifePaid > 0 ? ` Pays ${shockLifePaid} life for it to enter untapped.` : ""}${destination === "exile" ? (sourceZone === "graveyard" ? " It's exiled (flashback)." : " It's exiled — you may cast the other half later.") : destination === "library" ? " It's shuffled into its owner's library." : ""}`,
+        message: `${message ?? `${session.seats.find((seat) => seat.id === seatId)?.name ?? "Player"} plays ${playedName}.`}${copiedFromName ? ` It enters as a copy of ${copiedFromName}.` : ""}${enteredTapped ? " It enters tapped." : revealedForLand ? ` Reveals ${revealedForLand} from hand, so it enters untapped.` : shockLifePaid > 0 ? ` Pays ${shockLifePaid} life for it to enter untapped.` : ""}${destination === "exile" ? (sourceZone === "graveyard" ? " It's exiled (flashback)." : playedIsAdventure ? " It's exiled — you may cast the other half later." : " It's exiled.") : destination === "library" ? " It's shuffled into its owner's library." : ""}`,
         detail: destination === "graveyard" || destination === "exile" || destination === "library" ? "Response" : undefined
       },
       ...session.events

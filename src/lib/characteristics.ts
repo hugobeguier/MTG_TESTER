@@ -102,9 +102,10 @@ export function parseDevotionNotCreature(oracleText: string): DevotionNotCreatur
 }
 
 // Devotion to several colors at once: each mana symbol that could produce any of them counts once.
-export function computeDevotionToColors(battlefield: Array<{ manaCost?: string }>, colors: ManaColorLetter[]): number {
+export function computeDevotionToColors(battlefield: Array<{ manaCost?: string; phasedOut?: boolean }>, colors: ManaColorLetter[]): number {
   let count = 0;
   for (const card of battlefield) {
+    if (card.phasedOut) continue; // a phased-out permanent is treated as though it does not exist
     for (const symbol of card.manaCost?.match(/\{[^}]+\}/g) ?? []) {
       const parts = symbol.slice(1, -1).toUpperCase().split("/");
       if (colors.some((color) => parts.includes(color))) count += 1;
@@ -113,9 +114,10 @@ export function computeDevotionToColors(battlefield: Array<{ manaCost?: string }
   return count;
 }
 
-export function computeDevotion(battlefield: Array<{ manaCost?: string }>, color: ManaColorLetter): number {
+export function computeDevotion(battlefield: Array<{ manaCost?: string; phasedOut?: boolean }>, color: ManaColorLetter): number {
   let count = 0;
   for (const card of battlefield) {
+    if (card.phasedOut) continue;
     const symbols = card.manaCost?.match(/\{[^}]+\}/g) ?? [];
     for (const symbol of symbols) {
       const inner = symbol.slice(1, -1).toUpperCase();
@@ -366,7 +368,7 @@ export function permanentMatchesQualifier(card: QualifiableCard, matcher: string
 
 // Counts the matcher against a single battlefield (the CDA's own controller's — "you control").
 export function countMatchingPermanents(battlefield: QualifiableCard[], matcher: string): number {
-  return battlefield.filter((card) => permanentMatchesQualifier(card, matcher)).length;
+  return battlefield.filter((card) => !(card as { phasedOut?: boolean }).phasedOut && permanentMatchesQualifier(card, matcher)).length;
 }
 
 export interface GroupKeywordGrant {

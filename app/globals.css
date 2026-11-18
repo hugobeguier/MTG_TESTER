@@ -2695,7 +2695,7 @@ ol {
 .exile-playable-note { color: var(--green); font-weight: 700; }
 
 /* "Playable from exile" reminder tray */
-.exile-tray { background: var(--panel); border: 2px solid var(--green); border-radius: 8px; bottom: 1rem; box-shadow: 0 0 18px rgba(115, 180, 122, 0.5); display: grid; gap: 0.5rem; left: 1rem; max-height: 60vh; max-width: 340px; overflow-y: auto; padding: 0.7rem; position: fixed; z-index: 30; }
+.exile-tray { background: var(--panel); border: 2px solid var(--green); border-radius: 8px; box-shadow: 0 0 18px rgba(115, 180, 122, 0.5); display: grid; gap: 0.4rem; left: 0.75rem; max-height: 32vh; max-width: 280px; overflow-y: auto; padding: 0.5rem; position: fixed; top: 5.5rem; z-index: 30; /* top-left, never over the hand at the bottom */ }
 .exile-tray h3 { color: var(--green); font-size: 0.95rem; margin: 0; }
 .exile-tray-card { align-items: center; display: grid; gap: 0.5rem; grid-template-columns: 56px minmax(0, 1fr) auto; }
 .exile-tray-card div { display: grid; font-size: 0.8rem; gap: 0.15rem; }
@@ -2713,3 +2713,22 @@ ol {
 .card-pick .card-thumb-fallback { aspect-ratio: 5 / 7; background: #1b2018; border: 1px solid rgba(242, 240, 232, 0.2); font-size: 0.72rem; overflow: hidden; padding: 0.3rem; }
 .card-pick-name { font-size: 0.78rem; font-weight: 600; line-height: 1.2; }
 .card-pick-detail { color: var(--muted, #aaa); font-size: 0.68rem; line-height: 1.2; }
+
+/* TOKEN / PHASED OUT corner ribbons on the enlarged card previews (hover preview and card inspector); the 3D table paints its own sprites */
+.token-ribbon,
+.phased-ribbon {
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  border-radius: 6px;
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  padding: 2px 8px;
+  pointer-events: none;
+  position: absolute;
+  top: 8px;
+  z-index: 2;
+}
+.token-ribbon { background: rgba(214, 120, 20, 0.95); right: 8px; }
+.phased-ribbon { background: rgba(30, 60, 100, 0.92); border-color: rgba(160, 200, 255, 0.9); color: #dcecff; left: 8px; }
+.card-inspector-image { position: relative; }

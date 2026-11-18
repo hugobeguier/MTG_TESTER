@@ -25,6 +25,7 @@ import { parseRemovalEffect, type RemovalEffect } from "@/lib/removalSpells";
 import { zoneEffectTargetSpec } from "@/lib/targetSpecs";
 import { parseTargetedEffect } from "@/lib/targetedEffects";
 import { legalTargets, type TargetSpec } from "@/lib/targeting";
+import { phaseOutPermanent } from "@/engine/phasing";
 import { abilityOracleText, hasCardType } from "@/lib/typeGrants";
 import { type GameSession, type ManaPool, type PlayerSeat, type VisibleCard } from "@/lib/types";
 import { parseZoneEffect, type ZoneEffect } from "@/lib/zoneEffects";
@@ -965,47 +966,12 @@ export function applyEnchantmentAnimation(session: GameSession, casterSeatId: st
   };
 }
 
-// "Enchanted/equipped creature phases out." (Vanishing). Rule 702.26 in full is "treated as though
-// it doesn't exist" — untargetable, can't attack/block, doesn't change zones, ignored by SBAs and
-// most triggers — which this engine only enforces at the highest-value points (canAttack/canBlock,
-// and chooseRemovalTarget so phasing genuinely dodges the removal spells this card is cast to dodge)
-// rather than threading a phasedOut check through every board-scanning function; it stays a legal
-// (if pointless) target for anthem/devotion-style counting and other targeted effects this codebase
-// doesn't route through those two chokepoints. Phases back in, untapped, at its controller's next
-// untap step (untapForSeat) — including a Shadow of the Second Sun-style bonus untap step, since
-// that's the same real phase.
-function applyPhaseOut(session: GameSession, casterSeatId: string, sourceCard: VisibleCard): GameSession {
+// "Enchanted/equipped creature phases out." (the Vanishing Aura). The permanent (and anything attached to it) is treated as though it does not exist
+// until it phases in at its controller's next untap step: see src/engine/phasing.ts for the full rules summary and the places that skip phasedOut.
+function applyPhaseOut(session: GameSession, _casterSeatId: string, sourceCard: VisibleCard): GameSession {
   const targetId = sourceCard.attachedToId;
   if (!targetId) return session;
-  let targetName: string | undefined;
-  const next: GameSession = {
-    ...session,
-    seats: session.seats.map((seat) => ({
-      ...seat,
-      board: {
-        ...seat.board,
-        battlefield: seat.board.battlefield.map((card) => {
-          if (card.id !== targetId) return card;
-          targetName = card.name;
-          return { ...card, phasedOut: true };
-        })
-      }
-    }))
-  };
-  if (!targetName) return session;
-  return {
-    ...next,
-    events: [
-      {
-        id: crypto.randomUUID(),
-        at: new Date().toISOString(),
-        seatId: casterSeatId,
-        message: `${targetName} phases out from ${sourceCard.name}.`,
-        detail: "Rules action"
-      },
-      ...next.events
-    ]
-  };
+  return phaseOutPermanent(session, targetId);
 }
 
 export function genericAbilityEffectHasLegalTarget(session: GameSession, casterSeatId: string, sourceCard: VisibleCard, effect: GenericAbilityEffect): boolean {

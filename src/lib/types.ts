@@ -327,6 +327,8 @@ export interface VisibleCard {
   // doc comment for the scoping rationale. Cleared (phasing back in) at its controller's next untap
   // step, same as a real untap.
   phasedOut?: boolean;
+  // Phased out only because the permanent it is attached to did (rule 702.26g): it phases in with that host, never on its own.
+  phasedOutIndirectly?: boolean;
   role: string;
   zone: ZoneName;
   tapped?: boolean;
@@ -414,6 +416,10 @@ export interface VisibleCard {
   chosenAdditionalDiscardIds?: string[];
   // Cursed Mirror: what this permanent was before it became a copy of a creature until end of turn; restored when the turn ends.
   temporaryCopyOriginal?: Pick<VisibleCard, "name" | "typeLine" | "oracleText" | "manaCost" | "manaValue" | "colors" | "colorIdentity" | "power" | "toughness" | "imageUris">;
+  // A PERMANENT copy ("enters as a copy of ...": Estrid's Invocation, Clone, Mirrormade): what the real card is. The engine keeps one object per
+  // card, so this snapshot is what resetForZoneChange restores when the permanent leaves the battlefield (rule 707.? a copy that changes zones
+  // is just the card again), e.g. Estrid's Invocation exiled by its own upkeep rider returns as Estrid's Invocation, not as the old copy.
+  copyOriginal?: Pick<VisibleCard, "name" | "typeLine" | "oracleText" | "manaCost" | "manaValue" | "colors" | "colorIdentity" | "power" | "toughness" | "imageUris">;
   // Dragonhawk, Fate's Tempest: a card exiled by it that is still in exile at the beginning of its controller's next end step costs
   // each opponent this much life (the damage dealer is named for the log).
   exileEndStepDamage?: { sourceName: string; controllerSeatId: string; amount: number };
@@ -457,6 +463,8 @@ export interface GameEvent {
   seatId?: string;
   message: string;
   detail?: string;
+  // Set on the "<Card> phases out." / "<Card> phases in." log lines so the table can animate the change (cards keep the steady-state `phasedOut` flag).
+  phasing?: { cardId: string; direction: "out" | "in" };
 }
 
 // A snapshot of one agent seat's most recent LLM decision, kept purely for the "thinking" HUD

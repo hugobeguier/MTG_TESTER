@@ -12,7 +12,7 @@ export function hasKeyword(card: VisibleCard, keyword: string) {
   // Layer 6: a creature that's lost all abilities (Utter Insignificance, Overwhelming Splendor —
   // see abilitiesStripped's doc comment) has neither its printed keywords nor any granted ones,
   // regardless of what either source's text says.
-  if (card.abilitiesStripped) return false;
+  if ((card.abilitiesStripped || card.phasedOut)) return false;
   return hasKeywordText(card.oracleText, keyword) || Boolean(card.grantedKeywords?.includes(keyword));
 }
 

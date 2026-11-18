@@ -225,7 +225,7 @@ export function staticCostReduction(seat: PlayerSeat, card: VisibleCard): number
   const commanderReduction = commander && /\beminence\b/i.test(commander.oracleText) ? parseGrantedCostReduction(commander, card) : 0;
   // An emblem's "Artifact spells you cast cost {1} less to cast." (Saheeli, Filigree Master) is a standing reducer like a permanent's.
   const emblemReduction = emblemSourceCards(seat).reduce((total, source) => total + parseGrantedCostReduction(source, card), 0);
-  return commanderReduction + emblemReduction + seat.board.battlefield.reduce((total, source) => total + parseGrantedCostReduction(source, card), 0);
+  return commanderReduction + emblemReduction + seat.board.battlefield.reduce((total, source) => (source.phasedOut ? total : total + parseGrantedCostReduction(source, card)), 0);
 }
 
 // "Unlock costs you pay cost {1} less." (Inquisitive Glimmer, ...) — a differently-worded sibling

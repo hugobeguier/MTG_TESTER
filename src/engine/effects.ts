@@ -13,7 +13,7 @@ import { createCopyTokenForSeat, createTokensForSeat, parseCreateTokenSpecs, pre
 import { commonTriggerEffect, phaseEvent, resolveTriggerEffect } from "@/engine/triggers";
 import type { PendingAction, PendingRuleChoice, TriggerEffect } from "@/engine/types";
 import type { GraveyardReturnOptions } from "@/engine/zones";
-import { applyCounterDelta, applyCounterDeltaAtSession, applyGraveyardExile, applyGraveyardToLibrary, applyPutCardsOnLibrary, changeControlWithinBattlefield, findPermanentById, moveCardBetweenVisibleZones, moveTopLibraryCardToHand, possessive, putLookedAtCardsInGraveyard, queuePlayerChoice, reorderTopLibraryCards, resetForZoneChange, rulesEvent, shuffleCards } from "@/engine/zones";
+import { applyCounterDelta, applyCounterDeltaAtSession, applyEnterAsCopyTarget, applyGraveyardExile, applyGraveyardToLibrary, applyPutCardsOnLibrary, changeControlWithinBattlefield, findPermanentById, moveCardBetweenVisibleZones, moveTopLibraryCardToHand, possessive, putLookedAtCardsInGraveyard, queuePlayerChoice, reorderTopLibraryCards, resetForZoneChange, rulesEvent, shuffleCards } from "@/engine/zones";
 import type { StaticCondition } from "@/lib/characteristics";
 import { countMatchingPermanents, permanentMatchesQualifier } from "@/lib/characteristics";
 import { counterCount, effectivePower, effectiveToughness } from "@/lib/counters";
@@ -648,6 +648,13 @@ export function resolveDeferredChoice(session: GameSession, seatId: string, sour
     if (!devourer) return session;
     if (value && value !== "done") picked.push(value);
     return value && value !== "done" ? applyDevour(session, seatId, devourer, perCreature, picked) : finishDevour(session, seatId, devourer, perCreature, picked);
+  }
+  if (resolver === "enter_as_copy") {
+    // The owner's pick for a permanent that entered without being cast (Estrid's Invocation returning from its upkeep rider, a flickered Clone).
+    const target = value && value !== "none" ? findPermanentById(session, value) : undefined;
+    const entering = seat.board.battlefield.find((card) => card.id === sourceCardId);
+    if (!entering) return session;
+    return target ? applyEnterAsCopyTarget(session, seatId, sourceCardId, target) : rulesEvent(session, seatId, `${sourceName} enters without copying anything.`);
   }
   if (resolver === "hulk_exile") {
     if (!value || value === "none") return session;
@@ -1579,7 +1586,7 @@ function applyBecomesTargetTriggers(session: GameSession, casterSeatId: string, 
   const controller = session.seats.find((seat) => seat.board.battlefield.some((card) => card.id === targetCard.id));
   if (!controller || controller.id === casterSeatId) return session;
   for (const watcher of controller.board.battlefield) {
-    if (watcher.abilitiesStripped) continue;
+    if ((watcher.abilitiesStripped || watcher.phasedOut)) continue;
     for (const clause of oracleClauses(watcher.oracleText)) {
       const match = clause.match(/^whenever an? ([a-z]+) you control becomes the target of a spell or ability an opponent controls, this creature deals (\d+) damage to that player\b/i);
       if (!match || !permanentMatchesQualifier(targetCard, match[1])) continue;

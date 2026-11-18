@@ -148,7 +148,7 @@ export function applyEntersWithCounterReplacementsCore(session: GameSession, sea
     }
   }
   for (const source of others) {
-    if (source.abilitiesStripped) continue;
+    if ((source.abilitiesStripped || source.phasedOut)) continue;
     // Gorma, the Gullet: "Nontoken creatures you control enter with an additional +1/+1 counter on them for each creature that died under your
     // control this turn."
     if (!entering.token && /\bnontoken creatures you control enter with an additional \+1\/\+1 counter on them for each creature that died under your control this turn\b/i.test(source.oracleText)) {
@@ -356,6 +356,11 @@ export function resetForZoneChange<T extends VisibleCard>(card: T, zone: Visible
           unlockedFaceIndices: [0]
         }
       : {}),
+    // A copy that leaves the battlefield is just the real card again (name/text/art of what it truly is), see copyOriginal.
+    ...(card.copyOriginal ?? card.temporaryCopyOriginal ?? {}),
+    copyOriginal: undefined,
+    temporaryCopyOriginal: undefined,
+    phasedOut: undefined,
     tapped: false,
     attacking: false,
     damage: undefined,
@@ -414,7 +419,7 @@ export function findExileInsteadOfDying(
   for (const sourceSeat of session.seats) {
     if (sourceSeat.id === dyingSeatId || sourceSeat.hasLost) continue;
     for (const source of sourceSeat.board.battlefield) {
-      if (source.abilitiesStripped) continue;
+      if ((source.abilitiesStripped || source.phasedOut)) continue;
       const replacement = parseExileInsteadOfDyingReplacement(source.oracleText);
       if (replacement) return { sourceId: source.id, sourceName: source.name, sourceSeatId: sourceSeat.id, tokenClause: replacement.tokenClause };
     }
@@ -593,8 +598,44 @@ export function applyEnterAsCopyOnEntry(session: GameSession, seatId: string, ca
   const without: GameSession = { ...session, seats: session.seats.map((seat) => ({ ...seat, board: { ...seat.board, battlefield: seat.board.battlefield.filter((card) => card.id !== cardId) } })) };
   const target = findEnterAsCopyTarget(without, seatId, effect, entering.chosenCopyTargetId);
   if (!target) return session;
+  // A human with a real choice (2+ legal copy targets) is asked, exactly like the cast path (choose_cast_copy): Estrid's Invocation returning from its
+  // upkeep rider must let its owner pick a NEW enchantment. The permanent waits on the battlefield as the blank card until they answer.
+  const seat = session.seats.find((item) => item.id === seatId);
+  const candidates = enterAsCopyCandidates(without, seatId, effect);
+  if (seat?.kind === "human" && !entering.chosenCopyTargetId && candidates.length >= 2) {
+    return queuePlayerChoice(session, {
+      seatId,
+      sourceCardId: cardId,
+      sourceCardName: entering.name,
+      prompt: `${entering.name}: choose ${effect.controlledOnly ? "an enchantment you control" : "a permanent"} to enter as a copy of.`,
+      options: [...candidates.map((card) => ({ label: `${card.name} (${card.typeLine})`, value: card.id })), { label: "Don't copy anything", value: "none" }],
+      resolver: "enter_as_copy",
+      data: {}
+    });
+  }
+  return applyEnterAsCopyTarget(session, seatId, cardId, target);
+}
+
+// Turns the (blank) entering permanent into a permanent copy of `target`, remembering what it really is (copyOriginal) so it reverts on any zone change.
+export function applyEnterAsCopyTarget(session: GameSession, seatId: string, cardId: string, target: VisibleCard): GameSession {
+  const entering = session.seats.find((seat) => seat.id === seatId)?.board.battlefield.find((card) => card.id === cardId);
+  if (!entering) return session;
+  const effect = parseEnterAsCopyEffect(entering.oracleText);
+  if (!effect) return session;
   const copy: VisibleCard = {
     ...entering,
+    copyOriginal: entering.copyOriginal ?? {
+      name: entering.name,
+      typeLine: entering.typeLine,
+      oracleText: entering.oracleText,
+      manaCost: entering.manaCost,
+      manaValue: entering.manaValue,
+      colors: entering.colors,
+      colorIdentity: entering.colorIdentity,
+      power: entering.power,
+      toughness: entering.toughness,
+      imageUris: entering.imageUris
+    },
     name: target.name,
     typeLine: target.typeLine,
     oracleText: effect.extraAbilityText ? `${target.oracleText}\n${effect.extraAbilityText}` : target.oracleText,
@@ -606,10 +647,14 @@ export function applyEnterAsCopyOnEntry(session: GameSession, seatId: string, ca
     toughness: target.toughness,
     imageUris: target.imageUris ?? entering.imageUris
   };
-  return {
-    ...session,
-    seats: session.seats.map((seat) => (seat.id === seatId ? { ...seat, board: { ...seat.board, battlefield: seat.board.battlefield.map((card) => (card.id === cardId ? copy : card)) } } : seat))
-  };
+  return rulesEvent(
+    {
+      ...session,
+      seats: session.seats.map((seat) => (seat.id === seatId ? { ...seat, board: { ...seat.board, battlefield: seat.board.battlefield.map((card) => (card.id === cardId ? copy : card)) } } : seat))
+    },
+    seatId,
+    `${entering.name} enters as a copy of ${target.name}.`
+  );
 }
 
 // A control change (Threaten/Mind Control-style) is NOT a zone change (rule 400.7 only triggers on

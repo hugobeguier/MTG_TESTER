@@ -301,7 +301,7 @@ export function dealDamageToCreature(
 // "Whenever this creature is dealt damage, ..." (Ripjaw Raptor's enrage draw, Metropolis Reformer's lifegain). Resolved on the
 // spot rather than queued: the effects involved (draw, gain life) never need a choice.
 export function applyDealtDamageTriggers(session: GameSession, seatId: string, card: VisibleCard, amount: number): GameSession {
-  if (card.abilitiesStripped || amount <= 0) return session;
+  if ((card.abilitiesStripped || card.phasedOut) || amount <= 0) return session;
   let next = session;
   for (const clause of oracleClauses(card.oracleText)) {
     const match = clause.match(/(?:^|— )whenever this creature is dealt damage, (.+)$/i);

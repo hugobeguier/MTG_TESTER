@@ -97,7 +97,7 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
     }
   }
   // The gods: "As long as your devotion to white and black is less than seven, Athreos isn't a creature."
-  if (next.seats.some((seat) => seat.board.battlefield.some((card) => !card.abilitiesStripped && parseDevotionNotCreature(card.oracleText)))) {
+  if (next.seats.some((seat) => seat.board.battlefield.some((card) => !(card.abilitiesStripped || card.phasedOut) && parseDevotionNotCreature(card.oracleText)))) {
     let godChanged = false;
     next = {
       ...next,
@@ -465,7 +465,7 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
           // Emblems (Elspeth Sun's Champion's "Creatures you control get +2/+2 and have flying", Domri Rade's keywords, ...) are sources too: their
           // controller is the seat that holds them, and nothing can remove them.
           for (const sourceSeat of next.seats) {
-            for (const grantSource of [...sourceSeat.board.battlefield, ...emblemSourceCards(sourceSeat)]) {
+            for (const grantSource of [...sourceSeat.board.battlefield.filter((source) => !source.phasedOut), ...emblemSourceCards(sourceSeat)]) {
               for (const grant of parseGroupKeywordGrant(grantSource.oracleText)) {
                 if (grant.controlledOnly && sourceSeat.id !== seat.id) continue;
                 if (grant.excludeSelf && grantSource.id === card.id) continue;
@@ -480,7 +480,7 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
           // Envoy of the Ancestors: "Modified creatures you control have lifelink." (modified = has a counter, or an Equipment/Aura you control attached).
           // Zurgo and Ojutai: "[name] has hexproof as long as it entered this turn."
           for (const grantSource of seat.board.battlefield) {
-            if (grantSource.abilitiesStripped) continue;
+            if ((grantSource.abilitiesStripped || grantSource.phasedOut)) continue;
             for (const line of grantSource.oracleText.split("\n")) {
               const byColor = line.replace(/\([^)]*\)/g, "").match(/^each creature you control has (.+?)\.?$/i);
               if (byColor && /\bif it'?s (?:white|blue|black|red|green)\b/i.test(byColor[1]) && card.typeLine.includes("Creature")) {
@@ -505,7 +505,7 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
           // each of the controller's creatures as a pseudo-keyword carrying the current threshold (read back by attackerEvadesBlocker).
           if (card.typeLine.includes("Creature")) {
             for (const champion of seat.board.battlefield) {
-              if (champion.abilitiesStripped) continue;
+              if ((champion.abilitiesStripped || champion.phasedOut)) continue;
               if (/creatures with power less than this creature'?s power can'?t block creatures you control/i.test(champion.oracleText)) {
                 keywordSet.add(`can't be blocked by power below ${effectivePower(champion)}`);
               }
@@ -518,7 +518,7 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
           // keywordSet, since there's no existing "set of granted abilities" concept to fold a raw
           // ability string into. The first matching grant wins; no real card grants more than one.
           let manaAbilityGrantText: string | undefined;
-          for (const grantSource of seat.board.battlefield) {
+          for (const grantSource of seat.board.battlefield.filter((source) => !source.phasedOut)) {
             if (manaAbilityGrantText) break;
             for (const grant of parseGroupManaAbilityGrant(grantSource.oracleText)) {
               if (grant.excludeSelf && grantSource.id === card.id) continue;
@@ -535,7 +535,7 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
           // Same scope rule as the keyword grants above: without "you control" the boost applies to every
           // player's matching creatures (Lord of the Undead, Bad Moon), so every seat is a possible source.
           for (const sourceSeat of next.seats) {
-            for (const anthemSource of [...sourceSeat.board.battlefield, ...emblemSourceCards(sourceSeat)]) {
+            for (const anthemSource of [...sourceSeat.board.battlefield.filter((source) => !source.phasedOut), ...emblemSourceCards(sourceSeat)]) {
               for (const anthem of parseGroupAnthemBoost(anthemSource.oracleText)) {
                 if (anthem.controlledOnly && sourceSeat.id !== seat.id) continue;
                 if (anthem.excludeSelf && anthemSource.id === card.id) continue;
@@ -557,7 +557,7 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
           // "As long as ..." boosts and grants (Angel of Vitality, Righteous Valkyrie, Angelic Field Marshal's lieutenant),
           // checked live against the source controller's life / commander. Only a creature's OWN controller's sources.
           for (const conditionalSource of seat.board.battlefield) {
-            if (conditionalSource.abilitiesStripped) continue;
+            if ((conditionalSource.abilitiesStripped || conditionalSource.phasedOut)) continue;
             for (const boost of parseConditionalStaticBoosts(conditionalSource.oracleText)) {
               if (!staticConditionMet(boost.condition, seat, conditionalSource, next.activePlayerId)) continue;
               if (boost.scope === "self" && conditionalSource.id !== card.id) continue;
@@ -630,12 +630,12 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
   // ALL seats up front rather than re-derived per seat from that seat's own battlefield alone.
   // Reported live as Mycosynth Lattice's own artifact grant not being counted by Saheeli's affinity
   // discount for lands and other nonartifact permanents it should have applied to.
-  const globalGrantSources = next.seats.flatMap((seat) => seat.board.battlefield.flatMap((card) => parseTypeGrantEffects(card.oracleText).filter((grant) => grant.global)));
+  const globalGrantSources = next.seats.flatMap((seat) => seat.board.battlefield.filter((card) => !card.phasedOut).flatMap((card) => parseTypeGrantEffects(card.oracleText).filter((grant) => grant.global)));
   // Ygra, Eater of All: "Other creatures are Food artifacts in addition to their other types and have '...'" — every creature on the battlefield other
   // than the source, whoever controls it, gains the types and the granted activated ability. Sources are gathered across all seats.
   const otherCreatureGrantSources = next.seats.flatMap((seat) =>
     seat.board.battlefield.flatMap((card) => {
-      if (card.abilitiesStripped) return [];
+      if ((card.abilitiesStripped || card.phasedOut)) return [];
       const grant = parseOtherCreaturesGrant(card.oracleText);
       return grant ? [{ sourceId: card.id, grant }] : [];
     })
@@ -643,7 +643,7 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
   next = {
     ...next,
     seats: next.seats.map((seat) => {
-      const grantSources = [...seat.board.battlefield.flatMap((card) => parseTypeGrantEffects(card.oracleText).filter((grant) => !grant.global)), ...globalGrantSources];
+      const grantSources = [...seat.board.battlefield.filter((card) => !card.phasedOut).flatMap((card) => parseTypeGrantEffects(card.oracleText).filter((grant) => !grant.global)), ...globalGrantSources];
       return {
         ...seat,
         board: {

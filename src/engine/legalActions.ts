@@ -482,7 +482,7 @@ export const EMPTY_LOYALTY_KEYS = new Set<string>();
 export function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllowed: boolean, turn: number, activatedLoyaltyKeys: Set<string>, session: GameSession, landDropAvailable = true, stack: PendingAction[] = []): LegalAgentAction[] {
   const actions: LegalAgentAction[] = seat.board.battlefield
     .filter((card) => {
-      if (card.abilitiesStripped) return false;
+      if ((card.abilitiesStripped || card.phasedOut)) return false;
       if (!isBasicLandFetchAbility(card)) return false;
       const requiresTap = basicLandFetchCostRequiresTap(card);
       // Rule 302.6: only applies when the cost actually includes {T} (Evolving Wilds) — Sakura-
@@ -507,7 +507,7 @@ export function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllow
     }));
 
   for (const card of seat.board.battlefield) {
-    if (card.abilitiesStripped) continue;
+    if ((card.abilitiesStripped || card.phasedOut)) continue;
     parseGenericSacrificeAbilities(abilityOracleText(card)).forEach((ability, abilityIndex) => {
       if (!activateOnlyIfConditionMet(ability.clause, seat)) return;
       // "Activate only as a sorcery." (Fiend Artisan, Birthing Pod): never offered at instant speed.
@@ -593,7 +593,7 @@ export function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllow
   }
 
   for (const card of seat.board.battlefield) {
-    if (card.abilitiesStripped) continue;
+    if ((card.abilitiesStripped || card.phasedOut)) continue;
     parseGenericTapAbilities(abilityOracleText(card)).forEach((ability, abilityIndex) => {
       if (!activateOnlyIfConditionMet(ability.clause, seat)) return;
       if (hasSorcerySpeedOnlyLimiter(ability.clause) && !sorcerySpeedAllowed) return;
@@ -653,7 +653,7 @@ export function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllow
   // "{cost}: Untap ~." (Retrofitter Foundry's "{3}: Untap this artifact.") only ever does anything
   // useful while the permanent is actually tapped — no {T} in its own cost, so summoning sickness
   // (rule 302.6) doesn't apply here regardless of whether the source is a creature.
-  for (const card of seat.board.battlefield.filter((item) => item.tapped && !item.abilitiesStripped)) {
+  for (const card of seat.board.battlefield.filter((item) => item.tapped && !(item.abilitiesStripped || item.phasedOut))) {
     parseSelfUntapAbilities(card.oracleText).forEach((ability, abilityIndex) => {
       if (!activateOnlyIfConditionMet(ability.clause, seat)) return;
       const affordable = ability.costMana === 0 || chooseManaSourcesForCost(seat, genericCostShim(ability.costMana), ability.costMana, undefined, session.seats).ok;
@@ -672,7 +672,7 @@ export function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllow
   }
 
   for (const card of seat.board.battlefield) {
-    if (card.abilitiesStripped) continue;
+    if ((card.abilitiesStripped || card.phasedOut)) continue;
     parseGenericManaAbilities(card.oracleText).forEach((ability, abilityIndex) => {
       if (!activateOnlyIfConditionMet(ability.clause, seat)) return;
       if (hasSorcerySpeedOnlyLimiter(ability.clause) && !sorcerySpeedAllowed) return;

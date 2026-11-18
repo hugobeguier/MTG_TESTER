@@ -197,6 +197,7 @@ export function findLandRaidTriggers(session: GameSession, enteringSeatId: strin
     const landCount = seat.board.battlefield.filter((card) => card.typeLine.includes("Land")).length;
     if (enteringLandCount <= landCount) continue;
     for (const source of seat.board.battlefield) {
+      if (source.phasedOut) continue;
       if (!isArchaeomancersMapLandRaidTrigger(source.oracleText)) continue;
       triggers.push(
         makeCommonTrigger(enteringSeatId, seat.id, source, { kind: "put_land_from_hand" }, `${source.name} triggers because ${enteredCard.name} entered under ${possessive(enteringSeat)} control.`)
@@ -224,7 +225,7 @@ export function findSacrificeWatcherTriggers(
     for (const seat of session.seats) {
       if (seat.hasLost) continue;
       for (const source of seat.board.battlefield) {
-        if (source.id === death.card.id || source.abilitiesStripped) continue;
+        if (source.id === death.card.id || (source.abilitiesStripped || source.phasedOut)) continue;
         const clause = oracleClauses(source.oracleText).find((line) => /^whenever a player sacrifices another permanent\b/i.test(line));
         if (!clause) continue;
         const effectText = clause.replace(/^whenever a player sacrifices another permanent,\s*/i, "");
@@ -238,7 +239,7 @@ export function findSacrificeWatcherTriggers(
     const sacrificer = session.seats.find((item) => item.id === death.seatId);
     if (sacrificer && !sacrificer.hasLost) {
       for (const source of [...sacrificer.board.battlefield, ...(sacrificer.board.battlefield.some((card) => card.id === death.card.id) ? [] : [death.card])]) {
-        if (source.abilitiesStripped) continue;
+        if ((source.abilitiesStripped || source.phasedOut)) continue;
         for (const line of oracleClauses(source.oracleText)) {
           const match = line.match(/^whenever you sacrifice (?:an?|another) ([a-z]+ )?(creature|permanent|artifact|food|land)s?,\s*(.+)$/i);
           if (!match) continue;
@@ -260,7 +261,7 @@ export function findSacrificeWatcherTriggers(
     for (const seat of session.seats) {
       if (seat.hasLost) continue;
       for (const source of [...seat.board.battlefield, ...dyingCreatures.filter((death) => death.seatId === seat.id).map((death) => death.card)]) {
-        if (source.abilitiesStripped) continue;
+        if ((source.abilitiesStripped || source.phasedOut)) continue;
         const clause = oracleClauses(source.oracleText).find((line) => /^whenever one or more other creatures die,/i.test(line));
         if (!clause) continue;
         if (!dyingCreatures.some((death) => death.card.id !== source.id)) continue;
@@ -322,7 +323,7 @@ export function findPutIntoGraveyardTriggers(session: GameSession, deadSeatId: s
   const triggers: Array<Extract<PendingAction, { type: "trigger" }>> = [];
   for (const seat of session.seats) {
     for (const source of seat.board.battlefield) {
-      if (source.abilitiesStripped || source.id === deadCard.id) continue;
+      if ((source.abilitiesStripped || source.phasedOut) || source.id === deadCard.id) continue;
       for (const clause of oracleClauses(selfNameAsThisCreature(source))) {
         const match = clause.match(/^whenever an? ([a-z]+) is put into a graveyard from the battlefield, (.+)$/i);
         if (!match) continue;
@@ -358,6 +359,7 @@ export function findCommonTriggersForPermanentDied(
     const fallenAttachments = (seat.board.graveyard ?? []).filter((card) => attachedSourceIds?.includes(card.id));
     const sources = [...seat.board.battlefield, ...simultaneousDeathsForSeat, ...fallenAttachments];
     for (const source of sources) {
+      if (source.phasedOut) continue;
       // Felisa, Fang of Silverquill: "create X ... tokens, where X is the number of counters it had on it" counts counters of EVERY kind.
       // The watcher (Felisa) is a different permanent from the creature that died, so this applies to any source with that wording.
       const dynamicCounterCount = /\bnumber of counters it had on it\b/i.test(source.oracleText) ? (deadCard.counters ?? []).reduce((sum, counter) => sum + counter.count, 0) : source.id === deadCard.id ? plusOneCounterCount(deadCard) : undefined;
@@ -372,7 +374,7 @@ export function findCommonTriggersForPermanentDied(
   if (!deadCard.token) {
     for (const seat of session.seats) {
       for (const vat of seat.board.battlefield) {
-        if (vat.abilitiesStripped || !/imprint\s*[—-]\s*whenever a nontoken creature dies, you may exile that card/i.test(vat.oracleText)) continue;
+        if (vat.abilitiesStripped || vat.phasedOut || !/imprint\s*[—-]\s*whenever a nontoken creature dies, you may exile that card/i.test(vat.oracleText)) continue;
         triggers.push(makeCommonTrigger(deadSeatId, seat.id, vat, { kind: "imprint_dying_creature" }, `${vat.name} triggers because ${deadCard.name} died.`, deadCard.id));
       }
     }
@@ -400,7 +402,7 @@ export function findLeavesBattlefieldTriggers(session: GameSession, leavingSeatI
   // Athreos, Shroud-Veiled: any seat's watcher reacts to a marked creature of ANY controller dying or being exiled.
   for (const seat of session.seats) {
     for (const watcher of seat.board.battlefield) {
-      if (watcher.abilitiesStripped || watcher.id === leavingCard.id) continue;
+      if ((watcher.abilitiesStripped || watcher.phasedOut) || watcher.id === leavingCard.id) continue;
       for (const clause of oracleClauses(watcher.oracleText)) {
         const marked = clause.match(/^whenever a creature with an? ([a-z+/-]+) counter on it dies or is put into exile, return that card to the battlefield under your control\.?$/i);
         if (!marked || !(leavingCard.counters ?? []).some((counter) => counter.kind.toLowerCase() === marked[1].toLowerCase() && counter.count > 0)) continue;
@@ -410,7 +412,7 @@ export function findLeavesBattlefieldTriggers(session: GameSession, leavingSeatI
   }
   const watcherSeat = session.seats.find((seat) => seat.id === leavingSeatId);
   for (const watcher of watcherSeat?.board.battlefield ?? []) {
-    if (watcher.abilitiesStripped || watcher.id === leavingCard.id) continue;
+    if ((watcher.abilitiesStripped || watcher.phasedOut) || watcher.id === leavingCard.id) continue;
     for (const clause of oracleClauses(watcher.oracleText)) {
       // "Whenever another permanent you control leaves the battlefield, if it had counters on it, investigate." (Angelic Sleuth)
       const withCounters = hadCounters ? clause.match(/^whenever another permanent you control leaves the battlefield, if it had counters on it, (.+)$/i) : null;
@@ -478,7 +480,7 @@ export function findLifeGainTriggers(
   const sourceSeat = session.seats.find((seat) => seat.id === gain.seatId);
   if (!sourceSeat || sourceSeat.hasLost || gain.amount <= 0) return triggers;
   for (const source of sourceSeat.board.battlefield) {
-    if (source.abilitiesStripped) continue;
+    if ((source.abilitiesStripped || source.phasedOut)) continue;
     for (const clause of oracleClauses(source.oracleText)) {
       if (isActivatedAbilityClause(clause)) continue;
       const match = clause.match(/^(?:when|whenever) you gain life( for the first time each turn)?,/i);
@@ -508,7 +510,7 @@ export function findMultiAttackTriggers(session: GameSession, attackerSeatId: st
   // battlefield." (The Ur-Dragon): once per declaration, for the attacking creatures of that subtype.
   if (attacker) {
     for (const source of attacker.board.battlefield) {
-      if (source.abilitiesStripped) continue;
+      if ((source.abilitiesStripped || source.phasedOut)) continue;
       const clause = oracleClauses(source.oracleText).find((line) => /^whenever one or more [a-z]+s you control attack, draw that many cards, then you may put a permanent card from your hand onto the battlefield/i.test(line));
       const subtype = clause?.match(/^whenever one or more ([a-z]+)s you control attack/i)?.[1];
       const key = `${session.turn}:${source.id}:subtype_attack`;
@@ -523,7 +525,7 @@ export function findMultiAttackTriggers(session: GameSession, attackerSeatId: st
   for (const sourceSeat of session.seats) {
     if (sourceSeat.hasLost) continue;
     for (const source of sourceSeat.board.battlefield) {
-      if (source.abilitiesStripped) continue;
+      if ((source.abilitiesStripped || source.phasedOut)) continue;
       const key = `${session.turn}:${source.id}:multi_attack:${attackerSeatId}`;
       if (session.onceEachTurnEffectsUsed?.includes(key)) continue;
       for (const clause of oracleClauses(source.oracleText)) {
@@ -555,7 +557,7 @@ export function findAttackTriggers(
   for (const sourceSeat of session.seats) {
     if (sourceSeat.hasLost) continue;
     for (const source of sourceSeat.board.battlefield) {
-      if (source.abilitiesStripped) continue;
+      if ((source.abilitiesStripped || source.phasedOut)) continue;
       // Dethrone (Scourge of the Throne): attacking the player with the most life (or tied) puts a +1/+1 counter on the attacker.
       if (event === "attacks" && source.id === attack.card.id && hasKeywordText(source.oracleText, "dethrone")) {
         const defending = session.seats.find((seat) => seat.id === attack.defendingSeatId);
@@ -659,6 +661,7 @@ export function findCombatDamageToPlayerTriggers(
   if (!seat) return [];
   const triggers: Array<Extract<PendingAction, { type: "trigger" }>> = [];
   for (const source of seat.board.battlefield) {
+      if (source.phasedOut) continue;
     // Renown N (the keyword itself, with its own once-only rule) replaces whatever the reminder text would otherwise parse as.
     const renownMatch = source.id === dealingCard.id && !source.abilitiesStripped ? source.oracleText.match(/^renown (\d+)/im) : null;
     if (renownMatch) {
@@ -761,6 +764,7 @@ export function findAnyCombatDamageToOpponentTriggers(
     // controller (not an opponent of themselves).
     if (seat.hasLost || seat.id === damagedSeatId) continue;
     for (const source of seat.board.battlefield) {
+      if (source.phasedOut) continue;
       const parsed = parseAnyCreatureCombatDamageToOpponentTrigger(source.oracleText);
       if (!parsed) continue;
       triggers.push(
@@ -817,6 +821,7 @@ export function findBreenaAttackTriggers(session: GameSession, attackingSeatId: 
     );
     if (!hasLowerLifeOtherOpponent) continue;
     for (const source of seat.board.battlefield) {
+      if (source.phasedOut) continue;
       const parsed = parseBreenaAttackTrigger(source.oracleText);
       if (!parsed) continue;
       triggers.push(
@@ -845,6 +850,7 @@ export function findCardsLeftGraveyardTriggers(session: GameSession, graveyardSe
   if (!seat) return [];
   const triggers: Array<Extract<PendingAction, { type: "trigger" }>> = [];
   for (const source of seat.board.battlefield) {
+      if (source.phasedOut) continue;
     const effect = commonTriggerEffect(source.oracleText, "cards_left_graveyard");
     if (!effect) continue;
     triggers.push(makeCommonTrigger(graveyardSeatId, seat.id, source, effect, `${source.name} triggers because one or more cards left ${seat.name}'s graveyard.`));
@@ -945,6 +951,7 @@ export function findCastTriggers(
 
   for (const seat of session.seats) {
     for (const source of seat.board.battlefield) {
+      if (source.phasedOut) continue;
       for (const clause of oracleClauses(source.oracleText)) {
         if (isActivatedAbilityClause(clause)) continue;
         const condition = parseCastTriggerCondition(clause);
