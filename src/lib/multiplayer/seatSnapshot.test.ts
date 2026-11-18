@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { GameSession, PlayerSeat, VisibleCard } from "../types";
 import { buildSnapshot, isMpSnapshot, type SnapshotInput } from "./snapshot";
+import { defaultSeatStopSettings } from "./seatStops";
 
 function card(id: string, name: string, zone: VisibleCard["zone"]): VisibleCard {
   return { id, name, typeLine: `Type of ${name}`, oracleText: `Text of ${name}`, manaCost: "{3}", manaValue: 3, colors: ["U"], role: "x", zone };
@@ -157,5 +158,27 @@ describe("per-seat prompts (seatPrompts.ts) in a seated snapshot", () => {
     expect(snap.session.seats.find((s) => s.id === "seat-a")?.name).toBe("Hugo");
     expect(snap.session.events[0].message).toBe("Hugo passes to main phase.");
     expect(buildSnapshot(input, "spectator").ack).toBeUndefined();
+  });
+});
+
+describe("friend stop settings in the snapshot", () => {
+  it("a seated viewer gets only their OWN settings (defaults when none were set); a spectator gets none", () => {
+    const own = { ...defaultSeatStopSettings(2, 4), fullControl: true, holdOnce: true };
+    const other = { ...defaultSeatStopSettings(1, 4), stopOnAttacked: false };
+    const input = makeInput({ seatStops: { "seat-c": own, "seat-b": other } });
+    expect(buildSnapshot(input, "seat-c").myStops).toEqual(own);
+    expect(JSON.stringify(buildSnapshot(input, "seat-c")).includes('"stopOnAttacked":false')).toBe(false); // seat-b's choice stays on the host
+    expect(buildSnapshot(makeInput(), "seat-b").myStops).toEqual(defaultSeatStopSettings(1, 4));
+    expect(buildSnapshot(input, "spectator").myStops).toBeUndefined();
+  });
+});
+
+describe("snapshot size", () => {
+  it("carries no seat's deck list (the biggest part of a snapshot, never read by the table), not even the viewer's own", () => {
+    for (const viewer of [...LETTERS.map((l) => `seat-${l}`), "spectator"]) {
+      const snap = buildSnapshot(makeInput(), viewer);
+      for (const s of snap.session.seats) expect((s as { deck?: unknown }).deck, viewer).toBeUndefined();
+      expect(JSON.stringify(snap)).not.toContain("DeckOnly");
+    }
   });
 });

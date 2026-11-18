@@ -52,8 +52,9 @@ Friend (Hamachi): `http://<host-hamachi-ip>:3000/mp/join`, enter the code and a 
 
 ## M4 stage 4: friends play their seat
 
-* `remoteSeatPolicy.ts`: `remoteSeatsCanAct = true`; a remote seat always gets a priority window on a legal response (`priorityStopsForSeat`, full control) and its own turn
-  pauses at `remoteTurnStopSettings` (main phases + declare attackers). The old "skip remote seat turn" effect is now a no-op fallback.
+* `remoteSeatPolicy.ts` + `seatStops.ts`: `remoteSeatsCanAct = true`; a remote seat is asked for priority by the SAME rules/defaults as the host (stack response, attacked, own main phases / declare attackers, ...) using ITS OWN
+  `PriorityStopSettings` (`priorityStopSettings.bySeat[seatId]`, kept in game context `seatStops`; friend toggles Full Control / Stop Next / the grid through the `settings` intents; sent back as `snapshot.myStops`).
+  No legal response = never waited on. `dragOverlay.ts`: friend-side optimistic card drag (only the drop is sent). `publishTiming.ts`: 40 ms lead / 120 ms min interval publish; snapshots carry no `seat.deck`.
 * `intentSpecs.ts` (pure, shared): every wire intent = zod args + `when` (which game state allows it) + `seatArgs` (must equal the sender's seat). `intentProxy.ts` (guest) takes
   arity from it; `components/game/mpIntents.ts` (host) builds the registry from it and maps each name to the host handler (handlers take a seat id; one intent per React commit).
   Each processed intent is acked (`MpSnapshot.ack`: clientSeq + error text) and RemoteTable shows refusals as a toast.

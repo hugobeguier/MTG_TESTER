@@ -46,6 +46,8 @@ export interface MpGuestApi extends GuestState {
   /** Transport / timing details for the "connection details" line. */
   diagnostics: GuestDiagnostics;
   sendIntent: (name: string, args: unknown[]) => Promise<string | undefined>;
+  /** The clientSeq of the intent sendIntent was called with most recently (read it synchronously right after the call). */
+  lastIntentSeq: () => number;
 }
 
 export function useMpGuest(): MpGuestApi {
@@ -242,5 +244,7 @@ export function useMpGuest(): MpGuestApi {
     }
   }, []);
 
-  return { ...state, diagnostics: diag, join, leave, sendIntent };
+  const lastIntentSeq = useCallback(() => seqRef.current, []);
+
+  return { ...state, diagnostics: diag, join, leave, sendIntent, lastIntentSeq };
 }

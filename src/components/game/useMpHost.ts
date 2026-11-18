@@ -8,6 +8,7 @@ import { PublishGate, hostReducer, initialHostState, connectedGuests, type HostS
 import { hostStatusStore } from "@/lib/multiplayer/hostStatusStore";
 import type { HostEvent } from "@/lib/multiplayer/protocol";
 import { buildSnapshot, snapshotFingerprint, type SnapshotInput } from "@/lib/multiplayer/snapshot";
+import { publishDelayMs } from "@/lib/multiplayer/publishTiming";
 import { seatForSlot } from "@/lib/multiplayer/seatMap";
 import { SPECTATOR_VIEWER } from "@/lib/multiplayer/view";
 import type { GameContext } from "./context";
@@ -18,8 +19,6 @@ export interface MpHostConfig {
   enabled: boolean;
   hostName?: string;
 }
-
-export const PUBLISH_DEBOUNCE_MS = 150;
 
 export async function post(path: string, token: string | null, body: unknown, keepalive = false) {
   const res = await fetch(path, {
@@ -64,7 +63,8 @@ function readSnapshotInput(ctx: GameContext, hostName: string): SnapshotInput {
       manualLibrarySearch: ctx.choices.manualLibrarySearch
     },
     landPlayed: Object.fromEntries(session.seats.filter((seat) => seat.kind === "human").map((seat) => [seat.id, ctx.late.hasPlayedLandThisTurn(seat.id, session.turn)])),
-    pausedFor: ctx.mpPausedFor
+    pausedFor: ctx.mpPausedFor,
+    seatStops: ctx.stack.seatStops
   };
 }
 
@@ -83,8 +83,6 @@ export function useMpHost(ctx: GameContext, config: MpHostConfig): HostState {
   const latestRef = useRef({ ctx, hostName, guestSlots: [] as string[], enabled });
   latestRef.current = { ctx, hostName, guestSlots: connectedGuests(state).map((g) => g.seatId), enabled };
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const inFlightRef = useRef(false);
-  const dirtyRef = useRef(false);
   const intentRef = useRef<((event: Extract<HostEvent, { type: "intent" }>) => void) | undefined>(undefined);
 
   // Mirror state for the MpHostPanel (rendered beside AppFlow).
@@ -92,43 +90,65 @@ export function useMpHost(ctx: GameContext, config: MpHostConfig): HostState {
     if (enabled) hostStatusStore.set(state);
   }, [enabled, state]);
 
-  async function publishNow() {
-    const token = tokenRef.current;
-    const { ctx: live, hostName: name, guestSlots, enabled: on } = latestRef.current;
-    if (!token || !on || guestSlots.length === 0 || live.mode !== "game") return;
-    if (inFlightRef.current) {
-      dirtyRef.current = true;
+  // One slot at a time per guest (a slow POST to one friend must not hold up another guest's snapshot); a change that lands while a slot's POST is in
+  // flight marks it dirty and is published right after, from the then-current game.
+  const slotsRef = useRef(new Map<string, { inFlight: boolean; dirty: boolean }>());
+  const inputCacheRef = useRef<{ ctx: GameContext; name: string; input: SnapshotInput } | undefined>(undefined);
+  const lastPublishAtRef = useRef<number | undefined>(undefined);
+
+  async function publishSlot(slot: string) {
+    let state = slotsRef.current.get(slot);
+    if (!state) slotsRef.current.set(slot, (state = { inFlight: false, dirty: false }));
+    if (state.inFlight) {
+      state.dirty = true;
       return;
     }
-    inFlightRef.current = true;
+    state.inFlight = true;
     try {
-      const input = readSnapshotInput(live, name);
-      for (const slot of guestSlots) {
+      do {
+        state.dirty = false;
+        const token = tokenRef.current;
+        const { ctx: live, hostName: name, guestSlots, enabled: on } = latestRef.current;
+        if (!token || !on || !guestSlots.includes(slot) || live.mode !== "game") return;
+        // The (costly) game read is shared by all slots of one render.
+        let cached = inputCacheRef.current;
+        if (!cached || cached.ctx !== live || cached.name !== name) inputCacheRef.current = cached = { ctx: live, name, input: readSnapshotInput(live, name) };
+        const input = cached.input;
         // A guest sitting at a remote seat gets that seat's view; a guest without a seat (late joiner) is a spectator.
         const seatId = seatForSlot(live.session, slot);
         const snapshot = buildSnapshot(seatId ? { ...input, ack: acksRef.current[slot] } : input, seatId ?? SPECTATOR_VIEWER);
         const gate = gateFor(slot);
         const rev = gate.admit(snapshotFingerprint(snapshot));
         if (rev === undefined) continue;
+        const startedAt = performance.now();
+        const body = { toSeatId: slot, snapshot: { ...snapshot, rev }, rev };
         try {
-          await post("/api/mp/publish", token, { toSeatId: slot, snapshot: { ...snapshot, rev }, rev });
+          await post("/api/mp/publish", token, body);
+          if ((window as unknown as { __mpTiming?: boolean }).__mpTiming) { // opt-in dev probe: set window.__mpTiming = true in the host tab
+            console.info(`[mp] publish ${slot} rev ${rev}: ${Math.round(performance.now() - startedAt)} ms, ${JSON.stringify(body).length} bytes`);
+          }
         } catch (e) {
           gate.failed();
           dispatch({ type: "error", message: `Publish failed: ${e instanceof Error ? e.message : String(e)}` });
         }
-      }
+      } while (state.dirty);
     } finally {
-      inFlightRef.current = false;
-      if (dirtyRef.current) {
-        dirtyRef.current = false;
-        schedule();
-      }
+      state.inFlight = false;
     }
   }
 
+  function publishNow() {
+    lastPublishAtRef.current = Date.now();
+    inputCacheRef.current = undefined;
+    for (const slot of latestRef.current.guestSlots) void publishSlot(slot);
+  }
+
   function schedule() {
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => void publishNow(), PUBLISH_DEBOUNCE_MS);
+    if (timerRef.current) return; // a pending publish is never pushed back: it will read the newest game state when it fires
+    timerRef.current = setTimeout(() => {
+      timerRef.current = undefined;
+      publishNow();
+    }, publishDelayMs(Date.now(), lastPublishAtRef.current));
   }
 
   // Room + host stream lifecycle.
@@ -175,6 +195,7 @@ export function useMpHost(ctx: GameContext, config: MpHostConfig): HostState {
       cancelled = true;
       source?.close();
       if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = undefined;
       const token = tokenRef.current;
       tokenRef.current = null;
       if (token) void post("/api/mp/close", token, {}, true).catch(() => {});
@@ -204,7 +225,7 @@ export function useMpHost(ctx: GameContext, config: MpHostConfig): HostState {
     if (!enabled) return;
     schedule();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, session, activeSeatId, prioritySeatId, gameStage, mode, pendingAction, stackActions, priorityPasses, ctx.choices.mulligans, ctx.choices.keptHands, ctx.choices.mulliganReturnCardIds, ctx.mana.manaPools, guestKey, acks, ctx.mpPausedFor, ctx.choices.pendingRuleChoice, ctx.choices.libraryLook, ctx.choices.blockChoice, ctx.mana.manaChoice, ctx.choices.myriadTapChoice, ctx.choices.myriadSearch, ctx.choices.basicLandFetchSearch, ctx.choices.manualLibrarySearch]);
+  }, [enabled, session, activeSeatId, prioritySeatId, gameStage, mode, pendingAction, stackActions, priorityPasses, ctx.choices.mulligans, ctx.choices.keptHands, ctx.choices.mulliganReturnCardIds, ctx.mana.manaPools, guestKey, acks, ctx.mpPausedFor, ctx.stack.seatStops, ctx.choices.pendingRuleChoice, ctx.choices.libraryLook, ctx.choices.blockChoice, ctx.mana.manaChoice, ctx.choices.myriadTapChoice, ctx.choices.myriadSearch, ctx.choices.basicLandFetchSearch, ctx.choices.manualLibrarySearch]);
 
   useMpLobby({ ctx, state, enabled, hostName, tokenRef, intentRef, post, removeGuest: (slot) => dispatch({ type: "guest_removed", seatId: slot }) });
 

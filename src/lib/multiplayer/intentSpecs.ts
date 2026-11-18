@@ -27,6 +27,7 @@ export type IntentWhen =
   | "priority" // playing, something is on the stack and this seat holds priority
   | "turnIdle" // playing, it is this seat's turn, the stack is empty and no prompt is open
   | "attack" // turnIdle + the declare attackers step
+  | "settings" // playing: the friend's own priority-stop controls (allowed at any moment, also while a prompt is open)
   | "answerRule" // this seat owns the open pendingRuleChoice
   | "answerLook" // ... the open library look
   | "answerBlock" // ... the open block choice (the defending seat)
@@ -96,6 +97,14 @@ export const INTENT_SPECS = {
   onMoveCardToHand: { ...own(seatId, id), when: "act" },
   onMoveBattlefieldCard: { ...own(z.string().min(1).max(200), id, position), when: "act" },
   onOpenLibrarySearch: { schema: none, when: "act" },
+  // the friend's OWN priority-stop controls (same ones the host's table has; they change only the friend's seat settings)
+  onToggleFullControl: { schema: none, when: "settings" },
+  onStopNext: { schema: none, when: "settings" },
+  onTogglePhaseStop: { schema: tup(z.string().min(1).max(60), z.number().int().min(0).max(9)), when: "settings" },
+  onToggleStopOnStackResponse: { schema: none, when: "settings" },
+  onToggleStopOnAttacked: { schema: none, when: "settings" },
+  onToggleStopOnTargeted: { schema: none, when: "settings" },
+  onToggleStopOnChoicePrompt: { schema: none, when: "settings" },
   // combat
   onDeclareAttack: { ...plain(id, id), when: "attack" },
   onConfirmBlockers: { ...plain(idList), when: "answerBlock" },
@@ -208,6 +217,7 @@ const foreignPrompt = (owners: PromptOwners, seat: string): boolean => Object.va
 export function checkIntentWhen(when: IntentWhen, seat: string, state: IntentGameState): string | undefined {
   if (when === "mulligan") return state.gameStage !== "mulligan" ? "not in the opening-hand step" : state.hasKept(seat) ? "already kept" : undefined;
   if (state.gameStage !== "playing") return "the game has not started yet";
+  if (when === "settings") return undefined; // preferences only: never blocked by the pause or by another seat's prompt
   if (state.paused) return "the game is paused while a player reconnects";
   const answerKey = OWNER_FOR[when];
   if (answerKey) return state.owners[answerKey] === seat ? undefined : "no such prompt is waiting for you";

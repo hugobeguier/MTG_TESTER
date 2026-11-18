@@ -4,6 +4,7 @@ import { applyCounterDelta, moveCardBetweenVisibleZones } from "@/engine/zones";
 import { commonTriggerEffect } from "@/engine/triggers";
 import { findCommonTriggersForPermanentDied } from "@/engine/triggerFinders";
 import { landDropsAllowed, landPlaysMade, landTurnKey } from "@/engine/lands";
+import { applySeatStopChange, seatStopSettingsOf, type SeatStopChange } from "@/lib/multiplayer/seatStops";
 import { type GameContext, lateFn } from "./context";
 
 export function useGameActions(ctx: GameContext) {
@@ -42,6 +43,13 @@ export function useGameActions(ctx: GameContext) {
   function hasPlayedLandThisTurn(seatId: string, turn: number) {
     const seat = session.seats.find((item) => item.id === seatId);
     return landPlaysMade(landPlaysThisTurn.current, landTurnKey(seatId, turn)) >= (seat ? landDropsAllowed(seat) : 1);
+  }
+
+  // A remote friend toggled one of THEIR stop controls (Full Control, Stop Next, the grid): updates that seat's own settings (never the host's).
+  function updateSeatStops(seatId: string, change: SeatStopChange) {
+    const index = session.seats.findIndex((seat) => seat.id === seatId);
+    if (index < 0) return;
+    ctx.stack.setSeatStops((current) => ({ ...current, [seatId]: applySeatStopChange(seatStopSettingsOf({ bySeat: current }, seatId, index, session.seats.length), change) }));
   }
 
   function changeLife(seatId: string, delta: number) {
@@ -143,5 +151,5 @@ export function useGameActions(ctx: GameContext) {
     });
   }
 
-  return { addEvent, changeCounter, changeLife, hasPlayedLandThisTurn, humanActionBlockedByChoice, moveBattlefieldCard, moveCardToExile, moveCardToGraveyard, moveCardToHand };
+  return { addEvent, changeCounter, changeLife, hasPlayedLandThisTurn, humanActionBlockedByChoice, moveBattlefieldCard, updateSeatStops, moveCardToExile, moveCardToGraveyard, moveCardToHand };
 }

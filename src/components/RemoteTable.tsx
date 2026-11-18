@@ -5,10 +5,11 @@
 //  * Spectator (no seat): read-only, the host's seat is drawn as "me" with a hidden hand.
 //  * Seated friend: THEIR seat is "me" (own hand face-up, camera on their battlefield) and every action goes to the host as an intent (intentProxy.ts +
 //    intentSpecs.ts); the host runs the same handler its own click would and answers with the next snapshot (+ `ack` with a reason when it refused).
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { VisibleCard } from "@/lib/types";
 import { roomDoorFaces } from "@/engine/casting";
 import { isSimpleManaSourcePermanent } from "@/engine/simpleManaSource";
+import { DRAG_OVERLAY_TTL_MS, applyDragOverlay, pruneDragOverlay, recordDrag, type DragOverlay } from "@/lib/multiplayer/dragOverlay";
 import { createReadOnlySender, handlersFor, type IntentSender } from "@/lib/multiplayer/intentProxy";
 import type { MpSnapshot } from "@/lib/multiplayer/snapshot";
 import { ThreeGameTable } from "./ThreeGameTable";
@@ -24,11 +25,24 @@ export function RemoteTable({ snapshot, send = readOnlySender }: { snapshot: MpS
   const [selectedBlockerIds, setSelectedBlockerIds] = useState<string[]>([]);
   const [choiceMinimized, setChoiceMinimized] = useState(false);
   const [toast, setToast] = useState<string | undefined>();
+  // Dragging a permanent is local and instant: positions live here until the host's snapshot confirms (or reverts) them; only the drop is sent.
+  const [dragOverlay, setDragOverlay] = useState<DragOverlay>({});
   const seated = snapshot.mySeatId !== undefined;
   const handlers = handlersFor(seated ? "player" : "spectator", send);
   const mySeat = snapshot.session.seats.find((seat) => seat.id === snapshot.mySeatId);
   const waiting = snapshot.mulliganWaiting.filter((name) => name !== mySeat?.name);
   const prompts = snapshot.prompts;
+
+  const ackSeqForDrag = snapshot.ack?.seq;
+  useEffect(() => {
+    setDragOverlay((current) => pruneDragOverlay(current, snapshot.session, snapshot.mySeatId, ackSeqForDrag, Date.now()));
+  }, [snapshot, ackSeqForDrag]);
+  useEffect(() => {
+    if (!Object.values(dragOverlay).some((entry) => entry.dropped)) return;
+    const timer = window.setTimeout(() => setDragOverlay((current) => pruneDragOverlay(current, snapshot.session, snapshot.mySeatId, ackSeqForDrag, Date.now())), DRAG_OVERLAY_TTL_MS + 50);
+    return () => window.clearTimeout(timer);
+  }, [dragOverlay, snapshot, ackSeqForDrag]);
+  const shownSession = useMemo(() => applyDragOverlay(snapshot.session, snapshot.mySeatId, dragOverlay), [snapshot.session, snapshot.mySeatId, dragOverlay]);
 
   // A refused intent comes back as `ack.error` in the next snapshot: say why the click did nothing.
   const ackSeq = snapshot.ack?.seq;
@@ -85,7 +99,15 @@ export function RemoteTable({ snapshot, send = readOnlySender }: { snapshot: MpS
       ) : null}
       <ThreeGameTable
         {...handlers}
-        session={snapshot.session}
+        session={shownSession}
+        priorityStopSettings={snapshot.myStops}
+        holdPriorityOnce={snapshot.myStops?.holdOnce}
+        onMoveBattlefieldCard={(seatId, cardId, position, phase) => {
+          if (!seated) return;
+          // Mouse-move events only move the card locally; ONE intent goes to the host when it is dropped.
+          const seq = phase === "drop" ? send("onMoveBattlefieldCard", [seatId, cardId, position]) : undefined;
+          setDragOverlay((current) => recordDrag(current, cardId, position, phase === "drop", Date.now(), typeof seq === "number" ? seq : undefined));
+        }}
         prioritySeatId={snapshot.prioritySeatId}
         priorityPasses={snapshot.priorityPasses}
         requiredPasses={snapshot.requiredPasses}

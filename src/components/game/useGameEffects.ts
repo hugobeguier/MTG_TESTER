@@ -25,7 +25,7 @@ import { isCumulativeUpkeepCard } from "@/engine/legalActions";
 import { isLandCard } from "@/engine/shared";
 import { moveCommanderToCommandZone, rulesEvent } from "@/engine/zones";
 import { needsTokenArt, tokenArtLookupKey } from "@/lib/tokenArt";
-import { remoteSeatCanAct, remoteTurnStopSettings } from "@/lib/multiplayer/remoteSeatPolicy";
+import { remoteSeatCanAct, priorityStopsForSeat } from "@/lib/multiplayer/remoteSeatPolicy";
 import { nextPrioritySeatId, pendingActionRequiredPasses } from "@/engine/priority";
 import { removalEffectTargetSpec, zoneEffectTargetSpec } from "@/lib/targetSpecs";
 import { seatVerb } from "@/engine/abilities";
@@ -1164,10 +1164,10 @@ export function useGameEffects(ctx: GameContext) {
       session.phase === "declare blockers step"
     )
       return;
-    // The active human seat is the host's own or a remote friend's: the friend has no stop grid, so their own turn pauses at remoteTurnStopSettings.
+    // The active human seat is the host's own or a remote friend's: each pauses on its OWN stops (a friend's live in priorityStopSettings.bySeat).
     const turnSeat = session.seats.find((seat) => seat.id === activeSeatId);
     if (!turnSeat || turnSeat.kind !== "human") return;
-    const turnStops = turnSeat.remoteSlot !== undefined ? remoteTurnStopSettings(session.seats.indexOf(turnSeat)) : priorityStopSettings;
+    const turnStops = priorityStopsForSeat(turnSeat, priorityStopSettings, session.seats.indexOf(turnSeat), session.seats.length);
     if (turnStops.fullControl) return;
     const humanSeatIndex = Math.max(0, session.seats.indexOf(turnSeat));
     if (turnStops.phaseStops[stopKey(session.phase, humanSeatIndex)]) return;

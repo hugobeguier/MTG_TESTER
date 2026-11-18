@@ -486,9 +486,11 @@ export function canReceivePriorityForPendingAction(
     return payCostFromPool(pool, card, totalCost).ok || chooseManaSourcesForCost(seat, card, totalCost, undefined, session.seats).ok;
   }));
   const turnOwnerSeatIndex = Math.max(0, session.seats.findIndex((item) => item.id === activeSeatId));
+  // A remote friend is judged by THEIR OWN stop settings (same defaults and rules as the host), never by the host's.
+  const seatStops = priorityStopsForSeat(seat, stops, session.seats.indexOf(seat), session.seats.length);
   return (
     shouldStopForPriority({
-      settings: priorityStopsForSeat(seat, stops),
+      settings: seatStops,
       phase: session.phase,
       turnOwnerSeatIndex,
       actionType: action.type,
@@ -503,7 +505,7 @@ export function canReceivePriorityForPendingAction(
       // a ticked End Step) configured was asked to pass priority at every single phase of every
       // agent's turn. A phase-pass can never target anyone — there's no effect to be affected by.
       actionAffectsMe: action.type !== "phase" && !isPendingActionLikelyIrrelevantToSeat(seat, action, session),
-      holdOnce: holdPriorityOnceSeatId === seat.id,
+      holdOnce: holdPriorityOnceSeatId === seat.id || Boolean(seatStops.holdOnce),
       willPromptMe: pendingActionWillPromptSeat(seat, action, session)
     }) !== undefined
   );

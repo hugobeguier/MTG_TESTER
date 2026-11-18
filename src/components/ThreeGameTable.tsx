@@ -144,7 +144,8 @@ interface ThreeGameTableProps {
   onMoveCardToGraveyard?: (seatId: string, cardId: string) => void;
   onMoveCardToExile?: (seatId: string, cardId: string) => void;
   onMoveCardToHand?: (seatId: string, cardId: string) => void;
-  onMoveBattlefieldCard?: (seatId: string, cardId: string, position: { x: number; z: number }) => void;
+  /** `phase` tells a drag-move (many per drag) from the final drop (one): a remote table only sends the drop to the host. */
+  onMoveBattlefieldCard?: (seatId: string, cardId: string, position: { x: number; z: number }, phase?: "drag" | "drop") => void;
   onTapForMana?: (seatId: string, cardId: string) => void;
   onChangeCounter?: (seatId: string, cardId: string, kind: string, delta: number) => void;
   onActivateLoyalty?: (seatId: string, cardId: string, loyaltyCost: number, abilityText: string) => void;
@@ -178,7 +179,7 @@ interface ThreeGameTableProps {
   spectatorHandLabel?: string;
   /** Multiplayer friend seated at a remote seat who may not act yet: own hand is shown and inspectable, but every action control is hidden/inert. */
   guestReadOnly?: boolean;
-  /** Multiplayer friend who plays their seat: the full action HUD, minus the host-only controls (stops grid, Full Control, Stop Next, Agent Activity). */
+  /** Multiplayer friend who plays their seat: the full action HUD, minus the host-only Agent Activity panel (the stops grid, Full Control and Stop Next drive the friend's own seat settings). */
   guestActing?: boolean;
   /** Mulligan step: this seat already kept (hides Keep/Mulligan) and the names of seats still deciding ("Waiting for ... to decide"). */
   mulliganKept?: boolean;
@@ -1248,7 +1249,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
       if (Math.abs(dx) + Math.abs(dy) > 3) pointer.current.moved = true;
       const draggedCard = draggedBattlefieldCardRef.current;
       if (draggedCard) {
-        propsRef.current.onMoveBattlefieldCard?.(draggedCard.seatId, draggedCard.card.id, getTablePosition(event, draggedCard.seatId));
+        propsRef.current.onMoveBattlefieldCard?.(draggedCard.seatId, draggedCard.card.id, getTablePosition(event, draggedCard.seatId), "drag");
         return;
       }
       if (pointer.current.button === 2 || event.shiftKey) {
@@ -1270,7 +1271,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
       // a plain click still opens the inspector (attack targets, tap abilities, equip, ...) instead
       // of being swallowed as a no-op reposition every time.
       if (draggedCard && pointer.current.moved) {
-        propsRef.current.onMoveBattlefieldCard?.(draggedCard.seatId, draggedCard.card.id, getTablePosition(event, draggedCard.seatId));
+        propsRef.current.onMoveBattlefieldCard?.(draggedCard.seatId, draggedCard.card.id, getTablePosition(event, draggedCard.seatId), "drop");
         draggedBattlefieldCardRef.current = undefined;
         updateHoveredCard(event);
       } else {
@@ -1690,7 +1691,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
         </button>
         {props.guestActing ? null : <button type="button" onClick={() => setActivityOpen((current) => !current)}>Agent Activity</button>}
         <button type="button" onClick={() => setActionLogOpen((current) => !current)}>Action Log</button>
-        {props.guestActing ? null : <button type="button" onClick={() => setPriorityStopsOpen(true)}>Stops</button>}
+        <button type="button" onClick={() => setPriorityStopsOpen(true)}>Stops</button>
         <button
           type="button"
           className={showCommanderDamage ? "is-active" : undefined}
@@ -1890,7 +1891,6 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
                 Cycle Selected
               </button>
             ) : null}
-            {props.guestActing ? null : (
             <button
               type="button"
               className={props.priorityStopSettings?.fullControl ? "is-active" : undefined}
@@ -1899,8 +1899,6 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
             >
               Full Control
             </button>
-            )}
-            {props.guestActing ? null : (
             <button
               type="button"
               className={props.holdPriorityOnce ? "is-active" : undefined}
@@ -1910,7 +1908,6 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
             >
               Stop Next
             </button>
-            )}
             <button type="button" disabled={Boolean(props.pendingAction) || !humanIsActive} onClick={props.onAdvanceTurn}>
               {humanIsActive && !props.pendingAction ? "Continue" : "Advance Phase"}
             </button>

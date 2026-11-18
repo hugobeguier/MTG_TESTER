@@ -12,6 +12,8 @@ import { mulliganReturnRequired, waitingForNames } from "./mulliganGate";
 import { hostHumanSeat } from "./seatMap";
 import { SPECTATOR_VIEWER, buildGuestSession } from "./view";
 import { HOST_SEAT_NAME, eventsForViewer } from "./viewerText";
+import type { SeatStopSettings } from "../priorityStops";
+import { seatStopSettingsOf } from "./seatStops";
 import { buildSeatPrompts, type PromptSlots, type SeatPrompts } from "./seatPrompts";
 
 export const SNAPSHOT_VERSION = 2;
@@ -58,6 +60,8 @@ export interface SnapshotInput {
   ack?: { seq: number; error?: string };
   /** Names of friends the game is waiting on because they are disconnected (the game is paused while this is non-empty). */
   pausedFor?: string[];
+  /** Each remote friend's own priority-stop settings by seat id (only the viewer's own entry ever reaches that viewer; missing = the defaults). */
+  seatStops?: Record<string, SeatStopSettings>;
 }
 
 export interface MpSnapshot {
@@ -90,6 +94,8 @@ export interface MpSnapshot {
   prompts?: SeatPrompts;
   /** Seated viewer only: result of their newest intent (the table shows `error` as a toast). */
   ack?: { seq: number; error?: string };
+  /** Seated viewer only: their own stop settings (Full Control, Stop Next, grid) as the host applies them. */
+  myStops?: SeatStopSettings;
   /** Friends the game is paused for (disconnected); shown to everybody as "Waiting for <name> to reconnect". */
   pausedFor: string[];
 }
@@ -105,7 +111,11 @@ export function buildSnapshot(input: SnapshotInput, viewer: SnapshotViewer, rev 
   // The host's seat is literally named "You" and its log lines are second person: a guest reads them with the host's real name.
   const session: GameSession = {
     ...guestSession,
-    seats: guestSession.seats.map((seat) => (seat.id === hostSeatId && seat.name === HOST_SEAT_NAME ? { ...seat, name: input.hostName } : seat)),
+    // The seat's full deck list (every card with its text, ~120 KB for a 100-card deck) is the biggest part of a snapshot and no table reads it: dropped for EVERY seat, the viewer's own included.
+    seats: guestSession.seats.map((seat) => {
+      const { deck: _deck, ...rest } = seat;
+      return seat.id === hostSeatId && seat.name === HOST_SEAT_NAME ? { ...rest, name: input.hostName } : rest;
+    }),
     events: eventsForViewer(guestSession.events, hostSeatId, input.hostName)
   };
   const mulligans = input.mulligans ?? {};
@@ -132,6 +142,7 @@ export function buildSnapshot(input: SnapshotInput, viewer: SnapshotViewer, rev 
     myManaPool: mySeat ? input.manaPools?.[mySeat.id] : undefined,
     pausedFor: [...(input.pausedFor ?? [])],
     ack: mySeat ? input.ack : undefined,
+    myStops: mySeat ? seatStopSettingsOf({ bySeat: input.seatStops }, mySeat.id, input.session.seats.indexOf(mySeat), input.session.seats.length) : undefined,
     prompts: mySeat
       ? buildSeatPrompts({
           ...(input.prompts ?? {}),

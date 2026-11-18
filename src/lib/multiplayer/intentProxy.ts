@@ -2,7 +2,8 @@
 // /api/mp/intent (the host maps `name` back to its handler); a spectator gets a read-only sender that only records attempts.
 import { GUEST_INTENT_NAMES, intentArity } from "./intentSpecs";
 
-export type IntentSender = (name: string, args: unknown[]) => void;
+/** Sends one intent; may return the clientSeq it was sent with (the host's ack echoes it), which lets a table tell when the host has answered. */
+export type IntentSender = (name: string, args: unknown[]) => void | number;
 
 /** M3 sender: ignores everything (spectators cannot act). Keeps the last few attempts for debugging. */
 export function createReadOnlySender(log: Array<{ name: string; args: unknown[] }> = []): IntentSender {

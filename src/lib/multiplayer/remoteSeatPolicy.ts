@@ -1,7 +1,8 @@
 // Whether a remote friend's seat takes part in the game flow (holds priority, takes its own turn, answers prompts). The friend plays through intents
 // (components/game/mpIntents.ts), so the host waits for them like it waits for its own human seat. Every "wait for the remote seat" decision goes
 // through remoteSeatCanAct, so switching a seat back to "skipped" stays a one-line change.
-import { stopKey, type PriorityStopSettings } from "../priorityStops";
+import type { PriorityStopSettings, SeatStopSettings } from "../priorityStops";
+import { seatStopSettingsOf } from "./seatStops";
 
 export const remoteSeatsCanAct = true;
 
@@ -10,18 +11,10 @@ export function remoteSeatCanAct(seat: { remoteSlot?: string }, canAct: boolean 
   return seat.remoteSlot === undefined || canAct;
 }
 
-/** The friend has no stop-settings UI: they always get a priority window when they hold a legal response (full control). */
-export function priorityStopsForSeat<T extends { remoteSlot?: string }>(seat: T, stops: PriorityStopSettings): PriorityStopSettings {
-  return seat.remoteSlot === undefined || stops.fullControl ? stops : { ...stops, fullControl: true };
-}
-
 /**
- * Where a remote friend's OWN turn pauses for them (the host's grid is the host's own preference): both main phases and the declare attackers step on
- * their turn, and every opponent's turn is covered by the always-on response windows. `seatIndex` is the friend's index in the seat order.
+ * The stop settings that decide whether `seat` is interrupted: the host's seat (and agents, which ignore stops) use the host's `stops`; a remote friend uses
+ * THEIR OWN (`stops.bySeat`, defaulting to the same defaults the host has). They are asked exactly when the host's rules would ask the host.
  */
-export function remoteTurnStopSettings(seatIndex: number): PriorityStopSettings {
-  const phaseStops: Record<string, boolean> = {};
-  for (const phase of ["precombat main phase", "declare attackers step", "postcombat main phase"] as const) phaseStops[stopKey(phase, seatIndex)] = true;
-  return { phaseStops, stopOnStackResponse: true, stopOnAttacked: true, stopOnTargeted: true, stopOnChoicePrompt: true, fullControl: false };
+export function priorityStopsForSeat(seat: { id: string; remoteSlot?: string }, stops: PriorityStopSettings, seatIndex: number, seatCount: number): PriorityStopSettings | SeatStopSettings {
+  return seat.remoteSlot === undefined ? stops : seatStopSettingsOf(stops, seat.id, seatIndex, seatCount);
 }
-

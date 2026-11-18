@@ -16,6 +16,7 @@ const SAMPLE: Record<string, unknown[]> = {
   onActivateEquip: [S, "c1"], onActivateManlandAnimation: [S, "c1"], onActivateLoyalty: [S, "c1", -2, "text"], onResolveMyriadLandscape: [S, "c1"], onResolveBasicLandFetch: [S, "c1"],
   onDrawCard: [S], onShuffleLibrary: [S], onChangeLife: [S, -1], onChangeCounter: [S, "c1", "+1/+1", 1],
   onMoveCardToGraveyard: [S, "c1"], onMoveCardToExile: [S, "c1"], onMoveCardToHand: [S, "c1"], onMoveBattlefieldCard: [S, "c1", POS], onOpenLibrarySearch: [],
+  onToggleFullControl: [], onStopNext: [], onTogglePhaseStop: ["declare blockers step", 2], onToggleStopOnStackResponse: [], onToggleStopOnAttacked: [], onToggleStopOnTargeted: [], onToggleStopOnChoicePrompt: [],
   onDeclareAttack: ["c1", "seat-a"], onConfirmBlockers: [["bf1"]], onPassBlocks: [],
   onChooseMana: ["G"], onCancelManaChoice: [], onChooseMyriadTapMana: [], onChooseMyriadTapSearch: [], onCancelMyriadTapChoice: [], onCloseMyriadSearch: [],
   onCompleteMyriadSearch: [["c1"]], onCloseBasicLandFetchSearch: [], onCompleteBasicLandFetchSearch: ["c1"], onCloseLibrarySearch: [], onSearchLibraryCardToHand: ["c1", "hand"],
@@ -125,6 +126,14 @@ describe("state checks (checkIntentWhen)", () => {
     expect(run("onPlayCard", [S, "c1"], { ...stateFor("act"), paused: true }).result).toMatchObject({ ok: false });
     expect(checkIntentWhen("act", S, { ...stateFor("act"), gameStage: "mulligan" })).toMatch(/not started/);
     expect(run("onKeepHand", [], { ...stateFor("mulligan"), hasKept: () => true }).result.ok).toBe(false);
+  });
+  it("the friend's stop controls change THEIR seat's settings, work while a prompt is open or paused, and reject bad args", () => {
+    expect(run("onToggleFullControl", [], stateFor("settings")).calls).toEqual([["updateSeatStops", S, { kind: "fullControl" }]]);
+    expect(run("onTogglePhaseStop", ["end step", 0], stateFor("settings")).calls).toEqual([["updateSeatStops", S, { kind: "phase", phase: "end step", seatIndex: 0 }]]);
+    expect(run("onStopNext", [], { ...stateFor("settings"), owners: { rule: "seat-a" }, paused: true }).result.ok).toBe(true);
+    expect(run("onStopNext", [], { ...stateFor("settings"), gameStage: "mulligan" }).result.ok).toBe(false);
+    expect(run("onTogglePhaseStop", ["end step", -1], stateFor("settings")).result.ok).toBe(false);
+    expect(run("onTogglePhaseStop", [5, 0], stateFor("settings")).result.ok).toBe(false);
   });
   it("calls the handlers with the sender's seat", () => {
     expect(run("onEndTurn", [], stateFor("turnIdle")).calls).toEqual([["endTurn", S]]);

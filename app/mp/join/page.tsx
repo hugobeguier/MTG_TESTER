@@ -23,7 +23,10 @@ export default function MpJoinPage() {
     return (
       <>
         {guest.status === "reconnecting" ? <Banner>Connection lost - reconnecting...</Banner> : null}
-        <RemoteTable snapshot={guest.snapshot} send={(name, args) => void guest.sendIntent(name, args)} />
+        <RemoteTable snapshot={guest.snapshot} send={(name, args) => {
+          void guest.sendIntent(name, args);
+          return guest.lastIntentSeq();
+        }} />
       </>
     );
   }

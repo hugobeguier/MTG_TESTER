@@ -44,7 +44,17 @@ export interface PriorityStopSettings {
   stopOnChoicePrompt?: boolean;
   // Suspend all auto-passing — every window opens, exactly like today's behavior.
   fullControl: boolean;
+  /**
+   * Multiplayer, host side only (never persisted, never sent): each remote friend's OWN settings by seat id, so the friend's priority prompts follow their
+   * own stops instead of the host's. Built by the game context; priority.ts picks the entry for a remote seat (see lib/multiplayer/seatStops.ts).
+   */
+  bySeat?: Record<string, SeatStopSettings>;
+  /** Seat-level only: this seat's one-shot "Stop Next" flag (the host's equivalent is the separate holdPriorityOnce state). */
+  holdOnce?: boolean;
 }
+
+/** A remote friend's stop settings: the same shape as the host's, plus their own one-shot "Stop Next" flag. */
+export type SeatStopSettings = Omit<PriorityStopSettings, "bySeat">;
 
 export function stopKey(phase: string, turnOwnerSeatIndex: number): string {
   return `${turnOwnerSeatIndex}:${phase}`;

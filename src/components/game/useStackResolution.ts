@@ -1,6 +1,7 @@
 // The stack and priority: stack-array helpers, passPriority, response windows, beginPendingAction/resumeStackAction, responding with a card, and resolvePendingAction/resolvePendingActionNow (the big per-action-type resolver).
 // Part of the AppFlow() split: shared state arrives through `ctx` (see ./context.ts); handlers owned by other hooks are called through `lateFn` so every hook sees the current render's functions.
 import { type AuraAttachResult, applyAuraAttachToPlayer, applyAuraAttachment, applyChosenColor, applyChosenCreatureType, chooseAuraAttachTarget, entersWithChargeCounterPerKick, entersWithXCounters, exploreCount, grantsExtraTurn, isSagaCard, resolveExplore } from "@/engine/etb";
+import { clearHoldOnce } from "@/lib/multiplayer/seatStops";
 import { type CastChoices, type PendingAction } from "@/engine/types";
 import { type ChosenTarget, legalTargets } from "@/lib/targeting";
 import { type GameSession, type ManaColor, type VisibleCard } from "@/lib/types";
@@ -165,6 +166,7 @@ export function useStackResolution(ctx: GameContext) {
     // or not it ends up including the human (their affordability check may simply say no).
     const holdSeatId = holdPriorityOnce ? humanSeat.id : undefined;
     if (holdPriorityOnce) setHoldPriorityOnce(false);
+    ctx.stack.setSeatStops(clearHoldOnce); // a friend's own "Stop Next" is used up the same way
     const requiredPasses = pendingActionRequiredPasses(session.seats, action, activeSeatId, session, manaPools, priorityStopSettings, holdSeatId);
     if (requiredPasses.length === 0) {
       window.setTimeout(() => resolvePendingAction(action), 0);
@@ -214,6 +216,7 @@ export function useStackResolution(ctx: GameContext) {
     // the two functions actually opens the next window.
     const holdSeatId = holdPriorityOnce ? humanSeat.id : undefined;
     if (holdPriorityOnce) setHoldPriorityOnce(false);
+    ctx.stack.setSeatStops(clearHoldOnce); // a friend's own "Stop Next" is used up the same way
     const requiredPasses = pendingActionRequiredPasses(session.seats, action, activeSeatId, session, manaPools, priorityStopSettings, holdSeatId);
     // Whether the human specifically had a real response here but the stops policy chose to
     // auto-pass it anyway (as opposed to genuinely having nothing to respond with) — computed by
