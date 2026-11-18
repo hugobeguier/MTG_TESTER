@@ -19,3 +19,16 @@ export const hostStatusStore = {
     };
   }
 };
+
+/** Host actions the setup screen can trigger (registered by game/useMpLobby.ts; the host token never leaves the hook). */
+export interface HostActions {
+  /** Removes a guest from the room and frees their seat. */
+  kick: (slot: string) => void;
+}
+let actions: HostActions | undefined;
+export const hostActionsStore = {
+  get: () => actions,
+  set(next: HostActions | undefined) {
+    actions = next;
+  }
+};

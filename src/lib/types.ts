@@ -155,6 +155,9 @@ export interface PlayerSeat {
   // Finale of Revelation (X >= 10): "you have no maximum hand size for the rest of the game".
   noMaximumHandSize?: boolean;
   kind: SeatKind;
+  // Multiplayer: a relay slot id like "guest-1" on a seat played by a remote friend. The seat stays kind "human" (no agentName); the HOST's own
+  // human seat is the one without this marker (see lib/multiplayer/seatMap.ts).
+  remoteSlot?: string;
   agentName?: AgentName;
   life: number;
   commanderDamage: Record<string, number>;

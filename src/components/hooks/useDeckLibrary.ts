@@ -5,8 +5,8 @@ import { useEffect, useRef, useState } from "react";
 import type { PlayerSeat } from "@/lib/types";
 import { applyDefaultDecks, createInitialConfigs, type SavedDeck, type SeatConfig } from "@/components/DeckSetup";
 
-export function useDeckLibrary(initialSeats: PlayerSeat[]) {
-  const [configs, setConfigs] = useState<SeatConfig[]>(() => createInitialConfigs(initialSeats));
+export function useDeckLibrary(initialSeats: PlayerSeat[], options: { emptyNonHostSeats?: boolean } = {}) {
+  const [configs, setConfigs] = useState<SeatConfig[]>(() => createInitialConfigs(initialSeats, options));
   // Saved decks (.txt files under decks/) offered in each seat's "Load saved deck" dropdown. The first successful load
   // also fills still-empty seats with the default Foundations decks (see applyDefaultDecks).
   const [deckLibrary, setDeckLibrary] = useState<SavedDeck[]>([]);

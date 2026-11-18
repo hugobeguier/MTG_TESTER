@@ -1,3 +1,4 @@
+import { hostHumanSeat } from "@/lib/multiplayer/seatMap";
 import type { GameEvent, GameSession, VisibleCard } from "@/lib/types";
 import { PlayerBoard } from "./PlayerBoard";
 
@@ -34,7 +35,7 @@ export function GameTable({
   onKeepHand?: () => void;
   onMulligan?: () => void;
 }) {
-  const human = session.seats.find((seat) => seat.kind === "human") ?? session.seats[0];
+  const human = hostHumanSeat(session.seats) ?? session.seats[0];
   const [agentOne, agentTwo, agentThree] = session.seats.filter((seat) => seat.id !== human.id);
   const latest = session.events[0];
   const prioritySeat = session.seats.find((seat) => seat.id === prioritySeatId);

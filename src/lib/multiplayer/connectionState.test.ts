@@ -83,3 +83,21 @@ describe("reconnectDelayMs", () => {
     expect(reconnectDelayMs(10)).toBe(15_000);
   });
 });
+
+describe("lobby state", () => {
+  const lobby = (rev: number) => ({ kind: "lobby", v: 1, rev, hostName: "H", seats: [], hostDecks: [] }) as unknown as import("./lobby").LobbyMessage;
+  it("guest keeps the newest lobby and a lobby replaces a stale table", () => {
+    let s = guestReducer({ ...initialGuestState, status: "live", rev: 5, snapshot: snap(5) }, { type: "lobby", message: lobby(2) });
+    expect(s.snapshot).toBeUndefined();
+    expect(s.status).toBe("waiting");
+    s = guestReducer(s, { type: "lobby", message: lobby(1) });
+    expect(s.lobby?.rev).toBe(2);
+  });
+  it("host drops a removed guest", () => {
+    let s = hostReducer(hostReducer(initialHostState, { type: "creating" }), { type: "created", roomCode: "X" });
+    s = hostReducer(s, { type: "event", event: { type: "guest_joined", seatId: "guest-1", displayName: "A" } });
+    s = hostReducer(s, { type: "guest_removed", seatId: "guest-1" });
+    expect(s.guests).toEqual([]);
+    expect(s.status).toBe("waiting");
+  });
+});

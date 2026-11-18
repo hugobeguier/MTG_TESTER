@@ -40,18 +40,20 @@ import { useGameActions } from "./game/useGameActions";
 import { useRulesAdvisor } from "./game/useRulesAdvisor";
 import { useSpecialEffects } from "./game/useSpecialEffects";
 import { useGameEffects } from "./game/useGameEffects";
+import { hostHumanSeat } from "@/lib/multiplayer/seatMap";
 import { useMpHost } from "./game/useMpHost";
 import { findSpellSourceCard, pendingActionRequiredPasses, resolutionPromptNote, withPendingActionSourceCard } from "@/engine/priority";
 import { spellIsImmuneToCounters } from "@/engine/legalActions";
 import { canCastAtInstantSpeed, handCardFaceOptions, roomDoorFaces, seatHasFlashGrant } from "@/engine/casting";
 import { attackLockedOut, canAttack } from "@/engine/combat";
 import { getBasicLandFetchOptions, getMyriadLandscapeOptions } from "@/engine/etb";
-import { openingHandKeepSize } from "@/engine/mulligan";
+import { mulliganReturnRequired, waitingForNames } from "@/lib/multiplayer/mulliganGate";
 import { blockChoiceView, ruleChoiceView } from "@/components/viewModels";
 export type { LegalAgentAction } from "@/engine/flowTypes";
 export { resolvePendingUpkeepDraws, untapForSeat, clearTemporaryBuffs, resolveEndStepExileDamage, hasPhaseTrigger, humanPhaseGraveyardChoice, applyEndStepEffects, makePhaseStackTrigger, planOffTurnPhaseTriggers, scheduleDelayedPhaseTrigger, rollForStartingSeat } from "@/engine/turnFlow";
 export { applyExalted, resolveCombatDamage, cleanupCombat, assignBlockers, attackLockedOut, creatureCantBlock, hasVigilance, resolveAttackTarget, countCreaturesAttackingSeat, legalAttackActions, legalBlockActions, forcedAttackers, totalAttackTax } from "@/engine/combat";
 export { validateConfigsForPlay, applyDeckToSeat } from "@/components/DeckSetup";
+import { playingConfigs } from "@/components/DeckSetup";
 export { animateEnchantmentSpec, resolveEquip, payGenericSacrificeCost, applySacrificeEffect, payGenericTapCost, parseGenericAbilityEffect, applyGenericAbilityEffect, payGenericManaCost, applyGenericTapEffect, cycleCardInSession, tapCreaturesAltCostFor } from "@/engine/abilities";
 export { grantsExtraTurn, basicLandFetchBeholdType, resolveBasicLandFetchSearch, chooseBestBasicLandPairForMyriad, applySagaEntryLoreCounterHeadless, advanceSagaLoreCountersHeadless } from "@/engine/etb";
 export { legalMainPhaseActions, legalPriorityActions, checkMoveLegal, UNTAP_LANDS_SAFE_LIFE, untapAllLandsIsWorthIt, graveyardHateOnStack, graveyardShuffleIsWorthIt } from "@/engine/legalActions";
@@ -74,10 +76,10 @@ interface OllamaStatus {
 
 // AppFlow() is glue + JSX. State: game/context.ts (useGameState). Handlers/effects: game/use*.ts hooks sharing one GameContext - see src/components/README.md.
 export function AppFlow({ initialSession, ollama, multiplayerHost = false }: { initialSession: GameSession; ollama: OllamaStatus; multiplayerHost?: boolean }) {
-  const state = useGameState(initialSession);
+  const state = useGameState(initialSession, { emptyNonHostSeats: multiplayerHost }); // /mp/host: seats 1-3 start Empty (play alone), not AI
   const { mode, setMode, session, activeSeatId, prioritySeatId, tableSession, selectedHandCardId, setSelectedHandCardId, inspectedCard, setInspectedCard, gameStage, gameOverDismissed, setGameOverDismissed, setupMessage, configs, deckLibrary, savedGames, gameStarting, humanSeat, selectedHandCard } = state;
   const { agentThinking, agentReasoning } = state.agent;
-  const { mulligans, mulliganReturnCardIds, libraryLook, manualLibrarySearch, setManualLibrarySearch, pendingRuleChoice, blockChoice, selectedBlockerIds, myriadSearch, setMyriadSearch, myriadTapChoice, setMyriadTapChoice, basicLandFetchSearch, setBasicLandFetchSearch, choiceMinimized, setChoiceMinimized } = state.choices;
+  const { mulligans, keptHands, mulliganReturnCardIds, libraryLook, manualLibrarySearch, setManualLibrarySearch, pendingRuleChoice, blockChoice, selectedBlockerIds, myriadSearch, setMyriadSearch, myriadTapChoice, setMyriadTapChoice, basicLandFetchSearch, setBasicLandFetchSearch, choiceMinimized, setChoiceMinimized } = state.choices;
   const { manaPools, manaChoice, setManaChoice } = state.mana;
   const { pendingAction, stackActions, priorityPasses, priorityStopSettings, updatePriorityStopSettings, holdPriorityOnce, setHoldPriorityOnce, resolveNowRef, abilityApiRef, stackFeed } = state.stack;
   // Handlers live in the game/ hooks; they all read the same GameContext and call each other through ctx.late (filled just below).
@@ -142,8 +144,9 @@ export function AppFlow({ initialSession, ollama, multiplayerHost = false }: { i
   const playBlockedByBuild = configs.some((config) => config.status === "building");
 
   const setupSummary = useMemo(() => {
-    const ready = configs.filter((config) => config.deck?.validation.legal).length;
-    return `${ready}/${configs.length} decks ready`;
+    const playing = playingConfigs(configs);
+    const ready = playing.filter((config) => config.deck?.validation.legal).length;
+    return `${ready}/${playing.length} decks ready`;
   }, [configs]);
   resolveNowRef.current = resolvePendingActionNow;
   abilityApiRef.current = { resolveSacrificeAbilityEffect, resolveTapAbilityEffect };
@@ -160,7 +163,7 @@ export function AppFlow({ initialSession, ollama, multiplayerHost = false }: { i
   // "When this resolves you'll have to choose" notes for the human, keyed by stack item id (shown on the stack entries).
   const stackPrompts = useMemo(() => {
     const notes: Record<string, string> = {};
-    const humanForNotes = session.seats.find((seat) => seat.kind === "human");
+    const humanForNotes = hostHumanSeat(session.seats);
     if (!humanForNotes) return notes;
     for (const item of [...(pendingAction ? [pendingAction] : []), ...stackActions]) {
       const note = resolutionPromptNote(humanForNotes, item, session);
@@ -191,6 +194,7 @@ export function AppFlow({ initialSession, ollama, multiplayerHost = false }: { i
         deckLibrary={deckLibrary}
         onBuildDeck={buildDeck}
         onUpdateConfig={updateConfig}
+        multiplayerHost={multiplayerHost}
       />
     );
   }
@@ -221,8 +225,10 @@ export function AppFlow({ initialSession, ollama, multiplayerHost = false }: { i
         onSetChoiceMinimized={setChoiceMinimized}
         gameStage={gameStage}
         humanMulligans={mulligans[humanSeat.id] ?? 0}
-        mulliganReturnCardIds={mulliganReturnCardIds}
-        mulliganReturnRequired={Math.max(0, humanSeat.board.hand.length - openingHandKeepSize(mulligans[humanSeat.id] ?? 0))}
+        mulliganReturnCardIds={mulliganReturnCardIds[humanSeat.id] ?? []}
+        mulliganKept={Boolean(keptHands[humanSeat.id])}
+        mulliganWaitingFor={waitingForNames(session.seats.filter((seat) => seat.id !== humanSeat.id), keptHands)}
+        mulliganReturnRequired={keptHands[humanSeat.id] ? 0 : mulliganReturnRequired(humanSeat.board.hand, mulligans[humanSeat.id] ?? 0)}
         session={tableSession}
         prioritySeatId={prioritySeatId}
         pendingAction={pendingAction ? withPendingActionSourceCard(session, pendingAction, stackActions) : undefined}
@@ -236,9 +242,9 @@ export function AppFlow({ initialSession, ollama, multiplayerHost = false }: { i
         selectedCardCanRespond={selectedCardCanRespond}
         selectedCardFaceOptions={selectedCardFaceOptions}
         onPlayCardFace={(seatId, cardId, faceIndex) => playCard(seatId, cardId, undefined, "hand", faceIndex)}
-        onKeepHand={keepOpeningHand}
-        onMulligan={mulliganOpeningHand}
-        onToggleMulliganReturnCard={toggleMulliganReturnCard}
+        onKeepHand={() => keepOpeningHand()}
+        onMulligan={() => mulliganOpeningHand()}
+        onToggleMulliganReturnCard={(card) => toggleMulliganReturnCard(card)}
         onAdvanceTurn={advanceTurn}
         onEndTurn={endTurn}
         onDrawCard={drawCard}

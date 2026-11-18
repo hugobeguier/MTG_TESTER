@@ -628,3 +628,41 @@ the relay forwards to the host. See `src/lib/multiplayer/README.md` for the shor
 * **Guest page `/mp/join`** (`app/mp/join/page.tsx`): code (from `?code=`) + name -> `POST /rooms/CODE/join` -> seat token kept in `sessionStorage` ->
   `useMpGuest` (`components/hooks/useMpGuest.ts`: SSE with backoff reconnect; the relay replays the last snapshot) -> `RemoteTable` renders
   `ThreeGameTable` from the snapshot, read-only. `lib/multiplayer/intentProxy.ts` is the seam M4 wires to `POST /api/mp/intent`.
+
+### 7.1 Lobby (M4 stage 2)
+
+Before a game starts, friends land in a **lobby** instead of a blank waiting page. The lobby state lives on the **host's setup screen**: a friend's
+seat is a `SeatConfig` with `remoteSlot` (`"unassigned"` = open for a friend, `"guest-N"` = claimed by that guest); the host picks "AI agent" /
+"Open for a friend" per non-host seat. Pure rules are in `lib/multiplayer/lobby.ts` (intent whitelist via zod with size clamps, `claimSeat`,
+`releaseSlot`, `reconcileClaims`, `lobbyBlockers`, `buildLobbyMessage`).
+
+* **Host -> guest**: `useMpHost` calls `useMpLobby` (`components/game/useMpLobby.ts`), which publishes one `LobbyMessage` (`{kind:"lobby", v:1, rev, seats[],
+  hostDecks[] (names + commander only), yourSeatId, notice}`) per connected guest through the normal `publish` channel (the relay replays the last
+  message per slot to a (re)connecting guest). A guest sees everyone's seat and deck *status* but deck errors/warnings only for their own seat. When a
+  game starts the spectator snapshot replaces it; when the host returns to setup a lobby message makes the guest page drop the old table.
+* **Guest -> host** (`POST /api/mp/intent`, `useMpGuest.sendIntent`): `lobby_take_seat [seatId]`, `lobby_leave_seat []`,
+  `lobby_set_deck [{source:"saved", id} | {source:"new", name, commander, deckList}]`. The host validates with `parseLobbyIntent` (deck list <= 20 000
+  chars) and applies them to its configs. A deck is validated by the same `buildDeck` -> `POST /api/decks/build` the setup form uses (it runs from the host's
+  browser, so guests never touch non-`/api/mp` routes); the result (status, errors, warnings) comes back in the guest's lobby message. Guests'
+  own decks are remembered in their browser (`localStorage` `mtg-mp-my-decks`).
+* **PLAY** (`SetupScreen`, `useGameSetup.startGame`) is blocked while `lobbyBlockers` is non-empty: every friend seat must be taken, its guest
+  connected and its deck legal. At start `assignSlots` stamps `remoteSlot` on the seats (and the seat takes the friend's display name). A guest who
+  disconnects keeps the seat (same token reconnects into it) but PLAY stays blocked; a guest removed from the room frees it. The host panel
+  (`LobbyHostPanel`) has Kick / Free seat.
+* Friends acting in the game: see 7.2 (opening hand only so far).
+
+### 7.2 Seated friends: per-seat snapshots and the opening hand (M4 stage 3)
+
+* After Play a guest whose slot maps to a seat (`seatMap.seatForSlot`) gets **that seat's** snapshot (`buildSnapshot(input, seatId)`, v2): `viewer`, `mySeatId`,
+  their own hand face-up and their seat as the table's only `human` (so the existing "first human = me" camera/hand logic works unchanged), the host and
+  other friends relabelled `agent` with hidden hands, `myManaPool`, and during the mulligan step `mulligan {kept, returnCardIds, returnRequired}` (own seat only)
+  plus the public `mulliganWaiting` names. Guests without a seat stay spectators. `useMpHost` keeps one `PublishGate` per slot and publishes with `toSeatId: slot`.
+  Nothing of another seat's hand/library/deck/prompt may be in the JSON (`seatSnapshot.test.ts`).
+* **Opening hand in parallel**: `keepOpeningHand/mulliganOpeningHand/toggleMulliganReturnCard(…, seatId = host seat)` in `useGameSetup`; return-card picks are
+  per seat (`ctx.choices.mulliganReturnCardIds` is `Record<seatId, ids[]>`), `ctx.choices.keptHandsRef` mirrors `keptHands` synchronously. The first seat to keep
+  just locks its trimmed hand in; the **last human seat to keep** rolls for first player and sets `gameStage = "playing"` (pure rule: `lib/multiplayer/mulliganGate.ts`).
+  `ThreeGameTable` shows "Waiting for … to decide" (`mulliganKept`, `mulliganWaitingFor`).
+* **Guest intents**: `components/game/mpIntents.ts` (`useMpIntents`, wired from `useMpHost`) owns a whitelist registry (name -> zod args, state check, call). The dispatcher
+  (`lib/multiplayer/intentDispatch.ts`) forces the acting seat to the sender's seat, rejects slots without a seat, drops duplicate/old `clientSeq` and runs ONE queued
+  intent per React commit (handlers close over render-time state). `ThreeGameTable` prop `guestReadOnly` = seated but not yet allowed to act (hand inspectable, actions off).
+* Not yet: priority/stack/combat/prompt intents; a friend's opening-hand leylines are auto-played.

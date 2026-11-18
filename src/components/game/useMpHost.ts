@@ -8,8 +8,11 @@ import { PublishGate, hostReducer, initialHostState, connectedGuests, type HostS
 import { hostStatusStore } from "@/lib/multiplayer/hostStatusStore";
 import type { HostEvent } from "@/lib/multiplayer/protocol";
 import { buildSnapshot, snapshotFingerprint, type SnapshotInput } from "@/lib/multiplayer/snapshot";
+import { seatForSlot } from "@/lib/multiplayer/seatMap";
 import { SPECTATOR_VIEWER } from "@/lib/multiplayer/view";
 import type { GameContext } from "./context";
+import { useMpIntents } from "./mpIntents";
+import { useMpLobby } from "./useMpLobby";
 
 export interface MpHostConfig {
   enabled: boolean;
@@ -18,7 +21,7 @@ export interface MpHostConfig {
 
 export const PUBLISH_DEBOUNCE_MS = 150;
 
-async function post(path: string, token: string | null, body: unknown, keepalive = false) {
+export async function post(path: string, token: string | null, body: unknown, keepalive = false) {
   const res = await fetch(path, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
@@ -46,7 +49,10 @@ function readSnapshotInput(ctx: GameContext, hostName: string): SnapshotInput {
     stackActions: stackActions.map(view),
     gameStage,
     mulligans: ctx.choices.mulligans,
-    hostManaPool: ctx.mana.manaPools[humanSeat.id]
+    hostManaPool: ctx.mana.manaPools[humanSeat.id],
+    manaPools: ctx.mana.manaPools,
+    keptHands: ctx.choices.keptHands,
+    mulliganReturnCardIds: ctx.choices.mulliganReturnCardIds
   };
 }
 
@@ -55,12 +61,19 @@ export function useMpHost(ctx: GameContext, config: MpHostConfig): HostState {
   const hostName = config.hostName ?? "Host";
   const [state, dispatch] = useReducer(hostReducer, initialHostState);
   const tokenRef = useRef<string | null>(null);
-  const gateRef = useRef(new PublishGate());
-  const latestRef = useRef({ ctx, hostName, guestCount: 0, enabled });
-  latestRef.current = { ctx, hostName, guestCount: connectedGuests(state).length, enabled };
+  // One gate per guest slot: each guest gets its own view (a seated friend's hand, a spectator's stubs), so each has its own rev/fingerprint.
+  const gatesRef = useRef(new Map<string, PublishGate>());
+  const gateFor = (slot: string) => {
+    let gate = gatesRef.current.get(slot);
+    if (!gate) gatesRef.current.set(slot, (gate = new PublishGate()));
+    return gate;
+  };
+  const latestRef = useRef({ ctx, hostName, guestSlots: [] as string[], enabled });
+  latestRef.current = { ctx, hostName, guestSlots: connectedGuests(state).map((g) => g.seatId), enabled };
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const inFlightRef = useRef(false);
   const dirtyRef = useRef(false);
+  const intentRef = useRef<((event: Extract<HostEvent, { type: "intent" }>) => void) | undefined>(undefined);
 
   // Mirror state for the MpHostPanel (rendered beside AppFlow).
   useEffect(() => {
@@ -69,22 +82,29 @@ export function useMpHost(ctx: GameContext, config: MpHostConfig): HostState {
 
   async function publishNow() {
     const token = tokenRef.current;
-    const { ctx: live, hostName: name, guestCount, enabled: on } = latestRef.current;
-    if (!token || !on || guestCount === 0 || live.mode !== "game") return;
+    const { ctx: live, hostName: name, guestSlots, enabled: on } = latestRef.current;
+    if (!token || !on || guestSlots.length === 0 || live.mode !== "game") return;
     if (inFlightRef.current) {
       dirtyRef.current = true;
       return;
     }
-    const snapshot = buildSnapshot(readSnapshotInput(live, name), SPECTATOR_VIEWER);
-    const rev = gateRef.current.admit(snapshotFingerprint(snapshot));
-    if (rev === undefined) return;
     inFlightRef.current = true;
     try {
-      // Every guest is a spectator in M3, so one identical snapshot goes to all slots. M4 will send per-seat views here.
-      await post("/api/mp/publish", token, { toSeatId: "all", snapshot: { ...snapshot, rev }, rev });
-    } catch (e) {
-      gateRef.current.failed();
-      dispatch({ type: "error", message: `Publish failed: ${e instanceof Error ? e.message : String(e)}` });
+      const input = readSnapshotInput(live, name);
+      for (const slot of guestSlots) {
+        // A guest sitting at a remote seat gets that seat's view; a guest without a seat (late joiner) is a spectator.
+        const seatId = seatForSlot(live.session, slot);
+        const snapshot = buildSnapshot(input, seatId ?? SPECTATOR_VIEWER);
+        const gate = gateFor(slot);
+        const rev = gate.admit(snapshotFingerprint(snapshot));
+        if (rev === undefined) continue;
+        try {
+          await post("/api/mp/publish", token, { toSeatId: slot, snapshot: { ...snapshot, rev }, rev });
+        } catch (e) {
+          gate.failed();
+          dispatch({ type: "error", message: `Publish failed: ${e instanceof Error ? e.message : String(e)}` });
+        }
+      }
     } finally {
       inFlightRef.current = false;
       if (dirtyRef.current) {
@@ -120,10 +140,15 @@ export function useMpHost(ctx: GameContext, config: MpHostConfig): HostState {
         source.onmessage = (message) => {
           try {
             const event = JSON.parse(message.data) as HostEvent;
-            if (event.type === "guest_joined" || event.type === "host_ready") gateRef.current.force();
+            if (event.type === "intent") {
+              intentRef.current?.(event); // lobby intents (setup screen)
+              gameIntentRef.current?.(event); // game intents (opening hand, later priority/stack/...)
+            }
+            if (event.type === "guest_joined") gateFor(event.seatId).force();
+            if (event.type === "host_ready") for (const g of event.guests) gateFor(g.seatId).force();
             dispatch({ type: "event", event });
             if (event.type === "guest_joined" || event.type === "host_ready") {
-              latestRef.current.guestCount = Math.max(1, latestRef.current.guestCount);
+              if (event.type === "guest_joined" && !latestRef.current.guestSlots.includes(event.seatId)) latestRef.current.guestSlots = [...latestRef.current.guestSlots, event.seatId];
               schedule();
             }
           } catch {
@@ -156,7 +181,10 @@ export function useMpHost(ctx: GameContext, config: MpHostConfig): HostState {
     if (!enabled) return;
     schedule();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, session, activeSeatId, prioritySeatId, gameStage, mode, pendingAction, stackActions, priorityPasses, ctx.choices.mulligans, ctx.mana.manaPools, guestKey]);
+  }, [enabled, session, activeSeatId, prioritySeatId, gameStage, mode, pendingAction, stackActions, priorityPasses, ctx.choices.mulligans, ctx.choices.keptHands, ctx.choices.mulliganReturnCardIds, ctx.mana.manaPools, guestKey]);
+
+  const gameIntentRef = useMpIntents(ctx, enabled);
+  useMpLobby({ ctx, state, enabled, hostName, tokenRef, intentRef, post, removeGuest: (slot) => dispatch({ type: "guest_removed", seatId: slot }) });
 
   return state;
 }

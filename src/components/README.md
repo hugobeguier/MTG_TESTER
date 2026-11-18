@@ -4,6 +4,7 @@
 * `SetupScreen.tsx` - setup-screen JSX (status tiles, PLAY, saved games list, per-seat deck panels). Props only.
 * `GameOverDialog.tsx` - "Game over" modal. Props only.
 * `DeckSetup.tsx` - `DeckSetupPanel`, `Topbar`, `Status`, `SeatConfig`/`SavedDeck`, deck validation and `applyDeckToSeat`.
+* `LobbyHostPanel.tsx` / `LobbyScreen.tsx` - multiplayer lobby UI: host panel on the setup screen (Kick / Free seat) and the friend's lobby on `/mp/join` (see `src/lib/multiplayer/README.md`).
 * `ThreeGameTable.tsx`, `PlayerBoard.tsx`, `GameTable.tsx`, `VisualCard.tsx`, `ZoneSummary.tsx` - the in-game table UI.
 * `viewModels.ts` - `ruleChoiceView` / `blockChoiceView` (what choice dialogs show).
 * `hooks/usePriorityStopSettings.ts` - state: human priority-stop settings (persisted); returns `{priorityStopSettings, updatePriorityStopSettings}`.

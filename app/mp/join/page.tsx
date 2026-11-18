@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type { GuestDiagnostics } from "@/lib/multiplayer/guestTransport";
+import { LobbyScreen } from "@/components/LobbyScreen";
 import { RemoteTable } from "@/components/RemoteTable";
 import { useMpGuest } from "@/components/hooks/useMpGuest";
 
@@ -16,15 +18,18 @@ export default function MpJoinPage() {
   }, []);
 
   const joined = guest.status !== "idle" && guest.status !== "error" && guest.status !== "closed" && guest.status !== "joining";
-  const hostName = guest.snapshot?.hostName ?? "the host";
 
   if (guest.snapshot && guest.status !== "closed" && guest.status !== "error") {
     return (
       <>
         {guest.status === "reconnecting" ? <Banner>Connection lost - reconnecting...</Banner> : null}
-        <RemoteTable snapshot={guest.snapshot} />
+        <RemoteTable snapshot={guest.snapshot} send={(name, args) => void guest.sendIntent(name, args)} />
       </>
     );
+  }
+
+  if (guest.lobby && joined && guest.status !== "reconnecting") {
+    return <LobbyScreen lobby={guest.lobby} roomCode={guest.roomCode} sendIntent={guest.sendIntent} onLeave={guest.leave} />;
   }
 
   const box: React.CSSProperties = { maxWidth: 420, margin: "10vh auto", padding: 20, fontFamily: "system-ui, sans-serif", color: "#eee" };
@@ -35,7 +40,11 @@ export default function MpJoinPage() {
       {guest.status === "error" ? <p style={{ color: "#f88" }}>{guest.error}</p> : null}
       {joined ? (
         <p>
-          {guest.status === "reconnecting" ? "Connection lost - reconnecting..." : `Spectating ${hostName}'s game - waiting for the host to start`}
+          {guest.status === "reconnecting"
+            ? "Connection lost - reconnecting..."
+            : guest.status === "connecting"
+              ? "Connecting to the room..."
+              : "You're connected to the room. Waiting for the host's lobby or game to appear - this page will show it automatically."}
           <br />
           <button type="button" onClick={guest.leave}>Leave</button>
         </p>
@@ -59,7 +68,25 @@ export default function MpJoinPage() {
           </button>
         </form>
       )}
+      {guest.status !== "idle" && guest.status !== "joining" ? <ConnectionDetails diagnostics={guest.diagnostics} /> : null}
     </main>
+  );
+}
+
+function ConnectionDetails({ diagnostics }: { diagnostics: GuestDiagnostics }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const secs = (t?: number) => (t === undefined ? "never" : `${Math.max(0, Math.round((now - t) / 1000))}s ago`);
+  return (
+    <details style={{ marginTop: 16, opacity: 0.6, fontSize: 12 }}>
+      <summary>Connection details</summary>
+      <div>
+        transport: {diagnostics.transport === "poll" ? "poll (fallback)" : "stream"} · joined: {secs(diagnostics.joinedAt)} · last event: {secs(diagnostics.lastEventAt)} · last error: {diagnostics.lastError ?? "none"}
+      </div>
+    </details>
   );
 }
 

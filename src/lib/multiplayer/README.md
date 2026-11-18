@@ -26,3 +26,26 @@ Debug UI: `/mp/debug` (not linked). Other files here (`view.ts`, `randomUuidPoly
 Try it: build and start as usual (`npm run build`, `npm start`, port 3000; or `NEXT_DIST_DIR=.next-other npx next dev -p 3101` beside a running server).
 Host: open `http://localhost:3000/mp/host` (must be localhost so the guarded API routes work), start a game; the panel shows the room code.
 Friend (Hamachi): `http://<host-hamachi-ip>:3000/mp/join`, enter the code and a name; they watch the table live, read-only.
+
+## M4 stage 2: lobby
+
+* `lobby.ts` (+ test) - pure: lobby intents (`lobby_take_seat`, `lobby_leave_seat`, `lobby_set_deck`; zod whitelist + size clamps), seat claim/release,
+  `lobbyBlockers` (PLAY readiness), `buildLobbyMessage` (per-guest `LobbyMessage` v1), guest-side remembered decks.
+* Host: `components/game/useMpLobby.ts` (called by `useMpHost`) publishes lobby messages and applies guest intents to the setup configs; decks go
+  through the same `buildDeck` as the setup form. `components/LobbyHostPanel.tsx` (Kick / Free seat) on the setup screen.
+* Guest: `useMpGuest.sendIntent` -> `POST /api/mp/intent`; `components/LobbyScreen.tsx` (take/leave seat, host deck list, own saved decks, new deck).
+* Flow: host sets a seat to "Open for a friend" -> friend joins with the room code -> lobby -> takes seat + chooses deck -> host PLAY enabled when all
+  friend seats are taken and valid. After Play friends are still spectators.
+
+## M4 stage 3: per-seat snapshots + opening hand
+
+* `snapshot.ts` v2: `buildSnapshot(input, viewer)` where viewer is `SPECTATOR_VIEWER` or a seat id. A seated friend's snapshot has `mySeatId`, their own hand face-up
+  as the table's only `human`, `myManaPool`, and (during the mulligan step) `mulligan {kept, returnCardIds, returnRequired}`; every other seat's hand/library/deck/prompt
+  stays hidden (`seatSnapshot.test.ts` is the leak test). `useMpHost` publishes one snapshot per connected guest slot (own `PublishGate` each; slot -> seat via `seatMap.ts`),
+  a guest without a seat is a spectator.
+* `mulliganGate.ts` - pure: which human seats are undecided, "last to keep" (that keep starts the game), London-mulligan return count.
+* `intentDispatch.ts` - pure: `IntentQueue` (in order, drops duplicate/old `clientSeq` per slot) + `dispatchIntent(registry, event, seatOfSlot)` (whitelist, zod args,
+  seat check, acting seat forced to the sender's seat). Host glue + the registry: `components/game/mpIntents.ts` (one queued intent per React commit, because handlers
+  close over render-time state). `intentProxy.ts` `ACTING_GUEST_INTENTS` must match that registry (stage 3: `onKeepHand`, `onMulligan`, `onToggleMulliganReturnCard`).
+* Mulligans run in parallel: host handlers take an optional seat id; the game goes to "playing" when the last human seat keeps. A friend's leylines are auto-played (not asked yet).
+* `RemoteTable` for a seated friend passes `guestReadOnly` to `ThreeGameTable` (hand selectable/inspectable, all action controls off).

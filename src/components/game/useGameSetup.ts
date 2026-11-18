@@ -4,19 +4,23 @@ import { type AgentAction, type CommanderDeck, type GameEvent, type GameSession,
 import { type GameSnapshot, SAVE_FORMAT_VERSION, deserializeTurnCounters, isCleanSaveStop, serializeTurnCounters } from "@/lib/saveGame";
 import { type LegalAgentAction } from "@/engine/flowTypes";
 import { MULLIGAN_HARD_CAP, MULLIGAN_SOFT_CAP, agentKeepsHand, keepOpeningHandSize, openingHandBattlefieldCards, openingHandKeepSize, putOpeningHandCardOnBattlefield, withOpeningHand } from "@/engine/mulligan";
-import { type SeatConfig, applyDeckToSeat, createInitialConfigs, fallbackCommander, formatDeckList, inferColors, validateConfigsForPlay } from "@/components/DeckSetup";
+import { type SeatConfig, applyDeckToSeat, createInitialConfigs, fallbackCommander, formatDeckList, inferColors, playingConfigs, validateConfigsForPlay } from "@/components/DeckSetup";
 import { evaluateOpeningHand } from "@/lib/mulliganHeuristics";
 import { isLandCard } from "@/engine/shared";
 import { makeCommonTrigger, phaseEvent } from "@/engine/triggers";
 import { nextSeatId, rollForStartingSeat } from "@/engine/turnFlow";
 import { prewarmRuleWorkflowCache, warmUpAgentModel } from "@/lib/agentRuntime";
 import { seatVerb } from "@/engine/abilities";
+import { hostStatusStore } from "@/lib/multiplayer/hostStatusStore";
+import { lobbyBlockers } from "@/lib/multiplayer/lobby";
+import { assignSlots, isRemoteSeat } from "@/lib/multiplayer/seatMap";
+import { isLastToKeep, mulliganReturnRequired } from "@/lib/multiplayer/mulliganGate";
 import { type GameContext, lateFn } from "./context";
 
 export function useGameSetup(ctx: GameContext) {
-  const { mode, setMode, session, setSession, activeSeatId, setActiveSeatId, prioritySeatId, setPrioritySeatId, selectedHandCardId, setSelectedHandCardId, inspectedCard, setInspectedCard, gameStage, setGameStage, setGameOverDismissed, setSetupMessage, configs, setConfigs, defaultDecksApplied, setSavedGames, gameStarting, setGameStarting, humanSeat } = ctx;
+  const { mode, setMode, session, setSession, activeSeatId, setActiveSeatId, prioritySeatId, setPrioritySeatId, selectedHandCardId, setSelectedHandCardId, inspectedCard, setInspectedCard, gameStage, setGameStage, setGameOverDismissed, setSetupMessage, configs, setConfigs, defaultDecksApplied, setSavedGames, gameStarting, setGameStarting, humanSeat, baseSeats } = ctx;
   const { agentMainActions, agentDecisionRequests, agentThinking, setAgentThinking, setAgentReasoning, agentStatedPlans } = ctx.agent;
-  const { mulligans, setMulligans, keptHands, setKeptHands, mulliganReturnCardIds, setMulliganReturnCardIds, setLibraryLook, setManualLibrarySearch, pendingRuleChoice, setPendingRuleChoice, decisions, setBlockChoice, selectedBlockerIds, setSelectedBlockerIds, setMyriadSearch, setMyriadTapChoice, setBasicLandFetchSearch, commanderZoneChoiceAsked, auraRetargetAsked } = ctx.choices;
+  const { mulligans, setMulligans, keptHands, setKeptHands, keptHandsRef, mulliganReturnCardIds, setMulliganReturnCardIds, setLibraryLook, setManualLibrarySearch, pendingRuleChoice, setPendingRuleChoice, decisions, setBlockChoice, selectedBlockerIds, setSelectedBlockerIds, setMyriadSearch, setMyriadTapChoice, setBasicLandFetchSearch, commanderZoneChoiceAsked, auraRetargetAsked } = ctx.choices;
   const { manaPools, setManaPools, manaContributions, setManaContributions, restrictedManaBatches, setRestrictedManaBatches, setManaChoice } = ctx.mana;
   const { stackStore, pendingAction, setPendingAction, stackActions, priorityPasses, setPriorityPasses, holdPriorityOnce, setHoldPriorityOnce } = ctx.stack;
   const { landPlaysThisTurn, spellsCastThisTurn, firstDrawThisTurn, loyaltyActivationsThisTurn, phaseTriggersChecked, cleanupDiscardChecked, cleanupRestrictedManaChecked } = ctx.turn;
@@ -105,8 +109,40 @@ export function useGameSetup(ctx: GameContext) {
       return;
     }
 
-    const deckedSeats = session.seats.map((seat) => {
-      const config = validated.configs.find((item) => item.seatId === seat.id);
+    // Empty seats (multiplayer host chose "Empty") are not in the game at all: 1 to 4 seats play. The seat objects come from the current session,
+    // or from the original 4-seat session for a seat an earlier game left out.
+    const playing = playingConfigs(validated.configs);
+    const playingSeats = playing.flatMap((config) => {
+      const found = session.seats.find((seat) => seat.id === config.seatId) ?? baseSeats.find((seat) => seat.id === config.seatId);
+      return found ? [found] : [];
+    });
+    if (playingSeats.length === 0) {
+      setSetupMessage("Cannot start yet. At least one seat must be played.");
+      return;
+    }
+    // Remote friends: refuse to start until each remote seat has a connected guest, then stamp the seats (human, no agent) with their slot.
+    const guests = hostStatusStore.get().guests;
+    if (playing.some((config) => config.remoteSlot !== undefined)) {
+      const missing = lobbyBlockers(playing, guests);
+      if (missing.length > 0) {
+        setSetupMessage(`Cannot start yet. Friend seats are not ready (${missing.map((b) => `${playing.find((c) => c.seatId === b.seatId)?.name ?? b.seatId} ${b.reason}`).join("; ")}).`);
+        return;
+      }
+    }
+    const slotToSeat = assignSlots(playing, guests);
+    const seatToSlot = new Map(Object.entries(slotToSeat).map(([slot, seatId]) => [seatId, slot]));
+    const deckedSeats = playingSeats.map((baseSeat) => {
+      const config = playing.find((item) => item.seatId === baseSeat.id);
+      let seat = baseSeat;
+      if (config?.remoteSlot !== undefined) {
+        const { agentName: _agent, ...rest } = baseSeat;
+        const slot = seatToSlot.get(baseSeat.id);
+        const friend = guests.find((g) => g.seatId === slot)?.displayName; // the friend plays under their own name
+        seat = { ...rest, name: friend || config.name, kind: "human", remoteSlot: slot };
+      } else if (baseSeat.remoteSlot !== undefined) {
+        const { remoteSlot: _slot, ...rest } = baseSeat;
+        seat = { ...rest, name: config?.name ?? baseSeat.name, kind: "agent", agentName: (config?.name ?? baseSeat.name) as PlayerSeat["agentName"] }; // a seat that was remote in an earlier game goes back to its AI
+      }
       if (!config?.deck) return seat;
       return applyDeckToSeat(seat, config.deck);
     });
@@ -130,7 +166,7 @@ export function useGameSetup(ctx: GameContext) {
       status: "ready",
       winnerSeatId: undefined,
       attackPool: undefined,
-      activePlayerId: activeSeatId,
+      activePlayerId: agentResolved.seats.some((seat) => seat.id === activeSeatId) ? activeSeatId : agentResolved.seats[0].id,
       phase: "opening hand",
       turn: 0,
       seats: agentResolved.seats,
@@ -174,9 +210,12 @@ export function useGameSetup(ctx: GameContext) {
     agentStatedPlans.current = {};
     setRestrictedManaBatches({});
     setSession(nextSession);
+    if (nextSession.activePlayerId && nextSession.activePlayerId !== activeSeatId) setActiveSeatId(nextSession.activePlayerId);
+    if (!agentResolved.seats.some((seat) => seat.id === prioritySeatId)) setPrioritySeatId(agentResolved.seats[0].id);
     setMulligans(agentResolved.mulligans);
     setKeptHands(agentResolved.keptHands);
-    setMulliganReturnCardIds([]);
+    keptHandsRef.current = agentResolved.keptHands;
+    setMulliganReturnCardIds({});
     setPendingAction(undefined);
     replaceStackActions([]);
     setPriorityPasses([]);
@@ -208,7 +247,7 @@ export function useGameSetup(ctx: GameContext) {
           inspectedCard ||
           selectedHandCardId ||
           selectedBlockerIds.length > 0 ||
-          mulliganReturnCardIds.length > 0
+          Object.values(mulliganReturnCardIds).some((ids) => ids.length > 0)
       ),
       pendingDeathsCount: session.pendingDeaths?.length ?? 0,
       pendingEntriesCount: session.pendingEntries?.length ?? 0,
@@ -298,7 +337,7 @@ export function useGameSetup(ctx: GameContext) {
     // Every one of these is guaranteed empty by the clean-stop gate at save time — cleared here too
     // since this game object (React state, not the snapshot) may still be carrying stale values from
     // whatever was on screen just before Load was clicked.
-    setMulliganReturnCardIds([]);
+    setMulliganReturnCardIds({});
     setLibraryLook(undefined);
     setManualLibrarySearch(undefined);
     setPendingRuleChoice(undefined);
@@ -430,19 +469,40 @@ export function useGameSetup(ctx: GameContext) {
     return { seats: resolvedSeats, mulligans: mulliganCounts, keptHands: kept, events };
   }
 
-  function keepOpeningHand() {
-    const keepSize = openingHandKeepSize(mulligans[humanSeat.id] ?? 0);
-    const returnCount = Math.max(0, humanSeat.board.hand.length - keepSize);
-    if (mulliganReturnCardIds.length !== returnCount) {
-      addEvent(`Choose ${returnCount} card${returnCount === 1 ? "" : "s"} to shuffle into your library before keeping.`, humanSeat.id, "Mulligan");
+  // `seatId` is the seat that decides: the host's own seat by default, a friend's seat when a remote intent calls this (see mpIntents.ts, which forces it
+  // to the sender's seat). The game only starts once EVERY human seat has kept; an earlier keeper just waits with its hand already trimmed.
+  function keepOpeningHand(seatId: string = humanSeat.id) {
+    const seat = session.seats.find((item) => item.id === seatId);
+    if (!seat || seat.kind !== "human" || keptHandsRef.current[seatId]) return;
+    const returnIds = mulliganReturnCardIds[seatId] ?? [];
+    const keepSize = openingHandKeepSize(mulligans[seatId] ?? 0);
+    const returnCount = mulliganReturnRequired(seat.board.hand, mulligans[seatId] ?? 0);
+    if (returnIds.length !== returnCount) {
+      addEvent(`Choose ${returnCount} card${returnCount === 1 ? "" : "s"} to shuffle into your library before keeping.`, seatId, "Mulligan");
       return;
     }
-    // Every seat has now kept a hand (agents resolved their mulligans up front in startGame; the
-    // human is the last to confirm) — this is the correct moment to roll for who plays first,
-    // rather than defaulting to a fixed seat.
+    const lastToKeep = isLastToKeep(session.seats, keptHandsRef.current, seatId);
+    keptHandsRef.current = { ...keptHandsRef.current, [seatId]: true };
+    setKeptHands((current) => ({ ...current, [seatId]: true }));
+    setMulliganReturnCardIds((current) => ({ ...current, [seatId]: [] }));
+    const keepMessage = seatVerb(
+      seat,
+      keepSize === 7 ? `${seat.name} kept 7.` : `${seat.name} kept ${keepSize} and shuffled ${7 - keepSize} card${7 - keepSize === 1 ? "" : "s"} into their library.`,
+      keepSize === 7 ? "You kept 7." : `You kept ${keepSize} and shuffled ${7 - keepSize} card${7 - keepSize === 1 ? "" : "s"} into your library.`
+    );
+    const keepEvent = (suffix: string): GameEvent => ({ id: crypto.randomUUID(), at: new Date().toISOString(), seatId, message: `${keepMessage}${suffix}` });
+    if (!lastToKeep) {
+      // Others are still deciding: lock this hand in (the discarded cards go back into the library now) and wait.
+      setSession((current) => ({
+        ...current,
+        seats: current.seats.map((item) => (item.id === seatId ? keepOpeningHandSize(item, keepSize, returnIds, true) : item)),
+        events: [keepEvent(" Waiting for the other players."), ...current.events]
+      }));
+      return;
+    }
+    // Every seat has now kept a hand (agents resolved their mulligans up front in startGame; this seat is the last human to confirm) - this is the
+    // correct moment to roll for who plays first, rather than defaulting to a fixed seat.
     const { winnerId: firstSeatId, rolls } = rollForStartingSeat(session.seats);
-    setKeptHands((current) => ({ ...current, [humanSeat.id]: true }));
-    setMulliganReturnCardIds([]);
     setGameStage("playing");
     setActiveSeatId(firstSeatId);
     setPrioritySeatId(nextSeatId(session.seats, firstSeatId));
@@ -453,12 +513,12 @@ export function useGameSetup(ctx: GameContext) {
       activePlayerId: firstSeatId,
       phase: "untap step",
       turn: 1,
-      seats: current.seats.map((seat) => (seat.id === humanSeat.id ? keepOpeningHandSize(seat, keepSize, mulliganReturnCardIds, true) : seat)),
+      seats: current.seats.map((item) => (item.id === seatId ? keepOpeningHandSize(item, keepSize, returnIds, true) : item)),
       events: [
         phaseEvent(
           firstSeatId,
           (() => {
-            const firstSeat = current.seats.find((seat) => seat.id === firstSeatId);
+            const firstSeat = current.seats.find((item) => item.id === firstSeatId);
             return firstSeat ? seatVerb(firstSeat, `${firstSeat.name} starts turn 1: untap step.`, "You start turn 1: untap step.") : "Player starts turn 1: untap step.";
           })()
         ),
@@ -466,27 +526,23 @@ export function useGameSetup(ctx: GameContext) {
           id: crypto.randomUUID(),
           at: new Date().toISOString(),
           message: `${current.seats
-            .map((seat) => `${seat.name} rolls ${rolls[seat.id] ?? "?"}`)
-            .join(", ")}. ${current.seats.find((seat) => seat.id === firstSeatId)?.name ?? "Player"} wins the roll and goes first.`,
+            .map((item) => `${item.name} rolls ${rolls[item.id] ?? "?"}`)
+            .join(", ")}. ${current.seats.find((item) => item.id === firstSeatId)?.name ?? "Player"} wins the roll and goes first.`,
           detail: "Starting player roll"
         },
-        {
-          id: crypto.randomUUID(),
-          at: new Date().toISOString(),
-          seatId: humanSeat.id,
-          message: keepSize === 7 ? "You kept 7. The game begins." : `You kept ${keepSize} and shuffled ${7 - keepSize} card${7 - keepSize === 1 ? "" : "s"} into your library. The game begins.`
-        },
+        keepEvent(" The game begins."),
         ...current.events
       ]
       };
-      // Leylines and friends: agents always begin the game with them on the battlefield.
-      return started.seats.filter((seat) => seat.kind !== "human").reduce(
-        (next, seat) => openingHandBattlefieldCards(seat).reduce((inner, card) => putOpeningHandCardOnBattlefield(inner, seat.id, card.id), next),
+      // Leylines and friends: agents (and a friend's seat, which is not asked yet) always begin the game with them on the battlefield.
+      return started.seats.filter((item) => item.kind !== "human" || isRemoteSeat(item)).reduce(
+        (next, item) => openingHandBattlefieldCards(item).reduce((inner, card) => putOpeningHandCardOnBattlefield(inner, item.id, card.id), next),
         started
       );
     });
-    // ...and the human is asked about each one in their opening hand.
-    const humanLeylines = openingHandBattlefieldCards({ ...humanSeat, board: { ...humanSeat.board, hand: humanSeat.board.hand.filter((card) => !mulliganReturnCardIds.includes(card.id)) } });
+    // ...and the host is asked about each one in their opening hand (its hand is already trimmed unless it is the seat that kept last).
+    const hostHand = humanSeat.id === seatId ? humanSeat.board.hand.filter((card) => !returnIds.includes(card.id)) : humanSeat.board.hand;
+    const humanLeylines = openingHandBattlefieldCards({ ...humanSeat, board: { ...humanSeat.board, hand: hostHand } });
     if (humanLeylines.length > 0) {
       window.setTimeout(() => askOpeningHandBattlefield(humanSeat.id, humanLeylines.map((card) => card.id)), 100);
     }
@@ -511,36 +567,44 @@ export function useGameSetup(ctx: GameContext) {
     });
   }
 
-  function mulliganOpeningHand() {
-    const currentCount = mulligans[humanSeat.id] ?? 0;
+  function mulliganOpeningHand(seatId: string = humanSeat.id) {
+    const seat = session.seats.find((item) => item.id === seatId);
+    if (!seat || seat.kind !== "human" || keptHandsRef.current[seatId]) return;
+    const currentCount = mulligans[seatId] ?? 0;
     const nextCount = currentCount + 1;
     const nextKeepSize = openingHandKeepSize(nextCount);
-    setMulligans((current) => ({ ...current, [humanSeat.id]: nextCount }));
-    setSelectedHandCardId(undefined);
-    setMulliganReturnCardIds([]);
+    setMulligans((current) => ({ ...current, [seatId]: nextCount }));
+    if (seatId === humanSeat.id) setSelectedHandCardId(undefined);
+    setMulliganReturnCardIds((current) => ({ ...current, [seatId]: [] }));
     setSession((current) => ({
       ...current,
-      seats: current.seats.map((seat) => (seat.id === humanSeat.id ? withOpeningHand(seat, 7, nextCount) : seat)),
+      seats: current.seats.map((item) => (item.id === seatId ? withOpeningHand(item, 7, nextCount) : item)),
       events: [
         {
           id: crypto.randomUUID(),
           at: new Date().toISOString(),
-          seatId: humanSeat.id,
-          message: nextCount === 1 ? "You shuffled your hand into your library and drew 7. First mulligan is free; you can still keep 7." : `You shuffled your hand into your library and drew 7. Choose ${7 - nextKeepSize} card${7 - nextKeepSize === 1 ? "" : "s"} not to keep.`
+          seatId,
+          message:
+            nextCount === 1
+              ? seatVerb(seat, `${seat.name} shuffled their hand into their library and drew 7. First mulligan is free.`, "You shuffled your hand into your library and drew 7. First mulligan is free; you can still keep 7.")
+              : seatVerb(seat, `${seat.name} mulliganed again.`, `You shuffled your hand into your library and drew 7. Choose ${7 - nextKeepSize} card${7 - nextKeepSize === 1 ? "" : "s"} not to keep.`)
         },
         ...current.events
       ]
     }));
   }
 
-  function toggleMulliganReturnCard(card: VisibleCard) {
-    const keepSize = openingHandKeepSize(mulligans[humanSeat.id] ?? 0);
-    const required = Math.max(0, humanSeat.board.hand.length - keepSize);
+  function toggleMulliganReturnCard(card: Pick<VisibleCard, "id">, seatId: string = humanSeat.id) {
+    const seat = session.seats.find((item) => item.id === seatId);
+    if (!seat || seat.kind !== "human" || keptHandsRef.current[seatId]) return;
+    if (!seat.board.hand.some((handCard) => handCard.id === card.id)) return; // only a card in that seat's own hand
+    const required = mulliganReturnRequired(seat.board.hand, mulligans[seatId] ?? 0);
     if (required === 0) return;
-    setMulliganReturnCardIds((current) => {
-      if (current.includes(card.id)) return current.filter((id) => id !== card.id);
-      if (current.length >= required) return current;
-      return [...current, card.id];
+    setMulliganReturnCardIds((all) => {
+      const current = all[seatId] ?? [];
+      if (current.includes(card.id)) return { ...all, [seatId]: current.filter((id) => id !== card.id) };
+      if (current.length >= required) return all;
+      return { ...all, [seatId]: [...current, card.id] };
     });
   }
 

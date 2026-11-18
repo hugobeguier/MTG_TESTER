@@ -5,6 +5,8 @@
 // Extracted verbatim from components/AppFlow.tsx; AppFlow.tsx re-exports the previously public symbols.
 
 import { type CommanderDeck, type PlayerSeat, type VisibleCard } from "@/lib/types";
+import { openSeatPatch } from "@/lib/multiplayer/lobby";
+import { hostHumanSeat, isEmptySeat } from "@/lib/multiplayer/seatMap";
 
 type DeckInputMode = "commander" | "decklist";
 type DeckBuildStatus = "empty" | "building" | "ready" | "error";
@@ -13,6 +15,10 @@ export interface SeatConfig {
   seatId: string;
   name: string;
   kind: PlayerSeat["kind"];
+  // Multiplayer: this seat is played by a remote friend (kind "human", no AI). REMOTE_UNASSIGNED until the game starts, then the guest's slot id.
+  remoteSlot?: string;
+  // Multiplayer host: nobody plays this seat (not in the game, not shown to friends). The default for the non-host seats on /mp/host.
+  empty?: boolean;
   mode: DeckInputMode;
   commander: string;
   deckList: string;
@@ -38,8 +44,13 @@ export function DeckSetupPanel({
   config,
   library,
   onBuild,
-  onUpdate
+  onUpdate,
+  offerRemote = false,
+  lobbyNote
 }: {
+  // offerRemote: show the AI / Remote friend selector (only on /mp/host); lobbyNote: why this friend seat is not ready yet (a friend is missing or has no valid deck).
+  offerRemote?: boolean;
+  lobbyNote?: string;
   config: SeatConfig;
   library: SavedDeck[];
   onBuild: (config: SeatConfig) => void | Promise<void>;
@@ -49,11 +60,27 @@ export function DeckSetupPanel({
     <article className={`setup-card ${config.status}`}>
       <header>
         <div>
-          <p className="eyebrow">{config.kind === "human" ? "Player" : "Agent seat"}</p>
+          <p className="eyebrow">{config.empty ? "Empty seat" : config.remoteSlot !== undefined ? "Friend seat" : config.kind === "human" ? "Player" : "Agent seat"}</p>
           <h3>{config.name}</h3>
+          {offerRemote && (config.kind === "agent" || config.remoteSlot !== undefined || config.empty) ? (
+            <label>
+              Seat played by
+              <select
+                value={config.empty ? "empty" : config.remoteSlot !== undefined ? "remote" : "agent"}
+                onChange={(event) => onUpdate(config.seatId, seatRolePatch(event.target.value))}
+              >
+                <option value="empty">Empty (no player)</option>
+                <option value="agent">AI agent</option>
+                <option value="remote">Open for a friend</option>
+              </select>
+            </label>
+          ) : null}
+          {config.remoteSlot !== undefined && lobbyNote ? <p className="setup-play-message">{lobbyNote}</p> : null}
         </div>
-        <strong>{config.status === "building" ? "Building" : config.deck?.validation.legal ? "Ready" : "Draft"}</strong>
+        <strong>{config.empty ? "Empty" : config.status === "building" ? "Building" : config.deck?.validation.legal ? "Ready" : "Draft"}</strong>
       </header>
+      {config.empty ? null : (
+      <>
       <div className="mode-switch" role="group" aria-label={`${config.name} deck input mode`}>
         <button className={config.mode === "commander" ? "selected" : ""} type="button" onClick={() => onUpdate(config.seatId, { mode: "commander" })}>
           Commander
@@ -137,6 +164,8 @@ export function DeckSetupPanel({
           </>
         ) : null}
       </div>
+      </>
+      )}
     </article>
   );
 }
@@ -168,32 +197,48 @@ export function Status(props: { label: string; value: string; detail: string }) 
   );
 }
 
+const BLANK_DECK_PATCH = { mode: "commander" as const, commander: "", deckList: "", deck: undefined, status: "empty" as const, activity: [] as string[] };
+
+/** What the host's "Seat played by" selector does to a seat's config. */
+export function seatRolePatch(role: string): Partial<SeatConfig> {
+  if (role === "remote") return openSeatPatch();
+  if (role === "empty") return { kind: "agent", empty: true, remoteSlot: undefined, ...BLANK_DECK_PATCH, message: "Nobody plays this seat." };
+  return { kind: "agent", empty: false, remoteSlot: undefined, ...BLANK_DECK_PATCH, message: "Choose a commander or paste a deck list." };
+}
+
 // Default decks come from decks/foundations/*.txt via the deck library API (the seats start empty and
 // are filled by applyDefaultDecks once the library has loaded): the human seat gets Reign Of Dragons and
 // each agent seat (in seat order) one of the other three, all in decklist mode.
 const DEFAULT_HUMAN_DECK_LABEL = "Reign Of Dragons";
 const DEFAULT_AGENT_DECK_LABELS = ["Wretched Ranks", "Tramplesaurus Rex", "Calling All Angels"];
 
-export function createInitialConfigs(seats: PlayerSeat[]): SeatConfig[] {
+export function createInitialConfigs(seats: PlayerSeat[], options: { emptyNonHostSeats?: boolean } = {}): SeatConfig[] {
+  const host = options.emptyNonHostSeats ? hostHumanSeat(seats) : undefined;
   return seats.map((seat) => ({
     seatId: seat.id,
     name: seat.name,
     kind: seat.kind,
+    remoteSlot: seat.remoteSlot,
+    ...(host && seat.id !== host.id ? { empty: true, kind: "agent" as const } : {}),
     mode: seat.kind === "human" ? "decklist" : "commander",
     commander: seat.deck?.commander ?? "",
     deckList: "",
     deck: undefined,
     status: "empty",
-    message: "Choose a commander or paste a deck list.",
+    message: host && seat.id !== host.id ? "Nobody plays this seat." : "Choose a commander or paste a deck list.",
     activity: []
   }));
 }
+
+/** The seat configs that play (empty seats dropped). */
+export const playingConfigs = (configs: SeatConfig[]): SeatConfig[] => configs.filter((config) => !isEmptySeat(config));
 
 // Fills seats that still have no deck (nothing typed, loaded or built) with the default Foundations decks.
 export function applyDefaultDecks(configs: SeatConfig[], library: SavedDeck[]): SeatConfig[] {
   const find = (label: string) => library.find((deck) => deck.id.toLowerCase().startsWith("decks/foundations/") && deck.label.toLowerCase() === label.toLowerCase());
   let agentIndex = 0;
   return configs.map((config) => {
+    if (config.empty || config.remoteSlot !== undefined) return config; // an empty seat has no player; a friend's seat gets no auto-filled deck (the host pastes their list)
     const label = config.kind === "human" ? DEFAULT_HUMAN_DECK_LABEL : DEFAULT_AGENT_DECK_LABELS[agentIndex++];
     const saved = label ? find(label) : undefined;
     if (!saved || config.deckList.trim() || config.deck) return config;
@@ -210,6 +255,7 @@ export function formatDeckList(deck: CommanderDeck) {
 export function validateConfigsForPlay(configs: SeatConfig[]) {
   let ready = true;
   const nextConfigs = configs.map((config) => {
+    if (config.empty) return config; // not in the game: nothing to validate
     // Never rebuild a decklist-mode seat's deck here as a fallback: createDeckFromList without a
     // `catalog` (loadCardCatalog() reads the local card data file — a server-only concern this
     // client-side function has no access to) silently enriches nothing, so every non-basic-land

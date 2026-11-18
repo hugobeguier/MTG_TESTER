@@ -40,6 +40,7 @@ import { hasKeyword as hasOracleKeyword } from "@/lib/keywords";
 import { cardMatchesTypeFilter, isBasicLandFetchAbility } from "@/lib/oracleClauses";
 import { DEFAULT_STOP_SETTINGS, stopKey, TURN_PHASES, type PriorityStopSettings } from "@/lib/priorityStops";
 import { VisualCard } from "./VisualCard";
+import { hostHumanSeat } from "@/lib/multiplayer/seatMap";
 
 type ManaColor = "W" | "U" | "B" | "R" | "G" | "C";
 type ManaPool = Record<ManaColor, number>;
@@ -171,6 +172,14 @@ interface ThreeGameTableProps {
   onChooseMyriadTapSearch?: () => void;
   onCancelMyriadTapChoice?: () => void;
   gameStage?: "mulligan" | "playing";
+  /** Multiplayer spectator: hides the host's action buttons and relabels the hand strip with `spectatorHandLabel`. */
+  spectator?: boolean;
+  spectatorHandLabel?: string;
+  /** Multiplayer friend seated at a remote seat who may not act yet: own hand is shown and inspectable, but every action control is hidden/inert. */
+  guestReadOnly?: boolean;
+  /** Mulligan step: this seat already kept (hides Keep/Mulligan) and the names of seats still deciding ("Waiting for ... to decide"). */
+  mulliganKept?: boolean;
+  mulliganWaitingFor?: string[];
   humanMulligans?: number;
   mulliganReturnCardIds?: string[];
   mulliganReturnRequired?: number;
@@ -779,7 +788,9 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
   const cardMeshesRef = useRef<THREE.Object3D[]>([]);
   const frameRef = useRef<number | undefined>(undefined);
   const propsRef = useRef(props);
-  const cameraState = useRef({ yaw: 0, pitch: -0.85, distance: 26, target: new THREE.Vector3(0, 0, 0) });
+  // Start on the viewer's own side: the default camera (yaw 0) sits on the +Z side, which is where seat 0 lives; a viewer whose seat is on the far
+  // side (a friend at seat 1/2) starts turned around (yaw PI) so their own battlefield and hand are the near ones.
+  const cameraState = useRef({ yaw: PLAYER_AREAS[Math.max(0, props.session.seats.findIndex((seat) => seat.id === (hostHumanSeat(props.session.seats) ?? props.session.seats[0])?.id))]?.rot ?? 0, pitch: -0.85, distance: 26, target: new THREE.Vector3(0, 0, 0) });
   const movementKeys = useRef({ forward: false, left: false, back: false, right: false });
   const boardInputActive = useRef(false);
   const pointer = useRef({ down: false, button: 0, x: 0, y: 0, moved: false });
@@ -902,7 +913,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
   );
   const [actionLogDragOffset, setActionLogDragOffset] = useState<{ x: number; y: number } | undefined>();
   const [reasoningSeatId, setReasoningSeatId] = useState<string | undefined>();
-  const human = props.session.seats.find((seat) => seat.kind === "human") ?? props.session.seats[0];
+  const human = hostHumanSeat(props.session.seats) ?? props.session.seats[0];
   const agentSeats = props.session.seats.filter((seat) => seat.kind === "agent");
   const latest = props.session.events[0];
   const phaseNotice = latest?.detail === "Phase change" ? latest : undefined;
@@ -1190,7 +1201,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
 
       hoveredCardRef.current = data?.kind === "card" && data.card && data.seatId && data.location ? (data as CardUserData) : undefined;
       const hovered = hoveredCardRef.current;
-      renderer.domElement.style.cursor = hovered?.location === "battlefield" && hovered.seatId === propsRef.current.session.seats.find((seat) => seat.kind === "human")?.id ? "grab" : hovered || data?.kind === "zone" || (data?.kind === "player" && (propsRef.current.session.seats.find((seat) => seat.id === data.seatId)?.emblems?.length ?? 0) > 0) ? "pointer" : "";
+      renderer.domElement.style.cursor = hovered?.location === "battlefield" && hovered.seatId === hostHumanSeat(propsRef.current.session.seats)?.id ? "grab" : hovered || data?.kind === "zone" || (data?.kind === "player" && (propsRef.current.session.seats.find((seat) => seat.id === data.seatId)?.emblems?.length ?? 0) > 0) ? "pointer" : "";
     };
 
     const getTablePosition = (event: PointerEvent, seatId: string) => {
@@ -1214,7 +1225,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
       pointer.current = { down: true, button: event.button, x: event.clientX, y: event.clientY, moved: false };
       updateHoveredCard(event);
       const hovered = hoveredCardRef.current;
-      const humanId = propsRef.current.session.seats.find((seat) => seat.kind === "human")?.id;
+      const humanId = hostHumanSeat(propsRef.current.session.seats)?.id;
       const targeting = asBoardTargetingChoice(propsRef.current.ruleChoice);
       draggedBattlefieldCardRef.current =
         !targeting && event.button === 0 && !event.shiftKey && hovered?.location === "battlefield" && hovered.seatId === humanId ? hovered : undefined;
@@ -1603,6 +1614,8 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
   }
 
   const inspectedOwner = props.inspectedCard ? findCardOwner(props.session, props.inspectedCard.id) : undefined;
+  // The inspector offers the table owner's actions (move/activate/cast ...) only to a viewer who may act; a spectator or not-yet-acting friend just reads the card.
+  const inspectedActionOwner = props.spectator || props.guestReadOnly ? undefined : inspectedOwner;
 
   // Minimize for the choice boxes. Every decision box shares the same full-viewport backdrop that blocks the board, so instead of editing
   // each one, the boxes are wrapped in two "choice layers" that are simply hidden (kept mounted, so picks made so far survive) while
@@ -1796,16 +1809,34 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
         </aside>
       ) : null}
       <div className="three-hud bottom-left">
-        {props.gameStage === "mulligan" ? (
+        {props.spectator || (props.guestReadOnly && props.gameStage === "playing") ? (
+          <div className="hud-actions">
+            <div className="mana-pool" aria-label="Floating mana">
+              {(["W", "U", "B", "R", "G", "C"] as ManaColor[]).map((color) => (
+                <span className={`mana-symbol mana-${color.toLowerCase()} ${(props.manaPool?.[color] ?? 0) > 0 ? "has-mana" : "is-empty"}`} key={color}>
+                  {color} {props.manaPool?.[color] ?? 0}
+                </span>
+              ))}
+            </div>
+            <strong>{human.life} life</strong>
+          </div>
+        ) : props.gameStage === "mulligan" ? (
           <div className="hud-actions">
             <strong>{human.board.hand.length} cards</strong>
-            <small>
-              {mulliganRequired > 0
-                ? `Choose ${mulliganRequired} card${mulliganRequired === 1 ? "" : "s"} to shuffle into your library. Selected ${mulliganSelectedCount}/${mulliganRequired}.`
-                : "You may keep 7. First mulligan is free."}
-            </small>
-            <button type="button" disabled={mulliganSelectedCount !== mulliganRequired} onClick={props.onKeepHand}>Keep</button>
-            <button type="button" onClick={props.onMulligan}>Mulligan</button>
+            {props.mulliganKept ? (
+              <small>Hand kept.</small>
+            ) : (
+              <>
+                <small>
+                  {mulliganRequired > 0
+                    ? `Choose ${mulliganRequired} card${mulliganRequired === 1 ? "" : "s"} to shuffle into your library. Selected ${mulliganSelectedCount}/${mulliganRequired}.`
+                    : "You may keep 7. First mulligan is free."}
+                </small>
+                <button type="button" disabled={mulliganSelectedCount !== mulliganRequired} onClick={props.onKeepHand}>Keep</button>
+                <button type="button" onClick={props.onMulligan}>Mulligan</button>
+              </>
+            )}
+            {props.mulliganWaitingFor && props.mulliganWaitingFor.length > 0 ? <small className="mulligan-waiting">Waiting for {props.mulliganWaitingFor.join(", ")} to decide</small> : null}
           </div>
         ) : (
           <div className="hud-actions">
@@ -1903,84 +1934,84 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
           owner={inspectedOwner}
           onClose={props.onCloseInspectCard}
           onMoveToGraveyard={
-            inspectedOwner?.seat.kind === "human" && (inspectedOwner.zone === "hand" || inspectedOwner.zone === "battlefield" || inspectedOwner.zone === "exile")
-              ? () => props.onMoveCardToGraveyard?.(inspectedOwner.seat.id, props.inspectedCard!.id)
+            inspectedActionOwner?.seat.kind === "human" && (inspectedActionOwner.zone === "hand" || inspectedActionOwner.zone === "battlefield" || inspectedActionOwner.zone === "exile")
+              ? () => props.onMoveCardToGraveyard?.(inspectedActionOwner.seat.id, props.inspectedCard!.id)
               : undefined
           }
           onMoveToExile={
-            inspectedOwner?.seat.kind === "human" && (inspectedOwner.zone === "hand" || inspectedOwner.zone === "battlefield" || inspectedOwner.zone === "graveyard")
-              ? () => props.onMoveCardToExile?.(inspectedOwner.seat.id, props.inspectedCard!.id)
+            inspectedActionOwner?.seat.kind === "human" && (inspectedActionOwner.zone === "hand" || inspectedActionOwner.zone === "battlefield" || inspectedActionOwner.zone === "graveyard")
+              ? () => props.onMoveCardToExile?.(inspectedActionOwner.seat.id, props.inspectedCard!.id)
               : undefined
           }
           onResolveMyriadLandscape={
-            inspectedOwner?.seat.kind === "human" && inspectedOwner.zone === "battlefield" && props.inspectedCard.name === "Myriad Landscape"
-              ? () => props.onResolveMyriadLandscape?.(inspectedOwner.seat.id, props.inspectedCard!.id)
+            inspectedActionOwner?.seat.kind === "human" && inspectedActionOwner.zone === "battlefield" && props.inspectedCard.name === "Myriad Landscape"
+              ? () => props.onResolveMyriadLandscape?.(inspectedActionOwner.seat.id, props.inspectedCard!.id)
               : undefined
           }
           onResolveBasicLandFetch={
-            inspectedOwner?.seat.kind === "human" && inspectedOwner.zone === "battlefield" && isBasicLandFetchAbility(props.inspectedCard)
-              ? () => props.onResolveBasicLandFetch?.(inspectedOwner.seat.id, props.inspectedCard!.id)
+            inspectedActionOwner?.seat.kind === "human" && inspectedActionOwner.zone === "battlefield" && isBasicLandFetchAbility(props.inspectedCard)
+              ? () => props.onResolveBasicLandFetch?.(inspectedActionOwner.seat.id, props.inspectedCard!.id)
               : undefined
           }
           sacrificeAbilities={
-            inspectedOwner?.seat.kind === "human" && inspectedOwner.zone === "battlefield"
+            inspectedActionOwner?.seat.kind === "human" && inspectedActionOwner.zone === "battlefield"
               ? parseGenericSacrificeAbilities(abilityOracleText(props.inspectedCard))
               : []
           }
           onActivateSacrificeAbility={
-            inspectedOwner?.seat.kind === "human" && inspectedOwner.zone === "battlefield"
-              ? (abilityIndex) => props.onActivateSacrificeAbility?.(inspectedOwner.seat.id, props.inspectedCard!.id, abilityIndex)
+            inspectedActionOwner?.seat.kind === "human" && inspectedActionOwner.zone === "battlefield"
+              ? (abilityIndex) => props.onActivateSacrificeAbility?.(inspectedActionOwner.seat.id, props.inspectedCard!.id, abilityIndex)
               : undefined
           }
           tapAbilities={
-            inspectedOwner?.seat.kind === "human" &&
-            inspectedOwner.zone === "battlefield" &&
+            inspectedActionOwner?.seat.kind === "human" &&
+            inspectedActionOwner.zone === "battlefield" &&
             // A tapped permanent can still have an ability that taps OTHER creatures instead (Cryptbreaker).
             (!props.inspectedCard.tapped || parseGenericTapAbilities(abilityOracleText(props.inspectedCard)).some((ability) => ability.costTapCreatures))
               ? parseGenericTapAbilities(abilityOracleText(props.inspectedCard))
               : []
           }
           onActivateTapAbility={
-            inspectedOwner?.seat.kind === "human" && inspectedOwner.zone === "battlefield"
-              ? (abilityIndex) => props.onActivateTapAbility?.(inspectedOwner.seat.id, props.inspectedCard!.id, abilityIndex)
+            inspectedActionOwner?.seat.kind === "human" && inspectedActionOwner.zone === "battlefield"
+              ? (abilityIndex) => props.onActivateTapAbility?.(inspectedActionOwner.seat.id, props.inspectedCard!.id, abilityIndex)
               : undefined
           }
           selfUntapAbilities={
-            inspectedOwner?.seat.kind === "human" && inspectedOwner.zone === "battlefield" && props.inspectedCard.tapped
+            inspectedActionOwner?.seat.kind === "human" && inspectedActionOwner.zone === "battlefield" && props.inspectedCard.tapped
               ? parseSelfUntapAbilities(props.inspectedCard.oracleText)
               : []
           }
           onActivateSelfUntap={
-            inspectedOwner?.seat.kind === "human" && inspectedOwner.zone === "battlefield"
-              ? (abilityIndex) => props.onActivateSelfUntap?.(inspectedOwner.seat.id, props.inspectedCard!.id, abilityIndex)
+            inspectedActionOwner?.seat.kind === "human" && inspectedActionOwner.zone === "battlefield"
+              ? (abilityIndex) => props.onActivateSelfUntap?.(inspectedActionOwner.seat.id, props.inspectedCard!.id, abilityIndex)
               : undefined
           }
           genericManaAbilities={
-            inspectedOwner?.seat.kind === "human" && inspectedOwner.zone === "battlefield"
+            inspectedActionOwner?.seat.kind === "human" && inspectedActionOwner.zone === "battlefield"
               ? parseGenericManaAbilities(props.inspectedCard.oracleText)
               : []
           }
           onActivateGenericMana={
-            inspectedOwner?.seat.kind === "human" && inspectedOwner.zone === "battlefield"
-              ? (abilityIndex) => props.onActivateGenericMana?.(inspectedOwner.seat.id, props.inspectedCard!.id, abilityIndex)
+            inspectedActionOwner?.seat.kind === "human" && inspectedActionOwner.zone === "battlefield"
+              ? (abilityIndex) => props.onActivateGenericMana?.(inspectedActionOwner.seat.id, props.inspectedCard!.id, abilityIndex)
               : undefined
           }
           onUnlockRoomDoor={
-            inspectedOwner?.seat.kind === "human" && inspectedOwner.zone === "battlefield" && props.lockedRoomDoorFaceIndex !== undefined
-              ? () => props.onUnlockRoomDoor?.(inspectedOwner.seat.id, props.inspectedCard!.id, props.lockedRoomDoorFaceIndex!)
+            inspectedActionOwner?.seat.kind === "human" && inspectedActionOwner.zone === "battlefield" && props.lockedRoomDoorFaceIndex !== undefined
+              ? () => props.onUnlockRoomDoor?.(inspectedActionOwner.seat.id, props.inspectedCard!.id, props.lockedRoomDoorFaceIndex!)
               : undefined
           }
           onActivateEquip={
-            inspectedOwner?.seat.kind === "human" && inspectedOwner.zone === "battlefield" && isEquipment(props.inspectedCard) && equipCost(props.inspectedCard.oracleText) !== undefined
-              ? () => props.onActivateEquip?.(inspectedOwner.seat.id, props.inspectedCard!.id)
+            inspectedActionOwner?.seat.kind === "human" && inspectedActionOwner.zone === "battlefield" && isEquipment(props.inspectedCard) && equipCost(props.inspectedCard.oracleText) !== undefined
+              ? () => props.onActivateEquip?.(inspectedActionOwner.seat.id, props.inspectedCard!.id)
               : undefined
           }
           onActivateManlandAnimation={
-            inspectedOwner?.seat.kind === "human" &&
-            inspectedOwner.zone === "battlefield" &&
+            inspectedActionOwner?.seat.kind === "human" &&
+            inspectedActionOwner.zone === "battlefield" &&
             !props.inspectedCard.temporaryAnimatedAsCreature &&
             parseManlandAnimation(props.inspectedCard.oracleText) !== undefined
-              ? () => props.onActivateManlandAnimation?.(inspectedOwner.seat.id, props.inspectedCard!.id)
+              ? () => props.onActivateManlandAnimation?.(inspectedActionOwner.seat.id, props.inspectedCard!.id)
               : undefined
           }
           // A plain "{T}: Add ..." button for a permanent that ALSO has some other ability the
@@ -1990,16 +2021,16 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
           // display heuristic (producedMana + a literal "{T}:" clause) for whether to show the
           // button at all; a false positive here just no-ops on click rather than acting illegally.
           onTapForMana={
-            inspectedOwner?.seat.kind === "human" &&
-            inspectedOwner.zone === "battlefield" &&
+            inspectedActionOwner?.seat.kind === "human" &&
+            inspectedActionOwner.zone === "battlefield" &&
             !props.inspectedCard.tapped &&
             (props.inspectedCard.producedMana?.length ?? 0) > 0 &&
             /\{t\}\s*:/i.test(props.inspectedCard.oracleText)
-              ? () => props.onTapForMana?.(inspectedOwner.seat.id, props.inspectedCard!.id)
+              ? () => props.onTapForMana?.(inspectedActionOwner.seat.id, props.inspectedCard!.id)
               : undefined
           }
           attackTargets={
-            inspectedOwner?.seat.kind === "human" && inspectedOwner.zone === "battlefield" && props.humanAttackTargets && props.humanAttackTargets.length > 0
+            inspectedActionOwner?.seat.kind === "human" && inspectedActionOwner.zone === "battlefield" && props.humanAttackTargets && props.humanAttackTargets.length > 0
               ? props.humanAttackTargets
               : undefined
           }
@@ -2007,34 +2038,34 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
             props.onDeclareAttack ? (targetId) => props.onDeclareAttack?.(props.inspectedCard!.id, targetId) : undefined
           }
           onCastCommander={
-            inspectedOwner?.seat.kind === "human" && inspectedOwner.zone === "command"
-              ? () => props.onCastCommander?.(inspectedOwner.seat.id)
+            inspectedActionOwner?.seat.kind === "human" && inspectedActionOwner.zone === "command"
+              ? () => props.onCastCommander?.(inspectedActionOwner.seat.id)
               : undefined
           }
           onCastFromExile={
-            inspectedOwner?.seat.kind === "human" &&
-            inspectedOwner.zone === "exile" &&
-            props.inspectedCard.exiledPlayableBySeatId === inspectedOwner.seat.id &&
+            inspectedActionOwner?.seat.kind === "human" &&
+            inspectedActionOwner.zone === "exile" &&
+            props.inspectedCard.exiledPlayableBySeatId === inspectedActionOwner.seat.id &&
             (props.inspectedCard.exiledPlayableUntilTurn === undefined || props.session.turn <= props.inspectedCard.exiledPlayableUntilTurn) &&
             // If a response window is open, only an instant/flash card is actually castable —
             // main-phase casting (no pendingAction) has no such restriction.
-            (!props.pendingAction || canCastAtInstantSpeed(props.inspectedCard, seatHasFlashGrant(inspectedOwner.seat)))
-              ? () => props.onCastFromExile?.(inspectedOwner.seat.id, props.inspectedCard!.id)
+            (!props.pendingAction || canCastAtInstantSpeed(props.inspectedCard, seatHasFlashGrant(inspectedActionOwner.seat)))
+              ? () => props.onCastFromExile?.(inspectedActionOwner.seat.id, props.inspectedCard!.id)
               : undefined
           }
           onChangeCounter={
-            inspectedOwner?.seat.kind === "human" && inspectedOwner.zone === "battlefield" && props.inspectedCard.typeLine.includes("Creature")
-              ? (delta) => props.onChangeCounter?.(inspectedOwner.seat.id, props.inspectedCard!.id, "+1/+1", delta)
+            inspectedActionOwner?.seat.kind === "human" && inspectedActionOwner.zone === "battlefield" && props.inspectedCard.typeLine.includes("Creature")
+              ? (delta) => props.onChangeCounter?.(inspectedActionOwner.seat.id, props.inspectedCard!.id, "+1/+1", delta)
               : undefined
           }
           onChangeLoyalty={
-            inspectedOwner?.seat.kind === "human" && inspectedOwner.zone === "battlefield" && props.inspectedCard.typeLine.includes("Planeswalker")
-              ? (delta) => props.onChangeCounter?.(inspectedOwner.seat.id, props.inspectedCard!.id, "loyalty", delta)
+            inspectedActionOwner?.seat.kind === "human" && inspectedActionOwner.zone === "battlefield" && props.inspectedCard.typeLine.includes("Planeswalker")
+              ? (delta) => props.onChangeCounter?.(inspectedActionOwner.seat.id, props.inspectedCard!.id, "loyalty", delta)
               : undefined
           }
           onActivateLoyalty={
-            inspectedOwner?.seat.kind === "human" && inspectedOwner.zone === "battlefield" && props.inspectedCard.typeLine.includes("Planeswalker")
-              ? (cost, text) => props.onActivateLoyalty?.(inspectedOwner.seat.id, props.inspectedCard!.id, cost, text)
+            inspectedActionOwner?.seat.kind === "human" && inspectedActionOwner.zone === "battlefield" && props.inspectedCard.typeLine.includes("Planeswalker")
+              ? (cost, text) => props.onActivateLoyalty?.(inspectedActionOwner.seat.id, props.inspectedCard!.id, cost, text)
               : undefined
           }
         />
@@ -2194,10 +2225,10 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
         </div>
       ) : null}
       <ExilePlayableTray
-        seat={props.session.seats.find((item) => item.kind === "human")}
+        seat={hostHumanSeat(props.session.seats)}
         turn={props.session.turn}
         onCast={(cardId) => {
-          const human = props.session.seats.find((item) => item.kind === "human");
+          const human = hostHumanSeat(props.session.seats);
           if (human) props.onCastFromExile?.(human.id, cardId);
         }}
         onInspect={props.onInspectCard}
@@ -2329,14 +2360,14 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
       <div className="three-hand-panel" aria-label="Your hand">
         <div className="three-zone-strip">
           <div className="three-hand-heading">
-            <strong>Your hand</strong>
+            <strong>{props.spectator ? props.spectatorHandLabel ?? "Host's hand" : "Your hand"}</strong>
             <span>{human.board.hand.length} cards</span>
           </div>
           <div className="three-hand-row" onDragOver={onHandDragOver} onDrop={onHandDrop}>
             {human.board.hand.map((card) => (
               <article
                 className={`three-hand-card ${props.selectedCardId === card.id || props.mulliganReturnCardIds?.includes(card.id) ? "selected" : ""} ${draggingHandCardId === card.id ? "dragging" : ""}`}
-                draggable={props.gameStage === "playing"}
+                draggable={props.gameStage === "playing" && !props.guestReadOnly}
                 key={card.id}
                 onClick={() => {
                   if (props.gameStage === "mulligan" && mulliganRequired > 0) {

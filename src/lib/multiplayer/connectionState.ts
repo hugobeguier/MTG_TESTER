@@ -1,5 +1,6 @@
 // Pure state machines behind the multiplayer hooks (useMpHost / useMpGuest), so the logic is testable without React.
 import type { GuestInfo, HostEvent } from "./protocol";
+import type { LobbyMessage } from "./lobby";
 import type { MpSnapshot } from "./snapshot";
 
 // ---------- host ----------
@@ -23,6 +24,7 @@ export type HostAction =
   | { type: "event"; event: HostEvent }
   | { type: "error"; message: string }
   | { type: "closed" }
+  | { type: "guest_removed"; seatId: string }
   | { type: "reset" };
 
 const upsert = (guests: GuestInfo[], guest: GuestInfo) => (guests.some((g) => g.seatId === guest.seatId) ? guests.map((g) => (g.seatId === guest.seatId ? guest : g)) : [...guests, guest]);
@@ -51,6 +53,10 @@ export function hostReducer(state: HostState, action: HostAction): HostState {
       return { ...state, status: "error", error: action.message };
     case "closed":
       return { ...state, status: "closed" };
+    case "guest_removed": {
+      const guests = state.guests.filter((g) => g.seatId !== action.seatId);
+      return { ...state, guests, status: state.status === "live" && !guests.some((g) => g.connected) ? "waiting" : state.status };
+    }
     case "reset":
       return initialHostState;
   }
@@ -100,6 +106,8 @@ export interface GuestState {
   roomCode?: string;
   snapshot?: MpSnapshot;
   rev: number;
+  /** Latest lobby (seats / decks) while the host is on its setup screen. */
+  lobby?: LobbyMessage;
   error?: string;
 }
 
@@ -112,6 +120,7 @@ export type GuestAction =
   | { type: "stream_lost" }
   | { type: "welcome"; seatId: string; roomCode: string }
   | { type: "snapshot"; rev: number; snapshot: MpSnapshot }
+  | { type: "lobby"; message: LobbyMessage }
   | { type: "room_closed" }
   | { type: "error"; message: string; fatal?: boolean };
 
@@ -131,6 +140,10 @@ export function guestReducer(state: GuestState, action: GuestAction): GuestState
       // Replays after a reconnect and out-of-order deliveries must never move the table backwards.
       if (action.rev < state.rev) return state;
       return { ...state, snapshot: action.snapshot, rev: action.rev, status: "live", error: undefined };
+    case "lobby":
+      if (state.lobby && action.message.rev < state.lobby.rev) return state;
+      // Lobby messages are only sent while the host is on its setup screen, so any old table is stale: show the lobby again.
+      return { ...state, lobby: action.message, snapshot: undefined, rev: 0, status: state.status === "connecting" || state.status === "reconnecting" ? state.status : "waiting" };
     case "room_closed":
       return { ...state, status: "closed" };
     case "error":

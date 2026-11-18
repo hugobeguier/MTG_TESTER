@@ -33,6 +33,7 @@ import type { useAbilities } from "./useAbilities";
 import type { useChoicePrompts } from "./useChoicePrompts";
 import type { useAgentDriver } from "./useAgentDriver";
 import type { useGameActions } from "./useGameActions";
+import { hostHumanSeat } from "@/lib/multiplayer/seatMap";
 import type { useRulesAdvisor } from "./useRulesAdvisor";
 import type { useSpecialEffects } from "./useSpecialEffects";
 
@@ -60,7 +61,9 @@ export function lateFn<K extends keyof HandlerApi>(ctx: GameContext, key: K): Ha
   return ((...args: unknown[]) => (ctx.late[key] as (...a: unknown[]) => unknown)(...args)) as HandlerApi[K];
 }
 
-export function useGameState(initialSession: GameSession) {
+export function useGameState(initialSession: GameSession, options: { emptyNonHostSeats?: boolean } = {}) {
+  // The original (4-seat) session's seats: a seat an earlier game left out ("Empty") is rebuilt from here when it is played again.
+  const baseSeats = useRef(initialSession.seats).current;
 
   const [mode, setMode] = useState<FlowMode>("setup");
   const [session, rawSetSession] = useState(() => checkStateBasedActions(initialSession));
@@ -92,7 +95,11 @@ export function useGameState(initialSession: GameSession) {
   const [gameOverDismissed, setGameOverDismissed] = useState(false);
   const [mulligans, setMulligans] = useState<Record<string, number>>({});
   const [keptHands, setKeptHands] = useState<Record<string, boolean>>({});
-  const [mulliganReturnCardIds, setMulliganReturnCardIds] = useState<string[]>([]);
+  // Synchronous mirror of keptHands: a host click and a friend's queued intent can both run before the next render, and "am I the last to keep" must see both.
+  const keptHandsRef = useRef(keptHands);
+  keptHandsRef.current = keptHands;
+  // Cards each human seat has picked to shuffle away while mulliganing (seat id -> card ids); a friend's seat has its own entry.
+  const [mulliganReturnCardIds, setMulliganReturnCardIds] = useState<Record<string, string[]>>({});
   const [pendingRuleChoice, setPendingRuleChoice] = useState<PendingRuleChoice | undefined>();
   const decisions = useDecisionState(); // mana/block choices, library look, library searches, myriad tap live here (one decision per slot); old names/setters are adapters
   const { manaChoice, blockChoice, setManaChoice, setBlockChoice, libraryLook, setLibraryLook, manualLibrarySearch, setManualLibrarySearch, myriadSearch, setMyriadSearch, myriadTapChoice, setMyriadTapChoice, basicLandFetchSearch, setBasicLandFetchSearch } = decisions;
@@ -120,7 +127,7 @@ export function useGameState(initialSession: GameSession) {
   // human's own game actions (cast, activate, pass) are refused with a message — see humanActionBlockedByChoice — except tapping lands.
   const [choiceMinimized, setChoiceMinimized] = useState(false);
   const [setupMessage, setSetupMessage] = useState<string | undefined>();
-  const { configs, setConfigs, deckLibrary, defaultDecksApplied } = useDeckLibrary(initialSession.seats);
+  const { configs, setConfigs, deckLibrary, defaultDecksApplied } = useDeckLibrary(initialSession.seats, options);
   const { savedGames, setSavedGames } = useSavedGames(mode);
   // startGame is async (it awaits an Ollama mulligan decision per agent seat, which can take
   // several seconds each) with nothing else gating re-entry — playBlockedByBuild only reflects
@@ -244,7 +251,7 @@ export function useGameState(initialSession: GameSession) {
     resolveTapAbilityEffect: (seatId: string, cardId: string, paid: NonNullable<ReturnType<typeof payGenericTapCost>>, chosenCardId?: string) => void;
   }>({ resolveSacrificeAbilityEffect: () => undefined, resolveTapAbilityEffect: () => undefined });
   const [stackFeed, setStackFeed] = useState<StackFeedEntry[]>([]);
-  const humanSeat = session.seats.find((seat) => seat.kind === "human") ?? session.seats[0];
+  const humanSeat = hostHumanSeat(session.seats) ?? session.seats[0]; // the HOST's human seat (a remote friend's has remoteSlot)
   const selectedHandCard = selectedHandCardId ? humanSeat.board.hand.find((card) => card.id === selectedHandCardId) : undefined;
 
   // Emblem "whenever ... is put into your graveyard from the battlefield / dies, return it at the beginning of the next end step" (Daretti, Scrap
@@ -280,8 +287,8 @@ export function useGameState(initialSession: GameSession) {
   // The situation and scored options of each agent's latest decision (see requestAgentDecision), attached to its reasoning for the 🧠 chat.
   const agentDecisionInfo = useRef<Record<string, Pick<AgentReasoning, "situation" | "options" | "chosenId" | "turn" | "phase">>>({});
   return {
-    mode, setMode, session, setSession, activeSeatId, setActiveSeatId, prioritySeatId, setPrioritySeatId, tableSession, selectedHandCardId, setSelectedHandCardId, inspectedCard, setInspectedCard, gameStage, setGameStage, gameOverDismissed, setGameOverDismissed, latestSessionRef, setupMessage, setSetupMessage, configs, setConfigs, deckLibrary, defaultDecksApplied, savedGames, setSavedGames, gameStarting, setGameStarting, autoValidatedDefaultDeck, humanSeat, selectedHandCard,
-    choices: { decisions, mulligans, setMulligans, keptHands, setKeptHands, mulliganReturnCardIds, setMulliganReturnCardIds, libraryLook, setLibraryLook, manualLibrarySearch, setManualLibrarySearch, pendingRuleChoice, setPendingRuleChoice, blockChoice, setBlockChoice, selectedBlockerIds, setSelectedBlockerIds, myriadSearch, setMyriadSearch, myriadTapChoice, setMyriadTapChoice, basicLandFetchSearch, setBasicLandFetchSearch, choiceMinimized, setChoiceMinimized, pendingOrderedTriggerResume, commanderZoneChoiceAsked, auraRetargetAsked },
+    mode, setMode, session, setSession, activeSeatId, setActiveSeatId, prioritySeatId, setPrioritySeatId, tableSession, selectedHandCardId, setSelectedHandCardId, inspectedCard, setInspectedCard, gameStage, setGameStage, gameOverDismissed, setGameOverDismissed, latestSessionRef, setupMessage, setSetupMessage, configs, setConfigs, deckLibrary, defaultDecksApplied, savedGames, setSavedGames, gameStarting, setGameStarting, autoValidatedDefaultDeck, humanSeat, selectedHandCard, baseSeats,
+    choices: { decisions, mulligans, setMulligans, keptHands, setKeptHands, keptHandsRef, mulliganReturnCardIds, setMulliganReturnCardIds, libraryLook, setLibraryLook, manualLibrarySearch, setManualLibrarySearch, pendingRuleChoice, setPendingRuleChoice, blockChoice, setBlockChoice, selectedBlockerIds, setSelectedBlockerIds, myriadSearch, setMyriadSearch, myriadTapChoice, setMyriadTapChoice, basicLandFetchSearch, setBasicLandFetchSearch, choiceMinimized, setChoiceMinimized, pendingOrderedTriggerResume, commanderZoneChoiceAsked, auraRetargetAsked },
     stack: { stackStore, pendingAction, setPendingAction, stackActions, priorityPasses, setPriorityPasses, priorityStopSettings, updatePriorityStopSettings, holdPriorityOnce, setHoldPriorityOnce, castDispatchInFlight, CAST_DISPATCH_STALE_MS, resolveBeatIds, resolveNowRef, abilityResolvers, abilityApiRef, stackFeed, setStackFeed },
     mana: { manaPools, setManaPools, copyMana, setCopyMana, manaContributions, setManaContributions, restrictedManaBatches, setRestrictedManaBatches, manaChoice, setManaChoice, lastCastManaContributors },
     agent: { rulesAdvisorPending, setRulesAdvisorPending, agentMainActions, agentDecisionRequests, agentThinking, setAgentThinking, agentReasoning, setAgentReasoning, agentStatedPlans, agentCastAttempts, agentBannedCasts, agentDecisionInfo },
