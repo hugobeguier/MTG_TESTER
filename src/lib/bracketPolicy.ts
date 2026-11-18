@@ -9,7 +9,7 @@ const BASIC_LANDS = new Set([
   "Wastes"
 ]);
 
-export const GAME_CHANGERS = new Set([
+const GAME_CHANGERS = new Set([
   "Ancient Tomb",
   "Cyclonic Rift",
   "Demonic Tutor",
@@ -33,7 +33,7 @@ export const GAME_CHANGERS = new Set([
 // official Commander Brackets rules. Curated and non-exhaustive (same "decline rather than guess"
 // scope as GAME_CHANGERS above) — covers the cards most commonly cited by bracket judges, not every
 // card that could ever destroy multiple lands.
-export const MASS_LAND_DESTRUCTION = new Set([
+const MASS_LAND_DESTRUCTION = new Set([
   "Armageddon",
   "Ravages of War",
   "Catastrophe",
@@ -51,7 +51,7 @@ export const MASS_LAND_DESTRUCTION = new Set([
 // of specific well-known "turns on as early as it's assembled" pairs, not a combo detector — a deck
 // can still contain either card alone, or a full combo built from three or more pieces, without
 // tripping this check. Each pair is unordered.
-export const EARLY_INFINITE_COMBO_PAIRS: Array<[string, string]> = [
+const EARLY_INFINITE_COMBO_PAIRS: Array<[string, string]> = [
   ["Thassa's Oracle", "Demonic Consultation"],
   ["Thassa's Oracle", "Tainted Pact"],
   ["Isochron Scepter", "Dramatic Reversal"],
@@ -71,13 +71,13 @@ export const EARLY_INFINITE_COMBO_PAIRS: Array<[string, string]> = [
 // and still only ever take one extra turn at a time. Nexus of Fate is the card most commonly named
 // by bracket judges for this: shuffling back into the library lets a tutor/wheel effect draw into it
 // again the same turn, chaining extra turns rather than taking just one.
-export const CHAINABLE_EXTRA_TURN_CARDS = new Set(["Nexus of Fate"]);
+const CHAINABLE_EXTRA_TURN_CARDS = new Set(["Nexus of Fate"]);
 
-export function isMassLandDestruction(cardName: string): boolean {
+function isMassLandDestruction(cardName: string): boolean {
   return MASS_LAND_DESTRUCTION.has(cardName);
 }
 
-export function isChainableExtraTurn(cardName: string): boolean {
+function isChainableExtraTurn(cardName: string): boolean {
   return CHAINABLE_EXTRA_TURN_CARDS.has(cardName);
 }
 

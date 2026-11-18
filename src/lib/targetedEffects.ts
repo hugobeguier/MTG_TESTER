@@ -4,7 +4,7 @@
 import type { RemovalTargetType } from "./removalSpells";
 import type { TargetController, TargetSpec } from "./targeting";
 
-export type TargetedVerb =
+type TargetedVerb =
   | { kind: "add_counters"; counterKind: string; amount: number }
   | { kind: "gain_keywords"; keywords: string[] }
   | { kind: "pump"; power: number; toughness: number; keywords: string[] }

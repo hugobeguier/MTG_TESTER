@@ -372,10 +372,6 @@ export function evaluateOpeningHand(seat: PlayerSeat, mulligansTaken = 0): Openi
   return { keep: !forceMulligan && score >= keepThreshold, score, reasons, forceMulligan };
 }
 
-export function agentKeepsHand(seat: PlayerSeat, mulligansTaken = 0) {
-  return evaluateOpeningHand(seat, mulligansTaken).keep;
-}
 
-export function handHasLand(hand: VisibleCard[]): boolean {
-  return hand.some(isLand);
-}
+
+

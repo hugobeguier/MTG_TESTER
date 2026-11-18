@@ -94,4 +94,4 @@ export function pickTokenPrinting(card: TokenSpec, candidates: TokenCandidate[])
   return uris ? ({ small: uris.small, normal: uris.normal, large: uris.large, png: uris.png, artCrop: uris.art_crop, borderCrop: uris.border_crop } as CardImageUris) : undefined;
 }
 
-export type TokenArtResult = { imageUris?: CardImageUris };
+

@@ -5,11 +5,11 @@ import { declineFreeAttackReason, freeAttackBonus } from "./freeAttack";
 import { scoreWipeSequencing } from "./wipeSequencing";
 import { scoreGangBlockRisk, scoreInterferenceTiming, scoreOwnBoardWipe, scoreRemovalAftermath } from "./lookAhead";
 import { BLOCK_WEIGHTS, TERRIBLE_BLOCK_LOSS, assessBlock, bestBlockPlan, describeAssessment } from "./blockValuation";
-import { canLegallyBlock, hasDeathtouch, hasDoubleStrike, hasFirstStrike, hasFlying, hasIndestructible, hasInfect, hasKeyword, hasLifelink, hasMenace, hasReach, hasTrample, parseNum, simulateDuel } from "./combatSim";
+import { canLegallyBlock, hasDeathtouch, hasDoubleStrike, hasFirstStrike, hasIndestructible, hasInfect, hasLifelink, parseNum, simulateDuel } from "./combatSim";
 
 export { simulateDuel };
 
-export type ScorableActionType =
+type ScorableActionType =
   | "keep_hand"
   | "mulligan"
   | "play_land"
@@ -113,7 +113,7 @@ export interface ScoringContext {
 
 // A spell/ability on the stack as the agent sees it. actorSeatId is who put it there; targetCardIds/targetSeatIds are the targets
 // chosen at cast time when known (see AppFlow's pendingActionSummary).
-export interface StackItemLike {
+interface StackItemLike {
   id?: string;
   cardName?: string;
   oracleText?: string;
@@ -160,10 +160,7 @@ function opponentBattlefields(context: ScoringContext): CardLike[] {
   return (context.opponents ?? []).flatMap((opponent) => opponent.battlefield ?? []);
 }
 
-function isLethalTo(source: CardLike, damage: number, targetToughness: number): boolean {
-  if (damage <= 0) return false;
-  return hasDeathtouch(source) || damage >= targetToughness;
-}
+
 
 function scoreLandsBeforeSpells(action: ScorableAction, delta: (amount: number, reason: string) => void) {
   if (action.actionType === "play_land") {
@@ -480,7 +477,7 @@ function scoreTransformSacrifice(action: ScorableAction, context: ScoringContext
 
 // Lethal-aware blocking: if every creature attacking me would kill me when none is blocked, the fewest, biggest attackers whose blocking leaves me alive
 // must all be blocked — chump blocks included. Returns true when THIS attacker is one of them.
-export function blockIsNeededToSurvive(attacker: CardLike, context: ScoringContext): boolean {
+function blockIsNeededToSurvive(attacker: CardLike, context: ScoringContext): boolean {
   const life = context.you?.life ?? 40;
   const meId = context.you?.id;
   const attackers = opponentBattlefields(context).filter((card) => card.attacking && (card.typeLine ?? "").includes("Creature") && (meId === undefined || card.attackTargetId === undefined || card.attackTargetId === meId));
@@ -528,7 +525,6 @@ function scoreBlockDecision(action: ScorableAction, context: ScoringContext, del
     return;
   }
 
-  const attackerPower = parseNum(attacker.power) ?? 0;
   const duel = simulateDuel(attacker, blocker);
   const blockerDies = duel.blockerDies;
   const attackerDies = duel.attackerDies;
@@ -826,7 +822,7 @@ export function resolveGuardedChoice(scored: ScoredAction[], chosenId: string | 
 
 // While a block that kills the attacker and keeps the blocker alive is on offer — or the combined attack is lethal and a block is possible — "declare no
 // blockers" is not an acceptable choice (Malik left Nogi unblocked with an indestructible deathtouch Rhonas).
-export function declineFreeBlockReason(action: ScorableAction, actions: ScorableAction[], context: ScoringContext): string | undefined {
+function declineFreeBlockReason(action: ScorableAction, actions: ScorableAction[], context: ScoringContext): string | undefined {
   if (action.actionType !== "pass_priority") return undefined;
   if (context.purpose === "declare_blockers_additional") return declineWorthwhileGangReason(actions, context);
   if (context.purpose !== "declare_blockers") return undefined;
@@ -876,7 +872,7 @@ function declineWorthwhileGangReason(actions: ScorableAction[], context: Scoring
 }
 
 // A block that throws away a valuable creature for almost nothing (and is not part of a worthwhile gang block, not needed to survive) is vetoed.
-export function terribleBlockReason(action: ScorableAction, actions: ScorableAction[], context: ScoringContext): string | undefined {
+function terribleBlockReason(action: ScorableAction, actions: ScorableAction[], context: ScoringContext): string | undefined {
   if (context.purpose !== "declare_blockers" || action.actionType !== "block") return undefined;
   const blocker = findCard(context.you?.battlefield, action.cardId);
   const attacker = findCard(opponentBattlefields(context), action.targetIds[0]);

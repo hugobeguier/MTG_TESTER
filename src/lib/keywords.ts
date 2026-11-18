@@ -3,7 +3,7 @@
 // callers. Shared between the client engine (AppFlow.tsx) and any other rules-aware code (e.g.
 // rulesAdvisor.ts) so keyword knowledge doesn't drift between them.
 
-export type KeywordCategory = "evasion" | "protection" | "combat" | "static";
+type KeywordCategory = "evasion" | "protection" | "combat" | "static";
 
 export interface KeywordDefinition {
   name: string;
@@ -46,7 +46,7 @@ const NON_KEYWORD_WORDS = new Set([
 
 // The comma/semicolon-separated tokens of every line that consists only of keyword abilities ("Flying, vigilance",
 // "Ward {2}", "Protection from red"), lowercased, reminder text removed.
-export function keywordLineTokens(oracleText: string): string[] {
+function keywordLineTokens(oracleText: string): string[] {
   const tokens: string[] = [];
   for (const rawLine of oracleText.split("\n")) {
     const line = rawLine.replace(/\([^)]*\)/g, "").trim().toLowerCase();

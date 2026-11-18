@@ -89,7 +89,7 @@ Most of the engine lives, unusually, inside one 34,000-line React component file
 |---|---|
 | `AppFlow.tsx` | The game controller + React state (the `AppFlow()` component), ~10.8k lines. Engine code is in `src/engine/` (see `src/engine/README.md`). Section 4. |
 | `ThreeGameTable.tsx` (~5.2k) | Three.js 3D table, hand/stack HUD, all the card-picker prompts (discard, blink, scry, targets, mana choice). Receives everything as props from AppFlow. Exports `StackFeedEntry`. |
-| `GameTable.tsx`, `PlayerBoard.tsx`, `ZoneSummary.tsx`, `VisualCard.tsx` | Small, older/simple 2D pieces. |
+| `VisualCard.tsx` | Small 2D card renderer. |
 | `DeckEditor.tsx` | Deck library editor used by `app/decks`. |
 | `abilityAudit.ts` | Strict per-card audit: for each activated/granted ability, names the system that offers it or reports it "unmodelled". Imports `legalMainPhaseActions` and `manaChoicesForCard` from AppFlow. |
 | `clauseCoverage.ts` | `recognises(line)`: does ANY deterministic parser claim this oracle-text line? Used by the backlog script and the deck coverage test. |
@@ -146,7 +146,7 @@ action), `anomalies.ts`, `mistakes.ts` + `mistakeScenarios.ts` (wasteful-play de
 | `agent-mistakes.ts` | `agent:mistakes` | Self-play + wasteful-play report to `bench/mistakes/`. |
 | `ability-audit.ts` | `audit:abilities` | Runs `abilityAudit` over decks. |
 | `card-backlog.ts`, `choice-audit.ts` | `backlog`, `choice-audit` | Reports to `bench/coverage/`: unrecognised rules-text templates; decisions the engine makes for a human. |
-| `agent-bench.mjs`, `fetch-edhrec-ranks.mjs`, `dev-server.cmd`, `_*.mjs/ts` | `bench:agents` | Bench and one-off helpers. |
+| `agent-bench.mjs`, `fetch-edhrec-ranks.mjs`, `dev-server.cmd` | `bench:agents` | Bench and one-off helpers. |
 
 ---
 

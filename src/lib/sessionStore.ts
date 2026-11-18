@@ -38,11 +38,7 @@ export async function createSession(): Promise<GameSession> {
   return currentSession;
 }
 
-export function addEvent(message: string, detail?: string, seatId?: string): GameEvent {
-  const next = event(message, detail, seatId);
-  currentSession?.events.unshift(next);
-  return next;
-}
+
 
 function emptySeat(id: string, name: string, kind: "human" | "agent", agentName?: PlayerSeat["agentName"]): PlayerSeat {
   return {

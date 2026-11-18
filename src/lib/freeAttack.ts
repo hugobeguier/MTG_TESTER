@@ -45,7 +45,7 @@ export function untappedBlockersFor(attacker: CardLike, defender: Opponent): Car
 }
 
 // A {T} ability line on the attacker that attacking (which taps it) would forfeit, and whether it is worth more than the damage.
-export function tapAbilityDownside(attacker: CardLike, context: ScoringContext): string | undefined {
+function tapAbilityDownside(attacker: CardLike, context: ScoringContext): string | undefined {
   const text = cleanText(attacker);
   const lines = text.split(/\n|(?<=\.)\s+(?=\{)/).map((line) => line.trim());
   const tapLines = lines.filter((line) => /^[^"]*?\{t\}[^:]*:/.test(line) && !/^(?:whenever|when|at the beginning)/.test(line));

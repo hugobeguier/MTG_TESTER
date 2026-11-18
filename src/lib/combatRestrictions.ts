@@ -19,7 +19,7 @@ function ruleLines(card: TextCard): string[] {
 }
 
 // "Swampwalk" (this creature can't be blocked as long as defending player controls a Swamp): the land types it walks.
-export function landwalkTypes(card: TextCard): string[] {
+function landwalkTypes(card: TextCard): string[] {
   const found: string[] = [];
   for (const line of ruleLines(card)) {
     for (const part of line.split(/[,;]\s*/)) {

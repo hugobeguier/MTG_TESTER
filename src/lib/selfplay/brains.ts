@@ -17,7 +17,7 @@ export interface BrainRequest {
   context: ScoringContext;
 }
 
-export interface BrainDecision {
+interface BrainDecision {
   action: AgentAction;
   // Mirrors /api/agents/action's own `source` field (ollama/invalid/fallback) so the self-play
   // runner's per-seat decision-count breakdown means the same thing whether the seat behind it is

@@ -17,7 +17,7 @@ const DestinationSchema = z.preprocess((value) => {
   return cleaned;
 }, z.enum(["hand", "battlefield", "graveyard", "exile", "library"]).optional());
 
-export const RuleWorkflowSchema = z.object({
+const RuleWorkflowSchema = z.object({
   workflow: z.enum([
     "none",
     "search_basic_lands_shared_type_to_battlefield_tapped",
@@ -625,7 +625,7 @@ function extractSearchedCardType(text: string): string | undefined {
 //   but it's the obvious remaining case).
 // "...with mana value X or less, where X is 2 plus the sacrificed creature's mana value" (Eldritch Evolution): the cap is only known once the additional
 // cost was paid, so it comes from the mana value stamped on the spell then. Without a stamp the search stays unrestricted rather than guessing.
-export function sacrificedManaValueRestriction(text: string, sacrificedManaValue: number | undefined): { op: "lte" | "eq" | "gte"; value: number } | undefined {
+function sacrificedManaValueRestriction(text: string, sacrificedManaValue: number | undefined): { op: "lte" | "eq" | "gte"; value: number } | undefined {
   const match = text.match(/mana value x or less, where x is (\d+) plus the sacrificed creature'?s mana value/i);
   if (!match || sacrificedManaValue === undefined) return undefined;
   return { op: "lte", value: Number.parseInt(match[1], 10) + sacrificedManaValue };

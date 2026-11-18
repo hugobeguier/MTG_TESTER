@@ -52,6 +52,11 @@ function stubLand(id: string, name: string, color: string): VisibleCard {
 
 function stubSeat(): PlayerSeat {
   const lands = [stubLand("s1", "Swamp", "B"), stubLand("s2", "Forest", "G"), stubLand("s3", "Swamp", "B"), stubLand("s4", "Forest", "G"), stubLand("s5", "Swamp", "B"), stubLand("s6", "Forest", "G")];
+  // Three artifacts (metalcraft: Mox Opal) and a Dragon (Mox Jasper): the audit asks "does the engine model this ability", and a gated mana ability
+  // only shows its colors once its "Activate only if" condition holds.
+  const stubPermanent = (id: string, name: string, typeLine: string) => ({ id, name, typeLine, oracleText: "", manaValue: 2, colors: [], role: "permanent", zone: "battlefield" }) as unknown as VisibleCard;
+  const permanents = [stubPermanent("sa1", "Trinket One", "Artifact"), stubPermanent("sa2", "Trinket Two", "Artifact"), stubPermanent("sa3", "Trinket Three", "Artifact"), stubPermanent("sd1", "Stub Dragon", "Creature — Dragon")];
+  lands.push(...permanents);
   return {
     id: "audit",
     name: "Audit",

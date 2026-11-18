@@ -196,22 +196,8 @@ export function getCardByName(name: string): CardDbRow | undefined {
   return row ? rowToCard(row) : undefined;
 }
 
-// Candidate cards for the bulk parser: real (non-vanilla) rules text, not already in parsed_cards.
-// "Vanilla" here means literally empty oracle text — reminder text on keyword-only cards (e.g. a
-// plain "Flying" creature with no other line) still has real text and gets a real (if trivial) parse.
-export function listUnparsedCandidates(limit?: number): CardDbRow[] {
-  const sql = `
-    SELECT c.* FROM cards c
-    LEFT JOIN parsed_cards p ON p.oracle_id = c.oracle_id
-    WHERE p.oracle_id IS NULL AND trim(c.oracle_text) != ''
-    ORDER BY c.name
-    ${limit ? "LIMIT @limit" : ""}
-  `;
-  const rows = (limit ? getCardDb().prepare(sql).all({ limit }) : getCardDb().prepare(sql).all()) as Parameters<typeof rowToCard>[0][];
-  return rows.map(rowToCard);
-}
 
-export function countVanillaCards(): number {
+function countVanillaCards(): number {
   const { count } = getCardDb().prepare("SELECT COUNT(*) AS count FROM cards WHERE trim(oracle_text) = ''").get() as { count: number };
   return count;
 }
@@ -364,7 +350,7 @@ export interface XMageCardRow {
   ingestedAt: string;
 }
 
-export function getXMageCardByKey(xmageKey: string): XMageCardRow | undefined {
+function getXMageCardByKey(xmageKey: string): XMageCardRow | undefined {
   const row = getCardDb().prepare("SELECT * FROM xmage_cards WHERE xmage_key = ?").get(xmageKey) as
     | { xmage_key: string; file_path: string; source: string; ingested_at: string }
     | undefined;
@@ -377,28 +363,5 @@ export function getXMageCardByName(cardName: string): XMageCardRow | undefined {
   return getXMageCardByKey(xmageKeyForCardName(cardName));
 }
 
-// Bulk upsert for scripts/ingest-xmage-cards.mjs — replaces the whole table's contents with exactly
-// what's on disk right now (a stale entry for a file XMage has since renamed/removed would otherwise
-// linger forever with no natural expiry), inside one transaction so a re-ingest is atomic rather than
-// leaving the table half-old/half-new if it's interrupted partway through.
-export function replaceAllXMageCards(entries: Array<{ xmageKey: string; filePath: string; source: string }>): void {
-  const db = getCardDb();
-  const ingestedAt = new Date().toISOString();
-  const insert = db.prepare(`
-    INSERT INTO xmage_cards (xmage_key, file_path, source, ingested_at)
-    VALUES (@xmageKey, @filePath, @source, @ingestedAt)
-    ON CONFLICT(xmage_key) DO UPDATE SET
-      file_path = excluded.file_path, source = excluded.source, ingested_at = excluded.ingested_at
-  `);
-  const run = db.transaction((rows: Array<{ xmageKey: string; filePath: string; source: string }>) => {
-    db.prepare("DELETE FROM xmage_cards").run();
-    for (const row of rows) insert.run({ ...row, ingestedAt });
-  });
-  run(entries);
-}
 
-export function getXMageIngestStats() {
-  const total = (getCardDb().prepare("SELECT COUNT(*) AS n FROM xmage_cards").get() as { n: number }).n;
-  const lastIngestedAt = (getCardDb().prepare("SELECT MAX(ingested_at) AS at FROM xmage_cards").get() as { at: string | null }).at;
-  return { total, lastIngestedAt };
-}
+

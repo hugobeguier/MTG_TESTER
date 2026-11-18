@@ -19,7 +19,7 @@ import { capitalizeWord, emblemSourceCards, numberWordToInt } from "@/engine/sha
 // existing chosenX field/maxAffordableX/totalCastingCost machinery for it (see those functions) means
 // this doesn't need its own parallel casting-cost pipeline — a card is never both an {X} spell and
 // multikicker in this codebase's real-card sample, so treating "times kicked" as chosenX is safe.
-export function parseMultikickerCost(oracleText: string): number | undefined {
+function parseMultikickerCost(oracleText: string): number | undefined {
   const match = oracleText.match(/\b(?:multi)?kicker\s+((?:\{[^}]+\})+)/i);
   return match ? manaValueFromManaCost(match[1]) : undefined;
 }
@@ -365,7 +365,7 @@ export function totalCastingCost(seat: PlayerSeat, card: VisibleCard, baseCost: 
 // Saheeli, the Gifted's second +1: "The next spell you cast this turn has affinity for artifacts.
 // (It costs {1} less to cast for each artifact you control as you cast it.)" — evaluated against
 // artifacts controlled at cast time, not when the loyalty ability was activated.
-export function pendingArtifactAffinityReduction(seat: PlayerSeat) {
+function pendingArtifactAffinityReduction(seat: PlayerSeat) {
   return seat.nextSpellHasArtifactAffinity ? artifactCount(seat) : 0;
 }
 

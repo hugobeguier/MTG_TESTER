@@ -8,8 +8,8 @@ import type { AgentAction, DeckCard } from "./types";
 // skips the finally block that clears the "decision in flight" guard, permanently locking that
 // phase — no error is ever thrown, so nothing else can recover it).
 export const OLLAMA_TIMEOUT_MS = Number(process.env.OLLAMA_TIMEOUT_MS ?? 40000);
-export const OLLAMA_DECK_TIMEOUT_MS = Number(process.env.OLLAMA_DECK_TIMEOUT_MS ?? 60000);
-export const OLLAMA_PING_TIMEOUT_MS = Number(process.env.OLLAMA_PING_TIMEOUT_MS ?? 5000);
+const OLLAMA_DECK_TIMEOUT_MS = Number(process.env.OLLAMA_DECK_TIMEOUT_MS ?? 60000);
+const OLLAMA_PING_TIMEOUT_MS = Number(process.env.OLLAMA_PING_TIMEOUT_MS ?? 5000);
 // Whole-card parsing (cardParser.ts) asks the model to enumerate every ability on a card and emit
 // a full step array per ability, not just resolve one already-scoped clause — meaningfully more
 // output tokens than a single primitive-plan call, so it gets its own, longer budget rather than
@@ -47,7 +47,7 @@ export function agentModelName(agentName: string) {
 // rather than have that real request pay for both the load and the generation. Best-effort: a failed
 // or slow warm-up just means the next real request pays the cold-load cost itself, exactly as it does
 // today without this, so errors are swallowed rather than surfaced.
-export const OLLAMA_WARMUP_TIMEOUT_MS = Number(process.env.OLLAMA_WARMUP_TIMEOUT_MS ?? 120000);
+const OLLAMA_WARMUP_TIMEOUT_MS = Number(process.env.OLLAMA_WARMUP_TIMEOUT_MS ?? 120000);
 
 export async function warmUpOllamaModel(model: string, baseUrl = process.env.OLLAMA_BASE_URL ?? "http://localhost:11434"): Promise<void> {
   try {

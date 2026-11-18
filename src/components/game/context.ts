@@ -54,7 +54,7 @@ export type HandlerApi = ReturnType<typeof useManaUi> &
   ReturnType<typeof useGameActions> &
   ReturnType<typeof useRulesAdvisor> &
   ReturnType<typeof useSpecialEffects>;
-export type GameState = ReturnType<typeof useGameState>;
+type GameState = ReturnType<typeof useGameState>;
 export type GameContext = GameState & { late: HandlerApi };
 
 /** Forwarder to a handler owned by another game/ hook (looked up on ctx.late when called, not when created). */

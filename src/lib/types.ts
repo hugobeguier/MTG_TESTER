@@ -1,8 +1,8 @@
 import type { DelayedPhaseTrigger } from "./phaseTriggers";
 
-export type SeatKind = "human" | "agent";
+type SeatKind = "human" | "agent";
 
-export type ZoneName =
+type ZoneName =
   | "library"
   | "hand"
   | "battlefield"
@@ -10,7 +10,7 @@ export type ZoneName =
   | "exile"
   | "command";
 
-export type AgentName = "Veyra" | "Malik" | "Sable";
+type AgentName = "Veyra" | "Malik" | "Sable";
 
 export type ManaColor = "W" | "U" | "B" | "R" | "G" | "C";
 export type ColoredMana = Exclude<ManaColor, "C">;
@@ -129,7 +129,7 @@ export interface DeckValidationReport {
   gameChangerCount: number;
 }
 
-export interface DeckScore {
+interface DeckScore {
   total: number;
   curve: number;
   mana: number;
@@ -449,7 +449,7 @@ export interface VisibleCard {
   }>;
 }
 
-export interface PlayerBoardState {
+interface PlayerBoardState {
   commander?: VisibleCard;
   hand: VisibleCard[];
   battlefield: VisibleCard[];

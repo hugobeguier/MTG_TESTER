@@ -836,7 +836,7 @@ export function moveCardBetweenVisibleZones(session: GameSession, seatId: string
   return withLeaveRecord(session, moveCardBetweenVisibleZonesCore(session, seatId, cardId, destination), seatId, cardId, destination === "graveyard");
 }
 
-export function moveCardBetweenVisibleZonesCore(session: GameSession, seatId: string, cardId: string, destination: "hand" | "graveyard" | "exile"): GameSession {
+function moveCardBetweenVisibleZonesCore(session: GameSession, seatId: string, cardId: string, destination: "hand" | "graveyard" | "exile"): GameSession {
   const controllerSeat = session.seats.find((seat) => seat.id === seatId);
   if (!controllerSeat) return session;
   const graveyard = controllerSeat.board.graveyard ?? [];

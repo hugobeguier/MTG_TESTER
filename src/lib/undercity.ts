@@ -2,8 +2,8 @@
 // upkeeps, and whenever someone takes the initiative. Each room has an effect; most rooms lead on to a choice of two.
 export type UndercityRoom = "secret_entrance" | "forge" | "lost_well" | "trap" | "arena" | "stash" | "archives" | "catacombs" | "throne";
 
-export const UNDERCITY_START: UndercityRoom = "secret_entrance";
-export const UNDERCITY_LAST: UndercityRoom = "throne";
+const UNDERCITY_START: UndercityRoom = "secret_entrance";
+const UNDERCITY_LAST: UndercityRoom = "throne";
 
 const NEXT_ROOMS: Record<UndercityRoom, UndercityRoom[]> = {
   secret_entrance: ["forge", "lost_well"],

@@ -155,6 +155,4 @@ export async function decideWithGate<Proposal extends { legalActionId?: string }
 }
 
 /** Did a commit actually change anything? Used to catch an action that was "applied" into a no-op (the state object is returned untouched). */
-export function committedChange<T>(before: T, after: T): boolean {
-  return before !== after;
-}
+

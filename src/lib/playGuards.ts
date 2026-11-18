@@ -121,13 +121,13 @@ export function parseTargetedRemoval(action: ScorableAction): RemovalSpell | und
 const COLOR_NAME_TO_CODE: Record<string, string> = { white: "W", blue: "U", black: "B", red: "R", green: "G" };
 
 // Colour letters in the leading mana cost of a legal-action detail ("{1}{W} Instant. ...").
-export function spellColorsOf(action: ScorableAction): string[] {
+function spellColorsOf(action: ScorableAction): string[] {
   const cost = (action.detail ?? "").match(/^\s*((?:\{[^}]+\}\s*)+)/)?.[1] ?? "";
   return Array.from(new Set((cost.match(/\{([WUBRG])(?:\/[A-Z0-9]+)?\}/g) ?? []).map((symbol) => symbol[1])));
 }
 
 // "protection from white", "protection from red and blue", "protection from everything" (card.keywords entries, or the card's own text).
-export function isProtectedFromSpell(card: CardLike, spellColors: string[]): boolean {
+function isProtectedFromSpell(card: CardLike, spellColors: string[]): boolean {
   const lines = [...(card.keywords ?? []), ...(card.keywords ? [] : (card.oracleText ?? "").split("\n"))].map((line) => line.toLowerCase());
   for (const line of lines) {
     const match = line.match(/^protection from ([a-z ,]+)/);
@@ -140,7 +140,7 @@ export function isProtectedFromSpell(card: CardLike, spellColors: string[]): boo
 }
 
 // Ward is a tax on the removal spell: the target is worth that much less (at least one point; one point per ward {1}).
-export function wardPenalty(card: CardLike): number {
+function wardPenalty(card: CardLike): number {
   const entry = (card.keywords ?? []).map((line) => line.toLowerCase()).find((line) => line.startsWith("ward"));
   const text = entry ?? (card.keywords ? undefined : clean(card.oracleText).match(/\bward\b[^.\n]*/)?.[0]);
   if (!text) return 0;
@@ -155,7 +155,7 @@ function removalMinThreat(spellManaValue: number): number {
 // How much a permanent threatens the deciding seat, in the same "mana worth of stuff" units as strategy.creatureValue (which already
 // prices keywords, draw/ramp/token engines, anthems and the commander), plus what its power does against MY life and a few game-ending
 // text patterns.
-export function opposingThreat(card: CardLike, context: ScoringContext): number {
+function opposingThreat(card: CardLike, context: ScoringContext): number {
   let threat = creatureValue(card);
   const text = clean(card.oracleText);
   const power = Math.max(0, parseNum(card.power) ?? 0);
@@ -407,7 +407,7 @@ function myCardIds(context: ScoringContext): Set<string> {
 }
 
 // Does this stack item (cast or triggered by someone else) threaten something I control that THIS protection would actually save?
-export function stackItemThreatensMe(item: StackItem, context: ScoringContext, protectionText: string): boolean {
+function stackItemThreatensMe(item: StackItem, context: ScoringContext, protectionText: string): boolean {
   const mine = context.you?.id;
   if (mine && item.actorSeatId === mine) return false;
   const text = clean(item.oracleText);
@@ -450,7 +450,7 @@ function savesCreatureInCombat(context: ScoringContext, protectionText: string):
 // An Aura whose whole point is a reactive phase-out ability ("Enchant creature. {U}{U}: Enchanted creature phases out." - Vanishing). Casting it is a sorcery-speed
 // investment that only pays off if the agent later holds the activation mana up in response to removal, so with nothing threatening a permanent of
 // mine it is a wasted card (an agent was seen casting it on an empty stack for no reason). Treated like a protection spell: held unless something threatens me.
-export function isPhaseOutAura(action: ScorableAction): boolean {
+function isPhaseOutAura(action: ScorableAction): boolean {
   if (action.actionType !== "cast_spell") return false;
   const text = actionText(action);
   return /\benchant creature\b/.test(text) && /\benchanted creature phases? out\b/.test(text) && !/\benchanted creature (?:gets|has|gains|can't)\b/.test(text);
@@ -494,7 +494,7 @@ function sacrificedCards(action: ScorableAction, context: ScoringContext): CardL
 }
 
 // Fodder: a token that is just a body, or a nothing card (0 mana value, 1 total stats, no text).
-export function isWorthlessFodder(card: CardLike): boolean {
+function isWorthlessFodder(card: CardLike): boolean {
   const text = clean(card.oracleText);
   const stats = Math.max(0, parseNum(card.power) ?? 0) + Math.max(0, parseNum(card.toughness) ?? 0);
   if (card.commander) return false;
@@ -503,7 +503,7 @@ export function isWorthlessFodder(card: CardLike): boolean {
 }
 
 // Will this permanent be gone anyway: delayed sacrifice/exile on itself, or removal already on the stack aimed at it (or a sweeper).
-export function isDoomed(card: CardLike, context: ScoringContext): boolean {
+function isDoomed(card: CardLike, context: ScoringContext): boolean {
   const text = clean(card.oracleText);
   if (/\b(?:sacrifice|exile) (?:it|this creature)\b[^.]*\b(?:end step|end of turn)\b|\bat the beginning of (?:the )?(?:next )?end step, (?:sacrifice|exile)\b/.test(text)) return true;
   const mine = context.you?.id;

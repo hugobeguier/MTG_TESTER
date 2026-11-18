@@ -2,7 +2,7 @@
 // legality check (checkMoveLegal) and the main-phase agent heuristics.
 // Extracted verbatim from components/AppFlow.tsx; AppFlow.tsx re-exports the previously public symbols.
 
-import { abilityCostWithX, chooseAbilityX, chooseCreaturesToTapForCost, chooseEquipTarget, chooseGenericTapTarget, genericAbilityEffectHasLegalTarget, genericManaAbilityAffordable, parseGenericAbilityEffect, parseLoyaltyAbilities, tapCreaturesAltCostFor } from "@/engine/abilities";
+import { abilityCostWithX, chooseAbilityX, destroyAllTypesVictims, chooseCreaturesToTapForCost, chooseEquipTarget, chooseGenericTapTarget, genericAbilityEffectHasLegalTarget, genericManaAbilityAffordable, parseGenericAbilityEffect, parseLoyaltyAbilities, tapCreaturesAltCostFor } from "@/engine/abilities";
 import { AGENT_UNSUPPORTED_SPELL_TEXT, hasResolvableTarget, steelHellkiteXOptions } from "@/engine/castTargets";
 import { additionalSacrificeCandidates, canCastAtInstantSpeed, castRestrictedByTurnCount, independentlyCastableSpellFaces, modalDoubleFacedLandSplit, roomDoorFaces, seatHasFlashGrant, spellCastLockedOut, spellFaceCastableFromHand, spellFaceCostCard } from "@/engine/casting";
 import { canAttack, resolveAttackTarget } from "@/engine/combat";
@@ -602,6 +602,7 @@ export function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllow
       // Sunken Palace's marked mana only helps a human, who spends it from the pool; agents are not offered it.
       if (ability.effect.kind === "add_copy_mana" && seat.kind !== "human") return;
       if (ability.costLifeCommanderColors && seat.life <= commanderColorCount(seat)) return;
+      if (ability.costLife && seat.life <= ability.costLife + 4) return;
       // Hideaway lands (Spinerock Knoll, Mosswort Bridge): worth activating only with a hidden card and the condition already true.
       if (ability.effect.kind === "hideaway_play") {
         // A hidden LAND can only be played with a land drop left (the play-land-from-exile action below), so paying for it with none would be wasted.
@@ -631,6 +632,14 @@ export function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllow
         return;
       }
       if (ability.effect.kind === "search_library" && (seat.library?.length ?? 0) === 0) return;
+      // Steel Overseer: needs a permanent to put the counters on.
+      if (ability.effect.kind === "counter_on_each_you_control" && !seat.board.battlefield.some((c) => permanentMatchesQualifier(c, ability.effect.kind === "counter_on_each_you_control" ? ability.effect.qualifier : ""))) return;
+      // Nevinyrral's Disk: a board wipe is only offered to an agent when it takes clearly more from opponents than from itself (the source counts as lost).
+      if (ability.effect.kind === "destroy_all_types" && seat.kind !== "human") {
+        const victims = destroyAllTypesVictims(session, ability.effect.types);
+        const mine = victims.filter((victim) => victim.seatId === seat.id).length;
+        if (victims.length - mine < mine + 3) return;
+      }
       // Nothing to act on: no creature card in any graveyard to exile, or no legal graveyard target.
       if (ability.effect.kind === "exile_graveyard_creature_then_tokens" && !session.seats.some((s) => (s.board.graveyard ?? []).some((c) => c.typeLine.includes("Creature")))) return;
       if (ability.effect.kind === "zone_effect" && !zoneEffectHasLegalTarget(session, seat.id, ability.effect.effect)) return;
@@ -962,7 +971,7 @@ export function fallbackLegalAction(actions: LegalAgentAction[]) {
 // Agent policy for "Pay N life: Untap all lands you control." (Beledros Witherbloom). The ability is legal for anyone with the life, but
 // paying 10 life is only right when it buys something real: a spell worth casting (mana value 4+) that the lands still untapped cannot
 // pay for NOW but the full set of lands can, and only while the payment leaves a safe life total (20+) so it never walks into lethal.
-export const UNTAP_LANDS_SAFE_LIFE = 20;
+const UNTAP_LANDS_SAFE_LIFE = 20;
 export function untapAllLandsIsWorthIt(seat: PlayerSeat, costLife: number, allSeats?: PlayerSeat[]): boolean {
   if (seat.life - costLife < UNTAP_LANDS_SAFE_LIFE) return false;
   const untappedSeat: PlayerSeat = {
@@ -984,7 +993,7 @@ export function untapAllLandsIsWorthIt(seat: PlayerSeat, costLife: number, allSe
 // resource (no recursion in play) while the library is thinning. A reanimator's graveyard is its engine, so it is never shuffled away
 // without a graveyard-hate response. Empty graveyard: never (nothing to protect or recover).
 const GRAVEYARD_HATE_TEXT = /\bexile\b[^.]{0,80}\bgraveyards?\b|\bexile target card from a graveyard\b|\bexile (?:all )?cards? from (?:a|target|each|all)\b[^.]{0,40}graveyards?|\binto a graveyard from anywhere, exile it instead\b|\bgraveyards? (?:is|are) exiled\b/i;
-export function graveyardHateOnStack(session: GameSession, seat: PlayerSeat, stack: PendingAction[]): boolean {
+function graveyardHateOnStack(session: GameSession, seat: PlayerSeat, stack: PendingAction[]): boolean {
   return stack.some((item) => {
     if (item.actorSeatId === seat.id) return false;
     if (item.type === "trigger" && item.controllerSeatId === seat.id) return false;
@@ -996,7 +1005,7 @@ function graveyardIsResource(seat: PlayerSeat): boolean {
   const cards = [...seat.board.battlefield, ...seat.board.hand, ...(seat.board.commander ? [seat.board.commander] : [])];
   return cards.some((card) => !card.abilitiesStripped && /\b(?:from|in) (?:your|a) graveyard\b/i.test(card.oracleText));
 }
-export function graveyardShuffleIsWorthIt(session: GameSession, seat: PlayerSeat, stack: PendingAction[] = []): boolean {
+function graveyardShuffleIsWorthIt(session: GameSession, seat: PlayerSeat, stack: PendingAction[] = []): boolean {
   const graveyardSize = seat.board.graveyard?.length ?? 0;
   if (graveyardSize === 0) return false;
   if (graveyardHateOnStack(session, seat, stack)) return true;
@@ -1016,17 +1025,6 @@ export function seatIsBeingAttacked(session: GameSession, seatId: string): boole
   );
 }
 
-function canPayForCard(seat: PlayerSeat, card: VisibleCard) {
-  return chooseManaSourcesForCost(seat, card, card.manaValue).ok;
-}
 
-function chooseAgentMainPhaseCard(seat: PlayerSeat, hasPlayedLand: boolean) {
-  const unplayedLand = seat.board.hand.find((card) => isLandCard(card));
-  if (unplayedLand && !hasPlayedLand) return unplayedLand;
 
-  const playableSpells = seat.board.hand
-    .filter((card) => !isLandCard(card))
-    .filter((card) => chooseManaSourcesForCost(seat, card, adjustedCastingCost(seat, card, card.manaValue, "hand", seat.id)).ok)
-    .sort((left, right) => right.manaValue - left.manaValue);
-  return playableSpells[0];
-}
+

@@ -373,7 +373,7 @@ export function nextPrioritySeatIdWithPredicate(
 // Deliberately narrow (text patterns for the common shapes, not every possible prompt); a false positive only opens a window the player
 // can pass, and it is still gated by the seat having a real legal response.
 const EDICT_OR_DISCARD_TEXT = /\b(?:each (?:player|opponent|other player)|target (?:player|opponent)|that player|defending player)\b[^.]*?\b(?:sacrifices?|discards?)\b/i;
-export function pendingActionWillPromptSeat(seat: PlayerSeat, action: PendingAction, session: GameSession): boolean {
+function pendingActionWillPromptSeat(seat: PlayerSeat, action: PendingAction, session: GameSession): boolean {
   if (seat.kind !== "human") return false;
   if (action.type === "spell") {
     const text = findSpellSourceCard(session, action)?.oracleText ?? "";

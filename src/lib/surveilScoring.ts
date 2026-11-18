@@ -35,7 +35,7 @@ export interface SurveilSeatState {
   opponents?: Array<{ id?: string; life?: number; battlefield?: CardLike[] }>;
 }
 
-export interface SurveilCardScore {
+interface SurveilCardScore {
   id: string;
   name: string;
   keepValue: number;
@@ -49,9 +49,9 @@ export interface SurveilDecision {
   scores: SurveilCardScore[];
 }
 
-export const BIN_BELOW = 1.5;
-export const MIN_LIBRARY_AFTER = 5;
-export const SMALL_LIBRARY = 12;
+const BIN_BELOW = 1.5;
+const MIN_LIBRARY_AFTER = 5;
+const SMALL_LIBRARY = 12;
 const SMALL_LIBRARY_DEAD_ONLY_BELOW = -1;
 
 type ManaColor = "W" | "U" | "B" | "R" | "G";
@@ -69,7 +69,7 @@ const FUEL_KEYWORDS = /\bdelve\b|\bescape\b|\bflashback\b|\bunearth\b|\bthreshol
 export function hasCreatureRecursion(card: { oracleText?: string }): boolean {
   return CREATURE_RECURSION.test(text(card));
 }
-export function hasAnyRecursion(card: { oracleText?: string }): boolean {
+function hasAnyRecursion(card: { oracleText?: string }): boolean {
   return CREATURE_RECURSION.test(text(card)) || ANY_RECURSION.test(text(card));
 }
 

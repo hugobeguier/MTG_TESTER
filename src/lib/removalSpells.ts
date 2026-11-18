@@ -20,7 +20,7 @@ export type RemovalTargetType =
   | "nonland_permanent"
   | "land";
 
-export interface DestroyEffect {
+interface DestroyEffect {
   kind: "destroy";
   targetType: RemovalTargetType;
   excludedColors: string[];
@@ -45,12 +45,12 @@ export interface DestroyEffect {
 // target destroy, distinct from DestroyEffect above (which is always exactly one target). X is
 // resolved against the caster's actual chosenX at the call site, same "not guessed at here"
 // precedent DamageEffect.amount's own "X" already sets for this codebase.
-export interface DestroyUpToXEffect {
+interface DestroyUpToXEffect {
   kind: "destroy_up_to_x";
   targetType: RemovalTargetType;
 }
 
-export interface DestroyAllEffect {
+interface DestroyAllEffect {
   kind: "destroy_all";
   targetType: "creature" | "artifact" | "enchantment" | "artifact_or_enchantment";
   // "Destroy all non-Dragon/nonartifact/nonlegendary/nontoken/... creatures" (Crux of Fate, Toxic
@@ -74,13 +74,13 @@ export interface DestroyAllEffect {
 // and similar mono-condition sweepers). Only the mana-value-threshold shape is modeled; power/
 // toughness-conditioned wipes aren't common enough in this codebase's data to be worth the extra
 // branch, and are left unparsed (parseDestroy simply won't match them) rather than guessed at.
-export interface DestroyAllConditionalEffect {
+interface DestroyAllConditionalEffect {
   kind: "destroy_all_conditional";
   threshold: number;
   comparison: "or_less" | "or_greater";
 }
 
-export interface ExileEffect {
+interface ExileEffect {
   kind: "exile";
   targetType: RemovalTargetType;
   // "Its controller gains life equal to its power." (Swords to Plowshares, Path to Exile's near-
@@ -112,7 +112,7 @@ export function parseWhereX(text: string): DynamicAmount | undefined {
   return undefined;
 }
 
-export interface DamageEffect {
+interface DamageEffect {
   kind: "damage";
   // "X" for a variable-damage spell whose amount is the caster's chosen X (Comet Storm) — resolved
   // against the caster's actual chosenX at the call site, not guessed at here.
@@ -132,7 +132,7 @@ export interface DamageEffect {
 // Pyroclasm/Earthquake-shaped sweeper family, ...) — board-wide sibling of DamageEffect's
 // single-"target creature" shape, previously entirely unmodeled (this parser only ever recognized
 // a single targeted hit, so a mass-damage sweeper matched nothing and silently did nothing).
-export interface MassDamageEffect {
+interface MassDamageEffect {
   kind: "mass_damage";
   amount: number | "X";
   xDefinition?: DynamicAmount;
@@ -146,7 +146,7 @@ export interface MassDamageEffect {
   scope: "all" | "opponents";
 }
 
-export interface BounceEffect {
+interface BounceEffect {
   kind: "bounce";
   targetType: RemovalTargetType;
 }
@@ -162,13 +162,13 @@ export interface BounceEffect {
 // every modal ability's mode list — a real blanket resolveProliferate() already existed in
 // AppFlow.tsx, but nothing in the deterministic parsing pipeline could ever reach it from an
 // activated ability. Reported live as Cankerbloom's Proliferate mode simply not existing as a choice.
-export interface ProliferateEffect {
+interface ProliferateEffect {
   kind: "proliferate";
 }
 
 // "Target creature gains hexproof and indestructible until end of turn." (Collective Resistance, Valorous Stance) — a
 // protective mode that sits beside real removal modes in the same "choose" spell.
-export interface GrantKeywordsEffect {
+interface GrantKeywordsEffect {
   kind: "grant_keywords";
   keywords: string[];
 }
@@ -177,7 +177,7 @@ export interface GrantKeywordsEffect {
 // above. Modes this parser can't recognize (card draw, pumps, life totals, ...) are simply absent
 // from `modes` — a modal spell where NO mode is removal-shaped parses to undefined entirely (see
 // parseModal), same "decline rather than guess" behavior as every other unmatched shape here.
-export interface ModalEffect {
+interface ModalEffect {
   kind: "modal";
   chooseCount: number;
   modes: Exclude<RemovalEffect, ModalEffect>[];

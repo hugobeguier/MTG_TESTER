@@ -48,7 +48,7 @@ function isPlaneswalker(card: CardLike | undefined): boolean {
 }
 
 // What dying costs the blocker's owner.
-export function blockLoss(blocker: CardLike): number {
+function blockLoss(blocker: CardLike): number {
   let value = creatureValue(blocker);
   const text = (blocker.oracleText ?? "").toLowerCase();
   if (blocker.token) value *= BLOCK_WEIGHTS.tokenDiscount;
@@ -58,7 +58,7 @@ export function blockLoss(blocker: CardLike): number {
 }
 
 // Losing a commander: it goes to the command zone and every later cast costs {2} more, so it is worth far more than its card.
-export function commanderLossValue(card: CardLike): number {
+function commanderLossValue(card: CardLike): number {
   const tax = Number((card as { commanderTax?: number }).commanderTax ?? 0);
   return BLOCK_WEIGHTS.commanderLossBase + 0.5 * (card.manaValue ?? 0) + BLOCK_WEIGHTS.commanderTaxShare * (tax + 2);
 }
@@ -77,7 +77,7 @@ function attackPower(card: CardLike): number {
 }
 
 // Value of preventing `absorbed` of the attacker's damage, given what it is attacking.
-export function attackStake(attacker: CardLike, context: ScoringContext, absorbed: number): { saved: number; stake: string } {
+function attackStake(attacker: CardLike, context: ScoringContext, absorbed: number): { saved: number; stake: string } {
   if (absorbed <= 0) return { saved: 0, stake: "nothing (no damage prevented)" };
   const you = context.you;
   const targetId = attacker.attackTargetId;

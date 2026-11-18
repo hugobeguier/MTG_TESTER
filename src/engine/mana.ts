@@ -57,7 +57,7 @@ export function attackTriggerManaHeuristicSplit(seat: PlayerSeat, amount: number
   return pool;
 }
 
-export function spendGenericMana(pool: ManaPool, amount: number) {
+function spendGenericMana(pool: ManaPool, amount: number) {
   const next = { ...pool };
   let remaining = amount;
   for (const color of ["C", "W", "U", "B", "R", "G"] as ManaColor[]) {
@@ -145,14 +145,14 @@ export function chooseManaSourcesForCost(seat: PlayerSeat, card: VisibleCard, to
 // "Spend this mana only to cast an Angel spell." (Giada), "...only to cast a Dragon creature spell." (Haven of the Spirit Dragon): a
 // source with that clause can only help pay for a matching spell. A payment for anything without a type line (an activated
 // ability's cost shim) can't use it.
-export function manaSourceRestrictionMismatch(source: VisibleCard, payingFor: VisibleCard): boolean {
+function manaSourceRestrictionMismatch(source: VisibleCard, payingFor: VisibleCard): boolean {
   const match = source.oracleText.match(/spend this mana only to cast (?:an? )?([a-z]+)(?: (creature))? spells?\b/i);
   if (!match) return false;
   if (!payingFor.typeLine) return true;
   return !permanentMatchesQualifier(payingFor, match[1]) || Boolean(match[2] && !payingFor.typeLine.includes("Creature"));
 }
 
-export function manaSourceMayPayFor(source: VisibleCard, payingFor: VisibleCard): boolean {
+function manaSourceMayPayFor(source: VisibleCard, payingFor: VisibleCard): boolean {
   if (!manaSourceRestrictionMismatch(source, payingFor)) return true;
   // Still usable if the card also has a plain, unrestricted {T}: Add ability (Haven's {C}); choicesFor limits it to colorless.
   return oracleClauses(source.oracleText).some((clause) => /^\{t\}: add \{c\}\.?$/i.test(clause));
@@ -162,11 +162,11 @@ export function manaSourceMayPayFor(source: VisibleCard, payingFor: VisibleCard)
 // across every seat's battlefield, not just the caster's own: the permission is granted to every
 // player, by anyone's Lattice. Reported live as Hellkite Igniter's {R}{R} needing an actual red
 // source even with Mycosynth Lattice out, when any 2 mana of any color should satisfy it.
-export function anyColorManaSpendingActive(allSeats: PlayerSeat[]): boolean {
+function anyColorManaSpendingActive(allSeats: PlayerSeat[]): boolean {
   return allSeats.some((seat) => seat.board.battlefield.some((card) => /players may spend mana as though it were mana of any color\b/i.test(card.oracleText)));
 }
 
-export function manaRequirementForCard(card: VisibleCard, totalCost: number, anyColorSpendingActive = false) {
+function manaRequirementForCard(card: VisibleCard, totalCost: number, anyColorSpendingActive = false) {
   const colors: Record<ColoredMana, number> = { W: 0, U: 0, B: 0, R: 0, G: 0 };
   // Hybrid symbols ({B/G}, {W/U}, ...): each is paid with EITHER of its two colors. Before this they were counted as plain generic
   // mana, so Find // Finality's {B/G}{B/G} was payable with any two lands (white, say).
@@ -203,7 +203,7 @@ export function manaRequirementForCard(card: VisibleCard, totalCost: number, any
   return { colors, hybrids, generic };
 }
 
-export function manaPoolDifference(before: ManaPool, after: ManaPool) {
+function manaPoolDifference(before: ManaPool, after: ManaPool) {
   return {
     W: Math.max(0, before.W - after.W),
     U: Math.max(0, before.U - after.U),
@@ -219,18 +219,7 @@ export function formatManaPoolPayment(pool: ManaPool) {
   return parts.length > 0 ? parts.join(" ") : "no mana";
 }
 
-export function chooseManaSources(seat: PlayerSeat, requiredMana: number) {
-  if (requiredMana <= 0) return [];
-  const sources = seat.board.battlefield.filter((card) => isAvailableManaSource(card, seat));
-  const chosen: string[] = [];
-  let mana = 0;
-  for (const source of sources) {
-    chosen.push(source.id);
-    mana += manaProducedBy(source, seat);
-    if (mana >= requiredMana) break;
-  }
-  return chosen;
-}
+
 
 // Being a land is not evidence of a mana ability — Evolving Wilds, Terramorphic Expanse, and every
 // other sacrifice-for-a-basic-land fetch land have no "{T}: Add..." line at all, only a
@@ -293,7 +282,7 @@ export function summarizeAvailableMana(seat: PlayerSeat, allSeats?: PlayerSeat[]
 // separate, genuinely free "{T}: Add {C}.") is the motivating shape for costly; Arena of Glory's
 // "{T}: Add {R}." alongside "{R}, {T}, Exert this land: Add {R}{R}." is the motivating shape for why
 // AMOUNT needs the same split, not just color (see manaAmountFromAddClause's own comment).
-export function splitManaClausesByCost(oracleText: string): { free: string[]; costly: string[] } {
+function splitManaClausesByCost(oracleText: string): { free: string[]; costly: string[] } {
   const clauses = oracleText.split("\n").map((line) => line.trim()).filter(Boolean);
   const free: string[] = [];
   const costly: string[] = [];
@@ -312,7 +301,7 @@ export function splitManaClausesByCost(oracleText: string): { free: string[]; co
 // "Add {W}{U}{B}{R}{G}.") plus every color for the "any color / any combination of colors / chosen color" wordings (Prismatic
 // Lens, Cascading Cataracts, Orb of Dragonkind, Crucible of the Spirit Dragon). Reading only the FIRST symbol after "add"
 // let the other half of a two-color or filter ability escape the costly/conditional filters below.
-export function addedManaColors(clause: string): string[] {
+function addedManaColors(clause: string): string[] {
   const colors = new Set<string>();
   for (const match of clause.matchAll(/\badd\b([^.]*)/gi)) {
     for (const symbol of match[1].matchAll(/\{([wubrgc])\}/gi)) colors.add(symbol[1].toUpperCase());
@@ -350,7 +339,7 @@ export function costlyTapManaColors(oracleText: string): Set<string> {
 // (Meteor Crater, Nykthos, Rhystic Cave, Three Tree City's own mana ability) — those pick a color
 // fresh every tap rather than locking one in at ETB, so producedMana's "any color" answer is
 // already roughly correct for them rather than the bug this fixes.
-export function chosenColorManaAbility(oracleText: string): { fixedColor?: ManaColor } | undefined {
+function chosenColorManaAbility(oracleText: string): { fixedColor?: ManaColor } | undefined {
   const fixedMatch = oracleText.match(/add \{([wubrgc])\} or one mana of the chosen color/i);
   if (fixedMatch) return { fixedColor: fixedMatch[1].toUpperCase() as ManaColor };
   if (/\{t\}:\s*add one mana of the chosen color\b/i.test(oracleText)) return {};
@@ -533,7 +522,7 @@ export function isRecognizedBoardCondition(conditionRaw: string): boolean {
 // "Activate only if" condition that isn't currently met — checked as a final filter over whatever
 // manaChoicesForCardRaw already found, rather than threading condition-awareness through every one
 // of its branches (producedMana, hardcoded names, the generic "add {X}" regex, ...).
-export function conditionallyUnavailableColors(oracleText: string, seat: PlayerSeat): Set<string> {
+function conditionallyUnavailableColors(oracleText: string, seat: PlayerSeat): Set<string> {
   const colors = new Set<string>();
   const clauses = oracleText.split("\n").map((line) => line.trim()).filter(Boolean);
   for (const clause of clauses) {
@@ -599,7 +588,7 @@ export function manaChoicesForCard(card: VisibleCard, seat: PlayerSeat, allSeats
 // tapped, for the same reason — Scryfall's own producedMana field for a card like this lists every
 // color the GRANTED ability could ever produce, and nothing here filtered it out once the reminder-
 // text fix above stopped catching this differently-shaped quote.
-export function stripReminderText(oracleText: string): string {
+function stripReminderText(oracleText: string): string {
   return oracleText.replace(/\([^()]*\)/g, " ").replace(/"[^"]*"/g, " ");
 }
 
@@ -608,7 +597,24 @@ export function effectiveManaOracleText(card: VisibleCard): string {
   return card.grantedManaAbilityText ? `${base}\n${card.grantedManaAbilityText}` : base;
 }
 
-export function manaChoicesForCardRaw(card: VisibleCard, seat: PlayerSeat, allSeats?: PlayerSeat[]): ManaColor[] {
+// "{2}, {T}: Add {B} for each Swamp you control." (Cabal Coffers; Cabal Stronghold-style): a PAID tap that scales with the board. Modelled like a signet,
+// as its NET gain (count - generic cost). The generic cost is paid by tapping other untapped lands (spendManaSources does that), so the source
+// is only usable while enough other lands are untapped and the net gain is at least 1.
+export function scalingPaidManaAbility(oracleText: string): { generic: number; color: ManaColor; noun: string } | undefined {
+  const match = oracleText.replace(/\([^)]*\)/g, "").match(/^\{(\d+)\},\s*\{t\}:\s*add \{([wubrgc])\} for each ([a-z]+) you control\.?\s*$/im);
+  return match ? { generic: Number.parseInt(match[1], 10), color: match[2].toUpperCase() as ManaColor, noun: match[3].toLowerCase() } : undefined;
+}
+
+function otherUntappedLands(card: VisibleCard, seat: PlayerSeat): VisibleCard[] {
+  return seat.board.battlefield.filter((other) => other.id !== card.id && !other.tapped && isLandCard(other));
+}
+
+function manaChoicesForCardRaw(card: VisibleCard, seat: PlayerSeat, allSeats?: PlayerSeat[]): ManaColor[] {
+  const scalingPaid = scalingPaidManaAbility(effectiveManaOracleText(card));
+  if (scalingPaid) {
+    const net = countMatchingPermanents(seat.board.battlefield, scalingPaid.noun) - scalingPaid.generic;
+    return net >= 1 && otherUntappedLands(card, seat).length >= scalingPaid.generic ? [scalingPaid.color] : [];
+  }
   const chosenColorAbility = chosenColorManaAbility(effectiveManaOracleText(card));
   if (chosenColorAbility) {
     const colors: ManaColor[] = [];
@@ -735,7 +741,7 @@ export function producibleColorsForLand(card: VisibleCard): ManaColor[] {
 
 // excludeId keeps a land from counting itself (Reflecting Pool doesn't see its own color via "a
 // land you control").
-export function producibleColorsFromLands(lands: VisibleCard[], excludeId?: string): ManaColor[] {
+function producibleColorsFromLands(lands: VisibleCard[], excludeId?: string): ManaColor[] {
   const colors = new Set<ManaColor>();
   for (const land of lands) {
     if (land.id === excludeId) continue;
@@ -751,7 +757,7 @@ export function producibleColorsFromLands(lands: VisibleCard[], excludeId?: stri
 // those as always-tappable mana sources. Require the real templating instead: a repeatable "{T}
 // [, additional costs]: Add ..." ability in the same clause, which is what every actual mana rock's
 // oracle text uses.
-export function isManaRock(card: VisibleCard) {
+function isManaRock(card: VisibleCard) {
   if (!card.typeLine.includes("Artifact")) return false;
   const name = card.name.toLowerCase();
   if (name === "sol ring" || name.includes("signet") || name.includes("talisman")) return true;
@@ -761,7 +767,9 @@ export function isManaRock(card: VisibleCard) {
 // "Add {X} for each [Type] you control" scaling mana sources (Cabal Coffers, Gaea's Cradle, ...) —
 // without this, every mana source produced a flat 1 (or 2 for Sol Ring), so Cabal Coffers tapped
 // for a single black mana regardless of how many Swamps were actually in play.
-export function scalingManaAmount(card: VisibleCard, seat: PlayerSeat): number | undefined {
+function scalingManaAmount(card: VisibleCard, seat: PlayerSeat): number | undefined {
+  const scalingPaid = scalingPaidManaAbility(effectiveManaOracleText(card));
+  if (scalingPaid) return Math.max(0, countMatchingPermanents(seat.board.battlefield, scalingPaid.noun) - scalingPaid.generic);
   const perControlled = card.oracleText.match(/\badd \{[wubrgc]\} for each ([a-z]+) you control\b/i);
   if (perControlled) {
     const noun = perControlled[1].toLowerCase();
@@ -904,7 +912,7 @@ export function isSacrificeManaSource(card: VisibleCard): boolean {
 // the cycle (matching how a real player mostly taps these for their colored option anyway, since
 // that's the entire reason to run one over a basic land) rather than the status quo of never
 // applying it at all.
-export function painlandDamageAmount(oracleText: string): number | undefined {
+function painlandDamageAmount(oracleText: string): number | undefined {
   const match = oracleText.match(/(?:this land deals|it deals) (\d+) damage to you\b/i);
   return match ? Number.parseInt(match[1], 10) : undefined;
 }
@@ -927,7 +935,7 @@ export function manaAbilityCounterRemovalKind(oracleText: string): string | unde
 // construct: sacrificing the land without ever creating its payoff token would be a strict downgrade
 // from today's status quo (an unlimited, never-depleting mana source) rather than a fix, so it's
 // safer to leave that one card's depletion trigger unimplemented than to apply half of it.
-export function depletionSacrificeCounterKind(oracleText: string): string | undefined {
+function depletionSacrificeCounterKind(oracleText: string): string | undefined {
   const text = oracleText.toLowerCase();
   const plainMatch = text.match(/\bif there are no ([a-z]+) counters on (?:this [a-z]+|it),?\s*sacrifice it\./);
   if (plainMatch) return plainMatch[1];
@@ -944,6 +952,13 @@ export function depletionSacrificeCounterKind(oracleText: string): string | unde
 export function spendManaSources(seat: PlayerSeat, sourceIds: string[]): PlayerSeat {
   if (sourceIds.length === 0) return seat;
   const sourceSet = new Set(sourceIds);
+  // Cabal Coffers' "{2}" is paid by tapping that many OTHER untapped lands, which the net-gain model never lists as sources.
+  for (const id of [...sourceIds]) {
+    const source = seat.board.battlefield.find((card) => card.id === id);
+    const scalingPaid = source ? scalingPaidManaAbility(effectiveManaOracleText(source)) : undefined;
+    if (!source || !scalingPaid) continue;
+    for (const land of otherUntappedLands(source, seat).filter((candidate) => !sourceSet.has(candidate.id)).slice(0, scalingPaid.generic)) sourceSet.add(land.id);
+  }
   const kept: VisibleCard[] = [];
   const sacrificed: VisibleCard[] = [];
   let painDamage = 0;

@@ -937,7 +937,6 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
     (event) => event.detail !== "Mana" && event.detail !== "Rules advisor" && event.detail !== "Phase change"
   );
   const prioritySeat = props.session.seats.find((seat) => seat.id === props.prioritySeatId);
-  const humanSeatIndex = Math.max(0, props.session.seats.findIndex((seat) => seat.id === human.id));
   const humanHasPriority = props.prioritySeatId === human.id;
   const humanIsActive = props.session.activePlayerId === human.id;
   const stackTopFirst = [...displayedStack].reverse();

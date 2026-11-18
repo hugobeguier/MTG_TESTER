@@ -72,7 +72,7 @@ export function hasFlying(card: CardLike) {
   return hasKeyword(card, "flying");
 }
 
-export function hasReach(card: CardLike) {
+function hasReach(card: CardLike) {
   return hasKeyword(card, "reach");
 }
 

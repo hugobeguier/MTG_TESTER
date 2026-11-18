@@ -121,7 +121,7 @@ export function withOpeningHand(seat: PlayerSeat, size: number, mulliganCount: n
   };
 }
 
-export function makeShuffledLibrary(seat: PlayerSeat, shuffleCount: number) {
+function makeShuffledLibrary(seat: PlayerSeat, shuffleCount: number) {
   const deckCards = expandDeckCards(seat);
   if (deckCards.length === 0) {
     return Array.from({ length: 99 }, (_, index) =>
@@ -133,7 +133,7 @@ export function makeShuffledLibrary(seat: PlayerSeat, shuffleCount: number) {
   );
 }
 
-export function expandDeckCards(seat: PlayerSeat) {
+function expandDeckCards(seat: PlayerSeat) {
   const cards = seat.deck?.cards.filter((card) => card.role !== "commander") ?? [];
   return cards.flatMap((card) => Array.from({ length: card.count }, () => card));
 }
