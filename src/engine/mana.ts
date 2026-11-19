@@ -102,21 +102,27 @@ export function chooseManaSourcesForCost(seat: PlayerSeat, card: VisibleCard, to
   };
   const chosen = new Set<string>();
   const pool = emptyManaPool();
+  const tappedFor: Record<string, ManaColor> = {};
+  // Prefer a source that is not a pain land, so a coloured pip is paid with a basic before a land that hurts.
+  const cheapestFirst = (candidates: VisibleCard[], accepts: (candidate: VisibleCard) => boolean, color?: ManaColor) =>
+    candidates.find((candidate) => !chosen.has(candidate.id) && accepts(candidate) && painDamageForTap(candidate, color) === 0) ?? candidates.find((candidate) => !chosen.has(candidate.id) && accepts(candidate));
 
   for (const color of ["W", "U", "B", "R", "G"] as ColoredMana[]) {
     for (let needed = requirement.colors[color]; needed > 0; needed -= 1) {
-      const source = sources.find((candidate) => !chosen.has(candidate.id) && choicesFor(candidate).includes(color));
+      const source = cheapestFirst(sources, (candidate) => choicesFor(candidate).includes(color), color);
       if (!source) return { ok: false as const, sourceIds: [...chosen], reason: `missing ${color} mana` };
       chosen.add(source.id);
+      tappedFor[source.id] = color;
       pool[color] += manaProducedBy(source, seat);
     }
   }
 
   for (const options of requirement.hybrids) {
-    const source = sources.find((candidate) => !chosen.has(candidate.id) && options.some((color) => choicesFor(candidate).includes(color)));
+    const source = cheapestFirst(sources, (candidate) => options.some((color) => choicesFor(candidate).includes(color)));
     if (!source) return { ok: false as const, sourceIds: [...chosen], reason: `missing ${options.join(" or ")} mana` };
     chosen.add(source.id);
     const color = options.find((option) => choicesFor(source).includes(option)) ?? options[0];
+    tappedFor[source.id] = color;
     pool[color] += manaProducedBy(source, seat);
   }
 
@@ -131,15 +137,18 @@ export function chooseManaSourcesForCost(seat: PlayerSeat, card: VisibleCard, to
   }
 
   while (manaPoolTotal(pool) < totalCost) {
-    const source = sources.find((candidate) => !chosen.has(candidate.id));
+    const source = cheapestFirst(sources, () => true);
     if (!source) return { ok: false as const, sourceIds: [...chosen], reason: `missing ${totalCost - manaPoolTotal(pool)} generic mana` };
     chosen.add(source.id);
     const choices = choicesFor(source);
     const color = choices.includes("C") ? "C" : choices[0] ?? "C";
+    tappedFor[source.id] = color;
     pool[color] += manaProducedBy(source, seat);
   }
 
-  return { ok: true as const, sourceIds: [...chosen], pool, spent: pool };
+  const sourceIds = [...chosen];
+  sourceColorsByPayment.set(sourceIds, tappedFor);
+  return { ok: true as const, sourceIds, pool, spent: pool };
 }
 
 // "Spend this mana only to cast an Angel spell." (Giada), "...only to cast a Dragon creature spell." (Haven of the Spirit Dragon): a
@@ -913,8 +922,41 @@ export function isSacrificeManaSource(card: VisibleCard): boolean {
 // that's the entire reason to run one over a basic land) rather than the status quo of never
 // applying it at all.
 function painlandDamageAmount(oracleText: string): number | undefined {
-  const match = oracleText.match(/(?:this land deals|it deals) (\d+) damage to you\b/i);
+  const match = oracleText.match(/(?:this (?:land|artifact|creature|permanent) deals|it deals) (\d+) damage to you\b/i);
   return match ? Number.parseInt(match[1], 10) : undefined;
+}
+
+// Which colour each source was tapped for, recorded by chooseManaSourcesForCost against the `sourceIds` array it returns. Every payment site
+// calls spendManaSources(seat, payment.sourceIds) with that same array, so a pain land's damage can follow the colour actually produced without
+// threading a new argument through ~30 call sites. A source missing from the map (a caller that built its own id list) falls back to the default
+// in painDamageForTap.
+const sourceColorsByPayment = new WeakMap<readonly string[], Record<string, ManaColor>>();
+
+/**
+ * Damage a pain source deals to its controller when tapped for `color` (undefined = unknown). The classic painlands print a free "{T}: Add {C}."
+ * line next to "{T}: Add {W} or {B}. This land deals 1 damage to you.": only the coloured line hurts. City of Brass ("Whenever this land becomes
+ * tapped, it deals 1 damage to you.") and the single-ability lands (Ancient Tomb) hurt on every tap. Unknown colour: hurts unless a free ability exists.
+ */
+export function painDamageForTap(card: VisibleCard, color?: ManaColor): number {
+  const text = effectiveManaOracleText(card);
+  let always = 0;
+  for (const rawLine of text.split("\n")) {
+    const line = rawLine.trim();
+    const amount = painlandDamageAmount(line);
+    if (amount === undefined) continue;
+    if (/\badd\b/i.test(line)) {
+      const colors = addedManaColors(line);
+      // The damage sentence belongs to this line's mana ability: it applies when that ability's colour was chosen.
+      if (color === undefined) {
+        const hasFreeAlternative = text.split("\n").some((other) => other.trim() !== line && /^\{t\}:\s*add\b/i.test(other.trim()) && painlandDamageAmount(other) === undefined);
+        if (!hasFreeAlternative) always = Math.max(always, amount);
+      } else if (colors.includes(color)) always = Math.max(always, amount);
+    } else {
+      // "Whenever this land becomes tapped, it deals N damage to you." (City of Brass): a trigger on any tap.
+      always = Math.max(always, amount);
+    }
+  }
+  return always;
 }
 
 // Storage lands' "{T}, Remove a/an <kind> counter from this land: Add ..." mana ability (Gemstone
@@ -949,8 +991,9 @@ function depletionSacrificeCounterKind(oracleText: string): string | undefined {
 // zone-change rule, same as destroyCreatures/moveCardBetweenVisibleZones). Also charges any spent
 // painland's life cost — see painlandDamageAmount's own comment on why this is an approximation for
 // half the family, not an exact simulation.
-export function spendManaSources(seat: PlayerSeat, sourceIds: string[]): PlayerSeat {
+export function spendManaSources(seat: PlayerSeat, sourceIds: string[], tappedFor?: Record<string, ManaColor>): PlayerSeat {
   if (sourceIds.length === 0) return seat;
+  const colorOf = { ...(sourceColorsByPayment.get(sourceIds) ?? {}), ...(tappedFor ?? {}) };
   const sourceSet = new Set(sourceIds);
   // Cabal Coffers' "{2}" is paid by tapping that many OTHER untapped lands, which the net-gain model never lists as sources.
   for (const id of [...sourceIds]) {
@@ -967,7 +1010,7 @@ export function spendManaSources(seat: PlayerSeat, sourceIds: string[]): PlayerS
       kept.push(card);
       continue;
     }
-    painDamage += painlandDamageAmount(card.oracleText) ?? 0;
+    painDamage += painDamageForTap(card, colorOf[card.id]);
     if (isSacrificeManaSource(card)) {
       sacrificed.push(card);
       continue;

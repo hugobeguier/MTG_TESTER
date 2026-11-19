@@ -2,7 +2,7 @@
 // Part of the AppFlow() split: shared state arrives through `ctx` (see ./context.ts); handlers owned by other hooks are called through `lateFn` so every hook sees the current render's functions.
 import { type ManaColor, type ManaPool, type PlayerSeat, type RestrictedManaBatch, type VisibleCard } from "@/lib/types";
 import { abilityOracleText } from "@/lib/typeGrants";
-import { addManaToPool, addPools, chooseManaSourcesForCost, effectiveManaOracleText, emptyManaPool, isAvailableManaSource, isSacrificeManaSource, manaAbilityCounterRemovalKind, manaChoicesForCard, manaPoolTotal, manaProducedBy, payCostFromPool, restrictedBatchUsable, signetAbility, spendManaSources, tapVisibleCard } from "@/engine/mana";
+import { addManaToPool, addPools, chooseManaSourcesForCost, effectiveManaOracleText, emptyManaPool, isAvailableManaSource, isSacrificeManaSource, manaAbilityCounterRemovalKind, manaChoicesForCard, manaPoolTotal, manaProducedBy, painDamageForTap, payCostFromPool, restrictedBatchUsable, signetAbility, spendManaSources, tapVisibleCard } from "@/engine/mana";
 import { basicLandFetchCostRequiresTap, isBasicLandFetchAbility } from "@/lib/oracleClauses";
 import { genericCostShim } from "@/engine/effects";
 import { isSimpleManaSourcePermanent } from "@/engine/simpleManaSource";
@@ -295,9 +295,14 @@ export function useManaUi(ctx: GameContext) {
     // A Treasure (or any "{T}, Sacrifice this: Add ...") is used up by tapping it, and a storage land loses its counter - the automatic payment
     // already did this through spendManaSources; a manual tap only ever tapped it, so Treasures stayed on the battlefield.
     const consumedOnUse = location === "battlefield" && (isSacrificeManaSource(card) || manaAbilityCounterRemovalKind(card.oracleText) !== undefined);
-    setSession((current) =>
-      consumedOnUse ? { ...current, seats: current.seats.map((item) => (item.id === seatId ? spendManaSources(item, [cardId]) : item)) } : tapVisibleCard(current, seatId, cardId, location)
-    );
+    // Pain lands ("{T}: Add {W} or {B}. This land deals 1 damage to you.", City of Brass): a manual tap used to only tap the card and never dealt the damage.
+    const pain = painDamageForTap(card, color);
+    setSession((current) => {
+      if (consumedOnUse) return { ...current, seats: current.seats.map((item) => (item.id === seatId ? spendManaSources(item, [cardId], { [cardId]: color }) : item)) };
+      const tapped = tapVisibleCard(current, seatId, cardId, location);
+      return pain > 0 ? { ...tapped, seats: tapped.seats.map((item) => (item.id === seatId ? { ...item, life: Math.max(0, item.life - pain) } : item)) } : tapped;
+    });
+    if (pain > 0) addEvent(`${card.name} deals ${pain} damage to ${seat.name}.`, seatId, "Mana");
     const amount = manaProducedBy(card, seat);
     setManaPools((current) => {
       const pool = current[seatId] ?? emptyManaPool();

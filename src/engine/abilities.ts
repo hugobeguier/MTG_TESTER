@@ -894,7 +894,9 @@ export function zoneChoiceSpecFor(session: GameSession, seatId: string, effect: 
 // sentence verbatim) rather than pinned to one exact wording.
 function parseEnchantmentAnimationEffect(effectText: string): boolean {
   const text = effectText.toLowerCase();
-  return /\btarget non-aura enchantment becomes an? creature\b/.test(text) && /\bequal to its mana value\b/.test(text);
+  // The current Oracle wording is "Target non-Aura enchantment you control becomes a creature in addition to its other types and has base power
+  // and base toughness each equal to its mana value." ("you control" was added by errata; the old text had no such phrase).
+  return /\btarget non-aura enchantment(?: you control)? becomes an? creature\b/.test(text) && /\bequal to its mana value\b/.test(text);
 }
 
 // No chosenX exists for an activated ability (parseGenericManaAbilities already declines {X}-cost
