@@ -680,6 +680,6 @@ seat is a `SeatConfig` with `remoteSlot` (`"unassigned"` = open for a friend, `"
 * **Self-exiling spells**: `playCardFromZone` only stamps `exiledPlayableBySeatId` for an Adventure card going to exile. A spell that merely says "Exile ~"
   (Temporal Mastery) is simply exiled with no cast-from-exile permission (the "Playable from exile" tray also moved to the top-left so it never covers the hand).
 * **Permanent copies** (Estrid's Invocation, Clone, Mirrormade): the copy keeps the real card in `VisibleCard.copyOriginal`; `resetForZoneChange` restores it, so a
-  copy that is exiled returns as the real card. A non-cast entry by a human with 2+ legal targets queues an `enter_as_copy` player choice
+  copy that is exiled returns as the real card. A non-cast entry by a human with at least one legal target queues an `enter_as_copy` player choice
   (`applyEnterAsCopyOnEntry` / `resolveDeferredChoice`). Estrid's upkeep rider ("you may exile this ... return it to the battlefield under its owner's control") is in
   `applyDeterministicPhaseTrigger`; humans get the usual yes/no prompt first.

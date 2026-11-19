@@ -42,7 +42,7 @@ export function chooseAuraAttachTarget(session: GameSession, casterSeatId: strin
     const best = opponents.reduce((a, b) => (b.life > a.life ? b : a));
     return { kind: "attach_player", seatId: best.id };
   }
-  if (restriction === undefined || restriction === "other" || restriction === "permanent") return { kind: "unsupported" };
+  if (restriction === undefined || restriction === "other" || restriction === "permanent" || restriction === "land" || restriction === "creature_land_planeswalker") return { kind: "unsupported" };
 
   const targetOwn = restriction === "creature_you_control" || !isRemovalStyleAura(oracleText);
   const candidates: Array<{ seatId: string; card: VisibleCard }> = [];

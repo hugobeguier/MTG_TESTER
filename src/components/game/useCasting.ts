@@ -15,7 +15,7 @@ import { cannotPayMessage, chooseManaSourcesForCost, formatManaPoolPayment, isAv
 import { checkMoveLegal, formatLoyaltyCost, loyaltyTurnKey } from "@/engine/legalActions";
 import { commonTriggerEffect, findCommonTriggersForPermanentEntered, makeCommonTrigger } from "@/engine/triggers";
 import { cycleCardInSession, tapCreaturesAltCostFor, zoneChoiceSpecFor } from "@/engine/abilities";
-import { etbEffectText, oracleClauses, parseAdditionalDiscardCost, parseAdditionalSacrificeCost, parseEmblemGrant } from "@/lib/oracleClauses";
+import { etbEffectText, oracleClauses, parseAdditionalDiscardCost, parseAdditionalSacrificeCost, parseEmblemGrant, parseModalHeader } from "@/lib/oracleClauses";
 import { findSpellSourceCard } from "@/engine/priority";
 import { graveyardCastPermission } from "@/lib/graveyardCasting";
 import { hasChooseCreatureTypeEtb, parseChooseColorEtb } from "@/lib/characteristics";
@@ -25,7 +25,7 @@ import { landTurnKey, recordLandPlay } from "@/engine/lands";
 import { libraryTopCastPermission } from "@/lib/libraryCasting";
 import { parseCycling } from "@/lib/cycling";
 import { parseRemovalEffect } from "@/lib/removalSpells";
-import { zoneEffectTargetSpec } from "@/lib/targetSpecs";
+import { removalEffectTargetSpec, zoneEffectTargetSpec } from "@/lib/targetSpecs";
 import { type GameContext, lateFn } from "./context";
 
 export function useCasting(ctx: GameContext) {
@@ -44,6 +44,7 @@ export function useCasting(ctx: GameContext) {
   const humanActionBlockedByChoice = lateFn(ctx, "humanActionBlockedByChoice");
   const poolForSeat = lateFn(ctx, "poolForSeat");
   const queueCommonTriggers = lateFn(ctx, "queueCommonTriggers");
+  const maybeRequestTarget = lateFn(ctx, "maybeRequestTarget");
   const respondWithCard = lateFn(ctx, "respondWithCard");
   const restrictedManaPoolForSeat = lateFn(ctx, "restrictedManaPoolForSeat");
   const setSeatManaPool = lateFn(ctx, "setSeatManaPool");
@@ -1171,6 +1172,17 @@ export function useCasting(ctx: GameContext) {
       return;
     }
 
+    // "Destroy/Exile target ...[. Draw a card.]" (Garruk, Cursed Huntsman's -3): the aimed removal is its own step. A human chooses the target (even a single legal
+    // one) before the rest of the ability follows; an agent keeps the deterministic pick. The trailing sentences are the rider.
+    const loyaltyRemoval = /\bthen return\b|\bunder (?:its owner's|your) control\b/i.test(abilityText) ? undefined : parseRemovalEffect(abilityText);
+    if (loyaltyRemoval && (loyaltyRemoval.kind === "destroy" || loyaltyRemoval.kind === "exile" || loyaltyRemoval.kind === "bounce") && !parseModalHeader(abilityText)) {
+      const riderText = abilityText.split(/(?<=\.)\s+/).slice(1).join(" ");
+      const rider = riderText ? commonTriggerEffect(riderText, "clause") : undefined;
+      if (seat.kind === "human" && maybeRequestTarget(seatId, card, removalEffectTargetSpec(loyaltyRemoval, card.id), false, { kind: "removal", effect: loyaltyRemoval, rider })) return;
+      setSession((current) => applyRemovalEffect(current, seatId, card.name, card, loyaltyRemoval));
+      if (rider) window.setTimeout(() => queueCommonTriggers([makeCommonTrigger(seatId, seatId, card, rider, `${card.name}'s ability continues.`)]), 0);
+      return;
+    }
     const effect = commonTriggerEffect(abilityText, "clause");
     if (effect) {
       const trigger: Extract<PendingAction, { type: "trigger" }> = {

@@ -155,13 +155,16 @@ describe("Twilight Diviner: whenever one or more other creatures you control ent
     const picked = resolveDeferredChoice(asked, "a", "div", "Twilight Diviner", prompt.resolver, prompt.data, "big");
     expect(mine(picked).board.battlefield.find((c) => c.token)?.name).toBe("Bear big");
   });
-  it("a single candidate is copied without asking even a human", () => {
+  it("a single candidate still asks a human (never an automatic pick); the agent copies it straight away", () => {
     const only = bear("only", { enteredFrom: "graveyard" });
     const s = session([seat("a", [diviner(), only], { kind: "human" }), seat("o", [])]);
     const [t] = findEntersBatchWatcherTriggers(s, entries(s, ["only"]));
     const after = resolveTriggerEffect(s, t);
-    expect(after.pendingPlayerChoices).toBeUndefined();
-    expect(mine(after).board.battlefield.some((c) => c.token)).toBe(true);
+    expect(after.pendingPlayerChoices).toHaveLength(1);
+    expect(mine(after).board.battlefield.some((c) => c.token)).toBe(false);
+    const agentWorld = session([seat("a", [diviner(), only], { kind: "agent" }), seat("o", [])]);
+    const [agentTrigger] = findEntersBatchWatcherTriggers(agentWorld, entries(agentWorld, ["only"]));
+    expect(mine(resolveTriggerEffect(agentWorld, agentTrigger)).board.battlefield.some((c) => c.token)).toBe(true);
   });
 });
 

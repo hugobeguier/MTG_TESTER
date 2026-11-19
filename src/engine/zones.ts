@@ -598,11 +598,11 @@ export function applyEnterAsCopyOnEntry(session: GameSession, seatId: string, ca
   const without: GameSession = { ...session, seats: session.seats.map((seat) => ({ ...seat, board: { ...seat.board, battlefield: seat.board.battlefield.filter((card) => card.id !== cardId) } })) };
   const target = findEnterAsCopyTarget(without, seatId, effect, entering.chosenCopyTargetId);
   if (!target) return session;
-  // A human with a real choice (2+ legal copy targets) is asked, exactly like the cast path (choose_cast_copy): Estrid's Invocation returning from its
+  // A human with a real choice (at least one legal copy target) is asked, exactly like the cast path (choose_cast_copy): Estrid's Invocation returning from its
   // upkeep rider must let its owner pick a NEW enchantment. The permanent waits on the battlefield as the blank card until they answer.
   const seat = session.seats.find((item) => item.id === seatId);
   const candidates = enterAsCopyCandidates(without, seatId, effect);
-  if (seat?.kind === "human" && !entering.chosenCopyTargetId && candidates.length >= 2) {
+  if (seat?.kind === "human" && !entering.chosenCopyTargetId && candidates.length >= 1) {
     return queuePlayerChoice(session, {
       seatId,
       sourceCardId: cardId,

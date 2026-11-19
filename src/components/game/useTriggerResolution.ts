@@ -21,6 +21,7 @@ import { parseSagaChapters } from "@/lib/oracleClauses";
 import { putOpeningHandCardOnBattlefield } from "@/engine/mulligan";
 import { targetedEffectSpec } from "@/lib/targetedEffects";
 import { zoneEffectTargetSpec } from "@/lib/targetSpecs";
+import { triggerCardPrompt, triggerTargetOptionPrompt } from "@/engine/triggerPrompts";
 import { type GameContext, lateFn } from "./context";
 
 export function useTriggerResolution(ctx: GameContext) {
@@ -120,8 +121,8 @@ export function useTriggerResolution(ctx: GameContext) {
         return open(`${trigger.sourceCardName}: return the card to the battlefield instead of your hand?`, [{ index: 0, label: "Battlefield (the land is a Plains)" }, { index: 1, label: "Hand" }]);
       }
     }
-    const cardPrompt = triggerCardPrompt(trigger, controller);
-    if (cardPrompt && cardPrompt.cards.length >= 2) {
+    const cardPrompt = triggerCardPrompt(session, trigger, controller);
+    if (cardPrompt && cardPrompt.cards.length >= 1) {
       setPendingRuleChoice({
         id: crypto.randomUUID(),
         kind: "choose_trigger_card",
@@ -175,28 +176,13 @@ export function useTriggerResolution(ctx: GameContext) {
       if (max === 0) return false;
       return open(`${trigger.sourceCardName}: pay how much {R}? It deals that much damage to a target.`, Array.from({ length: max + 1 }, (_, count) => ({ index: count, label: count === 0 ? "Don't pay" : "{R} x" + count + " — " + count + " damage" })));
     }
-    // One-verb effects on a player (Blood Artist's drain): the human chooses who.
-    if (trigger.effect.kind === "targeted_effect" && trigger.effect.effect.who.kind === "player") {
-      const targeted = trigger.effect.effect;
-      const players = legalTargets(session, controller.id, targetedEffectSpec(targeted, trigger.sourceCardId, trigger.sourceCardName), findPermanentById(session, trigger.sourceCardId) ?? ({ id: trigger.sourceCardId, name: trigger.sourceCardName, typeLine: "", oracleText: "", manaValue: 0, colors: [], role: "effect", zone: "battlefield" } as VisibleCard)).filter((entry) => entry.kind === "player");
-      if (players.length >= 2) return open(`${trigger.sourceCardName}: choose a player.`, players.map((entry, index) => ({ index, label: `${session.seats.find((seat) => seat.id === entry.seatId)?.name ?? entry.seatId}${entry.seatId === controller.id ? " (you)" : ""} — ${session.seats.find((seat) => seat.id === entry.seatId)?.life ?? 0} life` })));
-    }
-    // The Undercity's Trap! (a player loses 5 life) and Arena (goad a creature): the human aims them.
-    if (trigger.effect.kind === "venture_room" && (trigger.effect.room === "trap" || trigger.effect.room === "arena")) {
-      const slot = trigger.effect.room === "trap" ? "player" : "opponent_creature";
-      const aimSource = { id: trigger.sourceCardId, name: trigger.sourceCardName, typeLine: "", oracleText: "", manaValue: 0, colors: [], role: "effect", zone: "battlefield" } as VisibleCard;
-      const aimOptions = labeledTargetOptions(session, controller.id, slot, aimSource);
-      if (aimOptions.length >= 2) return open(trigger.sourceCardName + ": choose a " + (slot === "player" ? "player" : "creature") + ".", aimOptions.map((option, index) => ({ index, label: option.label })));
-    }
+    // Player / goad / "any target" damage targets: the human always chooses (even with a single legal target).
+    const targetPrompt = triggerTargetOptionPrompt(session, trigger, controller);
+    if (targetPrompt) return open(targetPrompt.prompt, targetPrompt.options);
     // "You may put a land card from your hand onto the battlefield" (Archaeomancer's Map): the human picks which land.
     if (trigger.effect.kind === "put_land_from_hand") {
       const lands = controller.board.hand.filter((card) => card.typeLine.includes("Land"));
       if (lands.length >= 2) return open(`${trigger.sourceCardName}: choose a land card from your hand to put onto the battlefield.`, lands.map((card, index) => ({ index, label: card.name })));
-    }
-    // "Deals N damage to any target" triggers: the human aims the damage.
-    if (trigger.effect.kind === "damage_effect" || trigger.effect.kind === "context_power_damage") {
-      const aiming = triggerDamageAiming(session, trigger, controller.id);
-      if (aiming && aiming.options.length >= 2) return open(`${trigger.sourceCardName}: choose a target for ${aiming.effect.kind === "damage" ? (aiming.effect.amount === "X" ? (aiming.effect.xDefinition ? resolveDynamicAmount(session, controller.id, aiming.effect.xDefinition) : "X") : aiming.effect.amount) : ""} damage.`, aiming.options.map((option, index) => ({ index, label: option.label })));
     }
     // God-Eternal Bontu: "sacrifice any number of other permanents, then draw that many cards" — the human picks which ones, one at a time.
     if (trigger.effect.kind === "sacrifice_surplus_then_draw") {
@@ -206,129 +192,6 @@ export function useTriggerResolution(ctx: GameContext) {
     return false;
   }
 
-  // Which cards a human-controlled trigger asks them to pick, and from where. Undefined for triggers that need no card choice.
-  function triggerCardPrompt(trigger: Extract<PendingAction, { type: "trigger" }>, controller: PlayerSeat): { prompt: string; zone: "battlefield" | "graveyard"; cards: Array<{ seatId: string; cardId: string }>; picksNeeded: number } | undefined {
-    const ownCreatures = controller.board.battlefield.filter((card) => card.typeLine.includes("Creature")).map((card) => ({ seatId: controller.id, cardId: card.id }));
-    const ownGraveyardCreatures = (controller.board.graveyard ?? []).filter((card) => card.typeLine.includes("Creature") && card.id !== trigger.sourceCardId).map((card) => ({ seatId: controller.id, cardId: card.id }));
-    switch (trigger.effect.kind) {
-      case "target_creature_gains_keyword":
-        return { prompt: `${trigger.sourceCardName}: choose a creature you control to gain ${trigger.effect.keywords.join(" and ")} until end of turn.`, zone: "battlefield", cards: ownCreatures, picksNeeded: 1 };
-      // Eternal Taskmaster: "pay {2}{B}. If you do, return target creature card from your graveyard to your hand": the human picks the card.
-      case "pay_then_zone": {
-        const zoneSpec = zoneEffectTargetSpec(trigger.effect.zoneEffect);
-        const sourceForTargets = session.seats.flatMap((seat) => seat.board.battlefield).find((card) => card.id === trigger.sourceCardId);
-        if (!zoneSpec || !sourceForTargets) return undefined;
-        return {
-          prompt: `${trigger.sourceCardName}: choose the card to return.`,
-          zone: "graveyard",
-          cards: legalTargets(session, controller.id, zoneSpec, sourceForTargets).filter((target): target is Extract<ReturnType<typeof legalTargets>[number], { kind: "card" }> => target.kind === "card").map((target) => ({ seatId: target.seatId, cardId: target.card.id })),
-          picksNeeded: 1
-        };
-      }
-      // One-verb effects on a chosen permanent (Wizard Class's counter, Heliod's counter, ...): the human picks it.
-      case "targeted_effect": {
-        const targeted = trigger.effect.effect;
-        if (targeted.who.kind !== "permanent") return undefined;
-        const aimSource = findPermanentById(session, trigger.sourceCardId) ?? ({ id: trigger.sourceCardId, name: trigger.sourceCardName, typeLine: "", oracleText: "", manaValue: 0, colors: [], role: "effect", zone: "battlefield" } as VisibleCard);
-        const entries = legalTargets(session, controller.id, targetedEffectSpec(targeted, aimSource.id, trigger.sourceCardName), aimSource).filter((entry): entry is Extract<ReturnType<typeof legalTargets>[number], { kind: "card" }> => entry.kind === "card");
-        return { prompt: `${trigger.sourceCardName}: choose a target.`, zone: "battlefield", cards: entries.map((entry) => ({ seatId: entry.seatId, cardId: entry.card.id })), picksNeeded: 1 };
-      }
-      // The Undercity's Forge: two +1/+1 counters on a creature you control.
-      case "venture_room":
-        if (trigger.effect.room !== "forge") return undefined;
-        return { prompt: "Forge: choose a creature to put two +1/+1 counters on.", zone: "battlefield", cards: ownCreatures, picksNeeded: 1 };
-      // "Put a +1/+1 counter on target creature (you control)": the human picks it.
-      case "add_counter": {
-        const counterEffect = trigger.effect;
-        if (counterEffect.scope !== "target_creature" && counterEffect.scope !== "target_creature_you_control") return undefined;
-        return {
-          prompt: `${trigger.sourceCardName}: choose a creature to put ${counterEffect.amount === 1 ? "a" : counterEffect.amount} ${counterEffect.counterKind} counter${counterEffect.amount === 1 ? "" : "s"} on.`,
-          zone: "battlefield",
-          cards: session.seats
-            .filter((seat) => !seat.hasLost && (counterEffect.scope !== "target_creature_you_control" || seat.id === controller.id))
-            .flatMap((seat) => seat.board.battlefield.filter((card) => card.typeLine.includes("Creature") && (seat.id === controller.id || (!hasShroud(card) && !hasHexproof(card)))).map((card) => ({ seatId: seat.id, cardId: card.id }))),
-          picksNeeded: 1
-        };
-      }
-      case "exile_up_to_artifacts_enchantments":
-        return {
-          prompt: `${trigger.sourceCardName}: choose up to ${trigger.effect.count} artifacts and/or enchantments to exile.`,
-          zone: "battlefield",
-          cards: session.seats
-            .filter((seat) => seat.id !== controller.id && !seat.hasLost)
-            .flatMap((seat) => seat.board.battlefield.filter((card) => (card.typeLine.includes("Artifact") || card.typeLine.includes("Enchantment")) && !hasShroud(card) && !hasHexproof(card)).map((card) => ({ seatId: seat.id, cardId: card.id }))),
-          picksNeeded: trigger.effect.count
-        };
-      case "exile_until_leaves_each_opponent":
-        return {
-          prompt: `${trigger.sourceCardName}: choose up to one nonland permanent per opponent to exile until it leaves.`,
-          zone: "battlefield",
-          cards: session.seats
-            .filter((seat) => seat.id !== controller.id && !seat.hasLost)
-            .flatMap((seat) => seat.board.battlefield.filter((card) => !isLandCard(card) && !hasShroud(card) && !hasHexproof(card)).map((card) => ({ seatId: seat.id, cardId: card.id }))),
-          picksNeeded: session.seats.filter((seat) => seat.id !== controller.id && !seat.hasLost).length
-        };
-      case "pump_target_creature":
-        return { prompt: `${trigger.sourceCardName}: choose a creature you control to get the bonus.`, zone: "battlefield", cards: ownCreatures, picksNeeded: 1 };
-      case "double_power_counters":
-        return { prompt: `${trigger.sourceCardName}: choose a creature to put counters on equal to its power.`, zone: "battlefield", cards: ownCreatures, picksNeeded: 1 };
-      case "counters_on_up_to_creatures":
-        return { prompt: `${trigger.sourceCardName}: choose up to ${trigger.effect.count} creatures to put a ${trigger.effect.counterKind} counter on.`, zone: "battlefield", cards: ownCreatures, picksNeeded: trigger.effect.count };
-      case "gift_destroy_artifact_or_enchantment":
-        return {
-          prompt: `${trigger.sourceCardName}: choose an artifact or enchantment an opponent controls to destroy.`,
-          zone: "battlefield",
-          cards: session.seats
-            .filter((seat) => seat.id !== controller.id && !seat.hasLost)
-            .flatMap((seat) => seat.board.battlefield.filter((card) => card.typeLine.includes("Artifact") || card.typeLine.includes("Enchantment")).map((card) => ({ seatId: seat.id, cardId: card.id }))),
-          picksNeeded: 1
-        };
-      case "graveyard_creature_to_library_top":
-        return { prompt: `${trigger.sourceCardName}: choose a creature card in your graveyard to put on top of your library.`, zone: "graveyard", cards: ownGraveyardCreatures, picksNeeded: 1 };
-      case "landfall_return_nonland_permanent":
-        return {
-          prompt: `${trigger.sourceCardName}: choose a nonland permanent card in your graveyard to return.`,
-          zone: "graveyard",
-          cards: (controller.board.graveyard ?? []).filter((card) => !isLandCard(card) && /Creature|Artifact|Enchantment|Planeswalker|Battle/.test(card.typeLine)).map((card) => ({ seatId: controller.id, cardId: card.id })),
-          picksNeeded: 1
-        };
-      case "aura_reanimate":
-        return {
-          prompt: `${trigger.sourceCardName}: choose a creature card in a graveyard to return to the battlefield under your control.`,
-          zone: "graveyard",
-          cards: session.seats.flatMap((other) => (other.board.graveyard ?? []).filter((card) => card.typeLine.includes("Creature")).map((card) => ({ seatId: other.id, cardId: card.id }))),
-          picksNeeded: 1
-        };
-      case "exile_self_return_creature_to_hand":
-        return { prompt: `${trigger.sourceCardName}: choose a creature card in your graveyard to return to your hand.`, zone: "graveyard", cards: ownGraveyardCreatures, picksNeeded: 1 };
-      // Memnarch / Deathbringer Liege / Soul-Guide Lantern: the target is named when the ability goes on the stack, not at resolution.
-      case "become_artifact_target":
-        return {
-          prompt: `${trigger.sourceCardName}: choose a permanent to become an artifact.`,
-          zone: "battlefield",
-          cards: session.seats.flatMap((seat) => seat.board.battlefield.filter((card) => !hasCardType(card, "Artifact") && !card.phasedOut && (seat.id === controller.id || (!hasShroud(card) && !hasHexproof(card)))).map((card) => ({ seatId: seat.id, cardId: card.id }))),
-          picksNeeded: 1
-        };
-      case "gain_control_target_artifact":
-        return {
-          prompt: `${trigger.sourceCardName}: choose an artifact to gain control of.`,
-          zone: "battlefield",
-          cards: session.seats.filter((seat) => seat.id !== controller.id).flatMap((seat) => seat.board.battlefield.filter((card) => hasCardType(card, "Artifact") && !card.phasedOut && !hasShroud(card) && !hasHexproof(card)).map((card) => ({ seatId: seat.id, cardId: card.id }))),
-          picksNeeded: 1
-        };
-      case "destroy_tapped_creature":
-        return {
-          prompt: `${trigger.sourceCardName}: choose a tapped creature to destroy.`,
-          zone: "battlefield",
-          cards: session.seats.flatMap((seat) => seat.board.battlefield.filter((card) => card.tapped && card.typeLine.includes("Creature") && !card.phasedOut && (seat.id === controller.id || (!hasShroud(card) && !hasHexproof(card)))).map((card) => ({ seatId: seat.id, cardId: card.id }))),
-          picksNeeded: 1
-        };
-      case "exile_card_from_graveyard":
-        return { prompt: `${trigger.sourceCardName}: choose a card in a graveyard to exile.`, zone: "graveyard", cards: session.seats.flatMap((seat) => (seat.board.graveyard ?? []).map((card) => ({ seatId: seat.id, cardId: card.id }))), picksNeeded: 1 };
-      default:
-        return undefined;
-    }
-  }
 
   // One click of a trigger's card pick (battlefield or graveyard); reopens for the next pick of an "up to N", otherwise resolves.
   function completeTriggerCard(cardId: string) {
@@ -363,7 +226,7 @@ export function useTriggerResolution(ctx: GameContext) {
         const options = labeledTargetOptions(paid.session, choice.controllerSeatId, "any_damage", source);
         const damage: RemovalEffect = { kind: "damage", amount: paid.count, targetType: "any" };
         setSession(() => paid.session);
-        if (options.length >= 2) {
+        if (options.length >= 1) {
           setPendingRuleChoice({
             id: crypto.randomUUID(),
             kind: "choose_labeled_target",
@@ -1096,7 +959,7 @@ export function useTriggerResolution(ctx: GameContext) {
       if (trigger.effect.chosenOption !== undefined) continue;
       const controller = session.seats.find((seat) => seat.id === trigger.controllerSeatId);
       if (controller?.kind !== "human") continue;
-      const asksAtQueueTime = trigger.effect.kind === "modal" || trigger.effect.kind === "put_any_from_hand" || triggerCardPrompt(trigger, controller) !== undefined;
+      const asksAtQueueTime = trigger.effect.kind === "modal" || trigger.effect.kind === "put_any_from_hand" || triggerCardPrompt(session, trigger, controller) !== undefined || triggerTargetOptionPrompt(session, trigger, controller) !== undefined;
       if (asksAtQueueTime && openTriggerOptionPrompt(trigger, [], triggers)) return;
     }
     const [firstTrigger, ...laterTriggers] = triggers;

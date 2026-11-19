@@ -67,6 +67,29 @@ export function spellModePrompt(
   return { chooseCount: Math.min(generic.chooseCount, modes.length), labels: modes.map((mode, index) => mode.text ?? `Mode ${index + 1}`), genericModes: modes, distinctPerTurn: generic.distinctPerTurn };
 }
 
+// "Enchant ..." targets of an Aura as it is cast: creatures, lands, "creature, land, or planeswalker", any permanent, or a player (its own controller included).
+function auraPrompt(card: VisibleCard, restriction: Extract<CastStructure, { kind: "aura" }>["restriction"]): string {
+  const what = restriction === "player" ? "the player to enchant" : restriction === "land" ? "the land to enchant" : restriction === "permanent" ? "the permanent to enchant" : restriction === "creature_land_planeswalker" ? "the creature, land or planeswalker to enchant" : "the creature to enchant" + (restriction === "creature_you_control" ? " (a creature you control)" : "");
+  return `${card.name}: choose ${what}.`;
+}
+export function auraTargetOptions(session: GameSession, seatId: string, restriction: Extract<CastStructure, { kind: "aura" }>["restriction"], card: VisibleCard): LabeledSlot["options"] {
+  if (restriction === "creature" || restriction === "creature_you_control") return labeledTargetOptions(session, seatId, restriction === "creature_you_control" ? "own_creature" : "any_creature", card);
+  if (restriction === "player") {
+    return session.seats.filter((seat) => !seat.hasLost && (seat.id === seatId || !playerHasHexproof(seat))).map((seat) => ({ label: `${seat.name}${seat.id === seatId ? " (you)" : ""} (${seat.life} life)`, target: { kind: "player" as const, seatId: seat.id } }));
+  }
+  const wanted = (permanent: VisibleCard) => (restriction === "land" ? permanent.typeLine.includes("Land") : restriction === "creature_land_planeswalker" ? /Creature|Land|Planeswalker/.test(permanent.typeLine) : true);
+  const options: LabeledSlot["options"] = [];
+  for (const seat of session.seats) {
+    if (seat.hasLost) continue;
+    for (const permanent of seat.board.battlefield) {
+      if (permanent.id === card.id || permanent.phasedOut || !wanted(permanent)) continue;
+      if (seat.id !== seatId && (hasShroud(permanent) || hasHexproof(permanent) || isProtectedFrom(permanent, card))) continue;
+      options.push({ label: `${permanent.name} — ${seat.id === seatId ? "yours" : seat.name}`, target: { kind: "card" as const, seatId: seat.id, cardId: permanent.id } });
+    }
+  }
+  return options.sort((x, y) => Number(x.target.seatId === seatId) - Number(y.target.seatId === seatId)).slice(0, 40);
+}
+
 export function labeledTargetOptions(
   session: GameSession,
   controllerSeatId: string,
@@ -182,7 +205,7 @@ type CastStructure =
   | { kind: "pump"; effect: PumpEffect }
   | { kind: "targeted"; effect: TargetedEffect }
   // An Aura spell targets as it is CAST (rule 303.4a / 601.2c): "Enchant creature [you control]".
-  | { kind: "aura"; restriction: "creature" | "creature_you_control" };
+  | { kind: "aura"; restriction: "creature" | "creature_you_control" | "player" | "permanent" | "land" | "creature_land_planeswalker" };
 
 // What a spell does that needs the caster's decisions — only for instants and sorceries (a permanent's enters effect is a trigger, whose
 // targets are chosen when it triggers).
@@ -190,7 +213,7 @@ export function castStructure(card: VisibleCard, chosenX?: number): CastStructur
   if (!card.typeLine.includes("Instant") && !card.typeLine.includes("Sorcery")) {
     if (isAura(card)) {
       const restriction = enchantRestriction(card.oracleText);
-      if (restriction === "creature" || restriction === "creature_you_control") return { kind: "aura", restriction };
+      if (restriction && restriction !== "other") return { kind: "aura", restriction };
     }
     return undefined;
   }
@@ -304,7 +327,7 @@ export function nextCastPrompt(
   } else if (structure.kind === "targeted") {
     slots = [{ prompt: `${card.name}: choose a target.`, options: optionsFromSpec(session, seatId, targetedEffectSpec(structure.effect, card.id, card.name), card) }];
   } else if (structure.kind === "aura") {
-    slots = [{ prompt: `${card.name}: choose the creature to enchant${structure.restriction === "creature_you_control" ? " (a creature you control)" : ""}.`, options: labeledTargetOptions(session, seatId, structure.restriction === "creature_you_control" ? "own_creature" : "any_creature", card) }];
+    slots = [{ prompt: auraPrompt(card, structure.restriction), options: auraTargetOptions(session, seatId, structure.restriction, card) }];
   } else {
     slots = [{ prompt: `${card.name}: choose a creature.`, options: labeledTargetOptions(session, seatId, "any_creature", card) }];
   }
@@ -632,19 +655,19 @@ export function spellTargetSlots(session: GameSession, controllerSeatId: string,
   // Chandra's Ignition: "Target creature you control deals damage equal to its power to each other creature and each opponent."
   if (extra?.kind === "creature_damages_everything_else") {
     const own = labeledTargetOptions(session, controllerSeatId, "own_creature", source);
-    if (own.length < 2) return undefined;
+    if (own.length === 0) return undefined;
     return { slots: [{ prompt: `${source.name}: choose the creature you control that deals the damage.`, options: own }], continuation: { kind: "extra", effect: extra } };
   }
   // Consumed by Greed / Secret Rendezvous: "target opponent".
   if (extra?.kind === "opponent_sacrifices_greatest_power" || extra?.kind === "you_and_opponent_draw") {
     const opponents = labeledTargetOptions(session, controllerSeatId, "player", source);
-    if (opponents.length < 2) return undefined;
+    if (opponents.length === 0) return undefined;
     return { slots: [{ prompt: `${source.name}: choose a target opponent.`, options: opponents }], continuation: { kind: "extra", effect: extra } };
   }
   if (extra?.kind === "creature_bites") {
     const mine = labeledTargetOptions(session, controllerSeatId, "own_creature", source);
     const theirs = labeledTargetOptions(session, controllerSeatId, /creature or planeswalker you don'?t control/i.test(text) ? "opponent_creature_or_planeswalker" : "opponent_creature", source);
-    if (mine.length === 0 || theirs.length === 0 || mine.length + theirs.length < 3) return undefined;
+    if (mine.length === 0 || theirs.length === 0) return undefined;
     return {
       slots: [
         { prompt: `${source.name}: choose the creature you control that deals the damage.`, options: mine },
@@ -655,12 +678,12 @@ export function spellTargetSlots(session: GameSession, controllerSeatId: string,
   }
   if (extra?.kind === "shuffle_permanent_reveal_top") {
     const all = labeledTargetOptions(session, controllerSeatId, "any_permanent", source);
-    if (all.length < 2) return undefined;
+    if (all.length === 0) return undefined;
     return { slots: [{ prompt: `${source.name}: choose the permanent its owner shuffles into their library.`, options: all }], continuation: { kind: "extra", effect: extra } };
   }
   if (extra?.kind === "grant_keywords") {
     const own = labeledTargetOptions(session, controllerSeatId, "own_permanent", source);
-    if (own.length < 2) return undefined;
+    if (own.length === 0) return undefined;
     return {
       slots: [{ prompt: `${source.name}: choose a permanent you control to gain ${extra.keywords.join(" and ")} until end of turn.`, options: own }],
       continuation: { kind: "extra", effect: extra, lifeAmount: parseSimpleLifeChange(text)?.kind === "gain_life" ? parseSimpleLifeChange(text)!.amount : undefined }
@@ -670,7 +693,7 @@ export function spellTargetSlots(session: GameSession, controllerSeatId: string,
   const removal = parseRemovalEffect(text);
   if (removal?.kind === "damage" && removal.targetType !== "creature") {
     const options = labeledTargetOptions(session, controllerSeatId, removal.targetType === "player" ? "player" : "any_damage", source);
-    if (options.length < 2) return undefined;
+    if (options.length === 0) return undefined;
     return { slots: [{ prompt: `${source.name}: choose a target for the damage.`, options }], continuation: { kind: "damage", effect: removal, chosenX } };
   }
   return undefined;

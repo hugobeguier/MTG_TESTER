@@ -431,7 +431,7 @@ export function useAbilities(ctx: GameContext) {
     // "Target creature can't be blocked this turn." (Rogue's Passage): the human chooses the creature after paying.
     if (seat?.kind === "human" && paid.ability.effect.kind === "target_unblockable") {
       const yours = session.seats.find((item) => item.id === seatId)?.board.battlefield.filter((card) => card.typeLine.includes("Creature")) ?? [];
-      if (yours.length >= 2) {
+      if (yours.length >= 1) {
         setPendingRuleChoice({ id: crypto.randomUUID(), kind: "choose_creature_for_grant", controllerSeatId: seatId, sourceCardId: cardId, sourceCardName: paid.card.name, prompt: paid.card.name + ": choose the creature that can't be blocked this turn.", keywords: ["can't be blocked"] });
         return;
       }
@@ -481,7 +481,7 @@ export function useAbilities(ctx: GameContext) {
   function openAbilityDamageAim(seatId: string, sourceCard: VisibleCard, effect: RemovalEffect, afterPaymentSession: GameSession): boolean {
     if (effect.kind !== "damage" || typeof effect.amount !== "number" || effect.targetType === "creature") return false;
     const options = labeledTargetOptions(afterPaymentSession, seatId, effect.targetType === "player" ? "player" : "any_damage", sourceCard);
-    if (options.length < 2) return false;
+    if (options.length === 0) return false;
     setSession(() => afterPaymentSession);
     setPendingRuleChoice({
       id: crypto.randomUUID(),

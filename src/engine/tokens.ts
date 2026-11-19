@@ -470,7 +470,7 @@ export function resolveCopyOneOfCandidates(session: GameSession, controllerSeatI
   if (!controller) return session;
   const candidates = candidateIds.map((id) => findPermanentById(session, id)).filter((card): card is VisibleCard => card !== undefined);
   if (candidates.length === 0) return rulesEvent(session, controllerSeatId, `${sourceName} triggers, but none of the creatures it could copy are still on the battlefield.`);
-  if (candidates.length > 1 && controller.kind === "human") {
+  if (candidates.length >= 1 && controller.kind === "human") {
     return queuePlayerChoice(session, {
       seatId: controllerSeatId,
       sourceCardId,

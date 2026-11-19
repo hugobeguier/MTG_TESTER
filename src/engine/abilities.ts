@@ -528,7 +528,7 @@ export function applySacrificeEffect(
     const gained = rulesEvent({ ...session, seats: session.seats.map((item) => (item.id === seatId ? { ...item, life: item.life + amount } : item)) }, seatId, `${seat.name} gains ${amount} life from ${sourceCardName}.`);
     const targets = seat.board.battlefield.filter((card) => card.typeLine.includes("Creature") && !sacrificed.some((gone) => gone.id === card.id));
     if (targets.length === 0) return gained;
-    if (seat.kind === "human" && targets.length > 1) {
+    if (seat.kind === "human" && targets.length >= 1) {
       return queuePlayerChoice(gained, {
         seatId, sourceCardId, sourceCardName,
         prompt: `${sourceCardName}: put ${amount} +1/+1 counter${amount === 1 ? "" : "s"} on which creature you control?`,
@@ -885,7 +885,7 @@ function reanimateAbilitySpec(effect: ZoneEffect): TargetSpec | undefined {
 export function zoneChoiceSpecFor(session: GameSession, seatId: string, effect: ZoneEffect, sourceCard: VisibleCard): TargetSpec | undefined {
   const spec = zoneEffectTargetSpec(effect) ?? reanimateAbilitySpec(effect);
   if (!spec) return undefined;
-  return legalTargets(session, seatId, spec, sourceCard).length > 1 ? spec : undefined;
+  return legalTargets(session, seatId, spec, sourceCard).length > 0 ? spec : undefined;
 }
 
 // Zur, Eternal Schemer: "Target non-Aura enchantment becomes a creature. It's still an enchantment.

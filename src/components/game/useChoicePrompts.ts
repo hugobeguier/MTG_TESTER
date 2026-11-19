@@ -93,7 +93,7 @@ export function useChoicePrompts(ctx: GameContext) {
   // src/lib/targetSpecs.ts) — call this BEFORE applying a removal/zone effect that a human
   // controls. Opens choose_effect_target and returns true when it did (the caller must not also
   // apply the effect — it'll happen later, from chooseEffectTarget/declineEffectTarget); returns
-  // false when there's nothing to ask (no spec for this effect, the controller isn't human, or 0/1
+  // false when there is nothing to ask (no spec for this effect, the controller is not human, or no
   // legal targets exist — a foregone auto-pick isn't a real decision, matching this engine's
   // existing "only intercept the choice-worthy shapes" pattern everywhere else). Reads `session`
   // from the enclosing component scope, same as every other resolver here.
@@ -187,7 +187,8 @@ export function useChoicePrompts(ctx: GameContext) {
     const controllerSeat = session.seats.find((seat) => seat.id === controllerSeatId);
     if (controllerSeat?.kind !== "human") return false;
     const pool = legalTargets(session, controllerSeatId, spec, sourceCard);
-    if (pool.length <= 1) return false;
+    // Humans always choose their targets (even a single legal one: the player confirms it); with none there is nothing to ask.
+    if (pool.length === 0) return false;
     setPendingRuleChoice({
       id: crypto.randomUUID(),
       kind: "choose_effect_target",
@@ -219,6 +220,9 @@ export function useChoicePrompts(ctx: GameContext) {
       }
       return;
     }
+    // The rest of an ability whose first sentence was the aimed destroy/exile ("... Draw a card.") goes on the stack once the target is in.
+    const rider = choice.pending.kind === "removal" && targetsStillLegal(session, choice.controllerSeatId, choice.spec, choice.sourceCard, [target]) ? choice.pending.rider : undefined;
+    if (rider) window.setTimeout(() => queueCommonTriggers([makeCommonTrigger(choice.controllerSeatId, choice.controllerSeatId, choice.sourceCard, rider, `${choice.sourceCardName}'s ability continues.`)]), 0);
     setSession((current) => {
       if (!targetsStillLegal(current, choice.controllerSeatId, choice.spec, choice.sourceCard, [target])) {
         return noLegalTargetEvent(current, choice.controllerSeatId, choice.sourceCardName);
@@ -472,7 +476,7 @@ export function useChoicePrompts(ctx: GameContext) {
     }
     if (mode.kind === "damage" && mode.targetType !== "creature") {
       const options = labeledTargetOptions(session, choice.controllerSeatId, mode.targetType === "player" ? "player" : "any_damage", choice.sourceCard);
-      if (options.length >= 2) {
+      if (options.length >= 1) {
         setPendingRuleChoice({
           id: crypto.randomUUID(),
           kind: "choose_labeled_target",
@@ -490,7 +494,7 @@ export function useChoicePrompts(ctx: GameContext) {
     }
     if (mode.kind === "grant_keywords") {
       const yours = session.seats.find((seat) => seat.id === choice.controllerSeatId)?.board.battlefield.filter((card) => card.typeLine.includes("Creature")) ?? [];
-      if (yours.length >= 2) {
+      if (yours.length >= 1) {
         setPendingRuleChoice({ id: crypto.randomUUID(), kind: "choose_creature_for_grant", controllerSeatId: choice.controllerSeatId, sourceCardId: choice.sourceCardId, sourceCardName: choice.sourceCardName, prompt: choice.sourceCardName + ": choose a creature you control to gain " + mode.keywords.join(" and ") + " until end of turn.", keywords: mode.keywords });
         return;
       }

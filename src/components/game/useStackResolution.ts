@@ -603,7 +603,7 @@ export function useStackResolution(ctx: GameContext) {
       // deliberately skips this file's OTHER simultaneous-ETB extras a few hundred lines below (tokens,
       // X/multikicker/color counters, explore) — same declared simplification the Reanimate/Lim-Dûl's
       // Vault branches above already accept, on the theory that a real "target card" ETB never also
-      // needs those. Only intercepts when there's an actual decision (2+ legal targets) — see
+      // needs those. Intercepts whenever a human has at least one legal target (a single one is still confirmed by the player) — see
       // maybeRequestTarget's own doc comment. Reported live: Eternal Witness returned via Living Death
       // (and the same gap applies to casting it directly) picked "some card" with no say from the human.
       if (actor?.kind === "human" && !action.castChoices && sourceCard && reanimateZoneEffect?.kind === "regrow") {
@@ -611,7 +611,7 @@ export function useStackResolution(ctx: GameContext) {
         const regrowPool = regrowSpec ? legalTargets(session, action.actorSeatId, regrowSpec, sourceCard) : [];
         const optional = /\byou may\b/i.test(etbEffectText(sourceCard.oracleText));
         // "you may return target card ..." (Eternal Witness) is a real decision even with a single legal card: decline = return nothing.
-        if (regrowSpec && (regrowPool.length > 1 || (optional && regrowPool.length > 0))) {
+        if (regrowSpec && (regrowPool.length > 0 || (optional && regrowPool.length > 0))) {
           const remainingStack = removeStackAction(action.id);
           const resolutionDestination = spellResolutionDestination(session, action);
           let capturedEntryTriggers: Array<Extract<PendingAction, { type: "trigger" }>> = [];
@@ -653,7 +653,7 @@ export function useStackResolution(ctx: GameContext) {
       // modal card (parseRemovalEffect returns its "modal" kind for one, and removalEffectTargetSpec
       // returns undefined for that kind — the mode itself isn't chosen yet here) and "any target"
       // damage (removalEffectTargetSpec also declines that — needs a combined creature-or-player pool
-      // this phase doesn't build). Only intercepts with a real decision (2+ legal targets).
+      // this phase doesn't build). Intercepts with at least one legal target.
       // A cast modal spell: the human picks the mode(s).
       const modalPrompt = actor?.kind === "human" && !action.castChoices && sourceCard ? spellModePrompt(session, action.actorSeatId, sourceCard, action.chosenX) : undefined;
       if (actor?.kind === "human" && sourceCard && modalPrompt) {
@@ -724,7 +724,7 @@ export function useStackResolution(ctx: GameContext) {
         const removalPool = legalTargets(session, action.actorSeatId, castRemovalTargetSpec, sourceCard);
         // "you may destroy target ..." (Reclamation Sage) is a real decision even with a single legal target: decline = destroy nothing.
         const optionalRemoval = /\byou may\b/i.test(etbEffectText(sourceCard.oracleText));
-        if (removalPool.length > 1 || (optionalRemoval && removalPool.length > 0)) {
+        if (removalPool.length > 0 || (optionalRemoval && removalPool.length > 0)) {
           const remainingStack = removeStackAction(action.id);
           const resolutionDestination = spellResolutionDestination(session, action);
           setSession((current) =>
@@ -931,7 +931,11 @@ export function useStackResolution(ctx: GameContext) {
             ? castTargetLegal(current, action.actorSeatId, sourceCard, castAuraTarget) && current.seats.find((seat) => seat.id === castAuraTarget.seatId)?.board.battlefield.some((card) => card.id === castAuraTarget.cardId)
               ? { kind: "attach", seatId: castAuraTarget.seatId, cardId: castAuraTarget.cardId }
               : { kind: "no_target" }
-            : chooseAuraAttachTarget(current, action.actorSeatId, sourceCard.oracleText)
+            : castAuraTarget && castAuraTarget.kind === "player"
+              ? castTargetLegal(current, action.actorSeatId, sourceCard, castAuraTarget)
+                ? { kind: "attach_player", seatId: castAuraTarget.seatId }
+                : { kind: "no_target" }
+              : chooseAuraAttachTarget(current, action.actorSeatId, sourceCard.oracleText)
           : undefined;
       if (castAuraTarget && auraAttach?.kind === "attach") auraRetargetAsked.current.add(action.cardId);
       const destination = auraAttach?.kind === "no_target" ? "graveyard" : baseDestination;

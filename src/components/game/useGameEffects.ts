@@ -178,7 +178,7 @@ export function useGameEffects(ctx: GameContext) {
       if (deferredChoiceEntry || zoneEffect?.kind !== "regrow") continue;
       if (session.seats.find((seat) => seat.id === entry.seatId)?.kind !== "human") continue;
       const spec = zoneEffectTargetSpec(zoneEffect);
-      if (!spec || legalTargets(session, entry.seatId, spec, entry.card).length <= 1) continue;
+      if (!spec || legalTargets(session, entry.seatId, spec, entry.card).length === 0) continue;
       deferredChoiceEntry = { entry, zoneEffect, spec, optional: /\byou may\b/i.test(etbEffectText(entry.card.oracleText)) };
     }
     // A creature whose enters effect is removal ("When this creature enters, destroy target creature an opponent controls": Ravenous
@@ -199,7 +199,7 @@ export function useGameEffects(ctx: GameContext) {
       if (deferredRemovalEntry) break;
       const spec = removalEffectTargetSpec(item.removal, item.entry.card.id);
       if (!spec || session.seats.find((seat) => seat.id === item.entry.seatId)?.kind !== "human") continue;
-      if (legalTargets(session, item.entry.seatId, spec, item.entry.card).length > 1) deferredRemovalEntry = item;
+      if (legalTargets(session, item.entry.seatId, spec, item.entry.card).length > 0) deferredRemovalEntry = item;
     }
     const entryTriggers = [
       ...remainingEntries.flatMap((entry) => findCommonTriggersForPermanentEntered(session, entry.seatId, entry.card)),

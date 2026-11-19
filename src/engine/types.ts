@@ -445,7 +445,8 @@ export type PendingAction =
 // applier needs besides the target itself (chosenX for a variable-damage spell's already-paid X).
 export type PendingTargetedEffect =
   | { kind: "targeted"; effect: TargetedEffect }
-  | { kind: "removal"; effect: RemovalEffect; chosenX?: number }
+  // `rider`: what the ability does after the aimed effect (Garruk, Cursed Huntsman's "Destroy target creature. Draw a card.").
+  | { kind: "removal"; effect: RemovalEffect; chosenX?: number; rider?: TriggerEffect }
   | { kind: "zone"; effect: ZoneEffect; chosenX?: number }
   // "Another target creature gets +2/+0 and gains trample until end of turn." (Rhonas the Indomitable): the human aims the pump.
   | { kind: "pump"; effect: PumpEffect }
