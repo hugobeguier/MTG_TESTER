@@ -12,7 +12,7 @@ export { entersBattlefieldTapped, landDropsAllowed, landPlaysMade, recordLandPla
 import { isPlaneswalkerCard, loyaltyCounterCount } from "@/engine/zones";
 export { applyGraveyardExile, findEnterAsCopyTarget, moveCardBetweenVisibleZones, moveCommanderToCommandZone, parseEnterAsCopyEffect, putLookedAtCardsInGraveyard, shuffleCards } from "@/engine/zones";
 
-import { counterSpellCanTarget, parseCounterSpellAbility } from "@/lib/counterSpells";
+import { parseCounterSpellAbility } from "@/lib/counterSpells";
 import { stopKey } from "@/lib/priorityStops";
 export { activateSteelHellkiteX, agentSurveilDecision, applyGenericModalEffect, applyMassBounceEffect, applyMassPumpEffect, applyMill, applyRemovalEffect, applySimpleLifeChange, applySpellExtraEffect, applyTargetedPumpEffect, applyZoneEffect, castTargetLegal, chooseAgentLibraryCardForRuleChoice, drawForSeat, drawMultipleForSeat, genericCostShim, matchesPermanentSacrificeFilter, parseGenericModalEffect, parseTargetedPump, payWardIfNeeded, putLookedAtCardsOnBottom, resolveAgentLibraryLookWorkflow, resolveDeferredChoice, substituteX } from "@/engine/effects";
 
@@ -44,8 +44,8 @@ import { useSeatYield } from "./game/useSeatYield";
 import { hostHumanSeat } from "@/lib/multiplayer/seatMap";
 import { useMpHost } from "./game/useMpHost";
 import { MpPauseBanner } from "./MpPauseBanner";
-import { findSpellSourceCard, pendingActionRequiredPasses, resolutionPromptNote, withPendingActionSourceCard } from "@/engine/priority";
-import { spellIsImmuneToCounters } from "@/engine/legalActions";
+import { pendingActionRequiredPasses, resolutionPromptNote, withPendingActionSourceCard } from "@/engine/priority";
+import { legalCounterSpellTargets } from "@/engine/legalActions";
 import { canCastAtInstantSpeed, handCardFaceOptions, roomDoorFaces, seatHasFlashGrant } from "@/engine/casting";
 import { attackLockedOut, canAttack } from "@/engine/combat";
 import { getBasicLandFetchOptions, getMyriadLandscapeOptions } from "@/engine/etb";
@@ -107,12 +107,8 @@ export function AppFlow({ initialSession, ollama, multiplayerHost = false }: { i
     if (!selectedHandCard) return true;
     const counterAbility = parseCounterSpellAbility(selectedHandCard.oracleText);
     if (!counterAbility || !pendingAction || pendingAction.type !== "spell") return true;
-    const counterTargetCard = findSpellSourceCard(session, pendingAction);
-    return (
-      counterTargetCard !== undefined &&
-      !spellIsImmuneToCounters(session, counterTargetCard, pendingAction.actorSeatId) &&
-      counterSpellCanTarget(counterAbility, counterTargetCard.typeLine, pendingAction.sourceZone === "command")
-    );
+    // Any legal spell on the stack will do, not only the top one: the target is chosen in the cast prompt.
+    return legalCounterSpellTargets(session, stackActions, counterAbility).length > 0;
   })();
   const selectedCardCanRespond = selectedHandCard
     ? canCastAtInstantSpeed(selectedHandCard, seatHasFlashGrant(humanSeat, selectedHandCard)) &&

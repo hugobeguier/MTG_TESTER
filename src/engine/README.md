@@ -27,7 +27,7 @@ importing from `./AppFlow`. Each file starts with a header comment saying what i
 | `etb.ts` | Aura attach, chosen type/color, explore, sagas, Myriad / basic-land-fetch searches |
 | `abilities.ts` | Activated abilities: `payGenericSacrificeCost`, `payGenericTapCost`, `payGenericManaCost`, `applyGenericTapEffect`, `applyGenericAbilityEffect`, `resolveEquip`, cycling |
 | `casting.ts` | `playCardFromZone`, additional costs, MDFC/split/room face options, flash, `spellResolutionDestination` |
-| `castTargets.ts` | `spellTargetSlots`, `nextCastPrompt`, `castStructure`, agent target choosers, `hasResolvableTarget` |
+| `castTargets.ts` | `spellTargetSlots`, `nextCastPrompt` (takes the stack: counterspell targets), `counterTargetOptions`, `castStructure`, agent target choosers, `hasResolvableTarget` |
 | `combat.ts` | `canAttack`, `canBlock`, `resolveCombatDamage`, `assignBlockers`, `legalAttackActions`, `legalBlockActions`, combat simulation, attack tax |
 | `legalActions.ts` | `legalMainPhaseActions`, `legalPriorityActions`, `legalActivatedAbilityActions`, `checkMoveLegal` |
 | `priority.ts` | `pendingActionRequiredPasses`, `canReceivePriorityForPendingAction`, agent decision context / snapshots |

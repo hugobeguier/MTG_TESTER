@@ -10,7 +10,7 @@ import { type StackFeedEntry } from "@/components/ThreeGameTable";
 import { addManaToPool, attackTriggerManaHeuristicSplit, cannotPayMessage, chooseManaSourcesForCost, manaPoolTotal, payCostFromPool, selectedManaTotal, spendManaSources, spentManaColors } from "@/engine/mana";
 import { additionalSacrificeCandidates, applyChosenFaceToCard, applySpellDamagePrevention, canCastAtInstantSpeed, castFaceDecision, castRestrictedByTurnCount, chooseAdditionalCostSacrifice, independentlyCastableSpellFaces, manaFromTappedOpponentLands, payAdditionalDiscardCost, playCardFromZone, sacrificeForAdditionalCost, seatHasFlashGrant, spellCastLockedOut, spellFaceCostCard, spellResolutionDestination, targetingTax } from "@/engine/casting";
 import { adjustedCastingCost, hasSingleKicker, maxAffordableX, totalCastingCost } from "@/engine/costs";
-import { applyCastGenericModes, applyCastRemoval, castModeLabels, castStructure, describeRemovalMode, hasResolvableTarget, nextCastPrompt, spellModePrompt, spellTargetSlots, stackTargetText } from "@/engine/castTargets";
+import { applyCastGenericModes, applyCastRemoval, castModeLabels, castStructure, counterTargetActionFor, describeRemovalMode, hasResolvableTarget, nextCastPrompt, spellModePrompt, spellTargetSlots, stackTargetText } from "@/engine/castTargets";
 import { applyCastRevealUntilCreatures, applyEachPlayerSacrificeEffect, applyLivingDeathEffect, applyPunisherChoiceEffect, isLivingDeathEffect, parseEachPlayerSacrificeEffect, parseEtbZoneEffect, parseMassBounceEffect, parseMassPump, parsePunisherChoiceEffect, parseSimpleDrawEffect, parseSimpleLifeChange } from "@/engine/oneShotEffects";
 import { applyEntersWithCounterKind, applyEntersWithXCounters, colorsAmongPermanentsControlled, entersWithCounterPerColorControlled, entersWithFixedCounterKind, findExiledCardAnySeat, findPermanentById, moveCardBetweenVisibleZones, rulesEvent } from "@/engine/zones";
 import { applyEntersWithCounterReplacements } from "@/engine/entry";
@@ -18,7 +18,7 @@ import { applyGenericModalEffect, applyMassBounceEffect, applyMassPumpEffect, ap
 import { applyTargetedEffect, commonTriggerEffect, findCommonTriggersForPermanentEntered } from "@/engine/triggers";
 import { checkStateBasedActions } from "@/engine/stateBased";
 import { countCreaturesAttackingSeat } from "@/engine/combat";
-import { counterSpellCanTarget, parseCounterSpellAbility, parseDelayedUpkeepDraws } from "@/lib/counterSpells";
+import { parseCounterSpellAbility, parseDelayedUpkeepDraws } from "@/lib/counterSpells";
 import { createTokensForSeat, parseCreateTokenSpecs } from "@/engine/tokens";
 import { etbEffectText, parseAdditionalDiscardCost, parseAdditionalSacrificeCost, parseModalHeader, parseSpellModalHeader } from "@/lib/oracleClauses";
 import { findCastTriggers, findEntersBatchWatcherTriggers } from "@/engine/triggerFinders";
@@ -35,7 +35,7 @@ import { parseSpellExtraEffects } from "@/lib/spellExtras";
 import { parseTargetedEffect } from "@/lib/targetedEffects";
 import { parseZoneEffect } from "@/lib/zoneEffects";
 import { removalEffectTargetSpec, zoneEffectTargetSpec } from "@/lib/targetSpecs";
-import { spellIsImmuneToCounters } from "@/engine/legalActions";
+import { legalCounterSpellTargets, spellIsImmuneToCounters } from "@/engine/legalActions";
 import { stackBeatMs } from "@/lib/agentRuntime";
 import { type GameContext, lateFn } from "./context";
 
@@ -431,19 +431,23 @@ export function useStackResolution(ctx: GameContext) {
     // spell would spend the mana and card, then silently do nothing useful at resolution, with no
     // explanation of why. Checked before mana leaves the pool, same as the no-legal-target check
     // above, so a rejected response doesn't cost anything.
-    if (counterAbility && !parseModalHeader(castView.oracleText)) {
-      const counterTargetCard = pendingAction.type === "spell" ? findSpellSourceCard(session, pendingAction) : undefined;
-      const isCommanderSpell = pendingAction.type === "spell" && pendingAction.sourceZone === "command";
-      const legalCounterTarget =
-        counterTargetCard &&
-        !spellIsImmuneToCounters(session, counterTargetCard, pendingAction.actorSeatId) &&
-        counterSpellCanTarget(counterAbility, counterTargetCard.typeLine, isCommanderSpell);
-      if (!legalCounterTarget) {
+    // The target is ANY legal spell on the stack, not only the top one (rule 114): the human picks it in the cast prompt below.
+    const stackNow = stackStore.ref.current.stack;
+    const isCounterCast = Boolean(counterAbility) && !parseModalHeader(castView.oracleText);
+    if (counterAbility && isCounterCast) {
+      const legalTargets = legalCounterSpellTargets(session, stackNow, counterAbility);
+      if (legalTargets.length === 0) {
         addEvent(
-          `${actor.name} cannot respond with ${card.name}; ${pendingAction.type === "spell" ? `it can't legally counter ${pendingAction.cardName}` : "there is no spell on the stack to counter"}.`,
+          `${actor.name} cannot respond with ${card.name}; ${stackNow.some((item) => item.type === "spell") ? "it can't legally counter any spell on the stack" : "there is no spell on the stack to counter"}.`,
           actor.id,
           "Mana"
         );
+        return;
+      }
+      // The chosen target must still be on the stack and legal when the answers are replayed.
+      const chosenCounterTarget = castChoices?.targets[0];
+      if (castChoices && !legalTargets.some((item) => item.cardId === (chosenCounterTarget?.kind === "card" ? chosenCounterTarget.cardId : undefined))) {
+        addEvent(`${actor.name} cannot respond with ${card.name}; the spell it was aimed at is no longer a legal target.`, actor.id, "Mana");
         return;
       }
     }
@@ -466,7 +470,7 @@ export function useStackResolution(ctx: GameContext) {
     const manaSourceIds = isLandCard(card) ? [] : payment.sourceIds;
     if (!castChoices && !isLandCard(card)) {
       const answers: CastChoices = { targets: [] };
-      const firstPrompt = nextCastPrompt(session, actor.id, castView, chosenX > 0 ? chosenX : undefined, answers);
+      const firstPrompt = nextCastPrompt(session, actor.id, castView, chosenX > 0 ? chosenX : undefined, answers, stackNow);
       if (firstPrompt) {
         openCastPrompt(firstPrompt, { planCard: castView, chosenX: chosenX > 0 ? chosenX : undefined, answers, resume: { via: "respondWithCard", cardId, sourceZone, seatId: actor.id, faceIndex: respondHalf ? faceIndex : undefined, sacrificeTargets: preChosenSacrificeTargets } });
         return;
@@ -475,7 +479,10 @@ export function useStackResolution(ctx: GameContext) {
     if (!isLandCard(card) && payment.ok) {
       applyCastingCostPaymentSideEffect(actor.id, payment);
     }
-    const counterTargetId = counterAbility && pendingAction.type === "spell" ? pendingAction.id : undefined;
+    // The spell it counters: the one picked in the cast prompt; only a cast that skipped the prompt falls back to the top of the stack.
+    const chosenCounterAction = isCounterCast ? counterTargetActionFor(stackNow, castChoices?.targets[0]) : undefined;
+    const counterTargetId = isCounterCast ? (chosenCounterAction ?? (pendingAction.type === "spell" ? pendingAction : undefined))?.id : undefined;
+    const counterTargetName = isCounterCast ? (chosenCounterAction ?? (pendingAction.type === "spell" ? pendingAction : undefined))?.cardName : undefined;
     const action: PendingAction = {
       id: crypto.randomUUID(),
       type: "spell",
@@ -489,8 +496,9 @@ export function useStackResolution(ctx: GameContext) {
       faceIndex: respondHalf ? faceIndex : undefined,
       chosenX: chosenX > 0 ? chosenX : undefined,
       counterTargetId,
-      castChoices,
-      message: `${actor.name} responds with ${castView.name}${chosenX > 0 ? ` (X=${chosenX})` : ""}${stackTargetText(session, castChoices?.targets ?? [], counterTargetId && pendingAction.type === "spell" ? pendingAction.cardName ?? "a spell" : undefined, castModeLabels(castView, chosenX > 0 ? chosenX : undefined, castChoices))}${sourceZone === "exile" ? " from exile" : ""}.`
+      // A counterspell's pick lives in counterTargetId (a stack item, not a card on a board), so castChoices carries nothing for it.
+      castChoices: isCounterCast ? undefined : castChoices,
+      message: `${actor.name} responds with ${castView.name}${chosenX > 0 ? ` (X=${chosenX})` : ""}${stackTargetText(session, isCounterCast ? [] : castChoices?.targets ?? [], counterTargetId ? counterTargetName ?? "a spell" : undefined, castModeLabels(castView, chosenX > 0 ? chosenX : undefined, castChoices))}${sourceZone === "exile" ? " from exile" : ""}.`
     };
     if (sourceZone === "hand") setSelectedHandCardId(undefined);
     beginPendingAction(action, "Stack", preChosenSacrificeTargets);
@@ -828,7 +836,7 @@ export function useStackResolution(ctx: GameContext) {
             const targetCard =
               counterTargetAction.sourceZone === "command"
                 ? targetCurrentSeat?.board.commander
-                : targetCurrentSeat?.board.hand.find((card) => card.id === counterTargetAction.cardId);
+                : [...(targetCurrentSeat?.board.hand ?? []), ...(targetCurrentSeat?.board.exile ?? []), ...(targetCurrentSeat?.board.graveyard ?? [])].find((card) => card.id === counterTargetAction.cardId);
             if (targetCard) {
               next = moveCardBetweenVisibleZones(next, counterTargetAction.actorSeatId, targetCard.id, "graveyard");
             }
@@ -876,6 +884,15 @@ export function useStackResolution(ctx: GameContext) {
         });
         return;
       }
+      // Rule 608.2b: the spell it aimed at left the stack (countered, or resolved) before this resolved, so its only target is illegal: it fizzles. It does
+      // nothing (no delayed draws, no token) and is put into its owner's graveyard.
+      const stackAfterFizzle = removeStackAction(action.id);
+      setSession((current) => {
+        const played = playCardFromZone(current, action.actorSeatId, action.cardId, `${action.cardName} resolves.`, action.position, "graveyard", action.manaSourceIds, action.sourceZone ?? "hand", action.faceIndex);
+        return rulesEvent(played, action.actorSeatId, `${action.cardName}'s target is no longer legal, so it is countered on resolution and does nothing.`);
+      });
+      if (!resumeTopStackAction(stackAfterFizzle)) setPrioritySeatId(activeSeatId ?? action.actorSeatId);
+      return;
     }
 
     const remainingStack = removeStackAction(action.id);

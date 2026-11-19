@@ -7,14 +7,14 @@
 import { canAttack, attackLockedOut } from "@/engine/combat";
 import { canCastAtInstantSpeed, handCardFaceOptions, seatHasFlashGrant, type HandCardFaceOption } from "@/engine/casting";
 import { getBasicLandFetchOptions, getMyriadLandscapeOptions } from "@/engine/etb";
-import { spellIsImmuneToCounters } from "@/engine/legalActions";
+import { legalCounterSpellTargets } from "@/engine/legalActions";
 import { chooseManaSourcesForCost, emptyManaPool, payCostFromPool } from "@/engine/mana";
-import { findSpellSourceCard, resolutionPromptNote } from "@/engine/priority";
+import { resolutionPromptNote } from "@/engine/priority";
 import { isPlaneswalkerCard, loyaltyCounterCount } from "@/engine/zones";
 import type { BasicLandFetchSearchState, BlockChoiceState, LibraryLookState, ManaChoiceState, ManualLibrarySearchState, MyriadSearchState, MyriadTapChoiceState } from "@/engine/flowTypes";
 import type { PendingAction, PendingRuleChoice } from "@/engine/types";
 import { blockChoiceView, ruleChoiceView } from "@/components/viewModels";
-import { counterSpellCanTarget, parseCounterSpellAbility } from "../counterSpells";
+import { parseCounterSpellAbility } from "../counterSpells";
 import type { GameSession, ManaPool, PlayerSeat, VisibleCard } from "../types";
 import type { PromptOwners } from "./intentSpecs";
 
@@ -99,11 +99,11 @@ export interface SeatPrompts {
   attackerIds: string[];
 }
 
-function canLegallyCounter(session: GameSession, card: VisibleCard, pending: PendingAction | undefined): boolean {
+// Any legal spell on the stack is a valid counter target (the caster picks which in the cast prompt), not only the top one.
+function canLegallyCounter(session: GameSession, card: VisibleCard, pending: PendingAction | undefined, stack: PendingAction[]): boolean {
   const counterAbility = parseCounterSpellAbility(card.oracleText);
   if (!counterAbility || !pending || pending.type !== "spell") return true;
-  const target = findSpellSourceCard(session, pending);
-  return target !== undefined && !spellIsImmuneToCounters(session, target, pending.actorSeatId) && counterSpellCanTarget(counterAbility, target.typeLine, pending.sourceZone === "command");
+  return legalCounterSpellTargets(session, [...stack, pending], counterAbility).length > 0;
 }
 
 /** Pure: the prompts/hints of ONE seat. Same input -> same output. */
@@ -129,7 +129,7 @@ export function buildSeatPrompts(input: SeatPromptInput): SeatPrompts {
   for (const card of seat.board.hand) {
     const canRespond =
       canCastAtInstantSpeed(card, seatHasFlashGrant(seat, card)) &&
-      canLegallyCounter(session, card, input.pendingAction) &&
+      canLegallyCounter(session, card, input.pendingAction, input.stackActions) &&
       (payCostFromPool(pool, card, card.manaValue).ok || chooseManaSourcesForCost(seat, card, card.manaValue, undefined, session.seats).ok);
     const faceOptions = handCardFaceOptions(seat, card, input.landPlayedThisTurn, input.activeSeatId, pool, session.seats, session);
     handInfo[card.id] = { canRespond, ...(faceOptions && faceOptions.length > 0 ? { faceOptions } : {}) };

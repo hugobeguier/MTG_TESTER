@@ -23,7 +23,7 @@ import { isBoardWipeText } from "@/lib/actionScoring";
 import { parseGenericManaAbilities, parseGenericSacrificeAbilities, parseGenericTapAbilities, parseManlandAnimation, parseSelfUntapAbilities } from "@/lib/activatedAbilities";
 import { equipCost, isAura, isEquipment, restrictsNonManaNonLoyaltyAbilities } from "@/lib/attachments";
 import { permanentMatchesQualifier } from "@/lib/characteristics";
-import { counterImmunityScopeMatches, counterSpellCanTarget, hasCantBeCountered, parseCounterImmunityGrant, parseCounterSpellAbility } from "@/lib/counterSpells";
+import { counterImmunityScopeMatches, counterSpellCanTarget, hasCantBeCountered, parseCounterImmunityGrant, parseCounterSpellAbility, type CounterSpellAbility } from "@/lib/counterSpells";
 import { counterCount } from "@/lib/counters";
 import { parseCycling } from "@/lib/cycling";
 import { graveyardCastPermission } from "@/lib/graveyardCasting";
@@ -390,6 +390,25 @@ export function spellIsImmuneToCounters(session: GameSession, targetCard: Visibl
   return controller.board.battlefield.some((source) => {
     const scope = parseCounterImmunityGrant(source.oracleText);
     return scope !== undefined && counterImmunityScopeMatches(scope, targetCard.typeLine);
+  });
+}
+
+// Rule 114 / 701.5: a counterspell targets ONE spell on the stack, whichever the caster picks - not "the spell below me". These are the spells
+// on the stack (top first) the card's own restriction allows and that are not uncounterable. A copy of a spell (isCopy) is a spell too (it has
+// no card of its own, so it is judged by the type line recorded on the stack item). `stack` may list the top item twice (it is in both the
+// pending window and the stack array): duplicates by id are dropped.
+export function legalCounterSpellTargets(session: GameSession, stack: PendingAction[], ability: CounterSpellAbility): Array<Extract<PendingAction, { type: "spell" }>> {
+  const seen = new Set<string>();
+  const spells: Array<Extract<PendingAction, { type: "spell" }>> = [];
+  for (const item of stack) {
+    if (item.type !== "spell" || seen.has(item.id)) continue;
+    seen.add(item.id);
+    spells.push(item);
+  }
+  return spells.reverse().filter((item) => {
+    const card = findSpellSourceCard(session, item);
+    if (!card) return item.isCopy === true && counterSpellCanTarget(ability, item.cardTypeLine ?? "", false);
+    return !spellIsImmuneToCounters(session, card, item.actorSeatId) && counterSpellCanTarget(ability, card.typeLine, item.sourceZone === "command");
   });
 }
 

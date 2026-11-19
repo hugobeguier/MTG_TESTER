@@ -73,8 +73,7 @@ describe("guard: source never skips a human target prompt for a single candidate
 
 // ---- 2. Spells and Auras. ----
 const SPELL_EXCEPTIONS: Record<string, string> = {
-  "Arcane Denial": "counterspell: its target is the stack object the human responds to (counterTargetId), not a battlefield target",
-  Counterspell: "counterspell (see Arcane Denial)", Negate: "counterspell (see Arcane Denial)", "Swan Song": "counterspell (see Arcane Denial)",
+  // Counterspells are NOT exceptions any more: a human is asked which spell on the stack to counter (checked with a real stack below).
   Portent: "'target player's library': asked through choose_effect_target (library_look) when the spell resolves",
   "Animate Dead": "'enchant creature card in a graveyard': the graveyard creature is asked by the aura_reanimate enters trigger (tested below)",
   "Agadeem's Awakening": "'any number of target creature cards with different mana values': Rules Advisor planned, chosen at resolution",
@@ -98,11 +97,20 @@ describe("guard: a human's targeted spell or Aura asks for its target(s), even w
         if (!/\btargets?\b|^Enchant /im.test(face.oracleText) || !/Instant|Sorcery|Aura/.test(face.typeLine)) continue;
         checked += 1;
         const card = real(name, "spell", { zone: "hand", name: face.name, typeLine: face.typeLine, oracleText: face.oracleText });
-        if (!nextCastPrompt(world(), "me", card, 3, { targets: [] })) missing.push(face.name);
+        // A stack with an instant and a creature spell on it: a counterspell must ask which one (even a one-spell stack asks).
+        const stackWorld = world();
+        const onStack = [mk("stk1", "Instant", { name: "Some Instant", zone: "hand" }), mk("stk2", "Creature — Bear", { name: "Some Bear", zone: "hand" })];
+        stackWorld.seats[1].board.hand = onStack;
+        const stack = onStack.map((c) => ({ id: `s-${c.id}`, type: "spell" as const, actorSeatId: "opp", cardId: c.id, cardName: c.name, manaSourceIds: [], message: "" }));
+        if (!nextCastPrompt(stackWorld, "me", card, 3, { targets: [] }, stack)) missing.push(face.name);
       }
     }
     expect(checked).toBeGreaterThan(30);
     expect(missing.filter((name) => !(name in SPELL_EXCEPTIONS))).toEqual([]);
+  });
+  it("every counterspell of the shipped decks is a real (non-excepted) spell the guard above asked", () => {
+    for (const name of ["Arcane Denial", "Counterspell", "Negate", "Swan Song"]) expect(deckNames).toContain(name);
+    expect(Object.keys(SPELL_EXCEPTIONS)).not.toContain("Counterspell");
   });
   it("a one-candidate removal / bite still prompts", () => {
     const only = session([seat("me", "human", { battlefield: [mk("mine", "Creature — Bear")] }), seat("opp", "agent", { battlefield: [mk("theirs", "Creature — Bear")] })]);

@@ -36,6 +36,10 @@ Most of the engine lives, unusually, inside one 34,000-line React component file
    which makes a `PendingAction` (type `spell`, `trigger`, or `phase`) the thing everyone must pass
    priority on. Extra decisions (X value, modes, targets, alt costs) are asked first through
    `PendingRuleChoice` prompts (`openCastPrompt`, `completeCastX`, `completeSpellMode`, ...).
+   A **counterspell** targets one SPELL on the stack (rule 114), chosen at cast time: `nextCastPrompt` (given the stack) lists
+   every `legalCounterSpellTargets` entry (top first; restriction and "can't be countered" respected; a copy counts; abilities never),
+   the pick becomes `PendingAction.counterTargetId`, and at resolution only THAT item is removed (spells above/below keep their
+   order). If the targeted spell is already gone the counterspell fizzles (608.2b). Agents counter the spell they respond to (top).
 6. **Priority.** `passPriority` records who passed (`priorityPasses`); `nextPrioritySeatId` and
    `pendingActionRequiredPasses` (module-level) decide who must be asked. `src/lib/priorityStops.ts`
    holds the human's "when do I want to be interrupted" settings.

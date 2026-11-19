@@ -32,7 +32,7 @@ export function useCasting(ctx: GameContext) {
   const { session, setSession, activeSeatId, setSelectedHandCardId, humanSeat } = ctx;
   const { setLibraryLook, pendingRuleChoice, setPendingRuleChoice } = ctx.choices;
   const { copyMana, setCopyMana, manaContributions, lastCastManaContributors } = ctx.mana;
-  const { pendingAction, castDispatchInFlight, CAST_DISPATCH_STALE_MS } = ctx.stack;
+  const { pendingAction, stackStore, castDispatchInFlight, CAST_DISPATCH_STALE_MS } = ctx.stack;
   const { landPlaysThisTurn, firstDrawThisTurn, loyaltyActivationsThisTurn } = ctx.turn;
   const addEvent = lateFn(ctx, "addEvent");
   const applySagaEntryLoreCounter = lateFn(ctx, "applySagaEntryLoreCounter");
@@ -748,7 +748,7 @@ export function useCasting(ctx: GameContext) {
             ? { ...card, name: dfcSplit.spellFace.name, typeLine: dfcSplit.spellFace.typeLine, oracleText: dfcSplit.spellFace.oracleText }
             : card;
       const answers: CastChoices = { targets: [] };
-      const firstPrompt = nextCastPrompt(session, seatId, planCard, chosenX > 0 ? chosenX : undefined, answers);
+      const firstPrompt = nextCastPrompt(session, seatId, planCard, chosenX > 0 ? chosenX : undefined, answers, stackStore.ref.current.stack);
       if (firstPrompt) {
         openCastPrompt(firstPrompt, { planCard, chosenX: chosenX > 0 ? chosenX : undefined, answers, resume: { via: "playCard", seatId, cardId, position, sourceZone, faceIndex, sacrificeTargets: preChosenSacrificeTargets, altChoice } });
         setSelectedHandCardId(undefined);
@@ -1328,7 +1328,7 @@ export function useCasting(ctx: GameContext) {
     else if (choice.promptKind === "modes" && option.mode !== undefined) answers.modes!.push(option.mode);
     else if (option.target) answers.targets.push(option.target);
     if (!answers.modes?.length) delete answers.modes;
-    const next = nextCastPrompt(session, choice.controllerSeatId, choice.planCard, choice.chosenX, answers);
+    const next = nextCastPrompt(session, choice.controllerSeatId, choice.planCard, choice.chosenX, answers, stackStore.ref.current.stack);
     if (next) {
       openCastPrompt(next, { planCard: choice.planCard, chosenX: choice.chosenX, answers, resume: choice.resume });
       return;

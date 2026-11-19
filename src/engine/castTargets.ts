@@ -11,9 +11,11 @@ import { chooseManaSourcesForCost } from "@/engine/mana";
 import { agentPlannedCastChoices, parseEtbZoneEffect, parseSimpleLifeChange } from "@/engine/oneShotEffects";
 import { isLandCard } from "@/engine/shared";
 import { applyTargetedEffect, pickTargetedEffectTarget } from "@/engine/triggers";
-import { type CastChoices, type LabeledContinuation, type LabeledSlot } from "@/engine/types";
+import { type CastChoices, type LabeledContinuation, type LabeledSlot, type PendingAction } from "@/engine/types";
 import { rulesEvent } from "@/engine/zones";
 import { enchantRestriction, isAura } from "@/lib/attachments";
+import { parseCounterSpellAbility, type CounterSpellAbility } from "@/lib/counterSpells";
+import { legalCounterSpellTargets } from "@/engine/legalActions";
 import { effectivePower, effectiveToughness } from "@/lib/counters";
 import { etbEffectText, oracleClauses, parseModalHeader, parseSpellModalHeader } from "@/lib/oracleClauses";
 import { parseRemovalEffect, type RemovalEffect, type RemovalTargetType } from "@/lib/removalSpells";
@@ -208,6 +210,7 @@ type CastStructure =
   | { kind: "extra"; effect: SpellExtraEffect }
   | { kind: "pump"; effect: PumpEffect }
   | { kind: "targeted"; effect: TargetedEffect }
+  | { kind: "counter"; ability: CounterSpellAbility }
   // An Aura spell targets as it is CAST (rule 303.4a / 601.2c): "Enchant creature [you control]".
   | { kind: "aura"; restriction: "creature" | "creature_you_control" | "player" | "permanent" | "land" | "creature_land_planeswalker" };
 
@@ -222,6 +225,9 @@ export function castStructure(card: VisibleCard, chosenX?: number): CastStructur
     return undefined;
   }
   const text = etbEffectText(card.oracleText);
+  // "Counter target [type] spell": the target is a spell on the stack, chosen as the counterspell is cast.
+  const counterAbility = parseCounterSpellAbility(card.oracleText);
+  if (counterAbility && !parseModalHeader(card.oracleText)) return { kind: "counter", ability: counterAbility };
   if (parseModalHeader(card.oracleText)) {
     const removal = parseRemovalEffect(text);
     if (removal?.kind === "modal") return { kind: "removal_modal", modal: removal };
@@ -282,18 +288,38 @@ function genericModeSlots(session: GameSession, seatId: string, source: VisibleC
   return [];
 }
 
+// A counterspell's target is a SPELL on the stack, encoded as the card target of that spell (its controller + card id); counterTargetActionFor reads it back.
+export function counterTargetOptions(session: GameSession, seatId: string, stack: PendingAction[], ability: CounterSpellAbility): LabeledSlot["options"] {
+  return legalCounterSpellTargets(session, stack, ability).map((item, index) => {
+    const controller = session.seats.find((seat) => seat.id === item.actorSeatId);
+    const where = item.actorSeatId === seatId ? "yours" : controller?.name ?? "?";
+    return { label: `${item.cardName} — ${where}${index === 0 ? " (top of the stack)" : ""}${item.isCopy ? " (copy)" : ""}`, target: { kind: "card" as const, seatId: item.actorSeatId, cardId: item.cardId } };
+  });
+}
+
+// The stack spell a counterspell's chosen target names (undefined when it already left the stack).
+export function counterTargetActionFor(stack: PendingAction[], target: ChosenTarget | undefined): Extract<PendingAction, { type: "spell" }> | undefined {
+  if (target?.kind !== "card") return undefined;
+  const found = stack.find((item) => item.type === "spell" && item.cardId === target.cardId && item.actorSeatId === target.seatId);
+  return found?.type === "spell" ? found : undefined;
+}
+
 // The next question to put to the caster, given what they have already answered; undefined when nothing is left to ask.
 export function nextCastPrompt(
   session: GameSession,
   seatId: string,
   card: VisibleCard,
   chosenX: number | undefined,
-  answers: CastChoices
+  answers: CastChoices,
+  // The spells/abilities on the stack, which a counterspell's target is chosen from (the session itself does not hold the stack).
+  stack: PendingAction[] = []
 ): { kind: "modes"; prompt: string; options: Array<{ label: string; mode: number }> } | { kind: "target"; prompt: string; options: LabeledSlot["options"] } | undefined {
   const structure = castStructure(card, chosenX);
   if (!structure) return undefined;
   let slots: LabeledSlot[] = [];
-  if (structure.kind === "removal_modal" || structure.kind === "generic_modal") {
+  if (structure.kind === "counter") {
+    slots = [{ prompt: `${card.name}: choose the spell to counter.`, options: counterTargetOptions(session, seatId, stack, structure.ability) }];
+  } else if (structure.kind === "removal_modal" || structure.kind === "generic_modal") {
     const all = structure.kind === "removal_modal" ? structure.modal.modes : structure.modal.modes;
     const viable = all
       .map((mode, index) => ({ mode, index }))
@@ -565,6 +591,8 @@ function agentGenericModeTarget(session: GameSession, seatId: string, card: Visi
 export function agentCastTimeRemovalChoices(session: GameSession, seatId: string, card: VisibleCard, chosenX?: number): CastChoices | undefined {
   const structure = castStructure(card, chosenX);
   if (!structure) return card.typeLine.includes("Instant") || card.typeLine.includes("Sorcery") ? agentPlannedCastChoices(session, seatId, card) : undefined;
+  // An agent's counterspell keeps its own flow: it counters the spell it responds to (counterTargetId), nothing is recorded here.
+  if (structure.kind === "counter") return undefined;
   // An agent's Aura names its creature as it is cast (the same deterministic choice resolution used to make).
   if (structure.kind === "aura") {
     const attach = chooseAuraAttachTarget(session, seatId, card.oracleText);
