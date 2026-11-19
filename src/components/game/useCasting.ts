@@ -6,7 +6,7 @@ import { type ZoneEffect } from "@/lib/zoneEffects";
 import { activateGraveyardReturnInSession, findLandRaidTriggers } from "@/engine/triggerFinders";
 import { addEmblemToSeat, parseEtbZoneEffect } from "@/engine/oneShotEffects";
 import { additionalSacrificeCandidates, applyChosenFaceToCard, canCastAtInstantSpeed, castFaceDecision, castRestrictedByTurnCount, independentlyCastableSpellFaces, matchesAdditionalSacrificeType, modalDoubleFacedLandSplit, pathOfAncestryScries, playCardFromZone, recordCommanderCast, roomDoorFaces, seatHasFlashGrant, spellCastLockedOut, spellFaceCostCard, targetingTax, unlockSecondRoomDoor } from "@/engine/casting";
-import { adjustedCastingCost, cardWithFaceManaCost, coloredPipCount, fateDesignLifeAltCostKey, findMiracleGranter, hasFateDesignLifeAltCost, hasOmniscienceFreeHandCast, hasOnceEachTurnFreeHandCastPermission, hasSingleKicker, isHistoricCard, manaValueFromManaCost, maxAffordableX, miracleCostFor, onceEachTurnFreeCastKey, parseMiracleCost, staticCostReduction, totalCastingCost, unlockCostReduction, xSymbolCount } from "@/engine/costs";
+import { adjustedCastingCost, cardWithFaceManaCost, coloredPipCount, fateDesignLifeAltCostKey, hasFateDesignLifeAltCost, hasOmniscienceFreeHandCast, hasOnceEachTurnFreeHandCastPermission, hasSingleKicker, isHistoricCard, manaValueFromManaCost, maxAffordableX, onceEachTurnFreeCastKey, staticCostReduction, takeMiracleOffer, totalCastingCost, unlockCostReduction, xSymbolCount } from "@/engine/costs";
 import { agentCastTimeRemovalChoices, applyLabeledContinuation, castFaceCard, castModeLabels, hasResolvableTarget, nextCastPrompt, stackTargetText } from "@/engine/castTargets";
 import { applyChosenColor, applyChosenCreatureType, isSagaCard } from "@/engine/etb";
 import { applyCounterDelta, enterAsCopyCandidates, findExiledCardAnySeat, isPlaneswalkerCard, loyaltyCounterCount, parseEnterAsCopyEffect, possessive, shuffleCards } from "@/engine/zones";
@@ -105,58 +105,30 @@ export function useCasting(ctx: GameContext) {
   function drawCard(seatId: string) {
     const next = drawForSeat(session, seatId, `${session.seats.find((seat) => seat.id === seatId)?.name ?? "Player"} draws a card.`);
     setSession(next);
-    checkMiracleAfterDraw(session, next);
   }
 
-  function checkMiracleAfterDraw(priorSession: GameSession, nextSession: GameSession) {
-    for (const nextSeat of nextSession.seats) {
-      const priorHand = priorSession.seats.find((seat) => seat.id === nextSeat.id)?.board.hand ?? [];
-      const nextHand = nextSeat.board.hand;
-      if (nextHand.length <= priorHand.length) continue;
-
-      const turnKey = `${nextSession.turn}:${nextSeat.id}`;
-      if (firstDrawThisTurn.current.has(turnKey)) continue;
-      firstDrawThisTurn.current.add(turnKey);
-
-      const priorIds = new Set(priorHand.map((card) => card.id));
-      const firstDrawn = nextHand.find((card) => !priorIds.has(card.id));
-      if (!firstDrawn) continue;
-
-      // Native Miracle (Temporal Mastery, Bonfire of the Damned, ...) was never checked here at
-      // all — only Aminatou, Veil Piercer's granted-miracle case below was, and that's scoped to
-      // Enchantment cards specifically (matching her own "Enchantment cards in your hand have
-      // miracle" text), which no naturally-miracle card actually is. So a card with its own printed
-      // "Miracle {cost}" line just went to hand at full cost with the miracle window never offered.
-      const nativeMiracleCost = parseMiracleCost(firstDrawn);
-      if (nativeMiracleCost !== undefined) {
-        setPendingRuleChoice({
-          id: crypto.randomUUID(),
-          kind: "miracle_offer",
-          controllerSeatId: nextSeat.id,
-          sourceCardId: firstDrawn.id,
-          sourceCardName: firstDrawn.name,
-          prompt: `${firstDrawn.name} has miracle. Cast it for its miracle cost, or it stays in hand at full cost.`,
-          // A static reducer (Inquisitive Glimmer, ...) stacks with the printed miracle cost too —
-          // same floor rule 601.2f applies here, see miracleCostFor's own comment.
-          miracleCost: Math.max(coloredPipCount(firstDrawn), nativeMiracleCost - staticCostReduction(nextSeat, firstDrawn))
-        });
-        return;
-      }
-
-      const granter = findMiracleGranter(nextSeat);
-      if (!granter || !firstDrawn.typeLine.includes("Enchantment")) continue;
-
-      setPendingRuleChoice({
-        id: crypto.randomUUID(),
-        kind: "miracle_offer",
-        controllerSeatId: nextSeat.id,
-        sourceCardId: firstDrawn.id,
-        sourceCardName: firstDrawn.name,
-        prompt: `${granter.name} grants miracle. Cast ${firstDrawn.name} for its miracle cost, or it stays in hand at full cost.`,
-        miracleCost: miracleCostFor(nextSeat, firstDrawn)
-      });
-      return;
-    }
+  // CR 702.94a: the miracle trigger for a player's first card drawn this turn goes on the stack the next time a player would receive priority,
+  // after the whole draw effect (and a Brainstorm put-back) finished. useGameEffects calls this once nothing else is mid-resolution; the
+  // candidate card (PlayerSeat.drawnThisTurn.miracleCandidateId, set by drawForSeat) must still be in hand. Native "Miracle {cost}" and
+  // Aminatou's granted miracle both come through takeMiracleOffer; the offer is a normal pendingRuleChoice (routed to the seat's own snapshot
+  // for a remote friend, auto-answered for an AI seat).
+  function offerPendingMiracle() {
+    const taken = takeMiracleOffer(session);
+    if (!taken) return;
+    setSession(() => taken.session);
+    const offer = taken.offer;
+    if (!offer) return;
+    setPendingRuleChoice({
+      id: crypto.randomUUID(),
+      kind: "miracle_offer",
+      controllerSeatId: offer.seatId,
+      sourceCardId: offer.card.id,
+      sourceCardName: offer.card.name,
+      prompt: offer.granterName
+        ? `${offer.granterName} grants miracle. Reveal ${offer.card.name} and cast it for its miracle cost, or it stays in hand at full cost.`
+        : `${offer.card.name} has miracle. Reveal it and cast it for its miracle cost, or it stays in hand at full cost.`,
+      miracleCost: offer.cost
+    });
   }
 
   function shuffleLibrary(seatId: string) {
@@ -1377,5 +1349,5 @@ export function useCasting(ctx: GameContext) {
     });
   }
 
-  return { activateGraveyardAbility, activateLoyaltyAbility, applyCastingCostPaymentSideEffect, castCommander, castFromExile, castFromGraveyard, checkCastTriggeredKeywords, checkMiracleAfterDraw, chooseCreatureToSacrificeForCast, commitCrime, completeCastAlt, completeCastCopy, completeCastFace, completeCastPrompt, completeCastX, completeLabeledTarget, completeSpellMode, cycleCard, drawCard, openCastPrompt, payCastingCost, playCard, shuffleLibrary, unlockRoomDoor };
+  return { activateGraveyardAbility, activateLoyaltyAbility, applyCastingCostPaymentSideEffect, castCommander, castFromExile, castFromGraveyard, checkCastTriggeredKeywords, chooseCreatureToSacrificeForCast, commitCrime, completeCastAlt, completeCastCopy, completeCastFace, completeCastPrompt, completeCastX, completeLabeledTarget, completeSpellMode, cycleCard, drawCard, offerPendingMiracle, openCastPrompt, payCastingCost, playCard, shuffleLibrary, unlockRoomDoor };
 }

@@ -56,7 +56,8 @@ export function useGameEffects(ctx: GameContext) {
   const decideAgentTurnAction = lateFn(ctx, "decideAgentTurnAction");
   const fastForwardAgentToEndStep = lateFn(ctx, "fastForwardAgentToEndStep");
   const markAgentThinking = lateFn(ctx, "markAgentThinking");
-  const openCumulativeUpkeepChoice = lateFn(ctx, "openCumulativeUpkeepChoice");
+  const offerPendingMiracle = lateFn(ctx, "offerPendingMiracle");
+  const openCumulativeUpkeepChoice =lateFn(ctx, "openCumulativeUpkeepChoice");
   const openHumanPhaseChoice = lateFn(ctx, "openHumanPhaseChoice");
   const openPunisherPrompt = lateFn(ctx, "openPunisherPrompt");
   const playCard = lateFn(ctx, "playCard");
@@ -1236,6 +1237,15 @@ export function useGameEffects(ctx: GameContext) {
     humanSeat.id,
     priorityStopSettings
   ]);
+
+  // Miracle (CR 702.94a): a seat's first card drawn this turn (drawForSeat stamps drawnThisTurn.miracleCandidateId, on any player's turn) is offered
+  // once the whole draw effect, a Brainstorm put-back, and anything else mid-resolution are done - the next time a player would receive priority.
+  useEffect(() => {
+    if (mode !== "game" || gameStage !== "playing" || pendingAction || pendingRuleChoice || libraryLook || manualLibrarySearch || blockChoice || basicLandFetchSearch || rulesAdvisorPending) return;
+    if ((session.pendingDeaths?.length ?? 0) > 0) return;
+    if (!session.seats.some((seat) => seat.drawnThisTurn?.miracleCandidateId !== undefined)) return;
+    offerPendingMiracle();
+  }, [mode, gameStage, pendingAction, pendingRuleChoice, libraryLook, manualLibrarySearch, blockChoice, basicLandFetchSearch, rulesAdvisorPending, session.seats, session.pendingDeaths]);
 
   useEffect(() => {
     if (mode !== "game" || gameStage !== "playing" || !pendingRuleChoice) return;

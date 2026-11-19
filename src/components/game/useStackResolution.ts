@@ -51,7 +51,6 @@ export function useStackResolution(ctx: GameContext) {
   const applySagaEntryLoreCounter = lateFn(ctx, "applySagaEntryLoreCounter");
   const beginTriggerResolution = lateFn(ctx, "beginTriggerResolution");
   const checkCastTriggeredKeywords = lateFn(ctx, "checkCastTriggeredKeywords");
-  const checkMiracleAfterDraw = lateFn(ctx, "checkMiracleAfterDraw");
   const clearManaContributions = lateFn(ctx, "clearManaContributions");
   const consultRulesAdvisor = lateFn(ctx, "consultRulesAdvisor");
   const consultStaticEffectInterpreter = lateFn(ctx, "consultStaticEffectInterpreter");
@@ -544,7 +543,6 @@ export function useStackResolution(ctx: GameContext) {
     if (action.type === "phase") {
       setSession((current) => {
         const next = resolvePhaseAdvance(current);
-        checkMiracleAfterDraw(current, next);
         return next;
       });
       return;
@@ -1498,7 +1496,6 @@ export function useStackResolution(ctx: GameContext) {
         }
       }
       capturedTriggers = [...queuedTriggers, ...(tokenCreation?.triggers ?? [])];
-      if (simpleDrawEffect) checkMiracleAfterDraw(current, resolvedSession);
       return resolvedSession;
     });
     // Every capturedX variable above is only ever assigned inside the setSession updater just

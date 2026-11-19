@@ -144,7 +144,9 @@ export interface PlayerSeat {
   id: string;
   name: string;
   // How many cards this player has drawn so far in the given turn (Heliod, the Warped Eclipse counts what opponents drew).
-  drawnThisTurn?: { turn: number; count: number };
+  // miracleCandidateId: the FIRST card drawn this turn (CR 702.94a), kept until the miracle trigger is put on the stack (the next time a player
+  // would get priority, after the whole draw effect and any put-back finished) and then cleared. Written by drawForSeat, read by takeMiracleOffer.
+  drawnThisTurn?: { turn: number; count: number; miracleCandidateId?: string };
   // True once this player has created a token this turn (Idol of Oblivion's "activate only if you created a token this turn"); cleared when the turn changes.
   createdTokenThisTurn?: boolean;
   // This player's life when the current turn began (written at each turn change). "Gained life this turn" is read as life now above this; a gain

@@ -34,6 +34,11 @@ describe("promptSlotsForSeat: every choice box goes to the seat it is addressed 
     const friend = promptSlotsForSeat(slots, "friend");
     expect(Object.values(friend).every((slot) => slot !== undefined)).toBe(true);
   });
+  it("a miracle offer for a friend's seat (Aminatou, Veil Piercer) reaches only that friend's snapshot", () => {
+    const miracle = { id: "m", kind: "miracle_offer", controllerSeatId: "friend", sourceCardId: "e1", sourceCardName: "E", prompt: "?", miracleCost: 2 } as PendingRuleChoice;
+    expect(promptSlotsForSeat({ pendingRuleChoice: miracle }, "host").pendingRuleChoice).toBeUndefined();
+    expect(promptSlotsForSeat({ pendingRuleChoice: miracle }, "friend").pendingRuleChoice).toBe(miracle);
+  });
   it("host-addressed prompts still reach the host and not a friend", () => {
     const slots: PromptSlots = { pendingRuleChoice: rule("host"), libraryLook: look({ seatId: "host" }) };
     expect(promptSlotsForSeat(slots, "host").pendingRuleChoice).toBeDefined();

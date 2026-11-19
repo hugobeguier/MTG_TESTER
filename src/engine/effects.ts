@@ -3687,7 +3687,12 @@ export function drawForSeat(session: GameSession, seatId: string, message: strin
     if (!drawn) return seat;
     return {
       ...seat,
-      drawnThisTurn: { turn: session.turn, count: (seat.drawnThisTurn?.turn === session.turn ? seat.drawnThisTurn.count : 0) + 1 },
+      drawnThisTurn: (() => {
+        const previousCount = seat.drawnThisTurn?.turn === session.turn ? seat.drawnThisTurn.count : 0;
+        // Only the first card this player draws in the turn can be a miracle candidate (CR 702.94a).
+        const candidateId = previousCount === 0 ? drawn.id : seat.drawnThisTurn?.miracleCandidateId;
+        return { turn: session.turn, count: previousCount + 1, ...(candidateId ? { miracleCandidateId: candidateId } : {}) };
+      })(),
       library,
       board: {
         ...seat.board,

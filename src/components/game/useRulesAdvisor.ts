@@ -19,7 +19,6 @@ export function useRulesAdvisor(ctx: GameContext) {
   const { setRulesAdvisorPending } = ctx.agent;
   const { setPendingRuleChoice, setMyriadSearch } = ctx.choices;
   const addEvent = lateFn(ctx, "addEvent");
-  const checkMiracleAfterDraw = lateFn(ctx, "checkMiracleAfterDraw");
   const maybeRequestTarget = lateFn(ctx, "maybeRequestTarget");
   const startLibraryLook = lateFn(ctx, "startLibraryLook");
 
@@ -324,7 +323,6 @@ export function useRulesAdvisor(ctx: GameContext) {
       const count = Math.max(1, workflow.maxChoices || 1);
       setSession((current) => {
         const next = drawMultipleForSeat(current, seatId, count, `${seat.name} draws ${count} from ${sourceCard.name}.`);
-        checkMiracleAfterDraw(current, next);
         return next;
       });
       return;
@@ -346,7 +344,6 @@ export function useRulesAdvisor(ctx: GameContext) {
       const putBackAmount = workflow.putBackAmount ?? 0;
       const drawnSession = drawMultipleForSeat(session, seatId, drawAmount, `${seat.name} draws ${drawAmount} from ${sourceCard.name}.`);
       const postDrawHandSize = drawnSession.seats.find((item) => item.id === seatId)?.board.hand.length ?? 0;
-      checkMiracleAfterDraw(session, drawnSession);
       setSession(() => drawnSession);
       const requiredCount = Math.min(putBackAmount, postDrawHandSize);
       if (requiredCount > 0) {

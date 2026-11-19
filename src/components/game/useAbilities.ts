@@ -30,7 +30,6 @@ export function useAbilities(ctx: GameContext) {
   const { pendingAction, abilityResolvers, abilityApiRef } = ctx.stack;
   const addEvent = lateFn(ctx, "addEvent");
   const beginPendingAction = lateFn(ctx, "beginPendingAction");
-  const checkMiracleAfterDraw = lateFn(ctx, "checkMiracleAfterDraw");
   const clearManaContributions = lateFn(ctx, "clearManaContributions");
   const humanActionBlockedByChoice = lateFn(ctx, "humanActionBlockedByChoice");
   const maybeRequestTarget = lateFn(ctx, "maybeRequestTarget");
@@ -694,7 +693,6 @@ export function useAbilities(ctx: GameContext) {
     }
     const next = applyGenericAbilityEffect(paid.session, seatId, paid.card, paid.effect, chosenCardId);
     setSession(next);
-    checkMiracleAfterDraw(session, next);
   }
 
   // Only ever wired to the human control panel's own Equip button (ThreeGameTable only offers it

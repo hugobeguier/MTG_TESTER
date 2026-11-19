@@ -6,7 +6,7 @@
 // NOT here: spell-face helpers (spellFaceCostCard, castFaceOptions, ...) - they call timing/target checks that still live in AppFlow.tsx.
 // AppFlow.tsx re-exports the previously public symbols so existing importers keep working.
 
-import type { ManaPool, PlayerSeat, VisibleCard } from "@/lib/types";
+import type { GameSession, ManaPool, PlayerSeat, VisibleCard } from "@/lib/types";
 import { counterCount, effectivePower } from "@/lib/counters";
 import { permanentMatchesQualifier } from "@/lib/characteristics";
 import { hasCardType } from "@/lib/typeGrants";
@@ -469,6 +469,41 @@ export function findMiracleGranter(seat: PlayerSeat): VisibleCard | undefined {
 // 4, not the expected 5.
 export function miracleCostFor(seat: PlayerSeat, card: VisibleCard) {
   return Math.max(coloredPipCount(card), card.manaValue - 4 - staticCostReduction(seat, card));
+}
+
+export interface MiracleOffer {
+  seatId: string;
+  card: VisibleCard;
+  cost: number;
+  // Set when the miracle comes from a granter (Aminatou, Veil Piercer) instead of the card's own printed Miracle line.
+  granterName?: string;
+}
+
+// The miracle cost `seat` could pay for `card` (a card in its hand), or undefined when the card has no miracle at all.
+// Native "Miracle {cost}" and Aminatou's granted miracle (enchantment cards only, cost = mana cost reduced by {4}) both go
+// through the static cost reducers and the coloured-pip floor (601.2f); when both apply the cheaper one wins.
+export function miracleCostForCard(seat: PlayerSeat, card: VisibleCard): { cost: number; granterName?: string } | undefined {
+  const options: Array<{ cost: number; granterName?: string }> = [];
+  const nativeCost = parseMiracleCost(card);
+  if (nativeCost !== undefined) options.push({ cost: Math.max(coloredPipCount(card), nativeCost - staticCostReduction(seat, card)) });
+  const granter = findMiracleGranter(seat);
+  if (granter && /\bEnchantment\b/i.test(card.typeLine)) options.push({ cost: miracleCostFor(seat, card), granterName: granter.name });
+  return options.sort((a, b) => a.cost - b.cost)[0];
+}
+
+// CR 702.94a: the miracle trigger goes on the stack the next time a player would receive priority after the draw (and any put-back)
+// finished. This pops the next seat's pending first-draw candidate (PlayerSeat.drawnThisTurn.miracleCandidateId, written by drawForSeat) and
+// returns the session with it cleared plus the offer when that card is STILL in the seat's hand and has miracle. Only the first card a player drew
+// this turn is ever a candidate, on anyone's turn. Returns undefined when no seat has a candidate.
+export function takeMiracleOffer(session: GameSession): { session: GameSession; offer?: MiracleOffer } | undefined {
+  const seat = session.seats.find((item) => item.drawnThisTurn?.miracleCandidateId !== undefined);
+  if (!seat?.drawnThisTurn) return undefined;
+  const { miracleCandidateId, ...rest } = seat.drawnThisTurn;
+  const { turn } = rest;
+  const cleared: GameSession = { ...session, seats: session.seats.map((item) => (item.id === seat.id ? { ...item, drawnThisTurn: rest } : item)) };
+  const card = turn === session.turn && !seat.hasLost ? seat.board.hand.find((item) => item.id === miracleCandidateId) : undefined;
+  const miracle = card ? miracleCostForCard(seat, card) : undefined;
+  return { session: cleared, offer: card && miracle ? { seatId: seat.id, card, ...miracle } : undefined };
 }
 
 // A card's own printed "Miracle {cost}" line (Temporal Mastery: "Miracle {1}{U}"), as opposed to

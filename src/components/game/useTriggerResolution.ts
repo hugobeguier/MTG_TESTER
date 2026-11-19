@@ -33,7 +33,6 @@ export function useTriggerResolution(ctx: GameContext) {
   const applySagaReadAhead = lateFn(ctx, "applySagaReadAhead");
   const askOpeningHandBattlefield = lateFn(ctx, "askOpeningHandBattlefield");
   const beginPendingAction = lateFn(ctx, "beginPendingAction");
-  const checkMiracleAfterDraw = lateFn(ctx, "checkMiracleAfterDraw");
   const declareAttack = lateFn(ctx, "declareAttack");
   const playCard = lateFn(ctx, "playCard");
   const removeStackAction = lateFn(ctx, "removeStackAction");
@@ -508,7 +507,6 @@ export function useTriggerResolution(ctx: GameContext) {
           ? drawMultipleForSeat(session, trigger.controllerSeatId, drawAmount, `${seatName} draws ${drawAmount} from ${trigger.sourceCardName}.`)
           : session;
       const postDrawHandSize = drawnSession.seats.find((seat) => seat.id === trigger.controllerSeatId)?.board.hand.length ?? 0;
-      checkMiracleAfterDraw(session, drawnSession);
       setSession(() => drawnSession);
       const requiredCount = Math.min(putBackAmount, postDrawHandSize);
       if (requiredCount > 0) {
@@ -643,7 +641,6 @@ export function useTriggerResolution(ctx: GameContext) {
       const controllerSeat = session.seats.find((seat) => seat.id === trigger.controllerSeatId);
       if (controllerSeat?.kind === "human") {
         const drawnSession = drawMultipleForSeat(session, trigger.controllerSeatId, trigger.effect.amount, `${controllerSeat.name} draws ${trigger.effect.amount} from ${trigger.sourceCardName}.`);
-        checkMiracleAfterDraw(session, drawnSession);
         setSession(() => drawnSession);
         const permanents = drawnSession.seats.find((seat) => seat.id === trigger.controllerSeatId)?.board.hand.filter((card) => !/Instant|Sorcery/.test(card.typeLine)) ?? [];
         if (permanents.length > 0) {
@@ -669,7 +666,6 @@ export function useTriggerResolution(ctx: GameContext) {
       const controllerSeat = session.seats.find((seat) => seat.id === trigger.controllerSeatId);
       if (controllerSeat?.kind === "human") {
         const drawnSession = drawMultipleForSeat(session, trigger.controllerSeatId, trigger.effect.amount, `${controllerSeat.name} draws ${trigger.effect.amount} from ${trigger.sourceCardName}.`);
-        checkMiracleAfterDraw(session, drawnSession);
         const lands = drawnSession.seats.find((seat) => seat.id === trigger.controllerSeatId)?.board.hand.filter((card) => card.typeLine.includes("Land")) ?? [];
         const ownerAuto = trigger.effect.ownerToo ? resolveTriggerEffect(drawnSession, { ...trigger, effect: { ...trigger.effect, ownerToo: true }, controllerSeatId: findPermanentById(drawnSession, trigger.sourceCardId)?.ownerSeatId ?? trigger.controllerSeatId }) : drawnSession;
         setSession(() => (trigger.effect.kind === "draw_then_land" && trigger.effect.ownerToo && findPermanentById(drawnSession, trigger.sourceCardId)?.ownerSeatId !== trigger.controllerSeatId ? ownerAuto : drawnSession));
@@ -739,7 +735,6 @@ export function useTriggerResolution(ctx: GameContext) {
     } else if (accepted) {
       setSession((current) => {
         const next = resolveTriggerEffect(current, trigger);
-        checkMiracleAfterDraw(current, next);
         return next;
       });
     } else {
@@ -856,7 +851,6 @@ export function useTriggerResolution(ctx: GameContext) {
     const controllerSeat = fromSession.seats.find((seat) => seat.id === trigger.controllerSeatId);
     const seatName = controllerSeat?.name ?? "Player";
     const drawnSession = drawForSeat(fromSession, trigger.controllerSeatId, `${trigger.sourceCardName} connives: ${seatName} draws a card.`);
-    checkMiracleAfterDraw(fromSession, drawnSession);
     const postDrawHandSize = drawnSession.seats.find((seat) => seat.id === trigger.controllerSeatId)?.board.hand.length ?? 0;
     if (postDrawHandSize === 0) {
       startConniveIteration(trigger, remainingStack, iterationsLeft - 1, drawnSession);
