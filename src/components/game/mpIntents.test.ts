@@ -16,7 +16,7 @@ const SAMPLE: Record<string, unknown[]> = {
   onActivateEquip: [S, "c1"], onActivateManlandAnimation: [S, "c1"], onActivateLoyalty: [S, "c1", -2, "text"], onResolveMyriadLandscape: [S, "c1"], onResolveBasicLandFetch: [S, "c1"],
   onDrawCard: [S], onShuffleLibrary: [S], onChangeLife: [S, -1], onChangeCounter: [S, "c1", "+1/+1", 1],
   onMoveCardToGraveyard: [S, "c1"], onMoveCardToExile: [S, "c1"], onMoveCardToHand: [S, "c1"], onMoveBattlefieldCard: [S, "c1", POS], onOpenLibrarySearch: [],
-  onToggleFullControl: [], onStopNext: [], onTogglePhaseStop: ["declare blockers step", 2], onToggleStopOnStackResponse: [], onToggleStopOnAttacked: [], onToggleStopOnTargeted: [], onToggleStopOnChoicePrompt: [],
+  onToggleFullControl: [], onStopNext: [], onTogglePhaseStop: ["declare blockers step", 2], onToggleStopOnStackResponse: [], onToggleStopOnAttacked: [], onToggleStopOnTargeted: [], onToggleStopOnChoicePrompt: [], onToggleYield: [],
   onDeclareAttack: ["c1", "seat-a"], onConfirmBlockers: [["bf1"]], onPassBlocks: [],
   onChooseMana: ["G"], onCancelManaChoice: [], onChooseMyriadTapMana: [], onChooseMyriadTapSearch: [], onCancelMyriadTapChoice: [], onCloseMyriadSearch: [],
   onCompleteMyriadSearch: [["c1"]], onCloseBasicLandFetchSearch: [], onCompleteBasicLandFetchSearch: ["c1"], onCloseLibrarySearch: [], onSearchLibraryCardToHand: ["c1", "hand"],
@@ -140,5 +140,13 @@ describe("state checks (checkIntentWhen)", () => {
     expect(run("onDeclareAttack", ["c1", "seat-a"], stateFor("attack")).calls).toEqual([["declareHumanAttack", "c1", "seat-a", S]]);
     expect(run("onRespondWithSelectedCard", ["c1", "exile"], stateFor("priority")).calls).toEqual([["respondWithCard", "c1", "exile", undefined, undefined, undefined, S]]);
     expect(run("onPassPriority", [], stateFor("priority")).calls).toEqual([["passPriority"]]);
+  });
+});
+
+describe("yield intent", () => {
+  it("a friend's onToggleYield toggles only the sender's seat, works while a prompt is open or paused, and takes no args", () => {
+    expect(run("onToggleYield", [], stateFor("settings")).calls).toEqual([["toggleSeatYield", S]]);
+    expect(run("onToggleYield", [], { ...stateFor("settings"), owners: { rule: "seat-a" }, paused: true }).result.ok).toBe(true);
+    expect(run("onToggleYield", [], { ...stateFor("settings"), gameStage: "mulligan" }).result.ok).toBe(false);
   });
 });

@@ -43,6 +43,7 @@ import { DEFAULT_STOP_SETTINGS, stopKey, TURN_PHASES, type PriorityStopSettings 
 import { VisualCard } from "./VisualCard";
 import { hostHumanSeat } from "@/lib/multiplayer/seatMap";
 import { isMyStopColumn } from "@/lib/multiplayer/seatStops";
+import { describeKeyEvent, priorityShortcut } from "@/lib/yieldShortcuts";
 import { PHASE_ANIM_MS, nextPhaseTween, phaseProgress, type PhaseTween } from "@/components/phaseAnim";
 import { battlefieldPreviewCard, isLeftAlt } from "@/components/boardPreview";
 
@@ -212,6 +213,9 @@ interface ThreeGameTableProps {
   onToggleStopOnTargeted?: () => void;
   onToggleStopOnChoicePrompt?: () => void;
   onToggleFullControl?: () => void;
+  /** "Yield until end of turn" for the viewing seat: the button, Shift+Space; `yielding` shows the badge. */
+  onToggleYield?: () => void;
+  yielding?: boolean;
   holdPriorityOnce?: boolean;
   // Recently resolving/resolved stack items (newest first) with their "result" derived from the events produced while they resolved — the
   // stack shows what each item DID, so the game reads without the log.
@@ -374,7 +378,7 @@ function StackDock(props: StackDockProps) {
             {props.humanHasPriority ? (hasPrompts ? "Your chance to respond, before the choice appears." : "You have priority.") : `${props.seats.find((seat) => seat.id === props.prioritySeatId)?.name ?? "An agent"} has priority.`}
           </span>
           <div className="stack-dock-buttons">
-            <button type="button" className="stack-dock-pass" disabled={!props.humanHasPriority} onClick={props.onPass}>Pass Priority</button>
+            <button type="button" className="stack-dock-pass" title="Pass priority (Space)" disabled={!props.humanHasPriority} onClick={props.onPass}>Pass Priority</button>
             <button type="button" disabled={!props.humanHasPriority || !props.canRespondSelected} onClick={props.onRespondSelected}>Respond Selected</button>
             <button type="button" disabled={!props.humanHasPriority} onClick={props.onRespond}>Review Response</button>
             {props.pendingType === "trigger" ? (
@@ -939,6 +943,23 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
   const prioritySeat = props.session.seats.find((seat) => seat.id === props.prioritySeatId);
   const humanHasPriority = props.prioritySeatId === human.id;
   const humanIsActive = props.session.activePlayerId === human.id;
+  // Space = pass priority, Shift+Space = yield until end of turn (never while typing, on a button, or with a prompt/modal open; see lib/yieldShortcuts.ts).
+  const shortcutPromptOpen = Boolean(props.ruleChoice || props.blockChoice || props.manaChoice || props.libraryLook || props.myriadTapChoice || props.basicLandFetchSearch || props.inspectedCard || priorityStopsOpen);
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const action = priorityShortcut(describeKeyEvent(event), {
+        active: !props.spectator && (props.gameStage ?? "playing") === "playing",
+        canPass: Boolean(props.pendingAction) && humanHasPriority && Boolean(props.onPassPriority),
+        promptOpen: shortcutPromptOpen || Boolean(document.querySelector('[role="dialog"], dialog[open]'))
+      });
+      if (!action) return;
+      event.preventDefault();
+      if (action === "pass") props.onPassPriority?.();
+      else props.onToggleYield?.();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  });
   const stackTopFirst = [...displayedStack].reverse();
   const mulliganSelectedCount = props.mulliganReturnCardIds?.length ?? 0;
   const mulliganRequired = props.mulliganReturnRequired ?? 0;
@@ -1938,6 +1959,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
               type="button"
               className={props.priorityStopSettings?.fullControl ? "is-active" : undefined}
               aria-pressed={props.priorityStopSettings?.fullControl}
+              title="Full Control: every priority window opens, nothing is skipped for you (also cancels a yield)."
               onClick={props.onToggleFullControl}
             >
               Full Control
@@ -1947,10 +1969,22 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
               className={props.holdPriorityOnce ? "is-active" : undefined}
               aria-pressed={props.holdPriorityOnce}
               disabled={props.holdPriorityOnce}
+              title="Stop Next: you are asked at the very next priority window."
               onClick={props.onStopNext}
             >
               Stop Next
             </button>
+            {props.onToggleYield ? (
+              <button
+                type="button"
+                className={props.yielding ? "is-active" : undefined}
+                aria-pressed={Boolean(props.yielding)}
+                title="Yield until end of turn (Shift+Space): you are not asked to pass priority again this turn, unless an opponent targets you or attacks you. Click again to cancel."
+                onClick={props.onToggleYield}
+              >
+                Yield to End of Turn{props.yielding ? <span style={{ marginLeft: 6, padding: "0 6px", borderRadius: 8, background: "rgba(255,255,255,0.22)", fontSize: "0.8em" }}>Yielding</span> : null}
+              </button>
+            ) : null}
             <button type="button" disabled={Boolean(props.pendingAction) || !humanIsActive} onClick={props.onAdvanceTurn}>
               {humanIsActive && !props.pendingAction ? "Continue" : "Advance Phase"}
             </button>

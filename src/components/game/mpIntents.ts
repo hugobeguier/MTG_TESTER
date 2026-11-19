@@ -71,6 +71,7 @@ function callTable(h: HandlerApi): Record<GuestIntentName, Call> {
     onToggleStopOnAttacked: (s) => h.updateSeatStops(s, { kind: "attacked" }),
     onToggleStopOnTargeted: (s) => h.updateSeatStops(s, { kind: "targeted" }),
     onToggleStopOnChoicePrompt: (s) => h.updateSeatStops(s, { kind: "choicePrompt" }),
+    onToggleYield: (s) => h.toggleSeatYield(s),
     onDeclareAttack: (s, cardId, targetId) => h.declareHumanAttack(cardId, targetId, s),
     onConfirmBlockers: (_s, ids) => h.confirmBlockersFor(ids),
     onPassBlocks: () => h.passHumanBlocks(),

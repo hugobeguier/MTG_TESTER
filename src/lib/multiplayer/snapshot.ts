@@ -62,6 +62,8 @@ export interface SnapshotInput {
   pausedFor?: string[];
   /** Each remote friend's own priority-stop settings by seat id (only the viewer's own entry ever reaches that viewer; missing = the defaults). */
   seatStops?: Record<string, SeatStopSettings>;
+  /** Ids of the seats currently yielding until end of turn (only the viewer's own membership ever reaches that viewer, as `myYield`). */
+  yieldingSeatIds?: string[];
 }
 
 export interface MpSnapshot {
@@ -96,6 +98,8 @@ export interface MpSnapshot {
   ack?: { seq: number; error?: string };
   /** Seated viewer only: their own stop settings (Full Control, Stop Next, grid) as the host applies them. */
   myStops?: SeatStopSettings;
+  /** Seated viewer only: they are on "Yield until end of turn" (their own seat only). */
+  myYield?: boolean;
   /** Friends the game is paused for (disconnected); shown to everybody as "Waiting for <name> to reconnect". */
   pausedFor: string[];
 }
@@ -143,6 +147,7 @@ export function buildSnapshot(input: SnapshotInput, viewer: SnapshotViewer, rev 
     pausedFor: [...(input.pausedFor ?? [])],
     ack: mySeat ? input.ack : undefined,
     myStops: mySeat ? seatStopSettingsOf({ bySeat: input.seatStops }, mySeat.id, input.session.seats.indexOf(mySeat), input.session.seats.length) : undefined,
+    myYield: mySeat ? (input.yieldingSeatIds ?? []).includes(mySeat.id) : undefined,
     prompts: mySeat
       ? buildSeatPrompts({
           ...(input.prompts ?? {}),

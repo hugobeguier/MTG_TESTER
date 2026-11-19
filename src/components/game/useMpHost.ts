@@ -67,7 +67,8 @@ function readSnapshotInput(ctx: GameContext, hostName: string): SnapshotInput {
     },
     landPlayed: Object.fromEntries(session.seats.filter((seat) => seat.kind === "human").map((seat) => [seat.id, ctx.late.hasPlayedLandThisTurn(seat.id, session.turn)])),
     pausedFor: ctx.mpPausedFor,
-    seatStops: ctx.stack.seatStops
+    seatStops: ctx.stack.seatStops,
+    yieldingSeatIds: Object.keys(ctx.stack.seatYields)
   };
 }
 
@@ -233,7 +234,7 @@ export function useMpHost(ctx: GameContext, config: MpHostConfig): HostState {
     if (!enabled) return;
     schedule();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, session, activeSeatId, prioritySeatId, gameStage, mode, pendingAction, stackActions, priorityPasses, ctx.choices.mulligans, ctx.choices.keptHands, ctx.choices.mulliganReturnCardIds, ctx.mana.manaPools, guestKey, acks, ctx.mpPausedFor, ctx.stack.seatStops, ctx.choices.pendingRuleChoice, ctx.choices.libraryLook, ctx.choices.blockChoice, ctx.mana.manaChoice, ctx.choices.myriadTapChoice, ctx.choices.myriadSearch, ctx.choices.basicLandFetchSearch, ctx.choices.manualLibrarySearch]);
+  }, [enabled, session, activeSeatId, prioritySeatId, gameStage, mode, pendingAction, stackActions, priorityPasses, ctx.choices.mulligans, ctx.choices.keptHands, ctx.choices.mulliganReturnCardIds, ctx.mana.manaPools, guestKey, acks, ctx.mpPausedFor, ctx.stack.seatStops, ctx.stack.seatYields, ctx.choices.pendingRuleChoice, ctx.choices.libraryLook, ctx.choices.blockChoice, ctx.mana.manaChoice, ctx.choices.myriadTapChoice, ctx.choices.myriadSearch, ctx.choices.basicLandFetchSearch, ctx.choices.manualLibrarySearch]);
 
   useMpLobby({ ctx, state, enabled, hostName, tokenRef, intentRef, post, removeGuest: (slot) => dispatch({ type: "guest_removed", seatId: slot }) });
 

@@ -182,3 +182,13 @@ describe("snapshot size", () => {
     }
   });
 });
+
+describe("friend yield in the snapshot", () => {
+  it("a seated viewer learns only whether THEY are yielding; the others' yields never reach them", () => {
+    const input = makeInput({ yieldingSeatIds: ["seat-c"] });
+    expect(buildSnapshot(input, "seat-c").myYield).toBe(true);
+    expect(buildSnapshot(input, "seat-b").myYield).toBe(false);
+    expect(buildSnapshot(input, "spectator").myYield).toBeUndefined();
+    expect(JSON.stringify(buildSnapshot(input, "seat-b")).includes("seat-c\"]")).toBe(false);
+  });
+});

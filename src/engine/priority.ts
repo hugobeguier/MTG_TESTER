@@ -19,6 +19,7 @@ import { deathEffectText, etbEffectText, isActivatedAbilityClause, oracleClauses
 import { shouldStopForPriority, type PriorityStopSettings } from "@/lib/priorityStops";
 import { describeStackItem, type StackItemDescription, type StackItemLike } from "@/lib/stackDescription";
 import { priorityStopsForSeat, remoteSeatCanAct, remoteSeatsCanAct } from "@/lib/multiplayer/remoteSeatPolicy";
+import { yieldAutoPasses, type YieldMoment } from "@/engine/yieldPolicy";
 import { type GameSession, type ManaPool, type PlayerSeat, type VisibleCard } from "@/lib/types";
 
 // Without a session, this used to only send the card's NAME for anything on the stack — meaning
@@ -434,6 +435,29 @@ export function resolutionPromptNote(seat: PlayerSeat, action: PendingAction, se
   return "When this resolves you'll be asked to choose. Respond first if you want to.";
 }
 
+/** The facts yieldPolicy.ts needs about this seat and (optionally) the spell/ability on the stack. Exported for the yield effect, which clears ended yields with the same facts. */
+export function yieldMomentFor(
+  seat: PlayerSeat,
+  action: PendingAction | undefined,
+  session: GameSession,
+  activeSeatId: string | undefined,
+  stops: PriorityStopSettings,
+  holdPriorityOnceSeatId: string | undefined
+): YieldMoment {
+  const seatStops = priorityStopsForSeat(seat, stops, session.seats.indexOf(seat), session.seats.length);
+  const description = action && action.type !== "phase" ? withPendingActionSourceCard(session, action).description : undefined;
+  return {
+    seatId: seat.id,
+    turn: session.turn,
+    phase: session.phase,
+    activeSeatId,
+    beingAttacked: seatIsBeingAttacked(session, seat.id),
+    fullControl: seatStops.fullControl,
+    holdOnce: holdPriorityOnceSeatId === seat.id || Boolean(seatStops.holdOnce),
+    pending: description ? { controllerSeatId: description.controllerSeatId, targetSeatIds: description.targets.map((target) => target.seatId), sourceName: `${description.controller}'s ${description.source}` } : undefined
+  };
+}
+
 export function canReceivePriorityForPendingAction(
   seat: PlayerSeat,
   action: PendingAction,
@@ -459,6 +483,8 @@ export function canReceivePriorityForPendingAction(
     // human-only, so this branch is untouched by it.
     return legalPriorityActions(seat, action, activeSeatId, session).some((item) => item.actionType !== "pass_priority");
   }
+  // "Yield until end of turn": a yielding human seat passes this window on its own (see yieldPolicy.ts; cancelled by a spell aimed at it, an attack, Full Control, ...).
+  if (stops.yields?.[seat.id] && yieldAutoPasses(stops.yields[seat.id], yieldMomentFor(seat, action, session, activeSeatId, stops, holdPriorityOnceSeatId))) return false;
   const pool = manaPools[seat.id] ?? emptyManaPool();
   const pendingSpellTarget = action.type === "spell" ? findSpellSourceCard(session, action) : undefined;
   const flashGranted = seatHasFlashGrant(seat);

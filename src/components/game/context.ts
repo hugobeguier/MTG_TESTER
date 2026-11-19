@@ -18,6 +18,7 @@ import { checkStateBasedActions } from "@/engine/stateBased";
 import { payGenericSacrificeCost, payGenericTapCost } from "@/engine/abilities";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PriorityStopSettings, SeatStopSettings } from "@/lib/priorityStops";
+import type { YieldMap } from "@/engine/yieldPolicy";
 import { useDeckLibrary } from "@/components/hooks/useDeckLibrary";
 import { useStackState } from "@/components/hooks/useStackState";
 import { useDecisionState } from "@/components/hooks/useDecisionState";
@@ -37,6 +38,7 @@ import type { useGameActions } from "./useGameActions";
 import { hostHumanSeat } from "@/lib/multiplayer/seatMap";
 import type { useRulesAdvisor } from "./useRulesAdvisor";
 import type { useSpecialEffects } from "./useSpecialEffects";
+import type { useSeatYield } from "./useSeatYield";
 
 export type FlowMode = "setup" | "game";
 export type GameStage = "mulligan" | "playing";
@@ -53,7 +55,8 @@ export type HandlerApi = ReturnType<typeof useManaUi> &
   ReturnType<typeof useAgentDriver> &
   ReturnType<typeof useGameActions> &
   ReturnType<typeof useRulesAdvisor> &
-  ReturnType<typeof useSpecialEffects>;
+  ReturnType<typeof useSpecialEffects> &
+  ReturnType<typeof useSeatYield>;
 type GameState = ReturnType<typeof useGameState>;
 export type GameContext = GameState & { late: HandlerApi };
 
@@ -119,7 +122,9 @@ export function useGameState(initialSession: GameSession, options: { emptyNonHos
   // Multiplayer: each remote friend's OWN stop settings (seat id -> settings; absent = the host's defaults, see lib/multiplayer/seatStops.ts). Merged into the
   // settings every priority decision reads (as `bySeat`), so a friend is asked by their own stops, never the host's. Not persisted.
   const [seatStops, setSeatStops] = useState<Record<string, SeatStopSettings>>({});
-  const priorityStopSettings = useMemo<PriorityStopSettings>(() => (Object.keys(seatStops).length === 0 ? hostStopSettings : { ...hostStopSettings, bySeat: seatStops }), [hostStopSettings, seatStops]);
+  // "Yield until end of turn" per human seat (host included), by seat id: per turn, never persisted; read by priority.ts through `yields` (engine/yieldPolicy.ts).
+  const [seatYields, setSeatYields] = useState<YieldMap>({});
+  const priorityStopSettings = useMemo<PriorityStopSettings>(() => (Object.keys(seatStops).length === 0 && Object.keys(seatYields).length === 0 ? hostStopSettings : { ...hostStopSettings, ...(Object.keys(seatStops).length > 0 ? { bySeat: seatStops } : {}), ...(Object.keys(seatYields).length > 0 ? { yields: seatYields } : {}) }), [hostStopSettings, seatStops, seatYields]);
   // One-shot "stop me on the very next priority window" flag (the "Stop Next" button) — deliberately
   // session-only (not persisted): armed by a click, consumed the next time beginPendingAction or
   // resumeStackAction opens/reopens a window at all, regardless of whether that window ends up
@@ -296,7 +301,7 @@ export function useGameState(initialSession: GameSession, options: { emptyNonHos
   return {
     mpPausedFor, setMpPausedFor, mode, setMode, session, setSession, activeSeatId, setActiveSeatId, prioritySeatId, setPrioritySeatId, tableSession, selectedHandCardId, setSelectedHandCardId, inspectedCard, setInspectedCard, gameStage, setGameStage, gameOverDismissed, setGameOverDismissed, latestSessionRef, setupMessage, setSetupMessage, configs, setConfigs, deckLibrary, defaultDecksApplied, savedGames, setSavedGames, gameStarting, setGameStarting, autoValidatedDefaultDeck, humanSeat, selectedHandCard, baseSeats,
     choices: { decisions, mulligans, setMulligans, keptHands, setKeptHands, keptHandsRef, mulliganReturnCardIds, setMulliganReturnCardIds, libraryLook, setLibraryLook, manualLibrarySearch, setManualLibrarySearch, pendingRuleChoice, setPendingRuleChoice, blockChoice, setBlockChoice, selectedBlockerIds, setSelectedBlockerIds, myriadSearch, setMyriadSearch, myriadTapChoice, setMyriadTapChoice, basicLandFetchSearch, setBasicLandFetchSearch, choiceMinimized, setChoiceMinimized, pendingOrderedTriggerResume, commanderZoneChoiceAsked, auraRetargetAsked },
-    stack: { stackStore, pendingAction, setPendingAction, stackActions, priorityPasses, setPriorityPasses, priorityStopSettings, updatePriorityStopSettings, seatStops, setSeatStops, holdPriorityOnce, setHoldPriorityOnce, castDispatchInFlight, CAST_DISPATCH_STALE_MS, resolveBeatIds, resolveNowRef, abilityResolvers, abilityApiRef, stackFeed, setStackFeed },
+    stack: { stackStore, pendingAction, setPendingAction, stackActions, priorityPasses, setPriorityPasses, priorityStopSettings, updatePriorityStopSettings, seatStops, setSeatStops, seatYields, setSeatYields, holdPriorityOnce, setHoldPriorityOnce, castDispatchInFlight, CAST_DISPATCH_STALE_MS, resolveBeatIds, resolveNowRef, abilityResolvers, abilityApiRef, stackFeed, setStackFeed },
     mana: { manaPools, setManaPools, copyMana, setCopyMana, manaContributions, setManaContributions, restrictedManaBatches, setRestrictedManaBatches, manaChoice, setManaChoice, lastCastManaContributors },
     agent: { rulesAdvisorPending, setRulesAdvisorPending, agentMainActions, agentDecisionRequests, agentThinking, setAgentThinking, agentReasoning, setAgentReasoning, agentStatedPlans, agentCastAttempts, agentBannedCasts, agentDecisionInfo },
     turn: { landPlaysThisTurn, spellsCastThisTurn, firstDrawThisTurn, loyaltyActivationsThisTurn, phaseTriggersChecked, cleanupDiscardChecked, cleanupRestrictedManaChecked, pendingEndTurnAfterDiscard, processedDeathBatchRef, processedEntryBatchRef, processedLeaveBatchRef, processedCombatDamageToPlayerBatchRef, processedGraveyardDepartureBatchRef, emblemWatchPrevious, tokenArtCache, tokenArtInFlight, tokenArtVersion, setTokenArtVersion, monarchDrawChecked, exileDamageChecked, lifeWatchRef, processedBlockBatchRef, processedAttackBatchRef },

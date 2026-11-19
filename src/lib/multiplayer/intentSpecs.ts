@@ -105,6 +105,8 @@ export const INTENT_SPECS = {
   onToggleStopOnAttacked: { schema: none, when: "settings" },
   onToggleStopOnTargeted: { schema: none, when: "settings" },
   onToggleStopOnChoicePrompt: { schema: none, when: "settings" },
+  /** "Yield until end of turn" (Shift+Space) for the friend's own seat: the host auto-passes that seat's priority windows for the rest of the turn (engine/yieldPolicy.ts). */
+  onToggleYield: { schema: none, when: "settings" },
   // combat
   onDeclareAttack: { ...plain(id, id), when: "attack" },
   onConfirmBlockers: { ...plain(idList), when: "answerBlock" },

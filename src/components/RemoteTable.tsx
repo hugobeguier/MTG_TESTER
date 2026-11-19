@@ -102,6 +102,8 @@ export function RemoteTable({ snapshot, send = readOnlySender }: { snapshot: MpS
         session={shownSession}
         priorityStopSettings={snapshot.myStops}
         holdPriorityOnce={snapshot.myStops?.holdOnce}
+        yielding={snapshot.myYield}
+        onToggleYield={seated ? handlers.onToggleYield : undefined}
         onMoveBattlefieldCard={(seatId, cardId, position, phase) => {
           if (!seated) return;
           // Mouse-move events only move the card locally; ONE intent goes to the host when it is dropped.

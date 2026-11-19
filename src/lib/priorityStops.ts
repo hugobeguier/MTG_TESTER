@@ -11,6 +11,8 @@
 // way two independently-maintained copies eventually would. Lives here (a lib module) rather than in
 // either component file specifically to avoid a circular import: AppFlow.tsx imports ThreeGameTable,
 // so ThreeGameTable importing anything back from AppFlow.tsx would be circular.
+import type { YieldMap } from "@/engine/yieldPolicy";
+
 export const TURN_PHASES = [
   "untap step",
   "upkeep step",
@@ -49,12 +51,14 @@ export interface PriorityStopSettings {
    * own stops instead of the host's. Built by the game context; priority.ts picks the entry for a remote seat (see lib/multiplayer/seatStops.ts).
    */
   bySeat?: Record<string, SeatStopSettings>;
+  /** Host side only (never persisted, never sent): seats currently on "Yield until end of turn", by seat id (see engine/yieldPolicy.ts). Host's own seat included. */
+  yields?: YieldMap;
   /** Seat-level only: this seat's one-shot "Stop Next" flag (the host's equivalent is the separate holdPriorityOnce state). */
   holdOnce?: boolean;
 }
 
 /** A remote friend's stop settings: the same shape as the host's, plus their own one-shot "Stop Next" flag. */
-export type SeatStopSettings = Omit<PriorityStopSettings, "bySeat">;
+export type SeatStopSettings = Omit<PriorityStopSettings, "bySeat" | "yields">;
 
 export function stopKey(phase: string, turnOwnerSeatIndex: number): string {
   return `${turnOwnerSeatIndex}:${phase}`;

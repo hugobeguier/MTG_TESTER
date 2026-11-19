@@ -26,7 +26,8 @@ import { isLandCard } from "@/engine/shared";
 import { moveCommanderToCommandZone, rulesEvent } from "@/engine/zones";
 import { needsTokenArt, tokenArtLookupKey } from "@/lib/tokenArt";
 import { remoteSeatCanAct, priorityStopsForSeat } from "@/lib/multiplayer/remoteSeatPolicy";
-import { nextPrioritySeatId, pendingActionRequiredPasses } from "@/engine/priority";
+import { nextPrioritySeatId, pendingActionRequiredPasses, yieldMomentFor } from "@/engine/priority";
+import { yieldAutoPasses } from "@/engine/yieldPolicy";
 import { removalEffectTargetSpec, zoneEffectTargetSpec } from "@/lib/targetSpecs";
 import { seatVerb } from "@/engine/abilities";
 import { useEffect } from "react";
@@ -1168,15 +1169,17 @@ export function useGameEffects(ctx: GameContext) {
     const turnSeat = session.seats.find((seat) => seat.id === activeSeatId);
     if (!turnSeat || turnSeat.kind !== "human") return;
     const turnStops = priorityStopsForSeat(turnSeat, priorityStopSettings, session.seats.indexOf(turnSeat), session.seats.length);
+    // A seat on "Yield until end of turn" is auto-advanced through its own turn too (no own-turn stops, not even declare attackers) until the yield ends.
+    const yielding = yieldAutoPasses(priorityStopSettings.yields?.[turnSeat.id], yieldMomentFor(turnSeat, undefined, session, activeSeatId, priorityStopSettings, holdPriorityOnce && turnSeat.id === humanSeat.id ? turnSeat.id : undefined));
     if (turnStops.fullControl) return;
     const humanSeatIndex = Math.max(0, session.seats.indexOf(turnSeat));
-    if (turnStops.phaseStops[stopKey(session.phase, humanSeatIndex)]) return;
+    if (!yielding && turnStops.phaseStops[stopKey(session.phase, humanSeatIndex)]) return;
     // Footgun guard: an unticked "declare attackers step" would otherwise sail straight past any
     // real attack the human could still declare — there's no pendingAction/choice state guarding
     // that window the way blockChoice/pendingRuleChoice do for defense, since declareAttack mutates
     // the session directly rather than opening one. Stays regardless of the grid so unticking this
     // one cell can't silently make attacking impossible.
-    if (session.phase === "declare attackers step") {
+    if (session.phase === "declare attackers step" && !yielding) {
       const opponents = session.seats.filter((seat) => seat.id !== turnSeat.id && !seat.hasLost);
       if (legalAttackActions(turnSeat, opponents).length > 0) return;
     }
