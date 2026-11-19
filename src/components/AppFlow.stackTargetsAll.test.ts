@@ -242,7 +242,8 @@ const EXCEPTIONS: Record<string, string> = {
   "Parting Gust": "gift + exile-and-return needs the Rules Advisor plan",
   "Squirming Emergence": "fathomless-descent reanimation of a nonland permanent has no deterministic parser (Rules Advisor planned)",
   "Consuming Corruption": "X damage where X counts Swamps: Rules Advisor planned",
-  "Tendrils of Corruption": "X damage where X counts Swamps: Rules Advisor planned"
+  "Tendrils of Corruption": "X damage where X counts Swamps: Rules Advisor planned",
+  "Rootcast Apprenticeship": "known gap: 'choose three, you may choose the same mode more than once' with per-mode targets (counters, token copy, opponent sacrifice) has no deterministic parser or repeated-mode prompt"
 };
 function deckFiles(): string[] {
   const roots: string[] = [];

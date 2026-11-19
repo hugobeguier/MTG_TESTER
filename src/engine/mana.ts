@@ -11,6 +11,7 @@ import { effectivePower } from "@/lib/counters";
 import { oracleClauses } from "@/lib/oracleClauses";
 import { hasCardType } from "@/lib/typeGrants";
 import { COMMANDER_STARTING_LIFE, basicLandTypes, hasHaste, isBasicLandCard, isLandCard, numberWordToInt } from "@/engine/shared";
+import { cardWithColoredPipsReduced } from "@/engine/costs";
 
 export function availableManaForSeat(seat: PlayerSeat, pool?: ManaPool): number {
   if (seat.kind === "human" && pool) return manaPoolTotal(pool);
@@ -69,31 +70,75 @@ function spendGenericMana(pool: ManaPool, amount: number) {
   return next;
 }
 
-export function payCostFromPool(pool: ManaPool, card: VisibleCard, totalCost: number) {
-  const requirement = manaRequirementForCard(card, totalCost);
+// Pays a cost from mana already floating in a pool. A Phyrexian pip ({G/P}) is paid with its colour from the pool; it is paid with 2 life instead
+// only when the caller says life is available (options.life = the payer's life total) - the caller then has to charge the returned lifeCost.
+// options.seat: the payer, so a "costs {W}{U}{B}{R}{G} less" effect (Morophon) is applied to the spell's coloured pips before they are demanded.
+export function payCostFromPool(pool: ManaPool, card: VisibleCard, totalCost: number, options: { life?: number; seat?: PlayerSeat; allSeats?: PlayerSeat[] } = {}) {
+  const payCard = options.seat ? cardWithColoredPipsReduced(options.seat, card, options.allSeats) : card;
+  const phyrexianCount = manaRequirementForCard(payCard, totalCost).phyrexian.length;
+  let lastFailure: { ok: false; sourceIds: never[]; pool: ManaPool; reason: string } | undefined;
+  for (let lifePips = 0; lifePips <= phyrexianCount; lifePips += 1) {
+    if (lifePips > 0 && (options.life === undefined || options.life < 2 * lifePips)) break;
+    const attempt = payCostFromPoolWithLife(pool, payCard, totalCost, lifePips);
+    if (attempt.ok) return lifePips > 0 ? { ...attempt, lifeCost: 2 * lifePips } : attempt;
+    lastFailure ??= attempt;
+  }
+  return lastFailure ?? { ok: false as const, sourceIds: [] as never[], pool, reason: "cannot pay" };
+}
+
+function payCostFromPoolWithLife(pool: ManaPool, card: VisibleCard, totalCost: number, lifePips: number) {
+  const requirement = manaRequirementForCard(card, totalCost, false, lifePips);
   const next = { ...pool };
   for (const color of ["W", "U", "B", "R", "G"] as ColoredMana[]) {
     if (next[color] < requirement.colors[color]) {
-      return { ok: false as const, sourceIds: [], pool, reason: `missing ${color} mana` };
+      return { ok: false as const, sourceIds: [] as never[], pool, reason: `missing ${color} mana` };
     }
     next[color] -= requirement.colors[color];
   }
+  // {C} in a cost (Utter Insignificance's {2}{C}) can only be paid with colourless mana.
+  if (next.C < requirement.colorless) {
+    return { ok: false as const, sourceIds: [] as never[], pool, reason: "missing {C} (colorless) mana" };
+  }
+  next.C -= requirement.colorless;
   for (const options of requirement.hybrids) {
     const pick = [...options].sort((a, b) => next[b] - next[a])[0];
     if (next[pick] < 1) {
-      return { ok: false as const, sourceIds: [], pool, reason: `missing ${options.join(" or ")} mana` };
+      return { ok: false as const, sourceIds: [] as never[], pool, reason: `missing ${options.join(" or ")} mana` };
     }
     next[pick] -= 1;
   }
   if (manaPoolTotal(next) < requirement.generic) {
-    return { ok: false as const, sourceIds: [], pool, reason: `missing ${requirement.generic - manaPoolTotal(next)} generic mana` };
+    return { ok: false as const, sourceIds: [] as never[], pool, reason: `missing ${requirement.generic - manaPoolTotal(next)} generic mana` };
   }
   const genericPool = spendGenericMana(next, requirement.generic);
-  return { ok: true as const, sourceIds: [], pool: genericPool, spent: manaPoolDifference(pool, genericPool) };
+  return { ok: true as const, sourceIds: [] as never[], pool: genericPool, spent: manaPoolDifference(pool, genericPool) };
 }
 
+// Phyrexian mana ({G/P}: pay {G} or 2 life): chooseManaSourcesForCost first tries to pay every Phyrexian pip with mana, then with 1, 2, ... of them
+// paid with 2 life each (the player must have the life: rule 119.4), and takes the first way that works. The life is recorded against the returned
+// sourceIds array and charged by spendManaSources, the one place every payment site already calls, so no site needed new plumbing.
+const phyrexianLifeByPayment = new WeakMap<readonly string[], number>();
+
 export function chooseManaSourcesForCost(seat: PlayerSeat, card: VisibleCard, totalCost: number, excludeCardId?: string, allSeats?: PlayerSeat[]) {
-  const requirement = manaRequirementForCard(card, totalCost, anyColorManaSpendingActive(allSeats ?? [seat]));
+  const payCard = cardWithColoredPipsReduced(seat, card, allSeats);
+  const phyrexianCount = manaRequirementForCard(payCard, totalCost).phyrexian.length;
+  let firstFailure: ReturnType<typeof chooseManaSourcesForCostWithLife> | undefined;
+  for (let lifePips = 0; lifePips <= phyrexianCount; lifePips += 1) {
+    if (lifePips > 0 && seat.life < 2 * lifePips) break;
+    const attempt = chooseManaSourcesForCostWithLife(seat, payCard, totalCost, excludeCardId, allSeats, lifePips);
+    if (attempt.ok) {
+      if (lifePips > 0) phyrexianLifeByPayment.set(attempt.sourceIds, 2 * lifePips);
+      return lifePips > 0 ? { ...attempt, lifeCost: 2 * lifePips } : attempt;
+    }
+    firstFailure ??= attempt;
+  }
+  return firstFailure!;
+}
+
+function chooseManaSourcesForCostWithLife(seat: PlayerSeat, card: VisibleCard, totalCost: number, excludeCardId: string | undefined, allSeats: PlayerSeat[] | undefined, lifePips: number) {
+  const requirement = manaRequirementForCard(card, totalCost, anyColorManaSpendingActive(allSeats ?? [seat]), lifePips);
+  // Pips paid with life are not paid with mana: they come off the total that mana has to cover.
+  totalCost -= lifePips;
   const sources = seat.board.battlefield.filter((source) => source.id !== excludeCardId && isAvailableManaSource(source, seat, allSeats) && manaSourceMayPayFor(source, card));
   // A restricted source that is only here for its unrestricted colorless ability (Haven of the Spirit Dragon) can't make colors.
   const choicesFor = (source: VisibleCard) => {
@@ -108,13 +153,27 @@ export function chooseManaSourcesForCost(seat: PlayerSeat, card: VisibleCard, to
     candidates.find((candidate) => !chosen.has(candidate.id) && accepts(candidate) && painDamageForTap(candidate, color) === 0) ?? candidates.find((candidate) => !chosen.has(candidate.id) && accepts(candidate));
 
   for (const color of ["W", "U", "B", "R", "G"] as ColoredMana[]) {
-    for (let needed = requirement.colors[color]; needed > 0; needed -= 1) {
+    // A source that makes several mana of that colour ({T}: Add {G}{G}, The Great Henge) covers that many pips of it.
+    for (let needed = requirement.colors[color]; needed > 0; ) {
       const source = cheapestFirst(sources, (candidate) => choicesFor(candidate).includes(color), color);
       if (!source) return { ok: false as const, sourceIds: [...chosen], reason: `missing ${color} mana` };
       chosen.add(source.id);
       tappedFor[source.id] = color;
-      pool[color] += manaProducedBy(source, seat);
+      const produced = manaProducedBy(source, seat);
+      pool[color] += produced;
+      needed -= Math.max(1, produced);
     }
+  }
+
+  // {C} in a cost (Utter Insignificance's {2}{C}) can only be paid with colourless mana, i.e. a source that makes {C}.
+  for (let colorlessCovered = 0; colorlessCovered < requirement.colorless; ) {
+    const source = cheapestFirst(sources, (candidate) => choicesFor(candidate).includes("C"), "C");
+    if (!source) return { ok: false as const, sourceIds: [...chosen], reason: "missing {C} (colorless) mana" };
+    chosen.add(source.id);
+    tappedFor[source.id] = "C";
+    const produced = manaProducedBy(source, seat);
+    pool.C += produced;
+    colorlessCovered += Math.max(1, produced);
   }
 
   for (const options of requirement.hybrids) {
@@ -175,8 +234,11 @@ function anyColorManaSpendingActive(allSeats: PlayerSeat[]): boolean {
   return allSeats.some((seat) => seat.board.battlefield.some((card) => /players may spend mana as though it were mana of any color\b/i.test(card.oracleText)));
 }
 
-function manaRequirementForCard(card: VisibleCard, totalCost: number, anyColorSpendingActive = false) {
+function manaRequirementForCard(card: VisibleCard, totalCost: number, anyColorSpendingActive = false, lifePips = 0) {
   const colors: Record<ColoredMana, number> = { W: 0, U: 0, B: 0, R: 0, G: 0 };
+  // {C} (not generic {1}): must be paid with colourless mana. Phyrexian pips ({G/P}): paid with {G}, or with 2 life (the first `lifePips` of them).
+  let colorless = 0;
+  const phyrexian: ColoredMana[] = [];
   // Hybrid symbols ({B/G}, {W/U}, ...): each is paid with EITHER of its two colors. Before this they were counted as plain generic
   // mana, so Find // Finality's {B/G}{B/G} was payable with any two lands (white, say).
   const hybrids: ColoredMana[][] = [];
@@ -187,11 +249,17 @@ function manaRequirementForCard(card: VisibleCard, totalCost: number, anyColorSp
   // spent) real colored sources for a spell that should have cost nothing at all, and refused to
   // cast it entirely for anyone without those specific colors untapped. Reproduced live as
   // Omniscience not actually letting spells be cast for free.
-  if (totalCost <= 0) return { colors, hybrids, generic: 0 };
+  if (totalCost <= 0) return { colors, hybrids, colorless, phyrexian, generic: 0 };
   // Every colored pip becomes payable with any color of mana (Mycosynth Lattice) — folded entirely
   // into the generic requirement rather than tracked per-color, since chooseManaSourcesForCost's
   // colored loop only exists to demand a source of that SPECIFIC color.
-  if (anyColorSpendingActive) return { colors, hybrids, generic: totalCost };
+  if (anyColorSpendingActive) {
+    const symbolsAny = card.manaCost?.match(/\{[^}]+\}/g) ?? [];
+    // Mycosynth Lattice lets any mana pay a coloured pip, never a {C} pip; Phyrexian pips stay payable with life.
+    const colorlessPips = symbolsAny.filter((symbol) => symbol.toUpperCase() === "{C}").length;
+    const phyrexianPips = symbolsAny.filter((symbol) => /^\{[WUBRG]\/P\}$/i.test(symbol)).map((symbol) => symbol[1].toUpperCase() as ColoredMana);
+    return { colors, hybrids, colorless: colorlessPips, phyrexian: phyrexianPips, generic: Math.max(0, totalCost - colorlessPips) };
+  }
   const symbols = card.manaCost?.match(/\{[^}]+\}/g) ?? [];
   for (const symbol of symbols) {
     const value = symbol.replace(/[{}]/g, "").toUpperCase();
@@ -199,6 +267,10 @@ function manaRequirementForCard(card: VisibleCard, totalCost: number, anyColorSp
       colors[value as ColoredMana] += 1;
     } else if (/^[WUBRG]\/[WUBRG]$/.test(value)) {
       hybrids.push(value.split("/") as ColoredMana[]);
+    } else if (value === "C") {
+      colorless += 1;
+    } else if (/^[WUBRG]\/P$/.test(value)) {
+      phyrexian.push(value[0] as ColoredMana);
     }
   }
   if (symbols.length === 0 && totalCost > 0) {
@@ -207,9 +279,13 @@ function manaRequirementForCard(card: VisibleCard, totalCost: number, anyColorSp
       if (color !== "C") colors[color] += 1;
     }
   }
-  const coloredTotal = Object.values(colors).reduce((total, value) => total + value, 0) + hybrids.length;
+  // The Phyrexian pips that are paid with mana count as coloured pips; the first `lifePips` of them are paid with life instead (and are not generic).
+  phyrexian.forEach((color, index) => {
+    if (index >= lifePips) colors[color] += 1;
+  });
+  const coloredTotal = Object.values(colors).reduce((total, value) => total + value, 0) + hybrids.length + colorless + Math.min(lifePips, phyrexian.length);
   const generic = Math.max(0, totalCost - coloredTotal);
-  return { colors, hybrids, generic };
+  return { colors, hybrids, colorless, phyrexian, generic };
 }
 
 function manaPoolDifference(before: ManaPool, after: ManaPool) {
@@ -556,7 +632,14 @@ function conditionallyUnavailableColors(oracleText: string, seat: PlayerSeat): S
 export function manaChoicesForCard(card: VisibleCard, seat: PlayerSeat, allSeats?: PlayerSeat[]): ManaColor[] {
   const raw = manaChoicesForCardRaw(card, seat, allSeats);
   const blocked = conditionallyUnavailableColors(card.oracleText, seat);
-  return blocked.size > 0 ? raw.filter((color) => !blocked.has(color)) : raw;
+  const filtered = blocked.size > 0 ? raw.filter((color) => !blocked.has(color)) : raw;
+  // A land with a basic land type it was GIVEN (Urborg: every land is a Swamp) also has that type's intrinsic "{T}: Add {B}", on top of whatever its
+  // own text produces (Command Tower is still Command Tower, and a Mountain under Urborg taps for R or B). Not for a phased-out land.
+  if (card.grantedTypes?.length && card.typeLine.includes("Land") && !card.phasedOut && !card.abilitiesStripped) {
+    const intrinsic = card.grantedTypes.map(manaColorForBasicLand).filter((color): color is ManaColor => Boolean(color));
+    if (intrinsic.some((color) => !filtered.includes(color))) return normalizeManaColors([...filtered, ...intrinsic]);
+  }
+  return filtered;
 }
 
 // allSeats (every seat in the game, including this card's controller) is optional and only needed
@@ -602,7 +685,14 @@ function stripReminderText(oracleText: string): string {
 }
 
 export function effectiveManaOracleText(card: VisibleCard): string {
-  const base = stripReminderText(card.oracleText);
+  // A TRIGGERED ability that adds mana ("Whenever this creature attacks, add {R}{R}{R}{G}{G}{G}." Savage Ventmaw; "Whenever you tap a permanent for
+  // {C}, add an additional {C}." Forsaken Monument) is not a mana ability a player can use to pay for something: the mana only exists while the trigger
+  // resolves (attack mana is added by the combat code, the extra {C} by manaProducedBy). Left in, these cards were counted as free mana sources and
+  // auto-payment tapped them for mana they could not make at that time.
+  const base = stripReminderText(card.oracleText)
+    .split("\n")
+    .filter((line) => !/^\s*(?:whenever|when|at the beginning)\b[^\n]*\badd\b/i.test(line))
+    .join("\n");
   return card.grantedManaAbilityText ? `${base}\n${card.grantedManaAbilityText}` : base;
 }
 
@@ -614,11 +704,30 @@ export function scalingPaidManaAbility(oracleText: string): { generic: number; c
   return match ? { generic: Number.parseInt(match[1], 10), color: match[2].toUpperCase() as ManaColor, noun: match[3].toLowerCase() } : undefined;
 }
 
+// "{T}, Pay 2 life, Tap X untapped tokens you control: Add X mana in any combination of colors." (Hazel of the Rootbloom): modelled like a scaling mana
+// source - it makes as many mana as there are untapped tokens it can tap, costs 2 life, and spendManaSources taps those tokens along with it. A token
+// that is itself a mana source (a Treasure) is not counted: it would be tapped twice by one payment. Colours: any, all X of the one chosen.
+export function tokenTapManaAbility(card: VisibleCard): { life: number } | undefined {
+  const match = effectiveManaOracleText(card).match(/^\{t\}, pay (\d+) life, tap x untapped tokens you control: add x mana in any combination of colors\.?\s*$/im);
+  return match ? { life: Number.parseInt(match[1], 10) } : undefined;
+}
+
+export function tokensTappableForMana(card: VisibleCard, seat: PlayerSeat, allSeats?: PlayerSeat[]): VisibleCard[] {
+  return seat.board.battlefield.filter(
+    (other) => other.id !== card.id && other.token && !other.tapped && !other.phasedOut && !tokenTapManaAbility(other) && manaChoicesForCardRaw(other, seat, allSeats).length === 0
+  );
+}
+
 function otherUntappedLands(card: VisibleCard, seat: PlayerSeat): VisibleCard[] {
   return seat.board.battlefield.filter((other) => other.id !== card.id && !other.tapped && isLandCard(other));
 }
 
 function manaChoicesForCardRaw(card: VisibleCard, seat: PlayerSeat, allSeats?: PlayerSeat[]): ManaColor[] {
+  const tokenTap = tokenTapManaAbility(card);
+  if (tokenTap) {
+    // Needs at least one untapped token to tap, and the life (it cannot be paid down to a loss by an automatic payment).
+    return seat.life > tokenTap.life && tokensTappableForMana(card, seat, allSeats).length > 0 ? ["W", "U", "B", "R", "G"] : [];
+  }
   const scalingPaid = scalingPaidManaAbility(effectiveManaOracleText(card));
   if (scalingPaid) {
     const net = countMatchingPermanents(seat.board.battlefield, scalingPaid.noun) - scalingPaid.generic;
@@ -857,6 +966,7 @@ export function signetAbility(oracleText: string): { generic: number; symbols: M
 }
 
 export function manaProducedBy(card: VisibleCard, seat: PlayerSeat) {
+  if (tokenTapManaAbility(card)) return tokensTappableForMana(card, seat).length;
   const signet = signetAbility(effectiveManaOracleText(card));
   if (signet) return Math.max(1, signet.symbols.length - signet.generic);
   const scaling = scalingManaAmount(card, seat);
@@ -926,6 +1036,18 @@ function painlandDamageAmount(oracleText: string): number | undefined {
   return match ? Number.parseInt(match[1], 10) : undefined;
 }
 
+// "{T}: Add {G}{G}. You gain 2 life." (The Great Henge): life that comes with every tap of a mana ability. Only a mana line whose
+// cost is nothing but {T} counts.
+export function lifeGainForTap(card: VisibleCard): number {
+  for (const rawLine of effectiveManaOracleText(card).split("\n")) {
+    const line = rawLine.trim();
+    if (!/^\{t\}\s*:\s*add\b/i.test(line)) continue;
+    const gain = line.match(/\byou gain (\d+) life\b/i);
+    if (gain) return Number.parseInt(gain[1], 10);
+  }
+  return 0;
+}
+
 // Which colour each source was tapped for, recorded by chooseManaSourcesForCost against the `sourceIds` array it returns. Every payment site
 // calls spendManaSources(seat, payment.sourceIds) with that same array, so a pain land's damage can follow the colour actually produced without
 // threading a new argument through ~30 call sites. A source missing from the map (a caller that built its own id list) falls back to the default
@@ -992,6 +1114,13 @@ function depletionSacrificeCounterKind(oracleText: string): string | undefined {
 // painland's life cost — see painlandDamageAmount's own comment on why this is an approximation for
 // half the family, not an exact simulation.
 export function spendManaSources(seat: PlayerSeat, sourceIds: string[], tappedFor?: Record<string, ManaColor>): PlayerSeat {
+  // Life paid for Phyrexian pips ({G/P}) is charged here, with the same sourceIds array chooseManaSourcesForCost returned.
+  const lifePaid = phyrexianLifeByPayment.get(sourceIds) ?? 0;
+  const spent = spendManaSourcesTapping(seat, sourceIds, tappedFor);
+  return lifePaid > 0 ? { ...spent, life: Math.max(0, spent.life - lifePaid) } : spent;
+}
+
+function spendManaSourcesTapping(seat: PlayerSeat, sourceIds: string[], tappedFor?: Record<string, ManaColor>): PlayerSeat {
   if (sourceIds.length === 0) return seat;
   const colorOf = { ...(sourceColorsByPayment.get(sourceIds) ?? {}), ...(tappedFor ?? {}) };
   const sourceSet = new Set(sourceIds);
@@ -1002,15 +1131,27 @@ export function spendManaSources(seat: PlayerSeat, sourceIds: string[], tappedFo
     if (!source || !scalingPaid) continue;
     for (const land of otherUntappedLands(source, seat).filter((candidate) => !sourceSet.has(candidate.id)).slice(0, scalingPaid.generic)) sourceSet.add(land.id);
   }
+  // Hazel of the Rootbloom: the tokens it taps are tapped with it, and its "Pay 2 life" is charged.
+  let tokenTapLife = 0;
+  for (const id of [...sourceIds]) {
+    const source = seat.board.battlefield.find((card) => card.id === id);
+    const tokenTap = source ? tokenTapManaAbility(source) : undefined;
+    if (!source || !tokenTap) continue;
+    tokenTapLife += tokenTap.life;
+    for (const token of tokensTappableForMana(source, seat).filter((candidate) => !sourceSet.has(candidate.id))) sourceSet.add(token.id);
+  }
   const kept: VisibleCard[] = [];
   const sacrificed: VisibleCard[] = [];
   let painDamage = 0;
+  let lifeGain = 0;
+  const tokenTapLifeCost = tokenTapLife;
   for (const card of seat.board.battlefield) {
     if (!sourceSet.has(card.id)) {
       kept.push(card);
       continue;
     }
     painDamage += painDamageForTap(card, colorOf[card.id]);
+    lifeGain += lifeGainForTap(card);
     if (isSacrificeManaSource(card)) {
       sacrificed.push(card);
       continue;
@@ -1029,7 +1170,7 @@ export function spendManaSources(seat: PlayerSeat, sourceIds: string[], tappedFo
     }
     kept.push(hasCardType(card, "Artifact") ? { ...card, tapped: true, justTappedForMana: true } : { ...card, tapped: true });
   }
-  const life = painDamage > 0 ? Math.max(0, seat.life - painDamage) : seat.life;
+  const life = painDamage > 0 || lifeGain > 0 || tokenTapLifeCost > 0 ? Math.max(0, seat.life - painDamage - tokenTapLifeCost + lifeGain) : seat.life;
   if (sacrificed.length === 0) {
     return { ...seat, life, board: { ...seat.board, battlefield: kept } };
   }

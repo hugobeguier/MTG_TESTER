@@ -27,6 +27,9 @@ export interface TokenSpec {
   // "Create thirteen TAPPED 2/2 black Zombie creature tokens." (Army of the Damned, Necrotic Hex) —
   // only set when the card says so; absent means the token enters untapped like any other.
   tapped?: boolean;
+  // "a number of ... tokens equal to the number of opponents you have" (Chittering Witch): count is a placeholder, resolved to the creating player's
+  // opponents still in the game when the tokens are created (applyTokenCreationReplacements).
+  countBasis?: "opponents";
 }
 
 export function createTokenCard(seatId: string, sourceCardId: string, spec: TokenSpec): VisibleCard {
@@ -100,7 +103,7 @@ export function parseCreateTokenSpecs(
   // "Create X ... tokens, where X is the number of creatures attacking you") is a separate dynamic
   // basis, resolved against attackersTargetingCount instead — see the "where x is..." check below.
   const creaturePattern =
-    /creates?\s+(a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|twice x|x|\d+)\s+(?:tapped\s+)?((?:\d+\/\d+\s+)?(?:(?:white|blue|black|red|green|colorless|multicolored)\s+)*(?:[A-Z][a-zA-Z'-]*\s+){0,4}creature tokens?(?: with [^.]+)?)/gi;
+    /creates?\s+(a number of|a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|twice x|x|\d+)\s+(?:tapped\s+)?((?:\d+\/\d+\s+)?(?:(?:white|blue|black|red|green|colorless|multicolored)\s+)*(?:[A-Z][a-zA-Z'-]*\s+){0,4}creature tokens?(?: with [^.]+)?)/gi;
   // "...with reach, where X is the number of creatures attacking you." (Arachnogenesis) — this
   // clause sits INSIDE the "with [ability]" tail creaturePattern's own capture already grabs (unlike
   // forEachControlledPattern's basis below, which trails AFTER the match entirely on cards with no
@@ -144,6 +147,15 @@ export function parseCreateTokenSpecs(
     if (hasUnmodeledDynamicCount) continue;
     const forEachGraveyardMatch = normalized.slice(matchEnd, matchEnd + 60).match(forEachGraveyardCardPattern);
     let count: number;
+    // "Create a number of 1/1 black Rat creature tokens equal to the number of opponents you have." (Chittering Witch): the count is read when the
+    // tokens are created (the number of opponents still in the game), see TokenSpec.countBasis. Any other "a number of" basis is declined.
+    const opponentsBasis = match[1].toLowerCase() === "a number of" && /^\s*equal to the number of opponents you have\b/i.test(normalized.slice(matchEnd));
+    if (match[1].toLowerCase() === "a number of" && !opponentsBasis) continue;
+    if (opponentsBasis) {
+      const opponentSpec = parseCreatureTokenDescription(description);
+      if (opponentSpec) specs.push({ ...opponentSpec, count: 1, countBasis: "opponents" });
+      continue;
+    }
     if (forEachGraveyardMatch) {
       if (!controllerSeat) continue;
       const wantedType = forEachGraveyardMatch[1].toLowerCase();
@@ -281,58 +293,86 @@ function sentenceCaseAbilities(abilities: string) {
 }
 
 // ---- Session-level token creation (moved from AppFlow.tsx; part of the resolution import cycle, see entry.ts)
-// queueEntries (default on): the new tokens also go into pendingEntries so their "enters" triggers (and other permanents' "whenever a Zombie enters") fire
-// through the usual queue. The spell-resolution caller turns it off because it captures the returned triggers itself.
-export function createTokensForSeat(session: GameSession, seatId: string, sourceCardId: string, rawSpecs: TokenSpec[], options: { queueEntries?: boolean } = {}) {
-  // Draconic Visitor: "If one or more artifact tokens would be created under your control, that many 5/5 red Dragon creature tokens with flying are
-  // created instead." (Treasures, Clues, Thopters, ... all become Dragons.)
-  const replacesArtifactTokens = session.seats
-    .find((seat) => seat.id === seatId)
-    ?.board.battlefield.some((card) => !card.abilitiesStripped && /if one or more artifact tokens would be created under your control, that many 5\/5 red dragon creature tokens with flying are created instead/i.test(card.oracleText));
-  const dragonSpec = replacesArtifactTokens ? parseCreateTokenSpecs("create a 5/5 red Dragon creature token with flying")[0] : undefined;
-  const specs = dragonSpec ? rawSpecs.map((spec) => (spec.typeLine.includes("Artifact") ? { ...dragonSpec, count: spec.count } : spec)) : rawSpecs;
-  const createdTokens = specs.flatMap((spec) =>
-    Array.from({ length: spec.count }, () => createTokenCard(seatId, sourceCardId, spec))
-  );
-  const nextSession: GameSession = {
-    ...session,
-    pendingEntries: options.queueEntries === false || createdTokens.length === 0 ? session.pendingEntries : [...(session.pendingEntries ?? []), ...createdTokens.map((token) => ({ seatId, card: token }))],
-    seats: session.seats.map((seat) =>
-      seat.id === seatId
-        ? {
-            ...seat,
-            createdTokenThisTurn: createdTokens.length > 0 ? true : seat.createdTokenThisTurn,
-            board: {
-              ...seat.board,
-              battlefield: [...seat.board.battlefield, ...createdTokens]
-            },
-            zones: {
-              ...seat.zones,
-              battlefield: seat.zones.battlefield + createdTokens.length
-            }
-          }
-        : seat
-    )
-  };
-  // Run state-based actions before checking ETB-trigger applicability for the same reason as the
-  // spell-resolution pipeline: a created token that only becomes (e.g.) an enchantment via a
-  // separate static ability needs grantedTypes computed before "an enchantment enters" watchers
-  // (including the token's own) can recognize it.
-  // Dragonstorm Globe / Giada: "enters with an additional +1/+1 counter" applies to tokens too (e.g. Dragon tokens).
-  const withReplacementCounters = createdTokens.reduce((acc, token) => applyEntryEffects(acc, seatId, token.id), nextSession);
-  const sbaCheckedSession = checkStateBasedActions(withReplacementCounters);
-  const triggers = createdTokens.flatMap((token) => findCommonTriggersForPermanentEntered(sbaCheckedSession, seatId, token));
-  return { session: sbaCheckedSession, createdTokens, triggers };
+//
+// THE TOKEN CREATION PIPELINE. Every token a card, ability or trigger creates goes through createTokenBatch (createTokensForSeat for "create N X
+// tokens", createCopyTokenForSeat / createCopyTokensForSeat for "create a token that's a copy of ..."). One call is ONE creation event (rule 111.1):
+// first the replacement effects the creating player controls rewrite the request (applyTokenCreationReplacements), then the tokens enter together,
+// then entry effects, state-based actions and "enters" triggers run. A new "if you would create a token" card is a new rule inside
+// applyTokenCreationReplacements, not a new code path at each creating card.
+export interface TokenCreationRequest {
+  specs: TokenSpec[];
+  copies: Array<{ source: VisibleCard; notLegendary?: boolean; asArtifact?: boolean }>;
 }
 
-// A token copy takes the source's copiable values (name, type line, oracle text, mana cost/value,
-// colors, power/toughness) — not its current counters, attachments, or any other continuous-effect
-// state (rule 707.2), so a fresh minimal object is correct here rather than spreading `source`.
-// Types granted by a separate static ability (e.g. Secret Arcade) aren't copied either; they'll
-// apply fresh to the token on its own if it also matches that effect's scope, via the same
-// grantedTypes recompute every other permanent goes through.
-export function createCopyTokenForSeat(session: GameSession, seatId: string, source: VisibleCard, options: { notLegendary?: boolean; asArtifact?: boolean } = {}): { session: GameSession; token: VisibleCard } {
-  const token: VisibleCard = {
+const CLUE_FOOD_TREASURE = ["Clue", "Food", "Treasure"] as const;
+function predefinedKindOf(spec: TokenSpec): string | undefined {
+  return CLUE_FOOD_TREASURE.find((kind) => spec.name === kind || new RegExp(`\\b${kind}\\b`).test(spec.typeLine));
+}
+
+// Replacement effects on tokens the player is about to create, in a fixed order that matches how a player would sequence them for the best result
+// (they are the affected player's choice in the rules): Draconic Visitor (artifact tokens become Dragons), Academy Manufactor (Clue/Food/Treasure
+// become one of each), then Chatterfang (the whole event, counted last, gets that many extra Squirrels). Doubling effects (Doubling Season, Parallel
+// Lives) are not modelled; none is in the decks this was built for.
+export function applyTokenCreationReplacements(session: GameSession, seatId: string, request: TokenCreationRequest): TokenCreationRequest {
+  const controller = session.seats.find((seat) => seat.id === seatId);
+  if (!controller) return request;
+  const active = controller.board.battlefield.filter((card) => !card.abilitiesStripped && !card.phasedOut);
+  let { specs, copies } = request;
+  // Counts that depend on the board when the tokens are created: "the number of opponents you have".
+  if (specs.some((spec) => spec.countBasis)) {
+    const opponents = session.seats.filter((seat) => seat.id !== seatId && !seat.hasLost).length;
+    specs = specs.map((spec) => (spec.countBasis === "opponents" ? { ...spec, count: opponents, countBasis: undefined } : spec));
+  }
+
+  // Draconic Visitor: "If one or more artifact tokens would be created under your control, that many 5/5 red Dragon creature tokens with flying are
+  // created instead." (Treasures, Clues, Thopters, ... all become Dragons.)
+  if (active.some((card) => /if one or more artifact tokens would be created under your control, that many 5\/5 red dragon creature tokens with flying are created instead/i.test(card.oracleText))) {
+    const dragonSpec = parseCreateTokenSpecs("create a 5/5 red Dragon creature token with flying")[0];
+    if (dragonSpec) specs = specs.map((spec) => (spec.typeLine.includes("Artifact") ? { ...dragonSpec, count: spec.count } : spec));
+  }
+
+  // Academy Manufactor: "If you would create a Clue, Food, or Treasure token, instead create one of each." Each such token becomes one of each of the
+  // three (so two Treasures become two Clues, two Foods and two Treasures). A token that is a copy of one of those counts the same.
+  if (active.some((card) => /if you would create a clue, food, or treasure token, instead create one of each/i.test(card.oracleText))) {
+    const expanded: TokenSpec[] = [];
+    for (const spec of specs) {
+      const kind = predefinedKindOf(spec);
+      if (!kind) {
+        expanded.push(spec);
+        continue;
+      }
+      for (const other of CLUE_FOOD_TREASURE) {
+        const base = other === kind ? spec : predefinedTokenSpec(other);
+        if (base) expanded.push({ ...base, count: spec.count, ...(spec.tapped ? { tapped: true } : {}) });
+      }
+    }
+    for (const copy of copies) {
+      const kind = copy.source.token ? CLUE_FOOD_TREASURE.find((candidate) => new RegExp(`\\b${candidate}\\b`).test(copy.source.typeLine)) : undefined;
+      if (!kind) continue;
+      for (const other of CLUE_FOOD_TREASURE) {
+        const base = other === kind ? undefined : predefinedTokenSpec(other);
+        if (base) expanded.push({ ...base, count: 1 });
+      }
+    }
+    specs = expanded;
+  }
+
+  // Chatterfang, Squirrel General: "If one or more tokens would be created under your control, those tokens plus that many 1/1 green Squirrel creature
+  // tokens are created instead." Each Chatterfang adds as many Squirrels as the event holds at that moment.
+  const squirrelSpec = parseCreateTokenSpecs("create a 1/1 green Squirrel creature token")[0];
+  for (const card of active) {
+    if (!squirrelSpec || !/if one or more tokens would be created under your control, those tokens plus that many 1\/1 green squirrel creature tokens are created instead/i.test(card.oracleText)) continue;
+    const total = specs.reduce((sum, spec) => sum + spec.count, 0) + copies.length;
+    if (total > 0) specs = [...specs, { ...squirrelSpec, count: total }];
+  }
+  return { specs, copies };
+}
+
+function buildCopyToken(seatId: string, source: VisibleCard, options: { notLegendary?: boolean; asArtifact?: boolean } = {}): VisibleCard {
+  // A token copy takes the source's copiable values (name, type line, oracle text, mana cost/value, colors, power/toughness) - not its current counters,
+  // attachments, or any other continuous-effect state (rule 707.2), so a fresh minimal object is correct here rather than spreading `source`. Types
+  // granted by a separate static ability (e.g. Secret Arcade) aren't copied either; they apply fresh via the same grantedTypes recompute.
+  return {
     id: `${seatId}-token-${crypto.randomUUID()}`,
     name: source.name,
     typeLine: (() => {
@@ -358,17 +398,69 @@ export function createCopyTokenForSeat(session: GameSession, seatId: string, sou
     toughness: source.toughness,
     summoningSick: source.typeLine.includes("Creature")
   };
+}
+
+// The one creation event. queueEntries (default on): the new tokens also go into pendingEntries so their "enters" triggers (and other permanents'
+// "whenever a Zombie enters") fire through the usual queue. The spell-resolution caller of createTokensForSeat turns it off because it captures the
+// returned triggers itself.
+function createTokenBatch(
+  session: GameSession,
+  seatId: string,
+  sourceCardId: string,
+  request: TokenCreationRequest,
+  options: { queueEntries?: boolean } = {}
+): { session: GameSession; createdTokens: VisibleCard[]; copyTokens: VisibleCard[] } {
+  const replaced = applyTokenCreationReplacements(session, seatId, request);
+  const specTokens = replaced.specs.flatMap((spec) => Array.from({ length: spec.count }, () => createTokenCard(seatId, sourceCardId, spec)));
+  const copyTokens = replaced.copies.map((copy) => buildCopyToken(seatId, copy.source, copy));
+  const createdTokens = [...specTokens, ...copyTokens];
   const nextSession: GameSession = {
     ...session,
+    pendingEntries: options.queueEntries === false || createdTokens.length === 0 ? session.pendingEntries : [...(session.pendingEntries ?? []), ...createdTokens.map((token) => ({ seatId, card: token }))],
     seats: session.seats.map((seat) =>
-      seat.id === seatId
-        ? { ...seat, createdTokenThisTurn: true, board: { ...seat.board, battlefield: [...seat.board.battlefield, token] }, zones: { ...seat.zones, battlefield: seat.zones.battlefield + 1 } }
+      seat.id === seatId && createdTokens.length > 0
+        ? {
+            ...seat,
+            createdTokenThisTurn: true,
+            board: { ...seat.board, battlefield: [...seat.board.battlefield, ...createdTokens] },
+            zones: { ...seat.zones, battlefield: seat.zones.battlefield + createdTokens.length }
+          }
         : seat
-    ),
-    // A token copy entering is an entry like any other: its own "enters" triggers (and other permanents' watchers) fire.
-    pendingEntries: [...(session.pendingEntries ?? []), { seatId, card: token }]
+    )
   };
-  return { session: applyEntryEffects(nextSession, seatId, token.id), token };
+  // Dragonstorm Globe / Giada: "enters with an additional +1/+1 counter" applies to tokens too (e.g. Dragon tokens).
+  return { session: createdTokens.reduce((acc, token) => applyEntryEffects(acc, seatId, token.id), nextSession), createdTokens, copyTokens };
+}
+
+export function createTokensForSeat(session: GameSession, seatId: string, sourceCardId: string, rawSpecs: TokenSpec[], options: { queueEntries?: boolean } = {}) {
+  const created = createTokenBatch(session, seatId, sourceCardId, { specs: rawSpecs, copies: [] }, options);
+  const createdTokens = created.createdTokens;
+  // Run state-based actions before checking ETB-trigger applicability for the same reason as the
+  // spell-resolution pipeline: a created token that only becomes (e.g.) an enchantment via a
+  // separate static ability needs grantedTypes computed before "an enchantment enters" watchers
+  // (including the token's own) can recognize it.
+  const sbaCheckedSession = checkStateBasedActions(created.session);
+  const triggers = createdTokens.flatMap((token) => findCommonTriggersForPermanentEntered(sbaCheckedSession, seatId, token));
+  return { session: sbaCheckedSession, createdTokens, triggers };
+}
+
+// Token copies of several permanents in ONE event (Second Harvest: "For each token you control, create a token that's a copy of that permanent";
+// Hazel of the Rootbloom's two copies of a Squirrel). Replacement effects see the whole batch, so Chatterfang adds Squirrels once per event, by count.
+export function createCopyTokensForSeat(
+  session: GameSession,
+  seatId: string,
+  sources: VisibleCard[],
+  options: { notLegendary?: boolean; asArtifact?: boolean } = {},
+  sourceCardId = sources[0]?.id ?? ""
+): { session: GameSession; tokens: VisibleCard[]; createdTokens: VisibleCard[] } {
+  if (sources.length === 0) return { session, tokens: [], createdTokens: [] };
+  const created = createTokenBatch(session, seatId, sourceCardId, { specs: [], copies: sources.map((source) => ({ source, ...options })) });
+  return { session: created.session, tokens: created.copyTokens, createdTokens: created.createdTokens };
+}
+
+export function createCopyTokenForSeat(session: GameSession, seatId: string, source: VisibleCard, options: { notLegendary?: boolean; asArtifact?: boolean } = {}): { session: GameSession; token: VisibleCard } {
+  const created = createCopyTokensForSeat(session, seatId, [source], options);
+  return { session: created.session, token: created.tokens[0] };
 }
 
 // "Create a token that's a copy of one of them." (Twilight Diviner): one candidate copies straight away; with several a human is asked

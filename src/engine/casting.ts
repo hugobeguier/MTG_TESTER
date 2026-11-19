@@ -383,7 +383,7 @@ function castFaceOptions(
     const costCard = spellFaceCostCard(card, face);
     const fixedCost = adjustedCastingCost(seat, costCard, costCard.manaValue, "hand", activeSeatId, allSeats);
     // Only the non-X portion has to be payable to offer the half at all (X = 0 is always legal).
-    const payable = pool ? payCostFromPool(pool, costCard, fixedCost).ok : chooseManaSourcesForCost(seat, costCard, fixedCost, undefined, allSeats).ok;
+    const payable = pool ? payCostFromPool(pool, costCard, fixedCost, { life: seat.life, seat, allSeats }).ok : chooseManaSourcesForCost(seat, costCard, fixedCost, undefined, allSeats).ok;
     let castable = spellFaceCastableFromHand(face);
     if (castable && session) {
       const instant = canCastAtInstantSpeed(costCard, seatHasFlashGrant(seat, costCard));
@@ -462,7 +462,7 @@ export function handCardFaceOptions(
   const split = modalDoubleFacedLandSplit(card);
   if (split) {
     const spellCost = adjustedCastingCost(seat, card, card.manaValue, "hand", activeSeatId, allSeats);
-    const spellPayment = payCostFromPool(manaPool, card, spellCost);
+    const spellPayment = payCostFromPool(manaPool, card, spellCost, { life: seat.life, seat, allSeats });
     return [
       {
         faceIndex: split.landIndex,

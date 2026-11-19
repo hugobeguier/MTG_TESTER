@@ -14,7 +14,7 @@ importing from `./AppFlow`. Each file starts with a header comment saying what i
 | `mana.ts` | Mana pools, `manaChoicesForCard`, `chooseManaSourcesForCost`, `payCostFromPool`, `spendManaSources` |
 | `costs.ts` | `totalCastingCost`, `adjustedCastingCost`, `staticCostReduction`, X / miracle / alt-cost helpers |
 | `lands.ts` | Land drops, `entersBattlefieldTapped`, reveal-lands, shocklands |
-| `tokens.ts` | `parseCreateTokenSpecs`, `createTokensForSeat`, `createCopyTokenForSeat` |
+| `tokens.ts` | `parseCreateTokenSpecs`, THE token creation pipeline (`createTokenBatch` via `createTokensForSeat` / `createCopyTokenForSeat` / `createCopyTokensForSeat`; replacement effects in `applyTokenCreationReplacements`: Chatterfang, Academy Manufactor, Draconic Visitor) |
 | `zones.ts` | Moving cards between visible zones, counters, enter-as-copy, `moveCardBetweenVisibleZones` |
 | `entry.ts` | `moveCardAcrossSeats`, `destroyCreatures`, devour, graveyard returns, enters-with-counter replacements |
 | `damage.ts` | `applyCombatDamageToTarget`, damage prevention/shields, keyword predicates (`hasFlying`, `hasDeathtouch`...) |

@@ -11,7 +11,7 @@ import { entersBattlefieldTapped } from "@/engine/lands";
 import { chooseManaSourcesForCost, isBoardConditionMet, isRecognizedBoardCondition, lifeGainedThisTurn, spendManaSources } from "@/engine/mana";
 import { capitalizeWord, hasKeyword, isBasicLandCard, isLandCard, numberWordToInt } from "@/engine/shared";
 import { checkStateBasedActions, winTheGame } from "@/engine/stateBased";
-import { createCopyTokenForSeat, createTokenCard, createTokensForSeat, parseCreateTokenSpecs, predefinedTokenSpec, resolveCopyOneOfCandidates } from "@/engine/tokens";
+import { createCopyTokenForSeat, createCopyTokensForSeat, createTokenCard, createTokensForSeat, parseCreateTokenSpecs, predefinedTokenSpec, resolveCopyOneOfCandidates } from "@/engine/tokens";
 import type { PendingAction, TriggerCondition, TriggerEffect, TurnPhase } from "@/engine/types";
 import { applyCounterDelta, changeControlWithinBattlefield, findPermanentById, moveCardBetweenVisibleZones, possessive, queuePlayerChoice, randomInt, resetForZoneChange, rulesEvent, shuffleCards } from "@/engine/zones";
 import { attachedPowerToughnessBonus } from "@/lib/attachments";
@@ -719,6 +719,14 @@ export function commonTriggerEffect(
   const drawInstead = text.match(/^draw (a|one|two|three) cards?\. if you control (a|one|two|three|four|five|\d+) or more ([a-z]+?)s?, draw (two|three|four|\d+) cards? instead\b/);
   if (drawInstead) {
     return { kind: "draw_cards", amount: numberWordToInt(drawInstead[1]) ?? 1, optional, moreIf: { type: drawInstead[3], atLeast: numberWordToInt(drawInstead[2]) ?? 1, amount: numberWordToInt(drawInstead[4]) ?? 2 } };
+  }
+  // "put a +1/+1 counter on it and draw a card" (The Great Henge): two verbs in one clause. The plain draw reader below would take the draw and drop the
+  // counter, so the compound shape is read first: the counter goes on the entering permanent ("context"), then the draw follows.
+  const counterThenDraw = mode === "entered" || mode === "clause" ? text.match(/\bput (a|one|two|three|\d+) \+1\/\+1 counters? on it and draw (a|one|two|three|\d+) cards?\b/) : null;
+  if (counterThenDraw) {
+    const counters = numberWordToInt(counterThenDraw[1]);
+    const cards = numberWordToInt(counterThenDraw[2]);
+    if (counters && cards) return { kind: "add_counter", counterKind: "+1/+1", amount: counters, scope: "context", optional, then: { kind: "draw_cards", amount: cards } };
   }
   const drawCount = extractCommonDrawCount(text);
   if (drawCount) return { kind: "draw_cards", amount: drawCount, optional };
@@ -3011,8 +3019,10 @@ export function applyTargetedEffect(session: GameSession, controllerSeatId: stri
     const targetCard = session.seats.find((seat) => seat.id === target.seatId)?.board.battlefield.find((card) => card.id === target.cardId);
     if (!targetCard) return rulesEvent(session, controllerSeatId, `${source.name}: the target is gone.`);
     if (verb.kind === "copy_token") {
-      const copied = createCopyTokenForSeat(next, controllerSeatId, targetCard, { asArtifact: verb.asArtifact }).session;
-      next = rulesEvent(copied, controllerSeatId, `${source.name}: creates a token that's a copy of ${targetCard.name}.`);
+      // Hazel of the Rootbloom: a Squirrel token is copied twice - both copies are one creation event.
+      const copyCount = verb.doubleIfSubtype && new RegExp(`\\b${verb.doubleIfSubtype}\\b`, "i").test(targetCard.typeLine) ? 2 : 1;
+      const copied = createCopyTokensForSeat(next, controllerSeatId, Array.from({ length: copyCount }, () => targetCard), { asArtifact: verb.asArtifact }, source.id).session;
+      next = rulesEvent(copied, controllerSeatId, `${source.name}: creates ${copyCount === 2 ? "two tokens that are copies" : "a token that's a copy"} of ${targetCard.name}.`);
       return next;
     }
     const changeBase = (card: VisibleCard): VisibleCard => {
@@ -3237,6 +3247,27 @@ export function applyDeterministicPhaseTrigger(session: GameSession, seatId: str
     if (counters <= 0) return session;
     const specs = parseCreateTokenSpecs(`create ${counters} ${counterTokens[1]} with "${counterTokens[2]}"`);
     return specs.length > 0 ? createTokensForSeat(session, seatId, sourceCard.id, specs).session : undefined;
+  }
+  // Chitterspitter: "At the beginning of your upkeep, you may sacrifice a token. If you do, put an acorn counter on this artifact." (The buff is the
+  // group anthem "Squirrels you control get +1/+1 for each acorn counter on this artifact".) A human picks the token (the yes/no was already asked); an
+  // agent sacrifices a Squirrel only while it controls at least three, since each acorn buffs all the rest.
+  const sacrificeTokenCounter = clauseText.match(/\byou may sacrifice a token\. if you do, put an? ([a-z]+) counter on this (?:artifact|permanent|creature|enchantment)\b/i);
+  if (sacrificeTokenCounter) {
+    const owner = session.seats.find((item) => item.id === seatId);
+    const tokens = owner?.board.battlefield.filter((card) => card.token && !card.phasedOut) ?? [];
+    if (!owner || tokens.length === 0) return session;
+    if (owner.kind === "human") {
+      const distinct = tokens.filter((card, index) => tokens.findIndex((other) => other.name === card.name && other.power === card.power && other.toughness === card.toughness) === index);
+      return queuePlayerChoice(session, {
+        seatId, sourceCardId: sourceCard.id, sourceCardName: sourceCard.name,
+        prompt: `${sourceCard.name}: sacrifice which token? (you get a ${sacrificeTokenCounter[1]} counter)`,
+        options: [...distinct.map((card) => ({ label: `${card.name}${card.power ? ` (${card.power}/${card.toughness})` : ""}`, value: card.id })), { label: "Don't sacrifice", value: "none" }],
+        resolver: "sacrifice_token_for_counter", data: { counterKind: sacrificeTokenCounter[1] }
+      });
+    }
+    const squirrels = tokens.filter((card) => /\bsquirrel\b/i.test(card.typeLine));
+    if (squirrels.length < 3) return session;
+    return resolveDeferredChoice(session, seatId, sourceCard.id, sourceCard.name, "sacrifice_token_for_counter", { counterKind: sacrificeTokenCounter[1] }, squirrels[0].id);
   }
   // Deathbonnet Sprout: "At the beginning of your upkeep, mill a card. Then if there are three or more creature cards in your graveyard, transform this creature."
   const sproutText = clauseText.match(/\bmill a card\. then if there are (one|two|three|four|five|\d+) or more creature cards in your graveyard, transform this creature\b/i);

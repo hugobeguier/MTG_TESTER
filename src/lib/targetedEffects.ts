@@ -14,7 +14,7 @@ type TargetedVerb =
   | { kind: "draw"; amount: number }
   | { kind: "discard"; amount: number }
   // "Create a token that's a copy of another target nonland permanent you control." (Extravagant Replication)
-  | { kind: "copy_token"; asArtifact?: boolean }
+  | { kind: "copy_token"; asArtifact?: boolean; doubleIfSubtype?: string }
   // "Target creature can't block this creature this turn." (Kozilek's Pathfinder): the target can't block the source for the turn.
   | { kind: "cant_block_source" };
 
@@ -23,7 +23,7 @@ export interface TargetedEffect {
   // A player or a permanent of the given type; controller narrows whose.
   who:
     | { kind: "player"; opponentOnly: boolean }
-    | { kind: "permanent"; permanentType: RemovalTargetType; controller: TargetController; attackingOnly?: boolean; another?: boolean };
+    | { kind: "permanent"; permanentType: RemovalTargetType; controller: TargetController; attackingOnly?: boolean; another?: boolean; tokenOnly?: boolean };
   // "up to one target ...": choosing nothing is allowed.
   upTo?: boolean;
   // The rest of a compound sentence that happens to the controller: "and you gain 1 life", "and draw a card".
@@ -160,6 +160,13 @@ export function parseTargetedEffect(rawText: string): TargetedEffect | undefined
     }
   }
 
+  // "Create a token that's a copy of target token you control. If that token is a Squirrel, instead create two tokens that are copies of it." (Hazel of
+  // the Rootbloom): only a TOKEN is a legal target, and a token of the named subtype is copied twice.
+  const tokenCopy = text.match(/^create a token that'?s a copy of target token you control\. if that token is an? ([a-z]+), instead create two tokens that are copies of it$/);
+  if (tokenCopy) {
+    return { verb: { kind: "copy_token", doubleIfSubtype: tokenCopy[1] }, who: { kind: "permanent", permanentType: "permanent", controller: "you", tokenOnly: true } };
+  }
+
   // "Create a token that's a copy of [another] target nonland permanent you control." — no "except ..." modifiers (those change what is copied).
   // "..., except it's an artifact in addition to its other types." (Saheeli's Artistry) is the one exception modelled.
   const copy = text.match(/^create a token that'?s a copy of (another )?target ([a-z ]+?)(,? except it'?s an artifact in addition to its other types)?$/);
@@ -192,6 +199,7 @@ export function targetedEffectSpec(effect: TargetedEffect, sourceCardId: string,
     max: 1,
     excludedCardIds: effect.who.another ? [sourceCardId] : [],
     ...(effect.who.attackingOnly ? { attackingOnly: true } : {}),
+    ...(effect.who.tokenOnly ? { tokensOnly: true } : {}),
     prompt: `${label}: choose a target.`
   };
 }

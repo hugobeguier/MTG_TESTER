@@ -7,9 +7,9 @@ import { manaValueFromManaCost } from "@/engine/costs";
 import { PROTECTION_COLOR_CODE, addDamageShieldsFromSpec, applyCombatDamageToTarget, dealDamageToCreature, hasFlying, hasHexproof, hasIndestructible, hasShroud, isProtectedFrom, playerCantLose, playerHasHexproof } from "@/engine/damage";
 import { applyDevour, applyGraveyardReturn, applyGraveyardReturnPicked, destroyCreatures, finishDevour, moveCardAcrossSeats, moveLibraryCardToDestination } from "@/engine/entry";
 import { chooseManaSourcesForCost, manaChoicesForCard, manaColorForBasicLand, normalizeManaColors, spendManaSources } from "@/engine/mana";
-import { COMMANDER_STARTING_LIFE, basicLandTypes, hasKeyword, isBasicLandCard, isLandCard, numberWordToInt } from "@/engine/shared";
+import { COMMANDER_STARTING_LIFE, basicLandTypes, capitalizeWord, hasKeyword, isBasicLandCard, isLandCard, numberWordToInt } from "@/engine/shared";
 import type { TokenSpec } from "@/engine/tokens";
-import { createCopyTokenForSeat, createTokensForSeat, parseCreateTokenSpecs, predefinedTokenSpec } from "@/engine/tokens";
+import { createCopyTokenForSeat, createCopyTokensForSeat, createTokensForSeat, parseCreateTokenSpecs, predefinedTokenSpec } from "@/engine/tokens";
 import { commonTriggerEffect, phaseEvent, resolveTriggerEffect } from "@/engine/triggers";
 import type { PendingAction, PendingRuleChoice, TriggerEffect } from "@/engine/types";
 import type { GraveyardReturnOptions } from "@/engine/zones";
@@ -655,6 +655,17 @@ export function resolveDeferredChoice(session: GameSession, seatId: string, sour
     const entering = seat.board.battlefield.find((card) => card.id === sourceCardId);
     if (!entering) return session;
     return target ? applyEnterAsCopyTarget(session, seatId, sourceCardId, target) : rulesEvent(session, seatId, `${sourceName} enters without copying anything.`);
+  }
+  if (resolver === "sacrifice_token_for_counter") {
+    // Chitterspitter: sacrifice a token (it ceases to exist), then put the counter on the source.
+    const token = value && value !== "none" ? seat.board.battlefield.find((card) => card.id === value && card.token) : undefined;
+    if (!token) return session;
+    const counterKind = String(data.counterKind ?? "acorn");
+    let next = token.typeLine.includes("Creature")
+      ? destroyCreatures(session, [{ seatId, cardId: token.id, message: `${seat.name} sacrifices ${token.name} (${sourceName}).` }], "Rules action")
+      : rulesEvent(moveCardBetweenVisibleZones(session, seatId, token.id, "graveyard"), seatId, `${seat.name} sacrifices ${token.name} (${sourceName}).`);
+    next = { ...next, seats: next.seats.map((item) => (item.id !== seatId ? item : { ...item, board: { ...item.board, battlefield: item.board.battlefield.map((entry) => (entry.id === sourceCardId ? applyCounterDelta(entry, counterKind, 1) : entry)) } })) };
+    return rulesEvent(next, seatId, `${sourceName} gets a${/^[aeiou]/i.test(counterKind) ? "n" : ""} ${counterKind} counter.`);
   }
   if (resolver === "hulk_exile") {
     if (!value || value === "none") return session;
@@ -1323,6 +1334,34 @@ export function applySpellExtraEffect(session: GameSession, casterSeatId: string
       return next;
     }
 
+    // Second Harvest: one creation event for every copy, so Chatterfang adds its Squirrels once, by count.
+    case "copy_each_token_you_control": {
+      const tokens = caster.board.battlefield.filter((card) => card.token && !card.phasedOut);
+      if (tokens.length === 0) return rulesEvent(session, casterSeatId, `${sourceName} resolves, but ${caster.name} controls no tokens.`);
+      const copied = createCopyTokensForSeat(session, casterSeatId, tokens, {}, source.id);
+      return rulesEvent(copied.session, casterSeatId, `${sourceName}: ${caster.name} creates a token that's a copy of each of ${tokens.length} token${tokens.length === 1 ? "" : "s"} they control.`);
+    }
+
+    // Swarmyard Massacre: every creature outside the listed types gets -N/-N, N = how many creatures of the listed types the caster controls.
+    case "shrink_others_per_own_of_types": {
+      // Whole type line, not only the part after an em dash: a created token's type line uses a plain hyphen ("Token Creature - Squirrel").
+      const inTypes = (card: VisibleCard) => card.typeLine.includes("Creature") && effect.types.some((type) => new RegExp(`\\b${type}\\b`, "i").test(card.typeLine));
+      const amount = caster.board.battlefield.filter((card) => !card.phasedOut && inTypes(card)).length;
+      if (amount <= 0) return rulesEvent(session, casterSeatId, `${sourceName}: ${caster.name} controls none of the listed creature types, so nothing shrinks.`);
+      const seats = session.seats.map((seat) => ({
+        ...seat,
+        board: {
+          ...seat.board,
+          battlefield: seat.board.battlefield.map((card) =>
+            card.typeLine.includes("Creature") && !card.phasedOut && !inTypes(card)
+              ? { ...card, temporaryPowerBonus: (card.temporaryPowerBonus ?? 0) - amount, temporaryToughnessBonus: (card.temporaryToughnessBonus ?? 0) - amount }
+              : card
+          )
+        }
+      }));
+      return rulesEvent({ ...session, seats }, casterSeatId, `${sourceName}: each creature that isn't an ${effect.types.map(capitalizeWord).join(", ")} gets -${amount}/-${amount} until end of turn.`);
+    }
+
     case "creature_damages_everything_else": {
       const chosenIgnitionDealer = resolvePreChosenBattlefieldTarget(session, chosenTargets?.[0]);
       const dealer = chosenIgnitionDealer && chosenIgnitionDealer.seatId === casterSeatId ? chosenIgnitionDealer.card : strongestControlledCreature(caster);
@@ -1749,7 +1788,13 @@ export function applyRemovalEffect(
       if (effect.exile) {
         return destructions.reduce((current, item) => moveCardBetweenVisibleZones(current, item.seatId, item.cardId, "exile"), session);
       }
-      return destroyCreatures(session, destructions, "Rules action");
+      const destroyedAll = destroyCreatures(session, destructions, "Rules action");
+      if (!effect.drawPerDestroyed || destructions.length === 0) return destroyedAll;
+      // Decree of Pain: one card per creature that really left the battlefield (an indestructible one never made the list; a replaced death does not count).
+      const remaining = new Set(destroyedAll.seats.flatMap((seat) => seat.board.battlefield.map((card) => card.id)));
+      const died = destructions.filter((item) => !remaining.has(item.cardId)).length;
+      const caster = destroyedAll.seats.find((seat) => seat.id === casterSeatId);
+      return died > 0 && caster ? drawMultipleForSeat(destroyedAll, casterSeatId, died, `${caster.name} draws ${died} card${died === 1 ? "" : "s"} from ${sourceName}.`) : destroyedAll;
     }
     case "mass_damage": {
       // X read from the board BEFORE any damage is dealt (Chain Reaction counts creatures as it
@@ -1953,6 +1998,24 @@ export function applyRemovalEffect(
             ]
           };
         }
+      }
+      // Saw in Half: "If that creature dies this way, its controller creates two tokens that are copies of that creature, except their power is half
+      // that creature's power and their toughness is half that creature's toughness. Round up each time." Power/toughness are what it had as it died.
+      if (effect.controllerCopiesHalved) {
+        const stillThere = destroyedSession.seats.some((seat) => seat.board.battlefield.some((card) => card.id === target.card.id));
+        if (stillThere) return destroyedSession;
+        const half = (value: number) => String(Math.ceil(Math.max(0, value) / 2));
+        const power = half(effectivePower(target.card));
+        const toughness = half(effectiveToughness(target.card));
+        const copies = createCopyTokensForSeat(destroyedSession, target.seatId, [target.card, target.card], {}, source.id);
+        const copyIds = new Set(copies.tokens.map((token) => token.id));
+        const halved: GameSession = {
+          ...copies.session,
+          seats: copies.session.seats.map((seat) =>
+            seat.id !== target.seatId ? seat : { ...seat, board: { ...seat.board, battlefield: seat.board.battlefield.map((card) => (copyIds.has(card.id) ? { ...card, power, toughness } : card)) } }
+          )
+        };
+        return rulesEvent(halved, casterSeatId, `${sourceName}: ${target.card.name} dies, and its controller creates two token copies of it with ${power}/${toughness}.`);
       }
       // "Its controller investigates." (Fateful Absence) — the Clue goes to whoever controlled the
       // destroyed permanent, not to the caster.

@@ -215,9 +215,11 @@ function deckCardNames(file: string): string[] {
 const PHASES = ["untap step", "upkeep step", "draw step", "precombat main phase", "beginning of combat step", "end of combat step", "end step", "postcombat main phase", "cleanup step"] as const;
 // Deliberate differences between the registry and the old substring matcher (the old matcher fired on quoted/reminder/"at end of combat" text of other abilities):
 //  Estrid's Invocation (quoted ability of a copy), Overlord of the Mistmoors (reminder text), Goldlust Triad (myriad's "exile the tokens at end of combat"),
-//  Shadow of the Second Sun (enchanted player's postcombat main: the Aura's own extra-phase mechanism, not a registry watcher).
+//  Shadow of the Second Sun (enchanted player's postcombat main: the Aura's own extra-phase mechanism, not a registry watcher),
+//  Scurry of Squirrels (same myriad reminder text as Goldlust Triad: "Exile the tokens at end of combat" is not a trigger of its own).
 const KNOWN_REGISTRY_DIFFERENCES = new Set([
-  "Estrid's Invocation|upkeep step|legacy", "Overlord of the Mistmoors|end step|legacy", "Goldlust Triad|end of combat step|legacy", "Shadow of the Second Sun|postcombat main phase|registry"
+  "Estrid's Invocation|upkeep step|legacy", "Overlord of the Mistmoors|end step|legacy", "Goldlust Triad|end of combat step|legacy", "Shadow of the Second Sun|postcombat main phase|registry",
+  "Scurry of Squirrels|end of combat step|legacy"
 ]);
 
 describe("shipped-deck phase triggers", () => {

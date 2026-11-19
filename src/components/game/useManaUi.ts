@@ -2,7 +2,7 @@
 // Part of the AppFlow() split: shared state arrives through `ctx` (see ./context.ts); handlers owned by other hooks are called through `lateFn` so every hook sees the current render's functions.
 import { type ManaColor, type ManaPool, type PlayerSeat, type RestrictedManaBatch, type VisibleCard } from "@/lib/types";
 import { abilityOracleText } from "@/lib/typeGrants";
-import { addManaToPool, addPools, chooseManaSourcesForCost, effectiveManaOracleText, emptyManaPool, isAvailableManaSource, isSacrificeManaSource, manaAbilityCounterRemovalKind, manaChoicesForCard, manaPoolTotal, manaProducedBy, painDamageForTap, payCostFromPool, restrictedBatchUsable, signetAbility, spendManaSources, tapVisibleCard } from "@/engine/mana";
+import { addManaToPool, addPools, chooseManaSourcesForCost, effectiveManaOracleText, emptyManaPool, isAvailableManaSource, isSacrificeManaSource, manaAbilityCounterRemovalKind, manaChoicesForCard, manaPoolTotal, manaProducedBy, lifeGainForTap, tokenTapManaAbility, painDamageForTap, payCostFromPool, restrictedBatchUsable, signetAbility, spendManaSources, tapVisibleCard } from "@/engine/mana";
 import { basicLandFetchCostRequiresTap, isBasicLandFetchAbility } from "@/lib/oracleClauses";
 import { genericCostShim } from "@/engine/effects";
 import { isSimpleManaSourcePermanent } from "@/engine/simpleManaSource";
@@ -294,15 +294,18 @@ export function useManaUi(ctx: GameContext) {
     if (location === "battlefield" && signetAbility(effectiveManaOracleText(card)) && tapSignet(seatId, cardId)) return;
     // A Treasure (or any "{T}, Sacrifice this: Add ...") is used up by tapping it, and a storage land loses its counter - the automatic payment
     // already did this through spendManaSources; a manual tap only ever tapped it, so Treasures stayed on the battlefield.
-    const consumedOnUse = location === "battlefield" && (isSacrificeManaSource(card) || manaAbilityCounterRemovalKind(card.oracleText) !== undefined);
+    const consumedOnUse = location === "battlefield" && (isSacrificeManaSource(card) || manaAbilityCounterRemovalKind(card.oracleText) !== undefined || tokenTapManaAbility(card) !== undefined);
     // Pain lands ("{T}: Add {W} or {B}. This land deals 1 damage to you.", City of Brass): a manual tap used to only tap the card and never dealt the damage.
     const pain = painDamageForTap(card, color);
+    // The Great Henge: "{T}: Add {G}{G}. You gain 2 life."
+    const gain = lifeGainForTap(card);
     setSession((current) => {
       if (consumedOnUse) return { ...current, seats: current.seats.map((item) => (item.id === seatId ? spendManaSources(item, [cardId], { [cardId]: color }) : item)) };
       const tapped = tapVisibleCard(current, seatId, cardId, location);
-      return pain > 0 ? { ...tapped, seats: tapped.seats.map((item) => (item.id === seatId ? { ...item, life: Math.max(0, item.life - pain) } : item)) } : tapped;
+      return pain > 0 || gain > 0 ? { ...tapped, seats: tapped.seats.map((item) => (item.id === seatId ? { ...item, life: Math.max(0, item.life - pain + gain) } : item)) } : tapped;
     });
     if (pain > 0) addEvent(`${card.name} deals ${pain} damage to ${seat.name}.`, seatId, "Mana");
+    if (gain > 0) addEvent(`${seat.name} gains ${gain} life from ${card.name}.`, seatId, "Mana");
     const amount = manaProducedBy(card, seat);
     setManaPools((current) => {
       const pool = current[seatId] ?? emptyManaPool();

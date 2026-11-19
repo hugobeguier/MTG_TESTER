@@ -32,7 +32,16 @@ const KNOWN_GAPS = [
   "Crucible of the Spirit Dragon: {1}, {T}: Put a storage counter on this land.", // (c) storage counters are only useful with its Dragon-restricted X mana ability
   "Scavenger Regent // Exude Toxin: Ward—Discard a card.", // (c) ward-discard needs the ward payment flow extended
   "Mistrise Village: {U}, {T}: The next spell you cast this turn can't be countered.", // (c) 'next spell can't be countered' flag
-  "Three Tree City: {2}, {T}: Choose a color. Add an amount of mana of that color equal to the numbe" // (c) choose-a-color mana scaled by a chosen creature type
+  "Three Tree City: {2}, {T}: Choose a color. Add an amount of mana of that color equal to the numbe", // (c) choose-a-color mana scaled by a chosen creature type
+  // From the Squirreled Away deck (decks/foundations). Hazel of the Rootbloom's token-tap mana ability is modelled (tokenTapManaAbility in engine/mana.ts).
+  "Chatterfang, Squirrel General: {B}, Sacrifice X Squirrels: Target creature gets +X/-X", // known gap: a sacrifice cost with a variable COUNT (X creatures) has no representation in the sacrifice-ability model (fixed sacrificeCount) and needs an X prompt plus a target prompt in useAbilities
+  "Gourmand's Talent: During your turn, artifacts you control are Foods in addition to their other typ", // known gap: a turn-conditional subtype grant to artifacts that also grants the Food sacrifice ability
+  "Insatiable Frugivore: {3}{B}, Sacrifice X Foods: Creatures you control get +X/+0", // known gap: variable-count sacrifice cost (X Foods), same missing piece as Chatterfang's ability
+  "Oran-Rief, the Vastwood: {T}: Put a +1/+1 counter on each green creature that entered this turn", // known gap: needs a per-turn 'entered this turn' record on permanents
+  "Ravenous Squirrel: {1}{B}{G}, Sacrifice an artifact or creature: You gain 1 life and draw a card.", // known gap: sacrifice-an-artifact-or-creature cost combined with a gain-life-and-draw compound effect
+  "Swarmyard: {T}: Regenerate target Insect, Rat, Spider, or Squirrel.", // known gap: the engine has no regeneration shields
+  "The Odd Acorn Gang: Squirrels you control have \"{T}: Target Squirrel gets +2/+2 and gains trample un", // known gap: a static grant of an activated, targeted pump ability to a creature type
+  "Viridescent Bog: {1}, {T}: Add {B}{G}." // known gap: a land with a paid two-colour tap ability next to its free {C} tap is only modelled for signets (by name)
 ];
 
 function deckFiles(dir: string): string[] {

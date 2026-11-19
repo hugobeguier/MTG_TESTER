@@ -60,7 +60,8 @@ export function isBasicLandCard(card: VisibleCard) {
 }
 
 export function basicLandTypes(card: VisibleCard) {
-  return ["Plains", "Island", "Swamp", "Mountain", "Forest", "Wastes"].filter((type) => card.name === type || card.typeLine.includes(type));
+  // grantedTypes carries land subtypes handed out by Urborg / Yavimaya ("Each land is a Swamp in addition to its other land types").
+  return ["Plains", "Island", "Swamp", "Mountain", "Forest", "Wastes"].filter((type) => card.name === type || card.typeLine.includes(type) || Boolean(card.grantedTypes?.includes(type)));
 }
 
 export function capitalizeWord(word: string) {

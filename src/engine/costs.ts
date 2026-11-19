@@ -11,7 +11,7 @@ import { counterCount, effectivePower } from "@/lib/counters";
 import { permanentMatchesQualifier } from "@/lib/characteristics";
 import { hasCardType } from "@/lib/typeGrants";
 import { availableManaForSeat, isDragonMana } from "@/engine/mana";
-import { capitalizeWord, emblemSourceCards, numberWordToInt } from "@/engine/shared";
+import { basicLandTypes, capitalizeWord, emblemSourceCards, numberWordToInt } from "@/engine/shared";
 
 // "Multikicker {2} (You may pay an additional {2} any number of times as you cast this spell.)"
 // (Everflowing Chalice, ...) — a separate additional-cost mechanic, not an {X} in the printed mana
@@ -120,6 +120,8 @@ export function adjustedCastingCost(
   // One with the Multiverse's once-per-turn version below — see hasOmniscienceFreeHandCast's own
   // doc comment for why this card gets its own narrow check rather than a shared "free cast" grammar).
   if (sourceZone === "hand" && hasOmniscienceFreeHandCast(seat)) return 0;
+  // Dracogenesis: "You may cast Dragon spells without paying their mana costs."
+  if (hasQualifiedFreeCastPermission(seat, card)) return 0;
   if (
     sourceZone === "hand" &&
     turn !== undefined &&
@@ -154,9 +156,11 @@ export function adjustedCastingCost(
     turn !== undefined && seat.board.battlefield.some((permanent) => !permanent.abilitiesStripped && /spells you cast cost \{1\} less to cast for each card your opponents have drawn this turn/i.test(permanent.oracleText))
       ? allSeats.filter((other) => other.id !== seat.id && other.drawnThisTurn?.turn === turn).reduce((total, other) => total + (other.drawnThisTurn?.count ?? 0), 0)
       : 0;
+  // Morophon: coloured pips come off first, then the generic reductions can only go down to the pips that are left.
+  const pipsRemoved = coloredPipReductionTotal(seat, card);
   return Math.max(
-    coloredPipCount(card),
-    baseCost - drawnByOpponents - pendingArtifactAffinityReduction(seat) - staticCostReduction(seat, card) - selfConditionalCostReduction(card, allSeats) - selfScalingCostReduction(card, seat, allSeats)
+    coloredPipCount(card) - pipsRemoved,
+    baseCost - pipsRemoved - drawnByOpponents - pendingArtifactAffinityReduction(seat) - staticCostReduction(seat, card) - selfConditionalCostReduction(card, allSeats) - selfScalingCostReduction(card, seat, allSeats)
   );
 }
 
@@ -283,7 +287,82 @@ function selfScalingCostReduction(card: VisibleCard, caster: PlayerSeat, allSeat
   if (/this spell costs \{x\} less to cast, where x is the total power of creatures you control/i.test(card.oracleText)) {
     return caster.board.battlefield.filter((permanent) => permanent.typeLine.includes("Creature")).reduce((total, permanent) => total + Math.max(0, effectivePower(permanent)), 0);
   }
+  // "This spell costs {X} less to cast, where X is the greatest power among creatures you control." (The Great Henge)
+  if (/this spell costs \{x\} less to cast, where x is the greatest power among creatures you control/i.test(card.oracleText)) {
+    return caster.board.battlefield.filter((permanent) => !permanent.phasedOut && hasCardType(permanent, "Creature")).reduce((greatest, permanent) => Math.max(greatest, effectivePower(permanent)), 0);
+  }
+  // "Domain - This spell costs {2} less to cast for each basic land type among lands you control." (Scion of Draco). Land types given by Urborg /
+  // Yavimaya (grantedTypes) count, like the types printed on the lands.
+  const domain = card.oracleText.match(/this spell costs \{(\d+)\} less to cast for each basic land type among lands you control/i);
+  if (domain) return Number.parseInt(domain[1], 10) * basicLandTypesAmongLands(caster).length;
   return 0;
+}
+
+// The basic land types (Plains, Island, Swamp, Mountain, Forest; Wastes is not a basic land TYPE for domain) among the lands a seat controls.
+export function basicLandTypesAmongLands(seat: PlayerSeat): string[] {
+  const types = new Set<string>();
+  for (const permanent of seat.board.battlefield) {
+    if (permanent.phasedOut || !hasCardType(permanent, "Land")) continue;
+    for (const type of basicLandTypes(permanent)) if (type !== "Wastes") types.add(type);
+  }
+  return [...types];
+}
+
+// "You may cast Dragon spells without paying their mana costs." (Dracogenesis): a standing permission from a permanent you control, for the spells of
+// one kind. Any zone you could cast from; a commander still pays its tax (the callers add it on top of the 0 this gives).
+function hasQualifiedFreeCastPermission(seat: PlayerSeat, card: VisibleCard): boolean {
+  return seat.board.battlefield.some(
+    (source) =>
+      !source.phasedOut &&
+      !source.abilitiesStripped &&
+      source.oracleText.split("\n").some((line) => {
+        const match = line.trim().match(/^you may cast ([a-z][a-z ]*?) spells without paying their mana costs?\b/i);
+        return Boolean(match) && matchesCostReductionQualifier(match![1].toLowerCase(), card);
+      })
+  );
+}
+
+// "Spells of the chosen type you cast cost {W}{U}{B}{R}{G} less to cast. This effect reduces only the amount of colored mana you pay." (Morophon, the
+// Boundless): per reduction symbol, one pip of that colour comes off the spell's cost if it has one; generic mana is untouched, and a colour the
+// spell does not ask for reduces nothing. Returns how many pips of each colour are removed.
+export function coloredPipReduction(seat: PlayerSeat, card: VisibleCard): Record<"W" | "U" | "B" | "R" | "G", number> {
+  const removed = { W: 0, U: 0, B: 0, R: 0, G: 0 };
+  if (!card.typeLine || !card.manaCost) return removed;
+  const pips = { W: 0, U: 0, B: 0, R: 0, G: 0 };
+  for (const symbol of card.manaCost.match(/\{[WUBRG]\}/gi) ?? []) pips[symbol[1].toUpperCase() as keyof typeof pips] += 1;
+  for (const source of seat.board.battlefield) {
+    if (source.phasedOut || source.abilitiesStripped || !source.chosenCreatureType) continue;
+    for (const line of source.oracleText.split("\n")) {
+      const match = line.trim().match(/^spells of the chosen type you cast cost ((?:\{[WUBRG]\})+) less to cast\b/i);
+      if (!match || !card.typeLine.includes(source.chosenCreatureType)) continue;
+      for (const symbol of match[1].match(/\{[WUBRG]\}/gi) ?? []) {
+        const color = symbol[1].toUpperCase() as keyof typeof pips;
+        if (removed[color] < pips[color]) removed[color] += 1;
+      }
+    }
+  }
+  return removed;
+}
+
+function coloredPipReductionTotal(seat: PlayerSeat, card: VisibleCard): number {
+  return Object.values(coloredPipReduction(seat, card)).reduce((total, value) => total + value, 0);
+}
+
+// The spell as it is PAID for: the same card with the coloured pips a Morophon-style effect removed taken off its mana cost, so the payment code
+// demands exactly what is left. Everything that only prices a spell (adjustedCastingCost) keeps using the printed card.
+export function cardWithColoredPipsReduced(seat: PlayerSeat, card: VisibleCard, _allSeats?: PlayerSeat[]): VisibleCard {
+  const removed = coloredPipReduction(seat, card);
+  if (Object.values(removed).every((value) => value === 0) || !card.manaCost) return card;
+  const left = { ...removed };
+  const manaCost = card.manaCost.replace(/\{[WUBRG]\}/gi, (symbol) => {
+    const color = symbol[1].toUpperCase() as keyof typeof left;
+    if (left[color] > 0) {
+      left[color] -= 1;
+      return "";
+    }
+    return symbol;
+  });
+  return { ...card, manaCost };
 }
 
 // "[Qualifier] spells [you cast ]cost {N} less to cast." and its "of the chosen type" tribal
@@ -359,7 +438,8 @@ export function totalCastingCost(seat: PlayerSeat, card: VisibleCard, baseCost: 
   const ownReduction = allSeats ? selfConditionalCostReduction(card, allSeats) + selfScalingCostReduction(card, seat, allSeats) : 0;
   // Rule 601.2f: same colored-pip floor as adjustedCastingCost above — a flat cost reduction can
   // never eat into X/multikicker-inflated cost's colored requirement either.
-  return Math.max(coloredPipCount(card), baseCost + unitCost * chosenX - pendingArtifactAffinityReduction(seat) - staticCostReduction(seat, card) - ownReduction);
+  const pipsRemoved = coloredPipReductionTotal(seat, card);
+  return Math.max(coloredPipCount(card) - pipsRemoved, baseCost + unitCost * chosenX - pipsRemoved - pendingArtifactAffinityReduction(seat) - staticCostReduction(seat, card) - ownReduction);
 }
 
 // Saheeli, the Gifted's second +1: "The next spell you cast this turn has affinity for artifacts.
@@ -369,8 +449,9 @@ function pendingArtifactAffinityReduction(seat: PlayerSeat) {
   return seat.nextSpellHasArtifactAffinity ? artifactCount(seat) : 0;
 }
 
+// The part of a cost no "costs {N} less" effect can touch (rule 601.2f): coloured pips, {C} pips, hybrid pips and Phyrexian pips.
 export function coloredPipCount(card: VisibleCard) {
-  return (card.manaCost?.match(/\{[WUBRG]\}/gi) ?? []).length;
+  return (card.manaCost?.match(/\{(?:[WUBRG]|C|[WUBRG]\/[WUBRGP])\}/gi) ?? []).length;
 }
 
 export function findMiracleGranter(seat: PlayerSeat): VisibleCard | undefined {

@@ -62,15 +62,16 @@ export function useCasting(ctx: GameContext) {
   function payCastingCost(seatId: string, seat: PlayerSeat, costCard: VisibleCard, totalCost: number) {
     const restricted = restrictedManaPoolForSeat(seatId, costCard);
     if (manaPoolTotal(restricted) > 0) {
-      const restrictedResult = payCostFromPool(restricted, costCard, totalCost);
+      const restrictedResult = payCostFromPool(restricted, costCard, totalCost, { seat, allSeats: session.seats });
       if (restrictedResult.ok) {
         return { ok: true as const, source: "restricted" as const, sourceIds: [] as string[], pool: undefined, spent: restrictedResult.spent, forCard: costCard };
       }
     }
     if (seat.kind === "human") {
-      const result = payCostFromPool(poolForSeat(seatId), costCard, totalCost);
+      // life: a Phyrexian pip the pool has no colour for ({G/P}, Birthing Pod) is paid with 2 life; seat: Morophon's coloured-pip reduction.
+      const result = payCostFromPool(poolForSeat(seatId), costCard, totalCost, { life: seat.life, seat, allSeats: session.seats });
       return result.ok
-        ? { ok: true as const, source: "pool" as const, sourceIds: [] as string[], pool: result.pool, spent: result.spent }
+        ? { ok: true as const, source: "pool" as const, sourceIds: [] as string[], pool: result.pool, spent: result.spent, lifeCost: "lifeCost" in result ? result.lifeCost : 0 }
         : { ok: false as const, sourceIds: [] as string[], reason: result.reason };
     }
     const result = chooseManaSourcesForCost(seat, costCard, totalCost, undefined, session.seats);
@@ -91,6 +92,12 @@ export function useCasting(ctx: GameContext) {
     } else if (payment.source === "pool" && payment.pool) {
       setSeatManaPool(seatId, payment.pool);
       clearManaContributions(seatId);
+      // Phyrexian mana paid with life (the pool had no {G} for Birthing Pod's {G/P}).
+      if (payment.lifeCost > 0) {
+        const life = payment.lifeCost;
+        setSession((current) => ({ ...current, seats: current.seats.map((item) => (item.id === seatId ? { ...item, life: Math.max(0, item.life - life) } : item)) }));
+        addEvent(`${session.seats.find((item) => item.id === seatId)?.name ?? "Player"} pays ${life} life for Phyrexian mana.`, seatId, "Mana");
+      }
     }
   }
 

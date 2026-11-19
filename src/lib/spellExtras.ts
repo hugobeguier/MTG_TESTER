@@ -62,6 +62,11 @@ export type SpellExtraEffect =
   // "Target creature you control deals damage equal to its power to each other creature and each
   // opponent." (Chandra's Ignition)
   | { kind: "creature_damages_everything_else" }
+  // "For each token you control, create a token that's a copy of that permanent." (Second Harvest): all the copies are ONE creation event.
+  | { kind: "copy_each_token_you_control" }
+  // "...Then each creature that isn't an Insect, Rat, Spider, or Squirrel gets -1/-1 until end of turn for each creature you control that's an Insect,
+  // Rat, Spider, or Squirrel." (Swarmyard Massacre): everything outside the listed creature types shrinks by the number of your creatures inside them.
+  | { kind: "shrink_others_per_own_of_types"; types: string[] }
   // "Target creature you control deals damage equal to its power to target creature or planeswalker
   // you don't control." (Bite Down)
   // trampleExcess: Ram Through's "If the creature you control has trample, excess damage is dealt to that creature's controller instead."
@@ -212,6 +217,17 @@ export function parseSpellExtraEffects(text: string): SpellExtraEffect[] {
 
   if (/\btarget creature you control deals damage equal to its power to each other creature and each opponent\b/i.test(normalized)) {
     effects.push({ kind: "creature_damages_everything_else" });
+  }
+
+  if (/\bfor each token you control, create a token that'?s a copy of that permanent\b/i.test(normalized)) {
+    effects.push({ kind: "copy_each_token_you_control" });
+  }
+
+  const shrinkOthers = normalized.match(
+    /\beach creature that isn'?t an? ([A-Za-z]+(?:, [A-Za-z]+)*(?:,? or [A-Za-z]+)) gets -1\/-1 until end of turn for each creature you control that'?s an? ([A-Za-z]+(?:, [A-Za-z]+)*(?:,? or [A-Za-z]+))\b/i
+  );
+  if (shrinkOthers && shrinkOthers[1].toLowerCase() === shrinkOthers[2].toLowerCase()) {
+    effects.push({ kind: "shrink_others_per_own_of_types", types: shrinkOthers[1].split(/,\s*(?:or\s+)?|\s+or\s+/i).map((word) => word.trim().toLowerCase()).filter(Boolean) });
   }
 
   if (/\btarget creature you control deals damage equal to its power to target creature or planeswalker you don'?t control\b/i.test(normalized)) {

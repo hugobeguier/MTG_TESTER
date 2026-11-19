@@ -12,7 +12,7 @@ import { attachedBasePowerToughness, attachedPowerToughnessBonus, attachmentStri
 import { computeDevotion, computeDevotionToColors, countMatchingPermanents, parseAllZonesCda, parseCharacteristicDefiningAbility, parseConditionalStaticBoosts, parseDevotionCda, parseDevotionNotCreature, parseGroupAnthemBoost, parseGroupKeywordGrant, parseGroupManaAbilityGrant, parseOwnGraveyardCda, parseSelfAnthemBoost, permanentMatchesQualifier } from "@/lib/characteristics";
 import { counterCount, effectivePower, effectiveToughness } from "@/lib/counters";
 import { shareSessionSeats } from "@/lib/structuralShare";
-import { hasCardType, parseOtherCreaturesGrant, parseTypeGrantEffects, typeGrantAppliesTo } from "@/lib/typeGrants";
+import { hasCardType, parseLandSubtypeGrants, parseOtherCreaturesGrant, parseTypeGrantEffects, typeGrantAppliesTo } from "@/lib/typeGrants";
 import type { GameEvent, GameSession, PlayerSeat, VisibleCard } from "@/lib/types";
 
 // Runs after every session update (see the setSession wrapper below) so state-based actions are
@@ -640,6 +640,12 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
       return grant ? [{ sourceId: card.id, grant }] : [];
     })
   );
+  // Urborg, Tomb of Yawgmoth / Yavimaya, Cradle of Growth: "Each land is a Swamp/Forest in addition to its other land types." Sources are gathered
+  // across all seats; a phased-out or ability-stripped source grants nothing, and since this pass rewrites grantedTypes from scratch every time, the
+  // subtype disappears from every land the moment the source leaves, phases out or loses its abilities.
+  const landSubtypeGrants = Array.from(
+    new Set(next.seats.flatMap((seat) => seat.board.battlefield.filter((card) => !card.phasedOut && !card.abilitiesStripped).flatMap((card) => parseLandSubtypeGrants(card.oracleText))))
+  );
   next = {
     ...next,
     seats: next.seats.map((seat) => {
@@ -653,6 +659,7 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
             for (const grant of grantSources) {
               if (typeGrantAppliesTo(grant.granteeFilter, card)) grantedSet.add(grant.grantedType);
             }
+            if (landSubtypeGrants.length > 0 && hasCardType(card, "Land")) for (const subtype of landSubtypeGrants) grantedSet.add(subtype);
             let grantedAbilityTexts: string[] = [];
             if (hasCardType(card, "Creature")) {
               for (const source of otherCreatureGrantSources) {

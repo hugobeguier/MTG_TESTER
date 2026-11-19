@@ -33,6 +33,9 @@ interface DestroyEffect {
   // "Its controller investigates." (Fateful Absence) — the destroyed permanent's controller, not the
   // caster, gets a Clue token.
   controllerInvestigates?: boolean;
+  // "If that creature dies this way, its controller creates two tokens that are copies of that creature, except their power is half that creature's
+  // power and their toughness is half that creature's toughness. Round up each time." (Saw in Half)
+  controllerCopiesHalved?: boolean;
   // "You lose life equal to that permanent's mana value." (Feed the Swarm) — the CASTER pays life, read off the target before it is destroyed.
   casterLosesLifeEqualToManaValue?: boolean;
   // "Destroy target creature with toughness 4 or greater." (Destroy Evil) — a legal target needs at least this much toughness.
@@ -68,6 +71,9 @@ interface DestroyAllEffect {
   requireKeyword?: string;
   // "Exile all artifacts." (Farewell): the same sweep, but the permanents are exiled — indestructible doesn't save them.
   exile?: boolean;
+  // "Destroy all creatures. They can't be regenerated. Draw a card for each creature destroyed this way." (Decree of Pain): the caster draws one card per
+  // creature (any player's) that was actually destroyed.
+  drawPerDestroyed?: boolean;
 }
 
 // "Destroy all creatures with mana value N or less/greater" (Austere Command's creature modes,
@@ -259,7 +265,9 @@ function parseDestroy(text: string): DestroyEffect | DestroyAllEffect | DestroyA
       kind: "destroy_all",
       targetType: "creature",
       excludeType: qualifier && !isColor ? qualifier : undefined,
-      excludedColors: qualifier && isColor ? [qualifier] : []
+      excludedColors: qualifier && isColor ? [qualifier] : [],
+      // "Draw a card for each creature destroyed this way." (Decree of Pain)
+      ...(/\bdraw a card for each creature destroyed this way\b/.test(text) ? { drawPerDestroyed: true } : {})
     };
   }
   // "Destroy all artifacts and enchantments." (Cleansing Nova's second mode) — checked before the artifact-only match, which
@@ -298,6 +306,7 @@ function parseDestroy(text: string): DestroyEffect | DestroyAllEffect | DestroyA
     basicsExcluded: clause.includes("nonbasic"),
     ...(/\b(?:an opponent controls|you don'?t control|your opponents control)\b/.test(clause) ? { opponentOnly: true } : {}),
     ...(/\bits controller investigates\b/.test(text) ? { controllerInvestigates: true } : {}),
+    ...(/\bits controller creates two tokens that are copies of that creature, except their power is half that creature'?s power and their toughness is half that creature'?s toughness\b/.test(text) ? { controllerCopiesHalved: true } : {}),
     ...(/\byou lose life equal to that (?:permanent|creature|enchantment)['’]?s mana value\b/.test(text) ? { casterLosesLifeEqualToManaValue: true } : {}),
     ...(clause.match(/target creature with toughness (\d+) or greater/) ? { minToughness: Number.parseInt(clause.match(/target creature with toughness (\d+) or greater/)![1], 10) } : {})
   };

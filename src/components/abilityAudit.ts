@@ -12,6 +12,7 @@ import { parseGroupManaAbilityGrant } from "@/lib/characteristics";
 import { parseOtherCreaturesGrant, parseTypeGrantEffects } from "@/lib/typeGrants";
 import type { PlayerSeat, VisibleCard } from "@/lib/types";
 import { legalMainPhaseActions, manaChoicesForCard } from "./AppFlow";
+import { tokenTapManaAbility } from "@/engine/mana";
 import type { GameSession } from "@/lib/types";
 
 export interface AuditFinding {
@@ -114,6 +115,8 @@ function activatedModelledBy(card: AuditableCard, clause: string): string | unde
     const asCard = { id: "audit-card", name: card.name, typeLine: card.typeLine ?? "", oracleText: text, manaValue: 0, colors: [], zone: "battlefield", producedMana: card.producedMana, chosenColor: "W" } as unknown as VisibleCard;
     const seat = stubSeat();
     if (manaChoicesForCard(asCard, seat, [seat, stubOpponent()]).length > 0) return "mana system";
+    // Hazel of the Rootbloom: "{T}, Pay 2 life, Tap X untapped tokens you control: Add X mana ..." needs tokens on the board, which the stub seat lacks.
+    if (tokenTapManaAbility(asCard)) return "mana system (taps tokens)";
   }
   if (/graveyard/i.test(clause) && parseGraveyardReturnAbility(text)) return "graveyard return ability";
   if (/search your library for a basic/i.test(clause) && isBasicLandFetchAbility({ oracleText: text })) return "basic land fetch";

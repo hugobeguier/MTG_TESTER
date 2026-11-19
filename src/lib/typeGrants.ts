@@ -110,3 +110,18 @@ export function parseOtherCreaturesGrant(oracleText: string): OtherCreaturesGran
 export function abilityOracleText(card: { oracleText: string; grantedAbilityText?: string }): string {
   return card.grantedAbilityText ? `${card.oracleText}\n${card.grantedAbilityText}` : card.oracleText;
 }
+
+// "Each land is a Swamp in addition to its other land types." (Urborg, Tomb of Yawgmoth) / "...a Forest..." (Yavimaya, Cradle of Growth): every land
+// on the battlefield, whoever controls it, gains that land SUBTYPE. Returns the subtypes granted. The grant is stored in the land's grantedTypes (as
+// "Swamp"), so basicLandTypes / hasCardType / the "Swamp you control" counters and the intrinsic "{T}: Add {B}" mana ability all see it.
+const BASIC_LAND_SUBTYPES = ["Plains", "Island", "Swamp", "Mountain", "Forest"];
+export function parseLandSubtypeGrants(oracleText: string): string[] {
+  const granted: string[] = [];
+  for (const line of oracleText.split("\n")) {
+    const match = line.trim().match(/^each land is an? ([A-Za-z]+) in addition to its other land types\b/i);
+    if (!match) continue;
+    const subtype = BASIC_LAND_SUBTYPES.find((candidate) => candidate.toLowerCase() === match[1].toLowerCase());
+    if (subtype) granted.push(subtype);
+  }
+  return granted;
+}

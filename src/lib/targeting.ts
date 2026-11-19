@@ -36,6 +36,8 @@ export interface TargetSpec {
   excludedColors?: string[];
   // "Target ATTACKING creature": only creatures currently attacking.
   attackingOnly?: boolean;
+  // "Target TOKEN you control" (Hazel of the Rootbloom): only tokens are legal.
+  tokensOnly?: boolean;
   // "Target Zombie card" (Lord of the Undead): the card must have this creature type (a changeling counts).
   subtype?: string;
   artifactsExcluded?: boolean;
@@ -106,6 +108,7 @@ function matchesSpecFilters(card: VisibleCard, spec: TargetSpec): boolean {
   }
   if (spec.excludedCardIds?.includes(card.id)) return false;
   if (spec.attackingOnly && !card.attacking) return false;
+  if (spec.tokensOnly && !card.token) return false;
   if (spec.subtype && !permanentMatchesQualifier(card, spec.subtype)) return false;
   return true;
 }
