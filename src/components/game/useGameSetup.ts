@@ -8,7 +8,7 @@ import { type SeatConfig, applyDeckToSeat, createInitialConfigs, fallbackCommand
 import { evaluateOpeningHand } from "@/lib/mulliganHeuristics";
 import { isLandCard } from "@/engine/shared";
 import { makeCommonTrigger, phaseEvent } from "@/engine/triggers";
-import { nextSeatId, rollForStartingSeat } from "@/engine/turnFlow";
+import { rollForStartingSeat } from "@/engine/turnFlow";
 import { prewarmRuleWorkflowCache, warmUpAgentModel } from "@/lib/agentRuntime";
 import { seatVerb } from "@/engine/abilities";
 import { hostStatusStore } from "@/lib/multiplayer/hostStatusStore";
@@ -505,7 +505,7 @@ export function useGameSetup(ctx: GameContext) {
     const { winnerId: firstSeatId, rolls } = rollForStartingSeat(session.seats);
     setGameStage("playing");
     setActiveSeatId(firstSeatId);
-    setPrioritySeatId(nextSeatId(session.seats, firstSeatId));
+    setPrioritySeatId(firstSeatId); // the active player starts with priority
     setSession((current) => {
       const started: GameSession = {
       ...current,

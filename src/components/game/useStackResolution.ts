@@ -21,7 +21,7 @@ import { counterSpellCanTarget, parseCounterSpellAbility, parseDelayedUpkeepDraw
 import { createTokensForSeat, parseCreateTokenSpecs } from "@/engine/tokens";
 import { etbEffectText, parseAdditionalDiscardCost, parseAdditionalSacrificeCost, parseModalHeader, parseSpellModalHeader } from "@/lib/oracleClauses";
 import { findCastTriggers, findEntersBatchWatcherTriggers } from "@/engine/triggerFinders";
-import { findSpellSourceCard, nextPrioritySeatId, pendingActionRequiredPasses, withPendingActionSourceCard } from "@/engine/priority";
+import { findSpellSourceCard, nextPrioritySeatId, nextSeatAfterPass, pendingActionRequiredPasses, withPendingActionSourceCard } from "@/engine/priority";
 import { flushSync } from "react-dom";
 import { hasChooseCreatureTypeEtb, parseChooseColorEtb } from "@/lib/characteristics";
 import { hasIndestructible } from "@/engine/damage";
@@ -117,9 +117,9 @@ export function useStackResolution(ctx: GameContext) {
 
     setPriorityPasses(nextPasses);
     setPrioritySeatId(
-      nextPrioritySeatId(
+      nextSeatAfterPass(
         session.seats,
-        pendingAction.actorSeatId,
+        passingSeatId,
         nextPasses,
         pendingAction,
         activeSeatId,
@@ -174,8 +174,9 @@ export function useStackResolution(ctx: GameContext) {
     }
     setPendingAction(action);
     setPriorityPasses([]);
+    // Reopened after something above it resolved: the ACTIVE player gets priority first (rule 117.3b), not this item's own actor.
     setPrioritySeatId(
-      nextPrioritySeatId(session.seats, action.actorSeatId, [], action, activeSeatId, session, manaPools, priorityStopSettings, holdSeatId)
+      nextPrioritySeatId(session.seats, activeSeatId ?? action.actorSeatId, [], action, activeSeatId, session, manaPools, priorityStopSettings, holdSeatId)
     );
   }
 
@@ -323,8 +324,10 @@ export function useStackResolution(ctx: GameContext) {
 
     setPendingAction(action);
     setPriorityPasses([]);
+    // The caster holds priority after casting / activating (117.3c); but triggers are put on the stack and then the ACTIVE player
+    // receives priority first (117.5), whoever controls the trigger.
     setPrioritySeatId(
-      nextPrioritySeatId(session.seats, action.actorSeatId, [], action, activeSeatId, session, manaPools, priorityStopSettings, holdSeatId)
+      nextPrioritySeatId(session.seats, action.type === "trigger" ? (activeSeatId ?? action.actorSeatId) : action.actorSeatId, [], action, activeSeatId, session, manaPools, priorityStopSettings, holdSeatId)
     );
   }
 
@@ -863,7 +866,7 @@ export function useStackResolution(ctx: GameContext) {
           }
 
           if (!resumeTopStackAction(stackAfterCounter)) {
-            setPrioritySeatId(action.actorSeatId);
+            setPrioritySeatId(activeSeatId ?? action.actorSeatId);
           }
           return next;
         });
@@ -1510,7 +1513,7 @@ export function useStackResolution(ctx: GameContext) {
       if (capturedTriggers.length > 0) {
         queueCommonTriggers(capturedTriggers);
       } else if (!resumeTopStackAction(remainingStack)) {
-        setPrioritySeatId(action.actorSeatId);
+        setPrioritySeatId(activeSeatId ?? action.actorSeatId);
       }
       if (capturedDigLook) {
         // Looked at by the CASTER (a remote friend casting Grisly Salvage looks at THEIR library, in THEIR prompt; the default looker is the host).

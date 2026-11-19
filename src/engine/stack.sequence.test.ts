@@ -76,7 +76,7 @@ describe("stack sequences", () => {
     expect(pushed.stack.map((x) => x.id)).toEqual(["t1"]);
     const open = openWindow(pushed, trigger, c);
     expect(open.state.stack).toHaveLength(1);
-    expect(open.state.prioritySeatId).toBe("c");
+    expect(open.state.prioritySeatId).toBe("a"); // 117.5: the active player gets priority first, even for a trigger controlled by c
     const closedT = passAll(open.state, c);
     expect(closedT.resolve.id).toBe("t1");
     const end = resolveTop(closedT.state, "t1");

@@ -16,7 +16,7 @@ import { checkMoveLegal, cumulativeUpkeepCost, fallbackLegalAction, hasAgentMain
 import { chooseAgentLibraryCardForRuleChoice, chooseWorstHandCardToDiscard, genericCostShim } from "@/engine/effects";
 import { chooseLandToReturn, choosePermanentToBlink, resolveEquip, seatVerb } from "@/engine/abilities";
 import { decideWithGate } from "@/lib/moveLegality";
-import { effectiveMaxHandSize, isMainPhase, nextSeatId, phaseTriggeredCards } from "@/engine/turnFlow";
+import { effectiveMaxHandSize, isMainPhase, phaseTriggeredCards } from "@/engine/turnFlow";
 import { evaluateOpeningHand } from "@/lib/mulliganHeuristics";
 import { parseCounterSpellAbility } from "@/lib/counterSpells";
 import { phaseEvent } from "@/engine/triggers";
@@ -464,7 +464,7 @@ export function useAgentDriver(ctx: GameContext) {
       const active = current.seats.find((seat) => seat.id === seatId);
       if (!active || current.activePlayerId !== seatId || current.phase === "end step" || current.phase === "cleanup step") return current;
       clearAllManaPools(current.seats);
-      setPrioritySeatId(nextSeatId(current.seats, seatId));
+      setPrioritySeatId(seatId); // 117.3a: the active player keeps priority entering the end step
       return clearCombatState({
         ...current,
         phase: "end step",

@@ -368,6 +368,41 @@ export function nextPrioritySeatIdWithPredicate(
   return actorSeatId;
 }
 
+// After `passerSeatId` passes: priority goes to the next seat in turn order (117.3d) that still has to pass, wrapping around and
+// skipping seats that already passed. Unlike nextPrioritySeatIdWithPredicate this has no "actor first" rule: that only applies when
+// a window opens (the caster holds priority), and a REOPENED window starts with the active player, so the window's own actor must
+// not jump the queue after the first pass. Falls back to the passer if nobody is left.
+export function nextSeatAfterPassWithPredicate(
+  seats: PlayerSeat[],
+  passerSeatId: string | undefined,
+  passes: string[],
+  action: PendingAction,
+  canReceivePriority: CanReceivePriority
+) {
+  const required = pendingActionRequiredPassesWithPredicate(seats, action, canReceivePriority);
+  const startIndex = Math.max(0, seats.findIndex((seat) => seat.id === passerSeatId));
+  for (let offset = 1; offset <= seats.length; offset += 1) {
+    const seat = seats[(startIndex + offset) % seats.length];
+    if (required.includes(seat.id) && !passes.includes(seat.id)) return seat.id;
+  }
+  return passerSeatId ?? action.actorSeatId;
+}
+
+export function nextSeatAfterPass(
+  seats: PlayerSeat[],
+  passerSeatId: string | undefined,
+  passes: string[],
+  action: PendingAction,
+  activeSeatId: string | undefined,
+  session: GameSession,
+  manaPools: Record<string, ManaPool>,
+  stops: PriorityStopSettings,
+  holdPriorityOnceSeatId: string | undefined,
+  remoteCanAct: boolean = remoteSeatsCanAct
+) {
+  return nextSeatAfterPassWithPredicate(seats, passerSeatId, passes, action, (seat, a) => canReceivePriorityForPendingAction(seat, a, activeSeatId, session, manaPools, stops, holdPriorityOnceSeatId, remoteCanAct));
+}
+
 // Whether resolving `action` will open a choice prompt for this (human) seat — the "last chance to respond first" cases the stop policy
 // should never skip: an edict-style sacrifice or a discard that names this seat, and the human's own optional / option-picking triggers.
 // Deliberately narrow (text patterns for the common shapes, not every possible prompt); a false positive only opens a window the player

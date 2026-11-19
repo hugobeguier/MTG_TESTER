@@ -6,7 +6,7 @@ import { type SagaChapters, isSagaTransformChapter, parseGainsAbilityGrant, pars
 import { TURN_PHASES } from "@/lib/priorityStops";
 import { anyPhaseTrigger } from "@/lib/phaseTriggers";
 import { applyCounterDelta, applyLoreCounterEtb, moveCardBetweenVisibleZones, rulesEvent } from "@/engine/zones";
-import { applyEndStepEffects, clearTemporaryBuffs, effectiveMaxHandSize, hasExtraBeginningPhaseAura, nextSeatForTurn, nextSeatId, phaseTriggeredCards, resolvePendingUpkeepDraws, untapForSeat } from "@/engine/turnFlow";
+import { applyEndStepEffects, clearTemporaryBuffs, effectiveMaxHandSize, hasExtraBeginningPhaseAura, nextSeatForTurn, phaseTriggeredCards, resolvePendingUpkeepDraws, untapForSeat } from "@/engine/turnFlow";
 import { cannotPayMessage, chooseManaSourcesForCost, manaPoolTotal, payCostFromPool, selectedManaTotal, spendManaSources } from "@/engine/mana";
 import { chooseReadAheadChapter, loreCounterCount } from "@/engine/etb";
 import { cleanupCombat, forcedAttackers, resolveCombatDamage } from "@/engine/combat";
@@ -175,7 +175,7 @@ export function useTurnFlow(ctx: GameContext) {
       // resolveEndTurn already checks it — this is the only other place a turn changes hands.
       const { seat: nextSeat, queue } = nextSeatForTurn(current.seats, activeIndex, current.extraTurnsQueue);
       setActiveSeatId(nextSeat.id);
-      setPrioritySeatId(nextSeatId(current.seats, nextSeat.id));
+      setPrioritySeatId(nextSeat.id); // 117.3a: the active player receives priority at the start of each step
       loyaltyActivationsThisTurn.current.clear();
       return runPhaseActions(
         clearTemporaryBuffs({
@@ -207,7 +207,7 @@ export function useTurnFlow(ctx: GameContext) {
       );
     }
 
-    setPrioritySeatId(nextSeatId(current.seats, activeSeat.id));
+    setPrioritySeatId(activeSeat.id); // 117.3a
     return runPhaseActions(
       {
         ...current,
@@ -244,7 +244,7 @@ export function useTurnFlow(ctx: GameContext) {
     const { seat: nextSeat, queue } = nextSeatForTurn(current.seats, activeIndex, current.extraTurnsQueue);
     clearAllManaPools(current.seats);
     setActiveSeatId(nextSeat.id);
-    setPrioritySeatId(nextSeatId(current.seats, nextSeat.id));
+    setPrioritySeatId(nextSeat.id); // 117.3a
     loyaltyActivationsThisTurn.current.clear();
 
     const cleaned = cleanupCombat(

@@ -6,7 +6,7 @@
 
 import type { PlayerSeat } from "@/lib/types";
 import type { PendingAction } from "@/engine/types";
-import { isStackAction, nextPrioritySeatIdWithPredicate as nextPrioritySeatId, pendingActionRequiredPassesWithPredicate as pendingActionRequiredPasses, type CanReceivePriority } from "@/engine/priority";
+import { isStackAction, nextPrioritySeatIdWithPredicate as nextPrioritySeatId, nextSeatAfterPassWithPredicate as nextSeatAfterPass, pendingActionRequiredPassesWithPredicate as pendingActionRequiredPasses, type CanReceivePriority } from "@/engine/priority";
 
 export interface StackState {
   activeSeatId?: string;
@@ -52,7 +52,11 @@ export function removeFromStack(state: StackState, id: string): { state: StackSt
 export function openWindow(
   state: StackState,
   action: PendingAction,
-  ctx: PriorityCtx
+  ctx: PriorityCtx,
+  // Who gets priority first. Default is the actor (117.3c: the caster holds priority after casting); a window REOPENED after
+  // something above it resolved passes the ACTIVE player instead (117.3b), via resumeWindow.
+  // A trigger put on the stack gives the ACTIVE player priority first (117.5), whoever controls it.
+  firstSeatId: string = action.type === "trigger" && state.activeSeatId ? state.activeSeatId : action.actorSeatId
 ): { state: StackState; requiredPasses: string[]; autoResolve: boolean } {
   const pushed = pushToStack(state, action);
   const requiredPasses = pendingActionRequiredPasses(ctx.seats, action, ctx.canReceivePriority);
@@ -62,11 +66,17 @@ export function openWindow(
       ...pushed,
       pending: action,
       passes: [],
-      prioritySeatId: nextPrioritySeatId(ctx.seats, action.actorSeatId, [], action, ctx.canReceivePriority)
+      prioritySeatId: nextPrioritySeatId(ctx.seats, firstSeatId, [], action, ctx.canReceivePriority)
     },
     requiredPasses,
     autoResolve: false
   };
+}
+
+// Rule 117.3b: after a spell/ability resolves, the ACTIVE player receives priority first (not the controller of the item that
+// resolved, nor the controller of the item now on top), then turn order from the active player.
+export function resumeWindow(state: StackState, action: PendingAction, ctx: PriorityCtx) {
+  return openWindow(state, action, ctx, state.activeSeatId ?? action.actorSeatId);
 }
 
 // passPriority: with no window open priority just moves to the next seat; otherwise the holder's pass is recorded and, once every
@@ -82,7 +92,7 @@ export function passPriority(state: StackState, ctx: PriorityCtx): { state: Stac
   const passes = state.prioritySeatId === undefined ? state.passes : Array.from(new Set([...state.passes, state.prioritySeatId]));
   if (requiredPasses.every((seatId) => passes.includes(seatId))) return { state, resolve: pending };
   return {
-    state: { ...state, passes, prioritySeatId: nextPrioritySeatId(ctx.seats, pending.actorSeatId, passes, pending, ctx.canReceivePriority) }
+    state: { ...state, passes, prioritySeatId: nextSeatAfterPass(ctx.seats, state.prioritySeatId, passes, pending, ctx.canReceivePriority) }
   };
 }
 
