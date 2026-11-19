@@ -1609,6 +1609,19 @@ h3 {
   font-size: 0.85rem;
 }
 
+.mode-check-row,
+.mode-count-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+}
+
+.mode-count-row span[aria-live] {
+  min-width: 2ch;
+  text-align: center;
+}
+
 .creature-type-list {
   max-height: 280px;
   overflow-y: auto;

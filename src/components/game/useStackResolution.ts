@@ -7,7 +7,7 @@ import { type CastChoices, type PendingAction } from "@/engine/types";
 import { type ChosenTarget, legalTargets } from "@/lib/targeting";
 import { type GameSession, type ManaColor, type VisibleCard } from "@/lib/types";
 import { type StackFeedEntry } from "@/components/ThreeGameTable";
-import { addManaToPool, attackTriggerManaHeuristicSplit, cannotPayMessage, chooseManaSourcesForCost, manaPoolTotal, payCostFromPool, selectedManaTotal, spendManaSources, spentManaColors } from "@/engine/mana";
+import { addManaToPool, emptyManaPool, attackTriggerManaHeuristicSplit, cannotPayMessage, chooseManaSourcesForCost, manaPoolTotal, payCostFromPool, selectedManaTotal, spendManaSources, spentManaColors } from "@/engine/mana";
 import { additionalSacrificeCandidates, applyChosenFaceToCard, applySpellDamagePrevention, canCastAtInstantSpeed, castFaceDecision, castRestrictedByTurnCount, chooseAdditionalCostSacrifice, independentlyCastableSpellFaces, manaFromTappedOpponentLands, payAdditionalDiscardCost, playCardFromZone, sacrificeForAdditionalCost, seatHasFlashGrant, spellCastLockedOut, spellFaceCostCard, spellResolutionDestination, targetingTax } from "@/engine/casting";
 import { adjustedCastingCost, hasSingleKicker, maxAffordableX, totalCastingCost } from "@/engine/costs";
 import { applyCastGenericModes, applyCastRemoval, castModeLabels, castStructure, counterTargetActionFor, describeRemovalMode, hasResolvableTarget, nextCastPrompt, spellModePrompt, spellTargetSlots, stackTargetText } from "@/engine/castTargets";
@@ -1515,7 +1515,14 @@ export function useStackResolution(ctx: GameContext) {
     // this whole block by one more macrotask lets the already-scheduled updater run first.
     window.setTimeout(() => {
       if (capturedSpellMana) {
-        setSeatManaPool(action.actorSeatId, addManaToPool(poolForSeat(action.actorSeatId), capturedSpellMana.color, capturedSpellMana.amount));
+        const manaColor = capturedSpellMana.color;
+        const manaAmount = capturedSpellMana.amount;
+        if (session.seats.find((item) => item.id === action.actorSeatId)?.kind === "human") {
+          setSeatManaPool(action.actorSeatId, addManaToPool(poolForSeat(action.actorSeatId), manaColor, manaAmount));
+        } else {
+          // An agent's floating mana lives on its seat (PlayerSeat.floatingMana): the legal-action lists and payCastingCost spend it first, the phase end empties it.
+          setSession((current) => ({ ...current, seats: current.seats.map((item) => (item.id === action.actorSeatId ? { ...item, floatingMana: addManaToPool(item.floatingMana ?? emptyManaPool(), manaColor, manaAmount) } : item)) }));
+        }
         addEvent(`${action.cardName} adds ${capturedSpellMana.amount} {${capturedSpellMana.color}} (${capturedSpellMana.note ?? `${capturedSpellMana.amount} tapped land${capturedSpellMana.amount === 1 ? "" : "s"} among your opponents'`}).`, action.actorSeatId, "Rules action");
       }
       if (capturedRestrictedMana) {

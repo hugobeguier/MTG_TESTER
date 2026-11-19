@@ -313,7 +313,7 @@ export function nextCastPrompt(
   answers: CastChoices,
   // The spells/abilities on the stack, which a counterspell's target is chosen from (the session itself does not hold the stack).
   stack: PendingAction[] = []
-): { kind: "modes"; prompt: string; options: Array<{ label: string; mode: number }> } | { kind: "target"; prompt: string; options: LabeledSlot["options"] } | undefined {
+): { kind: "modes"; prompt: string; options: Array<{ label: string; mode: number }> } | { kind: "modeset"; prompt: string; options: Array<{ label: string; mode: number }>; min: number; max: number; repeatable: boolean } | { kind: "target"; prompt: string; options: LabeledSlot["options"] } | undefined {
   const structure = castStructure(card, chosenX);
   if (!structure) return undefined;
   let slots: LabeledSlot[] = [];
@@ -324,6 +324,24 @@ export function nextCastPrompt(
     const viable = all
       .map((mode, index) => ({ mode, index }))
       .filter(({ mode }) => (structure.kind === "removal_modal" ? removalEffectHasLegalTarget(session, seatId, card, mode as Exclude<RemovalEffect, { kind: "modal" }>) : genericModalModeHasLegalTarget(session, seatId, mode as GenericModalMode)));
+    // "Choose one or more / one or both / any number / up to N" and "Choose three. You may choose the same mode more than once.": ONE checkbox prompt for the
+    // whole mode set (any non-empty subset, or exactly N picks with repeats), then the targets of the chosen modes in printed order (rule 601.2b-c).
+    if (structure.kind === "generic_modal" && (structure.modal.atMost || structure.modal.repeatable) && !answers.modesDone) {
+      const repeatable = Boolean(structure.modal.repeatable);
+      if (viable.length === 1) {
+        answers.modes = repeatable ? Array.from({ length: structure.modal.chooseCount }, () => viable[0].index) : [viable[0].index];
+        answers.modesDone = true;
+      } else if (viable.length > 1) {
+        return {
+          kind: "modeset",
+          prompt: repeatable ? `${card.name}: choose ${structure.modal.chooseCount} modes (the same mode may be chosen more than once).` : `${card.name}: choose one or more modes.`,
+          options: viable.map(({ mode, index }) => ({ label: (mode as GenericModalMode).text ?? `Mode ${index + 1}`, mode: index })),
+          min: repeatable ? structure.modal.chooseCount : 1,
+          max: repeatable ? structure.modal.chooseCount : Math.min(structure.modal.chooseCount, viable.length),
+          repeatable
+        };
+      }
+    }
     const wanted = Math.min(structure.modal.chooseCount, viable.length);
     const picked = answers.modes ?? [];
     // "One or more / one or both": the player may stop early, so even a spell whose every mode is viable asks.
@@ -364,10 +382,21 @@ export function nextCastPrompt(
   const slot = slots[answers.targets.length];
   if (!slot || slot.options.length === 0) return undefined;
   // A card already picked for an earlier slot can't be picked again (Victimize's second graveyard creature).
-  const alreadyPicked = new Set(answers.targets.flatMap((target) => (target.kind === "card" ? [target.cardId] : [])));
+  // (Not for a modal spell: each mode has its own instance of "target", so the same permanent may be chosen again, e.g. two +1/+1 counter modes of Rootcast Apprenticeship.)
+  const isModal = structure.kind === "removal_modal" || structure.kind === "generic_modal";
+  const alreadyPicked = new Set(isModal ? [] : answers.targets.flatMap((target) => (target.kind === "card" ? [target.cardId] : [])));
   const options = slot.options.filter((option) => option.target.kind !== "card" || !alreadyPicked.has(option.target.cardId));
   if (options.length === 0) return undefined;
   return { kind: "target", prompt: slot.prompt, options };
+}
+
+// A checkbox mode-set answer (positions in the prompt's option list) -> the chosen mode indexes in PRINTED order (the order modes are resolved and targeted in), or
+// undefined when the answer is not allowed: too few / too many picks, a position that is not an option, or a repeated mode on a spell that does not allow repeats.
+export function modeSetAnswer(modeSet: { min: number; max: number; repeatable: boolean }, options: Array<{ mode?: number }>, positions: number[]): number[] | undefined {
+  if (positions.length < modeSet.min || positions.length > modeSet.max) return undefined;
+  if (positions.some((position) => !Number.isInteger(position) || options[position]?.mode === undefined)) return undefined;
+  if (!modeSet.repeatable && new Set(positions).size !== positions.length) return undefined;
+  return positions.map((position) => options[position].mode as number).sort((a, b) => a - b);
 }
 
 // A card by id in any visible zone of any seat (battlefield, hand, graveyard, exile, library) — lets the text-option pickers show real card art.
@@ -562,9 +591,9 @@ function agentModalCastChoices(session: GameSession, seatId: string, card: Visib
     const modal = structure.modal;
     const viable = modal.modes
       .map((mode, index) => ({ mode, index }))
-      .filter(({ mode, index }) => genericModalModeHasLegalTarget(session, seatId, mode) && !(modal.distinctPerTurn && session.onceEachTurnEffectsUsed?.includes(`${session.turn}:${card.id}:mode:${index}`)))
-      .slice(0, modal.chooseCount);
-    for (const { mode, index } of viable) {
+      .filter(({ mode, index }) => genericModalModeHasLegalTarget(session, seatId, mode) && !(modal.distinctPerTurn && session.onceEachTurnEffectsUsed?.includes(`${session.turn}:${card.id}:mode:${index}`)));
+    const taken = modal.repeatable ? repeatableModePicks(viable, modal.chooseCount) : viable.slice(0, modal.chooseCount);
+    for (const { mode, index } of taken) {
       if (genericModeSlots(session, seatId, card, mode).length > 0) {
         const target = agentGenericModeTarget(session, seatId, card, mode, chosenX);
         if (!target) continue;
@@ -574,6 +603,19 @@ function agentModalCastChoices(session: GameSession, seatId: string, card: Visib
     }
   }
   return modes.length > 0 ? { modes, targets } : undefined;
+}
+
+// "Choose three, the same mode more than once" for an agent: the three most useful picks (an opponent's sacrifice first, then counters, token copies and tokens),
+// repeating the best ones when fewer than three distinct modes are viable; returned in printed order, the order the modes resolve in.
+function repeatableModePicks(viable: Array<{ mode: GenericModalMode; index: number }>, count: number): Array<{ mode: GenericModalMode; index: number }> {
+  if (viable.length === 0) return [];
+  const score = ({ mode }: { mode: GenericModalMode }) => {
+    const verb = mode.kind === "trigger" && mode.effect.kind === "targeted_effect" ? mode.effect.effect.verb.kind : mode.kind === "trigger" ? mode.effect.kind : "";
+    return verb === "sacrifice" ? 5 : verb === "add_counters" ? 4 : verb === "copy_token" || verb === "create_tokens" ? 3 : 1;
+  };
+  const ranked = [...viable].sort((a, b) => score(b) - score(a) || a.index - b.index);
+  const picks = Array.from({ length: count }, (_, at) => ranked[at % ranked.length]);
+  return picks.sort((a, b) => a.index - b.index);
 }
 
 function agentGenericModeTarget(session: GameSession, seatId: string, card: VisibleCard, mode: GenericModalMode, chosenX?: number): ChosenTarget | undefined {

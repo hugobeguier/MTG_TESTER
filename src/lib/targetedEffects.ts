@@ -16,7 +16,11 @@ type TargetedVerb =
   // "Create a token that's a copy of another target nonland permanent you control." (Extravagant Replication)
   | { kind: "copy_token"; asArtifact?: boolean; doubleIfSubtype?: string }
   // "Target creature can't block this creature this turn." (Kozilek's Pathfinder): the target can't block the source for the turn.
-  | { kind: "cant_block_source" };
+  | { kind: "cant_block_source" }
+  // "Target player creates a 1/1 green Squirrel creature token." (Rootcast Apprenticeship): the TARGET player gets the tokens; `clause` is "Create ... token." for parseCreateTokenSpecs.
+  | { kind: "create_tokens"; clause: string }
+  // "Target opponent sacrifices a nontoken artifact of their choice." (Rootcast Apprenticeship): the target player chooses which of their permanents matching `typeFilter`.
+  | { kind: "sacrifice"; typeFilter: string };
 
 export interface TargetedEffect {
   verb: TargetedVerb;
@@ -167,6 +171,23 @@ export function parseTargetedEffect(rawText: string): TargetedEffect | undefined
     return { verb: { kind: "copy_token", doubleIfSubtype: tokenCopy[1] }, who: { kind: "permanent", permanentType: "permanent", controller: "you", tokenOnly: true } };
   }
 
+  // "Create a token that's a copy of target token you control." (Rootcast Apprenticeship): only a token is a legal target.
+  if (/^create a token that'?s a copy of target token you control$/.test(text)) {
+    return { verb: { kind: "copy_token" }, who: { kind: "permanent", permanentType: "permanent", controller: "you", tokenOnly: true } };
+  }
+
+  // "Target player creates a 1/1 green Squirrel creature token."
+  const targetCreates = rawText.replace(/\([^)]*\)/g, "").replace(/\s+/g, " ").trim().replace(/\.$/, "").match(/^target (player|opponent) creates (.+? tokens?)$/i);
+  if (targetCreates) {
+    return { verb: { kind: "create_tokens", clause: `Create ${targetCreates[2]}.` }, who: { kind: "player", opponentOnly: targetCreates[1].toLowerCase() === "opponent" } };
+  }
+
+  // "Target opponent sacrifices a nontoken artifact of their choice."
+  const targetSacrifices = text.match(/^target (player|opponent) sacrifices an? ([a-z ]+?) of their choice$/);
+  if (targetSacrifices && ["artifact", "nontoken artifact", "enchantment", "land", "creature", "nontoken creature", "nonland permanent", "permanent"].includes(targetSacrifices[2])) {
+    return { verb: { kind: "sacrifice", typeFilter: targetSacrifices[2] }, who: { kind: "player", opponentOnly: targetSacrifices[1] === "opponent" } };
+  }
+
   // "Create a token that's a copy of [another] target nonland permanent you control." — no "except ..." modifiers (those change what is copied).
   // "..., except it's an artifact in addition to its other types." (Saheeli's Artistry) is the one exception modelled.
   const copy = text.match(/^create a token that'?s a copy of (another )?target ([a-z ]+?)(,? except it'?s an artifact in addition to its other types)?$/);
@@ -210,7 +231,7 @@ export function targetedEffectIsBeneficial(effect: TargetedEffect): boolean {
   if (verb.kind === "add_counters") return !verb.counterKind.startsWith("-");
   if (verb.kind === "gain_keywords" && verb.keywords.includes("can't block")) return false;
   if (verb.kind === "cant_block_source") return false;
-  if (verb.kind === "gain_keywords" || verb.kind === "untap" || verb.kind === "draw" || verb.kind === "copy_token") return true;
+  if (verb.kind === "gain_keywords" || verb.kind === "untap" || verb.kind === "draw" || verb.kind === "copy_token" || verb.kind === "create_tokens") return true;
   if (verb.kind === "pump") return verb.power >= 0 && verb.toughness >= 0;
   if (verb.kind === "life") return verb.delta > 0;
   return false;

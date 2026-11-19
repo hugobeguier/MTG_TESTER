@@ -6,6 +6,7 @@ import { addManaToPool, addPools, chooseManaSourcesForCost, effectiveManaOracleT
 import { basicLandFetchCostRequiresTap, isBasicLandFetchAbility } from "@/lib/oracleClauses";
 import { genericCostShim } from "@/engine/effects";
 import { isSimpleManaSourcePermanent } from "@/engine/simpleManaSource";
+import { markPermanentsUsed, tapPaidSignet, toggleTapManually } from "@/engine/tapUsed";
 import { isEquipment } from "@/lib/attachments";
 import { parseGenericSacrificeAbilities, parseGenericTapAbilities } from "@/lib/activatedAbilities";
 import { type GameContext, lateFn } from "./context";
@@ -28,6 +29,9 @@ export function useManaUi(ctx: GameContext) {
     // "You don't lose unspent red mana as steps and phases end." (Leyline Tyrant) — the red stays; everything else empties.
     const keepsRed = session.seats.find((seat) => seat.id === seatId)?.board.battlefield.some((card) => !card.abilitiesStripped && /you don'?t lose unspent red mana as steps and phases end/i.test(card.oracleText));
     setSeatManaPool(seatId, keepsRed ? { ...emptyManaPool(), R: poolForSeat(seatId).R } : emptyManaPool());
+    markContributionSourcesUsed(seatId);
+    // An agent's floating mana (PlayerSeat.floatingMana) empties with the phase too.
+    setSession((current) => (current.seats.some((seat) => seat.id === seatId && seat.floatingMana) ? { ...current, seats: current.seats.map((seat) => (seat.id === seatId ? { ...seat, floatingMana: undefined } : seat)) } : current));
     setManaContributions((current) => ({ ...current, [seatId]: [] }));
     setCopyMana((current) => (current[seatId] ? { ...current, [seatId]: 0 } : current));
   }
@@ -40,7 +44,15 @@ export function useManaUi(ctx: GameContext) {
     for (const seat of seats) clearManaPool(seat.id);
   }
 
+  // The mana these taps made is gone from the record (spent, partly spent, or emptied at the end of the phase): the sources count as USED and can no longer be
+  // untapped by hand (engine/tapUsed.ts). Only a tap whose mana is still floating and untouched keeps its undo.
+  function markContributionSourcesUsed(seatId: string) {
+    const ids = (manaContributions[seatId] ?? []).map((item) => item.cardId);
+    if (ids.length > 0) setSession((current) => markPermanentsUsed(current, seatId, ids));
+  }
+
   function clearManaContributions(seatId: string) {
+    markContributionSourcesUsed(seatId);
     setManaContributions((current) => ({ ...current, [seatId]: [] }));
   }
 
@@ -201,14 +213,28 @@ export function useManaUi(ctx: GameContext) {
       setInspectedCard(card);
       return;
     }
+    if (seat && card && !card.tapped && location === "battlefield" && tapSignet(seatId, cardId)) return;
     if (seat && card && !card.tapped && isAvailableManaSource(card, seat, session.seats)) {
-      if (location === "battlefield" && tapSignet(seatId, cardId)) return;
       const choices = manaChoicesForCard(card, seat, session.seats);
       if (choices.length > 1) {
         setManaChoice({ seatId, cardId, cardName: card.name, location, choices });
         return;
       }
       tapForMana(seatId, cardId, location, choices[0] ?? "C");
+      return;
+    }
+
+    // A human's manual untap goes through engine/tapUsed.ts: a tapped permanent that was USED (its mana spent or partly spent, it paid a cost, a paid mana ability ran)
+    // is refused; a misclick tap, or a tap whose mana is still floating untouched (taken back out of the pool here), is undone.
+    if (location === "battlefield" && seat && card) {
+      const toggled = toggleTapManually(session, seatId, cardId, manaContributions[seatId] ?? [], poolForSeat(seatId));
+      if (toggled.refused) {
+        addEvent(toggled.refused, seatId, "Rules action");
+        return;
+      }
+      if (card.tapped) removeManaContribution(seatId, cardId);
+      setSession((current) => toggleTapManually(current, seatId, cardId, manaContributions[seatId] ?? [], poolForSeat(seatId)).session);
+      setInspectedCard((current) => (current?.id === cardId ? { ...current, tapped: !current.tapped } : current));
       return;
     }
 
@@ -253,8 +279,9 @@ export function useManaUi(ctx: GameContext) {
   function tapPermanentForMana(seatId: string, cardId: string) {
     const seat = session.seats.find((item) => item.id === seatId);
     const card = seat?.board.battlefield.find((item) => item.id === cardId);
-    if (!seat || !card || card.tapped || !isAvailableManaSource(card, seat, session.seats)) return;
+    if (!seat || !card || card.tapped) return;
     if (tapSignet(seatId, cardId)) return;
+    if (!isAvailableManaSource(card, seat, session.seats)) return;
     const choices = manaChoicesForCard(card, seat, session.seats);
     if (choices.length > 1) {
       setManaChoice({ seatId, cardId, cardName: card.name, location: "battlefield", choices });
@@ -269,18 +296,18 @@ export function useManaUi(ctx: GameContext) {
     const card = seat?.board.battlefield.find((item) => item.id === cardId);
     const signet = card ? signetAbility(effectiveManaOracleText(card)) : undefined;
     if (!seat || !card || !signet) return false;
-    if (card.tapped || !isAvailableManaSource(card, seat, session.seats)) return true;
-    const pool = manaPools[seatId] ?? emptyManaPool();
-    const paid = signet.generic > 0 ? payCostFromPool(pool, genericCostShim(signet.generic), signet.generic) : { ok: true as const, pool };
-    if (!paid.ok) {
-      addEvent(`${card.name} needs {${signet.generic}} first: tap a land (or another source) so the mana is in your pool, then tap ${card.name}.`, seatId, "Mana");
+    // Not isAvailableManaSource: that also needs ANOTHER untapped source to pay the {1}, while a human may pay it from mana already floating in the pool.
+    if (card.tapped || card.phasedOut || (card.typeLine.includes("Creature") && card.summoningSick)) return true;
+    const tapped = tapPaidSignet(session, seatId, cardId, manaPools[seatId] ?? emptyManaPool());
+    if (!tapped.ok) {
+      addEvent(tapped.reason, seatId, "Mana");
       return true;
     }
-    let next = paid.pool;
-    for (const symbol of signet.symbols) next = addManaToPool(next, symbol, 1);
-    setManaPools((current) => ({ ...current, [seatId]: next }));
+    // The {N} was spent out of the pool: the sources that made that mana (and this signet) are USED and can't be untapped and replayed (that was +1 mana per untap of Viridescent Bog).
+    if (signet.generic > 0) clearManaContributions(seatId);
+    setManaPools((current) => ({ ...current, [seatId]: tapped.pool }));
     for (const symbol of signet.symbols) addManaContribution(seatId, cardId, symbol, 1);
-    setSession((current) => tapVisibleCard(current, seatId, cardId, "battlefield"));
+    setSession((current) => (signet.generic > 0 ? markPermanentsUsed(tapVisibleCard(current, seatId, cardId, "battlefield"), seatId, [cardId]) : tapVisibleCard(current, seatId, cardId, "battlefield")));
     addEvent(`${seat.name} pays {${signet.generic}} and taps ${card.name} for ${signet.symbols.map((symbol) => "{" + symbol + "}").join("")}.`, seatId, "Mana");
     setInspectedCard((current) => (current?.id === cardId ? { ...current, tapped: true } : current));
     setManaChoice(undefined);
@@ -290,8 +317,9 @@ export function useManaUi(ctx: GameContext) {
   function tapForMana(seatId: string, cardId: string, location: "battlefield" | "command", color: ManaColor) {
     const seat = session.seats.find((item) => item.id === seatId);
     const card = location === "command" ? seat?.board.commander : seat?.board.battlefield.find((item) => item.id === cardId);
-    if (!seat || !card || card.tapped || !isAvailableManaSource(card, seat, session.seats)) return;
+    if (!seat || !card || card.tapped) return;
     if (location === "battlefield" && signetAbility(effectiveManaOracleText(card)) && tapSignet(seatId, cardId)) return;
+    if (!isAvailableManaSource(card, seat, session.seats)) return;
     // A Treasure (or any "{T}, Sacrifice this: Add ...") is used up by tapping it, and a storage land loses its counter - the automatic payment
     // already did this through spendManaSources; a manual tap only ever tapped it, so Treasures stayed on the battlefield.
     const consumedOnUse = location === "battlefield" && (isSacrificeManaSource(card) || manaAbilityCounterRemovalKind(card.oracleText) !== undefined || tokenTapManaAbility(card) !== undefined);

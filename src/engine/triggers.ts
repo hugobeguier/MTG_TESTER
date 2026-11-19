@@ -6,7 +6,7 @@
 import { manaValueFromManaCost } from "@/engine/costs";
 import { addDamageShieldsFromSpec, applyCombatDamageToTarget, dealDamageToCreature, hasFlying, hasHexproof, hasIndestructible, hasShroud, isProtectedFrom, playerHasHexproof } from "@/engine/damage";
 import { PHASE_SCRIPTS, resolveScriptedTrigger, rollD20, scriptedEffectFromText, startD20Reanimate, exploitTriggerFor, riotTriggerFor } from "@/engine/cardScripts";
-import { applyCounterAccumulationEffect, applyDiscardEffect, applyDrainEffect, applyDrawXThenPutBack, applyGenericModalEffect, applyMassPumpEffect, applyMasterOfCeremonies, applyMill, applyPrimitiveAction, applyRemovalEffect, applyTargetedPumpEffect, applyZoneEffect, becomeTemporaryCopy, castTargetLegal, chooseCounterTarget, chooseReanimationTarget, chooseWorstHandCardToDiscard, deferHumanDiscard, drawForSeat, drawMultipleForSeat, genericManaAbilityCostShim, matchesEachPlayerSacrificeFilter, noLegalTargetEvent, parseCounterAccumulationTrigger, parseGenericModalEffect, parseTargetedPump, resolveAgentLibraryLookWorkflow, resolveDeferredChoice, resolveProliferate, resolveRevealExchangeTrigger, resolveSacrificeSelfThenSearch, resolveSearchLibraryPut, resolveWhereXBoardCount, strongestControlledCreature, transformPermanent } from "@/engine/effects";
+import { applyCounterAccumulationEffect, applyDiscardEffect, applyDrainEffect, applyDrawXThenPutBack, applyGenericModalEffect, applyMassPumpEffect, applyMasterOfCeremonies, applyMill, applyPrimitiveAction, applyRemovalEffect, applyTargetedPumpEffect, applyZoneEffect, becomeTemporaryCopy, castTargetLegal, chooseCounterTarget, choosePlaguecrafterSacrifice, chooseReanimationTarget, chooseWorstHandCardToDiscard, deferHumanDiscard, drawForSeat, drawMultipleForSeat, genericManaAbilityCostShim, matchesEachPlayerSacrificeFilter, noLegalTargetEvent, parseCounterAccumulationTrigger, parseGenericModalEffect, parseTargetedPump, resolveAgentLibraryLookWorkflow, resolveDeferredChoice, resolveProliferate, resolveRevealExchangeTrigger, resolveSacrificeSelfThenSearch, resolveSearchLibraryPut, resolveWhereXBoardCount, strongestControlledCreature, transformPermanent } from "@/engine/effects";
 import { applyGraveyardReturn, destroyCreatures, moveCardAcrossSeats, moveLibraryCardToDestination } from "@/engine/entry";
 import { entersBattlefieldTapped } from "@/engine/lands";
 import { chooseManaSourcesForCost, isBoardConditionMet, isRecognizedBoardCondition, lifeGainedThisTurn, spendManaSources } from "@/engine/mana";
@@ -3018,6 +3018,11 @@ export function applyTreasureNabber(session: GameSession): GameSession {
   return next;
 }
 
+// The clause reaches the token parser lower-cased (the mode text was normalised): restore the capitals of the token's name and subtype ("squirrel Token" -> "Squirrel Token").
+function titleCaseWords(text: string): string {
+  return text.replace(/\b[a-z]/g, (letter) => letter.toUpperCase());
+}
+
 // Who an agent aims a targeted effect at: helpful verbs go on its own best permanent (or itself); harmful ones on the opponent they hurt most.
 export function pickTargetedEffectTarget(session: GameSession, controllerSeatId: string, source: VisibleCard, effect: TargetedEffect): ChosenTarget | undefined {
   const spec = targetedEffectSpec(effect, source.id, source.name);
@@ -3077,7 +3082,7 @@ export function applyTargetedEffect(session: GameSession, controllerSeatId: stri
           ...(verb.keywords.length ? { temporaryGrantedKeywords: [...(card.temporaryGrantedKeywords ?? []), ...verb.keywords], grantedKeywords: [...new Set([...(card.grantedKeywords ?? []), ...verb.keywords])] } : {})
         };
       if (verb.kind === "tap") return { ...card, tapped: true };
-      if (verb.kind === "untap") return { ...card, tapped: false };
+      if (verb.kind === "untap") return { ...card, tapped: false, tapUsed: false };
       return card;
     };
     // "...Tap it." (Gyome, Master Chef) taps the target after the verb is applied.
@@ -3092,6 +3097,21 @@ export function applyTargetedEffect(session: GameSession, controllerSeatId: stri
       next = rulesEvent({ ...next, seats: next.seats.map((seat) => (seat.id === victim.id ? { ...seat, life: seat.life + verb.delta } : seat)) }, controllerSeatId, `${source.name}: ${victim.name} ${verb.delta < 0 ? "loses" : "gains"} ${Math.abs(verb.delta)} life.`);
     } else if (verb.kind === "draw") {
       next = drawMultipleForSeat(next, victim.id, verb.amount, `${victim.name} draws ${verb.amount} card${verb.amount === 1 ? "" : "s"} (${source.name}).`);
+    } else if (verb.kind === "create_tokens") {
+      // Rootcast Apprenticeship: the TARGET player gets the tokens (the caster's own seat when they aim it at themselves).
+      next = rulesEvent(createTokensForSeat(next, victim.id, source.id, parseCreateTokenSpecs(verb.clause, undefined, victim).map((spec) => ({ ...spec, name: titleCaseWords(spec.name), typeLine: titleCaseWords(spec.typeLine) }))).session, controllerSeatId, `${source.name}: ${victim.name} creates ${verb.clause.replace(/^Create /, "").replace(/\.$/, "")}.`);
+    } else if (verb.kind === "sacrifice") {
+      // "...sacrifices a nontoken artifact of their choice": the victim chooses. A human with more than one candidate gets the picker (pendingSacrificeChoices); an agent gives up its least valuable.
+      const candidates = victim.board.battlefield.filter((card) => matchesEachPlayerSacrificeFilter(card, verb.typeFilter));
+      if (candidates.length === 0) {
+        next = rulesEvent(next, controllerSeatId, `${source.name}: ${victim.name} has nothing to sacrifice.`);
+      } else if (victim.kind === "human" && candidates.length > 1) {
+        next = { ...next, pendingSacrificeChoices: [...(next.pendingSacrificeChoices ?? []), { seatId: victim.id, sourceCardId: source.id, sourceCardName: source.name, count: 1, typeFilter: verb.typeFilter }] };
+      } else {
+        const pick = choosePlaguecrafterSacrifice(victim, verb.typeFilter) ?? candidates[0];
+        const message = `${victim.name} sacrifices ${pick.name} (${source.name}).`;
+        next = pick.typeLine.includes("Creature") ? destroyCreatures(next, [{ seatId: victim.id, cardId: pick.id, message }], "Rules action") : rulesEvent(moveCardBetweenVisibleZones(next, victim.id, pick.id, "graveyard"), victim.id, message);
+      }
     } else if (verb.kind === "discard") {
       const deferred = deferHumanDiscard(next, victim.id, verb.amount, source.name);
       if (deferred) next = deferred;

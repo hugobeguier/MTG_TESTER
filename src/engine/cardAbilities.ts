@@ -447,7 +447,7 @@ export function payScriptedCost(session: GameSession, seatId: string, card: Visi
               ...s.board,
               hand: cost.discardSelf ? s.board.hand.filter((c) => c.id !== card.id) : s.board.hand,
               graveyard: cost.discardSelf ? [...(s.board.graveyard ?? []), { ...card, zone: "graveyard" as const }] : s.board.graveyard,
-              battlefield: s.board.battlefield.map((c) => (c.id !== card.id ? c : { ...c, ...(cost.tap ? { tapped: true } : {}), ...(cost.removeCounters ? applyCounterDelta(c, cost.removeCounters.kind, -cost.removeCounters.count) : {}) }))
+              battlefield: s.board.battlefield.map((c) => (c.id !== card.id ? c : { ...c, ...(cost.tap ? { tapped: true, tapUsed: true } : {}), ...(cost.removeCounters ? applyCounterDelta(c, cost.removeCounters.kind, -cost.removeCounters.count) : {}) }))
             }
           }
     )

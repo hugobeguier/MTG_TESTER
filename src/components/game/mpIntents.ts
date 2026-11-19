@@ -109,6 +109,7 @@ function callTable(h: HandlerApi): Record<GuestIntentName, Call> {
     onChooseEachPlayerSacrifice: (s, _seat, cardId) => h.chooseEachPlayerSacrificeTarget(s, cardId),
     onChooseCreatureToSacrificeForCast: (s, _seat, cardId) => h.chooseCreatureToSacrificeForCast(s, cardId),
     onChooseModalOption: (_s, index) => h.chooseModalOption(index),
+    onChooseModalSet: (_s, positions) => h.completeCastModeSet(positions),
     onChooseEffectTarget: (_s, target) => h.chooseEffectTarget(target),
     onDeclineEffectTarget: () => h.declineEffectTarget(),
     onConfirmProliferateTargets: (_s, cardIds, seatIds) => h.chooseProliferateTargets(cardIds, seatIds),

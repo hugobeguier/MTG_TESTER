@@ -11,6 +11,8 @@ importing from `./AppFlow`. Each file starts with a header comment saying what i
 | `types.ts` | Engine-wide types: `PendingAction`, `CastChoices`, `TriggerEffect`, `TurnPhase`, `LabeledSlot` ... |
 | `flowTypes.ts` | Choice-state types shared with the UI: `BlockChoiceState`, `LegalAgentAction`, library-look / search states |
 | `shared.ts` | Leaf helpers: `hasKeyword`, `isLandCard`, `numberWordToInt`, `emblemAsShimCard` |
+| `tapUsed.ts` | Human manual-untap rule: `toggleTapManually`, `canManuallyUntap`, `markPermanentsUsed`, `tapPaidSignet` (a used tap cannot be undone; paid signets / Viridescent Bog pay their {1} from the pool) |
+| `ritualUse.ts` | Agent mana rituals: `ritualYield`, `wouldRitualBeUsed` (a ritual is only offered to an agent when a spell can spend the floating mana) |
 | `mana.ts` | Mana pools, `manaChoicesForCard`, `chooseManaSourcesForCost`, `payCostFromPool`, `spendManaSources` |
 | `costs.ts` | `totalCastingCost`, `adjustedCastingCost`, `staticCostReduction`, X / miracle (`miracleCostForCard`, `takeMiracleOffer`) / alt-cost helpers |
 | `lands.ts` | Land drops, `entersBattlefieldTapped`, reveal-lands, shocklands |

@@ -5,7 +5,7 @@ import { parseGenericSacrificeAbilities, parseGenericTapAbilities } from "@/lib/
 import { basicLandFetchCostRequiresTap, isBasicLandFetchAbility } from "@/lib/oracleClauses";
 import { abilityOracleText } from "@/lib/typeGrants";
 import type { PlayerSeat, VisibleCard } from "@/lib/types";
-import { isAvailableManaSource } from "./mana";
+import { effectiveManaOracleText, isAvailableManaSource, signetAbility } from "./mana";
 
 /**
  * A mana land/rock (not a creature, not equipment) with no second real ability that also costs {T}: a card with one (Mind Stone's "{1},{T}, Sacrifice: draw",
@@ -15,7 +15,8 @@ export function isSimpleManaSourcePermanent(card: VisibleCard, seat: PlayerSeat,
   return (
     !card.typeLine.includes("Creature") &&
     !isEquipment(card) &&
-    isAvailableManaSource(card, seat, seats) &&
+    // A paid signet (Viridescent Bog) pays its {1} from the floating pool (tapSignet), so it is clickable even with no other untapped source.
+    (isAvailableManaSource(card, seat, seats) || (!card.tapped && !card.phasedOut && signetAbility(effectiveManaOracleText(card)) !== undefined)) &&
     !parseGenericSacrificeAbilities(abilityOracleText(card)).some((ability) => ability.costTap) &&
     parseGenericTapAbilities(abilityOracleText(card)).length === 0 &&
     !(isBasicLandFetchAbility(card) && basicLandFetchCostRequiresTap(card))

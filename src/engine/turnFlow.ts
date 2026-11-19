@@ -83,7 +83,7 @@ export function untapForSeat(session: GameSession, seatId: string): GameSession 
         ? { ...card, summoningSick: false, attacking: false, blocking: false }
         : { ...applyCounterDelta(card, "stun", -1), summoningSick: false, attacking: false, blocking: false };
     }
-    return { ...card, tapped: false, summoningSick: false, attacking: false, blocking: false };
+    return { ...card, tapped: false, tapUsed: false, summoningSick: false, attacking: false, blocking: false };
   };
   const untappedSession = {
     ...session,
@@ -275,7 +275,7 @@ function applyExtraUntapEffects(session: GameSession, activeUntapSeatId: string)
                 ...item.board,
                 commander: scope === "permanents" && item.board.commander?.tapped ? { ...item.board.commander, tapped: false } : item.board.commander,
                 battlefield: item.board.battlefield.map((card) =>
-                  card.tapped && (scope === "permanents" || card.typeLine.includes("Artifact")) ? { ...card, tapped: false } : card
+                  card.tapped && (scope === "permanents" || card.typeLine.includes("Artifact")) ? { ...card, tapped: false, tapUsed: false } : card
                 )
               }
             }

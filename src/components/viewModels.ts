@@ -123,6 +123,9 @@ export function ruleChoiceView(
     }
     // A card target (a graveyard creature, a permanent) is shown with its art and text, not just its name.
     const cardForTarget = (target: ChosenTarget | undefined): VisibleCard | undefined => (target?.kind === "card" ? findCardAnywhere(session, target.cardId, target.seatId) : undefined);
+    if (choice.kind === "choose_cast_targets" && choice.promptKind === "modeset" && choice.modeSet) {
+      return { kind: "choose_modal_set" as const, sourceCardName: choice.sourceCardName, prompt: choice.prompt, options: choice.options.map((option, index) => ({ index, label: option.label })), ...choice.modeSet };
+    }
     if (choice.kind === "choose_cast_targets") {
       return { kind: "choose_modal_option" as const, sourceCardName: choice.sourceCardName, prompt: choice.prompt, options: choice.options.map((option, index) => ({ index, label: option.label, card: cardForTarget(option.target) })) };
     }

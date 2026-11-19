@@ -10,7 +10,8 @@ import { adjustedCastingCost, cardWithFaceManaCost, manaValueFromManaCost, maxAf
 import { chooseSacrificeTargets, discardableHandCards, genericCostShim, genericManaAbilityCostShim, removalEffectHasLegalTarget, zoneEffectHasLegalTarget } from "@/engine/effects";
 import { chooseBestBasicLandPairForMyriad, getBasicLandFetchOptions } from "@/engine/etb";
 import { type LegalAgentAction } from "@/engine/flowTypes";
-import { activateOnlyIfConditionMet, chooseManaSourcesForCost, formatManaPoolPayment, isBoardConditionMet } from "@/engine/mana";
+import { activateOnlyIfConditionMet, chooseManaSourcesForCost, chooseManaSourcesOrFloating, formatManaPoolPayment, isBoardConditionMet } from "@/engine/mana";
+import { isPureRitual, wouldRitualBeUsed } from "@/engine/ritualUse";
 import { commanderColorCount, hideawayDamageConditionMet } from "@/engine/oneShotEffects";
 import { findSpellSourceCard, pendingActionSourceCard } from "@/engine/priority";
 import { hasHaste, isLandCard } from "@/engine/shared";
@@ -110,7 +111,7 @@ export function legalMainPhaseActions(
     const split = modalDoubleFacedLandSplit(card);
     if (split) {
       const totalCost = adjustedCastingCost(seat, card, card.manaValue, "hand", activeSeatId, session.seats);
-      const payment = chooseManaSourcesForCost(seat, card, totalCost, undefined, session.seats);
+      const payment = chooseManaSourcesOrFloating(seat, card, totalCost, undefined, session.seats);
       // hasResolvableTarget reads oracleText/typeLine off whatever card it's given — the top-level
       // VisibleCard fields describe the *primary* face, not necessarily this spell face (Malakir
       // Rebirth // Malakir Mire and the rest of the Zendikar Rising MDFC cycle put the spell face
@@ -138,7 +139,7 @@ export function legalMainPhaseActions(
       doors.forEach((door, index) => {
         const shim = cardWithFaceManaCost(card, door.manaCost);
         const totalCost = adjustedCastingCost(seat, shim, manaValueFromManaCost(door.manaCost), "hand", activeSeatId, session.seats);
-        const payment = chooseManaSourcesForCost(seat, shim, totalCost, undefined, session.seats);
+        const payment = chooseManaSourcesOrFloating(seat, shim, totalCost, undefined, session.seats);
         if (!payment.ok) return;
         actions.push({
           id: `cast:${card.id}:face${index}`,
@@ -164,7 +165,7 @@ export function legalMainPhaseActions(
         const fixedCost = adjustedCastingCost(seat, shim, baseCost, "hand", activeSeatId, session.seats);
         const chosenX = maxAffordableX(seat, shim, fixedCost);
         const totalCost = totalCastingCost(seat, shim, baseCost, chosenX, session.seats);
-        const payment = chooseManaSourcesForCost(seat, shim, totalCost, undefined, session.seats);
+        const payment = chooseManaSourcesOrFloating(seat, shim, totalCost, undefined, session.seats);
         if (!payment.ok) return;
         if (!hasResolvableTarget(session, seat.id, { ...card, name: face.name, typeLine: face.typeLine, oracleText: face.oracleText })) return;
         const xNote = chosenX > 0 ? ` Casting for X=${chosenX}.` : "";
@@ -189,7 +190,7 @@ export function legalMainPhaseActions(
     const fixedCost = adjustedCastingCost(seat, card, card.manaValue, "hand", activeSeatId, session.seats);
     const chosenX = maxAffordableX(seat, card, fixedCost);
     const totalCost = totalCastingCost(seat, card, card.manaValue, chosenX, session.seats);
-    let payment = chooseManaSourcesForCost(seat, card, totalCost, undefined, session.seats);
+    let payment = chooseManaSourcesOrFloating(seat, card, totalCost, undefined, session.seats);
     // An alternative cost (Sephara) that lets an otherwise unaffordable spell be cast.
     const legalTapAlt = tapCreaturesAltCostFor(seat, card);
     if (legalTapAlt) {
@@ -238,7 +239,7 @@ export function legalMainPhaseActions(
     const costWaivedHere = baseCost > 0 && fixedCost === 0;
     const chosenX = costWaivedHere ? 0 : maxAffordableX(seat, castCard, fixedCost);
     const totalCost = costWaivedHere ? fixedCost : totalCastingCost(seat, castCard, baseCost, chosenX, session.seats);
-    const payment = chooseManaSourcesForCost(seat, castCard, totalCost, undefined, session.seats);
+    const payment = chooseManaSourcesOrFloating(seat, castCard, totalCost, undefined, session.seats);
     if (!payment.ok) continue;
     const targetCheckCard = permanentFace ? { ...card, name: permanentFace.name, typeLine: permanentFace.typeLine, oracleText: permanentFace.oracleText } : card;
     if (!hasResolvableTarget(session, seat.id, targetCheckCard)) continue;
@@ -267,7 +268,7 @@ export function legalMainPhaseActions(
     const fixedCost = adjustedCastingCost(seat, castCard, baseCost, "graveyard", activeSeatId, session.seats);
     const chosenX = maxAffordableX(seat, castCard, fixedCost);
     const totalCost = totalCastingCost(seat, castCard, baseCost, chosenX, session.seats);
-    const payment = chooseManaSourcesForCost(seat, castCard, totalCost, undefined, session.seats);
+    const payment = chooseManaSourcesOrFloating(seat, castCard, totalCost, undefined, session.seats);
     if (!payment.ok) continue;
     if (!hasResolvableTarget(session, seat.id, card)) continue;
     actions.push({
@@ -288,7 +289,7 @@ export function legalMainPhaseActions(
     const fixedCost = adjustedCastingCost(seat, topCard, topCard.manaValue, "library", activeSeatId, session.seats);
     const chosenX = maxAffordableX(seat, topCard, fixedCost);
     const totalCost = totalCastingCost(seat, topCard, topCard.manaValue, chosenX, session.seats);
-    const payment = chooseManaSourcesForCost(seat, topCard, totalCost, undefined, session.seats);
+    const payment = chooseManaSourcesOrFloating(seat, topCard, totalCost, undefined, session.seats);
     if (payment.ok && hasResolvableTarget(session, seat.id, topCard)) {
       actions.push({
         id: `cast-library:${topCard.id}`,
@@ -306,7 +307,7 @@ export function legalMainPhaseActions(
   const commander = seat.board.commander;
   if (commander) {
     const totalCost = adjustedCastingCost(seat, commander, commander.manaValue, "command", activeSeatId, session.seats) + (commander.commanderTax ?? 0);
-    const payment = chooseManaSourcesForCost(seat, commander, totalCost, undefined, session.seats);
+    const payment = chooseManaSourcesOrFloating(seat, commander, totalCost, undefined, session.seats);
     if (payment.ok && hasResolvableTarget(session, seat.id, commander)) {
       actions.push({
         id: `cast-commander:${commander.id}`,
@@ -364,8 +365,14 @@ export function legalMainPhaseActions(
   return actions.filter((action) => {
     if (action.actionType !== "cast_spell" || !action.cardId) return true;
     const handCard = seat.board.hand.find((card) => card.id === action.cardId);
+    if (handCard && agentWastesRitual(session, seat, handCard, activeSeatId, "sorcery")) return false;
     return !handCard || !isTargetedCounterspell(handCard);
   });
+}
+
+// A pure mana ritual (Dark Ritual) offered to an AGENT with nothing it could then cast from the floating mana: the mana would empty unspent (see ritualUse.ts).
+function agentWastesRitual(session: GameSession, seat: PlayerSeat, card: VisibleCard, activeSeatId: string | undefined, timing: "sorcery" | "response"): boolean {
+  return seat.kind !== "human" && isPureRitual(card) && !wouldRitualBeUsed(session, seat, card, activeSeatId, timing);
 }
 
 // A card whose spell is "Counter target ... spell" (Swan Song, Counterspell, Negate, ...) and is not a modal card that may have a non-counter mode.
@@ -476,9 +483,10 @@ export function legalPriorityActions(seat: PlayerSeat, pendingAction: PendingAct
     .filter(({ card }) => {
       const fixedCost = adjustedCastingCost(seat, card, card.manaValue, "hand", activeSeatId, session.seats);
       const chosenX = maxAffordableX(seat, card, fixedCost);
-      return chooseManaSourcesForCost(seat, card, totalCastingCost(seat, card, card.manaValue, chosenX, session.seats), undefined, session.seats).ok;
+      return chooseManaSourcesOrFloating(seat, card, totalCastingCost(seat, card, card.manaValue, chosenX, session.seats), undefined, session.seats).ok;
     })
     .filter(({ card }) => hasResolvableTarget(session, seat.id, card))
+    .filter(({ card, sourceZone }) => sourceZone === "exile" || !agentWastesRitual(session, seat, card, activeSeatId, "response"))
     .map(({ card, sourceZone }) => ({
       id: sourceZone === "exile" ? `respond-exile:${card.id}` : `respond:${card.id}`,
       actionType: "cast_spell" as const,

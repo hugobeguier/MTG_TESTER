@@ -114,6 +114,7 @@ export function matchesEachPlayerSacrificeFilter(card: VisibleCard, typeFilter: 
     if (trimmed === "enchantment") return card.typeLine.includes("Enchantment");
     if (trimmed === "land") return card.typeLine.includes("Land");
     if (trimmed === "nontoken creature") return card.typeLine.includes("Creature") && !card.token;
+    if (trimmed === "nontoken artifact") return card.typeLine.includes("Artifact") && !card.token;
     if (trimmed === "permanent") return true;
     if (trimmed === "nonland permanent") return !card.typeLine.includes("Land");
     return false;
@@ -973,7 +974,7 @@ export function applySpellExtraEffect(session: GameSession, casterSeatId: string
               : {
                   ...seat,
                   noMaximumHandSize: true,
-                  board: { ...seat.board, battlefield: seat.board.battlefield.map((card) => (toUntap > 0 && isLandCard(card) && card.tapped ? ((toUntap -= 1), { ...card, tapped: false }) : card)) }
+                  board: { ...seat.board, battlefield: seat.board.battlefield.map((card) => (toUntap > 0 && isLandCard(card) && card.tapped ? ((toUntap -= 1), { ...card, tapped: false, tapUsed: false }) : card)) }
                 }
           )
         };
@@ -3132,6 +3133,8 @@ export interface GenericModalEffect {
   chooseCount: number;
   // "Choose one or more / any number / up to two": the player may stop before chooseCount modes.
   atMost?: boolean;
+  // "Choose three. You may choose the same mode more than once." (Rootcast Apprenticeship): exactly chooseCount picks, repeats allowed.
+  repeatable?: boolean;
   modes: GenericModalMode[];
   // "choose one that hasn't been chosen this turn" (Parapet Thrasher): each mode can be picked once per turn per source.
   distinctPerTurn?: boolean;
@@ -3159,7 +3162,7 @@ export function parseGenericModalEffect(oracleText: string, chosenX: number | un
     // The bullet's own wording labels the mode in the prompt a human sees.
     if (modes.length > before) modes[modes.length - 1] = { ...modes[modes.length - 1], text: modeText.replace(/^[•*]\s*/, "").trim() };
   }
-  return modes.length > 0 ? { chooseCount: header.chooseCount, modes, ...(header.atMost ? { atMost: true } : {}), ...(/hasn'?t been chosen this turn/i.test(oracleText) ? { distinctPerTurn: true } : {}) } : undefined;
+  return modes.length > 0 ? { chooseCount: header.chooseCount, modes, ...(header.atMost ? { atMost: true } : {}), ...(header.repeatable ? { repeatable: true } : {}), ...(/hasn'?t been chosen this turn/i.test(oracleText) ? { distinctPerTurn: true } : {}) } : undefined;
 }
 
 function parseOneGenericMode(modeText: string, modes: GenericModalMode[]): void {
@@ -3217,6 +3220,9 @@ export function genericModalModeHasLegalTarget(session: GameSession, casterSeatI
   if (mode.kind === "all") return mode.parts.every((part) => genericModalModeHasLegalTarget(session, casterSeatId, part));
   if (mode.kind === "extra") return true;
   if (mode.kind === "trigger" && mode.effect.kind === "targeted_effect") {
+    // "Target opponent sacrifices a nontoken artifact": only a mode worth choosing when some opponent actually has one.
+    const verb = mode.effect.effect.verb;
+    if (verb.kind === "sacrifice" && !session.seats.some((other) => other.id !== casterSeatId && !other.hasLost && other.board.battlefield.some((card) => matchesEachPlayerSacrificeFilter(card, verb.typeFilter)))) return false;
     const probe = { id: "", name: "", typeLine: "", oracleText: "", colors: [], manaValue: 0, role: "permanent", zone: "battlefield" } as VisibleCard;
     return legalTargets(session, casterSeatId, targetedEffectSpec(mode.effect.effect, "", ""), probe).length > 0;
   }

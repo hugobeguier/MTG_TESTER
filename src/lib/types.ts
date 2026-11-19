@@ -154,6 +154,8 @@ export interface PlayerSeat {
   lifeAtTurnStart?: number;
   // Archway of Innovation: "The next spell you cast this turn has improvise."
   nextSpellHasImprovise?: boolean;
+  // Mana floating for an AGENT seat (a ritual's {B}{B}{B}); a human's floating mana lives in the table's manaPools. Spent first by the next spell the agent casts, emptied at the end of the phase.
+  floatingMana?: ManaPool;
   // Finale of Revelation (X >= 10): "you have no maximum hand size for the rest of the game".
   noMaximumHandSize?: boolean;
   kind: SeatKind;
@@ -397,6 +399,9 @@ export interface VisibleCard {
   damagedPlayersThisTurn?: string[];
   // Set on an artifact the moment its controller taps it for mana (spendManaSources); read once by the Treasure Nabber watcher in the state-based pass, then cleared.
   justTappedForMana?: boolean;
+  // Set when this permanent was tapped to pay for something (mana that was spent, an activated ability's {T} cost, convoke/crew/orb taps). A human cannot manually untap a
+  // tapped permanent carrying it (engine/tapUsed.ts); the untap step and real untap effects clear it.
+  tapUsed?: boolean;
   // Treasure Nabber: "gain control of that artifact until the end of your next turn" — the owner to give it back to, and when (the stealer's end step on a later turn than afterTurn).
   nabbedFromSeatId?: string;
   nabbedUntil?: { seatId: string; afterTurn: number };

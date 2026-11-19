@@ -400,7 +400,7 @@ export function payGenericSacrificeCost(
     next = {
       ...next,
       seats: next.seats.map((item) =>
-        item.id === seatId ? { ...item, board: { ...item.board, battlefield: item.board.battlefield.map((c) => (c.id === cardId ? { ...c, tapped: true } : c)) } } : item
+        item.id === seatId ? { ...item, board: { ...item.board, battlefield: item.board.battlefield.map((c) => (c.id === cardId ? { ...c, tapped: true, tapUsed: true } : c)) } } : item
       )
     };
   }
@@ -790,12 +790,13 @@ export function payGenericTapCost(
               ...item.board,
               battlefield: item.board.battlefield.map((c) =>
                 tapIds.has(c.id)
-                  ? { ...c, tapped: true }
+                  ? { ...c, tapped: true, tapUsed: true }
                   : c.id !== cardId || ability.costTapCreatures
                   ? c
                   : {
                       ...c,
                       tapped: !ability.untapsSelf,
+                      tapUsed: !ability.untapsSelf,
                       // "Remove a gold counter from this artifact" is part of the cost.
                       ...(ability.costPutCounter ? { counters: applyCounterDelta(c, ability.costPutCounter, 1).counters } : {}),
                       ...(ability.costRemoveCounter
@@ -1059,7 +1060,7 @@ export function applyGenericAbilityEffect(session: GameSession, casterSeatId: st
     const untapped: GameSession = {
       ...session,
       seats: session.seats.map((seat) =>
-        seat.id !== casterSeatId ? seat : { ...seat, board: { ...seat.board, battlefield: seat.board.battlefield.map((card) => (card.tapped && card.typeLine.includes("Land") ? { ...card, tapped: false } : card)) } }
+        seat.id !== casterSeatId ? seat : { ...seat, board: { ...seat.board, battlefield: seat.board.battlefield.map((card) => (card.tapped && card.typeLine.includes("Land") ? { ...card, tapped: false, tapUsed: false } : card)) } }
       )
     };
     return rulesEvent(untapped, casterSeatId, `${owner?.name ?? "A player"} untaps ${tappedLands.length} land${tappedLands.length === 1 ? "" : "s"} with ${sourceCard.name}.`);

@@ -135,11 +135,45 @@ export function chooseManaSourcesForCost(seat: PlayerSeat, card: VisibleCard, to
   return firstFailure!;
 }
 
+// A paid signet-shaped source ("{1}, {T}: Add {B}{G}.": Signets, Viridescent Bog) is modelled by its NET gain (BG - {1} = 1), which is only true when the
+// {1} is really paid out of OTHER sources in the same payment. A selection where the other chosen sources make less than the signet's generic cost would
+// get the mana for free (Bog alone paid for a one-mana spell), so such a signet is banned from that payment and the selection is redone without it.
 function chooseManaSourcesForCostWithLife(seat: PlayerSeat, card: VisibleCard, totalCost: number, excludeCardId: string | undefined, allSeats: PlayerSeat[] | undefined, lifePips: number) {
+  const banned = new Set<string>();
+  for (;;) {
+    const attempt = selectManaSourcesForCost(seat, card, totalCost, excludeCardId, allSeats, lifePips, banned);
+    if (!attempt.ok) return attempt;
+    const unpaid = attempt.sourceIds.filter((id) => {
+      const source = seat.board.battlefield.find((candidate) => candidate.id === id);
+      const signet = source ? signetAbility(effectiveManaOracleText(source)) : undefined;
+      if (!source || !signet || signet.generic === 0) return false;
+      const others = attempt.sourceIds.filter((other) => other !== id).reduce((total, otherId) => {
+        const otherCard = seat.board.battlefield.find((candidate) => candidate.id === otherId);
+        return otherCard ? total + manaProducedBy(otherCard, seat) : total;
+      }, 0);
+      return others < signet.generic;
+    });
+    if (unpaid.length === 0) return attempt;
+    for (const id of unpaid) banned.add(id);
+  }
+}
+
+// Whether a paid signet-shaped source can be activated at all right now: some OTHER untapped mana source has to pay its {1}.
+export function signetCostPayable(card: VisibleCard, seat: PlayerSeat, allSeats?: PlayerSeat[]): boolean {
+  const signet = signetAbility(effectiveManaOracleText(card));
+  if (!signet || signet.generic === 0) return true;
+  const others = seat.board.battlefield.filter(
+    (other) => other.id !== card.id && !other.tapped && !other.phasedOut && !signetAbility(effectiveManaOracleText(other)) && !scalingPaidManaAbility(effectiveManaOracleText(other)) && manaChoicesForCardRaw(other, seat, allSeats).length > 0 &&
+      !(other.typeLine.includes("Creature") && other.summoningSick && !hasHaste(other))
+  );
+  return others.reduce((total, other) => total + manaProducedBy(other, seat), 0) >= signet.generic;
+}
+
+function selectManaSourcesForCost(seat: PlayerSeat, card: VisibleCard, totalCost: number, excludeCardId: string | undefined, allSeats: PlayerSeat[] | undefined, lifePips: number, banned: Set<string>) {
   const requirement = manaRequirementForCard(card, totalCost, anyColorManaSpendingActive(allSeats ?? [seat]), lifePips);
   // Pips paid with life are not paid with mana: they come off the total that mana has to cover.
   totalCost -= lifePips;
-  const sources = seat.board.battlefield.filter((source) => source.id !== excludeCardId && isAvailableManaSource(source, seat, allSeats) && manaSourceMayPayFor(source, card));
+  const sources = seat.board.battlefield.filter((source) => source.id !== excludeCardId && !banned.has(source.id) && isAvailableManaSource(source, seat, allSeats) && manaSourceMayPayFor(source, card));
   // A restricted source that is only here for its unrestricted colorless ability (Haven of the Spirit Dragon) can't make colors.
   const choicesFor = (source: VisibleCard) => {
     const choices = manaChoicesForCard(source, seat, allSeats);
@@ -327,6 +361,8 @@ export function isAvailableManaSource(card: VisibleCard, seat: PlayerSeat, allSe
   // Dragon spells (see isDragonMana). Counting it as two free mana as well made a six-mana Dragon castable with three lands.
   if (isDragonMana(card)) return false;
   if (card.phasedOut) return false;
+  // A signet-shaped source ("{1}, {T}: Add {B}{G}.") with nothing else to pay its {1} with is no source at all (it used to count as +1 free mana).
+  if (!card.tapped && !signetCostPayable(card, seat, allSeats)) return false;
   return !card.tapped && manaChoicesForCard(card, seat, allSeats).length > 0;
 }
 
@@ -1186,11 +1222,11 @@ function spendManaSourcesTapping(seat: PlayerSeat, sourceIds: string[], tappedFo
       if (remainingCount === 0 && depletionSacrificeCounterKind(card.oracleText) === removalKind) {
         sacrificed.push({ ...card, counters: updatedCounters });
       } else {
-        kept.push({ ...card, tapped: true, counters: updatedCounters });
+        kept.push({ ...card, tapped: true, tapUsed: true, counters: updatedCounters });
       }
       continue;
     }
-    kept.push(hasCardType(card, "Artifact") ? { ...card, tapped: true, justTappedForMana: true } : { ...card, tapped: true });
+    kept.push(hasCardType(card, "Artifact") ? { ...card, tapped: true, tapUsed: true, justTappedForMana: true } : { ...card, tapped: true, tapUsed: true });
   }
   const life = painDamage > 0 || lifeGain > 0 || tokenTapLifeCost > 0 ? Math.max(0, seat.life - painDamage - tokenTapLifeCost + lifeGain) : seat.life;
   if (sacrificed.length === 0) {
@@ -1235,7 +1271,7 @@ export function tapVisibleCard(session: GameSession, seatId: string, cardId: str
           commander: location === "command" && seat.board.commander?.id === cardId ? { ...seat.board.commander, tapped: true } : seat.board.commander,
           battlefield:
             location === "battlefield"
-              ? seat.board.battlefield.map((card) => (card.id === cardId ? { ...card, tapped: true } : card))
+              ? seat.board.battlefield.map((card) => (card.id === cardId ? { ...card, tapped: true, tapUsed: false } : card))
               : seat.board.battlefield
         }
       };
@@ -1254,4 +1290,15 @@ export function isDragonMana(source: VisibleCard): boolean {
 // A batch limited to one kind of spell ("only to cast Dragon spells") is usable only for a spell of that type or subtype.
 export function restrictedBatchUsable(batch: RestrictedManaBatch, forCard?: VisibleCard) {
   return !batch.spellType || Boolean(forCard && forCard.typeLine.toLowerCase().includes(batch.spellType.toLowerCase()));
-}
+}
+// An AGENT's floating mana (a ritual's {B}{B}{B}, PlayerSeat.floatingMana) pays for a spell first when it covers the whole cost; otherwise the spell is paid by
+// tapping sources as before (never a partial blend: the floating mana would then empty unspent). The legal-action lists and the payment use this one function.
+export function chooseManaSourcesOrFloating(seat: PlayerSeat, card: VisibleCard, totalCost: number, excludeCardId?: string, allSeats?: PlayerSeat[]): ReturnType<typeof chooseManaSourcesForCost> & { floating?: true; remaining?: ManaPool } {
+  const floating = seat.kind !== "human" ? seat.floatingMana : undefined;
+  if (floating && manaPoolTotal(floating) > 0 && totalCost > 0) {
+    const paid = payCostFromPool(floating, card, totalCost, { seat, allSeats });
+    // Same shape as a tapped payment (pool = what was spent), plus the pool that is left.
+    if (paid.ok) return { ok: true, sourceIds: [], pool: paid.spent, spent: paid.spent, floating: true, remaining: paid.pool };
+  }
+  return chooseManaSourcesForCost(seat, card, totalCost, excludeCardId, allSeats);
+}

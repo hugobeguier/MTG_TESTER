@@ -24,7 +24,7 @@ const SAMPLE: Record<string, unknown[]> = {
   onAcceptCommanderZoneChoice: [], onDeclineCommanderZoneChoice: [], onCompleteDiscardChoice: [["c1"]], onCompletePutCardsOnLibrary: [["c1"]], onCompleteConniveDiscard: [["c1"]],
   onCompleteReturnLandToHand: [["c1"]], onCompleteChoosePermanentToBlink: [["c1"]], onChooseCreatureType: ["Elf"], onChooseColor: ["U"], onConfirmAttackTriggerManaColors: [{ R: 2 }],
   onChooseGraveyardReanimationTarget: ["seat-a", "c1"], onChooseSacrificeCostTarget: [S, "c1"], onChooseEachPlayerSacrifice: [S, "c1"], onChooseCreatureToSacrificeForCast: [S, "c1"],
-  onChooseModalOption: [1], onChooseEffectTarget: [{ kind: "card", seatId: "seat-a", cardId: "c1" }], onDeclineEffectTarget: [], onConfirmProliferateTargets: [["c1"], ["seat-a"]],
+  onChooseModalOption: [1], onChooseModalSet: [[0, 1]], onChooseEffectTarget: [{ kind: "card", seatId: "seat-a", cardId: "c1" }], onDeclineEffectTarget: [], onConfirmProliferateTargets: [["c1"], ["seat-a"]],
   onChooseBattlefieldCreatureTarget: ["seat-a", "c1"], onChooseAuraRetarget: ["seat-a", "c1"], onChooseEquipTarget: ["c1"], onChooseNextTrigger: ["c1"],
   onKeepLibraryLookCardOnTop: ["c1"], onOrderLibraryLookCardOnTop: ["c1"], onPutLibraryLookCardOnBottom: ["c1"], onPutLibraryLookCardInGraveyard: ["c1"],
   onSendLibraryLookCardToHand: ["c1"], onRepeatVaultLook: [], onKeepVaultLookCards: [], onCloseLibraryLook: []

@@ -7,11 +7,11 @@ import { activateGraveyardReturnInSession, findLandRaidTriggers } from "@/engine
 import { addEmblemToSeat, parseEtbZoneEffect } from "@/engine/oneShotEffects";
 import { additionalSacrificeCandidates, applyChosenFaceToCard, canCastAtInstantSpeed, castFaceDecision, castRestrictedByTurnCount, independentlyCastableSpellFaces, matchesAdditionalSacrificeType, modalDoubleFacedLandSplit, pathOfAncestryScries, playCardFromZone, recordCommanderCast, roomDoorFaces, seatHasFlashGrant, spellCastLockedOut, spellFaceCostCard, targetingTax, unlockSecondRoomDoor } from "@/engine/casting";
 import { adjustedCastingCost, cardWithFaceManaCost, coloredPipCount, fateDesignLifeAltCostKey, hasFateDesignLifeAltCost, hasOmniscienceFreeHandCast, hasOnceEachTurnFreeHandCastPermission, hasSingleKicker, isHistoricCard, manaValueFromManaCost, maxAffordableX, onceEachTurnFreeCastKey, staticCostReduction, takeMiracleOffer, totalCastingCost, unlockCostReduction, xSymbolCount } from "@/engine/costs";
-import { agentCastTimeRemovalChoices, applyLabeledContinuation, castFaceCard, castModeLabels, hasResolvableTarget, nextCastPrompt, stackTargetText } from "@/engine/castTargets";
+import { agentCastTimeRemovalChoices, applyLabeledContinuation, castFaceCard, castModeLabels, hasResolvableTarget, modeSetAnswer, nextCastPrompt, stackTargetText } from "@/engine/castTargets";
 import { applyChosenColor, applyChosenCreatureType, isSagaCard } from "@/engine/etb";
 import { applyCounterDelta, enterAsCopyCandidates, findExiledCardAnySeat, isPlaneswalkerCard, loyaltyCounterCount, parseEnterAsCopyEffect, possessive, shuffleCards } from "@/engine/zones";
 import { applyGenericModalEffect, applyRemovalEffect, applyZoneEffect, drawForSeat, resolveAgentLibraryLookWorkflow } from "@/engine/effects";
-import { cannotPayMessage, chooseManaSourcesForCost, formatManaPoolPayment, isAvailableManaSource, isDragonMana, manaChoicesForCard, manaPoolTotal, payCostFromPool, selectedManaTotal, spendManaSources, spentManaColors } from "@/engine/mana";
+import { cannotPayMessage, chooseManaSourcesForCost, chooseManaSourcesOrFloating, formatManaPoolPayment, isAvailableManaSource, isDragonMana, manaChoicesForCard, manaPoolTotal, payCostFromPool, selectedManaTotal, spendManaSources, spentManaColors } from "@/engine/mana";
 import { checkMoveLegal, formatLoyaltyCost, loyaltyTurnKey } from "@/engine/legalActions";
 import { commonTriggerEffect, findCommonTriggersForPermanentEntered, makeCommonTrigger } from "@/engine/triggers";
 import { cycleCardInSession, tapCreaturesAltCostFor, zoneChoiceSpecFor } from "@/engine/abilities";
@@ -75,7 +75,11 @@ export function useCasting(ctx: GameContext) {
         ? { ok: true as const, source: "pool" as const, sourceIds: [] as string[], pool: result.pool, spent: result.spent, lifeCost: "lifeCost" in result ? result.lifeCost : 0 }
         : { ok: false as const, sourceIds: [] as string[], reason: result.reason };
     }
-    const result = chooseManaSourcesForCost(seat, costCard, totalCost, undefined, session.seats);
+    // An agent's floating mana (a ritual's) pays first when it covers the whole cost; otherwise lands are tapped as before.
+    const result = chooseManaSourcesOrFloating(seat, costCard, totalCost, undefined, session.seats);
+    if (result.ok && result.floating && result.remaining) {
+      return { ok: true as const, source: "floating" as const, sourceIds: [] as string[], pool: result.remaining, spent: result.spent };
+    }
     return result.ok
       ? { ok: true as const, source: "tapped" as const, sourceIds: result.sourceIds, pool: undefined, spent: result.spent }
       : { ok: false as const, sourceIds: result.sourceIds, reason: result.reason };
@@ -90,6 +94,9 @@ export function useCasting(ctx: GameContext) {
     if (!payment.ok) return;
     if (payment.source === "restricted") {
       spendRestrictedMana(seatId, payment.spent, "forCard" in payment ? payment.forCard : undefined);
+    } else if (payment.source === "floating") {
+      const remaining = payment.pool;
+      setSession((current) => ({ ...current, seats: current.seats.map((item) => (item.id === seatId ? { ...item, floatingMana: manaPoolTotal(remaining) > 0 ? remaining : undefined } : item)) }));
     } else if (payment.source === "pool" && payment.pool) {
       setSeatManaPool(seatId, payment.pool);
       clearManaContributions(seatId);
@@ -738,7 +745,7 @@ export function useCasting(ctx: GameContext) {
         setSession((current) => ({
           ...current,
           seats: current.seats.map((item) =>
-            item.id !== seatId ? item : { ...item, board: { ...item.board, battlefield: item.board.battlefield.map((permanent) => (toTapOrbs.has(permanent.id) ? { ...permanent, tapped: true } : permanent)) } }
+            item.id !== seatId ? item : { ...item, board: { ...item.board, battlefield: item.board.battlefield.map((permanent) => (toTapOrbs.has(permanent.id) ? { ...permanent, tapped: true, tapUsed: true } : permanent)) } }
           ),
           events: [{ id: crypto.randomUUID(), at: new Date().toISOString(), seatId, message: `${seat.name} pays {1} and taps Orb of Dragonkind for two mana toward ${card.name}.`, detail: "Rules action" }, ...current.events]
         }));
@@ -749,7 +756,7 @@ export function useCasting(ctx: GameContext) {
       setSession((current) => ({
         ...current,
         seats: current.seats.map((item) =>
-          item.id !== seatId ? item : { ...item, board: { ...item.board, battlefield: item.board.battlefield.map((permanent) => (toTap.has(permanent.id) ? { ...permanent, tapped: true } : permanent)) } }
+          item.id !== seatId ? item : { ...item, board: { ...item.board, battlefield: item.board.battlefield.map((permanent) => (toTap.has(permanent.id) ? { ...permanent, tapped: true, tapUsed: true } : permanent)) } }
         ),
         events: [{ id: crypto.randomUUID(), at: new Date().toISOString(), seatId, message: `${seat.name} pays ${tapAlt.costManaText} and taps ${toTap.size} creatures instead of ${card.name}'s mana cost.`, detail: "Rules action" }, ...current.events]
       }));
@@ -1283,6 +1290,7 @@ export function useCasting(ctx: GameContext) {
       chosenX: base.chosenX,
       prompt: prompt.prompt,
       promptKind: prompt.kind,
+      ...(prompt.kind === "modeset" ? { modeSet: { min: prompt.min, max: prompt.max, repeatable: prompt.repeatable } } : {}),
       options,
       answers: { modes: base.answers.modes ? [...base.answers.modes] : undefined, modesDone: base.answers.modesDone, targets: [...base.answers.targets] },
       resume: base.resume
@@ -1300,6 +1308,28 @@ export function useCasting(ctx: GameContext) {
     else if (choice.promptKind === "modes" && option.mode !== undefined) answers.modes!.push(option.mode);
     else if (option.target) answers.targets.push(option.target);
     if (!answers.modes?.length) delete answers.modes;
+    const next = nextCastPrompt(session, choice.controllerSeatId, choice.planCard, choice.chosenX, answers, stackStore.ref.current.stack);
+    if (next) {
+      openCastPrompt(next, { planCard: choice.planCard, chosenX: choice.chosenX, answers, resume: choice.resume });
+      return;
+    }
+    setPendingRuleChoice(undefined);
+    const resume = choice.resume;
+    window.setTimeout(() => {
+      if (resume.via === "playCard") playCard(resume.seatId, resume.cardId, resume.position, resume.sourceZone, resume.faceIndex, resume.sacrificeTargets, answers, resume.altChoice);
+      else respondWithCard(resume.cardId, resume.sourceZone, resume.sacrificeTargets, answers, resume.faceIndex, resume.seatId);
+    }, 0);
+  }
+
+  // The mode set of a "choose one or more / any number / choose N, repeats allowed" spell, answered in one go as a list of option positions. Re-validated here (a
+  // remote friend's answer arrives through the same whitelisted intent): within [min, max], every position real, a mode repeated only when the spell allows it.
+  function completeCastModeSet(positions: number[]) {
+    const choice = pendingRuleChoice;
+    if (!choice || choice.kind !== "choose_cast_targets" || choice.promptKind !== "modeset" || !choice.modeSet) return;
+    // Modes resolve (and their targets are chosen) in the order they are printed on the card (modeSetAnswer sorts them).
+    const modes = modeSetAnswer(choice.modeSet, choice.options, positions);
+    if (!modes) return;
+    const answers: CastChoices = { modes, modesDone: true, targets: [...choice.answers.targets] };
     const next = nextCastPrompt(session, choice.controllerSeatId, choice.planCard, choice.chosenX, answers, stackStore.ref.current.stack);
     if (next) {
       openCastPrompt(next, { planCard: choice.planCard, chosenX: choice.chosenX, answers, resume: choice.resume });
@@ -1349,5 +1379,5 @@ export function useCasting(ctx: GameContext) {
     });
   }
 
-  return { activateGraveyardAbility, activateLoyaltyAbility, applyCastingCostPaymentSideEffect, castCommander, castFromExile, castFromGraveyard, checkCastTriggeredKeywords, chooseCreatureToSacrificeForCast, commitCrime, completeCastAlt, completeCastCopy, completeCastFace, completeCastPrompt, completeCastX, completeLabeledTarget, completeSpellMode, cycleCard, drawCard, offerPendingMiracle, openCastPrompt, payCastingCost, playCard, shuffleLibrary, unlockRoomDoor };
+  return { activateGraveyardAbility, activateLoyaltyAbility, applyCastingCostPaymentSideEffect, castCommander, castFromExile, castFromGraveyard, checkCastTriggeredKeywords, chooseCreatureToSacrificeForCast, commitCrime, completeCastAlt, completeCastCopy, completeCastFace, completeCastModeSet, completeCastPrompt, completeCastX, completeLabeledTarget, completeSpellMode, cycleCard, drawCard, offerPendingMiracle, openCastPrompt, payCastingCost, playCard, shuffleLibrary, unlockRoomDoor };
 }

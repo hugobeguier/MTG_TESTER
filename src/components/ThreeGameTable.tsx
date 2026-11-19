@@ -118,6 +118,8 @@ interface ThreeGameTableProps {
   onChooseEachPlayerSacrifice?: (seatId: string, cardId: string) => void;
   onChooseCreatureToSacrificeForCast?: (seatId: string, cardId: string) => void;
   onChooseModalOption?: (index: number) => void;
+  // The checkbox mode-set prompt (choose one or more / any number / choose N with repeats): positions in the prompt's option list.
+  onChooseModalSet?: (positions: number[]) => void;
   onChooseEffectTarget?: (target: { kind: "card"; seatId: string; cardId: string } | { kind: "player"; seatId: string }) => void;
   onDeclineEffectTarget?: () => void;
   onConfirmProliferateTargets?: (cardIds: string[], playerSeatIds: string[]) => void;
@@ -509,6 +511,16 @@ type RuleChoiceView =
       prompt: string;
       cards: Array<{ card: VisibleCard; seatId: string; seatName: string }>;
       actionLabel: string;
+    }
+  // "Choose one or more" spells: tick any non-empty subset of the modes (or, for "choose three, the same mode more than once", spread exactly N picks over them), confirm.
+  | {
+      kind: "choose_modal_set";
+      sourceCardName: string;
+      prompt: string;
+      options: Array<{ index: number; label: string }>;
+      min: number;
+      max: number;
+      repeatable: boolean;
     }
   | {
       kind: "choose_modal_option";
@@ -2257,6 +2269,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
           onChoose={props.onChooseCreatureToSacrificeForCast}
         />
       ) : null}
+      {props.ruleChoice?.kind === "choose_modal_set" ? <ModalSetModal choice={props.ruleChoice} onConfirm={props.onChooseModalSet} /> : null}
       {props.ruleChoice?.kind === "choose_modal_option" ? (
         <ModalOptionModal
           prompt={props.ruleChoice.prompt}
@@ -3888,6 +3901,59 @@ function ReturnLandToHandModal({
         <div className="modal-actions">
           <button className="inspector-action" type="button" disabled={!selected} onClick={() => onConfirm?.(selected ? [selected] : [])}>
             Return to hand
+          </button>
+        </div>
+      </article>
+    </div>
+  );
+}
+
+// The mode checklist of a "choose one or more" spell. Each mode has a count: 0/1 (a checkbox) normally, 0..max when the same mode may be chosen more than once.
+// Confirm is enabled only when the total is within [min, max]; the answer is the list of option positions (a repeated mode appears once per pick).
+function ModalSetModal({ choice, onConfirm }: { choice: Extract<RuleChoiceView, { kind: "choose_modal_set" }>; onConfirm?: (positions: number[]) => void }) {
+  const [counts, setCounts] = useState<number[]>(() => choice.options.map(() => 0));
+  const total = counts.reduce((sum, count) => sum + count, 0);
+  const valid = total >= choice.min && total <= choice.max;
+  const bump = (position: number, delta: number) =>
+    setCounts((current) =>
+      current.map((count, at) => {
+        if (at !== position) return count;
+        const next = count + delta;
+        const cap = choice.repeatable ? choice.max : 1;
+        return next < 0 || next > cap || (delta > 0 && total >= choice.max) ? count : next;
+      })
+    );
+  return (
+    <div className="card-inspector-backdrop" role="dialog" aria-modal="true" aria-label={`${choice.sourceCardName}: choose modes`}>
+      <article className="mana-choice-modal" onClick={(event) => event.stopPropagation()}>
+        <header>
+          <p className="eyebrow">{choice.sourceCardName}</p>
+          <h2>Choose modes</h2>
+        </header>
+        <p>{choice.prompt}</p>
+        <div className="modal-actions discard-hand-list">
+          {choice.options.map((option, position) =>
+            choice.repeatable ? (
+              <div key={option.index} className="mode-count-row">
+                <button type="button" className="inspector-action" aria-label={`Fewer: ${option.label}`} disabled={counts[position] === 0} onClick={() => bump(position, -1)}>-</button>
+                <span aria-live="polite">{counts[position]}x</span>
+                <button type="button" className="inspector-action" aria-label={`More: ${option.label}`} disabled={total >= choice.max} onClick={() => bump(position, 1)}>+</button>
+                <span>{option.label}</span>
+              </div>
+            ) : (
+              <label key={option.index} className="mode-check-row">
+                <input type="checkbox" checked={counts[position] === 1} disabled={counts[position] === 0 && total >= choice.max} onChange={() => bump(position, counts[position] === 1 ? -1 : 1)} />
+                <span>{option.label}</span>
+              </label>
+            )
+          )}
+        </div>
+        <p className="muted">
+          {total} chosen ({choice.repeatable ? `exactly ${choice.max}` : choice.min === choice.max ? `exactly ${choice.max}` : `at least ${choice.min}, at most ${choice.max}`})
+        </p>
+        <div className="modal-actions">
+          <button className="inspector-action" type="button" disabled={!valid} onClick={() => onConfirm?.(counts.flatMap((count, position) => Array.from({ length: count }, () => position)))}>
+            Confirm modes
           </button>
         </div>
       </article>

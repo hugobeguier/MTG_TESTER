@@ -2790,8 +2790,9 @@ describe("Saheeli's Artistry", () => {
     const s = session([seat("a", [real("Sol Ring", "ring"), bear("cub")]), seat("b", [])]);
     const modal = parseGenericModalEffect(spell.oracleText, undefined)!;
     expect(modal.atMost).toBe(true);
+    // "Choose one or both": one checkbox prompt for the mode set (not a pick-then-"Done choosing" sequence).
     const prompt = nextCastPrompt(s, "a", spell, undefined, { targets: [] } as CastChoices);
-    expect(prompt?.kind).toBe("modes");
+    expect(prompt).toMatchObject({ kind: "modeset", min: 1, max: 2, repeatable: false });
     const after = applyCastGenericModes(s, "a", spell, modal, {
       modes: [0, 1],
       targets: [{ kind: "card", seatId: "a", cardId: "ring" }, { kind: "card", seatId: "a", cardId: "cub" }]

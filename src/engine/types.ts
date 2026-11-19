@@ -536,8 +536,10 @@ export type PendingRuleChoice =
       planCard: VisibleCard;
       chosenX?: number;
       prompt: string;
-      promptKind: "modes" | "target";
+      promptKind: "modes" | "modeset" | "target";
       options: Array<{ label: string; mode?: number; target?: ChosenTarget }>;
+      // promptKind "modeset" (choose one or more / any number / choose N with repeats): the checkbox prompt's bounds; the answer is a list of option positions.
+      modeSet?: { min: number; max: number; repeatable: boolean };
       answers: CastChoices;
       resume:
         | { via: "playCard"; seatId: string; cardId: string; position?: { x: number; z: number }; sourceZone: "hand" | "command" | "exile" | "graveyard" | "library"; faceIndex?: number; sacrificeTargets?: VisibleCard[]; altChoice?: "alt" | "normal" }

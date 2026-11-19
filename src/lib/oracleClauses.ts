@@ -349,7 +349,13 @@ export interface ModalHeader {
   modeTexts: string[];
   // "Choose one or more / any number / up to two": chooseCount is the most modes, the player may pick fewer.
   atMost?: boolean;
+  // "Choose three. You may choose the same mode more than once." (Rootcast Apprenticeship): exactly chooseCount picks, a mode may be picked repeatedly.
+  repeatable?: boolean;
 }
+
+// The header every modal spell/trigger starts with: "Choose one —", "Choose one or more —", "Choose any number —", "Choose up to two —", "Choose two —", and the
+// repeatable wording "Choose three. You may choose the same mode more than once." followed by the bullets. ONE pattern, shared by both parsers below.
+const MODAL_HEADER = /\bchoose (one or more|one or both|any number|up to (?:two|three|four)|one|two|three|four|five)(?: that hasn'?t been chosen this turn)?(?:\s*[—-]\s*|\.\s*you may choose the same mode more than once\.\s*)/i;
 
 // "Choose one/two/three —\n• mode.\n• mode. ..." (Boros Charm, Austere Command, Profane Command,
 // ...) — extracts each bullet's own raw text so a caller can independently try its own single-
@@ -359,8 +365,9 @@ export interface ModalHeader {
 // own modal handling and by AppFlow.tsx's generic (non-removal) modal handling, so both recognize
 // the same header shapes instead of drifting apart.
 export function parseModalHeader(oracleText: string): ModalHeader | undefined {
-  const header = oracleText.match(/\bchoose (one or more|one or both|any number|up to (?:two|three)|one|two|three)(?: that hasn'?t been chosen this turn)?\s*[—-]\s*/i);
+  const header = oracleText.match(MODAL_HEADER);
   if (!header || header.index === undefined) return undefined;
+  const repeatable = /you may choose the same mode more than once/i.test(header[0]);
   const word = header[1].toLowerCase();
   const modeTexts = oracleText
     .slice(header.index + header[0].length)
@@ -372,9 +379,9 @@ export function parseModalHeader(oracleText: string): ModalHeader | undefined {
   // this engine doesn't collect, so only the first (free) mode is taken (Collective Resistance).
   const everyMode = word === "one or more" || word === "one or both" || word === "any number";
   const upTo = word.startsWith("up to ");
-  const chooseCount = everyMode ? (/\bescalate\b/i.test(oracleText) ? 1 : modeTexts.length) : ({ one: 1, two: 2, three: 3 } as Record<string, number>)[upTo ? word.slice(6) : word] ?? 1;
+  const chooseCount = everyMode ? (/\bescalate\b/i.test(oracleText) ? 1 : modeTexts.length) : ({ one: 1, two: 2, three: 3, four: 4, five: 5 } as Record<string, number>)[upTo ? word.slice(6) : word] ?? 1;
   // "One or more" / "any number" / "up to two": the player may stop early (at least one mode for "one or more").
-  return { chooseCount, modeTexts, ...((everyMode || upTo) && chooseCount > 1 ? { atMost: true } : {}) };
+  return { chooseCount, modeTexts, ...((everyMode || upTo) && chooseCount > 1 ? { atMost: true } : {}), ...(repeatable ? { repeatable: true } : {}) };
 }
 
 // The modal header of the card's OWN spell/enters text, as opposed to a "Choose one —" that belongs to an activated ability
@@ -384,7 +391,7 @@ export function parseModalHeader(oracleText: string): ModalHeader | undefined {
 export function parseSpellModalHeader(oracleText: string): ModalHeader | undefined {
   const header = parseModalHeader(oracleText);
   if (!header) return undefined;
-  const at = oracleText.search(/\bchoose (?:one or more|one or both|any number|up to (?:two|three)|one|two|three)(?: that hasn'?t been chosen this turn)?\s*[—-]\s*/i);
+  const at = oracleText.search(MODAL_HEADER);
   if (at < 0) return header;
   const lineStart = oracleText.lastIndexOf("\n", at) + 1;
   return oracleText.slice(lineStart, at).includes(":") ? undefined : header;

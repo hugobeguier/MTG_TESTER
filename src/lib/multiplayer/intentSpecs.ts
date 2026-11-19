@@ -13,6 +13,8 @@ const faceIndex = z.number().int().min(0).max(9);
 const position = z.object({ x: z.number().finite(), z: z.number().finite() }).strict();
 const manaColor = z.enum(["W", "U", "B", "R", "G", "C"]);
 const idList = z.array(id).max(200);
+// Positions in a checkbox prompt's option list (a "choose one or more" spell's mode set): a handful of small integers, repeats allowed (the engine re-validates).
+const positionList = z.array(z.number().int().min(0).max(50)).max(10);
 
 /** Zod tuple that also accepts a SHORTER array (trailing optional args that JSON dropped) by padding with undefined. */
 function tup(...items: ZodTypeAny[]) {
@@ -146,6 +148,8 @@ export const INTENT_SPECS = {
   onChooseEachPlayerSacrifice: { ...own(seatId, id), when: "answerRule" },
   onChooseCreatureToSacrificeForCast: { ...own(seatId, id), when: "answerRule" },
   onChooseModalOption: { ...plain(z.number().int().min(0).max(50)), when: "answerRule" },
+  /** The mode set of a "choose one or more" / "choose three, same mode more than once" spell, as positions in the prompt's option list. */
+  onChooseModalSet: { ...plain(positionList), when: "answerRule" },
   onChooseEffectTarget: { ...plain(effectTarget), when: "answerRule" },
   onDeclineEffectTarget: { schema: none, when: "answerRule" },
   onConfirmProliferateTargets: { ...plain(idList, idList), when: "answerRule" },

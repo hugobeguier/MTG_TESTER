@@ -82,8 +82,7 @@ const SPELL_EXCEPTIONS: Record<string, string> = {
   "Revitalizing Repast": "no deterministic parser (Rules Advisor planned)",
   "Immoral Bargain": "X targets after an X sacrifice cost: Rules Advisor planned",
   "Pest Infestation": "'up to X' targets: one at a time at resolution",
-  "Crackle with Power": "'each of up to X targets' divided damage: one at a time at resolution",
-  "Rootcast Apprenticeship": "choose three modes (repeatable) with per-mode targets: no repeated-mode prompt yet"
+  "Crackle with Power": "'each of up to X targets' divided damage: one at a time at resolution"
 };
 describe("guard: a human's targeted spell or Aura asks for its target(s), even with a single legal candidate", () => {
   it("every instant / sorcery / Aura face of the shipped decks prompts, or is a documented exception", () => {
