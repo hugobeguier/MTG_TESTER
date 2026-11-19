@@ -168,7 +168,7 @@ export type TriggerEffect = (
   // is unused/0 when this is set. Also changes the gain side: "the life lost this way" is the SUM
   // across every opponent (devotion × opponent count), not the flat per-trigger amount Zulaport
   // Cutthroat's wording uses — see applyDrainEffect's gainEqualsTotalLoss parameter.
-  | { kind: "drain"; amount: number; scope: "target_player" | "each_opponent"; devotionColor?: ManaColorLetter; noGain?: boolean }
+  | { kind: "drain"; amount: number; scope: "target_player" | "each_opponent"; devotionColor?: ManaColorLetter; noGain?: boolean; gainTotalLoss?: boolean }
   // "Return a land you control to its owner's hand." (Simic Growth Chamber and the rest of the
   // karoo/bounce-land cycle: "This land enters tapped. When this land enters, return a land you
   // control to its owner's hand.") — mandatory, and WHICH land is a real choice (routed through
@@ -251,7 +251,9 @@ export type TriggerEffect = (
   // "Exile all graveyards." (Farewell's last mode)
   | { kind: "exile_all_graveyards" }
   // "Roll a d20. You create a number of Treasure tokens equal to the result." (the Ancient Dragons): the roll is made when it resolves.
-  | { kind: "d20_roll"; payoff: "treasures" | "draw" | "faerie_dragons" }
+  | { kind: "d20_roll"; payoff: "treasures" | "draw" | "faerie_dragons" | "reanimate_mv" }
+  // A card-specific deterministic trigger (src/engine/cardScripts.ts): `script` names the handler, `params` its data (defending seat, subtype, keywords, damage dealt ...).
+  | { kind: "scripted"; script: string; params?: Record<string, unknown> }
   // Animate Dead and friends: "Return enchanted creature card to the battlefield under your control and attach this Aura to it."
   // The creature card is chosen from any graveyard when the Aura enters (the engine has no "enchant a card in a graveyard" attachment).
   | { kind: "aura_reanimate" }

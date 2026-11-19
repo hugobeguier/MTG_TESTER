@@ -17,6 +17,7 @@ import { cardsLeaveGraveyardEffectText, etbEffectText } from "@/lib/oracleClause
 import { chooseFreeCastCard, markHandCardFreeCastable } from "@/engine/casting";
 import { createCombatBlockChoice, legalAttackActions } from "@/engine/combat";
 import { enchantRestriction, isAura, isRemovalStyleAura } from "@/lib/attachments";
+import { scriptedSearchPrompt } from "@/engine/cardScripts";
 import { findAnyCombatDamageToOpponentTriggers, findAttackTriggers, findCardsLeftGraveyardTriggers, findCombatDamageToPlayerTriggers, findCommonTriggersForPermanentDied, findEntersBatchWatcherTriggers, findLeavesBattlefieldTriggers, findLifeGainTriggers, findMultiAttackTriggers, findPutIntoGraveyardTriggers, findSacrificeWatcherTriggers, lifeGainReplacementBonus } from "@/engine/triggerFinders";
 import { findCardAnywhere } from "@/engine/castTargets";
 import { findEmblemGraveyardReturns, isBraidsEndStepText, parseEtbZoneEffect } from "@/engine/oneShotEffects";
@@ -278,7 +279,7 @@ export function useGameEffects(ctx: GameContext) {
     const groupSeen = new Set<string>();
     const damageTriggers = hits
       .flatMap((hit) => [
-        ...findCombatDamageToPlayerTriggers(session, hit.seatId, hit.card, hit.damagedSeatId),
+        ...findCombatDamageToPlayerTriggers(session, hit.seatId, hit.card, hit.damagedSeatId, hit.amount),
         ...findAnyCombatDamageToOpponentTriggers(session, hit.seatId, hit.card, hit.damagedSeatId)
       ])
       .filter((trigger) => {
@@ -305,6 +306,27 @@ export function useGameEffects(ctx: GameContext) {
     });
     if (damageTriggers.length > 0) queueCommonTriggers(damageTriggers);
   }, [session.pendingCombatDamageToPlayer, pendingAction]);
+
+  // Mana a resolved trigger / loyalty ability added (Sarkhan Unbroken's +1) goes into the seat's pool; a library search a human owes from a scripted trigger (Tiamat, exploit) opens the picker.
+  useEffect(() => {
+    const grants = session.pendingManaGrants;
+    if (!grants || grants.length === 0) return;
+    for (const grant of grants) {
+      let pool = poolForSeat(grant.seatId);
+      for (const color of grant.colors) pool = addManaToPool(pool, color as ManaColor, 1);
+      setSeatManaPool(grant.seatId, pool);
+    }
+    setSession((current) => ({ ...current, pendingManaGrants: undefined }));
+  }, [session.pendingManaGrants]);
+  useEffect(() => {
+    const searches = session.pendingScriptedSearch;
+    if (!searches || searches.length === 0 || pendingRuleChoice) return;
+    const [next, ...rest] = searches;
+    const prompt = scriptedSearchPrompt(next.script);
+    setSession((current) => ({ ...current, pendingScriptedSearch: rest.length > 0 ? rest : undefined }));
+    if (!prompt) return;
+    setPendingRuleChoice({ id: crypto.randomUUID(), kind: "choose_card_from_library", controllerSeatId: next.seatId, sourceCardId: next.sourceCardId, sourceCardName: next.sourceCardName, prompt: prompt.prompt.replace("{name}", next.sourceCardName), destination: "hand", maxChoices: prompt.maxChoices, allowedCardFilter: prompt.filter, reveal: true });
+  }, [session.pendingScriptedSearch, pendingRuleChoice]);
 
   // Attack triggers: "Whenever this creature attacks, ..." / "Whenever a creature attacks you or a
   // planeswalker you control, ..." — queued per DECLARED attacker (see pendingAttackDeclarations on

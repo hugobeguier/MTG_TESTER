@@ -5,6 +5,7 @@
 
 import { manaValueFromManaCost } from "@/engine/costs";
 import { addDamageShieldsFromSpec, applyCombatDamageToTarget, dealDamageToCreature, hasFlying, hasHexproof, hasIndestructible, hasShroud, isProtectedFrom, playerHasHexproof } from "@/engine/damage";
+import { PHASE_SCRIPTS, resolveScriptedTrigger, rollD20, scriptedEffectFromText, startD20Reanimate, exploitTriggerFor, riotTriggerFor } from "@/engine/cardScripts";
 import { applyCounterAccumulationEffect, applyDiscardEffect, applyDrainEffect, applyDrawXThenPutBack, applyGenericModalEffect, applyMassPumpEffect, applyMasterOfCeremonies, applyMill, applyPrimitiveAction, applyRemovalEffect, applyTargetedPumpEffect, applyZoneEffect, becomeTemporaryCopy, castTargetLegal, chooseCounterTarget, chooseReanimationTarget, chooseWorstHandCardToDiscard, deferHumanDiscard, drawForSeat, drawMultipleForSeat, genericManaAbilityCostShim, matchesEachPlayerSacrificeFilter, noLegalTargetEvent, parseCounterAccumulationTrigger, parseGenericModalEffect, parseTargetedPump, resolveAgentLibraryLookWorkflow, resolveDeferredChoice, resolveProliferate, resolveRevealExchangeTrigger, resolveSacrificeSelfThenSearch, resolveSearchLibraryPut, resolveWhereXBoardCount, strongestControlledCreature, transformPermanent } from "@/engine/effects";
 import { applyGraveyardReturn, destroyCreatures, moveCardAcrossSeats, moveLibraryCardToDestination } from "@/engine/entry";
 import { entersBattlefieldTapped } from "@/engine/lands";
@@ -104,6 +105,32 @@ export function findCommonTriggersForPermanentEntered(session: GameSession, ente
         triggers.push(makeCommonTrigger(enteringSeatId, seat.id, source, { kind: "aura_reanimate" }, `${source.name} enters and returns a creature card from a graveyard.`, enteredPermanent.id));
         continue;
       }
+      // Riot: the entering creature's own controller chooses a +1/+1 counter or haste (printed, or granted by Rhythm of the Wild).
+      if (source.id === enteredPermanent.id && !source.abilitiesStripped) {
+        const riot = riotTriggerFor(session, enteringSeatId, source);
+        if (riot) triggers.push(makeCommonTrigger(enteringSeatId, seat.id, source, riot, `${source.name} enters with riot.`, enteredPermanent.id));
+      }
+      // Exploit (Sidisi, Undead Vizier, ...): its controller may sacrifice a creature as it enters; the "exploits" payoff follows (cardScripts.ts).
+      if (source.id === enteredPermanent.id && !source.abilitiesStripped) {
+        const exploit = exploitTriggerFor(source);
+        if (exploit) triggers.push(makeCommonTrigger(enteringSeatId, seat.id, source, exploit, `${source.name} exploits (it entered the battlefield).`, enteredPermanent.id));
+      }
+      // Scripted self-enters triggers (Tiamat, Ureni, Hellkite Courser, Disciple of Freyalise): recognised from the clause text, see cardScripts.ts.
+      if (source.id === enteredPermanent.id && !source.abilitiesStripped) {
+        const shortName = source.name.toLowerCase().split(" // ")[0].split(",")[0].trim();
+        let scriptedEnters: TriggerEffect | undefined;
+        for (const rawClause of oracleClauses(source.oracleText)) {
+          const clause = rawClause.replace(/\([^)]*\)/g, "").replace(/^[^:]+:\s*(?=when\b)/i, "").trim();
+          const head = clause.match(/^when ([^,]+?) enters(?: the battlefield)?(?: or attacks)?,/i);
+          if (!head || !(/^this\b/i.test(head[1]) || head[1].toLowerCase() === shortName || head[1].toLowerCase() === source.name.toLowerCase() || shortName.startsWith(head[1].toLowerCase()))) continue;
+          if (/\bif you cast it\b/i.test(clause) && !["hand", "command", "exile"].includes(source.enteredFrom ?? "")) continue;
+          scriptedEnters = scriptedEffectFromText(clause.replace(/ or attacks,/i, ",")) ?? scriptedEnters;
+        }
+        if (scriptedEnters) {
+          triggers.push(makeCommonTrigger(enteringSeatId, seat.id, source, scriptedEnters, `${source.name} triggers because it entered the battlefield.`, enteredPermanent.id));
+          continue;
+        }
+      }
       // "When this creature enters, choose two —" (Titan of Industry): the bullets are the modes.
       if (source.id === enteredPermanent.id) {
         const modalEtb = modalClauseTriggerEffect(source, /^when (?:this [a-z]+|[^,]+?) enters(?: the battlefield)?, choose (?:one or more|one or both|any number|up to (?:two|three)|one|two|three)\b.*[—-]\s*$/i);
@@ -120,6 +147,8 @@ export function findCommonTriggersForPermanentEntered(session: GameSession, ente
           for (const clause of conditionalClauses) {
             // "if he was kicked" (Josu Vess) — true only for a kicked cast.
             if (clause.condition && /\bwas kicked\b/i.test(clause.condition) && !source.kicked) continue;
+            // "if you cast it" (Tiamat): a spell cast from hand or the command zone, not a reanimated or flickered permanent.
+            if (clause.condition && /^you cast it$/i.test(clause.condition) && !["hand", "command", "exile"].includes(source.enteredFrom ?? "")) continue;
             if (clause.condition && isRecognizedBoardCondition(clause.condition) && !isBoardConditionMet(clause.condition, seat, session.seats)) continue;
             const clauseEffect = commonTriggerEffect(clause.effectText, "clause", undefined, seat);
             if (!clauseEffect) continue;
@@ -369,6 +398,9 @@ export function commonTriggerEffect(
   // this engine's one-effect-per-clause parsing (see the module comment on TriggerEffect); a card
   // with multiple clauses where only one is optional would be mis-flagged, a declared simplification.
   const optional = /\byou may\b/.test(text) || undefined;
+  // Card-specific deterministic triggers (Atarka, Tiamat, Sarkhan ...): see cardScripts.ts.
+  const scripted = scriptedEffectFromText(relevantText);
+  if (scripted) return scripted.kind === "scripted" && scripted.script === "courser_commander" ? { ...scripted, ...(optional ? { optional } : {}) } : scripted;
   if (mode === "entered" || mode === "clause") {
     const preventSpec = parseDamagePrevention(text.replace(/^(?:when|whenever|at the beginning)\b[^,]*,\s*/, ""));
     if (preventSpec && ["you", "self", "controlled_creatures", "you_and_creatures"].includes(preventSpec.scope)) return { kind: "prevent_damage", spec: preventSpec };
@@ -663,6 +695,12 @@ export function commonTriggerEffect(
     if (drawAmount && lifeAmount) return { kind: "draw_cards", amount: drawAmount, optional, then: { kind: "lose_life", amount: lifeAmount } };
   }
 
+  // Kokusho, the Evening Star: "Each opponent loses 5 life. You gain life equal to the life lost this way." (sum across opponents)
+  const lossThenGainTotal = text.match(/\beach opponent loses\s+(\d+|one|two|three|four|five)\s+life\.\s*you gain life equal to the life lost this way\b/);
+  if (lossThenGainTotal) {
+    const amount = numberWordToInt(lossThenGainTotal[1]);
+    if (amount) return { kind: "drain", amount, scope: "each_opponent", gainTotalLoss: true, optional };
+  }
   // "Each opponent loses N life." with NO matching "you gain" (Vengeful Dead) — the drain checks above
   // all require the gain half.
   const opponentsLoseOnly = text.match(/\beach opponent loses\s+(\d+|one|two|three|four|five)\s+life\b(?!\s+and you gain)/);
@@ -1025,6 +1063,7 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
     return drawMultipleForSeat(session, trigger.controllerSeatId, trigger.effect.amount, `${trigger.sourceCardName} trigger resolves. ${seatName} draws ${trigger.effect.amount} card${trigger.effect.amount === 1 ? "" : "s"}.`);
   }
   if (trigger.effect.kind === "proliferate") return resolveProliferate(session);
+  if (trigger.effect.kind === "scripted") return resolveScriptedTrigger(session, trigger);
   if (trigger.effect.kind === "search_library_put") return resolveSearchLibraryPut(session, trigger);
   if (trigger.effect.kind === "sacrifice_self_then_search") return resolveSacrificeSelfThenSearch(session, trigger);
   if (trigger.effect.kind === "exile_up_to_artifacts_enchantments" || trigger.effect.kind === "exile_until_leaves_each_opponent") {
@@ -1600,8 +1639,9 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
     );
   }
   if (trigger.effect.kind === "d20_roll") {
-    const roll = randomInt(20) + 1;
+    const roll = rollD20();
     const rolled = rulesEvent(session, trigger.controllerSeatId, `${trigger.sourceCardName}: rolls a d20 and gets ${roll}.`);
+    if (trigger.effect.payoff === "reanimate_mv") return startD20Reanimate(rolled, trigger.controllerSeatId, trigger.sourceCardId, trigger.sourceCardName, roll);
     if (trigger.effect.payoff === "draw") return drawMultipleForSeat(rolled, trigger.controllerSeatId, roll, `${trigger.sourceCardName}: draws ${roll} cards.`);
     const specs = trigger.effect.payoff === "treasures"
       ? [{ ...predefinedTokenSpec("Treasure"), count: roll }]
@@ -1972,7 +2012,7 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
     // board-state-dependent and can genuinely change between this trigger being queued and actually
     // resolving (responses on the stack in between), so parse-time would be a stale/wrong number.
     const amount = devotionColor && controllerSeat ? computeDevotion(controllerSeat.board.battlefield, devotionColor) : trigger.effect.amount;
-    return applyDrainEffect(session, trigger.controllerSeatId, trigger.sourceCardName, amount, trigger.effect.scope, "trigger resolves", Boolean(devotionColor), Boolean(trigger.effect.noGain));
+    return applyDrainEffect(session, trigger.controllerSeatId, trigger.sourceCardName, amount, trigger.effect.scope, "trigger resolves", Boolean(devotionColor) || Boolean(trigger.effect.gainTotalLoss), Boolean(trigger.effect.noGain));
   }
   if (trigger.effect.kind === "connive") {
     let next = session;
@@ -3151,6 +3191,11 @@ export function applyDeterministicPhaseTrigger(session: GameSession, seatId: str
   const modeLabel = clauseText.match(/^[•*]\s*([A-Za-z]+)\s*[—-]/)?.[1];
   if (modeLabel && (sourceCard.chosenMode ?? modeLabel).toLowerCase() !== modeLabel.toLowerCase() && sourceCard.chosenMode) return session;
 
+  // Gyome, Call the Spirit Dragons, Rith: scripted end-step / upkeep triggers (cardScripts.ts).
+  const phaseScripted = scriptedEffectFromText(clauseText);
+  if (phaseScripted?.kind === "scripted" && PHASE_SCRIPTS.has(phaseScripted.script)) {
+    return resolveScriptedTrigger(session, makeCommonTrigger(seatId, seatId, sourceCard, phaseScripted, `${sourceCard.name} triggers at the beginning of the ${phase}.`));
+  }
   // Master of Ceremonies, Keen Duelist, Parker Luck: the other players' / the aimed players' part of the trigger is a real decision (see
   // applyMasterOfCeremonies, resolveRevealExchangeTrigger): a human is asked, an agent decides deterministically.
   if (/\beach opponent chooses money, friends, or secrets\b/i.test(clauseText)) {

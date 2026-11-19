@@ -2,6 +2,7 @@
 // land raids, enters-batch watchers, plus agent target picking for triggers.
 // Extracted verbatim from components/AppFlow.tsx; AppFlow.tsx re-exports the previously public symbols.
 
+import { agentScriptedTarget } from "@/engine/cardScripts";
 import { agentRemovalEffectTarget, encodeChosenTarget, labeledTargetOptions, targetableView } from "@/engine/castTargets";
 import { plusOneCounterCount } from "@/engine/combat";
 import { manaValueFromManaCost } from "@/engine/costs";
@@ -53,7 +54,7 @@ export function triggerDamageAiming(session: GameSession, trigger: Extract<Pendi
 // or undefined when the trigger needs no target or nothing is legal (resolution then keeps its own pick).
 export const agentTargetedTriggerKinds = new Set<string>([
   "targeted_effect", "damage_effect", "context_power_damage", "add_counter", "pump_target_creature", "double_power_counters", "target_creature_gains_keyword",
-  "destroy_tapped_creature", "aura_reanimate", "exile_card_from_graveyard", "become_artifact_target", "gain_control_target_artifact"
+  "destroy_tapped_creature", "aura_reanimate", "exile_card_from_graveyard", "become_artifact_target", "gain_control_target_artifact", "scripted"
 ]);
 
 export function agentTriggerTarget(session: GameSession, trigger: Extract<PendingAction, { type: "trigger" }>): string | undefined {
@@ -124,6 +125,8 @@ export function agentTriggerTarget(session: GameSession, trigger: Extract<Pendin
         .flatMap((seat) => seat.board.battlefield.filter((card) => hasCardType(card, "Artifact") && !hasShroud(card) && !hasHexproof(card) && !card.phasedOut));
       return [...pool].sort((a, b) => b.manaValue + Math.max(0, effectivePower(b)) - (a.manaValue + Math.max(0, effectivePower(a))))[0]?.id;
     }
+    case "scripted":
+      return agentScriptedTarget(session, trigger);
     default:
       return undefined;
   }
@@ -366,7 +369,7 @@ export function findCommonTriggersForPermanentDied(
       const effect = modalDeathTriggerEffect(source) ?? commonTriggerEffect(selfNameAsThisCreature(source), "died", dynamicCounterCount);
       if (!effect || !deathTriggerApplies(source, seat.id, deadCard, deadSeatId, attachedSourceIds)) continue;
       const resolvedEffect: TriggerEffect = effect.kind === "gain_life_equal_power" ? { kind: "gain_life", amount: Math.max(0, effectivePower(source)) } : effect;
-      triggers.push(makeCommonTrigger(deadSeatId, seat.id, source, resolvedEffect, `${source.name} triggers because ${deadCard.name} died.`));
+      triggers.push(makeCommonTrigger(deadSeatId, seat.id, source, resolvedEffect, `${source.name} triggers because ${deadCard.name} died.`, resolvedEffect.kind === "scripted" ? deadCard.id : undefined));
     }
   }
 
@@ -639,6 +642,7 @@ export function findAttackTriggers(
         // "...attacks while you don't control another Dinosaur, ..." (Pugnacious Hammerskull)
         const noOtherOfType = triggerClause.match(/\bwhile you don'?t control another ([a-z]+)\b/i);
         if (effect && noOtherOfType) effect = { ...effect, condition: { kind: "controls_no_other", subtype: noOtherOfType[1] } };
+        if (effect?.kind === "scripted") effect = { ...effect, params: { ...effect.params, defendingSeatId: attack.defendingSeatId } };
         if (effect) {
           triggers.push(makeCommonTrigger(attack.seatId, sourceSeat.id, source, effect, `${source.name} triggers because ${attack.card.name} ${event === "attacks" ? "attacked" : "blocked"}.`, attack.card.id));
         } else if (sourceSeat.id === attack.seatId) {
@@ -654,7 +658,9 @@ export function findCombatDamageToPlayerTriggers(
   session: GameSession,
   dealingSeatId: string,
   dealingCard: VisibleCard,
-  damagedSeatId?: string
+  damagedSeatId?: string,
+  // The combat damage dealt (Balefire Dragon: "that much damage to each creature that player controls").
+  damageAmount?: number
 ): Array<Extract<PendingAction, { type: "trigger" }>> {
   if (!hasCardType(dealingCard, "Creature")) return [];
   const seat = session.seats.find((item) => item.id === dealingSeatId);
@@ -716,6 +722,12 @@ export function findCombatDamageToPlayerTriggers(
           triggers.push(makeCommonTrigger(damagedSeatId ?? dealingSeatId, seat.id, source, { kind: "modal", modal }, `${source.name} triggers because ${dealingCard.name} dealt combat damage to an opponent.`));
         }
       }
+      continue;
+    }
+    if (effect.kind === "scripted") {
+      // "one or more Dragons you control" (Zurgo and Ojutai) only counts a Dragon dealing the damage.
+      if (effect.script === "look_three_take_one" && !dealingCard.typeLine.toLowerCase().includes(String(effect.params?.subtype ?? ""))) continue;
+      triggers.push(makeCommonTrigger(dealingSeatId, seat.id, source, { ...effect, params: { ...effect.params, damagedSeatId, amount: damageAmount ?? Math.max(0, effectivePower(dealingCard)) } }, `${source.name} triggers because ${dealingCard.name} dealt combat damage to a player.`, dealingCard.id));
       continue;
     }
     triggers.push(makeCommonTrigger(dealingSeatId, seat.id, source, effect, `${source.name} triggers because ${dealingCard.name} dealt combat damage to a player.`));
@@ -994,6 +1006,14 @@ export function findCastTriggers(
         // Parlor) is the same idea spelled out in full instead of abbreviated to a bare "X" — resolved
         // the same way, before the counter-count parser (which only understands a literal number
         // word/digit) ever sees it.
+        // Ramos, Dragon Engine: "put a +1/+1 counter on Ramos for each of that spell's colors" (a multicolored spell gives several, colorless none).
+        if (/\bput a \+1\/\+1 counter on [^.]+? for each of that spell'?s colors\b/i.test(condition.effectClause)) {
+          const colorCount = castCard.colors.length;
+          if (colorCount > 0) {
+            triggers.push(makeCommonTrigger(casterSeatId, seat.id, source, { kind: "add_counter", counterKind: "+1/+1", amount: colorCount, scope: "self" }, `${source.name} triggers because ${castCard.name} was cast.`));
+          }
+          continue;
+        }
         const effect = commonTriggerEffect(
           substituteManaValueCount(substituteX(condition.effectClause, castCard.manaValue), castCard.manaValue),
           "clause"

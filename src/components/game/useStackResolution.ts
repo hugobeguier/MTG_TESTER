@@ -1,5 +1,6 @@
 // The stack and priority: stack-array helpers, passPriority, response windows, beginPendingAction/resumeStackAction, responding with a card, and resolvePendingAction/resolvePendingActionNow (the big per-action-type resolver).
 // Part of the AppFlow() split: shared state arrives through `ctx` (see ./context.ts); handlers owned by other hooks are called through `lateFn` so every hook sees the current render's functions.
+import { applyTargetingLifeTax, findSpellTargetTriggers, targetingLifeTax } from "@/engine/cardScripts";
 import { type AuraAttachResult, applyAuraAttachToPlayer, applyAuraAttachment, applyChosenColor, applyChosenCreatureType, chooseAuraAttachTarget, entersWithChargeCounterPerKick, entersWithXCounters, exploreCount, grantsExtraTurn, isSagaCard, resolveExplore } from "@/engine/etb";
 import { clearHoldOnce } from "@/lib/multiplayer/seatStops";
 import { type CastChoices, type PendingAction } from "@/engine/types";
@@ -203,7 +204,10 @@ export function useStackResolution(ctx: GameContext) {
         if (/when you cast this spell, reveal cards from the top of your library until you reveal/i.test(sourceCard.oracleText)) {
           setSession((current) => applyCastRevealUntilCreatures(current, action.actorSeatId, sourceCard, action.chosenX));
         }
-        const castTriggers = findCastTriggers(session, action.actorSeatId, sourceCard, castOrdinal);
+        // Terror of the Peaks charges life for targeting it; Scalelord Reckoner reacts to a Dragon becoming the target of an opponent's spell.
+        const castTargets = action.castChoices?.targets ?? [];
+        if (targetingLifeTax(session, action.actorSeatId, castTargets) > 0) setSession((current) => applyTargetingLifeTax(current, action.actorSeatId, castTargets));
+        const castTriggers = [...findCastTriggers(session, action.actorSeatId, sourceCard, castOrdinal), ...findSpellTargetTriggers(session, action.actorSeatId, castTargets)];
         hasCastTriggers = castTriggers.length > 0;
         // Deferred, same reasoning as the land-ETB-trigger scheduling elsewhere in this file:
         // queueCommonTriggers itself calls beginPendingAction, so calling it synchronously here

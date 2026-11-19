@@ -23,6 +23,7 @@ importing from `./AppFlow`. Each file starts with a header comment saying what i
 | `triggerFinders.ts` | `findAttackTriggers`, `findCastTriggers`, death / sacrifice / leaves / life-gain / combat-damage finders, `agentTriggerTarget` |
 | `effects.ts` | Spell effect appliers (`applyRemovalEffect`, `applyZoneEffect`, `applyPrimitiveAction`...), target choosers, library-look workflows |
 | `oneShotEffects.ts` | One-shot parsers (`parseSimpleLifeChange`, `parseMassPump`...), primitive-plan mapping, emblems, each-player-sacrifice, punisher, Living Death |
+| `cardScripts.ts` | Text-recognised deterministic triggers (`scriptedEffectFromText`, `resolveScriptedTrigger`, `resolveScriptedChoice`): Atarka/Thrakkus/Silumgar, Tiamat, Ureni, Sarkhan Unbroken, exploit, riot, Call the Spirit Dragons, "becomes the target of a spell" hook (`findSpellTargetTriggers`, `targetingLifeTax`), dealt-damage watchers |
 | `etb.ts` | Aura attach, chosen type/color, explore, sagas, Myriad / basic-land-fetch searches |
 | `abilities.ts` | Activated abilities: `payGenericSacrificeCost`, `payGenericTapCost`, `payGenericManaCost`, `applyGenericTapEffect`, `applyGenericAbilityEffect`, `resolveEquip`, cycling |
 | `casting.ts` | `playCardFromZone`, additional costs, MDFC/split/room face options, flash, `spellResolutionDestination` |

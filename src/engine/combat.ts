@@ -306,6 +306,8 @@ export function canBlock(card: VisibleCard, attacker?: VisibleCard, controllerBa
   // "Target creature can't block this creature this turn." (Kozilek's Pathfinder)
   if (attacker && card.temporaryGrantedKeywords?.includes("can't block:" + attacker.id)) return false;
   if (attacker && hasFlying(attacker) && !hasFlying(card) && !hasReach(card)) return false;
+  // Shadow (rule 702.28): a creature with shadow can block or be blocked only by creatures with shadow (Dauthi Voidwalker).
+  if (attacker && hasKeyword(attacker, "shadow") !== hasKeyword(card, "shadow")) return false;
   // Landwalk: unblockable while the defending player controls a land of that type; "can block only creatures with flying".
   if (attacker && landwalkEvades(attacker, controllerBattlefield)) return false;
   if (attacker && canBlockOnlyFliers(card) && !hasFlying(attacker)) return false;

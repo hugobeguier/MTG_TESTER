@@ -202,9 +202,9 @@ describe("every human prompt kind has an agent answer (static guard)", () => {
 // consciously added. Entries that become handled can simply be deleted. Orzhov Advokist, Shadrix, The Ozolith and Reluctant Role Model are the
 // ones with real choices (listed under "Human/agent parity gaps" in docs/agents/system.md).
 const KNOWN_LLM_ONLY_PHASE_TRIGGERS = new Set([
-  "Call the Spirit Dragons|upkeep step", "Estrid's Invocation|upkeep step", "Gyome, Master Chef|end step", "Hulking Raptor|precombat main phase",
+  "Estrid's Invocation|upkeep step", "Hulking Raptor|precombat main phase",
   "Mystic Remora|upkeep step", "Orzhov Advokist|upkeep step", "Overlord of the Mistmoors|end step", "Reluctant Role Model|postcombat main phase",
-  "Rith, Liberated Primeval|end step", "Shadrix Silverquill|beginning of combat step", "The Ozolith|beginning of combat step"
+  "Shadrix Silverquill|beginning of combat step", "The Ozolith|beginning of combat step"
 ]);
 function deckFiles(): string[] {
   const roots: string[] = [];

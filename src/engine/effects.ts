@@ -3,6 +3,7 @@
 // helpers, draw helpers, library-look workflows, deferred choices.
 // Part of a deliberate import cycle with the other resolution modules (function declarations only).
 
+import { applyDrawThenLand, resolveScriptedChoice } from "@/engine/cardScripts";
 import { manaValueFromManaCost } from "@/engine/costs";
 import { PROTECTION_COLOR_CODE, addDamageShieldsFromSpec, applyCombatDamageToTarget, dealDamageToCreature, hasFlying, hasHexproof, hasIndestructible, hasShroud, isProtectedFrom, playerCantLose, playerHasHexproof } from "@/engine/damage";
 import { applyDevour, applyGraveyardReturn, applyGraveyardReturnPicked, destroyCreatures, finishDevour, moveCardAcrossSeats, moveLibraryCardToDestination } from "@/engine/entry";
@@ -598,6 +599,7 @@ export function becomeTemporaryCopy(session: GameSession, seatId: string, artifa
 export function resolveDeferredChoice(session: GameSession, seatId: string, sourceCardId: string, sourceName: string, resolver: string, data: Record<string, unknown>, value: string | undefined): GameSession {
   const seat = session.seats.find((item) => item.id === seatId);
   if (!seat) return session;
+  if (resolver === "scripted_choice") return resolveScriptedChoice(session, seatId, sourceCardId, sourceName, data, value);
   if (resolver === "reveal_exchange") {
     const controllerId = String(data.controllerSeatId ?? seatId);
     const picked = (value ?? "").split("|").filter(Boolean);
@@ -1537,7 +1539,7 @@ export function removalModeScore(session: GameSession, casterSeatId: string, mod
       0
     );
   if (mode.kind === "destroy_all") {
-    if (mode.targetType === "creature") return sweep((card) => card.typeLine.includes("Creature") && !cardMatchesExcludedType(card, mode.excludeType) && !cardMatchesExcludedColor(card, mode.excludedColors));
+    if (mode.targetType === "creature") return sweep((card) => card.typeLine.includes("Creature") && (!mode.onlyType || card.typeLine.toLowerCase().includes(mode.onlyType)) && !cardMatchesExcludedType(card, mode.excludeType) && !cardMatchesExcludedColor(card, mode.excludedColors));
     if (mode.targetType === "artifact") return sweep((card) => card.typeLine.includes("Artifact"));
     if (mode.targetType === "enchantment") return sweep((card) => card.typeLine.includes("Enchantment"));
     return sweep((card) => card.typeLine.includes("Artifact") || card.typeLine.includes("Enchantment"));
@@ -1575,6 +1577,7 @@ export function removalEffectHasLegalTarget(session: GameSession, casterSeatId: 
     // number" legally includes choosing none, so it's always at least a legal (if sometimes
     // pointless) mode, same as the unconditional mass-effect kinds above.
     case "proliferate":
+    case "draw_then_land":
       return true;
     case "grant_keywords":
       return chooseCounterTarget(session, casterSeatId, "+1/+1", false) !== undefined;
@@ -1774,6 +1777,7 @@ export function applyRemovalEffect(
         return (
           baseMatch &&
           (effect.exile || !hasIndestructible(card)) &&
+          (!effect.onlyType || card.typeLine.toLowerCase().includes(effect.onlyType)) &&
           !cardMatchesExcludedType(card, effect.excludeType) &&
           !cardMatchesExcludedColor(card, effect.excludedColors) &&
           (!effect.requireTapped || Boolean(card.tapped)) &&
@@ -1862,6 +1866,9 @@ export function applyRemovalEffect(
     // choose_proliferate_targets instead of reaching this case at all for a human controller).
     case "proliferate":
       return resolveProliferate(session);
+    // Insidious Fungus: draw, then you may put a land card from your hand onto the battlefield tapped (a human chooses which land, or none).
+    case "draw_then_land":
+      return applyDrawThenLand(session, casterSeatId, sourceName);
     // Protective mode: your best creature gains the keywords until end of turn (hexproof/indestructible resolve on the next state pass).
     case "grant_keywords": {
       const picked = resolvePreChosenBattlefieldTarget(session, preChosenTarget);

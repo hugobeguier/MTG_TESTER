@@ -10,6 +10,7 @@ import { legalTargets } from "@/lib/targeting";
 import { targetedEffectSpec } from "@/lib/targetedEffects";
 import { zoneEffectTargetSpec } from "@/lib/targetSpecs";
 import { labeledTargetOptions } from "@/engine/castTargets";
+import { scriptedTargetCandidates } from "@/engine/cardScripts";
 import { triggerDamageAiming } from "@/engine/triggerFinders";
 import { resolveDynamicAmount } from "@/engine/effects";
 
@@ -132,6 +133,12 @@ export function triggerCardPrompt(session: GameSession, trigger: Extract<Pending
       };
     case "exile_card_from_graveyard":
       return { prompt: `${trigger.sourceCardName}: choose a card in a graveyard to exile.`, zone: "graveyard", cards: session.seats.flatMap((seat) => (seat.board.graveyard ?? []).map((card) => ({ seatId: seat.id, cardId: card.id }))), picksNeeded: 1 };
+    // Scripted triggers that aim (Daretti: an artifact card in your graveyard; Scalelord Reckoner: a nonland permanent): the human picks it as the trigger goes on the stack.
+    case "scripted": {
+      const candidates = scriptedTargetCandidates(session, trigger);
+      if (candidates.length === 0) return undefined;
+      return { prompt: `${trigger.sourceCardName}: choose a target.`, zone: trigger.effect.script === "daretti_sac_return" ? "graveyard" : "battlefield", cards: candidates.map((entry) => ({ seatId: entry.seatId, cardId: entry.cardId })), picksNeeded: 1 };
+    }
     default:
       return undefined;
   }

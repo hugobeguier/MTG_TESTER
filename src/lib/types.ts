@@ -274,6 +274,8 @@ export interface VisibleCard {
   attachmentPowerBonus?: number;
   attachmentToughnessBonus?: number;
   grantedKeywords?: string[];
+  // Keywords a static group grant ("Artifacts you control have hexproof", Padeem) gives a NON-creature permanent; recomputed every state-based pass. hasKeyword reads it.
+  groupGrantedKeywords?: string[];
   grantedProtectionColors?: string[];
   // "Creature tokens you control have '{T}: Add one mana of any color.'" (Insidious Roots) — a
   // granted ACTIVATED ability's raw text (not a keyword grantedKeywords can express), recomputed
@@ -383,6 +385,8 @@ export interface VisibleCard {
   exileAtEndOfCombat?: boolean;
   // "Exile it at the beginning of the next end step." (Mimic Vat's token, Saheeli the Gifted's -7 copies) — dropped by applyEndStepEffects.
   exileAtEndStep?: boolean;
+  // Hellkite Courser: a commander put onto the battlefield "Return it to the command zone at the beginning of the next end step" (dropped by applyEndStepEffects).
+  returnToCommandAtEnd?: boolean;
   // Memnarch: "Target permanent becomes an artifact in addition to its other types." (no duration; folded into grantedTypes by the type-grant pass)
   permanentlyArtifact?: boolean;
   // Imprisoned in the Moon: what the enchanted permanent was before it became a colorless land (restored when the Aura leaves).
@@ -547,7 +551,7 @@ export interface GameSession {
   // Yawgmoth Praetor's "whenever a creature deals combat damage to ONE OF YOUR OPPONENTS," symmetric
   // across every seat, not just seatId's own creatures) to check whether that player is an opponent
   // of the WATCHING seat, not of the dealing creature's controller.
-  pendingCombatDamageToPlayer?: Array<{ seatId: string; card: VisibleCard; damagedSeatId: string }>;
+  pendingCombatDamageToPlayer?: Array<{ seatId: string; card: VisibleCard; damagedSeatId: string; amount?: number }>;
   // Every attacker declared this combat, queued for "Whenever <this creature / a creature> attacks"
   // triggers. The old generic declare-attackers phase sweep fired those once per phase entry for any
   // permanent with "attacks" text, whether or not the creature actually attacked (Grave Titan, Eternal
@@ -620,6 +624,12 @@ export interface GameSession {
   // restriction is per-object, not per-player, so each fresh copy can trigger again) gets stopped
   // instead of looping forever. Self-resets when the turn number changes.
   triggerChainGuard?: { turn: number; count: number };
+  // Mana a resolving trigger or loyalty ability adds to a seat's pool (Sarkhan Unbroken's +1): the mana pool lives in UI state, so the engine parks the grant here and the game-effects hook drains it.
+  pendingManaGrants?: Array<{ seatId: string; colors: string[]; sourceName: string }>;
+  // A library search a HUMAN owes from a resolving scripted trigger (Tiamat, exploit tutors): the game-effects hook opens the library picker from it.
+  pendingScriptedSearch?: Array<{ seatId: string; sourceCardId: string; sourceCardName: string; script: string }>;
+  // Turn and seats whose creature or planeswalker was dealt EXCESS damage this turn (Rith, Liberated Primeval's end-step trigger).
+  excessDamageTurn?: { turn: number; seatIds: string[] };
   // Rule 702.8/119.7a-adjacent: "Prevent all combat damage that would be dealt this turn." (Spore
   // Frog, and any other Fog-shaped sacrifice ability) — same self-resetting-by-turn-number
   // convention as triggerChainGuard above rather than a separate cleanup step at end of turn:

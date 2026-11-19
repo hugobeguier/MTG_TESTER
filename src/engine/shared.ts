@@ -13,7 +13,7 @@ export function hasKeyword(card: VisibleCard, keyword: string) {
   // see abilitiesStripped's doc comment) has neither its printed keywords nor any granted ones,
   // regardless of what either source's text says.
   if ((card.abilitiesStripped || card.phasedOut)) return false;
-  return hasKeywordText(card.oracleText, keyword) || Boolean(card.grantedKeywords?.includes(keyword));
+  return hasKeywordText(card.oracleText, keyword) || Boolean(card.grantedKeywords?.includes(keyword)) || Boolean(card.groupGrantedKeywords?.includes(keyword));
 }
 
 export function hasHaste(card: VisibleCard) {

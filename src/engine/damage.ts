@@ -2,6 +2,7 @@
 // and targets, damage shields/doubling, dealt-damage triggers, evasion/keyword predicates (hasFlying, hasDeathtouch, ...), protection.
 // Part of a deliberate import cycle with the other resolution modules (function declarations only).
 
+import { applyDamagedWatchers, recordExcessDamage } from "@/engine/cardScripts";
 import { strongestControlledCreature } from "@/engine/effects";
 import { destroyCreatures } from "@/engine/entry";
 import { hasKeyword } from "@/engine/shared";
@@ -237,7 +238,7 @@ function applyCombatDamageToTargetCore(
   // pendingCombatDamageToPlayer's own comment for the bug this fixes.
   const combatDamageToPlayerEntry =
     damageKind === "combat" && source && sourceControllerSeatId && source.typeLine.includes("Creature")
-      ? [{ seatId: sourceControllerSeatId, card: source, damagedSeatId: target.seat.id }]
+      ? [{ seatId: sourceControllerSeatId, card: source, damagedSeatId: target.seat.id, amount }]
       : [];
   return {
     ...base,
@@ -301,8 +302,10 @@ export function dealDamageToCreature(
 // "Whenever this creature is dealt damage, ..." (Ripjaw Raptor's enrage draw, Metropolis Reformer's lifegain). Resolved on the
 // spot rather than queued: the effects involved (draw, gain life) never need a choice.
 export function applyDealtDamageTriggers(session: GameSession, seatId: string, card: VisibleCard, amount: number): GameSession {
-  if ((card.abilitiesStripped || card.phasedOut) || amount <= 0) return session;
-  let next = session;
+  if (amount <= 0) return session;
+  // Rith, Liberated Primeval reads this at the end step; Wrathful Red Dragon watches every Dragon its controller owns.
+  let next = applyDamagedWatchers(recordExcessDamage(session, seatId, card, amount), seatId, card, amount);
+  if (card.abilitiesStripped || card.phasedOut) return next;
   for (const clause of oracleClauses(card.oracleText)) {
     const match = clause.match(/(?:^|— )whenever this creature is dealt damage, (.+)$/i);
     if (!match) continue;

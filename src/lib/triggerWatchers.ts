@@ -54,7 +54,9 @@ function descriptorIsEvaluable(descriptor: string): boolean {
 function parsePart(rawPart: string, sourceName: string): SubjectPart | undefined {
   const part = rawPart.trim();
   const shortName = sourceName.toLowerCase().split(" // ")[0].split(",")[0].trim();
-  if (/^this\s+[a-z ]+$/.test(part) || part === sourceName.toLowerCase() || part === shortName) {
+  // "Whenever Thrakkus attacks": a card named "Thrakkus the Butcher" refers to itself by the part before " the ".
+  const firstName = shortName.split(/ (?:the|of) /)[0];
+  if (/^this\s+[a-z ]+$/.test(part) || part === sourceName.toLowerCase() || part === shortName || part === firstName) {
     return { self: true, another: false, descriptor: "", control: "any" };
   }
   // "your commander" / "a commander you control" (Tome of Legends, Norn's Choirmaster): matched on the card's commander flag.

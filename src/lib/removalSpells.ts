@@ -62,6 +62,8 @@ interface DestroyAllEffect {
   // card pool (no "destroy all nonartifact enchantments"-shaped card exists to motivate supporting
   // it there too).
   excludeType?: string;
+  // "Destroy all Dragon creatures" (Crux of Fate): only creatures of this subtype.
+  onlyType?: string;
   // "Destroy all nonwhite creatures" — full color names ("white"), distinct from excludeType since
   // color is checked against a card's colors, not its type line (same split parseDestroy's
   // single-target DestroyEffect already makes between excludedColors and artifactsExcluded).
@@ -172,6 +174,11 @@ interface ProliferateEffect {
   kind: "proliferate";
 }
 
+// "Draw a card. Then you may put a land card from your hand onto the battlefield tapped." (Insidious Fungus's third mode): never needs a target.
+interface DrawThenLandEffect {
+  kind: "draw_then_land";
+}
+
 // "Target creature gains hexproof and indestructible until end of turn." (Collective Resistance, Valorous Stance) — a
 // protective mode that sits beside real removal modes in the same "choose" spell.
 interface GrantKeywordsEffect {
@@ -199,6 +206,7 @@ export type RemovalEffect =
   | MassDamageEffect
   | BounceEffect
   | ProliferateEffect
+  | DrawThenLandEffect
   | GrantKeywordsEffect
   | ModalEffect;
 
@@ -269,6 +277,10 @@ function parseDestroy(text: string): DestroyEffect | DestroyAllEffect | DestroyA
       // "Draw a card for each creature destroyed this way." (Decree of Pain)
       ...(/\bdraw a card for each creature destroyed this way\b/.test(text) ? { drawPerDestroyed: true } : {})
     };
+  }
+  const destroyAllOfType = text.match(/\bdestroy all ([a-z]+) creatures\b(?!\s+with\b)/);
+  if (destroyAllOfType && destroyAllOfType[1] !== "tapped" && !COLORS.includes(destroyAllOfType[1]) && !/^non/.test(destroyAllOfType[1])) {
+    return { kind: "destroy_all", targetType: "creature", excludedColors: [], onlyType: destroyAllOfType[1] };
   }
   // "Destroy all artifacts and enchantments." (Cleansing Nova's second mode) — checked before the artifact-only match, which
   // would otherwise swallow it and leave the enchantments standing.
@@ -408,6 +420,10 @@ function parseBounce(text: string): BounceEffect | undefined {
 // resolveProliferate (AppFlow.tsx) has no repeat-count parameter to give them yet, so they'd need
 // that extended too. Anchored start-to-end so "Proliferate twice."/"Proliferate X times." don't
 // also match this narrower shape.
+function parseDrawThenLand(text: string): DrawThenLandEffect | undefined {
+  return /^draw a card. then you may put a land card from your hand onto the battlefield tapped.?$/i.test(text.trim()) ? { kind: "draw_then_land" } : undefined;
+}
+
 function parseProliferate(text: string): ProliferateEffect | undefined {
   return /^proliferate\.?(\s*\(.*\))?\s*$/i.test(text.trim()) ? { kind: "proliferate" } : undefined;
 }
@@ -427,7 +443,7 @@ function parseSingleRemovalEffect(text: string): Exclude<RemovalEffect, ModalEff
     const targetType = ({ "artifacts and enchantments": "artifact_or_enchantment", artifacts: "artifact", creatures: "creature", enchantments: "enchantment" } as const)[exileAll[1] as "artifacts"];
     return { kind: "destroy_all", targetType, excludedColors: [], exile: true };
   }
-  return parseDestroy(text) ?? parseExile(text) ?? parseDamage(text) ?? parseMassDamage(text) ?? parseBounce(text) ?? parseProliferate(text) ?? parseGrantKeywords(text);
+  return parseDestroy(text) ?? parseExile(text) ?? parseDamage(text) ?? parseMassDamage(text) ?? parseBounce(text) ?? parseProliferate(text) ?? parseDrawThenLand(text) ?? parseGrantKeywords(text);
 }
 
 // "Choose one/two —\n• mode.\n• mode. ..." (Boros Charm, Austere Command, ...). Each bullet is

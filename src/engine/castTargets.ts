@@ -2,6 +2,7 @@
 // removal/zone/pump/extra effects, hasResolvableTarget checks.
 // Extracted verbatim from components/AppFlow.tsx; AppFlow.tsx re-exports the previously public symbols.
 
+import { targetingLifeTaxFor } from "@/engine/cardScripts";
 import { hasPayableAdditionalDiscardCost, hasPayableAdditionalSacrificeCost } from "@/engine/casting";
 import { hasHexproof, hasIndestructible, hasShroud, isProtectedFrom, playerHasHexproof } from "@/engine/damage";
 import { applyGenericModalEffect, applyRemovalEffect, applySpellExtraEffect, applyTargetedPumpEffect, applyZoneEffect, castTargetLegal, chooseControlTarget, chooseCounterTarget, chooseCreatureCardsFromOwnGraveyard, chooseDamageTarget, chooseGraveyardExileTarget, choosePumpTarget, chooseReanimationTarget, chooseRegrowTarget, chooseRemovalTarget, genericCostShim, genericModalModeHasLegalTarget, greatestCreaturePower, noLegalTargetEvent, parseGenericModalEffect, parseTargetedPump, removalEffectHasLegalTarget, removalModeScore, removalModeViable, resolveDynamicAmount, resolvePreChosenBattlefieldTarget, strongestControlledCreature, substituteX, zoneEffectHasLegalTarget, type GenericModalEffect, type GenericModalMode, type PumpEffect } from "@/engine/effects";
@@ -101,7 +102,10 @@ export function labeledTargetOptions(
     const stats = card.typeLine.includes("Creature") ? ` (${effectivePower(card)}/${effectiveToughness(card)})` : "";
     return `${card.name}${stats} — ${seat.id === controllerSeatId ? "yours" : seat.name}`;
   };
-  const targetable = (card: VisibleCard, seat: PlayerSeat) => seat.id === controllerSeatId || (!hasShroud(card) && !hasHexproof(card) && !isProtectedFrom(card, source));
+  // Terror of the Peaks: an opponent's SPELL can target it only if its caster can pay the extra life.
+  const casterLife = session.seats.find((item) => item.id === controllerSeatId)?.life ?? 0;
+  const taxAffordable = (card: VisibleCard) => source.zone === "battlefield" || targetingLifeTaxFor(card) < casterLife;
+  const targetable = (card: VisibleCard, seat: PlayerSeat) => seat.id === controllerSeatId || (!hasShroud(card) && !hasHexproof(card) && !isProtectedFrom(card, source) && taxAffordable(card));
   for (const seat of session.seats) {
     if (seat.hasLost) continue;
     const own = seat.id === controllerSeatId;
@@ -759,6 +763,8 @@ export function describeRemovalMode(mode: Exclude<RemovalEffect, { kind: "modal"
       return `Deal ${mode.amount} damage to each ${mode.excludeType ? `non-${mode.excludeType} ` : ""}creature${mode.scope === "opponents" ? " you don't control" : ""}.`;
     case "proliferate":
       return "Proliferate.";
+    case "draw_then_land":
+      return "Draw a card. Then you may put a land card from your hand onto the battlefield tapped.";
     case "grant_keywords":
       return `Target creature gains ${mode.keywords.join(" and ")} until end of turn.`;
   }

@@ -762,7 +762,8 @@ function parseSacrificeEffectText(text: string): SacrificeEffect | undefined {
     if (amount) return { kind: "surveil", amount };
   }
 
-  const drawMatch = lower.match(/\bdraw\s+(a|one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+cards?\b/);
+  // A "Choose one —" ability with a draw MODE (Insidious Fungus) is a modal removal effect, not a plain draw: leave it to the modal parser below.
+  const drawMatch = /\bchoose (?:one|two|one or more|one or both|any number)\s*[—-]/.test(lower) ? null : lower.match(/\bdraw\s+(a|one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+cards?\b/);
   if (drawMatch) {
     const amount = numberWordToInt(drawMatch[1]);
     const alsoLose = lower.match(/\band (?:you )?lose\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+life\b/);

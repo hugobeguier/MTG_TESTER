@@ -306,7 +306,24 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
           // type-granted creature never got this pass's power/toughness/keyword computation at all —
           // it stayed a permanent 0/0 with no keywords, since layers 6/7a/7d below only ever ran for
           // permanents this check let through.
-          if (!hasCardType(card, "Creature") && !seatStarfieldAnimatesCard(seat, card)) return card;
+          if (!hasCardType(card, "Creature") && !seatStarfieldAnimatesCard(seat, card)) {
+            // Padeem, Consul of Innovation: "Artifacts you control have hexproof." applies to noncreature artifacts too (they skip the creature pass below).
+            const groupKeywords = new Set<string>();
+            for (const sourceSeat of next.seats) {
+              for (const grantSource of sourceSeat.board.battlefield.filter((source) => !source.phasedOut && !source.abilitiesStripped)) {
+                for (const grant of parseGroupKeywordGrant(grantSource.oracleText)) {
+                  if (grant.controlledOnly && sourceSeat.id !== seat.id) continue;
+                  if (grant.excludeSelf && grantSource.id === card.id) continue;
+                  if (!permanentMatchesQualifier(card, grant.matcher)) continue;
+                  for (const keyword of grant.keywords) groupKeywords.add(keyword);
+                }
+              }
+            }
+            const nextGroup = groupKeywords.size > 0 ? Array.from(groupKeywords).sort() : undefined;
+            if (sameList(nextGroup, card.groupGrantedKeywords)) return card;
+            changed = true;
+            return { ...card, groupGrantedKeywords: nextGroup };
+          }
 
           // Layer 7a: characteristic-defining abilities establish this creature's own base P/T
           // from the current board (e.g. "power and toughness equal to the number of lands you

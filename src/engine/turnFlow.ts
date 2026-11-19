@@ -2,6 +2,7 @@
 // (beginning/end of turn triggers, delayed triggers), seat rotation / extra turns, starting-player roll.
 // Extracted verbatim from components/AppFlow.tsx; AppFlow.tsx re-exports the previously public symbols.
 
+import { returnFlaggedCommandersToCommandZone } from "@/engine/cardScripts";
 import { seatVerb } from "@/engine/abilities";
 import { applyCombatDamageToTarget } from "@/engine/damage";
 import { drawForSeat, drawMultipleForSeat } from "@/engine/effects";
@@ -358,7 +359,7 @@ export function applyEndStepEffects(session: GameSession, seatId: string): GameS
       ? { ...next, seats: next.seats.map((item) => (item.id === entry.seatId ? { ...item, board: { ...item.board, battlefield: item.board.battlefield.filter((card) => card.id !== entry.card.id) }, zones: { ...item.zones, battlefield: Math.max(0, item.zones.battlefield - 1) } } : item)) }
       : moveCardAcrossSeats(next, entry.seatId, entry.card.id, entry.card.ownerSeatId ?? entry.seatId, "exile").session;
   }
-  return resolveEndStepExileDamage(next, seatId);
+  return resolveEndStepExileDamage(returnFlaggedCommandersToCommandZone(next), seatId);
 }
 
 export function phaseEventName(phase: TurnPhase) {

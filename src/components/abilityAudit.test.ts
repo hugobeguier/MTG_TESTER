@@ -22,7 +22,7 @@ const KNOWN_GAPS = [
   // From the decks moved from the repo root into decks/custom (Aminatou, Lathliss, Meren, Saheeli, The Ur Dragon):
   "Callaphe, Beloved of the Sea: Creatures and enchantments you control have \"Spells your opponents cast that tar", // (c) granted tax on spells that target a permanent
   "Estrid's Invocation: You may have this enchantment enter as a copy of an enchantment you control, exc", // (c) enter-as-copy replacement with an upkeep trigger granted to the copy
-  "Dauthi Voidwalker: {T}, Sacrifice this creature: Choose an exiled card an opponent owns with a void", // (c) void-counter exile tracking and play-from-exile
+  "Dauthi Voidwalker: {T}, Sacrifice this creature: Choose an exiled card an opponent owns with a void", // (c) void-counter exile tracking and play-from-exile (shadow itself is implemented in combat.canBlock; the replacement effect and the sacrifice are not)
   "Takenuma, Abandoned Mire: Channel — {3}{B}, Discard this card: Mill three cards, then return a creature or", // (c) channel with mill-then-return
   "Spymaster's Vault: {B}, {T}: Target creature you control connives X, where X is the number of creat", // (c) connive X where X counts creature deaths this turn
   "Shifting Woodland: Delirium — {2}{G}{G}: This land becomes a copy of target permanent card in your ", // (c) becomes a copy of a graveyard card, delirium-gated
