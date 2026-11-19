@@ -80,6 +80,7 @@ export const INTENT_SPECS = {
   onClickPermanent: { ...plain(id), when: "act" },
   onActivateSacrificeAbility: { ...own(seatId, id, z.number().int().min(0).max(20)), when: "act" },
   onActivateTapAbility: { ...own(seatId, id, z.number().int().min(0).max(20)), when: "act" },
+  onActivateScriptedAbility: { ...own(seatId, id, z.string().min(1).max(60)), when: "act" },
   onActivateSelfUntap: { ...own(seatId, id, z.number().int().min(0).max(20)), when: "act" },
   onActivateGenericMana: { ...own(seatId, id, z.number().int().min(0).max(20)), when: "act" },
   onActivateEquip: { ...own(seatId, id), when: "act" },

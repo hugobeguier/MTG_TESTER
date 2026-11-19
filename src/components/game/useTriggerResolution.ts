@@ -28,6 +28,7 @@ export function useTriggerResolution(ctx: GameContext) {
   const { session, setSession, prioritySeatId } = ctx;
   const { pendingRuleChoice, setPendingRuleChoice } = ctx.choices;
   const { pendingAction, setPendingAction, setPriorityPasses, stackStore, abilityResolvers } = ctx.stack;
+  const activateScriptedAbility = lateFn(ctx, "activateScriptedAbility");
   const addEvent = lateFn(ctx, "addEvent");
   const applySagaReadAhead = lateFn(ctx, "applySagaReadAhead");
   const askOpeningHandBattlefield = lateFn(ctx, "askOpeningHandBattlefield");
@@ -218,6 +219,13 @@ export function useTriggerResolution(ctx: GameContext) {
     const choice = pendingRuleChoice;
     if (!choice || choice.kind !== "choose_trigger_option") return;
     setPendingRuleChoice(undefined);
+    // Card-specific activated ability (engine/cardAbilities.ts): the answer is one more pick; ask the next question or pay and resolve.
+    if (choice.trigger.effect.kind === "deferred_choice" && choice.trigger.effect.resolver === "scripted_ability") {
+      const data = choice.trigger.effect.data as { abilityId: string; cardId: string; picks: string[] };
+      const value = choice.trigger.effect.values[index];
+      if (value !== undefined) activateScriptedAbility(choice.controllerSeatId, data.cardId, data.abilityId, [...data.picks, value]);
+      return;
+    }
     // Leyline Tyrant: pay the chosen red now, then pick what the damage hits.
     if (choice.trigger.effect.kind === "pay_red_for_damage") {
       const paid = index > 0 ? payRedMana(session, choice.controllerSeatId, index) : undefined;

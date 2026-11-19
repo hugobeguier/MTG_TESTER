@@ -46,7 +46,7 @@ function readSnapshotInput(ctx: GameContext, hostName: string): SnapshotInput {
     activeSeatId,
     prioritySeatId,
     priorityPasses,
-    requiredPasses: pendingAction ? pendingActionRequiredPasses(session.seats, pendingAction, activeSeatId, session, ctx.mana.manaPools, priorityStopSettings, holdPriorityOnce ? humanSeat.id : undefined) : [],
+    requiredPasses: pendingAction ? pendingActionRequiredPasses(session.seats, pendingAction, activeSeatId, session, ctx.mana.manaPools, priorityStopSettings, holdPriorityOnce ? humanSeat.id : undefined, undefined, stackActions) : [],
     pendingAction: pendingAction ? view(pendingAction) : undefined,
     stackActions: stackActions.map(view),
     gameStage,

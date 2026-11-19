@@ -481,7 +481,7 @@ export function useAgentDriver(ctx: GameContext) {
       // The controller's "resolve" is only its own pass (rule 117.4): when another seat (the human, or an agent holding a real
       // instant-speed response) is also required, priority moves on to them and the trigger resolves once all have passed.
       // With nobody else required this is the old direct, log-free fast path.
-      const required = pendingActionRequiredPasses(session.seats, actionOnStack, activeSeatId, session, manaPools, priorityStopSettings, holdPriorityOnce ? humanSeat.id : undefined);
+      const required = pendingActionRequiredPasses(session.seats, actionOnStack, activeSeatId, session, manaPools, priorityStopSettings, holdPriorityOnce ? humanSeat.id : undefined, undefined, stackActions);
       if (required.some((seatId) => seatId !== seat.id && !priorityPasses.includes(seatId))) {
         passPriority();
         return;

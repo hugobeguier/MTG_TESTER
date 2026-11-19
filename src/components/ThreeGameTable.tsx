@@ -37,6 +37,7 @@ import { parseCycling } from "@/lib/cycling";
 import { parseGraveyardReturnAbility } from "@/lib/graveyardAbilities";
 import { parseManlandAnimation } from "@/lib/activatedAbilities";
 import { abilityOracleText } from "@/lib/typeGrants";
+import { scriptedAbilitiesFor } from "@/engine/cardAbilities";
 import { hasKeyword as hasOracleKeyword } from "@/lib/keywords";
 import { cardMatchesTypeFilter, isBasicLandFetchAbility } from "@/lib/oracleClauses";
 import { DEFAULT_STOP_SETTINGS, stopKey, TURN_PHASES, type PriorityStopSettings } from "@/lib/priorityStops";
@@ -158,6 +159,7 @@ interface ThreeGameTableProps {
   onResolveBasicLandFetch?: (seatId: string, cardId: string) => void;
   onActivateSacrificeAbility?: (seatId: string, cardId: string, abilityIndex: number) => void;
   onActivateTapAbility?: (seatId: string, cardId: string, abilityIndex: number) => void;
+  onActivateScriptedAbility?: (seatId: string, cardId: string, abilityId: string) => void;
   onActivateSelfUntap?: (seatId: string, cardId: string, abilityIndex: number) => void;
   onActivateGenericMana?: (seatId: string, cardId: string, abilityIndex: number) => void;
   onActivateEquip?: (seatId: string, cardId: string) => void;
@@ -2059,6 +2061,16 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
               ? (abilityIndex) => props.onActivateTapAbility?.(inspectedActionOwner.seat.id, props.inspectedCard!.id, abilityIndex)
               : undefined
           }
+          scriptedAbilities={
+            inspectedActionOwner?.seat.kind === "human" && (inspectedActionOwner.zone === "battlefield" || inspectedActionOwner.zone === "hand" || inspectedActionOwner.zone === "graveyard")
+              ? scriptedAbilitiesFor(props.inspectedCard, inspectedActionOwner.zone).map((ability) => ({ id: ability.id, label: ability.label(props.inspectedCard!) }))
+              : []
+          }
+          onActivateScripted={
+            inspectedActionOwner?.seat.kind === "human"
+              ? (abilityId) => props.onActivateScriptedAbility?.(inspectedActionOwner.seat.id, props.inspectedCard!.id, abilityId)
+              : undefined
+          }
           selfUntapAbilities={
             inspectedActionOwner?.seat.kind === "human" && inspectedActionOwner.zone === "battlefield" && props.inspectedCard.tapped
               ? parseSelfUntapAbilities(props.inspectedCard.oracleText)
@@ -2521,6 +2533,8 @@ function CardInspector({
   onActivateSacrificeAbility,
   tapAbilities,
   onActivateTapAbility,
+  scriptedAbilities,
+  onActivateScripted,
   selfUntapAbilities,
   onActivateSelfUntap,
   genericManaAbilities,
@@ -2548,6 +2562,8 @@ function CardInspector({
   onActivateSacrificeAbility?: (abilityIndex: number) => void;
   tapAbilities?: GenericTapAbility[];
   onActivateTapAbility?: (abilityIndex: number) => void;
+  scriptedAbilities?: Array<{ id: string; label: string }>;
+  onActivateScripted?: (abilityId: string) => void;
   selfUntapAbilities?: SelfUntapAbility[];
   onActivateSelfUntap?: (abilityIndex: number) => void;
   genericManaAbilities?: GenericManaAbility[];
@@ -2642,6 +2658,15 @@ function CardInspector({
               {tapAbilities.map((ability, abilityIndex) => (
                 <button key={abilityIndex} className="inspector-action" type="button" onClick={() => onActivateTapAbility?.(abilityIndex)}>
                   {ability.clause}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {scriptedAbilities && scriptedAbilities.length > 0 ? (
+            <div className="modal-actions" aria-label="Card ability options">
+              {scriptedAbilities.map((ability) => (
+                <button key={ability.id} className="inspector-action" type="button" onClick={() => onActivateScripted?.(ability.id)}>
+                  {ability.label}
                 </button>
               ))}
             </div>

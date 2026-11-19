@@ -12,7 +12,7 @@ const SAMPLE: Record<string, unknown[]> = {
   onPlayCard: [S, "c1", POS, "hand"], onPlayCardFace: [S, "c1", 1], onCycleCard: [S, "c1"], onCastFromExile: [S, "c1"], onCastFromGraveyard: [S, "c1"],
   onActivateGraveyardAbility: [S, "c1"], onCastCommander: [S, POS], onUnlockRoomDoor: [S, "c1", 0], onRespondWithSelectedCard: ["c1", "hand"],
   onTapForMana: [S, "c1"], onToggleTapCard: [S, "c1", "battlefield"], onClickPermanent: ["c1"],
-  onActivateSacrificeAbility: [S, "c1", 0], onActivateTapAbility: [S, "c1", 0], onActivateSelfUntap: [S, "c1", 0], onActivateGenericMana: [S, "c1", 0],
+  onActivateSacrificeAbility: [S, "c1", 0], onActivateTapAbility: [S, "c1", 0], onActivateScriptedAbility: [S, "c1", "channel_takenuma"], onActivateSelfUntap: [S, "c1", 0], onActivateGenericMana: [S, "c1", 0],
   onActivateEquip: [S, "c1"], onActivateManlandAnimation: [S, "c1"], onActivateLoyalty: [S, "c1", -2, "text"], onResolveMyriadLandscape: [S, "c1"], onResolveBasicLandFetch: [S, "c1"],
   onDrawCard: [S], onShuffleLibrary: [S], onChangeLife: [S, -1], onChangeCounter: [S, "c1", "+1/+1", 1],
   onMoveCardToGraveyard: [S, "c1"], onMoveCardToExile: [S, "c1"], onMoveCardToHand: [S, "c1"], onMoveBattlefieldCard: [S, "c1", POS], onOpenLibrarySearch: [],

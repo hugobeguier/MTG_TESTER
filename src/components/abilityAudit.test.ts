@@ -10,38 +10,26 @@ import { auditCard } from "./abilityAudit";
 
 // "Card: start of the ability line" for every activated ability, ability grant or ward cost the engine does not yet carry out.
 const KNOWN_GAPS = [
-  "Eiganjo, Seat of the Empire: Channel — {2}{W}, Discard this card: It deals 4", // (c) channel (hand-zone activation) with a cost reduction and an attacking/blocking target
   "Gix, Yawgmoth Praetor: {4}{B}{B}{B}, Discard X cards: Exile the top X", // (c) discard-X cost, exile top X of an opponent's library and play from among them
   "Hall of Heliod's Generosity: {1}{W}, {T}: Put target enchantment card from", // (c) needs a new 'graveyard card on top of library' zone effect
   "Hopeful Initiate: {2}{W}, Remove two +1/+1 counters from among creatures", // (c) counters removed 'from among creatures you control' (multi-permanent cost)
-  "Jarad, Golgari Lich Lord: Sacrifice a Swamp and a Forest: Return this card", // (c) graveyard-zone activation with a two-land sacrifice cost
   "Master Transmuter: {U}, {T}, Return an artifact you control to its owner's", // (c) bounce-an-artifact cost plus put-from-hand-onto-battlefield choice
-  "Priest of Forgotten Gods: {T}, Sacrifice two other creatures: Any number of", // (c) sacrifice-two cost with any-number-of-players targeting
   "Retribution of the Ancients: {B}, Remove X +1/+1 counters from among creatures", // (c) X counters removed from among creatures, -X/-X to a target
   "Tamiyo's Logbook: {5}{U}, {T}: Draw a card. This ability costs {1} less to activate", // (c) ability cost reduction per other artifact
   // From the decks moved from the repo root into decks/custom (Aminatou, Lathliss, Meren, Saheeli, The Ur Dragon):
   "Callaphe, Beloved of the Sea: Creatures and enchantments you control have \"Spells your opponents cast that tar", // (c) granted tax on spells that target a permanent
   "Estrid's Invocation: You may have this enchantment enter as a copy of an enchantment you control, exc", // (c) enter-as-copy replacement with an upkeep trigger granted to the copy
   "Dauthi Voidwalker: {T}, Sacrifice this creature: Choose an exiled card an opponent owns with a void", // (c) void-counter exile tracking and play-from-exile (shadow itself is implemented in combat.canBlock; the replacement effect and the sacrifice are not)
-  "Takenuma, Abandoned Mire: Channel — {3}{B}, Discard this card: Mill three cards, then return a creature or", // (c) channel with mill-then-return
-  "Spymaster's Vault: {B}, {T}: Target creature you control connives X, where X is the number of creat", // (c) connive X where X counts creature deaths this turn
   "Shifting Woodland: Delirium — {2}{G}{G}: This land becomes a copy of target permanent card in your ", // (c) becomes a copy of a graveyard card, delirium-gated
   "Susur Secundi, Void Altar: 12+ | {1}{B}, {T}, Pay 2 life, Sacrifice a creature: Draw cards equal to the sac", // (c) level-up style 12+ block, sorcery-speed sacrifice draw
-  "Boseiju, Who Endures: Channel — {1}{G}, Discard this card: Destroy target artifact, enchantment, or no", // (c) channel plus opponent's optional search
-  "Ramos, Dragon Engine: Remove five +1/+1 counters from Ramos: Add {W}{W}{U}{U}{B}{B}{R}{R}{G}{G}. Activ", // (c) ten-colored-mana burst into the pool for removing five counters (needs a pool-add mana path)
   "Crucible of the Spirit Dragon: {1}, {T}: Put a storage counter on this land.", // (c) storage counters are only useful with its Dragon-restricted X mana ability
   "Scavenger Regent // Exude Toxin: Ward—Discard a card.", // (c) ward-discard needs the ward payment flow extended
   "Mistrise Village: {U}, {T}: The next spell you cast this turn can't be countered.", // (c) 'next spell can't be countered' flag
   "Three Tree City: {2}, {T}: Choose a color. Add an amount of mana of that color equal to the numbe", // (c) choose-a-color mana scaled by a chosen creature type
   // From the Squirreled Away deck (decks/foundations). Hazel of the Rootbloom's token-tap mana ability is modelled (tokenTapManaAbility in engine/mana.ts).
-  "Chatterfang, Squirrel General: {B}, Sacrifice X Squirrels: Target creature gets +X/-X", // known gap: a sacrifice cost with a variable COUNT (X creatures) has no representation in the sacrifice-ability model (fixed sacrificeCount) and needs an X prompt plus a target prompt in useAbilities
   "Gourmand's Talent: During your turn, artifacts you control are Foods in addition to their other typ", // known gap: a turn-conditional subtype grant to artifacts that also grants the Food sacrifice ability
-  "Insatiable Frugivore: {3}{B}, Sacrifice X Foods: Creatures you control get +X/+0", // known gap: variable-count sacrifice cost (X Foods), same missing piece as Chatterfang's ability
-  "Oran-Rief, the Vastwood: {T}: Put a +1/+1 counter on each green creature that entered this turn", // known gap: needs a per-turn 'entered this turn' record on permanents
-  "Ravenous Squirrel: {1}{B}{G}, Sacrifice an artifact or creature: You gain 1 life and draw a card.", // known gap: sacrifice-an-artifact-or-creature cost combined with a gain-life-and-draw compound effect
   "Swarmyard: {T}: Regenerate target Insect, Rat, Spider, or Squirrel.", // known gap: the engine has no regeneration shields
   "The Odd Acorn Gang: Squirrels you control have \"{T}: Target Squirrel gets +2/+2 and gains trample un", // known gap: a static grant of an activated, targeted pump ability to a creature type
-  "Viridescent Bog: {1}, {T}: Add {B}{G}." // known gap: a land with a paid two-colour tap ability next to its free {C} tap is only modelled for signets (by name)
 ];
 
 function deckFiles(dir: string): string[] {

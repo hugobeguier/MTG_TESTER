@@ -7,11 +7,11 @@ import { castModeLabels, hasResolvableTarget } from "@/engine/castTargets";
 import { applyChosenFaceToCard, canCastAtInstantSpeed, seatHasFlashGrant, spellCastLockedOut } from "@/engine/casting";
 import { describeKeywords } from "@/engine/combat";
 import { adjustedCastingCost, maxAffordableX, totalCastingCost } from "@/engine/costs";
-import { EMPTY_LOYALTY_KEYS, isPendingActionLikelyIrrelevantToSeat, legalActivatedAbilityActions, legalPriorityActions, seatIsBeingAttacked, spellIsImmuneToCounters } from "@/engine/legalActions";
+import { EMPTY_LOYALTY_KEYS, isPendingActionLikelyIrrelevantToSeat, legalActivatedAbilityActions, legalCounterSpellTargets, legalPriorityActions, seatIsBeingAttacked } from "@/engine/legalActions";
 import { chooseManaSourcesForCost, emptyManaPool, payCostFromPool, summarizeAvailableMana } from "@/engine/mana";
 import { parseEtbZoneEffect } from "@/engine/oneShotEffects";
 import { type PendingAction } from "@/engine/types";
-import { counterSpellCanTarget, parseCounterSpellAbility } from "@/lib/counterSpells";
+import { parseCounterSpellAbility } from "@/lib/counterSpells";
 import { effectivePower, effectiveToughness } from "@/lib/counters";
 import { describeDamageShields } from "@/lib/damagePrevention";
 import { classifyTell } from "@/lib/lookAhead";
@@ -303,9 +303,10 @@ export function pendingActionRequiredPasses(
   manaPools: Record<string, ManaPool>,
   stops: PriorityStopSettings,
   holdPriorityOnceSeatId: string | undefined,
-  remoteCanAct: boolean = remoteSeatsCanAct
+  remoteCanAct: boolean = remoteSeatsCanAct,
+  stack: PendingAction[] = []
 ) {
-  return pendingActionRequiredPassesWithPredicate(seats, action, (seat, a) => canReceivePriorityForPendingAction(seat, a, activeSeatId, session, manaPools, stops, holdPriorityOnceSeatId, remoteCanAct));
+  return pendingActionRequiredPassesWithPredicate(seats, action, (seat, a) => canReceivePriorityForPendingAction(seat, a, activeSeatId, session, manaPools, stops, holdPriorityOnceSeatId, remoteCanAct, stack));
 }
 
 export function nextPrioritySeatId(
@@ -318,9 +319,10 @@ export function nextPrioritySeatId(
   manaPools: Record<string, ManaPool>,
   stops: PriorityStopSettings,
   holdPriorityOnceSeatId: string | undefined,
-  remoteCanAct: boolean = remoteSeatsCanAct
+  remoteCanAct: boolean = remoteSeatsCanAct,
+  stack: PendingAction[] = []
 ) {
-  return nextPrioritySeatIdWithPredicate(seats, actorSeatId, passes, action, (seat, a) => canReceivePriorityForPendingAction(seat, a, activeSeatId, session, manaPools, stops, holdPriorityOnceSeatId, remoteCanAct));
+  return nextPrioritySeatIdWithPredicate(seats, actorSeatId, passes, action, (seat, a) => canReceivePriorityForPendingAction(seat, a, activeSeatId, session, manaPools, stops, holdPriorityOnceSeatId, remoteCanAct, stack));
 }
 
 export function pendingActionRequiredPassesWithPredicate(
@@ -399,9 +401,10 @@ export function nextSeatAfterPass(
   manaPools: Record<string, ManaPool>,
   stops: PriorityStopSettings,
   holdPriorityOnceSeatId: string | undefined,
-  remoteCanAct: boolean = remoteSeatsCanAct
+  remoteCanAct: boolean = remoteSeatsCanAct,
+  stack: PendingAction[] = []
 ) {
-  return nextSeatAfterPassWithPredicate(seats, passerSeatId, passes, action, (seat, a) => canReceivePriorityForPendingAction(seat, a, activeSeatId, session, manaPools, stops, holdPriorityOnceSeatId, remoteCanAct));
+  return nextSeatAfterPassWithPredicate(seats, passerSeatId, passes, action, (seat, a) => canReceivePriorityForPendingAction(seat, a, activeSeatId, session, manaPools, stops, holdPriorityOnceSeatId, remoteCanAct, stack));
 }
 
 // Whether resolving `action` will open a choice prompt for this (human) seat — the "last chance to respond first" cases the stop policy
@@ -466,7 +469,9 @@ export function canReceivePriorityForPendingAction(
   manaPools: Record<string, ManaPool>,
   stops: PriorityStopSettings,
   holdPriorityOnceSeatId: string | undefined,
-  remoteCanAct: boolean = remoteSeatsCanAct
+  remoteCanAct: boolean = remoteSeatsCanAct,
+  // Every item currently on the stack (the pending `action` is added automatically); lets a counterspell be judged against deeper spells.
+  stack: PendingAction[] = []
 ) {
   if (seat.hasLost) return false;
   // A friend's seat that cannot respond yet (no pass/respond intents) is never waited on: it counts as having passed every window.
@@ -486,7 +491,6 @@ export function canReceivePriorityForPendingAction(
   // "Yield until end of turn": a yielding human seat passes this window on its own (see yieldPolicy.ts; cancelled by a spell aimed at it, an attack, Full Control, ...).
   if (stops.yields?.[seat.id] && yieldAutoPasses(stops.yields[seat.id], yieldMomentFor(seat, action, session, activeSeatId, stops, holdPriorityOnceSeatId))) return false;
   const pool = manaPools[seat.id] ?? emptyManaPool();
-  const pendingSpellTarget = action.type === "spell" ? findSpellSourceCard(session, action) : undefined;
   const flashGranted = seatHasFlashGrant(seat);
   // A human whose only legal instant-speed response is an activated ability on a battlefield
   // permanent (not a card in hand) previously never had a priority window opened for them at all —
@@ -528,12 +532,8 @@ export function canReceivePriorityForPendingAction(
     // excluding it would risk hiding a genuinely legal response rather than just an illegal one.
     const counterAbility = parseCounterSpellAbility(card.oracleText);
     if (counterAbility && !parseModalHeader(card.oracleText)) {
-      const legalCounterTarget =
-        action.type === "spell" &&
-        pendingSpellTarget &&
-        !spellIsImmuneToCounters(session, pendingSpellTarget, action.actorSeatId) &&
-        counterSpellCanTarget(counterAbility, pendingSpellTarget.typeLine, action.sourceZone === "command");
-      if (!legalCounterTarget) return false;
+      // A counterspell may target ANY spell on the stack, not only the top one: judge the whole stack plus the pending window.
+      if (legalCounterSpellTargets(session, [...stack, action], counterAbility).length === 0) return false;
     }
     const fixedCost = adjustedCastingCost(seat, card, card.manaValue, zone, activeSeatId, session.seats);
     const chosenX = maxAffordableX(seat, card, fixedCost);

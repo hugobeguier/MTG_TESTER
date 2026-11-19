@@ -4,6 +4,7 @@
 // Part of a deliberate import cycle with the other resolution modules (function declarations only).
 
 import { applyDrawThenLand, resolveScriptedChoice } from "@/engine/cardScripts";
+import { resolveCardAbilityChoice } from "@/engine/cardAbilities";
 import { manaValueFromManaCost } from "@/engine/costs";
 import { PROTECTION_COLOR_CODE, addDamageShieldsFromSpec, applyCombatDamageToTarget, dealDamageToCreature, hasFlying, hasHexproof, hasIndestructible, hasShroud, isProtectedFrom, playerCantLose, playerHasHexproof } from "@/engine/damage";
 import { applyDevour, applyGraveyardReturn, applyGraveyardReturnPicked, destroyCreatures, finishDevour, moveCardAcrossSeats, moveLibraryCardToDestination } from "@/engine/entry";
@@ -600,6 +601,9 @@ export function resolveDeferredChoice(session: GameSession, seatId: string, sour
   const seat = session.seats.find((item) => item.id === seatId);
   if (!seat) return session;
   if (resolver === "scripted_choice") return resolveScriptedChoice(session, seatId, sourceCardId, sourceName, data, value);
+  // "scripted_ability": every answer is one more pick of an activation in progress; useTriggerResolution.completeTriggerOption routes it to activateScriptedAbility.
+  if (resolver === "scripted_ability") return session;
+  if (resolver === "card_ability_choice") return resolveCardAbilityChoice(session, seatId, sourceCardId, sourceName, data, value);
   if (resolver === "reveal_exchange") {
     const controllerId = String(data.controllerSeatId ?? seatId);
     const picked = (value ?? "").split("|").filter(Boolean);

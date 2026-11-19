@@ -48,6 +48,7 @@ function callTable(h: HandlerApi): Record<GuestIntentName, Call> {
     onClickPermanent: (s, cardId) => h.clickPermanentForSeat(s, cardId),
     onActivateSacrificeAbility: (s, _seat, cardId, index) => h.activateGenericSacrificeAbility(s, cardId, index),
     onActivateTapAbility: (s, _seat, cardId, index) => h.activateGenericTapAbility(s, cardId, index),
+    onActivateScriptedAbility: (s, _seat, cardId, abilityId) => h.activateScriptedAbility(s, cardId, abilityId),
     onActivateSelfUntap: (s, _seat, cardId, index) => h.activateSelfUntapAbility(s, cardId, index),
     onActivateGenericMana: (s, _seat, cardId, index) => h.activateGenericManaAbility(s, cardId, index),
     onActivateEquip: (s, _seat, cardId) => h.activateEquip(s, cardId),

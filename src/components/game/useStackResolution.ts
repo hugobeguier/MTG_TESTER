@@ -93,7 +93,9 @@ export function useStackResolution(ctx: GameContext) {
       session,
       manaPools,
       priorityStopSettings,
-      holdPriorityOnce ? humanSeat.id : undefined
+      holdPriorityOnce ? humanSeat.id : undefined,
+      undefined,
+      stackStore.ref.current.stack
     );
     const nextPasses = Array.from(new Set([...priorityPasses, passingSeatId]));
     const passedByEveryone = requiredPasses.every((seatId) => nextPasses.includes(seatId));
@@ -127,7 +129,9 @@ export function useStackResolution(ctx: GameContext) {
         session,
         manaPools,
         priorityStopSettings,
-        holdPriorityOnce ? humanSeat.id : undefined
+        holdPriorityOnce ? humanSeat.id : undefined,
+        undefined,
+        stackStore.ref.current.stack
       )
     );
   }
@@ -168,7 +172,7 @@ export function useStackResolution(ctx: GameContext) {
     const holdSeatId = holdPriorityOnce ? humanSeat.id : undefined;
     if (holdPriorityOnce) setHoldPriorityOnce(false);
     ctx.stack.setSeatStops(clearHoldOnce); // a friend's own "Stop Next" is used up the same way
-    const requiredPasses = pendingActionRequiredPasses(session.seats, action, activeSeatId, session, manaPools, priorityStopSettings, holdSeatId);
+    const requiredPasses = pendingActionRequiredPasses(session.seats, action, activeSeatId, session, manaPools, priorityStopSettings, holdSeatId, undefined, stackStore.ref.current.stack);
     if (requiredPasses.length === 0) {
       window.setTimeout(() => resolvePendingAction(action), 0);
       return;
@@ -177,7 +181,7 @@ export function useStackResolution(ctx: GameContext) {
     setPriorityPasses([]);
     // Reopened after something above it resolved: the ACTIVE player gets priority first (rule 117.3b), not this item's own actor.
     setPrioritySeatId(
-      nextPrioritySeatId(session.seats, activeSeatId ?? action.actorSeatId, [], action, activeSeatId, session, manaPools, priorityStopSettings, holdSeatId)
+      nextPrioritySeatId(session.seats, activeSeatId ?? action.actorSeatId, [], action, activeSeatId, session, manaPools, priorityStopSettings, holdSeatId, undefined, stackStore.ref.current.stack)
     );
   }
 
@@ -222,7 +226,7 @@ export function useStackResolution(ctx: GameContext) {
     const holdSeatId = holdPriorityOnce ? humanSeat.id : undefined;
     if (holdPriorityOnce) setHoldPriorityOnce(false);
     ctx.stack.setSeatStops(clearHoldOnce); // a friend's own "Stop Next" is used up the same way
-    const requiredPasses = pendingActionRequiredPasses(session.seats, action, activeSeatId, session, manaPools, priorityStopSettings, holdSeatId);
+    const requiredPasses = pendingActionRequiredPasses(session.seats, action, activeSeatId, session, manaPools, priorityStopSettings, holdSeatId, undefined, stackStore.ref.current.stack);
     // Whether the human specifically had a real response here but the stops policy chose to
     // auto-pass it anyway (as opposed to genuinely having nothing to respond with) — computed by
     // asking the same question under full control, where every legal response always stops. Purely
@@ -230,7 +234,7 @@ export function useStackResolution(ctx: GameContext) {
     // respond with" in the log.
     const humanAutoPassedByPolicy =
       !requiredPasses.includes(humanSeat.id) &&
-      pendingActionRequiredPasses(session.seats, action, activeSeatId, session, manaPools, { ...priorityStopSettings, fullControl: true }, holdSeatId).includes(
+      pendingActionRequiredPasses(session.seats, action, activeSeatId, session, manaPools, { ...priorityStopSettings, fullControl: true }, holdSeatId, undefined, stackStore.ref.current.stack).includes(
         humanSeat.id
       );
     pushStackAction(action);
@@ -331,7 +335,7 @@ export function useStackResolution(ctx: GameContext) {
     // The caster holds priority after casting / activating (117.3c); but triggers are put on the stack and then the ACTIVE player
     // receives priority first (117.5), whoever controls the trigger.
     setPrioritySeatId(
-      nextPrioritySeatId(session.seats, action.type === "trigger" ? (activeSeatId ?? action.actorSeatId) : action.actorSeatId, [], action, activeSeatId, session, manaPools, priorityStopSettings, holdSeatId)
+      nextPrioritySeatId(session.seats, action.type === "trigger" ? (activeSeatId ?? action.actorSeatId) : action.actorSeatId, [], action, activeSeatId, session, manaPools, priorityStopSettings, holdSeatId, undefined, stackStore.ref.current.stack)
     );
   }
 

@@ -20,6 +20,7 @@ import { permanentMatchesQualifier } from "@/lib/characteristics";
 import { removalEffectTargetSpec } from "@/lib/targetSpecs";
 import { surveilBonusForSeat } from "@/engine/oneShotEffects";
 import { targetedEffectSpec } from "@/lib/targetedEffects";
+import { applyScriptedAbility, payScriptedCost, scriptedAbilityById, scriptedCostPayable, scriptedNextSlot } from "@/engine/cardAbilities";
 import { type GameContext, lateFn } from "./context";
 
 export function useAbilities(ctx: GameContext) {
@@ -272,6 +273,67 @@ export function useAbilities(ctx: GameContext) {
       return;
     }
     setSession((current) => applySacrificeEffect(current, seatId, paid.card, paid.ability.effect, paid.ability.clause, paid.sacrificed));
+  }
+
+  // Card-specific activated abilities (engine/cardAbilities.ts): each choice (sacrifices, targets, X) is asked one at a time - a human always gets a
+  // prompt, even with a single option - then the cost is paid (pool first) and the effect goes on the stack (a mana ability resolves at once).
+  function activateScriptedAbility(seatId: string, cardId: string, abilityId: string, picks: string[] = []) {
+    if (picks.length === 0 && humanActionBlockedByChoice(seatId)) return;
+    const ability = scriptedAbilityById(abilityId);
+    const seat = session.seats.find((item) => item.id === seatId);
+    const pool = ability?.zone === "hand" ? seat?.board.hand : ability?.zone === "graveyard" ? seat?.board.graveyard : seat?.board.battlefield;
+    const card = pool?.find((item) => item.id === cardId);
+    if (!ability || !seat || !card || !ability.matches(card)) return;
+    if (ability.sorcery && !(activeSeatId === seatId && isMainPhase(session.phase) && !pendingAction)) {
+      addEvent(`${card.name} can only be activated as a sorcery: during your own main phase with an empty stack.`, seatId, "Rules action");
+      return;
+    }
+    const humanPool = seat.kind === "human" ? poolForSeat(seatId) : undefined;
+    if (!scriptedCostPayable(session, seatId, card, ability, humanPool)) {
+      addEvent(`You can't pay for ${card.name}'s ability right now.`, seatId, "Rules action");
+      return;
+    }
+    const next = scriptedNextSlot(session, seatId, card, ability, picks);
+    if (!next) {
+      addEvent(`${card.name} cannot be activated: nothing legal to choose. Nothing was paid.`, seatId, "Rules action");
+      return;
+    }
+    if (next !== "done") {
+      setPendingRuleChoice({
+        id: crypto.randomUUID(),
+        kind: "choose_trigger_option",
+        controllerSeatId: seatId,
+        sourceCardId: cardId,
+        sourceCardName: card.name,
+        prompt: next.prompt,
+        options: next.options.map((option, index) => ({ index, label: option.label, cardId: option.cardId })),
+        trigger: makeCommonTrigger(seatId, seatId, card, { kind: "deferred_choice", resolver: "scripted_ability", data: { abilityId, cardId, picks }, values: next.options.map((option) => option.value) }, `${card.name}'s ability resolves.`),
+        remainingStack: []
+      });
+      return;
+    }
+    const paid = payScriptedCost(session, seatId, card, ability, picks, humanPool);
+    if (!paid) return;
+    let poolNow = paid.poolSpent;
+    if (paid.poolSpent) clearManaContributions(seatId);
+    const addMana = () => {
+      if (!ability.mana) return;
+      let target = poolNow ?? poolForSeat(seatId);
+      for (const symbol of ability.mana.match(/[WUBRGC]/g) ?? []) target = addManaToPool(target, symbol as ManaColor, 1);
+      poolNow = target;
+      setSeatManaPool(seatId, target);
+    };
+    if (paid.poolSpent) setSeatManaPool(seatId, paid.poolSpent);
+    if (ability.manaAbility) {
+      setSession(() => applyScriptedAbility(paid.session, seatId, card, ability, picks).session);
+      addMana();
+      return;
+    }
+    setSession(() => paid.session);
+    putAbilityOnStack(seatId, card, ability.label(card), () => {
+      setSession((current) => applyScriptedAbility(current, seatId, card, ability, picks).session);
+      addMana();
+    });
   }
 
   function activateGenericTapAbility(seatId: string, cardId: string, abilityIndex: number, chosenDiscardId?: string, chosenCardId?: string, chosenTapIds?: string[]) {
@@ -700,5 +762,5 @@ export function useAbilities(ctx: GameContext) {
     setSession(() => resolved.session);
   }
 
-  return { activateEquip, activateGenericManaAbility, activateGenericSacrificeAbility, activateGenericTapAbility, activateManlandAnimation, activateSelfUntapAbility, confirmEquipTarget, finishPaidSacrificeAbility, resolveSacrificeAbilityEffect, resolveTapAbilityEffect };
+  return { activateScriptedAbility, activateEquip, activateGenericManaAbility, activateGenericSacrificeAbility, activateGenericTapAbility, activateManlandAnimation, activateSelfUntapAbility, confirmEquipTarget, finishPaidSacrificeAbility, resolveSacrificeAbilityEffect, resolveTapAbilityEffect };
 }

@@ -699,9 +699,18 @@ export function effectiveManaOracleText(card: VisibleCard): string {
 // "{2}, {T}: Add {B} for each Swamp you control." (Cabal Coffers; Cabal Stronghold-style): a PAID tap that scales with the board. Modelled like a signet,
 // as its NET gain (count - generic cost). The generic cost is paid by tapping other untapped lands (spendManaSources does that), so the source
 // is only usable while enough other lands are untapped and the net gain is at least 1.
-export function scalingPaidManaAbility(oracleText: string): { generic: number; color: ManaColor; noun: string } | undefined {
-  const match = oracleText.replace(/\([^)]*\)/g, "").match(/^\{(\d+)\},\s*\{t\}:\s*add \{([wubrgc])\} for each ([a-z]+) you control\.?\s*$/im);
-  return match ? { generic: Number.parseInt(match[1], 10), color: match[2].toUpperCase() as ManaColor, noun: match[3].toLowerCase() } : undefined;
+// Crypt of Agadeem: "{2}, {T}: Add {B} for each black creature card in your graveyard." counts cards in the controller's graveyard (graveyardNoun).
+export function scalingPaidManaAbility(oracleText: string): { generic: number; color: ManaColor; noun: string; graveyardNoun?: string } | undefined {
+  const text = oracleText.replace(/\([^)]*\)/g, "");
+  const match = text.match(/^\{(\d+)\},\s*\{t\}:\s*add \{([wubrgc])\} for each ([a-z]+) you control\.?\s*$/im);
+  if (match) return { generic: Number.parseInt(match[1], 10), color: match[2].toUpperCase() as ManaColor, noun: match[3].toLowerCase() };
+  const graveyard = text.match(/^\{(\d+)\},\s*\{t\}:\s*add \{([wubrgc])\} for each ([a-z ]+?) cards? in your graveyard\.?\s*$/im);
+  return graveyard ? { generic: Number.parseInt(graveyard[1], 10), color: graveyard[2].toUpperCase() as ManaColor, noun: "", graveyardNoun: graveyard[3].toLowerCase() } : undefined;
+}
+
+// How many the scaling count is right now: permanents of the noun you control, or cards of the graveyardNoun in your graveyard.
+function scalingPaidCount(scaling: { noun: string; graveyardNoun?: string }, seat: PlayerSeat): number {
+  return scaling.graveyardNoun ? countMatchingPermanents(seat.board.graveyard ?? [], scaling.graveyardNoun) : countMatchingPermanents(seat.board.battlefield, scaling.noun);
 }
 
 // "{T}, Pay 2 life, Tap X untapped tokens you control: Add X mana in any combination of colors." (Hazel of the Rootbloom): modelled like a scaling mana
@@ -730,8 +739,10 @@ function manaChoicesForCardRaw(card: VisibleCard, seat: PlayerSeat, allSeats?: P
   }
   const scalingPaid = scalingPaidManaAbility(effectiveManaOracleText(card));
   if (scalingPaid) {
-    const net = countMatchingPermanents(seat.board.battlefield, scalingPaid.noun) - scalingPaid.generic;
-    return net >= 1 && otherUntappedLands(card, seat).length >= scalingPaid.generic ? [scalingPaid.color] : [];
+    const net = scalingPaidCount(scalingPaid, seat) - scalingPaid.generic;
+    if (net >= 1 && otherUntappedLands(card, seat).length >= scalingPaid.generic) return [scalingPaid.color];
+    // Crypt of Agadeem also has a plain "{T}: Add {B}": when the paid ability would not gain anything, it still taps for that.
+    if (splitManaClausesByCost(effectiveManaOracleText(card)).free.length === 0) return [];
   }
   const chosenColorAbility = chosenColorManaAbility(effectiveManaOracleText(card));
   if (chosenColorAbility) {
@@ -803,7 +814,9 @@ function manaChoicesForCardRaw(card: VisibleCard, seat: PlayerSeat, allSeats?: P
   if (name.includes("talisman of progress")) return ["C", "W", "U"];
   // A two-color signet ("{1}, {T}: Add {W}{B}.") makes exactly its own printed colors; only Arcane Signet's
   // commander-identity text (handled above) uses the commander's colors. Its {1} is why the generic filters above emptied it.
-  if (name.includes("signet")) {
+  // Viridescent Bog ("{1}, {T}: Add {B}{G}.") is a land with the same printed shape: recognised by the text, not the name.
+  const signetShaped = name.includes("signet") || signetAbility(effectiveManaOracleText(card)) !== undefined;
+  if (signetShaped) {
     const own = normalizeManaColors(addedManaColors(text));
     if (own.length > 0) return own;
   }
@@ -887,7 +900,10 @@ function isManaRock(card: VisibleCard) {
 // for a single black mana regardless of how many Swamps were actually in play.
 function scalingManaAmount(card: VisibleCard, seat: PlayerSeat): number | undefined {
   const scalingPaid = scalingPaidManaAbility(effectiveManaOracleText(card));
-  if (scalingPaid) return Math.max(0, countMatchingPermanents(seat.board.battlefield, scalingPaid.noun) - scalingPaid.generic);
+  if (scalingPaid) {
+    const net = Math.max(0, scalingPaidCount(scalingPaid, seat) - scalingPaid.generic);
+    return splitManaClausesByCost(effectiveManaOracleText(card)).free.length > 0 ? Math.max(1, net) : net;
+  }
   const perControlled = card.oracleText.match(/\badd \{[wubrgc]\} for each ([a-z]+) you control\b/i);
   if (perControlled) {
     const noun = perControlled[1].toLowerCase();
@@ -977,7 +993,13 @@ export function manaProducedBy(card: VisibleCard, seat: PlayerSeat) {
     .split("\n")
     .filter((line) => !(/\bactivate (?:this ability )?only if\b/i.test(line) && !activateOnlyIfConditionMet(line, seat)))
     .join("\n");
-  const base = manaAmountFromAddClause(usableText) ?? 1;
+  let base = manaAmountFromAddClause(usableText) ?? 1;
+  // Wolfwillow Haven: "Whenever enchanted land is tapped for mana, its controller adds an additional {G}." Counted when the land makes only that colour
+  // (a Forest); a land of another colour would need two different colours from one tap, which the one-colour tap does not express (never over-counted).
+  for (const aura of seat.board.battlefield) {
+    const extra = aura.attachedToId === card.id && !aura.phasedOut ? aura.oracleText.match(/whenever enchanted land is tapped for mana, its controller adds an additional \{([wubrgc])\}/i)?.[1]?.toUpperCase() : undefined;
+    if (extra && manaChoicesForCardRaw(card, seat).every((color) => color === extra) && manaChoicesForCardRaw(card, seat).length > 0) base += 1;
+  }
   // Forsaken Monument: "Whenever you tap a permanent for {C}, add an additional {C}." One extra per tap that produces only colorless mana.
   const addClause = usableText.match(/\{t\}[^:\n]*:\s*add\s+((?:\{[^}]+\})+)/i)?.[1] ?? "";
   const producesOnlyColorless = /^(?:\{c\})+$/i.test(addClause);

@@ -819,7 +819,9 @@ export function useGameEffects(ctx: GameContext) {
       session,
       manaPools,
       priorityStopSettings,
-      holdPriorityOnce ? humanSeat.id : undefined
+      holdPriorityOnce ? humanSeat.id : undefined,
+      undefined,
+      stackActions
     );
     if (!requiredNow.includes(prioritySeat.id)) {
       // If nobody actually needs to respond any more (e.g. the caster spent their last mana paying
@@ -851,7 +853,9 @@ export function useGameEffects(ctx: GameContext) {
           session,
           manaPools,
           priorityStopSettings,
-          holdPriorityOnce ? humanSeat.id : undefined
+          holdPriorityOnce ? humanSeat.id : undefined,
+          undefined,
+          stackActions
         )
       );
       return;

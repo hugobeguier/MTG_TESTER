@@ -923,7 +923,7 @@ function hasResolvableGenericCreatureTarget(session: GameSession, casterSeatId: 
   // genuinely legal cast rather than just failing to catch an illegal one.
   if (parseModalHeader(card.oracleText)) return true;
   const clause = oracleClauses(card.oracleText).find(
-    (item) => /\btarget creature\b/i.test(item) && !/\btarget creature (?:card|or )/i.test(item)
+    (item) => /\btarget creature\b/i.test(item) && !/\btarget creature (?:card|spell|or )/i.test(item)
   );
   if (!clause) return true;
   const wantsOwn = /\btarget creature you control\b/i.test(clause);

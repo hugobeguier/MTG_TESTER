@@ -24,13 +24,14 @@ importing from `./AppFlow`. Each file starts with a header comment saying what i
 | `effects.ts` | Spell effect appliers (`applyRemovalEffect`, `applyZoneEffect`, `applyPrimitiveAction`...), target choosers, library-look workflows |
 | `oneShotEffects.ts` | One-shot parsers (`parseSimpleLifeChange`, `parseMassPump`...), primitive-plan mapping, emblems, each-player-sacrifice, punisher, Living Death |
 | `cardScripts.ts` | Text-recognised deterministic triggers (`scriptedEffectFromText`, `resolveScriptedTrigger`, `resolveScriptedChoice`): Atarka/Thrakkus/Silumgar, Tiamat, Ureni, Sarkhan Unbroken, exploit, riot, Call the Spirit Dragons, "becomes the target of a spell" hook (`findSpellTargetTriggers`, `targetingLifeTax`), dealt-damage watchers |
+| `cardAbilities.ts` | Card-specific ACTIVATED abilities recognised by Oracle text (`SCRIPTED_ABILITIES`, `scriptedAbilitiesFor`, `scriptedNextSlot`, `payScriptedCost`, `applyScriptedAbility`): Priest of Forgotten Gods, Jarad graveyard recursion, channel lands (Takenuma/Boseiju/Eiganjo, from hand), Spymaster's Vault, Chatterfang and Frugivore X-sacrifice pumps, Ravenous Squirrel, Oran-Rief, Ramos burst mana. A human is asked every choice via choose_trigger_option (resolver "scripted_ability", driven by useAbilities.activateScriptedAbility); AI seats are not offered them. To add one: append a def to SCRIPTED_ABILITIES, add a test, the audit credits it automatically |
 | `etb.ts` | Aura attach, chosen type/color, explore, sagas, Myriad / basic-land-fetch searches |
 | `abilities.ts` | Activated abilities: `payGenericSacrificeCost`, `payGenericTapCost`, `payGenericManaCost`, `applyGenericTapEffect`, `applyGenericAbilityEffect`, `resolveEquip`, cycling |
 | `casting.ts` | `playCardFromZone`, additional costs, MDFC/split/room face options, flash, `spellResolutionDestination` |
 | `castTargets.ts` | `spellTargetSlots`, `nextCastPrompt` (takes the stack: counterspell targets), `counterTargetOptions`, `castStructure`, agent target choosers, `hasResolvableTarget` |
 | `combat.ts` | `canAttack`, `canBlock`, `resolveCombatDamage`, `assignBlockers`, `legalAttackActions`, `legalBlockActions`, combat simulation, attack tax |
 | `legalActions.ts` | `legalMainPhaseActions`, `legalPriorityActions`, `legalActivatedAbilityActions`, `checkMoveLegal` |
-| `priority.ts` | `pendingActionRequiredPasses`, `canReceivePriorityForPendingAction`, agent decision context / snapshots |
+| `priority.ts` | `pendingActionRequiredPasses`, `canReceivePriorityForPendingAction` (take the whole stack as a trailing arg, so a counterspell that can only hit a deeper spell still opens a window), agent decision context / snapshots |
 | `turnFlow.ts` | `untapForSeat`, upkeep draws, end step, phase-trigger planning, seat rotation, `rollForStartingSeat` |
 | `mulligan.ts` | Agent mulligans, `withOpeningHand`, `makeShuffledLibrary`, deck-card -> `VisibleCard` |
 

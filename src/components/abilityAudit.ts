@@ -13,6 +13,7 @@ import { parseOtherCreaturesGrant, parseTypeGrantEffects } from "@/lib/typeGrant
 import type { PlayerSeat, VisibleCard } from "@/lib/types";
 import { legalMainPhaseActions, manaChoicesForCard } from "./AppFlow";
 import { tokenTapManaAbility } from "@/engine/mana";
+import { SCRIPTED_ABILITIES } from "@/engine/cardAbilities";
 import type { GameSession } from "@/lib/types";
 
 export interface AuditFinding {
@@ -107,6 +108,7 @@ function activatedModelledBy(card: AuditableCard, clause: string): string | unde
   // The sacrifice parser reads "Sacrifice <this card's own name>:" as "Sacrifice this creature:", so compare against that form too.
   const selfNormalized = clause.replace(/(\b[Ss]acrifice\s+)[A-Z][\w'’,.-]*(?:\s+[A-Z][\w'’,.-]*)*(\s*:)/, "$1this creature$2");
   const claims = (list: Array<{ clause?: string }>) => list.some((ability) => ability.clause && (sharesPrefix(ability.clause, clause) || sharesPrefix(ability.clause, selfNormalized)));
+  if (SCRIPTED_ABILITIES.some((ability) => ability.matches({ oracleText: clause } as VisibleCard))) return "scripted card ability";
   if (claims(parseGenericSacrificeAbilities(text))) return "sacrifice ability parser";
   if (claims(parseGenericTapAbilities(text))) return "tap ability parser";
   if (claims(parseSelfUntapAbilities(text) as Array<{ clause?: string }>)) return "self-untap parser";
