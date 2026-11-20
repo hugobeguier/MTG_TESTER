@@ -13,6 +13,7 @@ import { isLandCard } from "@/engine/shared";
 import { applyTargetedEffect, pickTargetedEffectTarget } from "@/engine/triggers";
 import { type CastChoices, type LabeledContinuation, type LabeledSlot, type PendingAction } from "@/engine/types";
 import { rulesEvent } from "@/engine/zones";
+import { handExcludingStack } from "@/lib/stackedCards";
 import { enchantRestriction, isAura } from "@/lib/attachments";
 import { parseCounterSpellAbility, type CounterSpellAbility } from "@/lib/counterSpells";
 import { legalCounterSpellTargets } from "@/engine/legalActions";
@@ -37,8 +38,8 @@ export function sacrificeOptions(seat: PlayerSeat, sourceCardId: string, already
 }
 
 // The hand cards still available to discard, plus a final "done" entry (The Elder Dragon War's chapter II).
-export function discardOptions(seat: PlayerSeat, alreadyPicked: string[]): Array<{ index: number; label: string }> {
-  const remaining = seat.board.hand.filter((card) => !alreadyPicked.includes(card.id));
+export function discardOptions(seat: PlayerSeat, alreadyPicked: string[], excludeIds?: readonly string[]): Array<{ index: number; label: string }> {
+  const remaining = handExcludingStack(seat, excludeIds).filter((card) => !alreadyPicked.includes(card.id));
   return [...remaining.map((card, index) => ({ index, label: "Discard " + card.name })), { index: remaining.length, label: alreadyPicked.length === 0 ? "Discard nothing" : "Done (discard " + alreadyPicked.length + ", draw " + alreadyPicked.length + ")" }];
 }
 
@@ -427,10 +428,11 @@ export function stackTargetText(session: GameSession, targets: ChosenTarget[], c
 export function targetableView(session: GameSession, controllerSeatId: string, source: VisibleCard): GameSession {
   return {
     ...session,
+    // A phased-out permanent (anyone's) is treated as though it doesn't exist, so it is never a candidate target.
     seats: session.seats.map((seat) =>
       seat.id === controllerSeatId
-        ? seat
-        : { ...seat, board: { ...seat.board, battlefield: seat.board.battlefield.filter((card) => !hasShroud(card) && !hasHexproof(card) && !isProtectedFrom(card, source)) } }
+        ? { ...seat, board: { ...seat.board, battlefield: seat.board.battlefield.filter((card) => !card.phasedOut) } }
+        : { ...seat, board: { ...seat.board, battlefield: seat.board.battlefield.filter((card) => !card.phasedOut && !hasShroud(card) && !hasHexproof(card) && !isProtectedFrom(card, source)) } }
     )
   };
 }

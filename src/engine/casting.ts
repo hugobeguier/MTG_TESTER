@@ -113,7 +113,7 @@ export function payAdditionalDiscardCost(session: GameSession, seatId: string, s
     const current = next.seats.find((item) => item.id === seatId);
     if (!current) break;
     const chosenDiscard = spell.chosenAdditionalDiscardIds?.[paid] ? current.board.hand.find((card) => card.id === spell.chosenAdditionalDiscardIds![paid] && card.id !== spell.id) : undefined;
-    const discard = chosenDiscard ?? chooseWorstHandCardToDiscard({ ...current, board: { ...current.board, hand: current.board.hand.filter((card) => card.id !== spell.id) } });
+    const discard = chosenDiscard ?? chooseWorstHandCardToDiscard({ ...current, board: { ...current.board, hand: current.board.hand.filter((card) => card.id !== spell.id && !(next.stackSpellCardIds ?? []).includes(card.id)) } });
     if (!discard) break;
     next = moveCardBetweenVisibleZones(next, seatId, discard.id, "graveyard");
     next = rulesEvent(next, seatId, `${seat.name} discards ${discard.name} as an additional cost to cast ${spell.name}.`);

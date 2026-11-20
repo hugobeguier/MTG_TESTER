@@ -174,6 +174,8 @@ export function clearTemporaryBuffs(session: GameSession): GameSession {
                 temporaryAbilitiesStripped: undefined,
                 temporaryAnimatedAsCreature: undefined,
                 temporaryGrantedKeywords: undefined,
+                temporaryKeywordStamps: undefined,
+                temporaryStripStamp: undefined,
                 // The layer pass recomputes grantedKeywords on the next state check; dropping the temporary ones now keeps it right in between.
                 ...(card.temporaryGrantedKeywords?.length ? { grantedKeywords: card.grantedKeywords?.filter((keyword) => !card.temporaryGrantedKeywords!.includes(keyword)) } : {}),
                 ...(card.temporaryOriginalTypeLine !== undefined ? { typeLine: card.temporaryOriginalTypeLine, temporaryOriginalTypeLine: undefined } : {})

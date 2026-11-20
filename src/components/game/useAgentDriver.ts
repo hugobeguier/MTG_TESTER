@@ -13,6 +13,7 @@ import { buildAgentDecisionContext, pendingActionRequiredPasses, pendingActionSu
 import { canCastAtInstantSpeed, seatHasFlashGrant } from "@/engine/casting";
 import { cannotPayMessage, chooseManaSourcesForCost, manaPoolTotal, selectedManaTotal, spendManaSources, spentManaColors } from "@/engine/mana";
 import { checkMoveLegal, cumulativeUpkeepCost, fallbackLegalAction, hasAgentMainPhaseAction, isCumulativeUpkeepCard, isPendingActionLikelyIrrelevantToSeat, legalMainPhaseActions, legalPriorityActions } from "@/engine/legalActions";
+import { handExcludingStack } from "@/lib/stackedCards";
 import { chooseAgentLibraryCardForRuleChoice, chooseWorstHandCardToDiscard, genericCostShim } from "@/engine/effects";
 import { chooseLandToReturn, choosePermanentToBlink, resolveEquip, seatVerb } from "@/engine/abilities";
 import { decideWithGate } from "@/lib/moveLegality";
@@ -685,7 +686,7 @@ export function useAgentDriver(ctx: GameContext) {
     if (choice.kind === "discard_to_hand_size") {
       // Same "highest mana value first" heuristic chooseWorstHandCardToDiscard already uses for
       // discard-cost activated abilities, generalized to pick N cards instead of just one.
-      let hand = seat.board.hand;
+      let hand = handExcludingStack(seat, session.stackSpellCardIds);
       const discardIds: string[] = [];
       for (let count = 0; count < choice.requiredDiscards && hand.length > 0; count += 1) {
         const worst = hand.reduce((current, card) => (card.manaValue > current.manaValue ? card : current));
@@ -697,7 +698,7 @@ export function useAgentDriver(ctx: GameContext) {
     }
     if (choice.kind === "put_cards_on_library") {
       // Same "highest mana value first" heuristic as discard_to_hand_size above.
-      let hand = seat.board.hand;
+      let hand = handExcludingStack(seat, session.stackSpellCardIds);
       const putBackIds: string[] = [];
       for (let count = 0; count < choice.requiredCount && hand.length > 0; count += 1) {
         const worst = hand.reduce((current, card) => (card.manaValue > current.manaValue ? card : current));
@@ -708,7 +709,7 @@ export function useAgentDriver(ctx: GameContext) {
       return;
     }
     if (choice.kind === "connive_discard") {
-      const worst = chooseWorstHandCardToDiscard(seat);
+      const worst = chooseWorstHandCardToDiscard(seat, undefined, session.stackSpellCardIds);
       completeConniveDiscard(worst ? [worst.id] : []);
       return;
     }

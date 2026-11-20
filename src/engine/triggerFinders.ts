@@ -17,6 +17,7 @@ import { commonTriggerEffect, makeCommonTrigger, modalClauseTriggerEffect, pickT
 import { type LabeledSlot, type PendingAction, type TriggerEffect } from "@/engine/types";
 import { applyCounterDelta, findPermanentById, possessive, rulesEvent } from "@/engine/zones";
 import { permanentMatchesQualifier } from "@/lib/characteristics";
+import { hasActiveAbilities } from "@/lib/effectivePermanent";
 import { effectivePower } from "@/lib/counters";
 import { parseGraveyardReturnAbility, reduceGenericCost } from "@/lib/graveyardAbilities";
 import { hasKeyword as hasKeywordText } from "@/lib/keywords";
@@ -200,7 +201,7 @@ export function findLandRaidTriggers(session: GameSession, enteringSeatId: strin
     const landCount = seat.board.battlefield.filter((card) => card.typeLine.includes("Land")).length;
     if (enteringLandCount <= landCount) continue;
     for (const source of seat.board.battlefield) {
-      if (source.phasedOut) continue;
+      if (!hasActiveAbilities(source)) continue;
       if (!isArchaeomancersMapLandRaidTrigger(source.oracleText)) continue;
       triggers.push(
         makeCommonTrigger(enteringSeatId, seat.id, source, { kind: "put_land_from_hand" }, `${source.name} triggers because ${enteredCard.name} entered under ${possessive(enteringSeat)} control.`)
@@ -362,7 +363,7 @@ export function findCommonTriggersForPermanentDied(
     const fallenAttachments = (seat.board.graveyard ?? []).filter((card) => attachedSourceIds?.includes(card.id));
     const sources = [...seat.board.battlefield, ...simultaneousDeathsForSeat, ...fallenAttachments];
     for (const source of sources) {
-      if (source.phasedOut) continue;
+      if (!hasActiveAbilities(source)) continue;
       // Felisa, Fang of Silverquill: "create X ... tokens, where X is the number of counters it had on it" counts counters of EVERY kind.
       // The watcher (Felisa) is a different permanent from the creature that died, so this applies to any source with that wording.
       const dynamicCounterCount = /\bnumber of counters it had on it\b/i.test(source.oracleText) ? (deadCard.counters ?? []).reduce((sum, counter) => sum + counter.count, 0) : source.id === deadCard.id ? plusOneCounterCount(deadCard) : undefined;
@@ -667,7 +668,7 @@ export function findCombatDamageToPlayerTriggers(
   if (!seat) return [];
   const triggers: Array<Extract<PendingAction, { type: "trigger" }>> = [];
   for (const source of seat.board.battlefield) {
-      if (source.phasedOut) continue;
+      if (!hasActiveAbilities(source)) continue;
     // Renown N (the keyword itself, with its own once-only rule) replaces whatever the reminder text would otherwise parse as.
     const renownMatch = source.id === dealingCard.id && !source.abilitiesStripped ? source.oracleText.match(/^renown (\d+)/im) : null;
     if (renownMatch) {
@@ -776,7 +777,7 @@ export function findAnyCombatDamageToOpponentTriggers(
     // controller (not an opponent of themselves).
     if (seat.hasLost || seat.id === damagedSeatId) continue;
     for (const source of seat.board.battlefield) {
-      if (source.phasedOut) continue;
+      if (!hasActiveAbilities(source)) continue;
       const parsed = parseAnyCreatureCombatDamageToOpponentTrigger(source.oracleText);
       if (!parsed) continue;
       triggers.push(
@@ -833,7 +834,7 @@ export function findBreenaAttackTriggers(session: GameSession, attackingSeatId: 
     );
     if (!hasLowerLifeOtherOpponent) continue;
     for (const source of seat.board.battlefield) {
-      if (source.phasedOut) continue;
+      if (!hasActiveAbilities(source)) continue;
       const parsed = parseBreenaAttackTrigger(source.oracleText);
       if (!parsed) continue;
       triggers.push(
@@ -862,7 +863,7 @@ export function findCardsLeftGraveyardTriggers(session: GameSession, graveyardSe
   if (!seat) return [];
   const triggers: Array<Extract<PendingAction, { type: "trigger" }>> = [];
   for (const source of seat.board.battlefield) {
-      if (source.phasedOut) continue;
+      if (!hasActiveAbilities(source)) continue;
     const effect = commonTriggerEffect(source.oracleText, "cards_left_graveyard");
     if (!effect) continue;
     triggers.push(makeCommonTrigger(graveyardSeatId, seat.id, source, effect, `${source.name} triggers because one or more cards left ${seat.name}'s graveyard.`));
@@ -963,7 +964,7 @@ export function findCastTriggers(
 
   for (const seat of session.seats) {
     for (const source of seat.board.battlefield) {
-      if (source.phasedOut) continue;
+      if (!hasActiveAbilities(source)) continue;
       for (const clause of oracleClauses(source.oracleText)) {
         if (isActivatedAbilityClause(clause)) continue;
         const condition = parseCastTriggerCondition(clause);

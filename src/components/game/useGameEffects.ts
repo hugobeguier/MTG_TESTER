@@ -703,6 +703,7 @@ export function useGameEffects(ctx: GameContext) {
     for (const departure of departures) {
       const seat = session.seats.find((item) => item.id === departure.seatId);
       for (const source of seat?.board.battlefield ?? []) {
+        if (source.abilitiesStripped || source.phasedOut) continue;
         if (cardsLeaveGraveyardEffectText(source.oracleText) && commonTriggerEffect(source.oracleText, "cards_left_graveyard") === undefined) {
           void consultRulesAdvisor("cards_left_graveyard", departure.seatId, source);
         }

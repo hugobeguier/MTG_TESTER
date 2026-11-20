@@ -18,6 +18,7 @@ import { applyCounterDelta, changeControlWithinBattlefield, findPermanentById, m
 import { attachedPowerToughnessBonus } from "@/lib/attachments";
 import type { ManaColorLetter } from "@/lib/characteristics";
 import { computeDevotion, permanentMatchesQualifier } from "@/lib/characteristics";
+import { hasActiveAbilities } from "@/lib/effectivePermanent";
 import { counterCount, effectivePower, effectiveToughness } from "@/lib/counters";
 import { parseDamagePrevention } from "@/lib/damagePrevention";
 import { cardsLeaveGraveyardEffectText, combatDamageToPlayerEffectText, deathEffectText, etbEffectText, etbTriggerEffectText, isActivatedAbilityClause, isEntersWatcherClause, mergeModalBulletClauses, oracleClauses } from "@/lib/oracleClauses";
@@ -100,6 +101,8 @@ export function findCommonTriggersForPermanentEntered(session: GameSession, ente
 
   for (const seat of session.seats) {
     for (const source of seat.board.battlefield) {
+      // A permanent that lost all abilities (Utter Insignificance) or is phased out has no enters-watchers/self-triggers of its own.
+      if (!hasActiveAbilities(source)) continue;
       // Animate Dead: an Aura that returns a creature card from a graveyard and attaches to it.
       if (source.id === enteredPermanent.id && /\baura\b/i.test(source.typeLine) && /return enchanted creature card to the battlefield under your control and attach this aura to it/i.test(source.oracleText)) {
         triggers.push(makeCommonTrigger(enteringSeatId, seat.id, source, { kind: "aura_reanimate" }, `${source.name} enters and returns a creature card from a graveyard.`, enteredPermanent.id));
@@ -1867,7 +1870,7 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
     const mine = session.seats.find((item) => item.id === trigger.controllerSeatId);
     const deferred = deferHumanDiscard(session, trigger.controllerSeatId, 1, trigger.sourceCardName, trigger.effect.draw);
     if (deferred) return deferred;
-    const discard = mine ? chooseWorstHandCardToDiscard(mine) : undefined;
+    const discard = mine ? chooseWorstHandCardToDiscard(mine, undefined, session.stackSpellCardIds) : undefined;
     if (!mine || !discard) return rulesEvent(session, trigger.controllerSeatId, `${trigger.sourceCardName}: no card to discard, so nothing is drawn.`);
     let next = moveCardBetweenVisibleZones(session, mine.id, discard.id, "graveyard");
     next = rulesEvent(next, mine.id, `${mine.name} discards ${discard.name} (${trigger.sourceCardName}).`);
@@ -1884,8 +1887,10 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
       ? Math.max(0, ...[...owner.board.battlefield.filter((permanent) => permanent.commander), ...(owner.board.commander ? [owner.board.commander] : [])].map((commander) => commander.manaValue))
       : 0;
     const seeded: VisibleCard = { ...germ, attachmentPowerBonus: flat.power + commanderX || undefined, attachmentToughnessBonus: flat.toughness + commanderX || undefined };
+    const attachStamp = session.effectTimestampCounter ?? 0;
     const attached = {
       ...session,
+      effectTimestampCounter: attachStamp + 1,
       seats: session.seats.map((item) =>
         item.id !== owner.id
           ? item
@@ -1893,7 +1898,7 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
               ...item,
               board: {
                 ...item.board,
-                battlefield: [...item.board.battlefield.map((card) => (card.id === equipment.id ? { ...card, attachedToId: seeded.id, attachTimestamp: Date.now() } : card)), seeded]
+                battlefield: [...item.board.battlefield.map((card) => (card.id === equipment.id ? { ...card, attachedToId: seeded.id, attachTimestamp: attachStamp } : card)), seeded]
               },
               zones: { ...item.zones, battlefield: item.zones.battlefield + 1 }
             }
@@ -2021,7 +2026,7 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
       if (!seat) break;
       next = drawForSeat(next, trigger.controllerSeatId, `${trigger.sourceCardName} connives: ${seatName} draws a card.`);
       const drawnSeat = next.seats.find((item) => item.id === trigger.controllerSeatId);
-      const discard = drawnSeat ? chooseWorstHandCardToDiscard(drawnSeat) : undefined;
+      const discard = drawnSeat ? chooseWorstHandCardToDiscard(drawnSeat, undefined, next.stackSpellCardIds) : undefined;
       if (!discard) continue;
       const isNonland = !discard.typeLine.includes("Land");
       next = moveCardBetweenVisibleZones(next, trigger.controllerSeatId, discard.id, "graveyard");
@@ -2834,7 +2839,7 @@ function resolveTriggerEffectOnce(session: GameSession, trigger: Extract<Pending
     let next = session;
     for (let i = 0; i < amount; i += 1) {
       const discarder = next.seats.find((seat) => seat.id === discarderId);
-      const toDiscard = discarder ? chooseWorstHandCardToDiscard(discarder) : undefined;
+      const toDiscard = discarder ? chooseWorstHandCardToDiscard(discarder, undefined, next.stackSpellCardIds) : undefined;
       if (!discarder || !toDiscard) break;
       next = moveCardBetweenVisibleZones(next, discarderId, toDiscard.id, "graveyard");
       next = rulesEvent(next, discarderId, `${discarder.name} discards ${toDiscard.name} (${trigger.sourceCardName}).`);
@@ -3118,7 +3123,7 @@ export function applyTargetedEffect(session: GameSession, controllerSeatId: stri
       else {
         for (let count = 0; count < verb.amount; count += 1) {
           const fresh = next.seats.find((seat) => seat.id === victim.id);
-          const card = fresh ? chooseWorstHandCardToDiscard(fresh) : undefined;
+          const card = fresh ? chooseWorstHandCardToDiscard(fresh, undefined, next.stackSpellCardIds) : undefined;
           if (!card) break;
           next = rulesEvent(moveCardBetweenVisibleZones(next, victim.id, card.id, "graveyard"), victim.id, `${victim.name} discards ${card.name} (${source.name}).`);
         }

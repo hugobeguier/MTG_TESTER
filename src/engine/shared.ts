@@ -10,10 +10,11 @@ export const COMMANDER_STARTING_LIFE = 40;
 
 export function hasKeyword(card: VisibleCard, keyword: string) {
   // Layer 6: a creature that's lost all abilities (Utter Insignificance, Overwhelming Splendor —
-  // see abilitiesStripped's doc comment) has neither its printed keywords nor any granted ones,
-  // regardless of what either source's text says.
-  if ((card.abilitiesStripped || card.phasedOut)) return false;
-  return hasKeywordText(card.oracleText, keyword) || Boolean(card.grantedKeywords?.includes(keyword)) || Boolean(card.groupGrantedKeywords?.includes(keyword));
+  // see abilitiesStripped's doc comment) has lost its printed keywords. The granted lists are already
+  // timestamp-filtered by the state-based pass (stateBased.ts): grants from effects older than the strip
+  // are gone from them, grants from later effects remain, so they are read as-is.
+  if (card.phasedOut) return false;
+  return (!card.abilitiesStripped && hasKeywordText(card.oracleText, keyword)) || Boolean(card.grantedKeywords?.includes(keyword)) || Boolean(card.groupGrantedKeywords?.includes(keyword));
 }
 
 export function hasHaste(card: VisibleCard) {

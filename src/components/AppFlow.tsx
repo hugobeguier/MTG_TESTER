@@ -44,6 +44,7 @@ import { useSeatYield } from "./game/useSeatYield";
 import { hostHumanSeat } from "@/lib/multiplayer/seatMap";
 import { useMpHost } from "./game/useMpHost";
 import { MpPauseBanner } from "./MpPauseBanner";
+import { SandboxToggle } from "./SandboxToggle";
 import { pendingActionRequiredPasses, resolutionPromptNote, withPendingActionSourceCard } from "@/engine/priority";
 import { legalCounterSpellTargets } from "@/engine/legalActions";
 import { canCastAtInstantSpeed, handCardFaceOptions, roomDoorFaces, seatHasFlashGrant } from "@/engine/casting";
@@ -220,7 +221,9 @@ export function AppFlow({ initialSession, ollama, multiplayerHost = false }: { i
       </button>
       )}
       <MpPauseBanner names={state.mpPausedFor} />
+      {multiplayerHost ? <SandboxToggle on={state.sandboxMode} onChange={state.setSandboxMode} /> : null}
       <ThreeGameTable
+        testTools={state.sandboxMode}
         stackPrompts={stackPrompts}
         stackFeed={stackFeed}
         requiredPasses={requiredPassesForPanel}

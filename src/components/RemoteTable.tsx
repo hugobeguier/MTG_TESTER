@@ -92,6 +92,11 @@ export function RemoteTable({ snapshot, send = readOnlySender }: { snapshot: MpS
           Waiting for {snapshot.pausedFor.join(", ")} to reconnect - the game is paused
         </div>
       ) : null}
+      {snapshot.sandbox ? (
+        <div role="status" style={{ ...bannerStyle, top: 72, background: "rgba(140,30,30,0.95)" }}>
+          Sandbox mode: the host has test tools on (you do not)
+        </div>
+      ) : null}
       {toast ? (
         <div role="alert" style={{ ...bannerStyle, bottom: 140, background: "rgba(140,30,30,0.95)" }}>
           {toast}
@@ -121,6 +126,7 @@ export function RemoteTable({ snapshot, send = readOnlySender }: { snapshot: MpS
         gameStage={seated ? snapshot.gameStage : "playing"}
         spectator={!seated}
         guestActing={seated}
+        testTools={false}
         spectatorHandLabel={`${snapshot.hostName}'s hand`}
         humanMulligans={snapshot.mulligans[snapshot.mySeatId ?? snapshot.hostSeatId] ?? 0}
         mulliganReturnCardIds={snapshot.mulligan?.returnCardIds}

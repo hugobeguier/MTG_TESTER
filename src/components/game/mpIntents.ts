@@ -15,6 +15,9 @@ import { GUEST_INTENT_NAMES, INTENT_SPECS, checkIntentArgs, checkIntentWhen, typ
 import { isLobbyIntentName } from "@/lib/multiplayer/lobby";
 import { seatForSlot } from "@/lib/multiplayer/seatMap";
 import { promptOwnersOf } from "@/lib/multiplayer/seatPrompts";
+import { attackLockedOut, canAttack, resolveAttackTarget } from "@/engine/combat";
+import { parseLoyaltyAbilities } from "@/engine/abilities";
+import type { GameSession } from "@/lib/types";
 import type { GameContext, HandlerApi } from "./context";
 
 /** What the registry needs from the host: the (late-bound) handlers and a read of the game state the `when` checks look at. */
@@ -56,15 +59,7 @@ function callTable(h: HandlerApi): Record<GuestIntentName, Call> {
     onActivateLoyalty: (s, _seat, cardId, cost, text) => h.activateLoyaltyAbility(s, cardId, cost, text),
     onResolveMyriadLandscape: (s, _seat, cardId) => h.resolveMyriadLandscape(s, cardId),
     onResolveBasicLandFetch: (s, _seat, cardId) => h.resolveBasicLandFetch(s, cardId),
-    onDrawCard: (s) => h.drawCard(s),
-    onShuffleLibrary: (s) => h.shuffleLibrary(s),
-    onChangeLife: (s, _seat, delta) => h.changeLife(s, delta),
-    onChangeCounter: (s, _seat, cardId, kind, delta) => h.changeCounter(s, cardId, kind, delta),
-    onMoveCardToGraveyard: (s, _seat, cardId) => h.moveCardToGraveyard(s, cardId),
-    onMoveCardToExile: (s, _seat, cardId) => h.moveCardToExile(s, cardId),
-    onMoveCardToHand: (s, _seat, cardId) => h.moveCardToHand(s, cardId),
     onMoveBattlefieldCard: (s, _seat, cardId, position) => h.moveBattlefieldCard(s, cardId, position),
-    onOpenLibrarySearch: (s) => h.openManualLibrarySearch(s),
     onToggleFullControl: (s) => h.updateSeatStops(s, { kind: "fullControl" }),
     onStopNext: (s) => h.updateSeatStops(s, { kind: "stopNext" }),
     onTogglePhaseStop: (s, phase: string, seatIndex: number) => h.updateSeatStops(s, { kind: "phase", phase, seatIndex }),
@@ -153,10 +148,46 @@ type Listener = (event: IntentEvent) => void;
 /** Per-guest-slot result of the newest intent the host processed: published in that guest's snapshot so the friend sees why a click did nothing. */
 export type IntentAcks = Record<string, { seq: number; error?: string }>;
 
+/**
+ * Board-aware refusals for the guest intents that would otherwise trust their arguments. Pure over a session.
+ *  - toggle tap: a guest may only TAP an untapped permanent of their own battlefield. Untapping a tapped one is refused outright (the untap step, untap
+ *    effects and ability costs are the only legal ways), and the command zone has nothing to tap.
+ *  - attack: own untapped non-sick non-defender creature that has not attacked yet, aimed at ANOTHER seat that is still in the game or at a planeswalker that
+ *    seat controls (the engine's declareAttack would also accept your own seat or planeswalker as a target).
+ *  - loyalty: cost and text must be one of the planeswalker's printed loyalty abilities (the handler applies `cost` to the loyalty counters as given).
+ */
+export function guestRefusals(session: GameSession): Pick<IntentGameState, "toggleTapRefusal" | "attackRefusal" | "loyaltyRefusal"> {
+  const bf = (seatId: string) => session.seats.find((seat) => seat.id === seatId)?.board.battlefield ?? [];
+  return {
+    toggleTapRefusal: (seatId, cardId, location) => {
+      if (location !== "battlefield") return "that card is not a permanent you can tap";
+      const card = bf(seatId).find((item) => item.id === cardId);
+      if (!card) return "that is not one of your permanents";
+      if (card.tapped) return "a tapped permanent only untaps in your untap step or through the rules";
+      return undefined;
+    },
+    attackRefusal: (seatId, cardId, targetId) => {
+      const battlefield = bf(seatId);
+      const attacker = battlefield.find((item) => item.id === cardId);
+      if (!attacker) return "that is not one of your creatures";
+      if (!canAttack(attacker, battlefield) || attackLockedOut(session, attacker)) return `${attacker.name} cannot attack right now`;
+      const target = resolveAttackTarget(session, targetId);
+      if (!target || target.seat.id === seatId || target.seat.hasLost) return "that is not a legal attack target";
+      return undefined;
+    },
+    loyaltyRefusal: (seatId, cardId, cost, text) => {
+      const card = bf(seatId).find((item) => item.id === cardId);
+      if (!card) return "that is not one of your permanents";
+      return parseLoyaltyAbilities(card.oracleText).some((ability) => ability.cost === cost && ability.text === text) ? undefined : "that is not one of this planeswalker's loyalty abilities";
+    }
+  };
+}
+
 /** Reads the host's live state into what the `when` checks need. */
 export function readIntentState(ctx: GameContext, paused = false): IntentGameState {
   const { choices, mana, session } = ctx;
   return {
+    ...guestRefusals(session),
     gameStage: ctx.gameStage,
     activeSeatId: ctx.activeSeatId,
     prioritySeatId: ctx.prioritySeatId,

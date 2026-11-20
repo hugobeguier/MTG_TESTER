@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { bear, by, onBoard, real, seat, session } from "@/components/AppFlow.batch3Abilities.test";
 import { addManaToPool, chooseManaSourcesForCost, emptyManaPool, isAvailableManaSource, spendManaSources } from "@/engine/mana";
 import { untapForSeat } from "@/engine/turnFlow";
-import { canManuallyUntap, markPermanentsUsed, tapPaidSignet, tapRefusalMessage, toggleTapManually } from "@/engine/tapUsed";
+import { canManuallyUntap, markPermanentsUsed, tapPaidSignet, toggleTapManually, untapRefusalMessage } from "@/engine/tapUsed";
 
 const spell = (cost: number, manaCost: string) => real("Swamp", "spell", { manaValue: cost, manaCost, typeLine: "Sorcery" });
 
@@ -42,56 +42,72 @@ describe("Viridescent Bog: {1}, {T}: Add {B}{G}. really pays its {1}", () => {
     if (!tapped.ok) throw new Error("tap failed");
     s = markPermanentsUsed(tapped.session, "a", ["sw"]); // what the UI does when the Bog spends the pool: the contributing sources become used
     const noPool = emptyManaPool();
-    expect(toggleTapManually(s, "a", "bog", [], noPool).refused).toBe(tapRefusalMessage("Viridescent Bog"));
-    expect(toggleTapManually(s, "a", "sw", [], noPool).refused).toBe(tapRefusalMessage("Swamp"));
+    expect(toggleTapManually(s, "a", "bog", [], noPool).refused).toBeTruthy();
+    expect(toggleTapManually(s, "a", "sw", [], noPool).refused).toBeTruthy();
   });
 });
-
-describe("manual untap of a used permanent is refused (human seats)", () => {
+describe("manual untap is never allowed outside Sandbox mode", () => {
   const pool = addManaToPool(emptyManaPool(), "B", 1);
-  it("a land tapped by mistake whose mana still floats can be untapped, and takes its mana back out of the pool", () => {
+  const cardOf = (s: ReturnType<typeof session>, id: string) => onBoard(s, id);
+  it("a land that ENTERED tapped (a tapland: no tapUsed, no mana record) cannot be untapped by hand", () => {
+    for (const name of ["Temple of Malice", "Gruul Guildgate", "Blossoming Sands"]) {
+      const s = session([seat("a", [real(name, "tl", { tapped: true })])]);
+      const toggled = toggleTapManually(s, "a", "tl", [], emptyManaPool());
+      expect(toggled.refused).toBe(untapRefusalMessage(name));
+      expect(cardOf(toggled.session, "tl")?.tapped).toBe(true);
+    }
+  });
+  it("a land tapped for mana, even with its mana still floating, stays tapped", () => {
     const s = session([seat("a", [real("Swamp", "sw", { tapped: true })])]);
     const toggled = toggleTapManually(s, "a", "sw", [{ cardId: "sw", color: "B", amount: 1 }], pool);
-    expect(toggled.refused).toBeUndefined();
-    expect(toggled.removeFromPool).toEqual({ color: "B", amount: 1 });
-    expect(onBoard(toggled.session, "sw")?.tapped).toBe(false);
+    expect(toggled.refused).toBeTruthy();
+    expect(cardOf(toggled.session, "sw")?.tapped).toBe(true);
   });
-  it("once its mana was spent or partly spent (marked used, record cleared) the land stays tapped", () => {
-    const s = markPermanentsUsed(session([seat("a", [real("Swamp", "sw", { tapped: true })])]), "a", ["sw"]);
-    const toggled = toggleTapManually(s, "a", "sw", [], emptyManaPool());
-    expect(toggled.refused).toBe("Swamp was already used this turn and can't be untapped.");
-    expect(onBoard(toggled.session, "sw")?.tapped).toBe(true);
+  it("used lands and creatures stay tapped", () => {
+    const s = markPermanentsUsed(session([seat("a", [real("Swamp", "sw", { tapped: true }), bear("b2", { tapped: true, tapUsed: true }), bear("b1", { tapped: true })])]), "a", ["sw"]);
+    for (const id of ["sw", "b2", "b1"]) expect(toggleTapManually(s, "a", id, [], emptyManaPool()).refused).toBeTruthy();
   });
-  it("a land whose floating mana is partly gone from the pool is refused even if a record remains", () => {
-    const decision = canManuallyUntap(real("Swamp", "sw", { tapped: true }), [{ cardId: "sw", color: "B", amount: 1 }], emptyManaPool());
-    expect(decision.ok).toBe(false);
+  it("manually TAPPING an untapped permanent (any kind, summoning sick too) is still allowed", () => {
+    const s = session([seat("a", [real("Priest of Forgotten Gods", "pr"), bear("b", { summoningSick: true })])]);
+    for (const id of ["pr", "b"]) {
+      const tapped = toggleTapManually(s, "a", id, [], emptyManaPool());
+      expect(tapped.refused).toBeUndefined();
+      expect(cardOf(tapped.session, id)).toMatchObject({ tapped: true, tapUsed: false });
+      // and the tap cannot be undone by hand
+      expect(toggleTapManually(tapped.session, "a", id, [], emptyManaPool()).refused).toBeTruthy();
+    }
   });
-  it("a creature that paid its {T} ability cost cannot be untapped; one tapped by a misclick can", () => {
-    const priest = real("Priest of Forgotten Gods", "pr");
-    const lone = bear("b1", { tapped: true });
-    const used = bear("b2", { tapped: true, tapUsed: true });
-    const s = session([seat("a", [priest, lone, used])]);
-    expect(toggleTapManually(s, "a", "b1", [], emptyManaPool()).session.seats[0].board.battlefield.find((c) => c.id === "b1")?.tapped).toBe(false);
-    expect(toggleTapManually(s, "a", "b2", [], emptyManaPool()).refused).toBeTruthy();
-    // a manual tap is never "used": it can be undone straight away
-    const tapped = toggleTapManually(s, "a", "pr", [], emptyManaPool()).session;
-    expect(onBoard(tapped, "pr")).toMatchObject({ tapped: true, tapUsed: false });
-    expect(toggleTapManually(tapped, "a", "pr", [], emptyManaPool()).refused).toBeUndefined();
+  it("agent seats get no free untap either", () => {
+    const s = session([seat("a", [bear("b", { tapped: true })], { kind: "agent" } as never)]);
+    expect(toggleTapManually(s, "a", "b", [], emptyManaPool()).refused).toBeTruthy();
+  });
+  it("Sandbox mode may untap any tapped permanent", () => {
+    const s = session([seat("a", [real("Temple of Malice", "tl", { tapped: true })])]);
+    expect(cardOf(toggleTapManually(s, "a", "tl", [], emptyManaPool(), true).session, "tl")?.tapped).toBe(false);
+  });
+  it("canManuallyUntap still describes the sandbox undo rules", () => {
+    expect(canManuallyUntap(real("Swamp", "sw", { tapped: true }), [{ cardId: "sw", color: "B", amount: 1 }], emptyManaPool()).ok).toBe(false);
   });
   it("the automatic payment (spendManaSources) marks its taps used", () => {
-    const stone = real("Mind Stone", "ms");
-    const land = real("Swamp", "sw");
-    const s = seat("a", [stone, land]);
-    const spent = spendManaSources(s, ["sw"]);
-    expect(spent.board.battlefield.find((c) => c.id === "sw")).toMatchObject({ tapped: true, tapUsed: true });
-  });
-  it("agents keep the free toggle", () => {
-    const s = session([seat("a", [bear("b", { tapped: true, tapUsed: true })], { kind: "agent" } as never)]);
-    expect(toggleTapManually(s, "a", "b", [], emptyManaPool()).refused).toBeUndefined();
+    const s = seat("a", [real("Mind Stone", "ms"), real("Swamp", "sw")]);
+    expect(spendManaSources(s, ["sw"]).board.battlefield.find((c) => c.id === "sw")).toMatchObject({ tapped: true, tapUsed: true });
   });
   it("the untap step clears the used flag", () => {
     const s = session([seat("a", [real("Swamp", "sw", { tapped: true, tapUsed: true })])]);
     expect(onBoard(untapForSeat(s, "a"), "sw")).toMatchObject({ tapped: false, tapUsed: false });
     expect(by(s, "a")).toBeTruthy();
+  });
+});
+
+describe("tapped-entry lands are recognised on every entry path", () => {
+  it("Temple, guildgate and gain-land enter tapped; a basic does not; a check land follows the board", async () => {
+    const { entersBattlefieldTapped } = await import("@/engine/lands");
+    for (const name of ["Temple of Malice", "Gruul Guildgate", "Blossoming Sands"]) expect(entersBattlefieldTapped(real(name, "x"))).toBe(true);
+    expect(entersBattlefieldTapped(real("Swamp", "x"))).toBe(false);
+    const check = real("Drowned Catacomb", "dc");
+    const none = seat("a", [check]);
+    expect(entersBattlefieldTapped(check, none, [none])).toBe(true);
+    const withSwamp = seat("a", [check, real("Swamp", "sw")]);
+    expect(entersBattlefieldTapped(check, withSwamp, [withSwamp])).toBe(false);
   });
 });

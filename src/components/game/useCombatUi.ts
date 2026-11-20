@@ -165,6 +165,7 @@ export function useCombatUi(ctx: GameContext) {
     let attackTriggeredSession = metalcraftDebuffedSession;
     if (!target.planeswalker) {
       for (const source of taxedAttacker.board.battlefield) {
+        if (source.abilitiesStripped || source.phasedOut) continue;
         const attackEffectClause = oracleClauses(source.oracleText)
           .map((clause) => clause.match(/^whenever you attack an? player,\s*(.+)$/i))
           .find((match): match is RegExpMatchArray => match !== null)?.[1];

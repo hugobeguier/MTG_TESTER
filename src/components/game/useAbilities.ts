@@ -12,6 +12,7 @@ import { animateEnchantmentSpec, applyGenericAbilityEffect, applyGenericTapEffec
 import { describeRemovalMode, labeledTargetOptions, steelHellkiteXOptions } from "@/engine/castTargets";
 import { equipCost } from "@/lib/attachments";
 import { hasHaste, isLandCard } from "@/engine/shared";
+import { isSummoningSick } from "@/lib/summoningSickness";
 import { hasOnceEachTurnLimiter, makeCommonTrigger } from "@/engine/triggers";
 import { hasSorcerySpeedOnlyLimiter } from "@/engine/triggerFinders";
 import { isMainPhase } from "@/engine/turnFlow";
@@ -347,11 +348,11 @@ export function useAbilities(ctx: GameContext) {
       // activation that will actually go through once they've picked.
       if (!payGenericTapCost(session, seatId, cardId, abilityIndex, humanPool, chosenDiscardId, chosenTapIds)) {
         addEvent(
-          ability.costDiscard && discardableHandCards(seat, ability.costDiscardType).length === 0
+          ability.costDiscard && discardableHandCards(seat, ability.costDiscardType, session.stackSpellCardIds).length === 0
             ? `You have no ${ability.costDiscardType ? `${ability.costDiscardType.toLowerCase()} card` : "card"} in hand to discard, so you can't activate ${card.name}.`
             : !ability.costTapCreatures && card.tapped
               ? `${card.name} is already tapped, so you can't activate its {T} ability.`
-              : !ability.costTapCreatures && card.typeLine.includes("Creature") && card.summoningSick && !hasHaste(card)
+              : !ability.costTapCreatures && isSummoningSick(card)
                 ? `${card.name} came under your control this turn (summoning sick), so it can't use a {T} ability yet.`
                 : `You can't pay for ${card.name}'s ability right now (${ability.costManaText || "no mana"}).`,
           seatId,
@@ -562,7 +563,7 @@ export function useAbilities(ctx: GameContext) {
   function activateGenericManaAbility(seatId: string, cardId: string, abilityIndex: number, chosenCardId?: string) {
     const seat = session.seats.find((item) => item.id === seatId);
     const card = seat?.board.battlefield.find((item) => item.id === cardId);
-    const ability = card ? parseGenericManaAbilities(card.oracleText)[abilityIndex] : undefined;
+    const ability = card ? parseGenericManaAbilities(abilityOracleText(card))[abilityIndex] : undefined;
     // Steel Hellkite's {X}: the agent takes the best X; a human is asked which X (with what it would destroy).
     if (seat && card && ability?.costHasX) {
       const options = steelHellkiteXOptions(session, seat, card);

@@ -150,3 +150,21 @@ const NEGATIVE_AURA_PATTERNS = [/can'?t attack/i, /can'?t block/i, /doesn'?t unt
 export function isRemovalStyleAura(oracleText: string): boolean {
   return NEGATIVE_AURA_PATTERNS.some((pattern) => pattern.test(oracleText));
 }
+
+// Pacifism-style combat bans on the enchanted/equipped creature: "Enchanted creature can't attack or block." (Pacifism), "can't attack." (Goblin
+// Bully-style Auras), "can't block." and the "can't attack, block, ..." lists (Arrest). "can't attack you" (Vow of Malice) is NOT a blanket ban (it only
+// restricts attacking one player) and is deliberately left out.
+export function attachmentCombatBans(oracleText: string): { attack: boolean; block: boolean } {
+  let attack = false;
+  let block = false;
+  for (const line of oracleText.replace(/\([^)]*\)/g, "").split(/\n|\.\s/)) {
+    const match = line.match(/\b(?:enchanted|equipped) creature\b[^.]*?\bcan'?t ((?:attack|block)(?:[^.]*))/i);
+    if (!match) continue;
+    const list = match[1].toLowerCase();
+    if (/^attack you\b|^attack (?:a|an) player\b/.test(list)) continue;
+    if (/\bunless\b/.test(list)) continue;
+    if (/\battack\b/.test(list.replace(/^attack you.*/, ""))) attack = true;
+    if (/\bblock\b/.test(list)) block = true;
+  }
+  return { attack, block };
+}

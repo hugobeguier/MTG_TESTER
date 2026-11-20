@@ -18,6 +18,9 @@ function setup(over: { inMulligan?: boolean; kept?: Record<string, boolean> } = 
   const state: IntentGameState = {
     gameStage: over.inMulligan === false ? "playing" : "mulligan",
     hasPendingAction: false,
+    toggleTapRefusal: () => undefined,
+    attackRefusal: () => undefined,
+    loyaltyRefusal: () => undefined,
     phase: "untap step",
     owners: {},
     hasKept: (id) => Boolean(over.kept?.[id]),

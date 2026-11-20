@@ -8,7 +8,7 @@ import { destroyCreatures, returnLinkedExiles } from "@/engine/entry";
 import { emblemSourceCards, hasKeyword } from "@/engine/shared";
 import { applyImprisonedInTheMoon, applyTreasureNabber } from "@/engine/triggers";
 import { findPermanentById, isPlaneswalkerCard, loyaltyCounterCount, possessive, rulesEvent } from "@/engine/zones";
-import { attachedBasePowerToughness, attachedPowerToughnessBonus, attachmentStripsAllAbilities, grantedKeywords as attachmentGrantedKeywords, grantedProtectionColors as attachmentGrantedProtectionColors, isAura, isEquipment, playerCreatureLockEffect } from "@/lib/attachments";
+import { attachedBasePowerToughness, attachedPowerToughnessBonus, attachmentCombatBans, attachmentStripsAllAbilities, grantedKeywords as attachmentGrantedKeywords, grantedProtectionColors as attachmentGrantedProtectionColors, isAura, isEquipment, playerCreatureLockEffect } from "@/lib/attachments";
 import { computeDevotion, computeDevotionToColors, countMatchingPermanents, parseAllZonesCda, parseCharacteristicDefiningAbility, parseConditionalStaticBoosts, parseDevotionCda, parseDevotionNotCreature, parseGroupAnthemBoost, parseGroupKeywordGrant, parseGroupManaAbilityGrant, parseOwnGraveyardCda, parseSelfAnthemBoost, permanentMatchesQualifier } from "@/lib/characteristics";
 import { counterCount, effectivePower, effectiveToughness } from "@/lib/counters";
 import { shareSessionSeats } from "@/lib/structuralShare";
@@ -73,6 +73,27 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
   // bypass playCardFromZone leave enteredTurn unset, and this pass runs right after each action, still within that same turn.
   if (next.seats.some((seat) => seat.board.battlefield.some((card) => card.enteredTurn === undefined))) {
     next = { ...next, seats: next.seats.map((seat) => ({ ...seat, board: { ...seat.board, battlefield: seat.board.battlefield.map((card) => (card.enteredTurn === undefined ? { ...card, enteredTurn: next.turn } : card)) } })) };
+  }
+  // Layer-6 timestamps: a permanent entering the battlefield (or changing controller, which clears the stamp) gets the next value of the session's
+  // monotonic counter; so does an attachment whose attach site did not stamp it. See VisibleCard.permanentTimestamp.
+  if (next.seats.some((seat) => seat.board.battlefield.some((card) => card.permanentTimestamp === undefined || ((card.attachedToId || card.attachedToSeatId) && card.attachTimestamp === undefined)))) {
+    let counter = next.effectTimestampCounter ?? 0;
+    next = {
+      ...next,
+      seats: next.seats.map((seat) => ({
+        ...seat,
+        board: {
+          ...seat.board,
+          battlefield: seat.board.battlefield.map((card) => {
+            const needsEntry = card.permanentTimestamp === undefined;
+            const needsAttach = Boolean(card.attachedToId || card.attachedToSeatId) && card.attachTimestamp === undefined;
+            if (!needsEntry && !needsAttach) return card;
+            return { ...card, ...(needsEntry ? { permanentTimestamp: counter++ } : {}), ...(needsAttach ? { attachTimestamp: counter++ } : {}) };
+          })
+        }
+      }))
+    };
+    next = { ...next, effectTimestampCounter: counter };
   }
   // Devoid: a permanent with it is colorless.
   if (next.seats.some((seat) => seat.board.battlefield.some((card) => card.colors.length > 0 && !card.abilitiesStripped && /^devoid\b/im.test(card.oracleText)))) {
@@ -283,7 +304,7 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
 
   const allAttachments = next.seats.flatMap((seat) =>
     seat.board.battlefield
-      .filter((card) => (isAura(card) || isEquipment(card)) && card.attachedToId)
+      .filter((card) => (isAura(card) || isEquipment(card)) && card.attachedToId && !card.phasedOut)
       .map((card) => ({ ...card, controllerSeatId: seat.id }))
   );
   // "Enchant player" Auras with a board-wide creature-lock effect (Overwhelming Splendor) — kept
@@ -293,6 +314,7 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
     seat.board.battlefield.filter((card) => isAura(card) && card.attachedToSeatId && playerCreatureLockEffect(card.oracleText))
   );
   const sameList = (a: string[] | undefined, b: string[] | undefined) => (a?.join(",") ?? "") === (b?.join(",") ?? "");
+  let stampCounter = next.effectTimestampCounter ?? 0;
   next = {
     ...next,
     seats: next.seats.map((seat) => ({
@@ -385,11 +407,32 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
           let power = 0;
           let toughness = 0;
           const keywordSet = new Set<string>();
+          // Layer 6 ordering: every granted keyword remembers the newest timestamp of any effect granting it, so a later "loses all abilities" only
+          // removes the ones granted before it (see the filter at the end of this callback).
+          const keywordTs = new Map<string, number>();
+          const grantKeyword = (keyword: string, ts: number) => {
+            keywordSet.add(keyword);
+            if ((keywordTs.get(keyword) ?? -1) < ts) keywordTs.set(keyword, ts);
+          };
+          const protectionSet = new Set<string>();
+          const protectionTs = new Map<string, number>();
           // Man-land animation's granted keywords (flying, vigilance, ...) — see
           // temporaryGrantedKeywords's own comment for why this needs its own field rather than
           // writing into grantedKeywords directly, which this whole pass fully overwrites below.
-          for (const keyword of card.temporaryGrantedKeywords ?? []) keywordSet.add(keyword);
-          const protectionSet = new Set<string>();
+          // These are written by dozens of resolution sites that don't stamp anything, so the timestamp is "first seen by this pass" (the pass runs
+          // right after each resolution); one stamp per occurrence so a keyword granted again after a strip counts as the later grant.
+          const prevKeywordStamps = card.temporaryKeywordStamps ?? {};
+          const nextKeywordStamps: Record<string, number[]> = {};
+          for (const keyword of card.temporaryGrantedKeywords ?? []) {
+            const stamps = (nextKeywordStamps[keyword] ??= []);
+            stamps.push(prevKeywordStamps[keyword]?.[stamps.length] ?? stampCounter++);
+          }
+          for (const [keyword, stamps] of Object.entries(nextKeywordStamps)) grantKeyword(keyword, Math.max(...stamps));
+          let strippedAt = -1;
+          const markStripped = (ts: number) => {
+            losesAllAbilities = true;
+            if (ts > strippedAt) strippedAt = ts;
+          };
           const setEffectCandidates: Array<{ timestamp: number; power: number; toughness: number }> = [];
           // Layer 6: "Enchanted/equipped creature loses all abilities" (Utter Insignificance) or a
           // board-wide "Creatures enchanted player controls lose all abilities" (Overwhelming
@@ -397,9 +440,15 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
           // computing keywordSet/setEffectCandidates so hasKeyword's abilitiesStripped short-circuit
           // is authoritative regardless of what a later grant/anthem would otherwise have added.
           let losesAllAbilities = false;
+          let cantAttackByAttachment = false;
+          let cantBlockByAttachment = false;
           for (const attachment of allAttachments) {
             if (attachment.attachedToId !== card.id) continue;
-            if (attachmentStripsAllAbilities(attachment.oracleText)) losesAllAbilities = true;
+            const attachStamp = attachment.attachTimestamp ?? 0;
+            if (attachmentStripsAllAbilities(attachment.oracleText)) markStripped(attachStamp);
+            const combatBans = attachmentCombatBans(attachment.oracleText);
+            if (combatBans.attack) cantAttackByAttachment = true;
+            if (combatBans.block) cantBlockByAttachment = true;
             const bonus = attachedPowerToughnessBonus(attachment.oracleText);
             if (bonus) {
               power += bonus.power;
@@ -420,8 +469,11 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
               power += sharing;
               toughness += sharing;
             }
-            for (const keyword of attachmentGrantedKeywords(attachment.oracleText)) keywordSet.add(keyword);
-            for (const color of attachmentGrantedProtectionColors(attachment.oracleText)) protectionSet.add(color);
+            for (const keyword of attachmentGrantedKeywords(attachment.oracleText)) grantKeyword(keyword, attachStamp);
+            for (const color of attachmentGrantedProtectionColors(attachment.oracleText)) {
+              protectionSet.add(color);
+              if ((protectionTs.get(color) ?? -1) < attachStamp) protectionTs.set(color, attachStamp);
+            }
 
             const override = attachedBasePowerToughness(attachment.oracleText);
             if (override) {
@@ -437,7 +489,7 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
             if (lockAura.attachedToSeatId !== seat.id) continue;
             const lock = playerCreatureLockEffect(lockAura.oracleText);
             if (!lock) continue;
-            losesAllAbilities = true;
+            markStripped(lockAura.attachTimestamp ?? 0);
             setEffectCandidates.push({ timestamp: lockAura.attachTimestamp ?? 0, ...lock });
           }
           // "Creatures your opponents control lose all abilities and have base power and toughness
@@ -446,7 +498,8 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
           // source here. Number.MAX_SAFE_INTEGER as the timestamp always wins layer 7b's "newest
           // wins" tiebreak over any standing Aura-based override, matching a same-turn effect
           // resolving after whatever else is already on the creature.
-          if (card.temporaryAbilitiesStripped) losesAllAbilities = true;
+          const nextTemporaryStripStamp = card.temporaryAbilitiesStripped ? (card.temporaryStripStamp ?? stampCounter++) : undefined;
+          if (nextTemporaryStripStamp !== undefined) markStripped(nextTemporaryStripStamp);
           if (card.temporaryBasePower !== undefined && card.temporaryBaseToughness !== undefined) {
             setEffectCandidates.push({ timestamp: Number.MAX_SAFE_INTEGER, power: card.temporaryBasePower, toughness: card.temporaryBaseToughness });
           }
@@ -457,7 +510,7 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
           // of being cached from whenever the creature entered. Reuses attachmentPowerBonus/
           // attachmentToughnessBonus (already a generic "additive P/T bonus from any source" field,
           // not literally attachment-only) rather than adding a parallel field for the same layer.
-          const selfAnthem = parseSelfAnthemBoost(card.oracleText);
+          const selfAnthem = losesAllAbilities ? undefined : parseSelfAnthemBoost(card.oracleText);
           if (selfAnthem) {
             const source =
               selfAnthem.zone === "graveyard"
@@ -482,13 +535,14 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
           // Emblems (Elspeth Sun's Champion's "Creatures you control get +2/+2 and have flying", Domri Rade's keywords, ...) are sources too: their
           // controller is the seat that holds them, and nothing can remove them.
           for (const sourceSeat of next.seats) {
-            for (const grantSource of [...sourceSeat.board.battlefield.filter((source) => !source.phasedOut), ...emblemSourceCards(sourceSeat)]) {
+            for (const grantSource of [...sourceSeat.board.battlefield.filter((source) => !source.phasedOut && !source.abilitiesStripped), ...emblemSourceCards(sourceSeat)]) {
               for (const grant of parseGroupKeywordGrant(grantSource.oracleText)) {
                 if (grant.controlledOnly && sourceSeat.id !== seat.id) continue;
                 if (grant.excludeSelf && grantSource.id === card.id) continue;
                 if (!permanentMatchesQualifier(card, grant.matcher)) continue;
                 if (grant.withKeyword && !hasKeyword(card, grant.withKeyword)) continue;
-                for (const keyword of grant.keywords) keywordSet.add(keyword);
+                // A static grant's timestamp is its SOURCE permanent's (emblems: 0, they are never stripped and have no battlefield timestamp).
+                for (const keyword of grant.keywords) grantKeyword(keyword, grantSource.permanentTimestamp ?? 0);
               }
             }
           }
@@ -503,17 +557,18 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
               if (byColor && /\bif it'?s (?:white|blue|black|red|green)\b/i.test(byColor[1]) && card.typeLine.includes("Creature")) {
                 for (const part of byColor[1].split(/,\s*(?:and\s+)?|\s+and\s+(?=[a-z ]+ if it)/i)) {
                   const m = part.trim().match(/^([a-z ]+?) if it'?s (white|blue|black|red|green)$/i);
-                  if (m && hasChosenColor(card, m[2])) keywordSet.add(m[1].trim().toLowerCase());
+                  if (m && hasChosenColor(card, m[2])) grantKeyword(m[1].trim().toLowerCase(), grantSource.permanentTimestamp ?? 0);
                 }
               }
               const modified = line.replace(/\([^)]*\)/g, "").trim().match(/^modified creatures you control have ([a-z ]+?)\.?$/i);
               if (modified && card.typeLine.includes("Creature")) {
                 const isModified = (card.counters ?? []).some((counter) => counter.count > 0) || seat.board.battlefield.some((other) => other.attachedToId === card.id);
-                if (isModified) for (const keyword of modified[1].split(/ and |, /)) keywordSet.add(keyword.trim().toLowerCase());
+                if (isModified) for (const keyword of modified[1].split(/ and |, /)) grantKeyword(keyword.trim().toLowerCase(), grantSource.permanentTimestamp ?? 0);
               }
               const selfJustEntered = line.match(/^([^.,]+?) has ([a-z ]+?) as long as it entered this turn\.?$/i);
               if (selfJustEntered && grantSource.id === card.id && card.enteredTurn !== undefined && card.enteredTurn === next.turn) {
-                for (const keyword of selfJustEntered[2].split(/ and |, /)) keywordSet.add(keyword.trim().toLowerCase());
+                // Its own printed ability: timestamp 0, so any later "loses all abilities" removes it.
+                for (const keyword of selfJustEntered[2].split(/ and |, /)) grantKeyword(keyword.trim().toLowerCase(), 0);
               }
             }
           }
@@ -524,7 +579,7 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
             for (const champion of seat.board.battlefield) {
               if ((champion.abilitiesStripped || champion.phasedOut)) continue;
               if (/creatures with power less than this creature'?s power can'?t block creatures you control/i.test(champion.oracleText)) {
-                keywordSet.add(`can't be blocked by power below ${effectivePower(champion)}`);
+                grantKeyword(`can't be blocked by power below ${effectivePower(champion)}`, champion.permanentTimestamp ?? 0);
               }
             }
           }
@@ -535,6 +590,7 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
           // keywordSet, since there's no existing "set of granted abilities" concept to fold a raw
           // ability string into. The first matching grant wins; no real card grants more than one.
           let manaAbilityGrantText: string | undefined;
+          let manaAbilityGrantTs = 0;
           for (const grantSource of seat.board.battlefield.filter((source) => !source.phasedOut)) {
             if (manaAbilityGrantText) break;
             for (const grant of parseGroupManaAbilityGrant(grantSource.oracleText)) {
@@ -542,6 +598,7 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
               if (!permanentMatchesQualifier(card, grant.matcher)) continue;
               if (grant.requiresCounter && (card.counters ?? []).every((counter) => counter.count <= 0)) continue;
               manaAbilityGrantText = grant.abilityText;
+              manaAbilityGrantTs = grantSource.permanentTimestamp ?? 0;
               break;
             }
           }
@@ -552,7 +609,7 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
           // Same scope rule as the keyword grants above: without "you control" the boost applies to every
           // player's matching creatures (Lord of the Undead, Bad Moon), so every seat is a possible source.
           for (const sourceSeat of next.seats) {
-            for (const anthemSource of [...sourceSeat.board.battlefield.filter((source) => !source.phasedOut), ...emblemSourceCards(sourceSeat)]) {
+            for (const anthemSource of [...sourceSeat.board.battlefield.filter((source) => !source.phasedOut && !source.abilitiesStripped), ...emblemSourceCards(sourceSeat)]) {
               for (const anthem of parseGroupAnthemBoost(anthemSource.oracleText)) {
                 if (anthem.controlledOnly && sourceSeat.id !== seat.id) continue;
                 if (anthem.excludeSelf && anthemSource.id === card.id) continue;
@@ -580,7 +637,7 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
               if (boost.scope === "self" && conditionalSource.id !== card.id) continue;
               power += boost.power;
               toughness += boost.toughness;
-              if (boost.keyword) keywordSet.add(boost.keyword);
+              if (boost.keyword) grantKeyword(boost.keyword, conditionalSource.permanentTimestamp ?? 0);
             }
           }
 
@@ -590,7 +647,7 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
             const graveGrant = graveCard.oracleText.match(/as long as this card is in your graveyard and you control an? ([a-z]+), creatures you control have ([a-z]+)\./i);
             if (!graveGrant || !card.typeLine.includes("Creature")) continue;
             const landType = graveGrant[1].toLowerCase();
-            if (seat.board.battlefield.some((land) => land.typeLine.toLowerCase().includes(landType) && land.typeLine.includes("Land"))) keywordSet.add(graveGrant[2].toLowerCase());
+            if (seat.board.battlefield.some((land) => land.typeLine.toLowerCase().includes(landType) && land.typeLine.includes("Land"))) grantKeyword(graveGrant[2].toLowerCase(), 0);
           }
 
           // Layer 7b: "set base power/toughness" effects override the 7a/printed base outright —
@@ -599,10 +656,21 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
 
           const nextPowerBonus = power || undefined;
           const nextToughnessBonus = toughness || undefined;
-          const nextKeywords = keywordSet.size > 0 ? Array.from(keywordSet).sort() : undefined;
-          const nextProtection = protectionSet.size > 0 ? Array.from(protectionSet).sort() : undefined;
+          // Layer 6 timestamp order: "loses all abilities" removes what the permanent has from effects with an EARLIER timestamp (its own printed
+          // abilities are handled by abilitiesStripped itself); grants from a LATER effect survive.
+          const survives = (ts: number) => !losesAllAbilities || ts > strippedAt;
+          const keptKeywords = Array.from(keywordSet).filter((keyword) => survives(keywordTs.get(keyword) ?? 0));
+          const keptProtection = Array.from(protectionSet).filter((color) => survives(protectionTs.get(color) ?? 0));
+          if (manaAbilityGrantText && !survives(manaAbilityGrantTs)) manaAbilityGrantText = undefined;
+          const nextKeywords = keptKeywords.length > 0 ? keptKeywords.sort() : undefined;
+          const nextProtection = keptProtection.length > 0 ? keptProtection.sort() : undefined;
           const nextAbilitiesStripped = losesAllAbilities || undefined;
+          const nextStrippedAt = losesAllAbilities ? strippedAt : undefined;
+          const nextTemporaryKeywordStamps = Object.keys(nextKeywordStamps).length > 0 ? nextKeywordStamps : undefined;
           if (
+            JSON.stringify(nextTemporaryKeywordStamps) === JSON.stringify(card.temporaryKeywordStamps) &&
+            nextTemporaryStripStamp === card.temporaryStripStamp &&
+            nextStrippedAt === card.abilitiesStrippedAt &&
             nextPowerBonus === card.attachmentPowerBonus &&
             nextToughnessBonus === card.attachmentToughnessBonus &&
             sameList(nextKeywords, card.grantedKeywords) &&
@@ -612,7 +680,9 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
             cdaToughness === card.cdaToughness &&
             winningSetEffect?.power === card.setPowerOverride &&
             winningSetEffect?.toughness === card.setToughnessOverride &&
-            nextAbilitiesStripped === card.abilitiesStripped
+            nextAbilitiesStripped === card.abilitiesStripped &&
+            (cantAttackByAttachment || undefined) === card.attachmentCantAttack &&
+            (cantBlockByAttachment || undefined) === card.attachmentCantBlock
           ) {
             return card;
           }
@@ -628,12 +698,19 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
             cdaToughness,
             setPowerOverride: winningSetEffect?.power,
             setToughnessOverride: winningSetEffect?.toughness,
-            abilitiesStripped: nextAbilitiesStripped
+            abilitiesStripped: nextAbilitiesStripped,
+            abilitiesStrippedAt: nextStrippedAt,
+            temporaryKeywordStamps: nextTemporaryKeywordStamps,
+            temporaryStripStamp: nextTemporaryStripStamp,
+            attachmentCantAttack: cantAttackByAttachment || undefined,
+            attachmentCantBlock: cantBlockByAttachment || undefined
           };
         })
       }
     }))
   };
+
+  if (stampCounter !== (next.effectTimestampCounter ?? 0)) next = { ...next, effectTimestampCounter: stampCounter };
 
   // Static "X you control are Y in addition to their other types" effects (Secret Arcade,
   // Biotransference, ...) — recomputed every SBA pass from current board state, same
@@ -654,7 +731,7 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
     seat.board.battlefield.flatMap((card) => {
       if ((card.abilitiesStripped || card.phasedOut)) return [];
       const grant = parseOtherCreaturesGrant(card.oracleText);
-      return grant ? [{ sourceId: card.id, grant }] : [];
+      return grant ? [{ sourceId: card.id, grant, timestamp: card.permanentTimestamp ?? 0 }] : [];
     })
   );
   // Urborg, Tomb of Yawgmoth / Yavimaya, Cradle of Growth: "Each land is a Swamp/Forest in addition to its other land types." Sources are gathered
@@ -682,7 +759,8 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
               for (const source of otherCreatureGrantSources) {
                 if (source.sourceId === card.id) continue;
                 for (const type of source.grant.addedTypes) grantedSet.add(type);
-                if (source.grant.abilityText) grantedAbilityTexts = [...grantedAbilityTexts, source.grant.abilityText];
+                // Layer 6 order: a "loses all abilities" effect only removes this grant if the grant's source is older than it.
+                if (source.grant.abilityText && (!card.abilitiesStripped || source.timestamp > (card.abilitiesStrippedAt ?? -1))) grantedAbilityTexts = [...grantedAbilityTexts, source.grant.abilityText];
               }
             }
             const nextGrantedAbilityText = grantedAbilityTexts.length > 0 ? Array.from(new Set(grantedAbilityTexts)).join("\n") : undefined;

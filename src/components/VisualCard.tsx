@@ -1,4 +1,5 @@
 import type { VisibleCard } from "@/lib/types";
+import { SummoningSickBadge } from "@/components/SummoningSickBadge";
 import { effectivePower, effectiveToughness } from "@/lib/counters";
 
 const COLOR_LABELS: Record<string, string> = {
@@ -35,6 +36,7 @@ export function VisualCard({
       onClick={() => onClick?.(card)}
     >
       {imageUrl ? <img className="visual-card-image" src={imageUrl} alt="" loading="lazy" /> : null}
+      <SummoningSickBadge card={card} />
       <div className={imageUrl ? "visual-card-fallback sr-only" : "visual-card-fallback"}>
         <header className="visual-card-header">
           <strong>{card.name}</strong>
@@ -47,7 +49,6 @@ export function VisualCard({
         <div className="badges" aria-label={`${card.name} state`}>
           {card.commander ? <span>Commander</span> : null}
           {card.tapped ? <span>Tapped</span> : null}
-          {card.summoningSick ? <span>Sick</span> : null}
           {card.attacking ? <span>Attacking</span> : null}
           {card.blocking ? <span>Blocking</span> : null}
           {counters ? <span>{counters}</span> : null}

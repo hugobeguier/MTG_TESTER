@@ -67,6 +67,7 @@ function readSnapshotInput(ctx: GameContext, hostName: string): SnapshotInput {
     },
     landPlayed: Object.fromEntries(session.seats.filter((seat) => seat.kind === "human").map((seat) => [seat.id, ctx.late.hasPlayedLandThisTurn(seat.id, session.turn)])),
     pausedFor: ctx.mpPausedFor,
+    sandbox: ctx.sandboxMode,
     seatStops: ctx.stack.seatStops,
     yieldingSeatIds: Object.keys(ctx.stack.seatYields)
   };

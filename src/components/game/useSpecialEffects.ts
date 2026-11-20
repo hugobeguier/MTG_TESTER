@@ -299,10 +299,17 @@ export function useSpecialEffects(ctx: GameContext) {
   // destination: the per-pick zone override for Dina's Guidance-style choose_card_from_library
   // choices (see PendingRuleChoice.destinationChoices/chosenDestinations) — undefined for every
   // ordinary single-destination search, which just falls back to `choice.destination` as before.
-  function chooseRuleLibraryCard(cardId: string, destination?: "hand" | "graveyard" | "battlefield") {
+  function chooseRuleLibraryCard(cardId: string, requestedDestination?: "hand" | "graveyard" | "battlefield") {
     const choice = pendingRuleChoice;
     if (!choice || choice.kind !== "choose_card_from_library") return;
-    const chosenCardIds = [...(choice.chosenCardIds ?? []), cardId];
+    // A friend's pick arrives over the wire, so re-check it here instead of trusting the picker: the card must be one the search may find
+    // (its filter / mana-value budget, not already picked), and the zone must be one the effect offers (Dina's Guidance-style choices).
+    const alreadyChosen = choice.chosenCardIds ?? [];
+    const searchLibrary = session.seats.find((item) => item.id === choice.controllerSeatId)?.library ?? [];
+    const legalPicks = searchableLibraryCards(searchLibrary.filter((card) => !alreadyChosen.includes(card.id)), { ...choice, remainingTotalManaValue: remainingLibraryTotalManaValue(choice, searchLibrary) });
+    if (!legalPicks.some((card) => card.id === cardId)) return;
+    const destination = requestedDestination && choice.destinationChoices?.includes(requestedDestination) ? requestedDestination : undefined;
+    const chosenCardIds = [...alreadyChosen, cardId];
     // Kodama's Reach / Cultivate (split destination): the first find goes wherever the player said, the second gets the other zone.
     const firstSplitDestination = choice.splitDestination && choice.chosenCardIds?.length ? choice.chosenDestinations?.[choice.chosenCardIds[0]] : undefined;
     const effectiveDestination = destination ?? (firstSplitDestination ? (firstSplitDestination === "battlefield" ? "hand" : "battlefield") : undefined);

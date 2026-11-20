@@ -12,7 +12,7 @@ import { parseGenericSacrificeAbilities, parseGenericTapAbilities } from "@/lib/
 import { type GameContext, lateFn } from "./context";
 
 export function useManaUi(ctx: GameContext) {
-  const { session, setSession, setInspectedCard, humanSeat } = ctx;
+  const { session, setSession, setInspectedCard, humanSeat, manualUntapAllowed } = ctx;
   const { setMyriadTapChoice } = ctx.choices;
   const { manaPools, setManaPools, setCopyMana, manaContributions, setManaContributions, restrictedManaBatches, setRestrictedManaBatches, manaChoice, setManaChoice } = ctx.mana;
   const addEvent = lateFn(ctx, "addEvent");
@@ -227,20 +227,20 @@ export function useManaUi(ctx: GameContext) {
     // A human's manual untap goes through engine/tapUsed.ts: a tapped permanent that was USED (its mana spent or partly spent, it paid a cost, a paid mana ability ran)
     // is refused; a misclick tap, or a tap whose mana is still floating untouched (taken back out of the pool here), is undone.
     if (location === "battlefield" && seat && card) {
-      const toggled = toggleTapManually(session, seatId, cardId, manaContributions[seatId] ?? [], poolForSeat(seatId));
+      const toggled = toggleTapManually(session, seatId, cardId, manaContributions[seatId] ?? [], poolForSeat(seatId), manualUntapAllowed);
       if (toggled.refused) {
         addEvent(toggled.refused, seatId, "Rules action");
         return;
       }
       if (card.tapped) removeManaContribution(seatId, cardId);
-      setSession((current) => toggleTapManually(current, seatId, cardId, manaContributions[seatId] ?? [], poolForSeat(seatId)).session);
+      setSession((current) => toggleTapManually(current, seatId, cardId, manaContributions[seatId] ?? [], poolForSeat(seatId), manualUntapAllowed).session);
       setInspectedCard((current) => (current?.id === cardId ? { ...current, tapped: !current.tapped } : current));
       return;
     }
 
-    if (card?.tapped) {
-      removeManaContribution(seatId, cardId);
-    }
+    // Command zone: a commander there is not a permanent; only the sandbox test tools may flip it.
+    if (!manualUntapAllowed || !card) return;
+    if (card.tapped) removeManaContribution(seatId, cardId);
 
     setSession((current) => ({
       ...current,

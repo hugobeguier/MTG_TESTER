@@ -10,7 +10,7 @@ import { z, type ZodTypeAny } from "zod";
 const id = z.string().min(1).max(200);
 const seatId = id;
 const faceIndex = z.number().int().min(0).max(9);
-const position = z.object({ x: z.number().finite(), z: z.number().finite() }).strict();
+const position = z.object({ x: z.number().finite().min(-1000).max(1000), z: z.number().finite().min(-1000).max(1000) }).strict();
 const manaColor = z.enum(["W", "U", "B", "R", "G", "C"]);
 const idList = z.array(id).max(200);
 // Positions in a checkbox prompt's option list (a "choose one or more" spell's mode set): a handful of small integers, repeats allowed (the engine re-validates).
@@ -90,16 +90,8 @@ export const INTENT_SPECS = {
   onActivateLoyalty: { ...own(seatId, id, z.number().int().min(-50).max(50), smallText), when: "act" },
   onResolveMyriadLandscape: { ...own(seatId, id), when: "act" },
   onResolveBasicLandFetch: { ...own(seatId, id), when: "act" },
-  // manual controls the host has
-  onDrawCard: { ...own(seatId), when: "act" },
-  onShuffleLibrary: { ...own(seatId), when: "act" },
-  onChangeLife: { ...own(seatId, z.number().int().min(-100).max(100)), when: "act" },
-  onChangeCounter: { ...own(seatId, id, z.string().min(1).max(40), z.number().int().min(-20).max(20)), when: "act" },
-  onMoveCardToGraveyard: { ...own(seatId, id), when: "act" },
-  onMoveCardToExile: { ...own(seatId, id), when: "act" },
-  onMoveCardToHand: { ...own(seatId, id), when: "act" },
+  // NOT here on purpose: the host-only test tools (manual draw / shuffle / life / counters / move a card between zones / library search). A friend never gets them; see HOST_ONLY_TEST_INTENTS.
   onMoveBattlefieldCard: { ...own(z.string().min(1).max(200), id, position), when: "act" },
-  onOpenLibrarySearch: { schema: none, when: "act" },
   // the friend's OWN priority-stop controls (same ones the host's table has; they change only the friend's seat settings)
   onToggleFullControl: { schema: none, when: "settings" },
   onStopNext: { schema: none, when: "settings" },
@@ -204,6 +196,13 @@ export interface IntentGameState {
   battlefieldIds: (seatId: string) => string[];
   /** Waiting for a disconnected friend: nothing a friend or the table could do should advance the game meanwhile. */
   paused?: boolean;
+  /**
+   * Rules-level refusals that need the board (see guestRefusals in components/game/mpIntents.ts). Each returns a reason, or undefined when the action is legal.
+   * REQUIRED on purpose: a state that cannot verify these refuses the intent (fail closed).
+   */
+  toggleTapRefusal: (seatId: string, cardId: string, location: string) => string | undefined;
+  attackRefusal: (seatId: string, cardId: string, targetId: string) => string | undefined;
+  loyaltyRefusal: (seatId: string, cardId: string, cost: number, text: string) => string | undefined;
 }
 
 const OWNER_FOR: Partial<Record<IntentWhen, keyof PromptOwners>> = {
@@ -248,7 +247,23 @@ export function checkIntentArgs(name: string, seat: string, args: unknown[], sta
   for (const index of spec?.seatArgs ?? []) if (args[index] !== seat) return "you can only act for your own seat";
   if (name === "onConfirmBlockers") {
     const mine = new Set(state.battlefieldIds(seat));
-    if (!(args[0] as string[]).every((cardId) => mine.has(cardId))) return "those creatures are not yours";
+    const declared = args[0] as string[];
+    if (!declared.every((cardId) => mine.has(cardId))) return "those creatures are not yours";
+    if (new Set(declared).size !== declared.length) return "a creature can only be declared once";
   }
+  // Board-aware rules checks. A guest can never UNTAP by toggling (only the untap step / untap effects / ability costs do), and an attack must be a legal one.
+  // Fail closed: a state without the board checks (typed required, but checked at runtime too) refuses these intents.
+  const verify = (check: ((...a: never[]) => string | undefined) | undefined, ...a: unknown[]) => (check ? (check as (...x: unknown[]) => string | undefined)(...a) : "the host cannot verify that action");
+  if (name === "onToggleTapCard") return verify(state.toggleTapRefusal, seat, args[1], args[2]);
+  if (name === "onDeclareAttack") return verify(state.attackRefusal, seat, args[0], args[1]);
+  if (name === "onActivateLoyalty") return verify(state.loyaltyRefusal, seat, args[1], args[2], args[3]);
   return undefined;
 }
+
+/**
+ * The host's manual test tools. They bypass the rules (conjure a card into hand, search the library, rewrite life or counters, move any card between
+ * zones), so a friend's seat must never be able to run them: none of these names is in INTENT_SPECS, and the host refuses them as "unknown intent".
+ * (Legitimate effects that find or return cards run through the rules prompts instead.) The host's own table shows them only outside a multiplayer
+ * game or while the host has switched sandbox mode on, which every player can see (MpSnapshot.sandbox).
+ */
+export const HOST_ONLY_TEST_INTENTS = ["onDrawCard", "onShuffleLibrary", "onChangeLife", "onChangeCounter", "onMoveCardToGraveyard", "onMoveCardToExile", "onMoveCardToHand", "onOpenLibrarySearch"] as const;

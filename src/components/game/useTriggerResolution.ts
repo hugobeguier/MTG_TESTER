@@ -9,6 +9,7 @@ import { applyPutCardsOnLibrary, findPermanentById, moveCardBetweenVisibleZones,
 import { applyRemovalEffect, drawForSeat, drawMultipleForSeat, genericManaAbilityCostShim, genericModalModeHasLegalTarget, resolveDynamicAmount } from "@/engine/effects";
 import { chooseManaSourcesForCost } from "@/engine/mana";
 import { discardOptions, encodeChosenTarget, labeledTargetOptions, sacrificeOptions } from "@/engine/castTargets";
+import { handExcludingStack } from "@/lib/stackedCards";
 import { enterUndercityRoom, findCommonTriggersForPermanentEntered, makeCommonTrigger, payRedMana, resolveEcho, resolveTriggerEffect } from "@/engine/triggers";
 import { hasCardType } from "@/lib/typeGrants";
 import { hasHexproof, hasShroud } from "@/engine/damage";
@@ -153,8 +154,8 @@ export function useTriggerResolution(ctx: GameContext) {
       return open(`${trigger.sourceCardName}: choose a direction. Each player gains control of the nonland permanents of the next player that way.`, [{ index: 0, label: "Left" }, { index: 1, label: "Right" }]);
     }
     if (trigger.effect.kind === "discard_any_then_draw") {
-      if (controller.board.hand.length === 0) return false;
-      return open(`${trigger.sourceCardName}: discard which cards? You draw that many.`, discardOptions(controller, []));
+      if (handExcludingStack(controller, session.stackSpellCardIds).length === 0) return false;
+      return open(`${trigger.sourceCardName}: discard which cards? You draw that many.`, discardOptions(controller, [], session.stackSpellCardIds));
     }
     if (trigger.effect.kind === "choose_named_mode") {
       const names = trigger.effect.options;
@@ -417,17 +418,17 @@ export function useTriggerResolution(ctx: GameContext) {
       const effect = choice.trigger.effect;
       const owner = session.seats.find((seat) => seat.id === choice.controllerSeatId);
       const already = effect.discardIds ?? [];
-      const remaining = (owner?.board.hand ?? []).filter((card) => !already.includes(card.id));
+      const remaining = (owner ? handExcludingStack(owner, session.stackSpellCardIds) : []).filter((card) => !already.includes(card.id));
       if (owner && index < remaining.length) {
         const picked = [...already, remaining[index].id];
         const nextTrigger = { ...choice.trigger, effect: { ...effect, discardIds: picked } } as Extract<PendingAction, { type: "trigger" }>;
-        if (picked.length < Math.min(owner.board.hand.length, effect.max ?? Number.POSITIVE_INFINITY)) {
+        if (picked.length < Math.min(handExcludingStack(owner, session.stackSpellCardIds).length, effect.max ?? Number.POSITIVE_INFINITY)) {
           setPendingRuleChoice({
             ...choice,
             id: crypto.randomUUID(),
             trigger: nextTrigger,
             prompt: choice.sourceCardName + ": discard which cards? (" + picked.length + " chosen" + (effect.max ? ", up to " + effect.max : "") + ") You draw that many.",
-            options: discardOptions(owner, picked),
+            options: discardOptions(owner, picked, session.stackSpellCardIds),
             queueing: choice.queueing?.map((queued) => (queued.id === choice.trigger.id ? nextTrigger : queued))
           });
           return;
@@ -506,8 +507,9 @@ export function useTriggerResolution(ctx: GameContext) {
         drawAmount > 0
           ? drawMultipleForSeat(session, trigger.controllerSeatId, drawAmount, `${seatName} draws ${drawAmount} from ${trigger.sourceCardName}.`)
           : session;
-      const postDrawHandSize = drawnSession.seats.find((seat) => seat.id === trigger.controllerSeatId)?.board.hand.length ?? 0;
-      setSession(() => drawnSession);
+      const drawnPutBackSeat = drawnSession.seats.find((seat) => seat.id === trigger.controllerSeatId);
+      const postDrawHandSize = drawnPutBackSeat ? handExcludingStack(drawnPutBackSeat, drawnSession.stackSpellCardIds).length : 0;
+setSession(() => drawnSession);
       const requiredCount = Math.min(putBackAmount, postDrawHandSize);
       if (requiredCount > 0) {
         setPendingRuleChoice({
@@ -801,7 +803,7 @@ export function useTriggerResolution(ctx: GameContext) {
     const choice = pendingRuleChoice;
     if (!choice || choice.kind !== "put_cards_on_library") return;
     setPendingRuleChoice(undefined);
-    setSession((current) => applyPutCardsOnLibrary(current, choice.controllerSeatId, choice.sourceCardName, cardIds.slice(0, choice.requiredCount)));
+    setSession((current) => applyPutCardsOnLibrary(current, choice.controllerSeatId, choice.sourceCardName, cardIds.filter((id) => !current.stackSpellCardIds?.includes(id)).slice(0, choice.requiredCount)));
     const trigger = choice.trigger;
     if (!trigger) {
       // A cast spell's own draw_then_put_back (see the type's own comment) — the stack/priority
@@ -851,7 +853,8 @@ export function useTriggerResolution(ctx: GameContext) {
     const controllerSeat = fromSession.seats.find((seat) => seat.id === trigger.controllerSeatId);
     const seatName = controllerSeat?.name ?? "Player";
     const drawnSession = drawForSeat(fromSession, trigger.controllerSeatId, `${trigger.sourceCardName} connives: ${seatName} draws a card.`);
-    const postDrawHandSize = drawnSession.seats.find((seat) => seat.id === trigger.controllerSeatId)?.board.hand.length ?? 0;
+    const drawnSeat = drawnSession.seats.find((seat) => seat.id === trigger.controllerSeatId);
+    const postDrawHandSize = drawnSeat ? handExcludingStack(drawnSeat, drawnSession.stackSpellCardIds).length : 0;
     if (postDrawHandSize === 0) {
       startConniveIteration(trigger, remainingStack, iterationsLeft - 1, drawnSession);
       return;
@@ -900,7 +903,8 @@ export function useTriggerResolution(ctx: GameContext) {
     const choice = pendingRuleChoice;
     if (!choice || choice.kind !== "return_land_to_hand") return;
     setPendingRuleChoice(undefined);
-    const landId = cardIds[0];
+    // A friend's answer arrives over the wire: only a land on the chooser's own battlefield may be returned (not a graveyard/exile card).
+    const landId = session.seats.find((seat) => seat.id === choice.controllerSeatId)?.board.battlefield.find((card) => card.id === cardIds[0] && card.typeLine.includes("Land"))?.id;
     if (landId) {
       setSession((current) => moveCardBetweenVisibleZones(current, choice.controllerSeatId, landId, "hand"));
     }
@@ -912,7 +916,8 @@ export function useTriggerResolution(ctx: GameContext) {
     const choice = pendingRuleChoice;
     if (!choice || choice.kind !== "choose_permanent_to_blink") return;
     setPendingRuleChoice(undefined);
-    const targetId = cardIds[0];
+    // Same wire-answer check as the land return: only a permanent the chooser controls (other than the source) may be blinked.
+    const targetId = session.seats.find((seat) => seat.id === choice.controllerSeatId)?.board.battlefield.find((card) => card.id === cardIds[0] && card.id !== choice.sourceCardId)?.id;
     // Any ETB triggers the blinked permanent's return causes (its own "when this enters," and any
     // OTHER permanent watching for one) — captured here (not queued via queueCommonTriggers, which
     // would race resumeAfterTriggerChoice's own pendingAction update below) and appended to the

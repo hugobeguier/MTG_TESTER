@@ -67,27 +67,27 @@ export type ManualToggleResult = {
 };
 
 /**
- * The manual "toggle tap" (the T key / click on a battlefield permanent that has nothing better to do): THE function the UI calls. An untapped permanent is
- * tapped (a misclick tap carries no `tapUsed`, so it can be undone); a tapped one is untapped only if a human's rule allows it (canManuallyUntap).
- * Agents (non-human seats) keep the old free toggle: the rule exists to stop a human reusing mana or an ability.
+ * The manual "toggle tap" (the T key / click on a battlefield permanent that has nothing better to do): THE function the UI calls. Manually TAPPING an untapped
+ * permanent is always allowed (costs like "tap two untapped artifacts", convoke, crew, summoning-sick creatures). Manually UNTAPPING a tapped one is NEVER allowed
+ * (a land that entered tapped, one tapped for mana, a creature that paid {T}): it only untaps in its controller's untap step or through a real effect.
+ * The one exception is Sandbox mode (`sandbox`: the multiplayer host's explicit test tools), where the toggle is free for any seat.
  */
-export function toggleTapManually(session: GameSession, seatId: string, cardId: string, contributions: readonly ManaContribution[], pool: ManaPool): ManualToggleResult {
+export function toggleTapManually(session: GameSession, seatId: string, cardId: string, _contributions: readonly ManaContribution[], _pool: ManaPool, sandbox = false): ManualToggleResult {
   const seat = session.seats.find((item) => item.id === seatId);
   const card = seat?.board.battlefield.find((item) => item.id === cardId);
   if (!seat || !card) return { session };
-  let removeFromPool: ManualToggleResult["removeFromPool"];
-  if (card.tapped && seat.kind === "human") {
-    const decision = canManuallyUntap(card, contributions, pool);
-    if (!decision.ok) return { session, refused: decision.reason };
-    removeFromPool = decision.removeFromPool;
-  }
+  if (card.tapped && !sandbox) return { session, refused: untapRefusalMessage(card.name) };
   const next: GameSession = {
     ...session,
     seats: session.seats.map((item) =>
       item.id !== seatId ? item : { ...item, board: { ...item.board, battlefield: item.board.battlefield.map((permanent) => (permanent.id === cardId ? { ...permanent, tapped: !permanent.tapped, tapUsed: false } : permanent)) } }
     )
   };
-  return removeFromPool ? { session: next, removeFromPool } : { session: next };
+  return { session: next };
+}
+
+export function untapRefusalMessage(cardName: string): string {
+  return `${cardName} is tapped: it only untaps in your untap step or through a card effect.`;
 }
 
 export type SignetTapResult =

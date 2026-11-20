@@ -60,6 +60,8 @@ export interface SnapshotInput {
   ack?: { seq: number; error?: string };
   /** Names of friends the game is waiting on because they are disconnected (the game is paused while this is non-empty). */
   pausedFor?: string[];
+  /** The host has the test/sandbox tools switched on (every player is told, see RemoteTable). */
+  sandbox?: boolean;
   /** Each remote friend's own priority-stop settings by seat id (only the viewer's own entry ever reaches that viewer; missing = the defaults). */
   seatStops?: Record<string, SeatStopSettings>;
   /** Ids of the seats currently yielding until end of turn (only the viewer's own membership ever reaches that viewer, as `myYield`). */
@@ -102,6 +104,8 @@ export interface MpSnapshot {
   myYield?: boolean;
   /** Friends the game is paused for (disconnected); shown to everybody as "Waiting for <name> to reconnect". */
   pausedFor: string[];
+  /** Sandbox mode is on: the host can use manual test tools (friends never can). Shown to everybody as a banner. */
+  sandbox: boolean;
 }
 
 /** Same input + viewer + rev -> same output. Input is not mutated. Throws for a seat id the session does not have. */
@@ -145,6 +149,7 @@ export function buildSnapshot(input: SnapshotInput, viewer: SnapshotViewer, rev 
     hostManaPool: input.hostManaPool,
     myManaPool: mySeat ? input.manaPools?.[mySeat.id] : undefined,
     pausedFor: [...(input.pausedFor ?? [])],
+    sandbox: Boolean(input.sandbox),
     ack: mySeat ? input.ack : undefined,
     myStops: mySeat ? seatStopSettingsOf({ bySeat: input.seatStops }, mySeat.id, input.session.seats.indexOf(mySeat), input.session.seats.length) : undefined,
     myYield: mySeat ? (input.yieldingSeatIds ?? []).includes(mySeat.id) : undefined,

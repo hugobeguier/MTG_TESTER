@@ -132,6 +132,10 @@ function agentCardSnapshot(card: VisibleCard) {
     summoningSick: card.summoningSick,
     enteredTurn: card.enteredTurn,
     phasedOut: card.phasedOut ? true : undefined,
+    // "Loses all abilities" (Utter Insignificance): the oracleText below is NOT in force; read this flag before trusting it.
+    abilitiesStripped: card.abilitiesStripped ? true : undefined,
+    cantAttack: card.attachmentCantAttack ? true : undefined,
+    cantBlock: card.attachmentCantBlock ? true : undefined,
     attacking: card.attacking,
     attackTargetId: card.attacking ? card.attackTargetId : undefined,
     blocking: card.blocking,

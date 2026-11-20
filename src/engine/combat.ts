@@ -9,6 +9,7 @@ import { destroyCreatures } from "@/engine/entry";
 import { type BlockChoiceState, type LegalAgentAction } from "@/engine/flowTypes";
 import { chooseManaSourcesForCost, spendManaSources } from "@/engine/mana";
 import { hasHaste, hasKeyword } from "@/engine/shared";
+import { isSummoningSick } from "@/lib/summoningSickness";
 import { phaseEvent } from "@/engine/triggers";
 import { applyCounterDelta, isPlaneswalkerCard, loyaltyCounterCount, rulesEvent } from "@/engine/zones";
 import { bushidoAmount, canBlockAdditionalCreature, canBlockOnlyFliers, landwalkEvades, mustAttackEachCombat } from "@/lib/combatRestrictions";
@@ -264,7 +265,8 @@ export function attackLockedOut(session: GameSession, card: VisibleCard) {
 
 export function canAttack(card: VisibleCard, controllerBattlefield?: VisibleCard[]) {
   if (!attackBlockRestrictionMet(card, controllerBattlefield)) return false;
-  return hasCardType(card, "Creature") && !card.tapped && !card.phasedOut && (!card.summoningSick || hasHaste(card)) && !card.attacking && !hasDefender(card);
+  if (card.attachmentCantAttack) return false;
+  return hasCardType(card, "Creature") && !card.tapped && !card.phasedOut && !isSummoningSick(card) && !card.attacking && !hasDefender(card);
 }
 
 export function creatureCantBlock(card: VisibleCard): boolean {
@@ -297,7 +299,7 @@ function attackerEvadesBlocker(attacker: VisibleCard, blocker: VisibleCard): boo
 }
 
 export function canBlock(card: VisibleCard, attacker?: VisibleCard, controllerBattlefield?: VisibleCard[]) {
-  if (!hasCardType(card, "Creature") || card.tapped || card.phasedOut) return false;
+  if (!hasCardType(card, "Creature") || card.tapped || card.phasedOut || card.attachmentCantBlock) return false;
   // A creature that already blocks can block one more attacker when its text allows ("can block an additional creature each combat").
   if (card.blocking && !(canBlockAdditionalCreature(card) && !card.extraBlockingTargetId && attacker && attacker.id !== card.blockingTargetId)) return false;
   if (creatureCantBlock(card)) return false;

@@ -12,6 +12,7 @@ import { drawMultipleForSeat, resolveAgentLibraryLookWorkflow, resolveProliferat
 import { isBoardConditionMet } from "@/engine/mana";
 import { looksLikeAttackTaxCandidate } from "@/lib/staticEffects";
 import { shouldConsultRulesAdvisor } from "@/engine/priority";
+import { handExcludingStack } from "@/lib/stackedCards";
 import { type GameContext, lateFn } from "./context";
 
 export function useRulesAdvisor(ctx: GameContext) {
@@ -49,7 +50,7 @@ export function useRulesAdvisor(ctx: GameContext) {
       actorName: seat.name,
       sourceCard,
       battlefield: seat.board.battlefield,
-      hand: seat.board.hand,
+      hand: handExcludingStack(seat, session.stackSpellCardIds), // a spell on the stack isn't in hand (601.2a)
       graveyard: seat.board.graveyard ?? [],
       exile: seat.board.exile ?? [],
       libraryPreview: (seat.library ?? []).slice(0, 12).map((card) => ({
@@ -174,7 +175,7 @@ export function useRulesAdvisor(ctx: GameContext) {
           oracleText: eventRelevantOracleText(event, sourceCard.oracleText),
           actorName: seat.name,
           battlefieldSummary: seat.board.battlefield.map((card) => `${card.name} (${card.typeLine})`),
-          handSummary: seat.board.hand.map((card) => card.name),
+          handSummary: handExcludingStack(seat, session.stackSpellCardIds).map((card) => card.name),
           graveyardSummary: (seat.board.graveyard ?? []).map((card) => card.name),
           event
         })

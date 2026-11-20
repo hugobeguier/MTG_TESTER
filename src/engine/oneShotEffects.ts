@@ -333,7 +333,7 @@ export const MODAL_DONE_INDEX = 999;
 export function applyConniveDiscard(session: GameSession, seatId: string, sourceCardId: string, sourceCardName: string, discardCardId: string): GameSession {
   const seat = session.seats.find((item) => item.id === seatId);
   const discardCard = seat?.board.hand.find((card) => card.id === discardCardId);
-  if (!seat || !discardCard) return session;
+  if (!seat || !discardCard || session.stackSpellCardIds?.includes(discardCardId)) return session; // a spell on the stack isn't in hand (601.2a)
   const isNonland = !discardCard.typeLine.includes("Land");
   const seatName = seat.name;
   const discardedSession = moveCardBetweenVisibleZones(session, seatId, discardCardId, "graveyard");
@@ -619,7 +619,7 @@ export function applyEachPlayerSacrificeEffect(
   let next = destroyCreatures(session, destructions, "Rules action");
   for (const seatId of discarders) {
     const seat = next.seats.find((item) => item.id === seatId);
-    const discard = seat ? chooseWorstHandCardToDiscard(seat) : undefined;
+    const discard = seat ? chooseWorstHandCardToDiscard(seat, undefined, next.stackSpellCardIds) : undefined;
     if (!seat || !discard) continue;
     next = moveCardBetweenVisibleZones(next, seatId, discard.id, "graveyard");
     next = {
@@ -696,7 +696,7 @@ export function applyPunisherChoiceEffect(session: GameSession, casterSeatId: st
       const survivesComfortably = current.life - effect.lifeAmount > 10;
       const sacrificeCandidate = survivesComfortably ? undefined : chooseNonlandPermanentToSacrifice(current);
       const tokenToSacrifice = sacrificeCandidate?.token ? sacrificeCandidate : undefined;
-      const discardTarget = !survivesComfortably && !tokenToSacrifice ? chooseWorstHandCardToDiscard(current) : undefined;
+      const discardTarget = !survivesComfortably && !tokenToSacrifice ? chooseWorstHandCardToDiscard(current, undefined, next.stackSpellCardIds) : undefined;
       const permanentToSacrifice = !discardTarget && !tokenToSacrifice ? sacrificeCandidate : undefined;
       if (tokenToSacrifice) {
         next = destroyCreatures(

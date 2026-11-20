@@ -11,6 +11,7 @@ import { effectivePower } from "@/lib/counters";
 import { oracleClauses } from "@/lib/oracleClauses";
 import { hasCardType } from "@/lib/typeGrants";
 import { COMMANDER_STARTING_LIFE, basicLandTypes, hasHaste, isBasicLandCard, isLandCard, numberWordToInt } from "@/engine/shared";
+import { isSummoningSick } from "@/lib/summoningSickness";
 import { cardWithColoredPipsReduced } from "@/engine/costs";
 
 export function availableManaForSeat(seat: PlayerSeat, pool?: ManaPool): number {
@@ -164,7 +165,7 @@ export function signetCostPayable(card: VisibleCard, seat: PlayerSeat, allSeats?
   if (!signet || signet.generic === 0) return true;
   const others = seat.board.battlefield.filter(
     (other) => other.id !== card.id && !other.tapped && !other.phasedOut && !signetAbility(effectiveManaOracleText(other)) && !scalingPaidManaAbility(effectiveManaOracleText(other)) && manaChoicesForCardRaw(other, seat, allSeats).length > 0 &&
-      !(other.typeLine.includes("Creature") && other.summoningSick && !hasHaste(other))
+      !(isSummoningSick(other))
   );
   return others.reduce((total, other) => total + manaProducedBy(other, seat), 0) >= signet.generic;
 }
@@ -356,7 +357,7 @@ export function isAvailableManaSource(card: VisibleCard, seat: PlayerSeat, allSe
   // let chooseManaSourcesForCost/chooseManaSources silently auto-tap a mana dork the same turn it
   // entered the battlefield for spell/ability payment. Reported live as a freshly fetched Elvish
   // Mystic and a freshly played Llanowar Elves both tapping for mana immediately, neither with haste.
-  if (card.typeLine.includes("Creature") && card.summoningSick && !hasHaste(card)) return false;
+  if (isSummoningSick(card)) return false;
   // Orb of Dragonkind ("{1}, {T}: Add two mana ... only for Dragon spells") is not a plain mana source: it is modelled as a one-mana discount on
   // Dragon spells (see isDragonMana). Counting it as two free mana as well made a six-mana Dragon castable with three lands.
   if (isDragonMana(card)) return false;
@@ -666,6 +667,8 @@ function conditionallyUnavailableColors(oracleText: string, seat: PlayerSeat): S
 }
 
 export function manaChoicesForCard(card: VisibleCard, seat: PlayerSeat, allSeats?: PlayerSeat[]): ManaColor[] {
+  // Mana abilities are abilities: a permanent that lost all abilities (Utter Insignificance on a mana dork) or is phased out taps for nothing.
+  if (card.phasedOut || (card.abilitiesStripped && !card.grantedManaAbilityText)) return [];
   const raw = manaChoicesForCardRaw(card, seat, allSeats);
   const blocked = conditionallyUnavailableColors(card.oracleText, seat);
   const filtered = blocked.size > 0 ? raw.filter((color) => !blocked.has(color)) : raw;

@@ -6,6 +6,7 @@ import { canTapForCost } from "@/engine/abilities";
 import { findCardAnywhere } from "@/engine/castTargets";
 import { matchesAdditionalSacrificeType, roomDoorFaces } from "@/engine/casting";
 import { canBlock } from "@/engine/combat";
+import { handExcludingStack } from "@/lib/stackedCards";
 import { discardableHandCards, matchesEachPlayerSacrificeFilter, matchesPermanentSacrificeFilter, matchesSacrificeFilter } from "@/engine/effects";
 import { type BlockChoiceState, type ManualLibrarySearchState } from "@/engine/flowTypes";
 import { cumulativeUpkeepCost, isCumulativeUpkeepCard } from "@/engine/legalActions";
@@ -329,7 +330,7 @@ export function ruleChoiceView(
       return {
         kind: "discard_to_hand_size" as const,
         prompt: choice.prompt,
-        hand: discardableHandCards(humanSeat, choice.activation?.discardType),
+        hand: discardableHandCards(humanSeat, choice.activation?.discardType, session.stackSpellCardIds),
         requiredDiscards: choice.requiredDiscards,
         sourceCardName: choice.sourceCardName
       };
@@ -339,7 +340,7 @@ export function ruleChoiceView(
         kind: "put_cards_on_library" as const,
         sourceCardName: choice.sourceCardName,
         prompt: choice.prompt,
-        hand: humanSeat.board.hand,
+        hand: handExcludingStack(humanSeat, session.stackSpellCardIds),
         requiredCount: choice.requiredCount
       };
     }
@@ -348,7 +349,7 @@ export function ruleChoiceView(
         kind: "connive_discard" as const,
         sourceCardName: choice.sourceCardName,
         prompt: choice.prompt,
-        hand: humanSeat.board.hand
+        hand: handExcludingStack(humanSeat, session.stackSpellCardIds)
       };
     }
     if (choice.kind === "return_land_to_hand") {

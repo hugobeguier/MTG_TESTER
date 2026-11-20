@@ -11,6 +11,7 @@ import { nextTimestamp } from "@/engine/etb";
 import { activateOnlyIfConditionMet, chooseManaSourcesForCost, isBoardConditionMet, payCostFromPool, spendManaSources } from "@/engine/mana";
 import { applyDigPick, commanderColorCount, hideawayDamageConditionMet, surveilBonusForSeat } from "@/engine/oneShotEffects";
 import { basicLandTypes, hasHaste, hasKeyword, isLandCard, numberWordToInt } from "@/engine/shared";
+import { isSummoningSick } from "@/lib/summoningSickness";
 import { createCopyTokenForSeat, createTokensForSeat, parseCreateTokenSpecs } from "@/engine/tokens";
 import { applyDigToBattlefield, applyTargetedEffect, commonTriggerEffect, findPermanentOwnerTarget, hasOnceEachTurnLimiter, resolveTriggerEffect } from "@/engine/triggers";
 import { type PendingAction, type TriggerEffect } from "@/engine/types";
@@ -152,7 +153,7 @@ export function resolveManlandAnimation(session: GameSession, seatId: string, ca
   const seat = session.seats.find((item) => item.id === seatId);
   const card = seat?.board.battlefield.find((item) => item.id === cardId);
   if (!seat || !card) return undefined;
-  const animation = parseManlandAnimation(card.oracleText);
+  const animation = parseManlandAnimation(abilityOracleText(card));
   if (!animation) return undefined;
   const costCard = genericCostShim(animation.cost);
   const poolPayment = animation.cost > 0 && humanPool ? payCostFromPool(humanPool, costCard, animation.cost) : undefined;
@@ -315,14 +316,14 @@ export function payGenericSacrificeCost(
   if (!seat || !card) return undefined;
   const ability = parseGenericSacrificeAbilities(abilityOracleText(card))[abilityIndex];
   if (!ability || (ability.costTap && card.tapped)) return undefined;
-  if (ability.costTap && card.typeLine.includes("Creature") && card.summoningSick && !hasHaste(card)) return undefined;
+  if (ability.costTap && isSummoningSick(card)) return undefined;
   if (!activateOnlyIfConditionMet(ability.clause, seat)) return undefined;
   // An {X} in the cost (Fiend Artisan): the engine picks X, and the cost below is paid with it.
   const xValue = ability.costX ? chooseAbilityX(session, seat, card, ability) : 0;
   if (xValue === undefined) return undefined;
   const payAbility = ability.costX ? abilityCostWithX(ability, xValue) : ability;
 
-  const discardCard = ability.costDiscard ? chooseWorstHandCardToDiscard(seat) : undefined;
+  const discardCard = ability.costDiscard ? chooseWorstHandCardToDiscard(seat, undefined, session.stackSpellCardIds) : undefined;
   if (ability.costDiscard && !discardCard) return undefined;
   // Rule 119.4: a life payment can only be made if the player's life total is at least that much
   // (Arid Mesa and the rest of the fetch-land cycle's "Pay 1 life" cost, ...) — without this gate a
@@ -699,7 +700,7 @@ export function payGenericTapCost(
   // "Tap three untapped Zombies you control" has no {T} of its own, so the source's own tapped/summoning-sick state is irrelevant.
   if (!ability.costTapCreatures) {
     if (card.tapped) return undefined;
-    if (card.typeLine.includes("Creature") && card.summoningSick && !hasHaste(card)) return undefined;
+    if (isSummoningSick(card)) return undefined;
   }
   const chosenTaps = ability.costTapCreatures && chosenTapCreatureIds && chosenTapCreatureIds.length === ability.costTapCreatures.count
     ? chosenTapCreatureIds.map((id) => seat.board.battlefield.find((creature) => creature.id === id && !creature.tapped)).filter((creature): creature is VisibleCard => Boolean(creature))
@@ -718,7 +719,7 @@ export function payGenericTapCost(
   const tapIds = new Set((tappedForCost ?? []).map((creature) => creature.id));
 
   const discardCard = ability.costDiscard
-    ? (chosenDiscardId ? discardableHandCards(seat, ability.costDiscardType).find((handCard) => handCard.id === chosenDiscardId) : undefined) ?? chooseWorstHandCardToDiscard(seat, ability.costDiscardType)
+    ? (chosenDiscardId ? discardableHandCards(seat, ability.costDiscardType, session.stackSpellCardIds).find((handCard) => handCard.id === chosenDiscardId) : undefined) ?? chooseWorstHandCardToDiscard(seat, ability.costDiscardType, session.stackSpellCardIds)
     : undefined;
   if (ability.costDiscard && !discardCard) return undefined;
 
@@ -1103,7 +1104,7 @@ export function payGenericManaCost(
   const seat = session.seats.find((item) => item.id === seatId);
   const card = seat?.board.battlefield.find((item) => item.id === cardId);
   if (!seat || !card) return undefined;
-  const ability = parseGenericManaAbilities(card.oracleText)[abilityIndex];
+  const ability = parseGenericManaAbilities(abilityOracleText(card))[abilityIndex];
   if (!ability) return undefined;
   if (!activateOnlyIfConditionMet(ability.clause, seat)) return undefined;
 
@@ -1114,7 +1115,7 @@ export function payGenericManaCost(
   const effect = parseGenericAbilityEffect(ability.effectText);
   if (!effect) return undefined;
 
-  const discardCard = ability.costDiscard ? chooseWorstHandCardToDiscard(seat) : undefined;
+  const discardCard = ability.costDiscard ? chooseWorstHandCardToDiscard(seat, undefined, session.stackSpellCardIds) : undefined;
   if (ability.costDiscard && !discardCard) return undefined;
 
   // Rule 118.4: a life-payment cost can't be paid below 0 life — checked as a hard precondition,
@@ -1191,7 +1192,7 @@ export function resolveSelfUntapAbility(session: GameSession, seatId: string, ca
   const seat = session.seats.find((item) => item.id === seatId);
   const card = seat?.board.battlefield.find((item) => item.id === cardId);
   if (!seat || !card || !card.tapped) return { session };
-  const ability = parseSelfUntapAbilities(card.oracleText)[abilityIndex];
+  const ability = parseSelfUntapAbilities(abilityOracleText(card))[abilityIndex];
   if (!ability) return { session };
   if (!activateOnlyIfConditionMet(ability.clause, seat)) return { session };
 
@@ -1244,7 +1245,7 @@ function addCreatureTypeToTypeLine(typeLine: string, newType: string): string {
 // Every non-indestructible permanent of the given plural types ("artifacts", "creatures"...) on the whole battlefield. Also used by the AI gate in legalActions.
 export function destroyAllTypesVictims(session: GameSession, types: string[]): Array<{ seatId: string; card: VisibleCard }> {
   const wanted = types.map((type) => type.replace(/s$/, ""));
-  return session.seats.flatMap((item) => item.board.battlefield.filter((card) => !hasIndestructible(card) && wanted.some((type) => hasCardType(card, type[0].toUpperCase() + type.slice(1)))).map((card) => ({ seatId: item.id, card })));
+  return session.seats.flatMap((item) => item.board.battlefield.filter((card) => !card.phasedOut && !hasIndestructible(card) && wanted.some((type) => hasCardType(card, type[0].toUpperCase() + type.slice(1)))).map((card) => ({ seatId: item.id, card })));
 }
 
 export function applyGenericTapEffect(
@@ -1462,7 +1463,7 @@ export function applyGenericTapEffect(
       if (player.hasLost) continue;
       next = drawForSeat(next, player.id, `${player.name} draws a card from ${sourceCardName}.`);
       const current = next.seats.find((item) => item.id === player.id);
-      const discard = current && player.id !== options?.skipDiscardSeatId ? chooseWorstHandCardToDiscard(current) : undefined;
+      const discard = current && player.id !== options?.skipDiscardSeatId ? chooseWorstHandCardToDiscard(current, undefined, next.stackSpellCardIds) : undefined;
       if (discard) {
         next = moveCardBetweenVisibleZones(next, player.id, discard.id, "graveyard");
         next = rulesEvent(next, player.id, `${player.name} discards ${discard.name} (${sourceCardName}).`);

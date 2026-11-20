@@ -17,6 +17,8 @@ import * as THREE from "three";
 import type { AgentReasoning, GameSession, PlayerSeat, VisibleCard } from "@/lib/types";
 import type { AgentLesson } from "@/lib/agentLessons";
 import { effectivePower, effectiveToughness } from "@/lib/counters";
+import { HOURGLASS_PATH, SUMMONING_SICK_TOOLTIP, isSummoningSick } from "@/lib/summoningSickness";
+import { SummoningSickBadge } from "@/components/SummoningSickBadge";
 import { rotateDelta } from "@/lib/cameraPan";
 import { cardPickOptions, toggleCardSelection } from "@/lib/cardPick";
 import {
@@ -189,6 +191,8 @@ interface ThreeGameTableProps {
   guestReadOnly?: boolean;
   /** Multiplayer friend who plays their seat: the full action HUD, minus the host-only Agent Activity panel (the stops grid, Full Control and Stop Next drive the friend's own seat settings). */
   guestActing?: boolean;
+  /** Test/sandbox tools (manual Draw / Search Library / life +- / move cards between zones / counters). Default on (solo play); a friend's table and a multiplayer host outside sandbox mode pass false. */
+  testTools?: boolean;
   /** Mulligan step: this seat already kept (hides Keep/Mulligan) and the names of seats still deciding ("Waiting for ... to decide"). */
   mulliganKept?: boolean;
   mulliganWaitingFor?: string[];
@@ -939,6 +943,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
   const [actionLogDragOffset, setActionLogDragOffset] = useState<{ x: number; y: number } | undefined>();
   const [reasoningSeatId, setReasoningSeatId] = useState<string | undefined>();
   const human = hostHumanSeat(props.session.seats) ?? props.session.seats[0];
+  const testTools = props.testTools !== false;
   const agentSeats = props.session.seats.filter((seat) => seat.kind === "agent");
   const latest = props.session.events[0];
   const phaseNotice = latest?.detail === "Phase change" ? latest : undefined;
@@ -1670,11 +1675,11 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
     const position = getClampedDropPosition(event);
     const tableZone = tableZoneAtPosition(props.session, human.id, position);
     if (tableZone === "graveyard") {
-      props.onMoveCardToGraveyard?.(human.id, cardId);
+      if (testTools) props.onMoveCardToGraveyard?.(human.id, cardId);
       return;
     }
     if (tableZone === "exile") {
-      props.onMoveCardToExile?.(human.id, cardId);
+      if (testTools) props.onMoveCardToExile?.(human.id, cardId);
       return;
     }
     props.onPlayCard?.(human.id, cardId, position);
@@ -1693,13 +1698,15 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
     const { cardId, zone } = getDraggedCard(event);
     setDraggingHandCardId(undefined);
     setDraggingZone(undefined);
-    if (!cardId || zone !== "graveyard") return;
+    if (!cardId || zone !== "graveyard" || !testTools) return;
     props.onMoveCardToHand?.(human.id, cardId);
   }
 
   const inspectedOwner = props.inspectedCard ? findCardOwner(props.session, props.inspectedCard.id) : undefined;
   // The inspector offers the table owner's actions (move/activate/cast ...) only to a viewer who may act; a spectator or not-yet-acting friend just reads the card.
   const inspectedActionOwner = props.spectator || props.guestReadOnly ? undefined : inspectedOwner;
+  // The same owner, but only when the manual test tools (move a card to another zone, edit counters) are switched on.
+  const testToolOwner = testTools ? inspectedActionOwner : undefined;
 
   // Minimize for the choice boxes. Every decision box shares the same full-viewport backdrop that blocks the board, so instead of editing
   // each one, the boxes are wrapped in two "choice layers" that are simply hidden (kept mounted, so picks made so far survive) while
@@ -1931,13 +1938,17 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
                 </span>
               ))}
             </div>
-            <button type="button" onClick={() => props.onDrawCard?.(human.id)}>Draw</button>
-            <button type="button" onClick={() => props.onShuffleLibrary?.(human.id)}>Shuffle</button>
-            <button type="button" onClick={props.onOpenLibrarySearch}>Search Library</button>
+            {testTools ? (
+              <>
+                <button type="button" onClick={() => props.onDrawCard?.(human.id)}>Draw</button>
+                <button type="button" onClick={() => props.onShuffleLibrary?.(human.id)}>Shuffle</button>
+                <button type="button" onClick={props.onOpenLibrarySearch}>Search Library</button>
+              </>
+            ) : null}
             <div className="life-adjuster" aria-label="Life total controls">
-              <button type="button" onClick={() => props.onChangeLife?.(human.id, -1)}>-</button>
+              {testTools ? <button type="button" onClick={() => props.onChangeLife?.(human.id, -1)}>-</button> : null}
               <strong>{human.life}</strong>
-              <button type="button" onClick={() => props.onChangeLife?.(human.id, 1)}>+</button>
+              {testTools ? <button type="button" onClick={() => props.onChangeLife?.(human.id, 1)}>+</button> : null}
             </div>
             {props.selectedCardFaceOptions && props.selectedCardFaceOptions.length > 0 ? (
               props.selectedCardFaceOptions.map((option) => (
@@ -2031,13 +2042,13 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
           owner={inspectedOwner}
           onClose={props.onCloseInspectCard}
           onMoveToGraveyard={
-            inspectedActionOwner?.seat.kind === "human" && (inspectedActionOwner.zone === "hand" || inspectedActionOwner.zone === "battlefield" || inspectedActionOwner.zone === "exile")
-              ? () => props.onMoveCardToGraveyard?.(inspectedActionOwner.seat.id, props.inspectedCard!.id)
+            testToolOwner?.seat.kind === "human" && (testToolOwner.zone === "hand" || testToolOwner.zone === "battlefield" || testToolOwner.zone === "exile")
+              ? () => props.onMoveCardToGraveyard?.(testToolOwner.seat.id, props.inspectedCard!.id)
               : undefined
           }
           onMoveToExile={
-            inspectedActionOwner?.seat.kind === "human" && (inspectedActionOwner.zone === "hand" || inspectedActionOwner.zone === "battlefield" || inspectedActionOwner.zone === "graveyard")
-              ? () => props.onMoveCardToExile?.(inspectedActionOwner.seat.id, props.inspectedCard!.id)
+            testToolOwner?.seat.kind === "human" && (testToolOwner.zone === "hand" || testToolOwner.zone === "battlefield" || testToolOwner.zone === "graveyard")
+              ? () => props.onMoveCardToExile?.(testToolOwner.seat.id, props.inspectedCard!.id)
               : undefined
           }
           onResolveMyriadLandscape={
@@ -2085,7 +2096,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
           }
           selfUntapAbilities={
             inspectedActionOwner?.seat.kind === "human" && inspectedActionOwner.zone === "battlefield" && props.inspectedCard.tapped
-              ? parseSelfUntapAbilities(props.inspectedCard.oracleText)
+              ? parseSelfUntapAbilities(abilityOracleText(props.inspectedCard))
               : []
           }
           onActivateSelfUntap={
@@ -2095,7 +2106,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
           }
           genericManaAbilities={
             inspectedActionOwner?.seat.kind === "human" && inspectedActionOwner.zone === "battlefield"
-              ? parseGenericManaAbilities(props.inspectedCard.oracleText)
+              ? parseGenericManaAbilities(abilityOracleText(props.inspectedCard))
               : []
           }
           onActivateGenericMana={
@@ -2117,7 +2128,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
             inspectedActionOwner?.seat.kind === "human" &&
             inspectedActionOwner.zone === "battlefield" &&
             !props.inspectedCard.temporaryAnimatedAsCreature &&
-            parseManlandAnimation(props.inspectedCard.oracleText) !== undefined
+            parseManlandAnimation(abilityOracleText(props.inspectedCard)) !== undefined
               ? () => props.onActivateManlandAnimation?.(inspectedActionOwner.seat.id, props.inspectedCard!.id)
               : undefined
           }
@@ -2161,13 +2172,13 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
               : undefined
           }
           onChangeCounter={
-            inspectedActionOwner?.seat.kind === "human" && inspectedActionOwner.zone === "battlefield" && props.inspectedCard.typeLine.includes("Creature")
-              ? (delta) => props.onChangeCounter?.(inspectedActionOwner.seat.id, props.inspectedCard!.id, "+1/+1", delta)
+            testToolOwner?.seat.kind === "human" && testToolOwner.zone === "battlefield" && props.inspectedCard.typeLine.includes("Creature")
+              ? (delta) => props.onChangeCounter?.(testToolOwner.seat.id, props.inspectedCard!.id, "+1/+1", delta)
               : undefined
           }
           onChangeLoyalty={
-            inspectedActionOwner?.seat.kind === "human" && inspectedActionOwner.zone === "battlefield" && props.inspectedCard.typeLine.includes("Planeswalker")
-              ? (delta) => props.onChangeCounter?.(inspectedActionOwner.seat.id, props.inspectedCard!.id, "loyalty", delta)
+            testToolOwner?.seat.kind === "human" && testToolOwner.zone === "battlefield" && props.inspectedCard.typeLine.includes("Planeswalker")
+              ? (delta) => props.onChangeCounter?.(testToolOwner.seat.id, props.inspectedCard!.id, "loyalty", delta)
               : undefined
           }
           onActivateLoyalty={
@@ -2428,10 +2439,14 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
             setZoneView(undefined);
             props.onInspectCard?.(card);
           }}
-          onMoveToHand={(cardId) => {
-            props.onMoveCardToHand?.(zoneView.seatId, cardId);
-            setZoneView(undefined);
-          }}
+          onMoveToHand={
+            testTools
+              ? (cardId) => {
+                  props.onMoveCardToHand?.(zoneView.seatId, cardId);
+                  setZoneView(undefined);
+                }
+              : undefined
+          }
           onCastFromExile={(cardId) => {
             props.onCastFromExile?.(zoneView.seatId, cardId);
             setZoneView(undefined);
@@ -2609,6 +2624,7 @@ function CardInspector({
         <div className="card-inspector-image">
           {imageUrl ? <img src={imageUrl} alt="" /> : <FallbackLargeCard card={card} />}
           {card.token ? <span className="token-ribbon">TOKEN</span> : null}
+          <SummoningSickBadge card={card} />
           {card.phasedOut ? <span className="phased-ribbon">PHASED OUT</span> : null}
         </div>
         <div className="card-inspector-detail">
@@ -4412,8 +4428,7 @@ function BlockChoiceModal({
 function battlefieldStatusText(card: VisibleCard): string {
   const parts: string[] = [];
   if (card.tapped) parts.push("Tapped");
-  const hasHaste = hasOracleKeyword(card.oracleText, "haste") || Boolean(card.grantedKeywords?.includes("haste"));
-  if (card.typeLine.includes("Creature") && card.summoningSick && !hasHaste) parts.push("Summoning sick");
+  if (isSummoningSick(card)) parts.push("Summoning sick");
   if (card.attacking) parts.push("Attacking");
   if (card.blocking) parts.push("Blocking");
   if (card.chosenCreatureType) parts.push(`Chosen type: ${card.chosenCreatureType}`);
@@ -4457,7 +4472,7 @@ function ZoneViewerModal({
       : undefined;
   const cards = zone === "graveyard" ? (seat?.board.graveyard ?? []) : (seat?.board.exile ?? []);
   const title = zone === "graveyard" ? "Graveyard" : "Exile";
-  const canReturnToHand = seat?.kind === "human" && zone === "graveyard";
+  const canReturnToHand = seat?.kind === "human" && zone === "graveyard" && Boolean(onMoveToHand);
   // Impulse-draw/steal-and-play effects (see zoneEffects.ts) grant temporary or indefinite
   // permission to cast a card straight out of exile — only the seat that was granted it, only
   // while any time limit hasn't expired, and only an instant/flash card if a response window is
@@ -4663,6 +4678,7 @@ function cardRenderKey(card: VisibleCard) {
     tapped: Boolean(card.tapped),
     attacking: Boolean(card.attacking),
     blocking: Boolean(card.blocking),
+    sick: isSummoningSick(card),
     image: battlefieldImageUrls(card)[0],
     x: card.battlefieldPosition?.x,
     z: card.battlefieldPosition?.z,
@@ -4940,6 +4956,7 @@ function addCard(
   cardMeshesRef.current.push(mesh);
   addCounterBadges(group, card, x, z);
   addTokenBadge(group, card, x, z);
+  if (location === "battlefield") addSummoningSickBadge(group, card, x, z);
   addPhaseVisual(group, mesh, material, card, x, z);
 }
 
@@ -5037,6 +5054,46 @@ function addTokenBadge(group: THREE.Group, card: VisibleCard, x: number, z: numb
   const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false }));
   sprite.scale.set(0.34, 0.113, 1);
   sprite.position.set(x + 0.2, 0.36, z - 0.44);
+  sprite.renderOrder = 12;
+  group.add(sprite);
+}
+
+// Hourglass on every summoning-sick creature (same predicate as the engine's attack/{T} legality: lib/summoningSickness).
+function addSummoningSickBadge(group: THREE.Group, card: VisibleCard, x: number, z: number) {
+  if (!isSummoningSick(card)) return;
+  const key = "summoning-sick-badge";
+  let texture = counterBadgeTextureCache.get(key);
+  if (!texture) {
+    const canvas = document.createElement("canvas");
+    canvas.width = 128;
+    canvas.height = 128;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.beginPath();
+    ctx.arc(64, 64, 58, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(20,24,38,0.92)";
+    ctx.fill();
+    ctx.lineWidth = 6;
+    ctx.strokeStyle = "rgba(255,255,255,0.95)";
+    ctx.stroke();
+    ctx.save();
+    ctx.translate(32, 32);
+    ctx.scale(2.67, 2.67);
+    const path = new Path2D(HOURGLASS_PATH);
+    ctx.fillStyle = "#ffd76a";
+    ctx.fill(path);
+    ctx.lineWidth = 0.8;
+    ctx.strokeStyle = "rgba(0,0,0,0.55)";
+    ctx.stroke(path);
+    ctx.restore();
+    texture = new THREE.CanvasTexture(canvas);
+    texture.needsUpdate = true;
+    counterBadgeTextureCache.set(key, texture);
+  }
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false }));
+  sprite.name = SUMMONING_SICK_TOOLTIP;
+  sprite.scale.set(0.2, 0.2, 1);
+  sprite.position.set(x - 0.24, 0.36, z + 0.12);
   sprite.renderOrder = 12;
   group.add(sprite);
 }

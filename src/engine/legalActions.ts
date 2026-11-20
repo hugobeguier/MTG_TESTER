@@ -15,6 +15,7 @@ import { isPureRitual, wouldRitualBeUsed } from "@/engine/ritualUse";
 import { commanderColorCount, hideawayDamageConditionMet } from "@/engine/oneShotEffects";
 import { findSpellSourceCard, pendingActionSourceCard } from "@/engine/priority";
 import { hasHaste, isLandCard } from "@/engine/shared";
+import { isSummoningSick } from "@/lib/summoningSickness";
 import { hasSorcerySpeedOnlyLimiter } from "@/engine/triggerFinders";
 import { hasOnceEachTurnLimiter } from "@/engine/triggers";
 import { isMainPhase } from "@/engine/turnFlow";
@@ -515,7 +516,7 @@ export function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllow
       // Rule 302.6: only applies when the cost actually includes {T} (Evolving Wilds) — Sakura-
       // Tribe Elder's plain sacrifice cost isn't restricted by being tapped or summoning sick.
       if (requiresTap && card.tapped) return false;
-      if (requiresTap && card.typeLine.includes("Creature") && card.summoningSick && !hasHaste(card)) return false;
+      if (requiresTap && isSummoningSick(card)) return false;
       // Wayfarer's Bauble-style "{2}, {T}, Sacrifice ...: Search..." has a real generic-mana
       // component on top of tap+sacrifice — Evolving Wilds' plain "{T}, Sacrifice ..." costs 0 here,
       // so this is a no-op affordability check for that whole original card family.
@@ -578,7 +579,7 @@ export function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllow
       // ability's {T} cost (Viscera Seer, Carrion Feeder-style "{T}, Sacrifice a creature: ..."
       // are themselves creatures) unless it has haste. Non-creature permanents (Food/Clue tokens,
       // artifacts) have no such restriction.
-      if (ability.costTap && card.typeLine.includes("Creature") && card.summoningSick && !hasHaste(card)) return;
+      if (ability.costTap && isSummoningSick(card)) return;
       if (ability.costDiscard && seat.board.hand.length === 0) return;
       // Rule 119.4: a life payment (Arid Mesa and the rest of the fetch-land cycle's "Pay 1 life"
       // cost, ...) can only be made if the player's life total is at least that much.
@@ -638,14 +639,14 @@ export function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllow
         const damageMet = hideawayDamageConditionMet(session, seat.id, ability.effect.conditionText);
         if (!(damageMet !== undefined ? damageMet : isBoardConditionMet(ability.effect.conditionText, seat, session.seats))) return;
       }
-      if (ability.costDiscard && discardableHandCards(seat, ability.costDiscardType).length === 0) return;
+      if (ability.costDiscard && discardableHandCards(seat, ability.costDiscardType, session.stackSpellCardIds).length === 0) return;
       if (ability.costTapCreatures) {
         if (!chooseCreaturesToTapForCost(seat, ability.costTapCreatures.count, ability.costTapCreatures.subtype)) return;
       } else {
         if (card.tapped) return;
         // Rule 302.6: same summoning-sickness gate as the sacrifice-ability loop above — a creature
         // can't be tapped to pay a {T} cost the turn it entered without haste.
-        if (card.typeLine.includes("Creature") && card.summoningSick && !hasHaste(card)) return;
+        if (isSummoningSick(card)) return;
       }
       if (ability.costDiscard && seat.board.hand.length === 0) return;
       // excludeCardId: card.id — same self-tap exclusion as the sacrifice-ability loop above.
@@ -757,7 +758,7 @@ export function legalActivatedAbilityActions(seat: PlayerSeat, sorcerySpeedAllow
   // so unlike every other ability in this function it's legal at instant speed, not gated by
   // sorcerySpeedAllowed. Excludes an already-animated-this-turn land: reactivating would just
   // re-apply the exact same until-end-of-turn state for no benefit.
-  for (const card of seat.board.battlefield.filter((item) => !item.temporaryAnimatedAsCreature)) {
+  for (const card of seat.board.battlefield.filter((item) => !item.temporaryAnimatedAsCreature && !item.abilitiesStripped && !item.phasedOut)) {
     const animation = parseManlandAnimation(card.oracleText);
     if (!animation) continue;
     if (animation.cost > 0 && !chooseManaSourcesForCost(seat, genericCostShim(animation.cost), animation.cost, card.id, session.seats).ok) continue;

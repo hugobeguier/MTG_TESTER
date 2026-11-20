@@ -27,6 +27,7 @@ import { matchesTargetType, parseRemovalEffect } from "@/lib/removalSpells";
 import type { SpellExtraEffect } from "@/lib/spellExtras";
 import { parseSpellExtraEffects } from "@/lib/spellExtras";
 import { scoreSurveil } from "@/lib/surveilScoring";
+import { handExcludingStack } from "@/lib/stackedCards";
 import { targetedEffectSpec } from "@/lib/targetedEffects";
 import type { ChosenTarget } from "@/lib/targeting";
 import { legalTargets } from "@/lib/targeting";
@@ -142,12 +143,14 @@ export function deferHumanDiscard(session: GameSession, seatId: string, count: n
 }
 
 // Hand cards that can pay a "Discard a [Type] card" cost (Fauna Shaman: creature cards only); any card when untyped.
-export function discardableHandCards(seat: PlayerSeat, cardType?: string): VisibleCard[] {
-  return cardType ? seat.board.hand.filter((card) => hasCardType(card, cardType)) : seat.board.hand;
+// excludeIds: spells on the stack (session.stackSpellCardIds) — a card being cast isn't in the hand (rule 601.2a), so it can't be discarded.
+export function discardableHandCards(seat: PlayerSeat, cardType?: string, excludeIds?: readonly string[]): VisibleCard[] {
+  const hand = handExcludingStack(seat, excludeIds);
+  return cardType ? hand.filter((card) => hasCardType(card, cardType)) : hand;
 }
 
-export function chooseWorstHandCardToDiscard(seat: PlayerSeat, cardType?: string): VisibleCard | undefined {
-  const pool = discardableHandCards(seat, cardType);
+export function chooseWorstHandCardToDiscard(seat: PlayerSeat, cardType?: string, excludeIds?: readonly string[]): VisibleCard | undefined {
+  const pool = discardableHandCards(seat, cardType, excludeIds);
   if (pool.length === 0) return undefined;
   return pool.reduce((worst, card) => (card.manaValue > worst.manaValue ? card : worst));
 }
@@ -374,7 +377,7 @@ export function chooseDamageTarget(session: GameSession, casterSeatId: string, a
   const creatureCandidates: Array<{ seatId: string; card: VisibleCard }> = [];
   for (const seat of opponents) {
     for (const card of seat.board.battlefield) {
-      if (card.typeLine.includes("Creature") && !hasShroud(card) && !hasHexproof(card) && !isProtectedFrom(card, sourceCard)) {
+      if (card.typeLine.includes("Creature") && !card.phasedOut && !hasShroud(card) && !hasHexproof(card) && !isProtectedFrom(card, sourceCard)) {
         creatureCandidates.push({ seatId: seat.id, card });
       }
     }

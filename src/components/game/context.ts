@@ -13,6 +13,7 @@
 import { type AgentReasoning, type CardImageUris, type GameSession, type ManaContribution, type ManaPool, type RestrictedManaBatch, type VisibleCard } from "@/lib/types";
 import { MAX_SESSION_EVENTS, loadRuleWorkflowCacheOnce } from "@/lib/agentRuntime";
 import { type PendingAction, type PendingRuleChoice } from "@/engine/types";
+import { spellCardIdsOnStack } from "@/lib/stackedCards";
 import { type StackFeedEntry } from "@/components/ThreeGameTable";
 import { checkStateBasedActions } from "@/engine/stateBased";
 import { payGenericSacrificeCost, payGenericTapCost } from "@/engine/abilities";
@@ -75,7 +76,11 @@ export function useGameState(initialSession: GameSession, options: { emptyNonHos
   // after every single change, instead of relying on scattered call sites to remember to do it.
   const setSession = useCallback((update: GameSession | ((prev: GameSession) => GameSession)) => {
     rawSetSession((current) => {
-      const next = checkStateBasedActions(typeof update === "function" ? update(current) : update);
+      const checked = checkStateBasedActions(typeof update === "function" ? update(current) : update);
+      // Rule 601.2a: record which cards are spells on the stack so hand-based choices can skip them (src/lib/stackedCards.ts).
+      const stackIds = spellCardIdsOnStack(stackStore.ref.current.stack, stackStore.ref.current.pending);
+      const sameIds = stackIds.length === (checked.stackSpellCardIds?.length ?? 0) && stackIds.every((id, i) => checked.stackSpellCardIds?.[i] === id);
+      const next = sameIds ? checked : { ...checked, stackSpellCardIds: stackIds };
       // The event log is prepended to on every action and never trimmed; copying/filtering an ever-growing array on each update gets
       // slower all game. Newest events come first, so dropping the tail only loses the oldest history.
       return next.events.length > MAX_SESSION_EVENTS ? { ...next, events: next.events.slice(0, MAX_SESSION_EVENTS) } : next;
@@ -89,6 +94,14 @@ export function useGameState(initialSession: GameSession, options: { emptyNonHos
   }, []);
   const stackStore = useStackState({ activeSeatId: initialSession.activePlayerId ?? initialSession.seats[1]?.id, prioritySeatId: initialSession.activePlayerId ?? initialSession.seats[1]?.id });
   const { setPending: setPendingAction, setPasses: setPriorityPasses, setPrioritySeatId, setActiveSeatId } = stackStore;
+  // Keep session.stackSpellCardIds current when the stack changes with no session update alongside it (a push, a pass). No-op when unchanged.
+  useEffect(() => {
+    const ids = spellCardIdsOnStack(stackStore.state.stack, stackStore.state.pending);
+    rawSetSession((current) => {
+      const had = current.stackSpellCardIds ?? [];
+      return ids.length === had.length && ids.every((id, i) => had[i] === id) ? current : { ...current, stackSpellCardIds: ids };
+    });
+  }, [stackStore.state.stack, stackStore.state.pending]);
   const activeSeatId = stackStore.state.activeSeatId as string; // was useState<string>; keeps read sites' types
   // Stable identity for the table's session prop: a fresh `{ ...session }` on every render made everything inside the table that
   // depends on `props.session` recompute on unrelated re-renders (hover, thinking text, timers).
@@ -96,6 +109,8 @@ export function useGameState(initialSession: GameSession, options: { emptyNonHos
   const [selectedHandCardId, setSelectedHandCardId] = useState<string | undefined>();
   // Multiplayer: names of friends the game is waiting on because they are disconnected (set by useMpHost). While non-empty nothing advances on its own.
   const [mpPausedFor, setMpPausedFor] = useState<string[]>([]);
+  // Test/sandbox tools (manual draw, library search, move cards between zones, life +/-): on in solo play; off by default for a multiplayer host until they switch it on (the friends see a banner).
+  const [sandboxMode, setSandboxMode] = useState(!options.emptyNonHostSeats);
   const [inspectedCard, setInspectedCard] = useState<VisibleCard | undefined>();
   const [gameStage, setGameStage] = useState<GameStage>("mulligan");
   const [gameOverDismissed, setGameOverDismissed] = useState(false);
@@ -299,7 +314,7 @@ export function useGameState(initialSession: GameSession, options: { emptyNonHos
   // The situation and scored options of each agent's latest decision (see requestAgentDecision), attached to its reasoning for the 🧠 chat.
   const agentDecisionInfo = useRef<Record<string, Pick<AgentReasoning, "situation" | "options" | "chosenId" | "turn" | "phase">>>({});
   return {
-    mpPausedFor, setMpPausedFor, mode, setMode, session, setSession, activeSeatId, setActiveSeatId, prioritySeatId, setPrioritySeatId, tableSession, selectedHandCardId, setSelectedHandCardId, inspectedCard, setInspectedCard, gameStage, setGameStage, gameOverDismissed, setGameOverDismissed, latestSessionRef, setupMessage, setSetupMessage, configs, setConfigs, deckLibrary, defaultDecksApplied, savedGames, setSavedGames, gameStarting, setGameStarting, autoValidatedDefaultDeck, humanSeat, selectedHandCard, baseSeats,
+    sandboxMode, setSandboxMode, manualUntapAllowed: Boolean(options.emptyNonHostSeats) && sandboxMode, mpPausedFor, setMpPausedFor, mode, setMode, session, setSession, activeSeatId, setActiveSeatId, prioritySeatId, setPrioritySeatId, tableSession, selectedHandCardId, setSelectedHandCardId, inspectedCard, setInspectedCard, gameStage, setGameStage, gameOverDismissed, setGameOverDismissed, latestSessionRef, setupMessage, setSetupMessage, configs, setConfigs, deckLibrary, defaultDecksApplied, savedGames, setSavedGames, gameStarting, setGameStarting, autoValidatedDefaultDeck, humanSeat, selectedHandCard, baseSeats,
     choices: { decisions, mulligans, setMulligans, keptHands, setKeptHands, keptHandsRef, mulliganReturnCardIds, setMulliganReturnCardIds, libraryLook, setLibraryLook, manualLibrarySearch, setManualLibrarySearch, pendingRuleChoice, setPendingRuleChoice, blockChoice, setBlockChoice, selectedBlockerIds, setSelectedBlockerIds, myriadSearch, setMyriadSearch, myriadTapChoice, setMyriadTapChoice, basicLandFetchSearch, setBasicLandFetchSearch, choiceMinimized, setChoiceMinimized, pendingOrderedTriggerResume, commanderZoneChoiceAsked, auraRetargetAsked },
     stack: { stackStore, pendingAction, setPendingAction, stackActions, priorityPasses, setPriorityPasses, priorityStopSettings, updatePriorityStopSettings, seatStops, setSeatStops, seatYields, setSeatYields, holdPriorityOnce, setHoldPriorityOnce, castDispatchInFlight, CAST_DISPATCH_STALE_MS, resolveBeatIds, resolveNowRef, abilityResolvers, abilityApiRef, stackFeed, setStackFeed },
     mana: { manaPools, setManaPools, copyMana, setCopyMana, manaContributions, setManaContributions, restrictedManaBatches, setRestrictedManaBatches, manaChoice, setManaChoice, lastCastManaContributors },

@@ -107,8 +107,12 @@ export function parseOtherCreaturesGrant(oracleText: string): OtherCreaturesGran
 
 // The card's rules text for reading its ACTIVATED abilities: its own, plus any ability another permanent has granted it (Ygra's "have '{2}, {T},
 // Sacrifice this permanent: You gain 3 life.'"). Every place that parses a card's sacrifice/tap abilities goes through this.
-export function abilityOracleText(card: { oracleText: string; grantedAbilityText?: string }): string {
-  return card.grantedAbilityText ? `${card.oracleText}\n${card.grantedAbilityText}` : card.oracleText;
+// A phased-out permanent has no usable abilities; one that lost all abilities (Utter Insignificance) keeps only what a later effect granted it
+// (see lib/effectivePermanent.ts).
+export function abilityOracleText(card: { oracleText: string; grantedAbilityText?: string; abilitiesStripped?: boolean; phasedOut?: boolean }): string {
+  if (card.phasedOut) return "";
+  const own = card.abilitiesStripped ? "" : card.oracleText;
+  return card.grantedAbilityText ? `${own}\n${card.grantedAbilityText}` : own;
 }
 
 // "Each land is a Swamp in addition to its other land types." (Urborg, Tomb of Yawgmoth) / "...a Forest..." (Yavimaya, Cradle of Growth): every land

@@ -754,7 +754,8 @@ export function useChoicePrompts(ctx: GameContext) {
   function completeDiscardChoice(cardIds: string[]) {
     const choice = pendingRuleChoice;
     if (!choice || choice.kind !== "discard_to_hand_size") return;
-    completeRuleChoice(choice, cardIds);
+    // Rule 601.2a: a spell on the stack can't be discarded, even if a stale/forged pick names it.
+    completeRuleChoice(choice, cardIds.filter((id) => !session.stackSpellCardIds?.includes(id)));
   }
 
   function chooseNextUpkeepTrigger(sourceCardId: string) {

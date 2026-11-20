@@ -300,6 +300,10 @@ export interface VisibleCard {
   // at the moment of entering/dying, before this pass ever runs) aren't retroactively suppressed —
   // this only ever affects a permanent that's continuously on the battlefield.
   abilitiesStripped?: boolean;
+  // Derived every state-based-action pass from the Auras/Equipment attached to this creature (Pacifism: "Enchanted creature can't attack or block.").
+  // Read by canAttack/canBlock; not part of the creature's own abilities, so it survives "loses all abilities".
+  attachmentCantAttack?: boolean;
+  attachmentCantBlock?: boolean;
   // Additional card types granted by a static ability elsewhere (Secret Arcade-style "X you
   // control are Y in addition to their other types") — recomputed every state-based-action pass
   // from current board state, same pattern as grantedKeywords. Everything reading card.typeLine
@@ -315,6 +319,16 @@ export interface VisibleCard {
   // — a single WUBRG letter, locked in once at ETB the same way chosenCreatureType is.
   chosenColor?: string;
   attachTimestamp?: number;
+  // Layer-6 timestamps (all drawn from GameSession.effectTimestampCounter, see engine/etb.ts nextTimestamp). `permanentTimestamp` is stamped by the
+  // state-based pass the first time the permanent is seen on the battlefield (entry) and cleared on zone change / control change (so it is re-stamped);
+  // it is the timestamp of every static ability this permanent grants. `temporaryKeywordStamps` records when each until-end-of-turn granted keyword
+  // was first seen (i.e. when the granting spell/ability resolved). `temporaryStripStamp` is the same for the temporary "loses all abilities".
+  // `abilitiesStrippedAt` is the latest "loses all abilities" timestamp acting on the permanent: abilities from sources with an EARLIER timestamp are
+  // lost, LATER ones are kept (see lib/effectivePermanent.ts abilityIsActive).
+  permanentTimestamp?: number;
+  temporaryKeywordStamps?: Record<string, number[]>;
+  temporaryStripStamp?: number;
+  abilitiesStrippedAt?: number;
   cdaPower?: number;
   cdaToughness?: number;
   setPowerOverride?: number;
@@ -570,6 +584,9 @@ export interface GameSession {
   // Extra combat phases still owed this turn (Hellkite Charger, Scourge of the Throne): when end of combat is passed, the turn
   // goes back to beginning of combat instead of on to the second main phase.
   extraCombatsPending?: number;
+  // Card ids of spells currently on the stack. A cast spell's card stays in its source zone until it resolves, so every hand-based
+  // choice (discard, connive, put back) must skip these (src/lib/stackedCards.ts). Stamped by the setSession choke point.
+  stackSpellCardIds?: string[];
   // Creatures that left the battlefield WITHOUT dying (bounced, exiled, put into a library): "whenever a creature you control leaves the
   // battlefield" watchers react to these. Deaths come through pendingDeaths instead. Drained by a component effect.
   pendingLeaves?: Array<{ seatId: string; card: VisibleCard }>;
