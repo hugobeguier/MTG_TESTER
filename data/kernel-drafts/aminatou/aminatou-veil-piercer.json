@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "At the beginning of your upkeep, surveil 2. (Look at the top two cards of your library, then put any number of them into your graveyard and the rest on top of your library in any order.)",
+      "trigger": {
+        "event": "begin_step",
+        "step": "upkeep",
+        "whose": "yours"
+      },
+      "steps": [
+        {
+          "kind": "surveil",
+          "amount": 2,
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:surveil"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "static",
+      "text": "Each enchantment card in your hand has miracle. Its miracle cost is equal to its mana cost reduced by {4}. (You may cast a card for its miracle cost when you draw it if it's the first card you drew this turn.)",
+      "static": {
+        "affects": {
+          "types": [
+            "enchantment"
+          ],
+          "zone": "hand",
+          "owner": "you"
+        },
+        "modify": [
+          {
+            "grantAbility": {
+              "kind": "cast_option",
+              "keyword": "miracle",
+              "miracleCost": "its mana cost reduced by {4}",
+              "reduceBy": "{4}"
+            }
+          }
+        ]
+      },
+      "srcs": [
+        0,
+        1
+      ],
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "quantity",
+        "reason": "the miracle cost 'mana cost reduced by {4}' is carried in the grantAbility record (reduceBy), not a Quantity"
+      }
+    ]
+  }
+}

@@ -1,0 +1,152 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "activated",
+      "text": "+1: Create a 1/1 colorless Servo artifact creature token.",
+      "costs": [
+        {
+          "loyalty": 1
+        }
+      ],
+      "timing": {
+        "speed": "sorcery",
+        "limit": {
+          "count": 1,
+          "per": "turn"
+        }
+      },
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Servo",
+          "tokenPower": 1,
+          "tokenToughness": 1,
+          "tokenColors": [
+            "colorless"
+          ],
+          "tokenTypeLine": "Artifact Creature — Servo"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "timing",
+        "cost:loyalty"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "+1: The next spell you cast this turn has affinity for artifacts. (It costs {1} less to cast for each artifact you control as you cast it.)",
+      "costs": [
+        {
+          "loyalty": 1
+        }
+      ],
+      "timing": {
+        "speed": "sorcery",
+        "limit": {
+          "count": 1,
+          "per": "turn"
+        }
+      },
+      "steps": [
+        {
+          "kind": "grant_effect",
+          "who": "you",
+          "appliesTo": "next_spell_cast",
+          "modify": [
+            {
+              "grant": "affinity for artifacts"
+            }
+          ],
+          "duration": "until_end_of_turn"
+        }
+      ],
+      "scripted": {
+        "handler": "next_spell_gains_keyword",
+        "params": {
+          "keyword": "affinity",
+          "for": "artifacts"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "scripted:next_spell_gains_keyword",
+        "timing",
+        "cost:loyalty",
+        "step:grant_effect",
+        "field:grant_effect.appliesTo",
+        "field:grant_effect.modify"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "activated",
+      "text": "−7: For each artifact you control, create a token that's a copy of it. Those tokens gain haste. Exile those tokens at the beginning of the next end step.",
+      "costs": [
+        {
+          "loyalty": -7
+        }
+      ],
+      "timing": {
+        "speed": "sorcery",
+        "limit": {
+          "count": 1,
+          "per": "turn"
+        }
+      },
+      "steps": [
+        {
+          "kind": "repeat_for_each",
+          "over": {
+            "types": [
+              "artifact"
+            ],
+            "controller": "you"
+          },
+          "steps": [
+            {
+              "kind": "copy",
+              "target": "event_object",
+              "token": true,
+              "gainKeywords": [
+                "haste"
+              ],
+              "exileAt": "next_end_step"
+            }
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "timing",
+        "cost:loyalty",
+        "step:repeat_for_each",
+        "field:repeat_for_each.over",
+        "field:repeat_for_each.steps",
+        "step:copy",
+        "field:copy.exileAt",
+        "field:copy.gainKeywords",
+        "field:copy.token"
+      ]
+    },
+    {
+      "id": "a4",
+      "kind": "scripted",
+      "text": "Saheeli, the Gifted can be your commander.",
+      "scripted": {
+        "handler": "can_be_your_commander"
+      },
+      "implementation": "needed",
+      "needs": [
+        "scripted:can_be_your_commander"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Improvise (Each artifact you tap after you're done activating mana abilities pays for {1}.)",
+      "keyword": {
+        "name": "improvise"
+      },
+      "scripted": {
+        "handler": "improvise"
+      },
+      "implementation": "needed",
+      "needs": [
+        "scripted:improvise",
+        "keyword:improvise"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "spell_effect",
+      "text": "Reveal the top X cards of your library. You may put any number of artifact cards with mana value X or less from among them onto the battlefield. Then put all cards revealed this way that weren't put onto the battlefield into your graveyard.",
+      "xPrompt": {
+        "title": "Saheeli's Directive: choose X",
+        "instruction": "Choose a value for X (paid in mana as part of the spell's cost)."
+      },
+      "steps": [
+        {
+          "kind": "look_top",
+          "amount": {
+            "ref": "X"
+          },
+          "reveal": true,
+          "src": 0
+        },
+        {
+          "kind": "choose",
+          "from": {
+            "types": [
+              "artifact"
+            ],
+            "zone": "library",
+            "mv": {
+              "op": "<=",
+              "value": {
+                "ref": "X"
+              }
+            }
+          },
+          "fromLooked": true,
+          "anyNumber": true,
+          "saveAs": "chosen",
+          "optional": true,
+          "src": 1,
+          "prompt": {
+            "title": "Saheeli's Directive: put artifacts onto the battlefield",
+            "instruction": "You may put any number of artifact cards with mana value X or less from among the revealed cards onto the battlefield."
+          }
+        },
+        {
+          "kind": "move_card_zone",
+          "target": "chosen",
+          "moveTo": "battlefield",
+          "src": 1
+        },
+        {
+          "kind": "move_card_zone",
+          "what": "rest_of_looked_cards",
+          "moveTo": "graveyard",
+          "src": 2
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:look_top",
+        "quantity:X",
+        "field:look_top.reveal",
+        "step:choose",
+        "field:choose.anyNumber",
+        "field:choose.from",
+        "field:choose.fromLooked",
+        "field:choose.saveAs",
+        "field:move_card_zone.what"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "up to",
+        "reason": "'any number of' is anyNumber:true"
+      },
+      {
+        "lexeme": "each",
+        "reason": "'all cards revealed this way' is the rest_of_looked_cards move"
+      }
+    ]
+  }
+}

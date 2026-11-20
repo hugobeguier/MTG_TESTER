@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "keyword",
+      "text": "Haste",
+      "keyword": {
+        "name": "haste"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "triggered",
+      "text": "Whenever this creature attacks or becomes the target of a spell, create a Treasure token.",
+      "trigger": {
+        "event": "attack",
+        "subject": "self",
+        "alsoOn": [
+          {
+            "event": "becomes_target",
+            "subject": "self"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Treasure",
+          "tokenColors": [
+            "colorless"
+          ],
+          "tokenTypeLine": "Artifact — Treasure"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:multi_event",
+        "trigger:becomes_target"
+      ]
+    },
+    {
+      "id": "a4",
+      "kind": "static",
+      "text": "Treasures you control have \"{T}, Sacrifice this artifact: Add two mana of any one color.\"",
+      "static": {
+        "affects": {
+          "subtypes": [
+            "Treasure"
+          ],
+          "controller": "you"
+        },
+        "modify": [
+          {
+            "grantAbility": {
+              "kind": "mana",
+              "text": "{T}, Sacrifice this artifact: Add two mana of any one color.",
+              "costs": [
+                {
+                  "tap": "self"
+                },
+                {
+                  "sacrifice": "self",
+                  "count": 1
+                }
+              ],
+              "mana": {
+                "produces": [
+                  {
+                    "anyColor": 2
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "target",
+        "reason": "'becomes the target of a spell' is the becomes_target trigger event, not a targeted effect"
+      }
+    ]
+  }
+}

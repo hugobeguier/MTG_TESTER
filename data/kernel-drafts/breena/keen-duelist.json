@@ -1,0 +1,131 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "kind": "triggered",
+      "text": "At the beginning of your upkeep, you and target opponent each reveal the top card of your library. You each lose life equal to the mana value of the card revealed by the other player. You each put the card you revealed into your hand.",
+      "trigger": {
+        "event": "begin_step",
+        "step": "upkeep",
+        "whose": "yours"
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "player",
+          "filter": {
+            "controller": "opponent"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Keen Duelist: choose a target",
+            "instruction": "Choose target player.",
+            "source": {
+              "card": "Keen Duelist",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "choose",
+          "who": "you",
+          "alsoWho": "target_player",
+          "from": {
+            "zone": "library"
+          },
+          "position": "top",
+          "count": 1,
+          "reveal": true,
+          "saveAs": "chosen",
+          "src": 0,
+          "prompt": {
+            "title": "Keen Duelist: choose",
+            "instruction": "Choose a card in a library.",
+            "source": {
+              "card": "Keen Duelist",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "kind": "life_change",
+          "who": "you",
+          "amount": {
+            "math": "*",
+            "args": [
+              -1,
+              {
+                "ref": "stat",
+                "of": "chosen",
+                "stat": "mana_value"
+              }
+            ]
+          },
+          "lifeFrom": "theirs",
+          "src": 1
+        },
+        {
+          "kind": "life_change",
+          "who": "target_player",
+          "amount": {
+            "math": "*",
+            "args": [
+              -1,
+              {
+                "ref": "stat",
+                "of": "chosen",
+                "stat": "mana_value"
+              }
+            ]
+          },
+          "lifeFrom": "yours",
+          "src": 1
+        },
+        {
+          "kind": "move_card_zone",
+          "what": "chosen",
+          "moveFrom": "library",
+          "moveTo": "hand",
+          "who": "you",
+          "alsoWho": "target_player",
+          "src": 2
+        }
+      ],
+      "id": "a1",
+      "implementation": "needed",
+      "needs": [
+        "step:choose",
+        "field:choose.alsoWho",
+        "field:choose.count",
+        "field:choose.from",
+        "field:choose.position",
+        "field:choose.reveal",
+        "field:choose.saveAs",
+        "quantity:math",
+        "field:life_change.amount",
+        "field:life_change.lifeFrom",
+        "field:life_change.who",
+        "field:move_card_zone.alsoWho",
+        "field:move_card_zone.what"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "another",
+        "reason": "'the other player' (the other revealer), not a second object of the same filter"
+      },
+      {
+        "lexeme": "each",
+        "reason": "you and target opponent each: alsoWho on the steps"
+      }
+    ]
+  }
+}

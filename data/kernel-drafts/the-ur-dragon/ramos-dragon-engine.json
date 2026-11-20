@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever you cast a spell, put a +1/+1 counter on Ramos for each of that spell's colors.",
+      "trigger": {
+        "event": "cast",
+        "whose": "yours"
+      },
+      "scripted": {
+        "handler": "count_spell_colors"
+      },
+      "steps": [
+        {
+          "kind": "add_counters",
+          "on": "self",
+          "counterKind": "+1/+1",
+          "amount": {
+            "ref": "event_amount"
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "scripted:count_spell_colors",
+        "step:add_counters",
+        "quantity:event_amount",
+        "field:add_counters.on"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "mana",
+      "text": "Remove five +1/+1 counters from Ramos: Add {W}{W}{U}{U}{B}{B}{R}{R}{G}{G}. Activate only once each turn.",
+      "costs": [
+        {
+          "counters": {
+            "kind": "+1/+1",
+            "count": 5,
+            "remove": true,
+            "from": "self"
+          }
+        }
+      ],
+      "timing": {
+        "limit": {
+          "count": 1,
+          "per": "turn"
+        }
+      },
+      "mana": {
+        "produces": [
+          {
+            "colors": "{W}{W}{U}{U}{B}{B}{R}{R}{G}{G}"
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "timing",
+        "cost:counters"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

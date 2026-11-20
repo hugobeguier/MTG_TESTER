@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "keyword",
+      "text": "Menace",
+      "keyword": {
+        "name": "menace"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "keyword",
+      "text": "Haste",
+      "keyword": {
+        "name": "haste"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a4",
+      "kind": "triggered",
+      "text": "Whenever this creature attacks, draw two cards.",
+      "trigger": {
+        "event": "attack",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": 2,
+          "who": "you"
+        }
+      ],
+      "implementation": "implemented",
+      "needs": []
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

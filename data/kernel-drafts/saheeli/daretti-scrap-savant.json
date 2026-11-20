@@ -1,0 +1,228 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "activated",
+      "text": "+2: Discard up to two cards, then draw that many cards.",
+      "costs": [
+        {
+          "loyalty": 2
+        }
+      ],
+      "timing": {
+        "speed": "sorcery",
+        "limit": {
+          "count": 1,
+          "per": "turn"
+        }
+      },
+      "steps": [
+        {
+          "kind": "discard",
+          "id": "d1",
+          "who": "you",
+          "amount": 2,
+          "upTo": true,
+          "src": 0,
+          "prompt": {
+            "title": "Daretti, Scrap Savant: discard",
+            "instruction": "Choose 2 cards to discard.",
+            "source": {
+              "card": "Daretti, Scrap Savant",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "kind": "draw_cards",
+          "who": "you",
+          "amount": {
+            "ref": "event_amount"
+          },
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "timing",
+        "cost:loyalty",
+        "field:discard.upTo",
+        "quantity:event_amount"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "−2: Sacrifice an artifact. If you do, return target artifact card from your graveyard to the battlefield.",
+      "costs": [
+        {
+          "loyalty": -2
+        }
+      ],
+      "timing": {
+        "speed": "sorcery",
+        "limit": {
+          "count": 1,
+          "per": "turn"
+        }
+      },
+      "steps": [
+        {
+          "kind": "sacrifice_permanent",
+          "id": "s1",
+          "who": "you",
+          "amount": 1,
+          "filter": {
+            "types": [
+              "artifact"
+            ],
+            "controller": "you"
+          },
+          "src": 0,
+          "prompt": {
+            "title": "Daretti, Scrap Savant: sacrifice",
+            "instruction": "Choose a permanent to sacrifice.",
+            "source": {
+              "card": "Daretti, Scrap Savant",
+              "ability": "a2"
+            }
+          }
+        },
+        {
+          "kind": "reanimate",
+          "target": "t1",
+          "who": "you",
+          "src": 1,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "step_done",
+              "step": "s1"
+            },
+            "src": 1
+          }
+        }
+      ],
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "artifact"
+            ],
+            "zone": "graveyard",
+            "owner": "you"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Daretti, Scrap Savant: choose a target",
+            "instruction": "Choose target artifact card in your graveyard.",
+            "source": {
+              "card": "Daretti, Scrap Savant",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "timing",
+        "cost:loyalty",
+        "field:sacrifice_permanent.amount",
+        "field:sacrifice_permanent.filter",
+        "predicate:step_done"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "activated",
+      "text": "−10: You get an emblem with \"Whenever an artifact is put into your graveyard from the battlefield, return that card to the battlefield at the beginning of the next end step.\"",
+      "costs": [
+        {
+          "loyalty": -10
+        }
+      ],
+      "timing": {
+        "speed": "sorcery",
+        "limit": {
+          "count": 1,
+          "per": "turn"
+        }
+      },
+      "steps": [
+        {
+          "kind": "grant_effect",
+          "who": "you",
+          "emblem": true,
+          "modify": [
+            {
+              "grantAbility": {
+                "kind": "triggered",
+                "text": "Whenever an artifact is put into your graveyard from the battlefield, return that card to the battlefield at the beginning of the next end step.",
+                "trigger": {
+                  "event": "leaves",
+                  "subject": {
+                    "types": [
+                      "artifact"
+                    ],
+                    "owner": "you"
+                  },
+                  "fromZone": "battlefield",
+                  "toZone": "graveyard"
+                },
+                "steps": [
+                  {
+                    "kind": "create_delayed_trigger",
+                    "at": {
+                      "event": "begin_step",
+                      "step": "end_step",
+                      "whose": "each",
+                      "next": true
+                    },
+                    "steps": [
+                      {
+                        "kind": "move_card_zone",
+                        "target": "event_object",
+                        "from": "graveyard",
+                        "moveTo": "battlefield"
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          ],
+          "duration": "instant"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "timing",
+        "cost:loyalty",
+        "step:grant_effect",
+        "field:grant_effect.emblem",
+        "field:grant_effect.modify"
+      ]
+    },
+    {
+      "id": "a4",
+      "kind": "scripted",
+      "text": "Daretti, Scrap Savant can be your commander.",
+      "scripted": {
+        "handler": "can_be_your_commander"
+      },
+      "implementation": "needed",
+      "needs": [
+        "scripted:can_be_your_commander"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

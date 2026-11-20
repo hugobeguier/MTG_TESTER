@@ -1,0 +1,271 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Sheoldred: Menace",
+      "keyword": {
+        "name": "menace"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "When Sheoldred enters, each opponent sacrifices a nontoken creature or planeswalker of their choice.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "sacrifice_permanent",
+          "who": "each_opponent",
+          "filter": {
+            "anyOf": [
+              {
+                "types": [
+                  "creature"
+                ]
+              },
+              {
+                "types": [
+                  "planeswalker"
+                ]
+              }
+            ],
+            "token": false
+          },
+          "prompt": {
+            "title": "Sheoldred // The True Scriptures: sacrifice",
+            "instruction": "Choose a permanent to sacrifice.",
+            "source": {
+              "card": "Sheoldred // The True Scriptures",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:sacrifice_permanent.filter",
+        "field:sacrifice_permanent.who"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "activated",
+      "text": "{4}{B}: Exile Sheoldred, then return it to the battlefield transformed under its owner's control. Activate only as a sorcery and only if an opponent has eight or more cards in their graveyard.",
+      "costs": [
+        {
+          "mana": "{4}{B}"
+        }
+      ],
+      "timing": {
+        "speed": "sorcery",
+        "only": [
+          {
+            "check": "zone_count",
+            "who": "opponent",
+            "zone": "graveyard",
+            "cmp": {
+              "op": ">=",
+              "value": 8
+            }
+          }
+        ]
+      },
+      "steps": [
+        {
+          "kind": "move_card_zone",
+          "target": "self",
+          "moveTo": "exile",
+          "src": 0
+        },
+        {
+          "kind": "move_card_zone",
+          "target": "self",
+          "from": "exile",
+          "moveTo": "battlefield",
+          "transformed": true,
+          "who": "owner_of_target",
+          "src": 0
+        }
+      ],
+      "srcs": [
+        1
+      ],
+      "implementation": "needed",
+      "needs": [
+        "timing",
+        "field:move_card_zone.from",
+        "field:move_card_zone.transformed",
+        "field:move_card_zone.who"
+      ]
+    },
+    {
+      "id": "a4",
+      "kind": "keyword",
+      "text": "The True Scriptures: (As this Saga enters and after your draw step, add a lore counter.)",
+      "keyword": {
+        "name": "saga"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a5",
+      "kind": "triggered",
+      "text": "I — For each opponent, destroy up to one target creature or planeswalker that player controls.",
+      "trigger": {
+        "event": "counter_put",
+        "subject": "self",
+        "chapters": [
+          1
+        ]
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "anyOf": [
+              {
+                "types": [
+                  "creature"
+                ]
+              },
+              {
+                "types": [
+                  "planeswalker"
+                ]
+              }
+            ],
+            "controller": "opponent"
+          },
+          "count": {
+            "min": 0,
+            "max": 1
+          },
+          "perOpponent": true,
+          "prompt": {
+            "title": "Sheoldred // The True Scriptures: choose a target",
+            "instruction": "Choose up to one target creature or planeswalker an opponent controls (one choice for each opponent).",
+            "source": {
+              "card": "Sheoldred // The True Scriptures",
+              "ability": "a5"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "destroy_target",
+          "target": "t1"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:counter_put",
+        "trigger:chapters",
+        "targets:multi",
+        "targets:per_opponent"
+      ]
+    },
+    {
+      "id": "a6",
+      "kind": "triggered",
+      "text": "II — Each opponent discards three cards, then mills three cards.",
+      "trigger": {
+        "event": "counter_put",
+        "subject": "self",
+        "chapters": [
+          2
+        ]
+      },
+      "steps": [
+        {
+          "kind": "discard",
+          "who": "each_opponent",
+          "amount": 3,
+          "prompt": {
+            "title": "Sheoldred // The True Scriptures: discard",
+            "instruction": "Choose 3 cards to discard.",
+            "source": {
+              "card": "Sheoldred // The True Scriptures",
+              "ability": "a6"
+            }
+          }
+        },
+        {
+          "kind": "mill",
+          "who": "each_opponent",
+          "amount": 3
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:counter_put",
+        "trigger:chapters",
+        "field:discard.who",
+        "field:mill.who"
+      ]
+    },
+    {
+      "id": "a7",
+      "kind": "triggered",
+      "text": "III — Put all creature cards from all graveyards onto the battlefield under your control. Exile this Saga, then return it to the battlefield (front face up).",
+      "trigger": {
+        "event": "counter_put",
+        "subject": "self",
+        "chapters": [
+          3
+        ]
+      },
+      "steps": [
+        {
+          "kind": "move_card_zone",
+          "who": "you",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "zone": "graveyard"
+          },
+          "from": "graveyard",
+          "moveTo": "battlefield",
+          "all": true,
+          "src": 0
+        },
+        {
+          "kind": "move_card_zone",
+          "target": "self",
+          "moveTo": "exile",
+          "src": 1
+        },
+        {
+          "kind": "move_card_zone",
+          "target": "self",
+          "from": "exile",
+          "moveTo": "battlefield",
+          "faceUp": true,
+          "src": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:counter_put",
+        "trigger:chapters",
+        "field:move_card_zone.all",
+        "field:move_card_zone.filter",
+        "field:move_card_zone.from",
+        "field:move_card_zone.faceUp"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

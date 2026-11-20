@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Indestructible",
+      "keyword": {
+        "name": "indestructible"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "static",
+      "text": "Darksteel Juggernaut's power and toughness are each equal to the number of artifacts you control.",
+      "static": {
+        "affects": "self",
+        "modify": [
+          {
+            "setBasePT": {
+              "power": {
+                "ref": "count",
+                "of": {
+                  "types": [
+                    "artifact"
+                  ],
+                  "controller": "you"
+                }
+              },
+              "toughness": {
+                "ref": "count",
+                "of": {
+                  "types": [
+                    "artifact"
+                  ],
+                  "controller": "you"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static",
+        "static:setBasePT"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "static",
+      "text": "This creature attacks each combat if able.",
+      "static": {
+        "affects": "self",
+        "modify": [
+          {
+            "mustAttack": true
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static",
+        "static:mustAttack"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

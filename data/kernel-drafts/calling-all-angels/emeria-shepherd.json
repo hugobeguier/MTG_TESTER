@@ -1,0 +1,171 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Landfall — Whenever a land you control enters, you may return target nonland permanent card from your graveyard to your hand. If that land is a Plains, you may return that nonland permanent card to the battlefield instead.",
+      "trigger": {
+        "event": "etb",
+        "subject": {
+          "types": [
+            "land"
+          ],
+          "controller": "you"
+        }
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "zone": "graveyard",
+            "owner": "you",
+            "anyOf": [
+              {
+                "types": [
+                  "artifact"
+                ]
+              },
+              {
+                "types": [
+                  "creature"
+                ]
+              },
+              {
+                "types": [
+                  "enchantment"
+                ]
+              },
+              {
+                "types": [
+                  "planeswalker"
+                ]
+              },
+              {
+                "types": [
+                  "battle"
+                ]
+              }
+            ]
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Emeria Shepherd: choose a target",
+            "instruction": "Choose target artifact, creature, enchantment, planeswalker, or battle.",
+            "source": {
+              "card": "Emeria Shepherd",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "if_else",
+          "src": 1,
+          "if": {
+            "check": "matches",
+            "obj": "event_object",
+            "filter": {
+              "subtypes": [
+                "Plains"
+              ]
+            }
+          },
+          "then": [
+            {
+              "kind": "move_card_zone",
+              "target": "t1",
+              "from": "graveyard",
+              "moveTo": "battlefield",
+              "optional": true,
+              "src": 1,
+              "id": "bf",
+              "prompt": {
+                "title": "Emeria Shepherd: optional",
+                "instruction": "Do you want to put target artifact, creature, enchantment, planeswalker, or battle onto the battlefield?",
+                "source": {
+                  "card": "Emeria Shepherd",
+                  "ability": "a2"
+                }
+              }
+            },
+            {
+              "kind": "move_card_zone",
+              "target": "t1",
+              "from": "graveyard",
+              "moveTo": "hand",
+              "optional": true,
+              "src": 1,
+              "condition": {
+                "when": "on_resolution",
+                "if": {
+                  "not": {
+                    "check": "step_done",
+                    "step": "bf"
+                  }
+                },
+                "src": 1
+              },
+              "prompt": {
+                "title": "Emeria Shepherd: optional",
+                "instruction": "Do you want to put target artifact, creature, enchantment, planeswalker, or battle into your hand?",
+                "source": {
+                  "card": "Emeria Shepherd",
+                  "ability": "a2"
+                }
+              }
+            }
+          ],
+          "else": [
+            {
+              "kind": "move_card_zone",
+              "target": "t1",
+              "from": "graveyard",
+              "moveTo": "hand",
+              "optional": true,
+              "src": 0,
+              "prompt": {
+                "title": "Emeria Shepherd: optional",
+                "instruction": "Do you want to put target artifact, creature, enchantment, planeswalker, or battle into your hand?",
+                "source": {
+                  "card": "Emeria Shepherd",
+                  "ability": "a2"
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject",
+        "step:if_else",
+        "field:if_else.else",
+        "field:if_else.if",
+        "field:if_else.then",
+        "predicate:matches",
+        "field:move_card_zone.from",
+        "predicate:not",
+        "predicate:step_done"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

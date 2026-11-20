@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "At the beginning of your upkeep, if you have four or more creature cards in your graveyard, you may return target creature card from your graveyard to your hand.",
+      "trigger": {
+        "event": "begin_step",
+        "step": "upkeep",
+        "whose": "yours",
+        "interveningIf": {
+          "check": "zone_count",
+          "who": "you",
+          "zone": "graveyard",
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "cmp": {
+            "op": ">=",
+            "value": 4
+          }
+        }
+      },
+      "optional": true,
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "zone": "graveyard",
+            "owner": "you"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Oversold Cemetery: choose a target",
+            "instruction": "Choose target creature card in your graveyard.",
+            "source": {
+              "card": "Oversold Cemetery",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "move_card_zone",
+          "target": "t1",
+          "moveTo": "hand"
+        }
+      ],
+      "prompt": {
+        "title": "Oversold Cemetery: optional",
+        "instruction": "Do you want to put target creature card in your graveyard into your hand?",
+        "source": {
+          "card": "Oversold Cemetery",
+          "ability": "a1"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "trigger:intervening_if"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "replacement",
+      "text": "If a source you control would deal damage to an opponent or a permanent an opponent controls, it deals double that damage instead.",
+      "replacement": {
+        "event": "would_deal_damage",
+        "damageSource": {
+          "controller": "you"
+        },
+        "recipient": {
+          "controller": "opponent"
+        },
+        "result": {
+          "mode": "modify",
+          "set": {
+            "damageMultiplier": 2
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_deal_damage",
+        "replacement:damage_qualifiers"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

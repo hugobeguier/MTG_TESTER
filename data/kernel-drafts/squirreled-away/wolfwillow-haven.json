@@ -1,0 +1,116 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Enchant land",
+      "keyword": {
+        "name": "enchant"
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "land"
+            ]
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Wolfwillow Haven: choose a target",
+            "instruction": "Choose target land.",
+            "source": {
+              "card": "Wolfwillow Haven",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "keyword:enchant"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever enchanted land is tapped for mana, its controller adds an additional {G}.",
+      "trigger": {
+        "event": "tap",
+        "subject": "enchanted"
+      },
+      "steps": [
+        {
+          "kind": "add_mana",
+          "who": "controller_of_target",
+          "produces": [
+            {
+              "colors": "{G}"
+            }
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:tap",
+        "trigger:subject",
+        "step:add_mana",
+        "field:add_mana.produces",
+        "field:add_mana.who"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "activated",
+      "text": "{4}{G}, Sacrifice this Aura: Create a 2/2 green Wolf creature token. Activate only during your turn.",
+      "costs": [
+        {
+          "mana": "{4}{G}"
+        },
+        {
+          "sacrifice": "self",
+          "count": 1
+        }
+      ],
+      "timing": {
+        "only": [
+          {
+            "check": "turn_is",
+            "whose": "yours"
+          }
+        ]
+      },
+      "srcs": [
+        1
+      ],
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Wolf",
+          "tokenPower": 2,
+          "tokenToughness": 2,
+          "tokenColors": [
+            "green"
+          ],
+          "tokenTypeLine": "Creature — Wolf",
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "timing",
+        "predicate:turn_is",
+        "cost:sacrifice"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

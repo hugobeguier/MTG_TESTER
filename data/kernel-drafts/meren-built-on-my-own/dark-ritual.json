@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Add {B}{B}{B}.",
+      "steps": [
+        {
+          "kind": "add_mana",
+          "produces": [
+            {
+              "colors": "{B}{B}{B}"
+            }
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:add_mana",
+        "field:add_mana.produces"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

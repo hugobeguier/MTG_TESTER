@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "Dragon spells you cast cost {2} less to cast.",
+      "static": {
+        "affects": "you",
+        "modify": [
+          {
+            "costMod": {
+              "filter": {
+                "subtypes": [
+                  "Dragon"
+                ],
+                "zone": "stack"
+              },
+              "delta": -2
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

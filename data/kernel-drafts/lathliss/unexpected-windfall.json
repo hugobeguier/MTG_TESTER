@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "cast_option",
+      "text": "As an additional cost to cast this spell, discard a card.",
+      "implementation": "needed",
+      "needs": [
+        "cast_option"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "spell_effect",
+      "text": "Draw two cards and create two Treasure tokens.",
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": 2,
+          "who": "you"
+        },
+        {
+          "kind": "create_tokens",
+          "tokenCount": 2,
+          "tokenName": "Treasure",
+          "tokenColors": [
+            "colorless"
+          ],
+          "tokenTypeLine": "Artifact — Treasure"
+        }
+      ],
+      "implementation": "implemented",
+      "needs": []
+    }
+  ],
+  "review": {
+    "status": "draft"
+  },
+  "castOptions": [
+    {
+      "id": "c1",
+      "kind": "additional",
+      "from": "hand",
+      "cost": [
+        {
+          "discard": {
+            "zone": "hand",
+            "owner": "you"
+          },
+          "count": 1
+        }
+      ],
+      "replacesManaCost": false,
+      "optional": false,
+      "prompt": {
+        "title": "Unexpected Windfall: additional cost",
+        "instruction": "Choose how to pay the additional cost (discard a card in your hand).",
+        "source": {
+          "card": "Unexpected Windfall",
+          "ability": "c1"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "cast_option:additional",
+        "cast_option:mandatory",
+        "cost:discard"
+      ]
+    }
+  ]
+}

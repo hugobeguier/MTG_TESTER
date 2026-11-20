@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "When Moseo enters, create a 1/1 black and green Pest creature token with \"Whenever this token attacks, you gain 1 life.\"",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Pest",
+          "tokenPower": 1,
+          "tokenToughness": 1,
+          "tokenColors": [
+            "black",
+            "green"
+          ],
+          "tokenTypeLine": "Creature — Pest",
+          "tokenAbilities": [
+            {
+              "kind": "triggered",
+              "text": "Whenever this token attacks, you gain 1 life.",
+              "trigger": {
+                "event": "attack",
+                "subject": "self"
+              },
+              "steps": [
+                {
+                  "kind": "life_change",
+                  "who": "you",
+                  "amount": 1
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:create_tokens.tokenAbilities"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "triggered",
+      "text": "Infusion — At the beginning of your end step, if you gained life this turn, return up to one target creature card with mana value X or less from your graveyard to the battlefield, where X is the amount of life you gained this turn.",
+      "trigger": {
+        "event": "begin_step",
+        "step": "end_step",
+        "whose": "yours",
+        "interveningIf": {
+          "check": "did_this_turn",
+          "event": "gain_life",
+          "actor": "you"
+        }
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "zone": "graveyard",
+            "owner": "you",
+            "mv": {
+              "op": "<=",
+              "value": {
+                "ref": "count_this_turn",
+                "event": "gain_life",
+                "actor": "you"
+              }
+            }
+          },
+          "count": {
+            "min": 0,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Moseo, Vein's New Dean: choose a target",
+            "instruction": "Choose up to one target creature card with mana value less than or equal to the number of things that gain life this turn in your graveyard.",
+            "source": {
+              "card": "Moseo, Vein's New Dean",
+              "ability": "a3"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "reanimate",
+          "target": "t1",
+          "who": "you",
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "quantity:count_this_turn",
+        "trigger:intervening_if",
+        "targets:multi"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

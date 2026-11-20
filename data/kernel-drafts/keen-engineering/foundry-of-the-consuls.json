@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "mana",
+      "text": "{T}: Add {C}.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{C}"
+          }
+        ]
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "{5}, {T}, Sacrifice this land: Create two 1/1 colorless Thopter artifact creature tokens with flying.",
+      "costs": [
+        {
+          "mana": "{5}"
+        },
+        {
+          "tap": "self"
+        },
+        {
+          "sacrifice": "self",
+          "count": 1
+        }
+      ],
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 2,
+          "tokenName": "Thopter",
+          "tokenPower": 1,
+          "tokenToughness": 1,
+          "tokenColors": [
+            "colorless"
+          ],
+          "tokenTypeLine": "Artifact Creature — Thopter",
+          "tokenKeywords": [
+            "flying"
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "cost:sacrifice",
+        "field:create_tokens.tokenKeywords"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

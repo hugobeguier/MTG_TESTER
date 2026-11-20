@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "replacement",
+      "text": "As this artifact enters, choose a color.",
+      "replacement": {
+        "event": "would_enter",
+        "result": {
+          "mode": "also",
+          "steps": [
+            {
+              "kind": "choose",
+              "choice": "color",
+              "remember": true,
+              "prompt": {
+                "title": "Heraldic Banner: choose",
+                "instruction": "Choose a color.",
+                "source": {
+                  "card": "Heraldic Banner",
+                  "ability": "a1"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_enter",
+        "step:choose",
+        "field:choose.choice",
+        "field:choose.remember"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "static",
+      "text": "Creatures you control of the chosen color get +1/+0.",
+      "static": {
+        "affects": {
+          "types": [
+            "creature"
+          ],
+          "controller": "you",
+          "chosenColor": true
+        },
+        "modify": [
+          {
+            "pt": {
+              "power": 1,
+              "toughness": 0
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static",
+        "filter:chosenColor"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "mana",
+      "text": "{T}: Add one mana of the chosen color.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "chosenColor": 1
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "mana:variable",
+        "filter:chosenColor",
+        "mana:chosen_color"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

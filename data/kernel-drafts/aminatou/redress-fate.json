@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Return all artifact and enchantment cards from your graveyard to the battlefield.",
+      "steps": [
+        {
+          "kind": "reanimate",
+          "who": "you",
+          "all": true,
+          "filter": {
+            "anyOf": [
+              {
+                "types": [
+                  "artifact"
+                ]
+              },
+              {
+                "types": [
+                  "enchantment"
+                ]
+              }
+            ],
+            "zone": "graveyard",
+            "owner": "you"
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:reanimate.all",
+        "field:reanimate.filter"
+      ]
+    }
+  ],
+  "castOptions": [
+    {
+      "id": "c1",
+      "kind": "miracle",
+      "from": "hand",
+      "cost": [
+        {
+          "mana": "{3}{W}"
+        }
+      ],
+      "replacesManaCost": true,
+      "when": {
+        "event": "drawn",
+        "firstThisTurn": true
+      },
+      "optional": true,
+      "prompt": {
+        "title": "Redress Fate: miracle option",
+        "instruction": "Do you want to cast it using its miracle cost ({3}{W})?",
+        "source": {
+          "card": "Redress Fate",
+          "ability": "c1"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "cast_option:miracle"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

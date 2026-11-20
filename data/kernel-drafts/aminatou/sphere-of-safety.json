@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "Creatures can't attack you or planeswalkers you control unless their controller pays {X} for each of those creatures, where X is the number of enchantments you control.",
+      "static": {
+        "affects": {
+          "types": [
+            "creature"
+          ]
+        },
+        "modify": [
+          {
+            "attackTax": {
+              "cost": "{X}",
+              "per": "attacker",
+              "protects": "you_and_planeswalkers"
+            }
+          }
+        ]
+      },
+      "scripted": {
+        "handler": "attack_tax_per_enchantment",
+        "params": {
+          "x": {
+            "ref": "count",
+            "of": {
+              "types": [
+                "enchantment"
+              ],
+              "controller": "you"
+            }
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "scripted:attack_tax_per_enchantment",
+        "static",
+        "static:attackTax"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "unless",
+        "reason": "the 'unless pays' is the attackTax modifier itself"
+      }
+    ]
+  }
+}

@@ -1,0 +1,87 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "kind": "keyword",
+      "text": "First strike",
+      "keyword": {
+        "name": "first strike"
+      },
+      "id": "a1",
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "kind": "triggered",
+      "text": "When this creature enters, if an opponent controls more lands than you, you may search your library for a Plains card, put it onto the battlefield, then shuffle.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self",
+        "interveningIf": {
+          "check": "compare",
+          "left": {
+            "ref": "count",
+            "of": {
+              "types": [
+                "land"
+              ],
+              "controller": "opponent"
+            }
+          },
+          "cmp": {
+            "op": ">",
+            "value": {
+              "ref": "count",
+              "of": {
+                "types": [
+                  "land"
+                ],
+                "controller": "you"
+              }
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "kind": "search_library",
+          "who": "you",
+          "optional": true,
+          "filter": {
+            "subtypes": [
+              "Plains"
+            ]
+          },
+          "count": 1,
+          "to": "battlefield",
+          "tapped": false,
+          "shuffle": true,
+          "src": 0,
+          "prompt": {
+            "title": "Knight of the White Orchid: optional",
+            "instruction": "Do you want to search your library for a Plains, put it onto the battlefield, then shuffle?",
+            "source": {
+              "card": "Knight of the White Orchid",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "id": "a2",
+      "implementation": "needed",
+      "needs": [
+        "trigger:intervening_if",
+        "predicate:compare",
+        "step:search_library",
+        "field:search_library.count",
+        "field:search_library.filter",
+        "field:search_library.shuffle",
+        "field:search_library.tapped",
+        "field:search_library.to"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

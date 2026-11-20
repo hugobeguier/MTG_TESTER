@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "replacement",
+      "text": "This land enters tapped.",
+      "replacement": {
+        "event": "would_enter",
+        "result": {
+          "mode": "modify",
+          "set": {
+            "tapped": true
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_enter"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "mana",
+      "text": "{T}: Add {B}.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{B}"
+          }
+        ]
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "keyword",
+      "text": "Dredge 2 (If you would draw a card, you may mill two cards instead. If you do, return this card from your graveyard to your hand.)",
+      "keyword": {
+        "name": "dredge",
+        "param": 2
+      },
+      "implementation": "implemented",
+      "needs": []
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

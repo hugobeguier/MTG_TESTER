@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "mana",
+      "text": "{T}: Add {C}.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{C}"
+          }
+        ]
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "mana",
+      "text": "{T}: Add {U} or {R}. This artifact deals 1 damage to you.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{U}"
+          },
+          {
+            "colors": "{R}"
+          }
+        ]
+      },
+      "srcs": [
+        0
+      ],
+      "steps": [
+        {
+          "kind": "damage_target",
+          "who": "you",
+          "amount": 1,
+          "source": "self",
+          "src": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:damage_target.source"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

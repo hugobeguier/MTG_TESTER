@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "keyword",
+      "text": "vigilance",
+      "keyword": {
+        "name": "vigilance"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "keyword",
+      "text": "trample",
+      "keyword": {
+        "name": "trample"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a4",
+      "kind": "triggered",
+      "text": "When this creature dies, create a 3/3 colorless Golem artifact creature token with flying, a 3/3 colorless Golem artifact creature token with vigilance, and a 3/3 colorless Golem artifact creature token with trample.",
+      "trigger": {
+        "event": "dies",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Golem",
+          "tokenPower": 3,
+          "tokenToughness": 3,
+          "tokenColors": [
+            "colorless"
+          ],
+          "tokenTypeLine": "Artifact Creature — Golem",
+          "tokenKeywords": [
+            "flying"
+          ]
+        },
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Golem",
+          "tokenPower": 3,
+          "tokenToughness": 3,
+          "tokenColors": [
+            "colorless"
+          ],
+          "tokenTypeLine": "Artifact Creature — Golem",
+          "tokenKeywords": [
+            "vigilance"
+          ]
+        },
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Golem",
+          "tokenPower": 3,
+          "tokenToughness": 3,
+          "tokenColors": [
+            "colorless"
+          ],
+          "tokenTypeLine": "Artifact Creature — Golem",
+          "tokenKeywords": [
+            "trample"
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:create_tokens.tokenKeywords"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "replacement",
+      "text": "This artifact enters tapped.",
+      "replacement": {
+        "event": "would_enter",
+        "result": {
+          "mode": "modify",
+          "set": {
+            "tapped": true
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_enter"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "mana",
+      "text": "{T}: Add {B}.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{B}"
+          }
+        ]
+      },
+      "implementation": "implemented",
+      "needs": []
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

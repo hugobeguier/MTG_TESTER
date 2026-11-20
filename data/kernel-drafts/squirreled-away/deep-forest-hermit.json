@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Vanishing 3 (This creature enters with three time counters on it. At the beginning of your upkeep, remove a time counter from it. When the last is removed, sacrifice it.)",
+      "keyword": {
+        "name": "vanishing",
+        "param": 3
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "When this creature enters, create four 1/1 green Squirrel creature tokens.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 4,
+          "tokenName": "Squirrel",
+          "tokenPower": 1,
+          "tokenToughness": 1,
+          "tokenColors": [
+            "green"
+          ],
+          "tokenTypeLine": "Creature — Squirrel"
+        }
+      ],
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "static",
+      "text": "Squirrels you control get +1/+1.",
+      "static": {
+        "affects": {
+          "types": [
+            "creature"
+          ],
+          "subtypes": [
+            "Squirrel"
+          ],
+          "controller": "you"
+        },
+        "modify": [
+          {
+            "pt": {
+              "power": 1,
+              "toughness": 1
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

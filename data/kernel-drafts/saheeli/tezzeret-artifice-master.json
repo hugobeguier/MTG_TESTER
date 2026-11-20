@@ -1,0 +1,168 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "activated",
+      "text": "+1: Create a 1/1 colorless Thopter artifact creature token with flying.",
+      "costs": [
+        {
+          "loyalty": 1
+        }
+      ],
+      "timing": {
+        "speed": "sorcery",
+        "limit": {
+          "count": 1,
+          "per": "turn"
+        }
+      },
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Thopter",
+          "tokenPower": 1,
+          "tokenToughness": 1,
+          "tokenColors": [
+            "colorless"
+          ],
+          "tokenTypeLine": "Artifact Creature — Thopter",
+          "tokenKeywords": [
+            "flying"
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "timing",
+        "cost:loyalty",
+        "field:create_tokens.tokenKeywords"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "0: Draw a card. If you control three or more artifacts, draw two cards instead.",
+      "costs": [
+        {
+          "loyalty": 0
+        }
+      ],
+      "timing": {
+        "speed": "sorcery",
+        "limit": {
+          "count": 1,
+          "per": "turn"
+        }
+      },
+      "steps": [
+        {
+          "kind": "if_else",
+          "if": {
+            "check": "controls",
+            "filter": {
+              "types": [
+                "artifact"
+              ],
+              "controller": "you"
+            },
+            "count": {
+              "op": ">=",
+              "value": 3
+            }
+          },
+          "then": [
+            {
+              "kind": "draw_cards",
+              "amount": 2,
+              "who": "you",
+              "src": 1
+            }
+          ],
+          "else": [
+            {
+              "kind": "draw_cards",
+              "amount": 1,
+              "who": "you",
+              "src": 0
+            }
+          ],
+          "src": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "timing",
+        "cost:loyalty",
+        "step:if_else",
+        "field:if_else.else",
+        "field:if_else.if",
+        "field:if_else.then"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "activated",
+      "text": "−9: You get an emblem with \"At the beginning of your end step, search your library for a permanent card, put it onto the battlefield, then shuffle.\"",
+      "costs": [
+        {
+          "loyalty": -9
+        }
+      ],
+      "timing": {
+        "speed": "sorcery",
+        "limit": {
+          "count": 1,
+          "per": "turn"
+        }
+      },
+      "steps": [
+        {
+          "kind": "grant_effect",
+          "who": "you",
+          "emblem": true,
+          "modify": [
+            {
+              "grantAbility": {
+                "kind": "triggered",
+                "text": "At the beginning of your end step, search your library for a permanent card, put it onto the battlefield, then shuffle.",
+                "trigger": {
+                  "event": "begin_step",
+                  "step": "end_step",
+                  "whose": "yours"
+                },
+                "steps": [
+                  {
+                    "kind": "search_library",
+                    "who": "you",
+                    "filter": {
+                      "types": [
+                        "permanent"
+                      ]
+                    },
+                    "count": 1,
+                    "to": "battlefield",
+                    "shuffle": true
+                  }
+                ]
+              }
+            }
+          ],
+          "duration": "instant"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "timing",
+        "cost:loyalty",
+        "step:grant_effect",
+        "field:grant_effect.emblem",
+        "field:grant_effect.modify"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

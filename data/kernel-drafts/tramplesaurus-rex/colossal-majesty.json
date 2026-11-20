@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "At the beginning of your upkeep, if you control a creature with power 4 or greater, draw a card.",
+      "trigger": {
+        "event": "begin_step",
+        "step": "upkeep",
+        "whose": "yours",
+        "interveningIf": {
+          "check": "controls",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you",
+            "power": {
+              "op": ">=",
+              "value": 4
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": 1,
+          "who": "you"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:intervening_if"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

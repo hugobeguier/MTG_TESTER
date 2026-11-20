@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "Dragon spells you cast cost {1} less to cast.",
+      "static": {
+        "affects": "you",
+        "modify": [
+          {
+            "costMod": {
+              "filter": {
+                "subtypes": [
+                  "Dragon"
+                ],
+                "zone": "stack"
+              },
+              "delta": -1
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever a Dragon you control enters, you may have Sarkhan become a copy of it until end of turn, except its name is Sarkhan, Soul Aflame and it's legendary in addition to its other types.",
+      "trigger": {
+        "event": "etb",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "subtypes": [
+            "Dragon"
+          ],
+          "controller": "you"
+        }
+      },
+      "steps": [
+        {
+          "kind": "grant_effect",
+          "target": "self",
+          "optional": true,
+          "modify": [
+            {
+              "copyOf": "event_object"
+            },
+            {
+              "addTypes": [
+                "Legendary"
+              ]
+            }
+          ],
+          "exceptName": "Sarkhan, Soul Aflame",
+          "duration": "until_end_of_turn",
+          "prompt": {
+            "title": "Sarkhan, Soul Aflame: optional",
+            "instruction": "Do you want to Sarkhan, Soul Aflame is a copy of that object and becomes a legendary in addition to its other types until end of turn?",
+            "source": {
+              "card": "Sarkhan, Soul Aflame",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject",
+        "step:grant_effect",
+        "field:grant_effect.exceptName",
+        "field:grant_effect.modify"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

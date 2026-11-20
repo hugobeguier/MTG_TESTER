@@ -1,0 +1,130 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "kind": "spell_effect",
+      "text": "Exile target nontoken creature. If the gift wasn't promised, return that card to the battlefield under its owner's control with a +1/+1 counter on it at the beginning of the next end step.",
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "token": false
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Parting Gust: choose a target",
+            "instruction": "Choose target nontoken creature.",
+            "source": {
+              "card": "Parting Gust",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "exile_target",
+          "target": "t1",
+          "src": 0
+        },
+        {
+          "kind": "create_delayed_trigger",
+          "at": {
+            "event": "begin_step",
+            "step": "end_step",
+            "whose": "each",
+            "next": true
+          },
+          "src": 1,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "not": {
+                "check": "paid_additional_cost",
+                "option": "gift"
+              }
+            },
+            "src": 1
+          },
+          "steps": [
+            {
+              "kind": "move_card_zone",
+              "target": "t1",
+              "moveFrom": "exile",
+              "moveTo": "battlefield",
+              "underControlOf": "owner",
+              "withCounters": {
+                "kind": "+1/+1",
+                "count": 1
+              },
+              "src": 1
+            }
+          ]
+        }
+      ],
+      "id": "a1",
+      "implementation": "needed",
+      "needs": [
+        "step:create_delayed_trigger",
+        "field:create_delayed_trigger.at",
+        "field:create_delayed_trigger.steps",
+        "predicate:not",
+        "predicate:paid_additional_cost",
+        "field:move_card_zone.underControlOf",
+        "field:move_card_zone.withCounters"
+      ]
+    }
+  ],
+  "castOptions": [
+    {
+      "id": "c1",
+      "kind": "gift",
+      "from": "hand",
+      "cost": [],
+      "replacesManaCost": false,
+      "effects": {
+        "addSteps": [
+          {
+            "kind": "create_tokens",
+            "who": "opponent",
+            "tokenCount": 1,
+            "tokenName": "Fish",
+            "tokenPower": 1,
+            "tokenToughness": 1,
+            "tokenColors": [
+              "blue"
+            ],
+            "tokenTypeLine": "Creature — Fish",
+            "tokenTapped": true
+          }
+        ]
+      },
+      "optional": true,
+      "gift": "tapped Fish",
+      "prompt": {
+        "title": "Parting Gust: gift",
+        "instruction": "Do you want to promise a tapped Fish to an opponent? If you do, choose that opponent.",
+        "source": {
+          "card": "Parting Gust",
+          "ability": "c1"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "cast_option:gift",
+        "field:create_tokens.tokenTapped",
+        "field:create_tokens.who"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,128 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Cumulative upkeep {1} (At the beginning of your upkeep, put an age counter on this permanent, then sacrifice it unless you pay its upkeep cost for each age counter on it.)",
+      "keyword": {
+        "name": "cumulative_upkeep",
+        "param": "{1}"
+      },
+      "trigger": {
+        "event": "begin_step",
+        "step": "upkeep",
+        "whose": "yours"
+      },
+      "steps": [
+        {
+          "kind": "add_counters",
+          "on": "self",
+          "counterKind": "age",
+          "amount": 1,
+          "src": 0
+        },
+        {
+          "kind": "sacrifice_permanent",
+          "target": "self",
+          "unlessPay": {
+            "payer": "you",
+            "cost": [
+              {
+                "mana": "{1}"
+              }
+            ],
+            "prompt": {
+              "title": "Mystic Remora: pay or not",
+              "instruction": "Do you want to pay {1}? If you don't, sacrifice a permanent.",
+              "source": {
+                "card": "Mystic Remora",
+                "ability": "a1"
+              }
+            }
+          },
+          "costPerCounter": "age",
+          "src": 0,
+          "prompt": {
+            "title": "Mystic Remora: sacrifice",
+            "instruction": "Choose a permanent to sacrifice.",
+            "source": {
+              "card": "Mystic Remora",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:add_counters",
+        "field:add_counters.on",
+        "field:sacrifice_permanent.costPerCounter",
+        "step:unless_pay"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever an opponent casts a noncreature spell, you may draw a card unless that player pays {4}.",
+      "trigger": {
+        "event": "cast",
+        "subject": {
+          "notTypes": [
+            "creature"
+          ]
+        },
+        "whose": "opponents"
+      },
+      "optional": true,
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": 1,
+          "who": "you",
+          "optional": true,
+          "unlessPay": {
+            "payer": "that_player",
+            "cost": [
+              {
+                "mana": "{4}"
+              }
+            ],
+            "prompt": {
+              "title": "Mystic Remora: pay or not",
+              "instruction": "Do you want to pay {4}? If you don't, draw a card.",
+              "source": {
+                "card": "Mystic Remora",
+                "ability": "a2"
+              }
+            }
+          },
+          "src": 0,
+          "prompt": {
+            "title": "Mystic Remora: optional",
+            "instruction": "Do you want to draw a card?",
+            "source": {
+              "card": "Mystic Remora",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "prompt": {
+        "title": "Mystic Remora: optional",
+        "instruction": "Do you want to draw a card?",
+        "source": {
+          "card": "Mystic Remora",
+          "ability": "a2"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "step:unless_pay"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

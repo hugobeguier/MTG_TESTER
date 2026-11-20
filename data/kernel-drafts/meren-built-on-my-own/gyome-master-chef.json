@@ -1,0 +1,127 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Trample",
+      "keyword": {
+        "name": "trample"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "At the beginning of your end step, create a number of Food tokens equal to the number of nontoken creatures you had enter the battlefield under your control this turn.",
+      "trigger": {
+        "event": "begin_step",
+        "step": "end_step",
+        "whose": "yours"
+      },
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": {
+            "ref": "count_this_turn",
+            "event": "etb",
+            "filter": {
+              "types": [
+                "creature"
+              ],
+              "token": false,
+              "controller": "you"
+            }
+          },
+          "tokenName": "Food",
+          "tokenColors": [
+            "colorless"
+          ],
+          "tokenTypeLine": "Artifact — Food"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "quantity:count_this_turn"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "activated",
+      "text": "{1}, Sacrifice a Food: Target creature gains indestructible until end of turn. Tap it.",
+      "costs": [
+        {
+          "mana": "{1}"
+        },
+        {
+          "sacrifice": {
+            "subtypes": [
+              "Food"
+            ],
+            "controller": "you"
+          },
+          "count": 1,
+          "prompt": {
+            "title": "Gyome, Master Chef: choose what to sacrifice",
+            "instruction": "Choose 1 Food you control to sacrifice.",
+            "source": {
+              "card": "Gyome, Master Chef",
+              "ability": "a3"
+            }
+          }
+        }
+      ],
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Gyome, Master Chef: choose a target",
+            "instruction": "Choose target creature.",
+            "source": {
+              "card": "Gyome, Master Chef",
+              "ability": "a3"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "grant_effect",
+          "target": "t1",
+          "modify": [
+            {
+              "grant": "indestructible"
+            }
+          ],
+          "duration": "until_end_of_turn",
+          "src": 0
+        },
+        {
+          "kind": "tap_target",
+          "target": "t1",
+          "src": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "cost:sacrifice",
+        "step:grant_effect",
+        "field:grant_effect.modify"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "mana",
+      "text": "{T}: Add {C}.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{C}"
+          }
+        ]
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "{3}, {T}: Draw a card. Activate only if you control a creature with power 4 or greater.",
+      "srcs": [
+        1
+      ],
+      "costs": [
+        {
+          "mana": "{3}"
+        },
+        {
+          "tap": "self"
+        }
+      ],
+      "timing": {
+        "only": [
+          {
+            "check": "controls",
+            "filter": {
+              "types": [
+                "creature"
+              ],
+              "controller": "you",
+              "power": {
+                "op": ">=",
+                "value": 4
+              }
+            }
+          }
+        ]
+      },
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": 1,
+          "who": "you",
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "timing"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

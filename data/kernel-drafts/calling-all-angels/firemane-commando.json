@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever you attack with two or more creatures, draw a card.",
+      "trigger": {
+        "event": "attack",
+        "whose": "yours",
+        "batch": true,
+        "minCount": 2
+      },
+      "steps": [
+        {
+          "src": 0,
+          "kind": "draw_cards",
+          "amount": 1,
+          "who": "you"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:batch",
+        "trigger:min_count"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "triggered",
+      "text": "Whenever another player attacks with two or more creatures, they draw a card if none of those creatures attacked you.",
+      "trigger": {
+        "event": "attack",
+        "whose": "opponents",
+        "batch": true,
+        "minCount": 2,
+        "interveningIf": {
+          "check": "attacked_defender",
+          "defender": "you",
+          "who": "none"
+        }
+      },
+      "steps": [
+        {
+          "src": 0,
+          "kind": "draw_cards",
+          "amount": 1,
+          "who": "that_player"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:batch",
+        "trigger:intervening_if",
+        "predicate:attacked_defender",
+        "trigger:min_count",
+        "field:draw_cards.who"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

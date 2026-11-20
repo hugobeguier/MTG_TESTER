@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Whenever this creature or another nontoken Zombie you control dies, create a 2/2 black Zombie creature token.",
+      "trigger": {
+        "event": "dies",
+        "subject": {
+          "subtypes": [
+            "Zombie"
+          ],
+          "controller": "you",
+          "token": false
+        }
+      },
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Zombie",
+          "tokenPower": 2,
+          "tokenToughness": 2,
+          "tokenColors": [
+            "black"
+          ],
+          "tokenTypeLine": "Creature — Zombie"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "static",
+      "text": "Other enchantment creatures you control have flying.",
+      "static": {
+        "affects": {
+          "types": [
+            "enchantment",
+            "creature"
+          ],
+          "controller": "you",
+          "another": true
+        },
+        "modify": [
+          {
+            "grant": "flying"
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "triggered",
+      "text": "Whenever you attack a player, create a 1/1 white Glimmer enchantment creature token that's tapped and attacking that player.",
+      "trigger": {
+        "event": "attack",
+        "whose": "yours",
+        "batch": true
+      },
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Glimmer",
+          "tokenPower": 1,
+          "tokenToughness": 1,
+          "tokenColors": [
+            "white"
+          ],
+          "tokenTypeLine": "Enchantment Creature — Glimmer",
+          "tokenTapped": true,
+          "tokenAttacking": true,
+          "attackTarget": "that_player",
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:batch",
+        "field:create_tokens.attackTarget",
+        "field:create_tokens.tokenAttacking",
+        "field:create_tokens.tokenTapped"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

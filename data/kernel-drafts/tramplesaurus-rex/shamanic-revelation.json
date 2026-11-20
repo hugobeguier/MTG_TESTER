@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Draw a card for each creature you control.",
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": {
+            "ref": "count",
+            "of": {
+              "types": [
+                "creature"
+              ],
+              "controller": "you"
+            }
+          },
+          "who": "you"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "quantity:count"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "spell_effect",
+      "text": "Ferocious — You gain 4 life for each creature you control with power 4 or greater.",
+      "steps": [
+        {
+          "kind": "life_change",
+          "lifeDelta": {
+            "math": "*",
+            "args": [
+              4,
+              {
+                "ref": "count",
+                "of": {
+                  "types": [
+                    "creature"
+                  ],
+                  "controller": "you",
+                  "power": {
+                    "op": ">=",
+                    "value": 4
+                  }
+                }
+              }
+            ]
+          },
+          "who": "you",
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "controls",
+              "filter": {
+                "types": [
+                  "creature"
+                ],
+                "controller": "you",
+                "power": {
+                  "op": ">=",
+                  "value": 4
+                }
+              }
+            },
+            "src": 0
+          },
+          "src": 0
+        }
+      ],
+      "implementation": "implemented",
+      "needs": []
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,118 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Stensian Sanguinist: Whenever you attack, target creature gains deathtouch until end of turn. Whenever that creature deals combat damage to a player this combat, this creature becomes prepared. (While it's prepared, you may cast a copy of its spell. Doing so unprepares it.)",
+      "trigger": {
+        "event": "attack",
+        "whose": "yours",
+        "batch": true
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Stensian Sanguinist // Exsanguinate: choose a target",
+            "instruction": "Choose target creature.",
+            "source": {
+              "card": "Stensian Sanguinist // Exsanguinate",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "grant_effect",
+          "target": "t1",
+          "modify": [
+            {
+              "grant": "deathtouch"
+            }
+          ],
+          "duration": "until_end_of_turn",
+          "src": 0
+        },
+        {
+          "kind": "create_delayed_trigger",
+          "at": "this_combat",
+          "trigger": {
+            "event": "deals_combat_damage_to_player",
+            "subject": "t1"
+          },
+          "src": 1,
+          "steps": [
+            {
+              "kind": "grant_effect",
+              "target": "self",
+              "prepared": true,
+              "modify": [
+                {
+                  "grant": "prepared"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:batch",
+        "step:grant_effect",
+        "field:grant_effect.modify",
+        "step:create_delayed_trigger",
+        "field:create_delayed_trigger.at",
+        "field:create_delayed_trigger.steps",
+        "field:create_delayed_trigger.trigger",
+        "field:grant_effect.prepared"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "spell_effect",
+      "text": "Exsanguinate: Each opponent loses X life. You gain life equal to the life lost this way.",
+      "steps": [
+        {
+          "kind": "life_change",
+          "who": "each_opponent",
+          "lose": true,
+          "amount": {
+            "ref": "X"
+          },
+          "src": 0
+        },
+        {
+          "kind": "life_change",
+          "who": "you",
+          "amount": {
+            "ref": "life_lost_this_way"
+          },
+          "src": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "quantity:X",
+        "field:life_change.amount",
+        "field:life_change.lose",
+        "field:life_change.who",
+        "quantity:life_lost_this_way"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

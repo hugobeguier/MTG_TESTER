@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "This spell can't be countered.",
+      "zone": "stack",
+      "static": {
+        "affects": "self",
+        "modify": [
+          {
+            "cant": "be_countered"
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static",
+        "zone:stack"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "spell_effect",
+      "text": "Destroy target nonland permanent.",
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "notTypes": [
+              "land"
+            ]
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Void Rend: choose a target",
+            "instruction": "Choose target nonland permanent.",
+            "source": {
+              "card": "Void Rend",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "destroy_target",
+          "target": "t1"
+        }
+      ],
+      "implementation": "implemented",
+      "needs": []
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "Other Zombie creatures get +1/+1.",
+      "static": {
+        "affects": {
+          "types": [
+            "creature"
+          ],
+          "subtypes": [
+            "Zombie"
+          ],
+          "another": true
+        },
+        "modify": [
+          {
+            "pt": {
+              "power": 1,
+              "toughness": 1
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "{1}{B}, {T}: Return target Zombie card from your graveyard to your hand.",
+      "costs": [
+        {
+          "mana": "{1}{B}"
+        },
+        {
+          "tap": "self"
+        }
+      ],
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "subtypes": [
+              "Zombie"
+            ],
+            "zone": "graveyard",
+            "owner": "you"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Lord of the Undead: choose a target",
+            "instruction": "Choose target Zombie card in your graveyard.",
+            "source": {
+              "card": "Lord of the Undead",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "move_card_zone",
+          "target": "t1",
+          "moveTo": "hand"
+        }
+      ],
+      "implementation": "implemented",
+      "needs": []
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

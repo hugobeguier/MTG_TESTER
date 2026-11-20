@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "Green creature spells you cast cost {1} less to cast.",
+      "static": {
+        "affects": "you",
+        "modify": [
+          {
+            "costMod": {
+              "filter": {
+                "types": [
+                  "creature"
+                ],
+                "colors": [
+                  "green"
+                ]
+              },
+              "delta": -1
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever you cast a creature spell, target creature you control gets +2/+2 and gains trample until end of turn.",
+      "trigger": {
+        "event": "cast",
+        "subject": {
+          "types": [
+            "creature"
+          ]
+        },
+        "whose": "yours"
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Rhonas's Monument: choose a target",
+            "instruction": "Choose target creature you control.",
+            "source": {
+              "card": "Rhonas's Monument",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "pump_target",
+          "target": "t1",
+          "power": 2,
+          "toughness": 2,
+          "duration": "until_end_of_turn"
+        },
+        {
+          "kind": "grant_effect",
+          "target": "t1",
+          "modify": [
+            {
+              "grant": "trample"
+            }
+          ],
+          "duration": "until_end_of_turn"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:grant_effect",
+        "field:grant_effect.modify"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

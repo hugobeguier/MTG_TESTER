@@ -1,0 +1,107 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "Creature tokens you control have haste.",
+      "static": {
+        "affects": {
+          "types": [
+            "creature"
+          ],
+          "token": true,
+          "controller": "you"
+        },
+        "modify": [
+          {
+            "grant": "haste"
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "At the beginning of combat on your turn, create a 2/1 blue Phyrexian Myr artifact creature token. Then you may choose a token you control. If you do, each other token you control becomes a copy of that token.",
+      "trigger": {
+        "event": "begin_step",
+        "step": "beginning_of_combat",
+        "whose": "yours"
+      },
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Phyrexian Myr",
+          "tokenPower": 2,
+          "tokenToughness": 1,
+          "tokenColors": [
+            "blue"
+          ],
+          "tokenTypeLine": "Artifact Creature — Phyrexian Myr",
+          "src": 0
+        },
+        {
+          "kind": "choose",
+          "id": "c1",
+          "src": 1,
+          "from": {
+            "token": true,
+            "controller": "you",
+            "zone": "battlefield"
+          },
+          "count": 1,
+          "saveAs": "chosen",
+          "optional": true,
+          "prompt": {
+            "title": "Brudiclad: choose a token",
+            "instruction": "You may choose a token you control. Each other token you control becomes a copy of it."
+          }
+        },
+        {
+          "kind": "copy",
+          "src": 2,
+          "all": true,
+          "filter": {
+            "token": true,
+            "controller": "you",
+            "another": true
+          },
+          "of": "chosen",
+          "becomes": true,
+          "excludeChosen": true,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "step_done",
+              "step": "c1"
+            },
+            "src": 2
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:choose",
+        "field:choose.count",
+        "field:choose.from",
+        "field:choose.saveAs",
+        "step:copy",
+        "field:copy.all",
+        "field:copy.becomes",
+        "field:copy.excludeChosen",
+        "field:copy.filter",
+        "field:copy.of",
+        "predicate:step_done"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

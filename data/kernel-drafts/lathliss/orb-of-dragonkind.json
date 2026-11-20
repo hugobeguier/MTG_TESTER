@@ -1,0 +1,122 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "mana",
+      "text": "{1}, {T}: Add two mana in any combination of colors. Spend this mana only to cast Dragon spells or activate abilities of Dragons.",
+      "costs": [
+        {
+          "mana": "{1}"
+        },
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "anyColor": 2,
+            "restriction": {
+              "subtypes": [
+                "Dragon"
+              ]
+            },
+            "abilitiesOf": {
+              "subtypes": [
+                "Dragon"
+              ]
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "mana:variable",
+        "mana:restriction"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "{R}, {T}, Sacrifice this artifact: Look at the top seven cards of your library. You may reveal a Dragon card from among them and put it into your hand. Put the rest on the bottom of your library in a random order.",
+      "costs": [
+        {
+          "mana": "{R}"
+        },
+        {
+          "tap": "self"
+        },
+        {
+          "sacrifice": "self",
+          "count": 1
+        }
+      ],
+      "steps": [
+        {
+          "kind": "look_top",
+          "amount": 7,
+          "src": 0
+        },
+        {
+          "kind": "choose",
+          "from": {
+            "subtypes": [
+              "Dragon"
+            ],
+            "zone": "library"
+          },
+          "fromLooked": true,
+          "count": 1,
+          "saveAs": "chosen",
+          "optional": true,
+          "src": 1,
+          "prompt": {
+            "title": "Orb of Dragonkind: optional",
+            "instruction": "Do you want to choose a Dragon card from among the looked-at cards?",
+            "source": {
+              "card": "Orb of Dragonkind",
+              "ability": "a2"
+            }
+          }
+        },
+        {
+          "kind": "reveal",
+          "target": "chosen",
+          "src": 1
+        },
+        {
+          "kind": "move_card_zone",
+          "target": "chosen",
+          "moveTo": "hand",
+          "src": 1
+        },
+        {
+          "kind": "move_card_zone",
+          "what": "rest_of_looked_cards",
+          "moveTo": "library",
+          "position": "bottom",
+          "order": "random",
+          "src": 2
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "cost:sacrifice",
+        "step:look_top",
+        "step:choose",
+        "field:choose.count",
+        "field:choose.from",
+        "field:choose.fromLooked",
+        "field:choose.saveAs",
+        "step:reveal",
+        "field:move_card_zone.order",
+        "field:move_card_zone.position",
+        "field:move_card_zone.what"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

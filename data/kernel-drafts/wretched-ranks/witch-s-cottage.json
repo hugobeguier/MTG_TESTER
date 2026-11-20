@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "mana",
+      "text": "({T}: Add {B}.)",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{B}"
+          }
+        ]
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "replacement",
+      "text": "This land enters tapped unless you control three or more other Swamps.",
+      "replacement": {
+        "event": "would_enter",
+        "result": {
+          "mode": "modify",
+          "set": {
+            "tapped": true
+          }
+        },
+        "condition": {
+          "not": {
+            "check": "controls",
+            "filter": {
+              "subtypes": [
+                "Swamp"
+              ],
+              "controller": "you",
+              "another": true
+            },
+            "count": {
+              "op": ">=",
+              "value": 3
+            }
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_enter"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "triggered",
+      "text": "When this land enters untapped, you may put target creature card from your graveyard on top of your library.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self",
+        "interveningIf": {
+          "not": {
+            "check": "source_state",
+            "state": "tapped"
+          }
+        }
+      },
+      "optional": true,
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "zone": "graveyard",
+            "owner": "you"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Witch's Cottage: choose a target",
+            "instruction": "Choose target creature card in your graveyard.",
+            "source": {
+              "card": "Witch's Cottage",
+              "ability": "a3"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "move_card_zone",
+          "target": "t1",
+          "moveTo": "library",
+          "position": "top"
+        }
+      ],
+      "prompt": {
+        "title": "Witch's Cottage: optional",
+        "instruction": "Do you want to put target creature card in your graveyard on the top of its owner's library?",
+        "source": {
+          "card": "Witch's Cottage",
+          "ability": "a3"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "trigger:intervening_if",
+        "predicate:not",
+        "predicate:source_state",
+        "field:move_card_zone.position"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

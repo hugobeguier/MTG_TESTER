@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "kind": "spell_effect",
+      "srcs": [
+        0
+      ],
+      "text": "Choose two target players. Each of them searches their library for a card, then shuffles and puts that card on top.",
+      "targets": [
+        {
+          "id": "t1",
+          "what": "player",
+          "count": {
+            "min": 2,
+            "max": 2
+          },
+          "prompt": {
+            "title": "Scheming Symmetry: choose targets",
+            "instruction": "Choose two target players.",
+            "source": {
+              "card": "Scheming Symmetry",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "search_library",
+          "who": "target_player",
+          "filter": {},
+          "count": 1,
+          "to": "library",
+          "position": "top",
+          "shuffle": true,
+          "src": 1,
+          "prompt": {
+            "title": "Scheming Symmetry: search",
+            "instruction": "Choose a permanent from the library.",
+            "source": {
+              "card": "Scheming Symmetry",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "id": "a1",
+      "implementation": "needed",
+      "needs": [
+        "targets:multi",
+        "step:search_library",
+        "field:search_library.count",
+        "field:search_library.filter",
+        "field:search_library.position",
+        "field:search_library.shuffle",
+        "field:search_library.to",
+        "field:search_library.who"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "each",
+        "reason": "'each of them' = both target players; who:target_player applies to each target"
+      }
+    ]
+  }
+}

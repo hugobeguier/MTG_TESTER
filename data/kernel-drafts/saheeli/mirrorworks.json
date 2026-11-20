@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Whenever another nontoken artifact you control enters, you may pay {2}. If you do, create a token that's a copy of that artifact.",
+      "trigger": {
+        "event": "etb",
+        "subject": {
+          "types": [
+            "artifact"
+          ],
+          "token": false,
+          "another": true,
+          "controller": "you"
+        }
+      },
+      "steps": [
+        {
+          "kind": "copy",
+          "target": "event_object",
+          "token": true,
+          "optional": true,
+          "optionalCost": [
+            {
+              "mana": "{2}"
+            }
+          ],
+          "src": 0,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "paid_additional_cost",
+              "option": "{2}"
+            },
+            "src": 1
+          },
+          "prompt": {
+            "title": "Mirrorworks: optional",
+            "instruction": "Do you want to copy that object?",
+            "source": {
+              "card": "Mirrorworks",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject",
+        "step:copy",
+        "field:copy.optionalCost",
+        "field:copy.token",
+        "predicate:paid_additional_cost"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

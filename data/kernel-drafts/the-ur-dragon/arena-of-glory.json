@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "replacement",
+      "text": "This land enters tapped unless you control a Mountain.",
+      "replacement": {
+        "event": "would_enter",
+        "result": {
+          "mode": "modify",
+          "set": {
+            "tapped": true
+          }
+        },
+        "condition": {
+          "not": {
+            "check": "controls",
+            "filter": {
+              "subtypes": [
+                "Mountain"
+              ],
+              "controller": "you"
+            }
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_enter"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "mana",
+      "text": "{T}: Add {R}.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{R}"
+          }
+        ]
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "mana",
+      "text": "{R}, {T}, Exert this land: Add {R}{R}. If that mana is spent on a creature spell, it gains haste until end of turn.",
+      "costs": [
+        {
+          "mana": "{R}"
+        },
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{R}{R}"
+          }
+        ]
+      },
+      "scripted": {
+        "handler": "exert_and_haste_if_spent_on_creature_spell",
+        "params": {
+          "exert": true,
+          "haste": "creature spell",
+          "duration": "until end of turn"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "scripted:exert_and_haste_if_spent_on_creature_spell"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "if",
+        "reason": "'If that mana is spent on a creature spell, it gains haste' is the scripted marker (a rider on the mana)"
+      },
+      {
+        "lexeme": "until end of turn",
+        "reason": "haste duration lives in the scripted marker params"
+      }
+    ]
+  }
+}

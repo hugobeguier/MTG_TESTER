@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "scripted",
+      "optional": true,
+      "text": "You may look at the top card of your library any time.",
+      "scripted": {
+        "handler": "look_at_top_card_any_time"
+      },
+      "prompt": {
+        "title": "One with the Multiverse: optional",
+        "instruction": "Do you want to use this ability?",
+        "source": {
+          "card": "One with the Multiverse",
+          "ability": "a1"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "scripted:look_at_top_card_any_time"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "scripted",
+      "optional": true,
+      "text": "You may play lands and cast spells from the top of your library.",
+      "scripted": {
+        "handler": "play_from_top_of_library"
+      },
+      "prompt": {
+        "title": "One with the Multiverse: optional",
+        "instruction": "Do you want to use this ability?",
+        "source": {
+          "card": "One with the Multiverse",
+          "ability": "a2"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "scripted:play_from_top_of_library"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "scripted",
+      "optional": true,
+      "text": "Once during each of your turns, you may cast a spell from your hand or the top of your library without paying its mana cost.",
+      "timing": {
+        "limit": {
+          "count": 1,
+          "per": "turn"
+        }
+      },
+      "scripted": {
+        "handler": "free_cast_once_per_turn",
+        "params": {
+          "zones": [
+            "hand",
+            "library_top"
+          ],
+          "perTurn": 1
+        }
+      },
+      "prompt": {
+        "title": "One with the Multiverse: optional",
+        "instruction": "Do you want to use this ability?",
+        "source": {
+          "card": "One with the Multiverse",
+          "ability": "a3"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "scripted:free_cast_once_per_turn",
+        "timing"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "each",
+        "reason": "\"each of your turns\" is the per-turn limit in timing.limit"
+      }
+    ]
+  }
+}

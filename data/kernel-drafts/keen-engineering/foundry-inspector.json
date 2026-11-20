@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "Artifact spells you cast cost {1} less to cast.",
+      "static": {
+        "affects": "you",
+        "modify": [
+          {
+            "costMod": {
+              "filter": {
+                "types": [
+                  "artifact"
+                ]
+              },
+              "delta": -1
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

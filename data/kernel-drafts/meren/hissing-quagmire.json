@@ -1,0 +1,109 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "replacement",
+      "text": "This land enters tapped.",
+      "replacement": {
+        "event": "would_enter",
+        "result": {
+          "mode": "modify",
+          "set": {
+            "tapped": true
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_enter"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "mana",
+      "text": "{T}: Add {B} or {G}.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{B}"
+          }
+        ]
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "mana",
+      "text": "{T}: Add {B} or {G}.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{G}"
+          }
+        ]
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a4",
+      "kind": "activated",
+      "text": "{1}{B}{G}: Until end of turn, this land becomes a 2/2 black and green Elemental creature with deathtouch. It's still a land.",
+      "costs": [
+        {
+          "mana": "{1}{B}{G}"
+        }
+      ],
+      "steps": [
+        {
+          "kind": "grant_effect",
+          "target": "self",
+          "duration": "until_end_of_turn",
+          "modify": [
+            {
+              "addTypes": [
+                "Creature",
+                "Elemental"
+              ]
+            },
+            {
+              "setBasePT": {
+                "power": 2,
+                "toughness": 2
+              }
+            },
+            {
+              "setColors": [
+                "black",
+                "green"
+              ]
+            },
+            {
+              "grant": "deathtouch"
+            }
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:grant_effect",
+        "field:grant_effect.modify"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Each player exiles all creature cards from their graveyard, then sacrifices all creatures they control, then puts all cards they exiled this way onto the battlefield.",
+      "steps": [
+        {
+          "kind": "move_card_zone",
+          "who": "each_player",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "zone": "graveyard"
+          },
+          "from": "graveyard",
+          "moveTo": "exile",
+          "all": true,
+          "saveAs": "exiled_this_way"
+        },
+        {
+          "kind": "sacrifice_permanent",
+          "who": "each_player",
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "all": true,
+          "prompt": {
+            "title": "Living Death: sacrifice",
+            "instruction": "Choose a permanent to sacrifice.",
+            "source": {
+              "card": "Living Death",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "kind": "move_card_zone",
+          "who": "each_player",
+          "what": "exiled_this_way",
+          "from": "exile",
+          "moveTo": "battlefield",
+          "all": true
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:move_card_zone.all",
+        "field:move_card_zone.filter",
+        "field:move_card_zone.from",
+        "field:move_card_zone.saveAs",
+        "field:move_card_zone.who",
+        "field:sacrifice_permanent.all",
+        "field:sacrifice_permanent.filter",
+        "field:sacrifice_permanent.who",
+        "field:move_card_zone.what"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Draw X cards, then discard a card.",
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": {
+            "ref": "X"
+          },
+          "who": "you"
+        },
+        {
+          "kind": "discard",
+          "amount": 1,
+          "who": "you",
+          "prompt": {
+            "title": "Pull from Tomorrow: discard",
+            "instruction": "Choose a card to discard.",
+            "source": {
+              "card": "Pull from Tomorrow",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "quantity:X"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

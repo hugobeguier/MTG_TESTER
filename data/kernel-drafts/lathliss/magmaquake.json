@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Magmaquake deals X damage to each creature without flying and each planeswalker.",
+      "steps": [
+        {
+          "kind": "damage_target",
+          "all": true,
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "without": [
+              "flying"
+            ]
+          },
+          "amount": {
+            "ref": "X"
+          }
+        },
+        {
+          "kind": "damage_target",
+          "all": true,
+          "filter": {
+            "types": [
+              "planeswalker"
+            ]
+          },
+          "amount": {
+            "ref": "X"
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "filter:without",
+        "quantity:X",
+        "field:damage_target.all",
+        "field:damage_target.filter"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

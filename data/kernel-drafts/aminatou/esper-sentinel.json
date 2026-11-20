@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Whenever an opponent casts their first noncreature spell each turn, draw a card unless that player pays {X}, where X is this creature's power.",
+      "trigger": {
+        "event": "cast",
+        "subject": {
+          "notTypes": [
+            "creature"
+          ]
+        },
+        "whose": "opponents",
+        "nth": {
+          "n": 1,
+          "per": "turn"
+        }
+      },
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": 1,
+          "who": "you",
+          "unlessPay": {
+            "payer": "that_player",
+            "cost": [
+              {
+                "mana": "{X}"
+              }
+            ],
+            "x": {
+              "ref": "stat",
+              "of": "self",
+              "stat": "power"
+            },
+            "prompt": {
+              "title": "Esper Sentinel: pay or not",
+              "instruction": "Do you want to pay {X}? If you don't, draw a card.",
+              "source": {
+                "card": "Esper Sentinel",
+                "ability": "a1"
+              }
+            }
+          },
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:nth",
+        "step:unless_pay"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

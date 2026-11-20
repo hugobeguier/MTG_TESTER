@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Destroy target creature. If that creature dies this way, its controller creates two tokens that are copies of that creature, except their power is half that creature's power and their toughness is half that creature's toughness. Round up each time.",
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Saw in Half: choose a target",
+            "instruction": "Choose target creature.",
+            "source": {
+              "card": "Saw in Half",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "destroy_target",
+          "id": "s1",
+          "target": "t1",
+          "src": 0
+        },
+        {
+          "kind": "copy",
+          "target": "t1",
+          "token": true,
+          "count": 2,
+          "who": "controller_of_target",
+          "setPower": {
+            "math": "div_up",
+            "args": [
+              {
+                "ref": "stat",
+                "of": "t1",
+                "stat": "power"
+              },
+              2
+            ]
+          },
+          "setToughness": {
+            "math": "div_up",
+            "args": [
+              {
+                "ref": "stat",
+                "of": "t1",
+                "stat": "toughness"
+              },
+              2
+            ]
+          },
+          "src": 1,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "step_done",
+              "step": "s1"
+            },
+            "src": 1
+          }
+        }
+      ],
+      "srcs": [
+        2
+      ],
+      "implementation": "needed",
+      "needs": [
+        "quantity:division",
+        "step:copy",
+        "field:copy.count",
+        "field:copy.setPower",
+        "field:copy.setToughness",
+        "field:copy.token",
+        "field:copy.who",
+        "predicate:step_done"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

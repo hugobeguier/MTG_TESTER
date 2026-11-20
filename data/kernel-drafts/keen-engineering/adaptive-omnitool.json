@@ -1,0 +1,163 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "Equipped creature gets +1/+1 for each artifact you control.",
+      "static": {
+        "affects": "equipped",
+        "modify": [
+          {
+            "pt": {
+              "power": {
+                "ref": "count",
+                "of": {
+                  "types": [
+                    "artifact"
+                  ],
+                  "controller": "you"
+                }
+              },
+              "toughness": {
+                "ref": "count",
+                "of": {
+                  "types": [
+                    "artifact"
+                  ],
+                  "controller": "you"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever equipped creature attacks, look at the top six cards of your library. You may reveal an artifact card from among them and put it into your hand. Put the rest on the bottom of your library in a random order.",
+      "trigger": {
+        "event": "attack",
+        "subject": "equipped"
+      },
+      "steps": [
+        {
+          "kind": "look_top",
+          "amount": 6
+        },
+        {
+          "kind": "choose",
+          "from": {
+            "types": [
+              "artifact"
+            ],
+            "zone": "library"
+          },
+          "fromLooked": true,
+          "count": 1,
+          "saveAs": "chosen",
+          "optional": true,
+          "prompt": {
+            "title": "Adaptive Omnitool: optional",
+            "instruction": "Do you want to choose an artifact card from among the looked-at cards?",
+            "source": {
+              "card": "Adaptive Omnitool",
+              "ability": "a2"
+            }
+          }
+        },
+        {
+          "kind": "reveal",
+          "target": "chosen"
+        },
+        {
+          "kind": "move_card_zone",
+          "target": "chosen",
+          "moveTo": "hand"
+        },
+        {
+          "kind": "move_card_zone",
+          "what": "rest_of_looked_cards",
+          "moveTo": "library",
+          "position": "bottom",
+          "order": "random"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject",
+        "step:look_top",
+        "step:choose",
+        "field:choose.count",
+        "field:choose.from",
+        "field:choose.fromLooked",
+        "field:choose.saveAs",
+        "step:reveal",
+        "field:move_card_zone.order",
+        "field:move_card_zone.position",
+        "field:move_card_zone.what"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "activated",
+      "text": "Equip {3}",
+      "keyword": {
+        "name": "equip"
+      },
+      "timing": {
+        "speed": "sorcery"
+      },
+      "costs": [
+        {
+          "mana": "{3}"
+        }
+      ],
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Adaptive Omnitool: choose a target",
+            "instruction": "Choose target creature you control.",
+            "source": {
+              "card": "Adaptive Omnitool",
+              "ability": "a3"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "attach",
+          "what": "self",
+          "to": "t1"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:attach",
+        "field:attach.to",
+        "field:attach.what"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "At the beginning of your upkeep, put a lore counter on this enchantment, then draw a card for each lore counter on this enchantment.",
+      "trigger": {
+        "event": "begin_step",
+        "step": "upkeep",
+        "whose": "yours"
+      },
+      "steps": [
+        {
+          "kind": "add_counters",
+          "on": "self",
+          "counterKind": "lore",
+          "amount": 1,
+          "src": 0
+        },
+        {
+          "kind": "draw_cards",
+          "amount": {
+            "ref": "counters",
+            "kind": "lore",
+            "on": "self"
+          },
+          "who": "you",
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:add_counters",
+        "field:add_counters.on",
+        "quantity:counters"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

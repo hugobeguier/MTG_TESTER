@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Morph {B} (You may cast this card face down as a 2/2 creature for {3}. Turn it face up any time for its morph cost.)",
+      "keyword": {
+        "name": "morph",
+        "param": "{B}"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever another nontoken creature you control dies, draw a card.",
+      "trigger": {
+        "event": "dies",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "controller": "you",
+          "another": true,
+          "token": false
+        }
+      },
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": 1,
+          "who": "you"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "replacement",
+      "text": "This land enters tapped.",
+      "replacement": {
+        "event": "would_enter",
+        "result": {
+          "mode": "modify",
+          "set": {
+            "tapped": true
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_enter"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "When this land enters, return a land you control to its owner's hand.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "choose",
+          "id": "s1",
+          "from": {
+            "types": [
+              "land"
+            ],
+            "controller": "you",
+            "zone": "battlefield"
+          },
+          "count": 1,
+          "saveAs": "chosen",
+          "prompt": {
+            "title": "Golgari Rot Farm: choose",
+            "instruction": "Choose a land you control.",
+            "source": {
+              "card": "Golgari Rot Farm",
+              "ability": "a2"
+            }
+          }
+        },
+        {
+          "kind": "move_card_zone",
+          "target": "chosen",
+          "from": "battlefield",
+          "moveTo": "hand"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:choose",
+        "field:choose.count",
+        "field:choose.from",
+        "field:choose.saveAs",
+        "field:move_card_zone.from"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "mana",
+      "text": "{T}: Add {B}{G}.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{B}{G}"
+          }
+        ]
+      },
+      "implementation": "implemented",
+      "needs": []
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,154 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Reach",
+      "keyword": {
+        "name": "reach"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "When this creature enters, you may sacrifice another creature. When you do, destroy target nonland permanent.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "permanent"
+            ],
+            "notTypes": [
+              "land"
+            ]
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Skyfisher Spider: choose a target",
+            "instruction": "Choose target nonland permanent.",
+            "source": {
+              "card": "Skyfisher Spider",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "sacrifice_permanent",
+          "id": "s1",
+          "optional": true,
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you",
+            "another": true
+          },
+          "src": 0,
+          "prompt": {
+            "title": "Skyfisher Spider: optional",
+            "instruction": "Do you want to sacrifice an another creature you control?",
+            "source": {
+              "card": "Skyfisher Spider",
+              "ability": "a2"
+            }
+          }
+        },
+        {
+          "kind": "destroy_target",
+          "target": "t1",
+          "reflexive": true,
+          "src": 1,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "step_done",
+              "step": "s1"
+            },
+            "src": 1
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:sacrifice_permanent.filter",
+        "field:destroy_target.reflexive",
+        "predicate:step_done"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "triggered",
+      "text": "When this creature dies, you may gain 1 life for each creature card in your graveyard. If you do, exile this card from your graveyard.",
+      "trigger": {
+        "event": "dies",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "life_change",
+          "id": "s1",
+          "optional": true,
+          "who": "you",
+          "amount": {
+            "ref": "count",
+            "of": {
+              "types": [
+                "creature"
+              ],
+              "zone": "graveyard",
+              "owner": "you"
+            }
+          },
+          "src": 0,
+          "prompt": {
+            "title": "Skyfisher Spider: optional",
+            "instruction": "Do you want to gain the number of creature cards in your graveyard life?",
+            "source": {
+              "card": "Skyfisher Spider",
+              "ability": "a3"
+            }
+          }
+        },
+        {
+          "kind": "move_card_zone",
+          "target": "self",
+          "from": "graveyard",
+          "moveTo": "exile",
+          "src": 1,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "step_done",
+              "step": "s1"
+            },
+            "src": 1
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "quantity:count",
+        "field:life_change.amount",
+        "field:move_card_zone.from",
+        "predicate:step_done"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

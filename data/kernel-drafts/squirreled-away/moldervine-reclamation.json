@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Whenever a creature you control dies, you gain 1 life and draw a card.",
+      "trigger": {
+        "event": "dies",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "controller": "you"
+        }
+      },
+      "steps": [
+        {
+          "kind": "life_change",
+          "who": "you",
+          "amount": 1
+        },
+        {
+          "kind": "draw_cards",
+          "who": "you",
+          "amount": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject",
+        "field:life_change.amount"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

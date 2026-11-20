@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Deathtouch (Any amount of damage this deals to a creature is enough to destroy it.)",
+      "keyword": {
+        "name": "deathtouch"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "When this creature enters, destroy target artifact, enchantment, or land.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "anyOf": [
+              {
+                "types": [
+                  "artifact"
+                ]
+              },
+              {
+                "types": [
+                  "enchantment"
+                ]
+              },
+              {
+                "types": [
+                  "land"
+                ]
+              }
+            ]
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Acidic Slime: choose a target",
+            "instruction": "Choose target artifact, enchantment, or land.",
+            "source": {
+              "card": "Acidic Slime",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "destroy_target",
+          "target": "t1"
+        }
+      ],
+      "implementation": "implemented",
+      "needs": []
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

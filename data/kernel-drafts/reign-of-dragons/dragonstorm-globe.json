@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "replacement",
+      "text": "Each Dragon you control enters with an additional +1/+1 counter on it.",
+      "replacement": {
+        "event": "would_enter",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "subtypes": [
+            "Dragon"
+          ],
+          "controller": "you"
+        },
+        "result": {
+          "mode": "also",
+          "steps": [
+            {
+              "kind": "add_counters",
+              "on": "event_object",
+              "counterKind": "+1/+1",
+              "amount": 1
+            }
+          ]
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_enter",
+        "step:add_counters",
+        "field:add_counters.on"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "mana",
+      "text": "{T}: Add one mana of any color.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "anyColor": 1
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "mana:variable"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

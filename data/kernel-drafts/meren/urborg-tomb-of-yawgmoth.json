@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "Each land is a Swamp in addition to its other land types.",
+      "static": {
+        "affects": {
+          "types": [
+            "land"
+          ]
+        },
+        "modify": [
+          {
+            "addTypes": [
+              "Swamp"
+            ]
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static",
+        "static:addTypes"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "another",
+        "reason": "\"its other land types\" is not an object reference"
+      }
+    ]
+  }
+}

@@ -1,0 +1,105 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Destroy all creatures. They can't be regenerated. Draw a card for each creature destroyed this way.",
+      "steps": [
+        {
+          "kind": "destroy_all",
+          "id": "s1",
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "noRegenerate": true,
+          "src": 0
+        },
+        {
+          "kind": "draw_cards",
+          "who": "you",
+          "amount": {
+            "ref": "event_amount"
+          },
+          "amountOf": "s1",
+          "src": 2
+        }
+      ],
+      "srcs": [
+        1
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:destroy_all.filter",
+        "field:destroy_all.noRegenerate",
+        "quantity:event_amount",
+        "field:draw_cards.amountOf"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "zone": "hand",
+      "text": "Cycling {3}{B}{B} ({3}{B}{B}, Discard this card: Draw a card.)",
+      "keyword": {
+        "name": "cycling",
+        "param": "{3}{B}{B}"
+      },
+      "costs": [
+        {
+          "mana": "{3}{B}{B}"
+        },
+        {
+          "discard": "self",
+          "count": 1
+        }
+      ],
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "who": "you",
+          "amount": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "zone:hand",
+        "cost:discard"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "triggered",
+      "zone": "hand",
+      "text": "When you cycle this card, all creatures get -2/-2 until end of turn.",
+      "trigger": {
+        "event": "cycle",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "mass_pump",
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "power": -2,
+          "toughness": -2,
+          "duration": "until_end_of_turn"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "zone:hand",
+        "trigger:cycle",
+        "field:mass_pump.filter"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

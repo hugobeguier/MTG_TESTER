@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "This creature can't block.",
+      "static": {
+        "affects": "self",
+        "modify": [
+          {
+            "cant": "block"
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "Sacrifice a creature: Put a +1/+1 counter on this creature.",
+      "costs": [
+        {
+          "sacrifice": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you"
+          },
+          "count": 1,
+          "prompt": {
+            "title": "Carrion Feeder: choose what to sacrifice",
+            "instruction": "Choose 1 creature you control to sacrifice.",
+            "source": {
+              "card": "Carrion Feeder",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "add_counters",
+          "on": "self",
+          "counterKind": "+1/+1",
+          "amount": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "cost:sacrifice",
+        "step:add_counters",
+        "field:add_counters.on"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

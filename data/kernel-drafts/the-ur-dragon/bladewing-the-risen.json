@@ -1,0 +1,103 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "When Bladewing enters, you may return target Dragon permanent card from your graveyard to the battlefield.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "subtypes": [
+              "Dragon"
+            ],
+            "zone": "graveyard",
+            "owner": "you",
+            "types": [
+              "creature"
+            ]
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Bladewing the Risen: choose a target",
+            "instruction": "Choose target Dragon card in your graveyard.",
+            "source": {
+              "card": "Bladewing the Risen",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "reanimate",
+          "target": "t1",
+          "who": "you",
+          "optional": true,
+          "prompt": {
+            "title": "Bladewing the Risen: optional",
+            "instruction": "Do you want to return target Dragon card in your graveyard from the graveyard to the battlefield?",
+            "source": {
+              "card": "Bladewing the Risen",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "activated",
+      "text": "{B}{R}: Dragon creatures get +1/+1 until end of turn.",
+      "costs": [
+        {
+          "mana": "{B}{R}"
+        }
+      ],
+      "steps": [
+        {
+          "kind": "mass_pump",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "subtypes": [
+              "Dragon"
+            ]
+          },
+          "power": 1,
+          "toughness": 1,
+          "duration": "until_end_of_turn"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:mass_pump.filter"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

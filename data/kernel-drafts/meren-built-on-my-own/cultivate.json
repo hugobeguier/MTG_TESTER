@@ -1,0 +1,111 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Search your library for up to two basic land cards, reveal those cards, put one onto the battlefield tapped and the other into your hand, then shuffle.",
+      "steps": [
+        {
+          "kind": "search_library",
+          "id": "s1",
+          "who": "you",
+          "filter": {
+            "types": [
+              "land"
+            ],
+            "supertypes": [
+              "basic"
+            ]
+          },
+          "count": 2,
+          "upTo": true,
+          "reveal": true,
+          "to": "revealed",
+          "saveAs": "found",
+          "src": 0,
+          "prompt": {
+            "title": "Cultivate: search",
+            "instruction": "Choose a basic land from the library.",
+            "source": {
+              "card": "Cultivate",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "kind": "choose",
+          "id": "s2",
+          "from": {
+            "types": [
+              "land"
+            ],
+            "supertypes": [
+              "basic"
+            ]
+          },
+          "fromRevealed": true,
+          "count": 1,
+          "saveAs": "chosen",
+          "src": 0,
+          "prompt": {
+            "title": "Cultivate: choose",
+            "instruction": "Choose a basic land.",
+            "source": {
+              "card": "Cultivate",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "kind": "move_card_zone",
+          "target": "chosen",
+          "from": "library",
+          "moveTo": "battlefield",
+          "tapped": true,
+          "src": 0
+        },
+        {
+          "kind": "move_card_zone",
+          "what": "rest_of_revealed_cards",
+          "from": "library",
+          "moveTo": "hand",
+          "src": 0
+        },
+        {
+          "kind": "shuffle",
+          "who": "you",
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:search_library",
+        "field:search_library.count",
+        "field:search_library.filter",
+        "field:search_library.reveal",
+        "field:search_library.saveAs",
+        "field:search_library.to",
+        "field:search_library.upTo",
+        "step:choose",
+        "field:choose.count",
+        "field:choose.from",
+        "field:choose.fromRevealed",
+        "field:choose.saveAs",
+        "field:move_card_zone.from",
+        "field:move_card_zone.tapped",
+        "field:move_card_zone.what",
+        "step:shuffle"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "another",
+        "reason": "the other = the revealed basic not chosen to enter the battlefield (rest_of_revealed_cards)"
+      }
+    ]
+  }
+}

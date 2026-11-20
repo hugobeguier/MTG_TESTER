@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "When this enchantment enters, create a 1/1 white Human Soldier creature token.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Human Soldier",
+          "tokenPower": 1,
+          "tokenToughness": 1,
+          "tokenColors": [
+            "white"
+          ],
+          "tokenTypeLine": "Creature — Human Soldier"
+        }
+      ],
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever a creature you control dies, each opponent loses 1 life and you gain 1 life.",
+      "trigger": {
+        "event": "dies",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "controller": "you"
+        }
+      },
+      "steps": [
+        {
+          "kind": "life_change",
+          "who": "each_opponent",
+          "lose": true,
+          "amount": 1
+        },
+        {
+          "kind": "life_change",
+          "who": "you",
+          "amount": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject",
+        "field:life_change.amount",
+        "field:life_change.lose",
+        "field:life_change.who"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

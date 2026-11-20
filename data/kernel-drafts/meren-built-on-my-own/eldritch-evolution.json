@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "cast_option",
+      "text": "As an additional cost to cast this spell, sacrifice a creature.",
+      "costs": [
+        {
+          "sacrifice": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you"
+          },
+          "count": 1,
+          "prompt": {
+            "title": "Eldritch Evolution: choose what to sacrifice",
+            "instruction": "Choose 1 creature you control to sacrifice.",
+            "source": {
+              "card": "Eldritch Evolution",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "cast_option",
+        "cost:sacrifice"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "spell_effect",
+      "text": "Search your library for a creature card with mana value X or less, where X is 2 plus the sacrificed creature's mana value. Put that card onto the battlefield, then shuffle. Exile Eldritch Evolution.",
+      "steps": [
+        {
+          "kind": "search_library",
+          "who": "you",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "mv": {
+              "op": "<=",
+              "value": {
+                "math": "+",
+                "args": [
+                  2,
+                  {
+                    "ref": "stat",
+                    "of": "sacrificed",
+                    "stat": "mana_value"
+                  }
+                ]
+              }
+            }
+          },
+          "count": 1,
+          "to": "battlefield",
+          "shuffle": true,
+          "src": 0,
+          "prompt": {
+            "title": "Eldritch Evolution: search",
+            "instruction": "Choose a creature with mana value less than or equal to 2 + the sacrificed permanent's mana value from the library.",
+            "source": {
+              "card": "Eldritch Evolution",
+              "ability": "a2"
+            }
+          }
+        },
+        {
+          "kind": "move_card_zone",
+          "target": "self",
+          "moveTo": "exile",
+          "src": 2
+        }
+      ],
+      "srcs": [
+        1
+      ],
+      "implementation": "needed",
+      "needs": [
+        "ref:sacrificed",
+        "step:search_library",
+        "field:search_library.count",
+        "field:search_library.filter",
+        "field:search_library.shuffle",
+        "field:search_library.to"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

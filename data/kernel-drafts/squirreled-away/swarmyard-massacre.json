@@ -1,0 +1,123 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Create two 1/1 green Squirrel creature tokens. Then each creature that isn't an Insect, Rat, Spider, or Squirrel gets -1/-1 until end of turn for each creature you control that's an Insect, Rat, Spider, or Squirrel.",
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 2,
+          "tokenName": "Squirrel",
+          "tokenPower": 1,
+          "tokenToughness": 1,
+          "tokenColors": [
+            "green"
+          ],
+          "tokenTypeLine": "Creature — Squirrel",
+          "src": 0
+        },
+        {
+          "kind": "mass_pump",
+          "src": 1,
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "notSubtypes": [
+              "Insect",
+              "Rat",
+              "Spider",
+              "Squirrel"
+            ]
+          },
+          "power": {
+            "math": "*",
+            "args": [
+              -1,
+              {
+                "ref": "count",
+                "of": {
+                  "types": [
+                    "creature"
+                  ],
+                  "controller": "you",
+                  "anyOf": [
+                    {
+                      "subtypes": [
+                        "Insect"
+                      ]
+                    },
+                    {
+                      "subtypes": [
+                        "Rat"
+                      ]
+                    },
+                    {
+                      "subtypes": [
+                        "Spider"
+                      ]
+                    },
+                    {
+                      "subtypes": [
+                        "Squirrel"
+                      ]
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          "toughness": {
+            "math": "*",
+            "args": [
+              -1,
+              {
+                "ref": "count",
+                "of": {
+                  "types": [
+                    "creature"
+                  ],
+                  "controller": "you",
+                  "anyOf": [
+                    {
+                      "subtypes": [
+                        "Insect"
+                      ]
+                    },
+                    {
+                      "subtypes": [
+                        "Rat"
+                      ]
+                    },
+                    {
+                      "subtypes": [
+                        "Spider"
+                      ]
+                    },
+                    {
+                      "subtypes": [
+                        "Squirrel"
+                      ]
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          "duration": "until_end_of_turn"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "filter:notSubtypes",
+        "quantity:math",
+        "field:mass_pump.filter"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

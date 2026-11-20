@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "static",
+      "text": "Other Dragons you control get +1/+1.",
+      "static": {
+        "affects": {
+          "types": [
+            "creature"
+          ],
+          "subtypes": [
+            "Dragon"
+          ],
+          "controller": "you",
+          "another": true
+        },
+        "modify": [
+          {
+            "pt": {
+              "power": 1,
+              "toughness": 1
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "triggered",
+      "text": "Storm (When you cast this spell, copy it for each spell cast before it this turn. Copies become tokens.)",
+      "keyword": {
+        "name": "storm"
+      },
+      "zone": "stack",
+      "scripted": {
+        "handler": "storm"
+      },
+      "trigger": {
+        "event": "cast",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "copy",
+          "target": "self",
+          "count": {
+            "ref": "event_amount"
+          },
+          "token": true
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "scripted:storm",
+        "zone:stack",
+        "step:copy",
+        "field:copy.count",
+        "field:copy.token"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

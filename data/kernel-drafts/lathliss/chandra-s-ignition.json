@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Target creature you control deals damage equal to its power to each other creature and each opponent.",
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Chandra's Ignition: choose a target",
+            "instruction": "Choose target creature you control.",
+            "source": {
+              "card": "Chandra's Ignition",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "damage_target",
+          "source": "t1",
+          "all": true,
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "another": true
+          },
+          "amount": {
+            "ref": "stat",
+            "of": "t1",
+            "stat": "power"
+          }
+        },
+        {
+          "kind": "damage_target",
+          "source": "t1",
+          "who": "each_opponent",
+          "amount": {
+            "ref": "stat",
+            "of": "t1",
+            "stat": "power"
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "quantity:stat",
+        "field:damage_target.all",
+        "field:damage_target.filter",
+        "field:damage_target.source",
+        "field:damage_target.who"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

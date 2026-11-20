@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever another Angel or Cleric you control enters, you gain life equal to that creature's toughness.",
+      "trigger": {
+        "event": "etb",
+        "subject": {
+          "controller": "you",
+          "another": true,
+          "anyOf": [
+            {
+              "subtypes": [
+                "Angel"
+              ]
+            },
+            {
+              "subtypes": [
+                "Cleric"
+              ]
+            }
+          ]
+        }
+      },
+      "steps": [
+        {
+          "src": 0,
+          "kind": "life_change",
+          "who": "you",
+          "amount": {
+            "ref": "stat",
+            "of": "event_object",
+            "stat": "toughness"
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject",
+        "quantity:stat",
+        "field:life_change.amount"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "static",
+      "text": "As long as you have at least 7 life more than your starting life total, creatures you control get +2/+2.",
+      "static": {
+        "affects": {
+          "types": [
+            "creature"
+          ],
+          "controller": "you"
+        },
+        "modify": [
+          {
+            "pt": {
+              "power": 2,
+              "toughness": 2
+            }
+          }
+        ],
+        "while": {
+          "check": "life",
+          "who": "you",
+          "cmp": {
+            "op": ">=",
+            "value": {
+              "math": "+",
+              "args": [
+                {
+                  "ref": "starting_life"
+                },
+                7
+              ]
+            }
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "static",
+        "quantity:starting_life"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

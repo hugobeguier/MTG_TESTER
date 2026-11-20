@@ -1,0 +1,218 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "(Gain the next level as a sorcery to add its ability.)",
+      "keyword": {
+        "name": "class"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "static",
+      "text": "During your turn, artifacts you control are Foods in addition to their other types and have \"{2}, {T}, Sacrifice this artifact: You gain 3 life.\"",
+      "static": {
+        "affects": {
+          "types": [
+            "artifact"
+          ],
+          "controller": "you"
+        },
+        "modify": [
+          {
+            "addTypes": [
+              "Food"
+            ]
+          },
+          {
+            "grantAbility": {
+              "kind": "activated",
+              "text": "{2}, {T}, Sacrifice this artifact: You gain 3 life.",
+              "costs": [
+                {
+                  "mana": "{2}"
+                },
+                {
+                  "tap": "self"
+                },
+                {
+                  "sacrifice": "self",
+                  "count": 1
+                }
+              ],
+              "steps": [
+                {
+                  "kind": "life_change",
+                  "who": "you",
+                  "amount": 3
+                }
+              ]
+            }
+          }
+        ],
+        "while": {
+          "check": "turn_is",
+          "whose": "yours"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "static",
+        "static:addTypes"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "activated",
+      "text": "{2}{G}: Level 2",
+      "keyword": {
+        "name": "class_level",
+        "param": 2
+      },
+      "timing": {
+        "speed": "sorcery"
+      },
+      "costs": [
+        {
+          "mana": "{2}{G}"
+        }
+      ],
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a4",
+      "kind": "triggered",
+      "text": "Whenever you gain life for the first time each turn, create a 3/3 green Raccoon creature token.",
+      "conditions": [
+        {
+          "when": "static",
+          "if": {
+            "check": "stat",
+            "of": "self",
+            "stat": "class_level",
+            "cmp": {
+              "op": ">=",
+              "value": 2
+            }
+          }
+        }
+      ],
+      "trigger": {
+        "event": "gain_life",
+        "subject": "you",
+        "nth": {
+          "n": 1,
+          "per": "turn"
+        }
+      },
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Raccoon",
+          "tokenPower": 3,
+          "tokenToughness": 3,
+          "tokenColors": [
+            "green"
+          ],
+          "tokenTypeLine": "Creature — Raccoon"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "condition_when:static",
+        "predicate:stat",
+        "trigger:gain_life",
+        "trigger:nth",
+        "trigger:subject"
+      ]
+    },
+    {
+      "id": "a5",
+      "kind": "activated",
+      "text": "{3}{G}: Level 3",
+      "keyword": {
+        "name": "class_level",
+        "param": 3
+      },
+      "timing": {
+        "speed": "sorcery"
+      },
+      "costs": [
+        {
+          "mana": "{3}{G}"
+        }
+      ],
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a6",
+      "kind": "triggered",
+      "text": "Whenever you gain life for the first time each turn, put a +1/+1 counter on each creature you control.",
+      "conditions": [
+        {
+          "when": "static",
+          "if": {
+            "check": "stat",
+            "of": "self",
+            "stat": "class_level",
+            "cmp": {
+              "op": ">=",
+              "value": 3
+            }
+          }
+        }
+      ],
+      "trigger": {
+        "event": "gain_life",
+        "subject": "you",
+        "nth": {
+          "n": 1,
+          "per": "turn"
+        }
+      },
+      "steps": [
+        {
+          "kind": "repeat_for_each",
+          "over": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you"
+          },
+          "steps": [
+            {
+              "kind": "add_counters",
+              "on": "iterated",
+              "counterKind": "+1/+1",
+              "amount": 1
+            }
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "ref:iterated",
+        "condition_when:static",
+        "predicate:stat",
+        "trigger:gain_life",
+        "trigger:nth",
+        "trigger:subject",
+        "step:repeat_for_each",
+        "field:repeat_for_each.over",
+        "field:repeat_for_each.steps",
+        "step:add_counters",
+        "field:add_counters.on"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

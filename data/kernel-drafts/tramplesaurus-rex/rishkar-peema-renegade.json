@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "When Rishkar enters, put a +1/+1 counter on each of up to two target creatures.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "count": {
+            "min": 0,
+            "max": 2
+          },
+          "prompt": {
+            "title": "Rishkar, Peema Renegade: choose targets",
+            "instruction": "Choose up to two target creatures.",
+            "source": {
+              "card": "Rishkar, Peema Renegade",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "add_counters",
+          "on": "t1",
+          "counterKind": "+1/+1",
+          "amount": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "targets:multi",
+        "step:add_counters",
+        "field:add_counters.on"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "static",
+      "text": "Each creature you control with a counter on it has \"{T}: Add {G}.\"",
+      "static": {
+        "affects": {
+          "types": [
+            "creature"
+          ],
+          "controller": "you",
+          "hasCounter": "any"
+        },
+        "modify": [
+          {
+            "grantAbility": {
+              "kind": "mana",
+              "text": "{T}: Add {G}.",
+              "costs": [
+                {
+                  "tap": "self"
+                }
+              ],
+              "mana": {
+                "produces": [
+                  {
+                    "colors": "{G}"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

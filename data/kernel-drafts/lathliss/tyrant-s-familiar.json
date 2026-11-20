@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "keyword",
+      "text": "Haste",
+      "keyword": {
+        "name": "haste"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "static",
+      "text": "Lieutenant — As long as you control your commander, this creature gets +2/+2 and has \"Whenever this creature attacks, it deals 7 damage to target creature defending player controls.\"",
+      "static": {
+        "affects": "self",
+        "modify": [
+          {
+            "pt": {
+              "power": 2,
+              "toughness": 2
+            }
+          },
+          {
+            "grantAbility": {
+              "kind": "triggered",
+              "text": "Whenever this creature attacks, it deals 7 damage to target creature defending player controls.",
+              "trigger": {
+                "event": "attack",
+                "subject": "self"
+              },
+              "targets": [
+                {
+                  "id": "tg1",
+                  "what": "object",
+                  "filter": {
+                    "types": [
+                      "creature"
+                    ],
+                    "controller": "defending_player"
+                  },
+                  "count": {
+                    "min": 1,
+                    "max": 1
+                  }
+                }
+              ],
+              "steps": [
+                {
+                  "kind": "damage_target",
+                  "source": "self",
+                  "target": "tg1",
+                  "amount": 7
+                }
+              ]
+            }
+          }
+        ],
+        "while": {
+          "check": "controls",
+          "filter": {
+            "controller": "you",
+            "isCommander": true
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "static",
+        "filter:defending_player",
+        "filter:isCommander"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

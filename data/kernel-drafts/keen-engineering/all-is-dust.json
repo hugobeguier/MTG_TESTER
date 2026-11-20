@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Each player sacrifices all permanents they control that are one or more colors.",
+      "steps": [
+        {
+          "kind": "sacrifice_permanent",
+          "who": "each_player",
+          "all": true,
+          "filter": {
+            "zone": "battlefield",
+            "colored": true
+          },
+          "prompt": {
+            "title": "All Is Dust: sacrifice",
+            "instruction": "Choose a permanent to sacrifice.",
+            "source": {
+              "card": "All Is Dust",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "filter:colored",
+        "field:sacrifice_permanent.all",
+        "field:sacrifice_permanent.filter",
+        "field:sacrifice_permanent.who"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Whenever this creature or another creature dies, target player loses 1 life and you gain 1 life.",
+      "trigger": {
+        "event": "dies",
+        "subject": "self",
+        "alsoOn": [
+          {
+            "event": "dies",
+            "subject": {
+              "types": [
+                "creature"
+              ],
+              "another": true
+            }
+          }
+        ]
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "player",
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Blood Artist: choose a target",
+            "instruction": "Choose target player.",
+            "source": {
+              "card": "Blood Artist",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "life_change",
+          "who": "target_player",
+          "lose": true,
+          "amount": 1
+        },
+        {
+          "kind": "life_change",
+          "who": "you",
+          "amount": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:multi_event",
+        "trigger:subject",
+        "field:life_change.amount",
+        "field:life_change.lose",
+        "field:life_change.who"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

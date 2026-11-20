@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "replacement",
+      "text": "As this artifact enters, choose a creature type.",
+      "replacement": {
+        "event": "would_enter",
+        "result": {
+          "mode": "also",
+          "steps": [
+            {
+              "kind": "choose",
+              "choice": "creature_type",
+              "remember": true,
+              "prompt": {
+                "title": "Patchwork Banner: choose",
+                "instruction": "Choose a creature type.",
+                "source": {
+                  "card": "Patchwork Banner",
+                  "ability": "a1"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_enter",
+        "step:choose",
+        "field:choose.choice",
+        "field:choose.remember"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "static",
+      "text": "Creatures you control of the chosen type get +1/+1.",
+      "static": {
+        "affects": {
+          "types": [
+            "creature"
+          ],
+          "controller": "you",
+          "chosenType": true
+        },
+        "modify": [
+          {
+            "pt": {
+              "power": 1,
+              "toughness": 1
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static",
+        "filter:chosenType"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "mana",
+      "text": "{T}: Add one mana of any color.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "anyColor": 1
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "mana:variable"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

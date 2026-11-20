@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "activated",
+      "text": "{T}: Draw a card. Activate only if you created a token this turn.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "timing": {
+        "only": [
+          {
+            "check": "did_this_turn",
+            "event": "token_created",
+            "actor": "you"
+          }
+        ]
+      },
+      "srcs": [
+        1
+      ],
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": 1,
+          "who": "you",
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "timing"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "{8}, {T}, Sacrifice this artifact: Create a 10/10 colorless Eldrazi creature token.",
+      "costs": [
+        {
+          "mana": "{8}"
+        },
+        {
+          "tap": "self"
+        },
+        {
+          "sacrifice": "self",
+          "count": 1
+        }
+      ],
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Eldrazi",
+          "tokenPower": 10,
+          "tokenToughness": 10,
+          "tokenColors": [
+            "colorless"
+          ],
+          "tokenTypeLine": "Creature — Eldrazi"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "cost:sacrifice"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

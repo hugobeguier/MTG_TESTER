@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Crackle with Power deals five times X damage to each of up to X targets.",
+      "xPrompt": {
+        "title": "Crackle with Power: choose X",
+        "instruction": "Choose a value for X (paid in mana as part of the spell's cost)."
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "any",
+          "count": {
+            "min": 0,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Crackle with Power: choose targets",
+            "instruction": "Choose up to X targets (any target: creatures, players or planeswalkers)."
+          }
+        }
+      ],
+      "scripted": {
+        "handler": "target_count_up_to_X"
+      },
+      "steps": [
+        {
+          "kind": "damage_target",
+          "target": "t1",
+          "amount": {
+            "math": "*",
+            "args": [
+              5,
+              {
+                "ref": "X"
+              }
+            ]
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "scripted:target_count_up_to_X",
+        "targets:multi",
+        "quantity:math"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "each",
+        "reason": "'each of up to X targets' is the per-target damage on the single damage step; the target count is the scripted marker"
+      }
+    ]
+  }
+}

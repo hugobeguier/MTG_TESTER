@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "When this enchantment enters, put X +1/+1 counters on target creature, where X is that creature's power.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Thickest in the Thicket: choose a target",
+            "instruction": "Choose target creature.",
+            "source": {
+              "card": "Thickest in the Thicket",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "add_counters",
+          "on": "t1",
+          "counterKind": "+1/+1",
+          "amount": {
+            "ref": "stat",
+            "of": "t1",
+            "stat": "power"
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:add_counters",
+        "quantity:stat",
+        "field:add_counters.on"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "At the beginning of your end step, draw two cards if you control the creature with the greatest power or tied for the greatest power.",
+      "trigger": {
+        "event": "begin_step",
+        "step": "end_step",
+        "whose": "yours",
+        "interveningIf": {
+          "check": "controls",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you",
+            "power": {
+              "op": ">=",
+              "value": {
+                "ref": "greatest",
+                "of": {
+                  "types": [
+                    "creature"
+                  ]
+                },
+                "stat": "power"
+              }
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": 2,
+          "who": "you"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:intervening_if"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

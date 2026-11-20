@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "replacement",
+      "text": "This land enters tapped.",
+      "replacement": {
+        "event": "would_enter",
+        "result": {
+          "mode": "modify",
+          "set": {
+            "tapped": true
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_enter"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "When this land enters, scry 1. (Look at the top card of your library. You may put that card on the bottom.)",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "scry",
+          "amount": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:scry"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "mana",
+      "text": "{T}: Add {W} or {B}.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{W}"
+          }
+        ]
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a4",
+      "kind": "mana",
+      "text": "{T}: Add {W} or {B}.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{B}"
+          }
+        ]
+      },
+      "implementation": "implemented",
+      "needs": []
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

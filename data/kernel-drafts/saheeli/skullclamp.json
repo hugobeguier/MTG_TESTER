@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "Equipped creature gets +1/-1.",
+      "static": {
+        "affects": "equipped",
+        "modify": [
+          {
+            "pt": {
+              "power": 1,
+              "toughness": -1
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever equipped creature dies, draw two cards.",
+      "trigger": {
+        "event": "dies",
+        "subject": "equipped"
+      },
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": 2,
+          "who": "you"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "activated",
+      "text": "Equip {1}",
+      "keyword": {
+        "name": "equip"
+      },
+      "timing": {
+        "speed": "sorcery"
+      },
+      "costs": [
+        {
+          "mana": "{1}"
+        }
+      ],
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Skullclamp: choose a target",
+            "instruction": "Choose target creature you control.",
+            "source": {
+              "card": "Skullclamp",
+              "ability": "a3"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "attach",
+          "what": "self",
+          "to": "t1"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:attach",
+        "field:attach.to",
+        "field:attach.what"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

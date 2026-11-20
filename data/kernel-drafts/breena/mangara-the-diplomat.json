@@ -1,0 +1,87 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "kind": "keyword",
+      "text": "Lifelink",
+      "keyword": {
+        "name": "lifelink"
+      },
+      "id": "a1",
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "kind": "triggered",
+      "text": "Whenever an opponent attacks with creatures, if two or more of those creatures are attacking you and/or planeswalkers you control, draw a card.",
+      "trigger": {
+        "event": "attack",
+        "subject": "opponent",
+        "whose": "opponents",
+        "batch": true,
+        "interveningIf": {
+          "check": "compare",
+          "left": {
+            "ref": "count",
+            "of": {
+              "types": [
+                "creature"
+              ],
+              "attacking": true,
+              "attackingYou": true
+            }
+          },
+          "cmp": {
+            "op": ">=",
+            "value": 2
+          }
+        }
+      },
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": 1,
+          "who": "you",
+          "src": 0
+        }
+      ],
+      "id": "a2",
+      "implementation": "needed",
+      "needs": [
+        "filter:attackingYou",
+        "trigger:batch",
+        "trigger:intervening_if",
+        "predicate:compare",
+        "trigger:subject"
+      ]
+    },
+    {
+      "kind": "triggered",
+      "text": "Whenever an opponent casts their second spell each turn, draw a card.",
+      "trigger": {
+        "event": "cast",
+        "whose": "opponents",
+        "nth": {
+          "n": 2,
+          "per": "turn"
+        }
+      },
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": 1,
+          "who": "you",
+          "src": 0
+        }
+      ],
+      "id": "a3",
+      "implementation": "needed",
+      "needs": [
+        "trigger:nth"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

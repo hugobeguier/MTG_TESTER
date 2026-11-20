@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "At the beginning of your upkeep, if you control six or more lands, create a 5/5 red Dragon creature token with flying.",
+      "trigger": {
+        "event": "begin_step",
+        "step": "upkeep",
+        "whose": "yours",
+        "interveningIf": {
+          "check": "controls",
+          "filter": {
+            "types": [
+              "land"
+            ],
+            "controller": "you"
+          },
+          "count": {
+            "op": ">=",
+            "value": 6
+          }
+        }
+      },
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Dragon",
+          "tokenPower": 5,
+          "tokenToughness": 5,
+          "tokenColors": [
+            "red"
+          ],
+          "tokenTypeLine": "Creature — Dragon",
+          "tokenKeywords": [
+            "flying"
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:intervening_if",
+        "field:create_tokens.tokenKeywords"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

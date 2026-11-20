@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever another creature you control enters, you gain 1 life.",
+      "trigger": {
+        "event": "etb",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "controller": "you",
+          "another": true
+        }
+      },
+      "steps": [
+        {
+          "src": 0,
+          "kind": "life_change",
+          "lifeDelta": 1,
+          "who": "you"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

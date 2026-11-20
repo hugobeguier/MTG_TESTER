@@ -1,0 +1,148 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "replacement",
+      "text": "As this enchantment enters, choose Khans or Dragons.",
+      "replacement": {
+        "event": "would_enter",
+        "result": {
+          "mode": "also",
+          "steps": [
+            {
+              "kind": "choose",
+              "choice": "mode",
+              "options": [
+                "Khans",
+                "Dragons"
+              ],
+              "remember": true,
+              "prompt": {
+                "title": "Outpost Siege: choose",
+                "instruction": "Choose one of Khans or Dragons.",
+                "source": {
+                  "card": "Outpost Siege",
+                  "ability": "a1"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_enter",
+        "step:choose",
+        "field:choose.choice",
+        "field:choose.options",
+        "field:choose.remember"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "• Khans — At the beginning of your upkeep, exile the top card of your library. Until end of turn, you may play that card.",
+      "trigger": {
+        "event": "begin_step",
+        "step": "upkeep",
+        "whose": "yours",
+        "interveningIf": {
+          "check": "chosen_is",
+          "kind": "mode",
+          "value": "Khans"
+        }
+      },
+      "steps": [
+        {
+          "kind": "move_card_zone",
+          "who": "you",
+          "moveFrom": "library",
+          "moveTo": "exile",
+          "moveCount": 1,
+          "position": "top",
+          "saveAs": "exiled"
+        },
+        {
+          "kind": "permission_to_play",
+          "what": "exiled",
+          "optional": true,
+          "duration": "until_end_of_turn",
+          "prompt": {
+            "title": "Outpost Siege: optional",
+            "instruction": "Do you want to you may play exiled until end of turn?",
+            "source": {
+              "card": "Outpost Siege",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:intervening_if",
+        "predicate:chosen_is",
+        "field:move_card_zone.position",
+        "field:move_card_zone.saveAs",
+        "step:permission_to_play",
+        "field:permission_to_play.what"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "triggered",
+      "text": "• Dragons — Whenever a creature you control leaves the battlefield, this enchantment deals 1 damage to any target.",
+      "trigger": {
+        "event": "leaves",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "controller": "you"
+        },
+        "interveningIf": {
+          "check": "chosen_is",
+          "kind": "mode",
+          "value": "Dragons"
+        }
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "any",
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Outpost Siege: choose a target",
+            "instruction": "Choose target.",
+            "source": {
+              "card": "Outpost Siege",
+              "ability": "a3"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "damage_target",
+          "source": "self",
+          "target": "t1",
+          "amount": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:leaves",
+        "trigger:intervening_if",
+        "predicate:chosen_is",
+        "trigger:subject",
+        "field:damage_target.source"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

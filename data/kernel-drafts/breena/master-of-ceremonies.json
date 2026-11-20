@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "kind": "triggered",
+      "text": "At the beginning of your upkeep, each opponent chooses money, friends, or secrets. For each player who chose money, you and that player each create a Treasure token. For each player who chose friends, you and that player each create a 1/1 green and white Citizen creature token. For each player who chose secrets, you and that player each draw a card.",
+      "trigger": {
+        "event": "begin_step",
+        "step": "upkeep",
+        "whose": "yours"
+      },
+      "steps": [
+        {
+          "kind": "repeat_for_each",
+          "over": "each_opponent",
+          "src": 0,
+          "steps": [
+            {
+              "kind": "choose",
+              "who": "that_player",
+              "choice": "mode",
+              "options": [
+                "money",
+                "friends",
+                "secrets"
+              ],
+              "remember": true,
+              "saveAs": "chosen",
+              "src": 0,
+              "prompt": {
+                "title": "Master of Ceremonies: choose",
+                "instruction": "Choose one of money, friends, or secrets.",
+                "source": {
+                  "card": "Master of Ceremonies",
+                  "ability": "a1"
+                }
+              }
+            },
+            {
+              "kind": "create_tokens",
+              "who": "you",
+              "alsoWho": "that_player",
+              "tokenCount": 1,
+              "tokenName": "Treasure",
+              "tokenColors": [
+                "colorless"
+              ],
+              "tokenTypeLine": "Artifact — Treasure",
+              "src": 1,
+              "condition": {
+                "when": "on_resolution",
+                "if": {
+                  "check": "chosen_is",
+                  "kind": "mode",
+                  "value": "money"
+                },
+                "src": 1
+              }
+            },
+            {
+              "kind": "create_tokens",
+              "who": "you",
+              "alsoWho": "that_player",
+              "tokenCount": 1,
+              "tokenName": "Citizen",
+              "tokenPower": 1,
+              "tokenToughness": 1,
+              "tokenColors": [
+                "green",
+                "white"
+              ],
+              "tokenTypeLine": "Creature — Citizen",
+              "src": 2,
+              "condition": {
+                "when": "on_resolution",
+                "if": {
+                  "check": "chosen_is",
+                  "kind": "mode",
+                  "value": "friends"
+                },
+                "src": 2
+              }
+            },
+            {
+              "kind": "draw_cards",
+              "who": "you",
+              "alsoWho": "that_player",
+              "amount": 1,
+              "src": 3,
+              "condition": {
+                "when": "on_resolution",
+                "if": {
+                  "check": "chosen_is",
+                  "kind": "mode",
+                  "value": "secrets"
+                },
+                "src": 3
+              }
+            }
+          ]
+        }
+      ],
+      "id": "a1",
+      "implementation": "needed",
+      "needs": [
+        "step:repeat_for_each",
+        "field:repeat_for_each.over",
+        "field:repeat_for_each.steps",
+        "step:choose",
+        "field:choose.choice",
+        "field:choose.options",
+        "field:choose.remember",
+        "field:choose.saveAs",
+        "field:choose.who",
+        "field:create_tokens.alsoWho",
+        "predicate:chosen_is",
+        "field:draw_cards.alsoWho"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

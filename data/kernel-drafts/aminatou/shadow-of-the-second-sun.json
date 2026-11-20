@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Enchant player",
+      "keyword": {
+        "name": "enchant"
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "player",
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Shadow of the Second Sun: choose a target",
+            "instruction": "Choose target player.",
+            "source": {
+              "card": "Shadow of the Second Sun",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "keyword:enchant"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "At the beginning of each of enchanted player's postcombat main phases, there is an additional beginning phase after this phase. (The end step happens after the added untap, upkeep, and draw steps.)",
+      "trigger": {
+        "event": "begin_step",
+        "step": "postcombat_main",
+        "subject": "enchanted",
+        "whose": "each"
+      },
+      "scripted": {
+        "handler": "additional_beginning_phase"
+      },
+      "implementation": "needed",
+      "needs": [
+        "scripted:additional_beginning_phase",
+        "trigger:begin_step:postcombat_main",
+        "trigger:subject"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

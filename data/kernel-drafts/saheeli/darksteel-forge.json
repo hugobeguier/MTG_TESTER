@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "Artifacts you control have indestructible. (Effects that say \"destroy\" don't destroy them. Artifact creatures with indestructible can't be destroyed by damage.)",
+      "static": {
+        "affects": {
+          "types": [
+            "artifact"
+          ],
+          "controller": "you"
+        },
+        "modify": [
+          {
+            "grant": "indestructible"
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,109 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Choose one or both —\n• Create a token that's a copy of target artifact.\n• Create a token that's a copy of target creature, except it's an artifact in addition to its other types.",
+      "modes": {
+        "choose": {
+          "min": 1,
+          "max": 2
+        },
+        "distinct": true,
+        "options": [
+          {
+            "id": "m1",
+            "text": "Create a token that's a copy of target artifact.",
+            "targets": [
+              {
+                "id": "t1",
+                "what": "object",
+                "filter": {
+                  "types": [
+                    "artifact"
+                  ]
+                },
+                "count": {
+                  "min": 1,
+                  "max": 1
+                },
+                "prompt": {
+                  "title": "Saheeli's Artistry: choose a target",
+                  "instruction": "Choose target artifact.",
+                  "source": {
+                    "card": "Saheeli's Artistry",
+                    "ability": "a1"
+                  }
+                }
+              }
+            ],
+            "steps": [
+              {
+                "kind": "copy",
+                "target": "t1",
+                "token": true
+              }
+            ]
+          },
+          {
+            "id": "m2",
+            "text": "Create a token that's a copy of target creature, except it's an artifact in addition to its other types.",
+            "targets": [
+              {
+                "id": "t2",
+                "what": "object",
+                "filter": {
+                  "types": [
+                    "creature"
+                  ]
+                },
+                "count": {
+                  "min": 1,
+                  "max": 1
+                },
+                "prompt": {
+                  "title": "Saheeli's Artistry: choose a target",
+                  "instruction": "Choose target creature.",
+                  "source": {
+                    "card": "Saheeli's Artistry",
+                    "ability": "a1"
+                  }
+                }
+              }
+            ],
+            "steps": [
+              {
+                "kind": "copy",
+                "target": "t2",
+                "token": true,
+                "exceptAddTypes": [
+                  "Artifact"
+                ]
+              }
+            ]
+          }
+        ],
+        "prompt": {
+          "title": "Saheeli's Artistry: choose modes",
+          "instruction": "Choose one or both modes.",
+          "source": {
+            "card": "Saheeli's Artistry",
+            "ability": "a1"
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "modes",
+        "modes:multiple",
+        "step:copy",
+        "field:copy.token",
+        "field:copy.exceptAddTypes"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

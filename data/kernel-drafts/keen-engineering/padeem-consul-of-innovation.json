@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "Artifacts you control have hexproof. (They can't be the targets of spells or abilities your opponents control.)",
+      "static": {
+        "affects": {
+          "types": [
+            "artifact"
+          ],
+          "controller": "you"
+        },
+        "modify": [
+          {
+            "grant": "hexproof"
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "At the beginning of your upkeep, if you control the artifact with the greatest mana value or tied for the greatest mana value, draw a card.",
+      "trigger": {
+        "event": "begin_step",
+        "step": "upkeep",
+        "whose": "yours",
+        "interveningIf": {
+          "check": "controls",
+          "filter": {
+            "types": [
+              "artifact"
+            ],
+            "controller": "you",
+            "mv": {
+              "op": ">=",
+              "value": {
+                "ref": "greatest",
+                "of": {
+                  "types": [
+                    "artifact"
+                  ],
+                  "controller": "any"
+                },
+                "stat": "mana_value"
+              }
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": 1,
+          "who": "you"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:intervening_if"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "replacement",
+      "text": "As this artifact enters, choose a creature type.",
+      "replacement": {
+        "event": "would_enter",
+        "result": {
+          "mode": "also",
+          "steps": [
+            {
+              "kind": "choose",
+              "choice": "creature_type",
+              "what": "creature_type",
+              "remember": true,
+              "saveAs": "chosen",
+              "prompt": {
+                "title": "Urza's Incubator: choose",
+                "instruction": "Choose a creature type.",
+                "source": {
+                  "card": "Urza's Incubator",
+                  "ability": "a1"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_enter",
+        "step:choose",
+        "field:choose.choice",
+        "field:choose.remember",
+        "field:choose.saveAs",
+        "field:choose.what"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "static",
+      "text": "Creature spells of the chosen type cost {2} less to cast.",
+      "static": {
+        "affects": "you",
+        "modify": [
+          {
+            "costMod": {
+              "filter": {
+                "types": [
+                  "creature"
+                ],
+                "zone": "stack",
+                "chosenType": true
+              },
+              "delta": -2
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static",
+        "filter:chosenType"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

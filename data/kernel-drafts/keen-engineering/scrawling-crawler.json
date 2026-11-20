@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "At the beginning of your upkeep, each player draws a card.",
+      "trigger": {
+        "event": "begin_step",
+        "step": "upkeep",
+        "whose": "yours"
+      },
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": 1,
+          "who": "each_player"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:draw_cards.who"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever an opponent draws a card, that player loses 1 life.",
+      "trigger": {
+        "event": "draw",
+        "whose": "opponents"
+      },
+      "steps": [
+        {
+          "kind": "life_change",
+          "lifeDelta": -1,
+          "who": "that_player"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:draw",
+        "field:life_change.who"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

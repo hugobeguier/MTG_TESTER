@@ -1,0 +1,117 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "mana",
+      "text": "{T}: Add {C}.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{C}"
+          }
+        ]
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "{1}, {T}: Put a storage counter on this land.",
+      "costs": [
+        {
+          "mana": "{1}"
+        },
+        {
+          "tap": "self"
+        }
+      ],
+      "steps": [
+        {
+          "kind": "add_counters",
+          "on": "self",
+          "counterKind": "storage",
+          "amount": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:add_counters",
+        "field:add_counters.on"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "activated",
+      "text": "{T}, Remove X storage counters from this land: Add X mana in any combination of colors. Spend this mana only to cast Dragon spells or activate abilities of Dragons.",
+      "costs": [
+        {
+          "tap": "self"
+        },
+        {
+          "counters": {
+            "kind": "storage",
+            "count": {
+              "ref": "X"
+            },
+            "remove": true,
+            "from": "self"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "add_mana",
+          "produces": [
+            {
+              "anyColor": 1,
+              "restriction": {
+                "subtypes": [
+                  "Dragon"
+                ]
+              },
+              "abilitiesOf": {
+                "subtypes": [
+                  "Dragon"
+                ]
+              }
+            }
+          ],
+          "amount": {
+            "ref": "X"
+          }
+        }
+      ],
+      "xPrompt": {
+        "title": "Crucible of the Spirit Dragon: choose X",
+        "instruction": "Choose a value for X (the amount used in the cost).",
+        "source": {
+          "card": "Crucible of the Spirit Dragon",
+          "ability": "a3"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "cost:counters",
+        "step:add_mana",
+        "quantity:X",
+        "field:add_mana.produces"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "only",
+        "reason": "'Spend this mana only to cast Dragon spells or activate abilities of Dragons' is the mana restriction/abilitiesOf filters"
+      }
+    ]
+  }
+}

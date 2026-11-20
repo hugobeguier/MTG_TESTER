@@ -1,0 +1,173 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Choose one or more —\n• Destroy target artifact.\n• Destroy target enchantment.\n• Target creature gains hexproof and indestructible until end of turn.",
+      "modes": {
+        "choose": {
+          "min": 1,
+          "max": 3
+        },
+        "distinct": true,
+        "options": [
+          {
+            "id": "m1",
+            "text": "Destroy target artifact.",
+            "targets": [
+              {
+                "id": "t1",
+                "what": "object",
+                "filter": {
+                  "types": [
+                    "artifact"
+                  ]
+                },
+                "count": {
+                  "min": 1,
+                  "max": 1
+                },
+                "prompt": {
+                  "title": "Collective Resistance: choose a target",
+                  "instruction": "Choose target artifact.",
+                  "source": {
+                    "card": "Collective Resistance",
+                    "ability": "a1"
+                  }
+                }
+              }
+            ],
+            "steps": [
+              {
+                "kind": "destroy_target",
+                "target": "t1"
+              }
+            ]
+          },
+          {
+            "id": "m2",
+            "text": "Destroy target enchantment.",
+            "targets": [
+              {
+                "id": "t1",
+                "what": "object",
+                "filter": {
+                  "types": [
+                    "enchantment"
+                  ]
+                },
+                "count": {
+                  "min": 1,
+                  "max": 1
+                },
+                "prompt": {
+                  "title": "Collective Resistance: choose a target",
+                  "instruction": "Choose target enchantment.",
+                  "source": {
+                    "card": "Collective Resistance",
+                    "ability": "a1"
+                  }
+                }
+              }
+            ],
+            "steps": [
+              {
+                "kind": "destroy_target",
+                "target": "t1"
+              }
+            ]
+          },
+          {
+            "id": "m3",
+            "text": "Target creature gains hexproof and indestructible until end of turn.",
+            "targets": [
+              {
+                "id": "t1",
+                "what": "object",
+                "filter": {
+                  "types": [
+                    "creature"
+                  ]
+                },
+                "count": {
+                  "min": 1,
+                  "max": 1
+                },
+                "prompt": {
+                  "title": "Collective Resistance: choose a target",
+                  "instruction": "Choose target creature.",
+                  "source": {
+                    "card": "Collective Resistance",
+                    "ability": "a1"
+                  }
+                }
+              }
+            ],
+            "steps": [
+              {
+                "kind": "grant_effect",
+                "target": "t1",
+                "modify": [
+                  {
+                    "grant": "hexproof"
+                  },
+                  {
+                    "grant": "indestructible"
+                  }
+                ],
+                "duration": "until_end_of_turn"
+              }
+            ]
+          }
+        ],
+        "prompt": {
+          "title": "Collective Resistance: choose modes",
+          "instruction": "Choose one or more modes (up to three).",
+          "source": {
+            "card": "Collective Resistance",
+            "ability": "a1"
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "modes",
+        "modes:multiple",
+        "step:grant_effect",
+        "field:grant_effect.modify"
+      ]
+    }
+  ],
+  "castOptions": [
+    {
+      "id": "c1",
+      "kind": "escalate",
+      "from": "hand",
+      "cost": [
+        {
+          "mana": "{G}"
+        }
+      ],
+      "replacesManaCost": false,
+      "perExtraMode": true,
+      "optional": true,
+      "prompt": {
+        "title": "Collective Resistance: escalate",
+        "instruction": "Do you want to pay {G} for each mode beyond the first?",
+        "source": {
+          "card": "Collective Resistance",
+          "ability": "c1"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "cast_option:escalate",
+        "cast_option:per_extra_mode"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

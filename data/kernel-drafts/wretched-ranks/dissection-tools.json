@@ -1,0 +1,129 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "When this Equipment enters, manifest dread, then attach this Equipment to that creature.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "scripted": {
+        "handler": "manifest_dread"
+      },
+      "steps": [
+        {
+          "kind": "attach",
+          "what": "self",
+          "to": "created"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "scripted:manifest_dread",
+        "ref:created",
+        "step:attach",
+        "field:attach.to",
+        "field:attach.what"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "static",
+      "text": "Equipped creature gets +2/+2 and has deathtouch and lifelink.",
+      "static": {
+        "affects": "equipped",
+        "modify": [
+          {
+            "pt": {
+              "power": 2,
+              "toughness": 2
+            }
+          },
+          {
+            "grant": "deathtouch"
+          },
+          {
+            "grant": "lifelink"
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "activated",
+      "text": "Equip—Sacrifice a creature.",
+      "keyword": {
+        "name": "equip"
+      },
+      "timing": {
+        "speed": "sorcery"
+      },
+      "costs": [
+        {
+          "sacrifice": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you"
+          },
+          "count": 1,
+          "prompt": {
+            "title": "Dissection Tools: choose what to sacrifice",
+            "instruction": "Choose 1 creature you control to sacrifice.",
+            "source": {
+              "card": "Dissection Tools",
+              "ability": "a3"
+            }
+          }
+        }
+      ],
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Dissection Tools: choose a target",
+            "instruction": "Choose target creature you control.",
+            "source": {
+              "card": "Dissection Tools",
+              "ability": "a3"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "attach",
+          "what": "self",
+          "to": "t1"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "cost:sacrifice",
+        "step:attach",
+        "field:attach.to",
+        "field:attach.what"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "I, II, III, IV — Create a Treasure token. Then if you control four or more Treasures, sacrifice this Saga. If you do, create a 6/6 red Dragon creature token with flying.",
+      "trigger": {
+        "event": "counter_put",
+        "subject": "self",
+        "chapters": [
+          1,
+          2,
+          3,
+          4
+        ]
+      },
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Treasure",
+          "tokenColors": [
+            "colorless"
+          ],
+          "tokenTypeLine": "Artifact — Treasure",
+          "src": 0
+        },
+        {
+          "kind": "sacrifice_permanent",
+          "who": "you",
+          "target": "self",
+          "src": 1,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "controls",
+              "filter": {
+                "subtypes": [
+                  "Treasure"
+                ],
+                "controller": "you"
+              },
+              "count": {
+                "op": ">=",
+                "value": 4
+              }
+            },
+            "src": 1
+          },
+          "id": "sac",
+          "prompt": {
+            "title": "The Misty Mountains Cold: sacrifice",
+            "instruction": "Choose a permanent to sacrifice.",
+            "source": {
+              "card": "The Misty Mountains Cold",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Dragon",
+          "tokenPower": 6,
+          "tokenToughness": 6,
+          "tokenColors": [
+            "red"
+          ],
+          "tokenTypeLine": "Creature — Dragon",
+          "tokenKeywords": [
+            "flying"
+          ],
+          "src": 2,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "step_done",
+              "step": "sac"
+            },
+            "src": 2
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:counter_put",
+        "trigger:chapters",
+        "field:create_tokens.tokenKeywords",
+        "predicate:step_done"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "oracleOverride": {
+      "text": "(As this Saga enters and after your draw step, add a lore counter. Sacrifice after IV.)\nI, II, III, IV — Create a Treasure token. Then if you control four or more Treasures, sacrifice this Saga. If you do, create a 6/6 red Dragon creature token with flying.",
+      "source": "XMage source, data/xmage-source/Mage.Sets/src/mage/cards/t/TheMistyMountainsCold.java (card absent from data/cards.db)",
+      "typeLine": "Enchantment — Saga"
+    }
+  }
+}

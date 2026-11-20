@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "Other Zombie creatures you control get +1/+1.",
+      "static": {
+        "affects": {
+          "types": [
+            "creature"
+          ],
+          "subtypes": [
+            "Zombie"
+          ],
+          "controller": "you",
+          "another": true
+        },
+        "modify": [
+          {
+            "pt": {
+              "power": 1,
+              "toughness": 1
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "{2}{B}, {T}: Exile target creature card from a graveyard. Create a 2/2 black Zombie creature token.",
+      "costs": [
+        {
+          "mana": "{2}{B}"
+        },
+        {
+          "tap": "self"
+        }
+      ],
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "zone": "graveyard"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Cemetery Reaper: choose a target",
+            "instruction": "Choose target creature card in a graveyard.",
+            "source": {
+              "card": "Cemetery Reaper",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "exile_target",
+          "target": "t1"
+        },
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Zombie",
+          "tokenPower": 2,
+          "tokenToughness": 2,
+          "tokenColors": [
+            "black"
+          ],
+          "tokenTypeLine": "Creature — Zombie"
+        }
+      ],
+      "implementation": "implemented",
+      "needs": []
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

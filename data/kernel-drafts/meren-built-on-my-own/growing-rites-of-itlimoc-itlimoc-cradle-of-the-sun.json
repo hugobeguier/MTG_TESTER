@@ -1,0 +1,193 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Growing Rites of Itlimoc: When Growing Rites of Itlimoc enters, look at the top four cards of your library. You may reveal a creature card from among them and put it into your hand. Put the rest on the bottom of your library in any order.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "look_top",
+          "amount": 4,
+          "src": 0
+        },
+        {
+          "kind": "choose",
+          "id": "s1",
+          "optional": true,
+          "from": {
+            "types": [
+              "creature"
+            ],
+            "zone": "library"
+          },
+          "fromLooked": true,
+          "count": 1,
+          "saveAs": "chosen",
+          "src": 1,
+          "prompt": {
+            "title": "Growing Rites of Itlimoc // Itlimoc, Cradle of the Sun: optional",
+            "instruction": "Do you want to choose a creature card from among the looked-at cards?",
+            "source": {
+              "card": "Growing Rites of Itlimoc // Itlimoc, Cradle of the Sun",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "kind": "reveal",
+          "target": "chosen",
+          "src": 1,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "step_done",
+              "step": "s1"
+            },
+            "src": 1
+          }
+        },
+        {
+          "kind": "move_card_zone",
+          "target": "chosen",
+          "moveTo": "hand",
+          "src": 1,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "step_done",
+              "step": "s1"
+            },
+            "src": 1
+          }
+        },
+        {
+          "kind": "move_card_zone",
+          "what": "rest_of_looked_cards",
+          "moveTo": "library",
+          "position": "bottom",
+          "ordered": "any_order",
+          "src": 2
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:look_top",
+        "step:choose",
+        "field:choose.count",
+        "field:choose.from",
+        "field:choose.fromLooked",
+        "field:choose.saveAs",
+        "step:reveal",
+        "predicate:step_done",
+        "field:move_card_zone.ordered",
+        "field:move_card_zone.position",
+        "field:move_card_zone.what"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "At the beginning of your end step, if you control four or more creatures, transform Growing Rites of Itlimoc.",
+      "trigger": {
+        "event": "begin_step",
+        "step": "end_step",
+        "whose": "yours",
+        "interveningIf": {
+          "check": "controls",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you"
+          },
+          "count": {
+            "op": ">=",
+            "value": 4
+          }
+        }
+      },
+      "steps": [
+        {
+          "kind": "transform",
+          "target": "self",
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:intervening_if",
+        "step:transform"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "keyword",
+      "text": "Itlimoc, Cradle of the Sun: (Transforms from Growing Rites of Itlimoc.)",
+      "keyword": {
+        "name": "back_face"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a4",
+      "kind": "mana",
+      "text": "{T}: Add {G}.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{G}"
+          }
+        ]
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a5",
+      "kind": "mana",
+      "text": "{T}: Add {G} for each creature you control.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "perCount": {
+              "types": [
+                "creature"
+              ],
+              "controller": "you"
+            },
+            "color": "{G}"
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "mana:variable"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "quantity",
+        "reason": "the for-each count is ManaSpec.perCount"
+      }
+    ]
+  }
+}

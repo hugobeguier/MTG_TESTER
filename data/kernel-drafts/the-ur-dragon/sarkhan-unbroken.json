@@ -1,0 +1,142 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "activated",
+      "text": "+1: Draw a card, then add one mana of any color.",
+      "costs": [
+        {
+          "loyalty": 1
+        }
+      ],
+      "timing": {
+        "speed": "sorcery",
+        "limit": {
+          "count": 1,
+          "per": "turn"
+        }
+      },
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "who": "you",
+          "amount": 1
+        },
+        {
+          "kind": "add_mana",
+          "produces": [
+            {
+              "anyColor": 1
+            }
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "timing",
+        "cost:loyalty",
+        "step:add_mana",
+        "field:add_mana.produces"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "−2: Create a 4/4 red Dragon creature token with flying.",
+      "costs": [
+        {
+          "loyalty": -2
+        }
+      ],
+      "timing": {
+        "speed": "sorcery",
+        "limit": {
+          "count": 1,
+          "per": "turn"
+        }
+      },
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Dragon",
+          "tokenPower": 4,
+          "tokenToughness": 4,
+          "tokenColors": [
+            "red"
+          ],
+          "tokenTypeLine": "Creature — Dragon",
+          "tokenKeywords": [
+            "flying"
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "timing",
+        "cost:loyalty",
+        "field:create_tokens.tokenKeywords"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "activated",
+      "text": "−8: Search your library for any number of Dragon creature cards, put them onto the battlefield, then shuffle.",
+      "costs": [
+        {
+          "loyalty": -8
+        }
+      ],
+      "timing": {
+        "speed": "sorcery",
+        "limit": {
+          "count": 1,
+          "per": "turn"
+        }
+      },
+      "steps": [
+        {
+          "kind": "search_library",
+          "who": "you",
+          "filter": {
+            "subtypes": [
+              "Dragon"
+            ],
+            "types": [
+              "creature"
+            ]
+          },
+          "anyNumber": true,
+          "upTo": true,
+          "min": 0,
+          "to": "battlefield",
+          "shuffle": true,
+          "prompt": {
+            "title": "Sarkhan Unbroken: search",
+            "instruction": "Choose a Dragon from the library.",
+            "source": {
+              "card": "Sarkhan Unbroken",
+              "ability": "a3"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "timing",
+        "cost:loyalty",
+        "step:search_library",
+        "field:search_library.anyNumber",
+        "field:search_library.filter",
+        "field:search_library.min",
+        "field:search_library.shuffle",
+        "field:search_library.to",
+        "field:search_library.upTo"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

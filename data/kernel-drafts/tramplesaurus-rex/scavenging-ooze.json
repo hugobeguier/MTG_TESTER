@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "activated",
+      "text": "{G}: Exile target card from a graveyard. If it was a creature card, put a +1/+1 counter on this creature and you gain 1 life.",
+      "costs": [
+        {
+          "mana": "{G}"
+        }
+      ],
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "zone": "graveyard"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Scavenging Ooze: choose a target",
+            "instruction": "Choose target card in a graveyard.",
+            "source": {
+              "card": "Scavenging Ooze",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "exile_target",
+          "target": "t1",
+          "src": 0
+        },
+        {
+          "kind": "if_else",
+          "if": {
+            "check": "matches",
+            "obj": "t1",
+            "filter": {
+              "types": [
+                "creature"
+              ]
+            }
+          },
+          "then": [
+            {
+              "kind": "add_counters",
+              "on": "self",
+              "counterKind": "+1/+1",
+              "amount": 1
+            },
+            {
+              "kind": "life_change",
+              "lifeDelta": 1,
+              "who": "you"
+            }
+          ],
+          "src": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:if_else",
+        "field:if_else.if",
+        "field:if_else.then",
+        "predicate:matches",
+        "step:add_counters",
+        "field:add_counters.on"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

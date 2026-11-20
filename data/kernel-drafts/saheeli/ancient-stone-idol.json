@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flash",
+      "keyword": {
+        "name": "flash"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "cast_option",
+      "text": "This spell costs {1} less to cast for each attacking creature.",
+      "costReduction": {
+        "per": {
+          "types": [
+            "creature"
+          ],
+          "attacking": true,
+          "controller": "any"
+        },
+        "amount": 1,
+        "applies": "generic"
+      },
+      "implementation": "needed",
+      "needs": [
+        "cast_option",
+        "cost_reduction"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "keyword",
+      "text": "Trample",
+      "keyword": {
+        "name": "trample"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a4",
+      "kind": "triggered",
+      "text": "When this creature dies, create a 6/12 colorless Construct artifact creature token with trample.",
+      "trigger": {
+        "event": "dies",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Construct",
+          "tokenPower": 6,
+          "tokenToughness": 12,
+          "tokenColors": [
+            "colorless"
+          ],
+          "tokenTypeLine": "Artifact Creature — Construct",
+          "tokenKeywords": [
+            "trample"
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:create_tokens.tokenKeywords"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

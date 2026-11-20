@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Breath Weapon deals 2 damage to each non-Dragon creature.",
+      "steps": [
+        {
+          "kind": "damage_target",
+          "all": true,
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "notSubtypes": [
+              "Dragon"
+            ]
+          },
+          "amount": 2
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "filter:notSubtypes",
+        "field:damage_target.all",
+        "field:damage_target.filter"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,109 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "When this creature enters, create four 1/1 colorless Myr artifact creature tokens.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 4,
+          "tokenName": "Myr",
+          "tokenPower": 1,
+          "tokenToughness": 1,
+          "tokenColors": [
+            "colorless"
+          ],
+          "tokenTypeLine": "Artifact Creature — Myr"
+        }
+      ],
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever this creature attacks, you may tap X untapped Myr you control. If you do, this creature gets +X/+0 until end of turn and deals X damage to the player or planeswalker it's attacking.",
+      "trigger": {
+        "event": "attack",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "choose",
+          "from": {
+            "subtypes": [
+              "Myr"
+            ],
+            "controller": "you",
+            "tapped": false
+          },
+          "count": {
+            "ref": "X"
+          },
+          "saveAs": "chosen",
+          "optional": true,
+          "prompt": {
+            "title": "Myr Battlesphere: optional",
+            "instruction": "Do you want to choose X untapped Myrs you control?",
+            "source": {
+              "card": "Myr Battlesphere",
+              "ability": "a2"
+            }
+          }
+        },
+        {
+          "kind": "tap_target",
+          "target": "chosen"
+        },
+        {
+          "kind": "pump_target",
+          "target": "self",
+          "power": {
+            "ref": "X"
+          },
+          "toughness": 0,
+          "duration": "until_end_of_turn",
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "paid_additional_cost",
+              "option": "tap X untapped Myr"
+            }
+          }
+        },
+        {
+          "kind": "damage_target",
+          "amount": {
+            "ref": "X"
+          },
+          "damageTargetType": "attacked_player_or_planeswalker",
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "paid_additional_cost",
+              "option": "tap X untapped Myr"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:choose",
+        "field:choose.count",
+        "field:choose.from",
+        "field:choose.saveAs",
+        "quantity:X",
+        "predicate:paid_additional_cost"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

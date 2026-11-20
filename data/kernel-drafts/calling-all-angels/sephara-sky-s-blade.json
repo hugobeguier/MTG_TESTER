@@ -1,0 +1,103 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "cast_option",
+      "text": "You may pay {W} and tap four untapped creatures you control with flying rather than pay this spell's mana cost.",
+      "implementation": "needed",
+      "needs": [
+        "cast_option"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "keyword",
+      "text": "Lifelink",
+      "keyword": {
+        "name": "lifelink"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a4",
+      "kind": "static",
+      "text": "Other creatures you control with flying have indestructible. (Damage and effects that say \"destroy\" don't destroy them.)",
+      "static": {
+        "affects": {
+          "types": [
+            "creature"
+          ],
+          "controller": "you",
+          "another": true,
+          "with": [
+            "flying"
+          ]
+        },
+        "modify": [
+          {
+            "grant": "indestructible"
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    }
+  ],
+  "castOptions": [
+    {
+      "id": "c1",
+      "kind": "alternative",
+      "from": "hand",
+      "cost": [
+        {
+          "mana": "{W}"
+        },
+        {
+          "tapOther": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you",
+            "with": [
+              "flying"
+            ],
+            "tapped": false
+          },
+          "count": 4
+        }
+      ],
+      "replacesManaCost": true,
+      "optional": true,
+      "prompt": {
+        "title": "Sephara, Sky's Blade: alternative option",
+        "instruction": "Do you want to cast it using its alternative cost ({W}, tap 4 untapped untapped creatures with flying you control)?",
+        "source": {
+          "card": "Sephara, Sky's Blade",
+          "ability": "c1"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "cast_option:alternative",
+        "cost:tapOther"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

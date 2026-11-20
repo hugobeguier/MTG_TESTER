@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "kind": "spell_effect",
+      "text": "Exile target nonland permanent. You lose 3 life.",
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "notTypes": [
+              "land"
+            ]
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Anguished Unmaking: choose a target",
+            "instruction": "Choose target nonland permanent.",
+            "source": {
+              "card": "Anguished Unmaking",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "exile_target",
+          "target": "t1",
+          "src": 0
+        },
+        {
+          "kind": "life_change",
+          "who": "you",
+          "lifeDelta": -3,
+          "src": 1
+        }
+      ],
+      "id": "a1",
+      "implementation": "implemented",
+      "needs": []
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

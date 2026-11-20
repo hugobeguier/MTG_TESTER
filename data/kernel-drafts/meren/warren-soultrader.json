@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "activated",
+      "text": "Pay 1 life, Sacrifice another creature: Create a Treasure token. (It's an artifact with \"{T}, Sacrifice this token: Add one mana of any color.\")",
+      "costs": [
+        {
+          "life": 1
+        },
+        {
+          "sacrifice": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you",
+            "another": true
+          },
+          "count": 1,
+          "prompt": {
+            "title": "Warren Soultrader: choose what to sacrifice",
+            "instruction": "Choose 1 another creature you control to sacrifice.",
+            "source": {
+              "card": "Warren Soultrader",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Treasure",
+          "tokenColors": [
+            "colorless"
+          ],
+          "tokenTypeLine": "Artifact — Treasure"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "cost:life",
+        "cost:sacrifice"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

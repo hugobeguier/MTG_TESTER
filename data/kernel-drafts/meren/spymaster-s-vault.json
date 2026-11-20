@@ -1,0 +1,122 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "replacement",
+      "text": "This land enters tapped unless you control a Swamp.",
+      "replacement": {
+        "event": "would_enter",
+        "result": {
+          "mode": "modify",
+          "set": {
+            "tapped": true
+          }
+        },
+        "condition": {
+          "not": {
+            "check": "controls",
+            "filter": {
+              "subtypes": [
+                "Swamp"
+              ],
+              "controller": "you"
+            }
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_enter"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "mana",
+      "text": "{T}: Add {B}.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{B}"
+          }
+        ]
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "activated",
+      "text": "{B}, {T}: Target creature you control connives X, where X is the number of creatures that died this turn. (Draw X cards, then discard X cards. Put a +1/+1 counter on that creature for each nonland card discarded this way.)",
+      "costs": [
+        {
+          "mana": "{B}"
+        },
+        {
+          "tap": "self"
+        }
+      ],
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Spymaster's Vault: choose a target",
+            "instruction": "Choose target creature you control.",
+            "source": {
+              "card": "Spymaster's Vault",
+              "ability": "a3"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "connive",
+          "on": "t1",
+          "amount": {
+            "ref": "count_this_turn",
+            "event": "dies",
+            "filter": {
+              "types": [
+                "creature"
+              ]
+            }
+          },
+          "prompt": {
+            "title": "Spymaster's Vault: connive",
+            "instruction": "Choose a card to discard after drawing (connive).",
+            "source": {
+              "card": "Spymaster's Vault",
+              "ability": "a3"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "quantity:count_this_turn",
+        "step:connive",
+        "field:connive.on"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

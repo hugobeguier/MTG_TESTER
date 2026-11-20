@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "You draw three cards and you lose 3 life.",
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": 3,
+          "who": "you"
+        },
+        {
+          "kind": "life_change",
+          "who": "you",
+          "lifeDelta": -3
+        }
+      ],
+      "implementation": "implemented",
+      "needs": []
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

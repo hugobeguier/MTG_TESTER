@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "replacement",
+      "text": "This land enters tapped unless you control a Mountain or a Forest.",
+      "replacement": {
+        "event": "would_enter",
+        "result": {
+          "mode": "modify",
+          "set": {
+            "tapped": true
+          }
+        },
+        "condition": {
+          "not": {
+            "check": "controls",
+            "filter": {
+              "anyOf": [
+                {
+                  "subtypes": [
+                    "Mountain"
+                  ]
+                },
+                {
+                  "subtypes": [
+                    "Forest"
+                  ]
+                }
+              ],
+              "controller": "you"
+            }
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_enter"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "mana",
+      "text": "{T}: Add {U}.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{U}"
+          }
+        ]
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "activated",
+      "text": "{U}, {T}: The next spell you cast this turn can't be countered.",
+      "costs": [
+        {
+          "mana": "{U}"
+        },
+        {
+          "tap": "self"
+        }
+      ],
+      "scripted": {
+        "handler": "next_spell_this_turn_cant_be_countered"
+      },
+      "steps": [
+        {
+          "kind": "grant_effect",
+          "who": "you",
+          "modify": [
+            {
+              "cant": "be_countered"
+            }
+          ],
+          "duration": "until_end_of_turn"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "scripted:next_spell_this_turn_cant_be_countered",
+        "step:grant_effect",
+        "field:grant_effect.modify"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

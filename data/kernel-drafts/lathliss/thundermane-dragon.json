@@ -1,0 +1,116 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "static",
+      "text": "You may look at the top card of your library any time.",
+      "optional": true,
+      "static": {
+        "affects": "you",
+        "modify": [
+          {
+            "grant": "look_at_top_card_of_library_any_time"
+          }
+        ]
+      },
+      "prompt": {
+        "title": "Thundermane Dragon: optional",
+        "instruction": "Do you want to use this ability?",
+        "source": {
+          "card": "Thundermane Dragon",
+          "ability": "a2"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "static",
+      "text": "You may cast creature spells with power 4 or greater from the top of your library. If you cast a creature spell this way, it gains haste until end of turn.",
+      "optional": true,
+      "static": {
+        "affects": "you",
+        "modify": [
+          {
+            "grant": "cast_creature_spells_with_power_4_or_greater_from_top_of_library"
+          }
+        ]
+      },
+      "srcs": [
+        0
+      ],
+      "steps": [
+        {
+          "kind": "grant_effect",
+          "target": "event_object",
+          "modify": [
+            {
+              "grant": "haste"
+            }
+          ],
+          "duration": "until_end_of_turn",
+          "src": 1,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "all": [
+                {
+                  "check": "cast_from",
+                  "zone": "library"
+                },
+                {
+                  "check": "matches",
+                  "obj": "event_object",
+                  "filter": {
+                    "types": [
+                      "creature"
+                    ],
+                    "power": {
+                      "op": ">=",
+                      "value": 4
+                    }
+                  }
+                }
+              ]
+            },
+            "src": 1
+          }
+        }
+      ],
+      "prompt": {
+        "title": "Thundermane Dragon: optional",
+        "instruction": "Do you want to that object gains haste until end of turn?",
+        "source": {
+          "card": "Thundermane Dragon",
+          "ability": "a3"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "static",
+        "step:grant_effect",
+        "field:grant_effect.modify",
+        "predicate:all",
+        "predicate:cast_from",
+        "predicate:matches"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

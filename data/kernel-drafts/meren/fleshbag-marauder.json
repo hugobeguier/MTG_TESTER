@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "When this creature enters, each player sacrifices a creature of their choice.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "sacrifice_permanent",
+          "who": "each_player",
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "prompt": {
+            "title": "Fleshbag Marauder: sacrifice",
+            "instruction": "Choose a permanent to sacrifice.",
+            "source": {
+              "card": "Fleshbag Marauder",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:sacrifice_permanent.filter",
+        "field:sacrifice_permanent.who"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

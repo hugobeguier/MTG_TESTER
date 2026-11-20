@@ -1,0 +1,103 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "Creatures you control are every creature type. The same is true for creature spells you control and creature cards you own that aren't on the battlefield.",
+      "static": {
+        "affects": {
+          "anyOf": [
+            {
+              "types": [
+                "creature"
+              ],
+              "controller": "you",
+              "zone": "battlefield"
+            },
+            {
+              "types": [
+                "creature"
+              ],
+              "controller": "you",
+              "zone": "stack"
+            },
+            {
+              "types": [
+                "creature"
+              ],
+              "owner": "you",
+              "zone": "hand"
+            },
+            {
+              "types": [
+                "creature"
+              ],
+              "owner": "you",
+              "zone": "graveyard"
+            },
+            {
+              "types": [
+                "creature"
+              ],
+              "owner": "you",
+              "zone": "library"
+            },
+            {
+              "types": [
+                "creature"
+              ],
+              "owner": "you",
+              "zone": "exile"
+            }
+          ]
+        },
+        "modify": [
+          {
+            "grant": "changeling"
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "{3}, {T}: Create a 2/2 blue Shapeshifter creature token with changeling. (It is every creature type.)",
+      "costs": [
+        {
+          "mana": "{3}"
+        },
+        {
+          "tap": "self"
+        }
+      ],
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Shapeshifter",
+          "tokenPower": 2,
+          "tokenToughness": 2,
+          "tokenColors": [
+            "blue"
+          ],
+          "tokenTypeLine": "Creature — Shapeshifter",
+          "tokenKeywords": [
+            "changeling"
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:create_tokens.tokenKeywords"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

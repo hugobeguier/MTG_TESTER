@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "kind": "mana",
+      "text": "{T}: Add {W} or {B}.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{W}"
+          },
+          {
+            "colors": "{B}"
+          }
+        ]
+      },
+      "id": "a1",
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "kind": "activated",
+      "text": "{W/B}{W/B}{W/B}{W/B}, {T}, Sacrifice this artifact: Draw two cards.",
+      "costs": [
+        {
+          "mana": "{W/B}{W/B}{W/B}{W/B}"
+        },
+        {
+          "tap": "self"
+        },
+        {
+          "sacrifice": "self",
+          "count": 1
+        }
+      ],
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "who": "you",
+          "amount": 2,
+          "src": 0
+        }
+      ],
+      "id": "a2",
+      "implementation": "needed",
+      "needs": [
+        "cost:sacrifice"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

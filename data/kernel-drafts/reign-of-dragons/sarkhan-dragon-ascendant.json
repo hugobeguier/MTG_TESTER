@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "When Sarkhan enters, you may behold a Dragon. If you do, create a Treasure token. (To behold a Dragon, choose a Dragon you control or reveal a Dragon card from your hand.)",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "choose",
+          "from": {
+            "anyOf": [
+              {
+                "types": [
+                  "creature"
+                ],
+                "subtypes": [
+                  "Dragon"
+                ],
+                "controller": "you",
+                "zone": "battlefield"
+              },
+              {
+                "subtypes": [
+                  "Dragon"
+                ],
+                "owner": "you",
+                "zone": "hand"
+              }
+            ]
+          },
+          "count": 1,
+          "saveAs": "chosen",
+          "optional": true,
+          "behold": true,
+          "src": 0,
+          "prompt": {
+            "title": "Sarkhan, Dragon Ascendant: optional",
+            "instruction": "Do you want to choose a Dragon you control or Dragon card in your hand?",
+            "source": {
+              "card": "Sarkhan, Dragon Ascendant",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Treasure",
+          "tokenColors": [
+            "colorless"
+          ],
+          "tokenTypeLine": "Artifact — Treasure",
+          "src": 1,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "paid_additional_cost",
+              "option": "behold a Dragon"
+            },
+            "src": 1
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:choose",
+        "field:choose.behold",
+        "field:choose.count",
+        "field:choose.from",
+        "field:choose.saveAs",
+        "predicate:paid_additional_cost"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever a Dragon you control enters, put a +1/+1 counter on Sarkhan. Until end of turn, Sarkhan becomes a Dragon in addition to its other types and gains flying.",
+      "trigger": {
+        "event": "etb",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "subtypes": [
+            "Dragon"
+          ],
+          "controller": "you"
+        }
+      },
+      "steps": [
+        {
+          "kind": "add_counters",
+          "on": "self",
+          "counterKind": "+1/+1",
+          "amount": 1,
+          "src": 0
+        },
+        {
+          "kind": "grant_effect",
+          "target": "self",
+          "modify": [
+            {
+              "addTypes": [
+                "Dragon"
+              ]
+            },
+            {
+              "grant": "flying"
+            }
+          ],
+          "duration": "until_end_of_turn",
+          "src": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject",
+        "step:add_counters",
+        "field:add_counters.on",
+        "step:grant_effect",
+        "field:grant_effect.modify"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

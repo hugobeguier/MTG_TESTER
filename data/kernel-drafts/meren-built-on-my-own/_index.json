@@ -1,0 +1,385 @@
+{
+  "deck": "Meren of Clan Nel Toth Built on my Own",
+  "cards": [
+    {
+      "slug": "meren-of-clan-nel-toth",
+      "name": "Meren of Clan Nel Toth"
+    },
+    {
+      "slug": "arachnogenesis",
+      "name": "Arachnogenesis"
+    },
+    {
+      "slug": "arcane-signet",
+      "name": "Arcane Signet"
+    },
+    {
+      "slug": "beast-whisperer",
+      "name": "Beast Whisperer"
+    },
+    {
+      "slug": "beledros-witherbloom",
+      "name": "Beledros Witherbloom"
+    },
+    {
+      "slug": "blood-artist",
+      "name": "Blood Artist"
+    },
+    {
+      "slug": "cankerbloom",
+      "name": "Cankerbloom"
+    },
+    {
+      "slug": "carrion-feeder",
+      "name": "Carrion Feeder"
+    },
+    {
+      "slug": "command-tower",
+      "name": "Command Tower"
+    },
+    {
+      "slug": "culling-ritual",
+      "name": "Culling Ritual"
+    },
+    {
+      "slug": "cultivate",
+      "name": "Cultivate"
+    },
+    {
+      "slug": "dark-ritual",
+      "name": "Dark Ritual"
+    },
+    {
+      "slug": "deadly-brew",
+      "name": "Deadly Brew"
+    },
+    {
+      "slug": "deathbonnet-sprout-deathbonnet-hulk",
+      "name": "Deathbonnet Sprout // Deathbonnet Hulk"
+    },
+    {
+      "slug": "dina-essence-brewer",
+      "name": "Dina, Essence Brewer"
+    },
+    {
+      "slug": "dina-s-guidance",
+      "name": "Dina's Guidance"
+    },
+    {
+      "slug": "dryad-arbor",
+      "name": "Dryad Arbor"
+    },
+    {
+      "slug": "eccentric-pestfinder-turn-stones",
+      "name": "Eccentric Pestfinder // Turn Stones",
+      "questions": [
+        "Prepared: once prepared, may you cast Turn Stones (a copy of the sorcery) any time you could cast a sorcery, with preparing cleared when the copy is cast? Please confirm the kernel should treat prepared as a permanent flag."
+      ]
+    },
+    {
+      "slug": "eldritch-evolution",
+      "name": "Eldritch Evolution"
+    },
+    {
+      "slug": "elvish-mystic",
+      "name": "Elvish Mystic"
+    },
+    {
+      "slug": "eternal-witness",
+      "name": "Eternal Witness"
+    },
+    {
+      "slug": "evolving-wilds",
+      "name": "Evolving Wilds"
+    },
+    {
+      "slug": "feed-the-swarm",
+      "name": "Feed the Swarm"
+    },
+    {
+      "slug": "fiend-artisan",
+      "name": "Fiend Artisan"
+    },
+    {
+      "slug": "find-finality",
+      "name": "Find // Finality"
+    },
+    {
+      "slug": "forest",
+      "name": "Forest"
+    },
+    {
+      "slug": "glowspore-shaman",
+      "name": "Glowspore Shaman"
+    },
+    {
+      "slug": "golgari-rot-farm",
+      "name": "Golgari Rot Farm"
+    },
+    {
+      "slug": "gorma-the-gullet",
+      "name": "Gorma, the Gullet"
+    },
+    {
+      "slug": "grim-haruspex",
+      "name": "Grim Haruspex"
+    },
+    {
+      "slug": "grisly-salvage",
+      "name": "Grisly Salvage"
+    },
+    {
+      "slug": "growing-rites-of-itlimoc-itlimoc-cradle-of-the-sun",
+      "name": "Growing Rites of Itlimoc // Itlimoc, Cradle of the Sun"
+    },
+    {
+      "slug": "guardian-project",
+      "name": "Guardian Project",
+      "questions": [
+        "Guardian Project compares the entering creature's name with creatures you control (other than it) and creature cards in your graveyard. Confirm that tokens never trigger it (only nontoken creatures) and that a changeling or name-copy is not special-cased."
+      ]
+    },
+    {
+      "slug": "gyome-master-chef",
+      "name": "Gyome, Master Chef"
+    },
+    {
+      "slug": "harrow",
+      "name": "Harrow"
+    },
+    {
+      "slug": "high-market",
+      "name": "High Market"
+    },
+    {
+      "slug": "immoral-bargain",
+      "name": "Immoral Bargain"
+    },
+    {
+      "slug": "insidious-roots",
+      "name": "Insidious Roots"
+    },
+    {
+      "slug": "izoni-thousand-eyed",
+      "name": "Izoni, Thousand-Eyed"
+    },
+    {
+      "slug": "jarad-golgari-lich-lord",
+      "name": "Jarad, Golgari Lich Lord"
+    },
+    {
+      "slug": "jungle-hollow",
+      "name": "Jungle Hollow"
+    },
+    {
+      "slug": "khalni-garden",
+      "name": "Khalni Garden"
+    },
+    {
+      "slug": "living-death",
+      "name": "Living Death"
+    },
+    {
+      "slug": "llanowar-elves",
+      "name": "Llanowar Elves"
+    },
+    {
+      "slug": "llanowar-wastes",
+      "name": "Llanowar Wastes"
+    },
+    {
+      "slug": "mazirek-kraul-death-priest",
+      "name": "Mazirek, Kraul Death Priest"
+    },
+    {
+      "slug": "midnight-reaper",
+      "name": "Midnight Reaper"
+    },
+    {
+      "slug": "morbid-opportunist",
+      "name": "Morbid Opportunist"
+    },
+    {
+      "slug": "moseo-vein-s-new-dean",
+      "name": "Moseo, Vein's New Dean",
+      "questions": [
+        "Infusion returns a creature card with mana value X or less, X = life gained this turn. The schema can only count gain EVENTS, so one 5-life gain reads as X = 1. Is that approximation acceptable until a life_gained_this_turn Quantity exists?"
+      ]
+    },
+    {
+      "slug": "mulch",
+      "name": "Mulch"
+    },
+    {
+      "slug": "necroblossom-snarl",
+      "name": "Necroblossom Snarl"
+    },
+    {
+      "slug": "old-rutstein",
+      "name": "Old Rutstein",
+      "questions": [
+        "Old Rutstein's three outcomes are by card type (land / creature / noncreature nonland). A land creature such as Dryad Arbor milled counts as both a land and a creature, so it makes a Treasure AND an Insect. Confirm that is intended."
+      ]
+    },
+    {
+      "slug": "old-stickfingers",
+      "name": "Old Stickfingers"
+    },
+    {
+      "slug": "overgrown-tomb",
+      "name": "Overgrown Tomb"
+    },
+    {
+      "slug": "pest-infestation",
+      "name": "Pest Infestation"
+    },
+    {
+      "slug": "phyrexian-reclamation",
+      "name": "Phyrexian Reclamation"
+    },
+    {
+      "slug": "plaguecrafter",
+      "name": "Plaguecrafter"
+    },
+    {
+      "slug": "priest-of-forgotten-gods",
+      "name": "Priest of Forgotten Gods"
+    },
+    {
+      "slug": "reanimate",
+      "name": "Reanimate"
+    },
+    {
+      "slug": "ribtruss-roaster",
+      "name": "Ribtruss Roaster"
+    },
+    {
+      "slug": "sakura-tribe-elder",
+      "name": "Sakura-Tribe Elder"
+    },
+    {
+      "slug": "savra-queen-of-the-golgari",
+      "name": "Savra, Queen of the Golgari"
+    },
+    {
+      "slug": "skull-prophet",
+      "name": "Skull Prophet"
+    },
+    {
+      "slug": "skullclamp",
+      "name": "Skullclamp"
+    },
+    {
+      "slug": "sol-ring",
+      "name": "Sol Ring"
+    },
+    {
+      "slug": "spore-frog",
+      "name": "Spore Frog"
+    },
+    {
+      "slug": "squirming-emergence",
+      "name": "Squirming Emergence"
+    },
+    {
+      "slug": "stensian-sanguinist-exsanguinate",
+      "name": "Stensian Sanguinist // Exsanguinate",
+      "questions": [
+        "Stensian Sanguinist: the target creature may be any creature, not only yours. The prepared trigger only fires if THAT creature deals combat damage to a player this combat. Confirm."
+      ]
+    },
+    {
+      "slug": "swamp",
+      "name": "Swamp"
+    },
+    {
+      "slug": "swiftfoot-boots",
+      "name": "Swiftfoot Boots"
+    },
+    {
+      "slug": "tainted-wood",
+      "name": "Tainted Wood"
+    },
+    {
+      "slug": "terramorphic-expanse",
+      "name": "Terramorphic Expanse"
+    },
+    {
+      "slug": "toski-bearer-of-secrets",
+      "name": "Toski, Bearer of Secrets"
+    },
+    {
+      "slug": "toxic-deluge",
+      "name": "Toxic Deluge"
+    },
+    {
+      "slug": "turbulent-fen",
+      "name": "Turbulent Fen"
+    },
+    {
+      "slug": "twilight-diviner",
+      "name": "Twilight Diviner"
+    },
+    {
+      "slug": "underground-mortuary",
+      "name": "Underground Mortuary"
+    },
+    {
+      "slug": "vernal-fen",
+      "name": "Vernal Fen"
+    },
+    {
+      "slug": "victimize",
+      "name": "Victimize"
+    },
+    {
+      "slug": "village-rites",
+      "name": "Village Rites"
+    },
+    {
+      "slug": "viscera-seer",
+      "name": "Viscera Seer"
+    },
+    {
+      "slug": "wight-of-the-reliquary",
+      "name": "Wight of the Reliquary"
+    },
+    {
+      "slug": "willow-geist",
+      "name": "Willow Geist"
+    },
+    {
+      "slug": "witch-of-the-moors",
+      "name": "Witch of the Moors"
+    },
+    {
+      "slug": "woodland-cemetery",
+      "name": "Woodland Cemetery"
+    },
+    {
+      "slug": "ygra-eater-of-all",
+      "name": "Ygra, Eater of All"
+    },
+    {
+      "slug": "zulaport-cutthroat",
+      "name": "Zulaport Cutthroat"
+    }
+  ],
+  "decisions": [
+    "SCHEMA QUESTION: the Prepared mechanic (Eccentric Pestfinder // Turn Stones, Stensian Sanguinist // Exsanguinate) has no state or rule: drafted as a grant_effect step with prepared:true / modify grant \"prepared\" on self (Stensian's second sentence is a create_delayed_trigger step, untyped at:\"this_combat\", trigger deals_combat_damage_to_player on t1). Wanted: a prepared flag on the permanent, a step to set/clear it, and the 'cast a copy of the back-face spell, then unprepare' permission as a kernel rule.",
+    "SCHEMA QUESTION: double-faced cards (Deathbonnet Sprout // Hulk, Growing Rites of Itlimoc // Itlimoc, Eccentric Pestfinder // Turn Stones, Stensian Sanguinist // Exsanguinate, Find // Finality) again carry both faces in one abilities[] with a face-name prefix in each text, as in the Meren deck. Same wanted fix: ability.face or card.faces[].",
+    "SCHEMA QUESTION: a search/reveal whose found cards go to DIFFERENT zones (Cultivate: one onto the battlefield tapped, the other to hand; Dina's Guidance: the found card to hand OR graveyard) has no vocabulary: drafted as search_library with to:\"revealed\" + saveAs, then a choose step (fromRevealed), move_card_zone steps (what rest_of_revealed_cards) and a separate shuffle; Dina's Guidance uses a choose choice:\"mode\" (hand/graveyard) read by an if_else. Wanted: search_library.split or a typed 'reveal then distribute' step.",
+    "SCHEMA QUESTION: 'for each permanent destroyed this way' (Culling Ritual: add {B} or {G} for each) has no Quantity: drafted as add_mana with amount event_amount plus step field amountOf:\"s1\" (same workaround as Decree of Pain in the Squirreled Away deck). Wanted: Quantity ref step_count {step}. Also each mana is B or G chosen separately (produces lists the alternatives).",
+    "SCHEMA QUESTION: Guardian Project's 'if it doesn't have the same name as another creature you control or a creature card in your graveyard' has no predicate (ObjectFilter.named is a fixed string, sameName is a group qualifier): drafted as a scripted handler unique_name_check (params list the two comparison pools) on a normal triggered ability with the draw step, plus review.ignore for if/another. Wanted: ObjectFilter.sameNameAs (ObjRef) or a Predicate nameMatches {obj, pools}. The handler is not in the known scripted-marker list.",
+    "SCHEMA QUESTION: 'the amount of life you gained this turn' (Moseo, Infusion X) has no Quantity: drafted as count_this_turn gain_life actor you, which counts gain EVENTS, not life points. Wanted: Quantity ref life_gained_this_turn {who} (also a sum variant of count_this_turn).",
+    "SCHEMA QUESTION: target count equal to a variable (Immoral Bargain 'destroy X target nonland permanents', Pest Infestation 'destroy up to X targets', Priest of Forgotten Gods 'any number of target players'): TargetSpec.count is two ints, so drafted as min 0 / max 99 (the 'any number' precedent) plus step amount X. Wanted: TargetSpec.count accepting Quantity (min/max), 'any number' as max:\"any\".",
+    "SCHEMA QUESTION: add_counters on a whole group (Mazirek 'a +1/+1 counter on each creature you control', Insidious Roots 'on each Plant you control') has no typed field: drafted as add_counters with all:true and filter (untyped passthrough, flagged as needs). Wanted: add_counters.all + filter typed, or an `on` that accepts an ObjectFilter.",
+    "SCHEMA QUESTION: 'if a land / creature / noncreature nonland card is milled this way' (Old Rutstein) has no ref to the cards a mill step moved: drafted as mill (s1) then a choose step with fromMilled and saveAs chosen (the single milled card), with matches conditions on `chosen`. Wanted: ObjRef milled (or step result ref) so no helper choose is needed; also an empty library mills nothing.",
+    "SCHEMA QUESTION: 'reveal cards from the top of your library until you reveal X creature cards' (Old Stickfingers) uses the untyped reveal.until {count, filter}, with move_card_zone what revealed_cards / rest_of_revealed_cards (order random is typed). 'When you cast this spell' is a triggered ability with zone stack and trigger cast/self (Plumb the Forbidden precedent); the X is the spell's X (xPrompt). The static P/T uses setBasePT (characteristic-defining) with the graveyard count.",
+    "SCHEMA QUESTION: replacement modify 'enters with an additional +1/+1 counter for each creature that died under your control this turn' (Gorma) is written as would_enter with subject filter and set.counters {kind, count: Quantity} (set is a loose record; the earlier escape-counters precedent). 'Additional' means on top of any counters it already enters with; the kernel must add, not overwrite.",
+    "SCHEMA QUESTION: Ygra's Ward is a keyword+triggered ability with unlessPay cost sacrifice a Food (Roaming Throne precedent for ward costs; keyword param is the cost text). 'Other creatures are Food artifacts in addition to their other types and have \"{2}, {T}, Sacrifice this permanent: You gain 3 life.\"' is a static with addTypes [Artifact, Food] and a loose grantAbility record; the type-change layer (a creature that is also a Food, so Gyome's/Ygra's Food filters match it) is a kernel rule. 'Whenever a Food is put into a graveyard from the battlefield' is event leaves with fromZone battlefield / toZone graveyard (there is no 'put into a graveyard' event name).",
+    "SCHEMA QUESTION: Devour 1 (Ribtruss Roaster) is a bare keyword ability with param 1; the 'sacrifice any number of creatures as it enters, enters with that many counters' replacement is a kernel rule (not encoded per card), like Saga lore counters.",
+    "SCHEMA QUESTION: Mazirek's 'a player sacrifices another permanent' uses trigger event sacrifice with subject controller:any, whose:each; the sacrifice event has no acting-player field in the schema (whose is the sacrificing player). Savra's 'each other player' is each_opponent (identical in a 2-player game; in multiplayer Commander it is every other player, which equals each opponent).",
+    "SCHEMA QUESTION: per-player 'if you sacrificed a permanent this way' (Deadly Brew: the 'you' part of each_player) uses step_done on the shared sacrifice step, which cannot tell WHICH player sacrificed (same gap as Plaguecrafter/Braids in the Meren deck). Wanted: step_done.who or a per-player result."
+  ]
+}

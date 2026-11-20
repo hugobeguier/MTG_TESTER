@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Whenever a Dragon you control enters, put a gold counter on this artifact.",
+      "trigger": {
+        "event": "etb",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "subtypes": [
+            "Dragon"
+          ],
+          "controller": "you"
+        }
+      },
+      "steps": [
+        {
+          "kind": "add_counters",
+          "on": "self",
+          "counterKind": "gold",
+          "amount": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject",
+        "step:add_counters",
+        "field:add_counters.on"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "{T}, Remove a gold counter from this artifact: Draw a card.",
+      "costs": [
+        {
+          "tap": "self"
+        },
+        {
+          "counters": {
+            "kind": "gold",
+            "count": 1,
+            "remove": true,
+            "from": "self"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": 1,
+          "who": "you"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "cost:counters"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "mana",
+      "text": "{T}: Add one mana of any color.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "anyColor": 1
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "mana:variable"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

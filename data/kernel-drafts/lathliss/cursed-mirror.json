@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "mana",
+      "text": "{T}: Add {R}.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{R}"
+          }
+        ]
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "replacement",
+      "text": "As this artifact enters, you may have it become a copy of any creature on the battlefield until end of turn, except it has haste.",
+      "optional": true,
+      "replacement": {
+        "event": "would_enter",
+        "optional": true,
+        "result": {
+          "mode": "also",
+          "steps": [
+            {
+              "kind": "copy",
+              "target": "self",
+              "of": {
+                "types": [
+                  "creature"
+                ],
+                "zone": "battlefield"
+              },
+              "optional": true,
+              "duration": "until_end_of_turn",
+              "exceptGrant": [
+                "haste"
+              ],
+              "prompt": {
+                "title": "Cursed Mirror: optional",
+                "instruction": "Do you want to copy Cursed Mirror?",
+                "source": {
+                  "card": "Cursed Mirror",
+                  "ability": "a2"
+                }
+              }
+            }
+          ]
+        },
+        "prompt": {
+          "title": "Cursed Mirror: optional",
+          "instruction": "Do you want to apply this replacement?",
+          "source": {
+            "card": "Cursed Mirror",
+            "ability": "a2"
+          }
+        }
+      },
+      "prompt": {
+        "title": "Cursed Mirror: optional",
+        "instruction": "Do you want to use this ability?",
+        "source": {
+          "card": "Cursed Mirror",
+          "ability": "a2"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_enter",
+        "step:copy",
+        "field:copy.exceptGrant",
+        "field:copy.of"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

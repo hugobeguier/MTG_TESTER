@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "trigger": {
+        "event": "deals_combat_damage_to_player",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "reanimate",
+          "target": "t1",
+          "who": "you",
+          "reflexive": true,
+          "amount": {
+            "ref": "X"
+          },
+          "src": 1
+        }
+      ],
+      "srcs": [
+        0
+      ],
+      "text": "Whenever this creature deals combat damage to a player, roll a d20. When you do, put any number of target creature cards with total mana value X or less from graveyards onto the battlefield under your control, where X is the result.",
+      "scripted": {
+        "handler": "roll_d20_result_is_X",
+        "params": {
+          "sides": 20
+        }
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "zone": "graveyard",
+            "owner": "any"
+          },
+          "count": {
+            "min": 0,
+            "max": 99
+          },
+          "prompt": {
+            "title": "Ancient Brass Dragon: choose targets",
+            "instruction": "Choose up to 99 target creature cards in a graveyard.",
+            "source": {
+              "card": "Ancient Brass Dragon",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "scripted:roll_d20_result_is_X",
+        "targets:multi",
+        "quantity:X",
+        "field:reanimate.amount",
+        "field:reanimate.reflexive"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

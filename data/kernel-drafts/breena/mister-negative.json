@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "kind": "keyword",
+      "text": "Vigilance, lifelink",
+      "keyword": {
+        "name": "vigilance"
+      },
+      "id": "a1",
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "kind": "keyword",
+      "text": "Vigilance, lifelink",
+      "keyword": {
+        "name": "lifelink"
+      },
+      "id": "a2",
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "kind": "triggered",
+      "text": "Darkforce Inversion — When Mister Negative enters, you may exchange life totals with target opponent. If you lost life this way, draw that many cards.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "player",
+          "filter": {
+            "controller": "opponent"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Mister Negative: choose a target",
+            "instruction": "Choose target player.",
+            "source": {
+              "card": "Mister Negative",
+              "ability": "a3"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "set_life",
+          "id": "s1",
+          "who": "you",
+          "target": "t1",
+          "exchange": true,
+          "optional": true,
+          "src": 0,
+          "prompt": {
+            "title": "Mister Negative: optional",
+            "instruction": "Do you want to set life total to ??",
+            "source": {
+              "card": "Mister Negative",
+              "ability": "a3"
+            }
+          }
+        },
+        {
+          "kind": "draw_cards",
+          "who": "you",
+          "amount": {
+            "ref": "life_lost_this_way"
+          },
+          "src": 1,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "compare",
+              "left": {
+                "ref": "life_lost_this_way"
+              },
+              "cmp": {
+                "op": ">",
+                "value": 0
+              }
+            },
+            "src": 1
+          }
+        }
+      ],
+      "id": "a3",
+      "implementation": "needed",
+      "needs": [
+        "step:set_life",
+        "field:set_life.exchange",
+        "quantity:life_lost_this_way",
+        "predicate:compare"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

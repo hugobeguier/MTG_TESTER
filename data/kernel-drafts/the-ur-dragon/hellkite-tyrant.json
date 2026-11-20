@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "keyword",
+      "text": "Trample",
+      "keyword": {
+        "name": "trample"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "triggered",
+      "trigger": {
+        "event": "deals_combat_damage_to_player",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "gain_control",
+          "all": true,
+          "who": "that_player",
+          "filter": {
+            "types": [
+              "artifact"
+            ]
+          }
+        }
+      ],
+      "text": "Whenever this creature deals combat damage to a player, gain control of all artifacts that player controls.",
+      "implementation": "needed",
+      "needs": [
+        "step:gain_control",
+        "field:gain_control.all",
+        "field:gain_control.filter",
+        "field:gain_control.who"
+      ]
+    },
+    {
+      "id": "a4",
+      "kind": "triggered",
+      "text": "At the beginning of your upkeep, if you control twenty or more artifacts, you win the game.",
+      "trigger": {
+        "event": "begin_step",
+        "step": "upkeep",
+        "whose": "yours",
+        "interveningIf": {
+          "check": "controls",
+          "filter": {
+            "types": [
+              "artifact"
+            ],
+            "controller": "you"
+          },
+          "count": {
+            "op": ">=",
+            "value": {
+              "math": "max",
+              "args": [
+                20
+              ]
+            }
+          }
+        }
+      },
+      "scripted": {
+        "handler": "win_the_game"
+      },
+      "implementation": "needed",
+      "needs": [
+        "scripted:win_the_game",
+        "trigger:intervening_if"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

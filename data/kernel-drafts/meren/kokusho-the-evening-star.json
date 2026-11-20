@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "When Kokusho dies, each opponent loses 5 life. You gain life equal to the life lost this way.",
+      "trigger": {
+        "event": "dies",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "life_change",
+          "who": "each_opponent",
+          "lose": true,
+          "amount": 5
+        },
+        {
+          "kind": "life_change",
+          "who": "you",
+          "amount": {
+            "ref": "life_lost_this_way"
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:life_change.amount",
+        "field:life_change.lose",
+        "field:life_change.who",
+        "quantity:life_lost_this_way"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

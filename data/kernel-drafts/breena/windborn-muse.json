@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "id": "a1",
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "kind": "static",
+      "text": "Creatures can't attack you unless their controller pays {2} for each creature they control that's attacking you.",
+      "static": {
+        "affects": {
+          "types": [
+            "creature"
+          ]
+        },
+        "modify": [
+          {
+            "attackTax": {
+              "cost": "{2}",
+              "per": "attacker"
+            }
+          }
+        ]
+      },
+      "id": "a2",
+      "implementation": "needed",
+      "needs": [
+        "static",
+        "static:attackTax"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "unless",
+        "reason": "the unless-pays is the attackTax modifier itself"
+      }
+    ]
+  }
+}

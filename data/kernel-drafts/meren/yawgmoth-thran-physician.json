@@ -1,0 +1,126 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Protection from Humans",
+      "keyword": {
+        "name": "protection",
+        "param": "Humans"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "Pay 1 life, Sacrifice another creature: Put a -1/-1 counter on up to one target creature and draw a card.",
+      "costs": [
+        {
+          "life": 1
+        },
+        {
+          "sacrifice": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you",
+            "another": true
+          },
+          "count": 1,
+          "prompt": {
+            "title": "Yawgmoth, Thran Physician: choose what to sacrifice",
+            "instruction": "Choose 1 another creature you control to sacrifice.",
+            "source": {
+              "card": "Yawgmoth, Thran Physician",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "count": {
+            "min": 0,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Yawgmoth, Thran Physician: choose a target",
+            "instruction": "Choose up to one target creature.",
+            "source": {
+              "card": "Yawgmoth, Thran Physician",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "add_counters",
+          "on": "t1",
+          "counterKind": "-1/-1",
+          "amount": 1
+        },
+        {
+          "kind": "draw_cards",
+          "who": "you",
+          "amount": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "cost:life",
+        "cost:sacrifice",
+        "targets:multi",
+        "step:add_counters",
+        "field:add_counters.on"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "activated",
+      "text": "{B}{B}, Discard a card: Proliferate. (Choose any number of permanents and/or players, then give each another counter of each kind already there.)",
+      "costs": [
+        {
+          "mana": "{B}{B}"
+        },
+        {
+          "discard": {
+            "zone": "hand",
+            "owner": "you"
+          },
+          "count": 1,
+          "prompt": {
+            "title": "Yawgmoth, Thran Physician: choose what to discard",
+            "instruction": "Choose 1 card in your hand to discard.",
+            "source": {
+              "card": "Yawgmoth, Thran Physician",
+              "ability": "a3"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "proliferate"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "cost:discard",
+        "step:proliferate"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

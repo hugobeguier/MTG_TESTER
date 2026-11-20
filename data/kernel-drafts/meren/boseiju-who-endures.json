@@ -1,0 +1,139 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "mana",
+      "text": "{T}: Add {G}.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{G}"
+          }
+        ]
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "zone": "hand",
+      "text": "Channel — {1}{G}, Discard this card: Destroy target artifact, enchantment, or nonbasic land an opponent controls. That player may search their library for a land card with a basic land type, put it onto the battlefield, then shuffle. This ability costs {1} less to activate for each legendary creature you control.",
+      "costs": [
+        {
+          "mana": "{1}{G}"
+        },
+        {
+          "discard": "self",
+          "count": 1
+        }
+      ],
+      "costReduction": {
+        "per": {
+          "types": [
+            "creature"
+          ],
+          "supertypes": [
+            "legendary"
+          ],
+          "controller": "you"
+        },
+        "amount": 1,
+        "applies": "generic",
+        "src": 2
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "filter": {
+            "controller": "opponent",
+            "anyOf": [
+              {
+                "types": [
+                  "artifact"
+                ]
+              },
+              {
+                "types": [
+                  "enchantment"
+                ]
+              },
+              {
+                "types": [
+                  "land"
+                ],
+                "notSupertypes": [
+                  "basic"
+                ]
+              }
+            ]
+          },
+          "prompt": {
+            "title": "Boseiju, Who Endures: choose a target",
+            "instruction": "Choose target artifact, enchantment, or nonbasic land an opponent controls.",
+            "source": {
+              "card": "Boseiju, Who Endures",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "destroy_target",
+          "target": "t1",
+          "src": 0
+        },
+        {
+          "kind": "search_library",
+          "who": "controller_of_target",
+          "optional": true,
+          "filter": {
+            "types": [
+              "land"
+            ],
+            "hasBasicLandType": true
+          },
+          "count": 1,
+          "to": "battlefield",
+          "shuffle": true,
+          "src": 1,
+          "prompt": {
+            "title": "Boseiju, Who Endures: optional",
+            "instruction": "Do you want to its controller searches their library for a land with a basic land type, put it onto the battlefield, then shuffle?",
+            "source": {
+              "card": "Boseiju, Who Endures",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "zone:hand",
+        "cost_reduction",
+        "cost:discard",
+        "step:search_library",
+        "field:search_library.count",
+        "field:search_library.filter",
+        "field:search_library.shuffle",
+        "field:search_library.to",
+        "field:search_library.who"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

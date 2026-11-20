@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Choose two target creature cards in your graveyard. Sacrifice a creature. If you do, return the chosen cards to the battlefield tapped.",
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "zone": "graveyard",
+            "owner": "you"
+          },
+          "count": {
+            "min": 2,
+            "max": 2
+          },
+          "distinct": true,
+          "src": 0,
+          "prompt": {
+            "title": "Victimize: choose targets",
+            "instruction": "Choose two target creature cards in your graveyard.",
+            "source": {
+              "card": "Victimize",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "sacrifice_permanent",
+          "id": "s1",
+          "who": "you",
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "src": 1,
+          "prompt": {
+            "title": "Victimize: sacrifice",
+            "instruction": "Choose a permanent to sacrifice.",
+            "source": {
+              "card": "Victimize",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "kind": "reanimate",
+          "target": "t1",
+          "who": "you",
+          "tapped": true,
+          "src": 2,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "step_done",
+              "step": "s1"
+            },
+            "src": 2
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "targets:multi",
+        "field:sacrifice_permanent.filter",
+        "field:reanimate.tapped",
+        "predicate:step_done"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

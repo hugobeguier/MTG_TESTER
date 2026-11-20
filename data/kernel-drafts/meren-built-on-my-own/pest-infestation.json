@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Destroy up to X target artifacts and/or enchantments. Create twice X 1/1 black and green Pest creature tokens with \"When this token dies, you gain 1 life.\"",
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "anyOf": [
+              {
+                "types": [
+                  "artifact"
+                ]
+              },
+              {
+                "types": [
+                  "enchantment"
+                ]
+              }
+            ]
+          },
+          "count": {
+            "min": 0,
+            "max": 99
+          },
+          "prompt": {
+            "title": "Pest Infestation: choose targets",
+            "instruction": "Choose up to 99 target artifacts or enchantments.",
+            "source": {
+              "card": "Pest Infestation",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "destroy_target",
+          "target": "t1",
+          "amount": {
+            "ref": "X"
+          },
+          "src": 0
+        },
+        {
+          "kind": "create_tokens",
+          "tokenCount": {
+            "math": "*",
+            "args": [
+              2,
+              {
+                "ref": "X"
+              }
+            ]
+          },
+          "tokenName": "Pest",
+          "tokenPower": 1,
+          "tokenToughness": 1,
+          "tokenColors": [
+            "black",
+            "green"
+          ],
+          "tokenTypeLine": "Creature — Pest",
+          "tokenAbilities": [
+            {
+              "kind": "triggered",
+              "text": "When this token dies, you gain 1 life.",
+              "trigger": {
+                "event": "dies",
+                "subject": "self"
+              },
+              "steps": [
+                {
+                  "kind": "life_change",
+                  "who": "you",
+                  "amount": 1
+                }
+              ]
+            }
+          ],
+          "src": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "targets:multi",
+        "quantity:X",
+        "field:destroy_target.amount",
+        "quantity:math",
+        "field:create_tokens.tokenAbilities"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,114 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "activated",
+      "text": "{T}, Sacrifice two other creatures: Any number of target players each lose 2 life and sacrifice a creature of their choice. You add {B}{B} and draw a card.",
+      "costs": [
+        {
+          "tap": "self"
+        },
+        {
+          "sacrifice": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you",
+            "another": true
+          },
+          "count": 2,
+          "prompt": {
+            "title": "Priest of Forgotten Gods: choose what to sacrifice",
+            "instruction": "Choose 2 other creatures you control to sacrifice.",
+            "source": {
+              "card": "Priest of Forgotten Gods",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "targets": [
+        {
+          "id": "t1",
+          "what": "player",
+          "count": {
+            "min": 0,
+            "max": 99
+          },
+          "prompt": {
+            "title": "Priest of Forgotten Gods: choose targets",
+            "instruction": "Choose up to 99 target players.",
+            "source": {
+              "card": "Priest of Forgotten Gods",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "life_change",
+          "who": "target_player",
+          "lose": true,
+          "amount": 2,
+          "src": 0
+        },
+        {
+          "kind": "sacrifice_permanent",
+          "who": "target_player",
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "src": 0,
+          "prompt": {
+            "title": "Priest of Forgotten Gods: sacrifice",
+            "instruction": "Choose a permanent to sacrifice.",
+            "source": {
+              "card": "Priest of Forgotten Gods",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "kind": "add_mana",
+          "produces": [
+            {
+              "colors": "{B}{B}"
+            }
+          ],
+          "src": 1
+        },
+        {
+          "kind": "draw_cards",
+          "who": "you",
+          "amount": 1,
+          "src": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "cost:sacrifice",
+        "targets:multi",
+        "field:life_change.amount",
+        "field:life_change.lose",
+        "field:life_change.who",
+        "field:sacrifice_permanent.filter",
+        "field:sacrifice_permanent.who",
+        "step:add_mana",
+        "field:add_mana.produces"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "each",
+        "reason": "each of the any-number target players is the loop: step who target_player applies to every chosen player"
+      }
+    ]
+  }
+}

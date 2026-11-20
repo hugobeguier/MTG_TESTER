@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Whenever you cast an enchantment spell, create a 4/4 white Angel creature token with flying.",
+      "trigger": {
+        "event": "cast",
+        "subject": {
+          "types": [
+            "enchantment"
+          ]
+        },
+        "whose": "yours"
+      },
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Angel",
+          "tokenPower": 4,
+          "tokenToughness": 4,
+          "tokenColors": [
+            "white"
+          ],
+          "tokenTypeLine": "Creature — Angel",
+          "tokenKeywords": [
+            "flying"
+          ],
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:create_tokens.tokenKeywords"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,158 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Hideaway 4 (When this land enters, look at the top four cards of your library, exile one face down, then put the rest on the bottom in a random order.)",
+      "keyword": {
+        "name": "hideaway",
+        "param": 4
+      },
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "look_top",
+          "amount": 4
+        },
+        {
+          "kind": "choose",
+          "from": {
+            "zone": "library"
+          },
+          "fromLooked": true,
+          "count": 1,
+          "saveAs": "chosen",
+          "prompt": {
+            "title": "Spinerock Knoll: choose",
+            "instruction": "Choose a card from among the looked-at cards.",
+            "source": {
+              "card": "Spinerock Knoll",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "kind": "move_card_zone",
+          "target": "chosen",
+          "moveTo": "exile",
+          "faceDown": true,
+          "linkExile": true
+        },
+        {
+          "kind": "move_card_zone",
+          "what": "rest_of_looked_cards",
+          "moveTo": "library",
+          "position": "bottom",
+          "order": "random"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:look_top",
+        "step:choose",
+        "field:choose.count",
+        "field:choose.from",
+        "field:choose.fromLooked",
+        "field:choose.saveAs",
+        "field:move_card_zone.faceDown",
+        "field:move_card_zone.linkExile",
+        "field:move_card_zone.order",
+        "field:move_card_zone.position",
+        "field:move_card_zone.what"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "replacement",
+      "text": "This land enters tapped.",
+      "replacement": {
+        "event": "would_enter",
+        "result": {
+          "mode": "modify",
+          "set": {
+            "tapped": true
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_enter"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "mana",
+      "text": "{T}: Add {R}.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{R}"
+          }
+        ]
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a4",
+      "kind": "activated",
+      "text": "{R}, {T}: You may play the exiled card without paying its mana cost if an opponent was dealt 7 or more damage this turn.",
+      "costs": [
+        {
+          "mana": "{R}"
+        },
+        {
+          "tap": "self"
+        }
+      ],
+      "steps": [
+        {
+          "kind": "permission_to_play",
+          "what": "linked_exile",
+          "target": "linked_exile",
+          "withoutPaying": true,
+          "optional": true,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "did_this_turn",
+              "event": "deals_damage",
+              "actor": "opponent",
+              "cmp": {
+                "op": ">=",
+                "value": 7
+              }
+            }
+          },
+          "prompt": {
+            "title": "Spinerock Knoll: optional",
+            "instruction": "Do you want to you may play linked_exile without paying its mana cost?",
+            "source": {
+              "card": "Spinerock Knoll",
+              "ability": "a4"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "ref:linked_exile",
+        "step:permission_to_play",
+        "field:permission_to_play.what",
+        "field:permission_to_play.withoutPaying"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

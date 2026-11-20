@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Reach (This creature can block creatures with flying.)",
+      "keyword": {
+        "name": "reach"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "keyword",
+      "text": "Deathtouch (Any amount of damage this deals to a creature is enough to destroy it.)",
+      "keyword": {
+        "name": "deathtouch"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "triggered",
+      "text": "Whenever another creature dies, each opponent loses 1 life.",
+      "trigger": {
+        "event": "dies",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "another": true
+        }
+      },
+      "steps": [
+        {
+          "kind": "life_change",
+          "who": "each_opponent",
+          "lose": true,
+          "amount": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject",
+        "field:life_change.amount",
+        "field:life_change.lose",
+        "field:life_change.who"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

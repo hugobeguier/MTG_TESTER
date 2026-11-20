@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "replacement",
+      "text": "This land enters tapped.",
+      "replacement": {
+        "event": "would_enter",
+        "result": {
+          "mode": "modify",
+          "set": {
+            "tapped": true
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_enter"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "mana",
+      "text": "{T}: Add {U}.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{U}"
+          }
+        ]
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "activated",
+      "text": "Cycling {2} ({2}, Discard this card: Draw a card.)",
+      "zone": "hand",
+      "keyword": {
+        "name": "cycling"
+      },
+      "costs": [
+        {
+          "mana": "{2}"
+        },
+        {
+          "discard": "self",
+          "count": 1
+        }
+      ],
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": 1,
+          "who": "you"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "zone:hand",
+        "cost:discard"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

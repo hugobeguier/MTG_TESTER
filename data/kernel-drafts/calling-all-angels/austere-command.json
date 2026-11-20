@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Choose two —\n• Destroy all artifacts.\n• Destroy all enchantments.\n• Destroy all creatures with mana value 3 or less.\n• Destroy all creatures with mana value 4 or greater.",
+      "modes": {
+        "choose": {
+          "min": 2,
+          "max": 2
+        },
+        "distinct": true,
+        "options": [
+          {
+            "id": "m1",
+            "text": "Destroy all artifacts.",
+            "steps": [
+              {
+                "kind": "destroy_all",
+                "filter": {
+                  "types": [
+                    "artifact"
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "id": "m2",
+            "text": "Destroy all enchantments.",
+            "steps": [
+              {
+                "kind": "destroy_all",
+                "filter": {
+                  "types": [
+                    "enchantment"
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "id": "m3",
+            "text": "Destroy all creatures with mana value 3 or less.",
+            "steps": [
+              {
+                "kind": "destroy_all",
+                "filter": {
+                  "types": [
+                    "creature"
+                  ],
+                  "mv": {
+                    "op": "<=",
+                    "value": 3
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "id": "m4",
+            "text": "Destroy all creatures with mana value 4 or greater.",
+            "steps": [
+              {
+                "kind": "destroy_all",
+                "filter": {
+                  "types": [
+                    "creature"
+                  ],
+                  "mv": {
+                    "op": ">=",
+                    "value": 4
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "prompt": {
+          "title": "Austere Command: choose modes",
+          "instruction": "Choose two modes (each different).",
+          "source": {
+            "card": "Austere Command",
+            "ability": "a1"
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "modes",
+        "modes:multiple",
+        "field:destroy_all.filter"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

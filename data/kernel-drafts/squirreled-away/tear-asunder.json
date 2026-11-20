@@ -1,0 +1,126 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Exile target artifact or enchantment. If this spell was kicked, exile target nonland permanent instead.",
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "anyOf": [
+              {
+                "types": [
+                  "artifact"
+                ]
+              },
+              {
+                "types": [
+                  "enchantment"
+                ]
+              }
+            ]
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Tear Asunder: choose a target",
+            "instruction": "Choose target artifact or enchantment.",
+            "source": {
+              "card": "Tear Asunder",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "id": "t2",
+          "what": "object",
+          "filter": {
+            "types": [
+              "permanent"
+            ],
+            "notTypes": [
+              "land"
+            ]
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Tear Asunder: choose a target",
+            "instruction": "Choose target nonland permanent.",
+            "source": {
+              "card": "Tear Asunder",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "if_else",
+          "if": {
+            "check": "kicked"
+          },
+          "then": [
+            {
+              "kind": "exile_target",
+              "target": "t2",
+              "src": 1
+            }
+          ],
+          "else": [
+            {
+              "kind": "exile_target",
+              "target": "t1",
+              "src": 0
+            }
+          ],
+          "src": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:if_else",
+        "field:if_else.else",
+        "field:if_else.if",
+        "field:if_else.then",
+        "predicate:kicked"
+      ]
+    }
+  ],
+  "castOptions": [
+    {
+      "id": "c1",
+      "kind": "kicker",
+      "from": "hand",
+      "cost": [
+        {
+          "mana": "{1}{B}"
+        }
+      ],
+      "replacesManaCost": false,
+      "optional": true,
+      "prompt": {
+        "title": "Tear Asunder: kicker option",
+        "instruction": "Do you want to pay the additional kicker cost ({1}{B})?",
+        "source": {
+          "card": "Tear Asunder",
+          "ability": "c1"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "cast_option:kicker"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

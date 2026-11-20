@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "activated",
+      "text": "{B}, {T}, Sacrifice another creature: Create X 2/2 black Zombie creature tokens, where X is the sacrificed creature's power.",
+      "costs": [
+        {
+          "mana": "{B}"
+        },
+        {
+          "tap": "self"
+        },
+        {
+          "sacrifice": {
+            "types": [
+              "creature"
+            ],
+            "another": true,
+            "controller": "you"
+          },
+          "count": 1,
+          "prompt": {
+            "title": "Ghoulcaller Gisa: choose what to sacrifice",
+            "instruction": "Choose 1 another creature you control to sacrifice.",
+            "source": {
+              "card": "Ghoulcaller Gisa",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": {
+            "ref": "stat",
+            "of": "sacrificed",
+            "stat": "power"
+          },
+          "tokenName": "Zombie",
+          "tokenPower": 2,
+          "tokenToughness": 2,
+          "tokenColors": [
+            "black"
+          ],
+          "tokenTypeLine": "Creature — Zombie"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "ref:sacrificed",
+        "cost:sacrifice",
+        "quantity:stat"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

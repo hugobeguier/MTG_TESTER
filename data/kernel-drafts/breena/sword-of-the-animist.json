@@ -1,0 +1,129 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "kind": "static",
+      "text": "Equipped creature gets +1/+1.",
+      "static": {
+        "affects": "equipped",
+        "modify": [
+          {
+            "pt": {
+              "power": 1,
+              "toughness": 1
+            }
+          }
+        ]
+      },
+      "id": "a1",
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "kind": "triggered",
+      "text": "Whenever equipped creature attacks, you may search your library for a basic land card, put it onto the battlefield tapped, then shuffle.",
+      "trigger": {
+        "event": "attack",
+        "subject": "equipped"
+      },
+      "steps": [
+        {
+          "kind": "search_library",
+          "who": "you",
+          "optional": true,
+          "filter": {
+            "types": [
+              "land"
+            ],
+            "supertypes": [
+              "basic"
+            ]
+          },
+          "count": 1,
+          "to": "battlefield",
+          "tapped": true,
+          "shuffle": true,
+          "src": 0,
+          "prompt": {
+            "title": "Sword of the Animist: optional",
+            "instruction": "Do you want to search your library for a basic land, put it onto the battlefield, then shuffle?",
+            "source": {
+              "card": "Sword of the Animist",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "id": "a2",
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject",
+        "step:search_library",
+        "field:search_library.count",
+        "field:search_library.filter",
+        "field:search_library.shuffle",
+        "field:search_library.tapped",
+        "field:search_library.to"
+      ]
+    },
+    {
+      "kind": "activated",
+      "keyword": {
+        "name": "equip",
+        "param": "{2}"
+      },
+      "text": "Equip {2}",
+      "timing": {
+        "speed": "sorcery"
+      },
+      "costs": [
+        {
+          "mana": "{2}"
+        }
+      ],
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Sword of the Animist: choose a target",
+            "instruction": "Choose target creature you control.",
+            "source": {
+              "card": "Sword of the Animist",
+              "ability": "a3"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "attach",
+          "what": "self",
+          "to": "t1"
+        }
+      ],
+      "id": "a3",
+      "implementation": "needed",
+      "needs": [
+        "step:attach",
+        "field:attach.to",
+        "field:attach.what"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "activated",
+      "text": "{G}, {T}, Discard a creature card: Search your library for a creature card, reveal it, put it into your hand, then shuffle.",
+      "costs": [
+        {
+          "mana": "{G}"
+        },
+        {
+          "tap": "self"
+        },
+        {
+          "discard": {
+            "types": [
+              "creature"
+            ],
+            "zone": "hand",
+            "owner": "you"
+          },
+          "count": 1,
+          "prompt": {
+            "title": "Fauna Shaman: choose what to discard",
+            "instruction": "Choose 1 creature card in your hand to discard.",
+            "source": {
+              "card": "Fauna Shaman",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "search_library",
+          "who": "you",
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "count": 1,
+          "to": "hand",
+          "reveal": true,
+          "shuffle": true,
+          "prompt": {
+            "title": "Fauna Shaman: search",
+            "instruction": "Choose a creature from the library.",
+            "source": {
+              "card": "Fauna Shaman",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "cost:discard",
+        "step:search_library",
+        "field:search_library.count",
+        "field:search_library.filter",
+        "field:search_library.reveal",
+        "field:search_library.shuffle",
+        "field:search_library.to"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

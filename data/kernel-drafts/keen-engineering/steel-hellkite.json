@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "{2}: This creature gets +1/+0 until end of turn.",
+      "costs": [
+        {
+          "mana": "{2}"
+        }
+      ],
+      "steps": [
+        {
+          "kind": "pump_target",
+          "target": "self",
+          "power": 1,
+          "toughness": 0,
+          "duration": "until_end_of_turn"
+        }
+      ],
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "activated",
+      "text": "{X}: Destroy each nonland permanent with mana value X whose controller was dealt combat damage by this creature this turn. Activate only once each turn.",
+      "costs": [
+        {
+          "mana": "{X}"
+        }
+      ],
+      "timing": {
+        "limit": {
+          "count": 1,
+          "per": "turn"
+        }
+      },
+      "srcs": [
+        1
+      ],
+      "steps": [
+        {
+          "kind": "destroy_all",
+          "src": 0,
+          "filter": {
+            "notTypes": [
+              "land"
+            ],
+            "mv": {
+              "op": "=",
+              "value": {
+                "ref": "X"
+              }
+            },
+            "controllerDealtDamageBy": "self"
+          }
+        }
+      ],
+      "xPrompt": {
+        "title": "Steel Hellkite: choose X",
+        "instruction": "Choose a value for X (paid in mana).",
+        "source": {
+          "card": "Steel Hellkite",
+          "ability": "a3"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "timing",
+        "cost:x",
+        "field:destroy_all.filter"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever another nontoken Dragon you control enters, create a 5/5 red Dragon creature token with flying.",
+      "trigger": {
+        "event": "etb",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "subtypes": [
+            "Dragon"
+          ],
+          "controller": "you",
+          "another": true,
+          "token": false
+        }
+      },
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Dragon",
+          "tokenPower": 5,
+          "tokenToughness": 5,
+          "tokenColors": [
+            "red"
+          ],
+          "tokenTypeLine": "Creature — Dragon",
+          "tokenKeywords": [
+            "flying"
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject",
+        "field:create_tokens.tokenKeywords"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "activated",
+      "text": "{1}{R}: Dragons you control get +1/+0 until end of turn.",
+      "costs": [
+        {
+          "mana": "{1}{R}"
+        }
+      ],
+      "steps": [
+        {
+          "kind": "mass_pump",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "subtypes": [
+              "Dragon"
+            ],
+            "controller": "you"
+          },
+          "power": 1,
+          "toughness": 0,
+          "duration": "until_end_of_turn"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:mass_pump.filter"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

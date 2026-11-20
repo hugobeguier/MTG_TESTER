@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "kind": "replacement",
+      "text": "This land enters tapped unless you have two or more opponents.",
+      "replacement": {
+        "event": "would_enter",
+        "result": {
+          "mode": "modify",
+          "set": {
+            "tapped": true
+          }
+        },
+        "condition": {
+          "not": {
+            "check": "compare",
+            "left": {
+              "ref": "players_count",
+              "who": "each_opponent",
+              "where": {
+                "check": "zone_count",
+                "who": "that_player",
+                "zone": "battlefield",
+                "cmp": {
+                  "op": ">=",
+                  "value": 0
+                }
+              }
+            },
+            "cmp": {
+              "op": ">=",
+              "value": 2
+            }
+          }
+        }
+      },
+      "id": "a1",
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_enter",
+        "quantity:players_count"
+      ]
+    },
+    {
+      "kind": "mana",
+      "text": "{T}: Add {W} or {B}.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{W}"
+          },
+          {
+            "colors": "{B}"
+          }
+        ]
+      },
+      "id": "a2",
+      "implementation": "implemented",
+      "needs": []
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

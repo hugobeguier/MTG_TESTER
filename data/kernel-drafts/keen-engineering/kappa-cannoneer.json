@@ -1,0 +1,105 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Improvise (Your artifacts can help cast this spell. Each artifact you tap after you're done activating mana abilities pays for {1}.)",
+      "keyword": {
+        "name": "improvise"
+      },
+      "scripted": {
+        "handler": "improvise"
+      },
+      "implementation": "needed",
+      "needs": [
+        "scripted:improvise",
+        "keyword:improvise"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Ward {4}",
+      "keyword": {
+        "name": "ward",
+        "param": 4
+      },
+      "trigger": {
+        "event": "becomes_target",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "counter_spell",
+          "target": "event_object",
+          "unlessPay": {
+            "payer": "that_player",
+            "cost": [
+              {
+                "mana": "{4}"
+              }
+            ],
+            "prompt": {
+              "title": "Kappa Cannoneer: pay or not",
+              "instruction": "Do you want to pay {4}? If you don't, counter that object.",
+              "source": {
+                "card": "Kappa Cannoneer",
+                "ability": "a2"
+              }
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:becomes_target",
+        "step:counter_spell",
+        "step:unless_pay"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "triggered",
+      "text": "Whenever this creature or another artifact you control enters, put a +1/+1 counter on this creature. It can't be blocked this turn.",
+      "trigger": {
+        "event": "etb",
+        "subject": {
+          "types": [
+            "artifact"
+          ],
+          "controller": "you"
+        }
+      },
+      "steps": [
+        {
+          "kind": "add_counters",
+          "on": "self",
+          "counterKind": "+1/+1",
+          "amount": 1
+        },
+        {
+          "kind": "grant_effect",
+          "target": "self",
+          "modify": [
+            {
+              "cant": "be_blocked"
+            }
+          ],
+          "duration": "until_end_of_turn"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject",
+        "step:add_counters",
+        "field:add_counters.on",
+        "step:grant_effect",
+        "field:grant_effect.modify"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

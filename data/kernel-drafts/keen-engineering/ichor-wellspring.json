@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "When this artifact enters or is put into a graveyard from the battlefield, draw a card.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self",
+        "alsoOn": [
+          {
+            "event": "leaves",
+            "fromZone": "battlefield",
+            "toZone": "graveyard"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": 1,
+          "who": "you"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:multi_event",
+        "trigger:leaves",
+        "trigger:zones"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

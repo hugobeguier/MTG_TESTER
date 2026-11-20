@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "Creatures you control have haste.",
+      "static": {
+        "affects": {
+          "types": [
+            "creature"
+          ],
+          "controller": "you"
+        },
+        "modify": [
+          {
+            "grant": "haste"
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever a creature you control with power 4 or greater enters, you may draw a card.",
+      "trigger": {
+        "event": "etb",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "controller": "you",
+          "power": {
+            "op": ">=",
+            "value": 4
+          }
+        }
+      },
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": 1,
+          "who": "you",
+          "optional": true,
+          "prompt": {
+            "title": "Temur Ascendancy: optional",
+            "instruction": "Do you want to draw a card?",
+            "source": {
+              "card": "Temur Ascendancy",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

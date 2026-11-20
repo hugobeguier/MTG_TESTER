@@ -1,0 +1,111 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "id": "a1",
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "kind": "triggered",
+      "text": "Whenever a player attacks one of your opponents, if that opponent has more life than another of your opponents, that attacking player draws a card and you put two +1/+1 counters on a creature you control.",
+      "trigger": {
+        "event": "attack",
+        "subject": "each_player",
+        "whose": "each",
+        "defender": "other_player",
+        "batch": true,
+        "interveningIf": {
+          "check": "compare",
+          "left": {
+            "ref": "players_count",
+            "who": "each_opponent",
+            "where": {
+              "check": "life",
+              "who": "that_player",
+              "cmp": {
+                "op": "<",
+                "value": {
+                  "ref": "life_total",
+                  "who": "opponent"
+                }
+              }
+            }
+          },
+          "cmp": {
+            "op": ">=",
+            "value": 1
+          }
+        }
+      },
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "who": "that_player",
+          "amount": 1,
+          "src": 0
+        },
+        {
+          "kind": "choose",
+          "from": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you",
+            "zone": "battlefield"
+          },
+          "count": 1,
+          "saveAs": "chosen",
+          "src": 0,
+          "prompt": {
+            "title": "Breena, the Demagogue: choose",
+            "instruction": "Choose a creature you control.",
+            "source": {
+              "card": "Breena, the Demagogue",
+              "ability": "a2"
+            }
+          }
+        },
+        {
+          "kind": "add_counters",
+          "on": "chosen",
+          "counterKind": "+1/+1",
+          "amount": 2,
+          "src": 0
+        }
+      ],
+      "id": "a2",
+      "implementation": "needed",
+      "needs": [
+        "quantity:life_total",
+        "quantity:players_count",
+        "trigger:batch",
+        "trigger:intervening_if",
+        "predicate:compare",
+        "trigger:subject",
+        "trigger:defender",
+        "field:draw_cards.who",
+        "step:choose",
+        "field:choose.count",
+        "field:choose.from",
+        "field:choose.saveAs",
+        "step:add_counters",
+        "field:add_counters.on"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "another",
+        "reason": "'another of your opponents' means a different opponent, not a second object of the same filter; expressed through players_count"
+      }
+    ]
+  }
+}

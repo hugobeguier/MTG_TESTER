@@ -1,0 +1,188 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "activated",
+      "text": "0: Create two 2/2 black and green Wolf creature tokens with \"When this token dies, put a loyalty counter on each Garruk you control.\"",
+      "costs": [
+        {
+          "loyalty": 0
+        }
+      ],
+      "timing": {
+        "speed": "sorcery",
+        "limit": {
+          "count": 1,
+          "per": "turn"
+        }
+      },
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 2,
+          "tokenName": "Wolf",
+          "tokenPower": 2,
+          "tokenToughness": 2,
+          "tokenColors": [
+            "black",
+            "green"
+          ],
+          "tokenTypeLine": "Creature — Wolf",
+          "tokenAbilities": [
+            {
+              "kind": "triggered",
+              "text": "When this token dies, put a loyalty counter on each Garruk you control.",
+              "trigger": {
+                "event": "dies",
+                "subject": "self"
+              },
+              "steps": [
+                {
+                  "kind": "repeat_for_each",
+                  "over": {
+                    "types": [
+                      "planeswalker"
+                    ],
+                    "subtypes": [
+                      "Garruk"
+                    ],
+                    "controller": "you"
+                  },
+                  "steps": [
+                    {
+                      "kind": "add_counters",
+                      "on": "iterated",
+                      "counterKind": "loyalty",
+                      "amount": 1
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "ref:iterated",
+        "timing",
+        "cost:loyalty",
+        "field:create_tokens.tokenAbilities"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "−3: Destroy target creature. Draw a card.",
+      "costs": [
+        {
+          "loyalty": -3
+        }
+      ],
+      "timing": {
+        "speed": "sorcery",
+        "limit": {
+          "count": 1,
+          "per": "turn"
+        }
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Garruk, Cursed Huntsman: choose a target",
+            "instruction": "Choose target creature.",
+            "source": {
+              "card": "Garruk, Cursed Huntsman",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "destroy_target",
+          "target": "t1",
+          "src": 0
+        },
+        {
+          "kind": "draw_cards",
+          "who": "you",
+          "amount": 1,
+          "src": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "timing",
+        "cost:loyalty"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "activated",
+      "text": "−6: You get an emblem with \"Creatures you control get +3/+3 and have trample.\"",
+      "costs": [
+        {
+          "loyalty": -6
+        }
+      ],
+      "timing": {
+        "speed": "sorcery",
+        "limit": {
+          "count": 1,
+          "per": "turn"
+        }
+      },
+      "steps": [
+        {
+          "kind": "grant_effect",
+          "emblem": true,
+          "who": "you",
+          "all": true,
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you"
+          },
+          "modify": [
+            {
+              "pt": {
+                "power": 3,
+                "toughness": 3
+              }
+            },
+            {
+              "grant": "trample"
+            }
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "timing",
+        "cost:loyalty",
+        "step:grant_effect",
+        "field:grant_effect.all",
+        "field:grant_effect.emblem",
+        "field:grant_effect.filter",
+        "field:grant_effect.modify"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

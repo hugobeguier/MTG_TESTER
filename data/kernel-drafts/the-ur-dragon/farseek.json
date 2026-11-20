@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Search your library for a Plains, Island, Swamp, or Mountain card, put it onto the battlefield tapped, then shuffle.",
+      "steps": [
+        {
+          "kind": "search_library",
+          "who": "you",
+          "filter": {
+            "anyOf": [
+              {
+                "subtypes": [
+                  "Plains"
+                ]
+              },
+              {
+                "subtypes": [
+                  "Island"
+                ]
+              },
+              {
+                "subtypes": [
+                  "Swamp"
+                ]
+              },
+              {
+                "subtypes": [
+                  "Mountain"
+                ]
+              }
+            ]
+          },
+          "count": 1,
+          "to": "battlefield",
+          "tapped": true,
+          "shuffle": true,
+          "prompt": {
+            "title": "Farseek: search",
+            "instruction": "Choose a Plains, Island, Swamp, or Mountain from the library.",
+            "source": {
+              "card": "Farseek",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:search_library",
+        "field:search_library.count",
+        "field:search_library.filter",
+        "field:search_library.shuffle",
+        "field:search_library.tapped",
+        "field:search_library.to"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

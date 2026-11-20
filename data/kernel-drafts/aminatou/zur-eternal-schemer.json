@@ -1,0 +1,118 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "static",
+      "text": "Enchantment creatures you control have deathtouch, lifelink, and hexproof.",
+      "static": {
+        "affects": {
+          "types": [
+            "enchantment",
+            "creature"
+          ],
+          "controller": "you"
+        },
+        "modify": [
+          {
+            "grant": "deathtouch"
+          },
+          {
+            "grant": "lifelink"
+          },
+          {
+            "grant": "hexproof"
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "activated",
+      "text": "{1}{W}: Target non-Aura enchantment you control becomes a creature in addition to its other types and has base power and base toughness each equal to its mana value.",
+      "costs": [
+        {
+          "mana": "{1}{W}"
+        }
+      ],
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "enchantment"
+            ],
+            "notSubtypes": [
+              "Aura"
+            ],
+            "controller": "you"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Zur, Eternal Schemer: choose a target",
+            "instruction": "Choose target non-Aura enchantment you control.",
+            "source": {
+              "card": "Zur, Eternal Schemer",
+              "ability": "a3"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "grant_effect",
+          "target": "t1",
+          "modify": [
+            {
+              "addTypes": [
+                "Creature"
+              ]
+            },
+            {
+              "setBasePT": {
+                "power": {
+                  "ref": "stat",
+                  "of": "t1",
+                  "stat": "mana_value"
+                },
+                "toughness": {
+                  "ref": "stat",
+                  "of": "t1",
+                  "stat": "mana_value"
+                }
+              }
+            }
+          ],
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "filter:notSubtypes",
+        "step:grant_effect",
+        "field:grant_effect.modify"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Deathtouch",
+      "keyword": {
+        "name": "deathtouch"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "At the beginning of your end step, if you gained life this turn, each opponent sacrifices a creature of their choice and you return up to one target creature card from your graveyard to your hand.",
+      "trigger": {
+        "event": "begin_step",
+        "step": "end_step",
+        "whose": "yours",
+        "interveningIf": {
+          "check": "did_this_turn",
+          "event": "gain_life",
+          "actor": "you"
+        }
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "zone": "graveyard",
+            "owner": "you"
+          },
+          "count": {
+            "min": 0,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Witch of the Moors: choose a target",
+            "instruction": "Choose up to one target creature card in your graveyard.",
+            "source": {
+              "card": "Witch of the Moors",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "sacrifice_permanent",
+          "who": "each_opponent",
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "src": 0,
+          "prompt": {
+            "title": "Witch of the Moors: sacrifice",
+            "instruction": "Choose a permanent to sacrifice.",
+            "source": {
+              "card": "Witch of the Moors",
+              "ability": "a2"
+            }
+          }
+        },
+        {
+          "kind": "move_card_zone",
+          "target": "t1",
+          "from": "graveyard",
+          "moveTo": "hand",
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:intervening_if",
+        "targets:multi",
+        "field:sacrifice_permanent.filter",
+        "field:sacrifice_permanent.who",
+        "field:move_card_zone.from"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

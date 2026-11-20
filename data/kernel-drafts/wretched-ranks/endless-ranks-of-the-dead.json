@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "At the beginning of your upkeep, create X 2/2 black Zombie creature tokens, where X is half the number of Zombies you control, rounded down.",
+      "trigger": {
+        "event": "begin_step",
+        "step": "upkeep",
+        "whose": "yours"
+      },
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": {
+            "math": "div_down",
+            "args": [
+              {
+                "ref": "count",
+                "of": {
+                  "subtypes": [
+                    "Zombie"
+                  ],
+                  "controller": "you"
+                }
+              },
+              2
+            ]
+          },
+          "tokenName": "Zombie",
+          "tokenPower": 2,
+          "tokenToughness": 2,
+          "tokenColors": [
+            "black"
+          ],
+          "tokenTypeLine": "Creature — Zombie"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "quantity:division",
+        "quantity:math"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

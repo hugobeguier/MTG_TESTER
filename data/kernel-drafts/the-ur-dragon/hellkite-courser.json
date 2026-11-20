@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "When this creature enters, you may put a commander you own from the command zone onto the battlefield. It gains haste. Return it to the command zone at the beginning of the next end step.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "choose",
+          "from": {
+            "isCommander": true,
+            "owner": "you",
+            "zone": "command"
+          },
+          "count": 1,
+          "saveAs": "chosen",
+          "optional": true,
+          "src": 0,
+          "prompt": {
+            "title": "Hellkite Courser: optional",
+            "instruction": "Do you want to choose a commander card in your command?",
+            "source": {
+              "card": "Hellkite Courser",
+              "ability": "a2"
+            }
+          }
+        },
+        {
+          "kind": "move_card_zone",
+          "target": "chosen",
+          "moveFrom": "command",
+          "moveTo": "battlefield",
+          "src": 0
+        },
+        {
+          "kind": "grant_effect",
+          "target": "chosen",
+          "modify": [
+            {
+              "grant": "haste"
+            }
+          ],
+          "src": 1
+        },
+        {
+          "kind": "create_delayed_trigger",
+          "trigger": {
+            "event": "begin_step",
+            "step": "end_step",
+            "whose": "each"
+          },
+          "steps": [
+            {
+              "kind": "move_card_zone",
+              "target": "chosen",
+              "moveFrom": "battlefield",
+              "moveTo": "command"
+            }
+          ],
+          "src": 2
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "filter:isCommander",
+        "step:choose",
+        "field:choose.count",
+        "field:choose.from",
+        "field:choose.saveAs",
+        "step:grant_effect",
+        "field:grant_effect.modify",
+        "step:create_delayed_trigger",
+        "field:create_delayed_trigger.steps",
+        "field:create_delayed_trigger.trigger"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

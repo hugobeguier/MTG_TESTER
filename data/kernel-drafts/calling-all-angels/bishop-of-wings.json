@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Whenever an Angel you control enters, you gain 4 life.",
+      "trigger": {
+        "event": "etb",
+        "subject": {
+          "subtypes": [
+            "Angel"
+          ],
+          "controller": "you"
+        }
+      },
+      "steps": [
+        {
+          "src": 0,
+          "kind": "life_change",
+          "lifeDelta": 4,
+          "who": "you"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever an Angel you control dies, create a 1/1 white Spirit creature token with flying.",
+      "trigger": {
+        "event": "dies",
+        "subject": {
+          "subtypes": [
+            "Angel"
+          ],
+          "controller": "you"
+        }
+      },
+      "steps": [
+        {
+          "src": 0,
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Spirit",
+          "tokenPower": 1,
+          "tokenToughness": 1,
+          "tokenColors": [
+            "white"
+          ],
+          "tokenTypeLine": "Creature — Spirit",
+          "tokenKeywords": [
+            "flying"
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject",
+        "field:create_tokens.tokenKeywords"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Each player sacrifices thirteen creatures of their choice.",
+      "steps": [
+        {
+          "kind": "sacrifice_permanent",
+          "who": "each_player",
+          "amount": 13,
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "src": 0,
+          "prompt": {
+            "title": "Blasphemous Edict: sacrifice",
+            "instruction": "Choose a permanent to sacrifice.",
+            "source": {
+              "card": "Blasphemous Edict",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:sacrifice_permanent.amount",
+        "field:sacrifice_permanent.filter",
+        "field:sacrifice_permanent.who"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "cast_option",
+      "text": "You may pay {B} rather than pay this spell's mana cost if there are thirteen or more creatures on the battlefield.",
+      "implementation": "needed",
+      "needs": [
+        "cast_option"
+      ]
+    }
+  ],
+  "castOptions": [
+    {
+      "id": "c1",
+      "kind": "alternative",
+      "from": "hand",
+      "cost": [
+        {
+          "mana": "{B}"
+        }
+      ],
+      "replacesManaCost": true,
+      "optional": true,
+      "condition": {
+        "check": "compare",
+        "left": {
+          "ref": "count",
+          "of": {
+            "types": [
+              "creature"
+            ]
+          }
+        },
+        "cmp": {
+          "op": ">=",
+          "value": 13
+        }
+      },
+      "prompt": {
+        "title": "Blasphemous Edict: alternative option",
+        "instruction": "Do you want to cast it using its alternative cost ({B})?",
+        "source": {
+          "card": "Blasphemous Edict",
+          "ability": "c1"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "cast_option:alternative",
+        "cast_option:conditional",
+        "predicate:compare"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

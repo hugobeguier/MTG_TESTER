@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever Ganax or another Dragon you control enters, create a Treasure token. (It's an artifact with \"{T}, Sacrifice this token: Add one mana of any color.\")",
+      "trigger": {
+        "event": "etb",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "subtypes": [
+            "Dragon"
+          ],
+          "controller": "you"
+        }
+      },
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Treasure",
+          "tokenColors": [
+            "colorless"
+          ],
+          "tokenTypeLine": "Artifact — Treasure"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "keyword",
+      "text": "Choose a Background (You can have a Background as a second commander.)",
+      "keyword": {
+        "name": "choose_a_background"
+      },
+      "scripted": {
+        "handler": "choose_a_background"
+      },
+      "implementation": "needed",
+      "needs": [
+        "scripted:choose_a_background"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "another",
+        "reason": "'Ganax or another Dragon you control' = any Dragon you control, because Ganax is itself a Dragon (same as Scourge of Valkas)"
+      }
+    ]
+  }
+}

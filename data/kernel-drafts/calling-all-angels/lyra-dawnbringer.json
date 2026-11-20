@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "keyword",
+      "text": "First strike",
+      "keyword": {
+        "name": "first strike"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "keyword",
+      "text": "Lifelink",
+      "keyword": {
+        "name": "lifelink"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a4",
+      "kind": "static",
+      "text": "Other Angels you control get +1/+1 and have lifelink.",
+      "static": {
+        "affects": {
+          "subtypes": [
+            "Angel"
+          ],
+          "controller": "you",
+          "another": true
+        },
+        "modify": [
+          {
+            "pt": {
+              "power": 1,
+              "toughness": 1
+            }
+          },
+          {
+            "grant": "lifelink"
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Whenever this creature or another Zombie dies, each opponent loses 1 life.",
+      "trigger": {
+        "event": "dies",
+        "subject": {
+          "subtypes": [
+            "Zombie"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "kind": "life_change",
+          "who": "each_opponent",
+          "lifeDelta": -1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject",
+        "field:life_change.who"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

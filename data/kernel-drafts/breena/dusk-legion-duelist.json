@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "kind": "keyword",
+      "text": "Vigilance",
+      "keyword": {
+        "name": "vigilance"
+      },
+      "id": "a1",
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "kind": "triggered",
+      "text": "Whenever one or more +1/+1 counters are put on this creature, draw a card. This ability triggers only once each turn.",
+      "trigger": {
+        "event": "counter_put",
+        "subject": "self",
+        "batch": true
+      },
+      "timing": {
+        "limit": {
+          "count": 1,
+          "per": "turn"
+        }
+      },
+      "srcs": [
+        1
+      ],
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": 1,
+          "who": "you",
+          "src": 0
+        }
+      ],
+      "id": "a2",
+      "implementation": "needed",
+      "needs": [
+        "timing",
+        "trigger:counter_put",
+        "trigger:batch"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "activated",
+      "text": "{1}{G/P}, {T}, Sacrifice a creature: Search your library for a creature card with mana value equal to 1 plus the sacrificed creature's mana value, put that card onto the battlefield, then shuffle. Activate only as a sorcery.",
+      "costs": [
+        {
+          "mana": "{1}{G/P}"
+        },
+        {
+          "tap": "self"
+        },
+        {
+          "sacrifice": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you"
+          },
+          "count": 1,
+          "prompt": {
+            "title": "Birthing Pod: choose what to sacrifice",
+            "instruction": "Choose 1 creature you control to sacrifice.",
+            "source": {
+              "card": "Birthing Pod",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "timing": {
+        "speed": "sorcery"
+      },
+      "steps": [
+        {
+          "kind": "search_library",
+          "src": 0,
+          "who": "you",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "mv": {
+              "op": "=",
+              "value": {
+                "math": "+",
+                "args": [
+                  1,
+                  {
+                    "ref": "stat",
+                    "of": "sacrificed",
+                    "stat": "mana_value"
+                  }
+                ]
+              }
+            }
+          },
+          "count": 1,
+          "to": "battlefield",
+          "shuffle": true,
+          "prompt": {
+            "title": "Birthing Pod: search",
+            "instruction": "Choose a creature with mana value 1 + the sacrificed permanent's mana value from the library.",
+            "source": {
+              "card": "Birthing Pod",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "srcs": [
+        1
+      ],
+      "implementation": "needed",
+      "needs": [
+        "ref:sacrificed",
+        "cost:sacrifice",
+        "step:search_library",
+        "field:search_library.count",
+        "field:search_library.filter",
+        "field:search_library.shuffle",
+        "field:search_library.to"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

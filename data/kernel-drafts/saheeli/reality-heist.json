@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Affinity for artifacts (This spell costs {1} less to cast for each artifact you control.)",
+      "keyword": {
+        "name": "affinity",
+        "param": "artifacts"
+      },
+      "costReduction": {
+        "per": {
+          "types": [
+            "artifact"
+          ],
+          "controller": "you"
+        },
+        "amount": 1,
+        "applies": "generic"
+      },
+      "implementation": "needed",
+      "needs": [
+        "cost_reduction"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "spell_effect",
+      "text": "Look at the top seven cards of your library. You may reveal up to two artifact cards from among them and put them into your hand. Put the rest on the bottom of your library in a random order.",
+      "steps": [
+        {
+          "kind": "look_top",
+          "amount": 7
+        },
+        {
+          "kind": "choose",
+          "from": {
+            "types": [
+              "artifact"
+            ],
+            "zone": "library"
+          },
+          "fromLooked": true,
+          "count": 2,
+          "upTo": true,
+          "saveAs": "chosen",
+          "optional": true,
+          "prompt": {
+            "title": "Reality Heist: reveal artifacts",
+            "instruction": "You may reveal up to two artifact cards from among the top seven cards of your library and put them into your hand."
+          }
+        },
+        {
+          "kind": "reveal",
+          "target": "chosen"
+        },
+        {
+          "kind": "move_card_zone",
+          "target": "chosen",
+          "moveTo": "hand"
+        },
+        {
+          "kind": "move_card_zone",
+          "what": "rest_of_looked_cards",
+          "moveTo": "library",
+          "position": "bottom",
+          "order": "random"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:look_top",
+        "step:choose",
+        "field:choose.count",
+        "field:choose.from",
+        "field:choose.fromLooked",
+        "field:choose.saveAs",
+        "field:choose.upTo",
+        "step:reveal",
+        "field:move_card_zone.order",
+        "field:move_card_zone.position",
+        "field:move_card_zone.what"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "mana",
+      "text": "{T}: Add {B}.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{B}"
+          }
+        ]
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "zone": "hand",
+      "keyword": {
+        "name": "channel"
+      },
+      "text": "Channel — {3}{B}, Discard this card: Mill three cards, then return a creature or planeswalker card from your graveyard to your hand. This ability costs {1} less to activate for each legendary creature you control.",
+      "costs": [
+        {
+          "mana": "{3}{B}"
+        },
+        {
+          "discard": "self",
+          "count": 1
+        }
+      ],
+      "costReduction": {
+        "per": {
+          "types": [
+            "creature"
+          ],
+          "supertypes": [
+            "legendary"
+          ],
+          "controller": "you"
+        },
+        "amount": 1,
+        "applies": "generic",
+        "src": 1
+      },
+      "steps": [
+        {
+          "kind": "mill",
+          "who": "you",
+          "amount": 3,
+          "src": 0
+        },
+        {
+          "kind": "move_card_zone",
+          "what": "choose",
+          "filter": {
+            "anyOf": [
+              {
+                "types": [
+                  "creature"
+                ]
+              },
+              {
+                "types": [
+                  "planeswalker"
+                ]
+              }
+            ],
+            "zone": "graveyard",
+            "owner": "you"
+          },
+          "from": "graveyard",
+          "moveTo": "hand",
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "zone:hand",
+        "cost_reduction",
+        "cost:discard",
+        "field:move_card_zone.filter",
+        "field:move_card_zone.from",
+        "field:move_card_zone.what"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

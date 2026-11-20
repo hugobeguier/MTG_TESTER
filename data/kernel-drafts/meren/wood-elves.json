@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "When this creature enters, search your library for a Forest card, put that card onto the battlefield, then shuffle.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "search_library",
+          "who": "you",
+          "filter": {
+            "subtypes": [
+              "Forest"
+            ]
+          },
+          "count": 1,
+          "to": "battlefield",
+          "shuffle": true,
+          "prompt": {
+            "title": "Wood Elves: search",
+            "instruction": "Choose a Forest from the library.",
+            "source": {
+              "card": "Wood Elves",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:search_library",
+        "field:search_library.count",
+        "field:search_library.filter",
+        "field:search_library.shuffle",
+        "field:search_library.to"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

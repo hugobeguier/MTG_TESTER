@@ -1,0 +1,122 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Whenever another creature you control dies, you get an experience counter.",
+      "trigger": {
+        "event": "dies",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "controller": "you",
+          "another": true
+        }
+      },
+      "steps": [
+        {
+          "kind": "add_counters",
+          "on": "you",
+          "counterKind": "experience",
+          "amount": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject",
+        "step:add_counters",
+        "field:add_counters.on"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "srcs": [
+        0
+      ],
+      "text": "At the beginning of your end step, choose target creature card in your graveyard. If that card's mana value is less than or equal to the number of experience counters you have, return it to the battlefield. Otherwise, put it into your hand.",
+      "trigger": {
+        "event": "begin_step",
+        "step": "end_step",
+        "whose": "yours"
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "zone": "graveyard",
+            "owner": "you"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Meren of Clan Nel Toth: choose a target",
+            "instruction": "Choose target creature card in your graveyard.",
+            "source": {
+              "card": "Meren of Clan Nel Toth",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "if_else",
+          "srcs": [
+            1,
+            2
+          ],
+          "if": {
+            "check": "stat",
+            "of": "t1",
+            "stat": "mana_value",
+            "cmp": {
+              "op": "<=",
+              "value": {
+                "ref": "counters",
+                "kind": "experience",
+                "on": "you"
+              }
+            }
+          },
+          "then": [
+            {
+              "kind": "reanimate",
+              "target": "t1",
+              "who": "you"
+            }
+          ],
+          "else": [
+            {
+              "kind": "move_card_zone",
+              "target": "t1",
+              "from": "graveyard",
+              "moveTo": "hand"
+            }
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:if_else",
+        "field:if_else.else",
+        "field:if_else.if",
+        "field:if_else.srcs",
+        "field:if_else.then",
+        "predicate:stat",
+        "field:move_card_zone.from"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

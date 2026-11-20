@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Counter target enchantment, instant, or sorcery spell. Its controller creates a 2/2 blue Bird creature token with flying.",
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "anyOf": [
+              {
+                "types": [
+                  "enchantment",
+                  "spell"
+                ]
+              },
+              {
+                "types": [
+                  "instant",
+                  "spell"
+                ]
+              },
+              {
+                "types": [
+                  "sorcery",
+                  "spell"
+                ]
+              }
+            ],
+            "zone": "stack"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Swan Song: choose a target",
+            "instruction": "Choose target enchantment spell, instant spell, or sorcery spell.",
+            "source": {
+              "card": "Swan Song",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "counter_spell",
+          "target": "t1",
+          "src": 0
+        },
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Bird",
+          "tokenPower": 2,
+          "tokenToughness": 2,
+          "tokenColors": [
+            "blue"
+          ],
+          "tokenTypeLine": "Creature — Bird",
+          "tokenKeywords": [
+            "flying"
+          ],
+          "who": "controller_of_target",
+          "src": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:counter_spell",
+        "field:create_tokens.tokenKeywords",
+        "field:create_tokens.who"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,120 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "activated",
+      "text": "{T}, Put a page counter on this artifact: Scry 1. (Look at the top card of your library. You may put that card on the bottom.)",
+      "costs": [
+        {
+          "tap": "self"
+        },
+        {
+          "counters": {
+            "kind": "page",
+            "count": 1,
+            "remove": false,
+            "from": "self"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "scry",
+          "amount": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "cost:counters",
+        "step:scry"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "{2}, {T}, Put a page counter on this artifact: Draw a card.",
+      "costs": [
+        {
+          "mana": "{2}"
+        },
+        {
+          "tap": "self"
+        },
+        {
+          "counters": {
+            "kind": "page",
+            "count": 1,
+            "remove": false,
+            "from": "self"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": 1,
+          "who": "you"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "cost:counters"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "triggered",
+      "text": "When there are four or more page counters on this artifact, exile it. If you do, you gain 4 life.",
+      "trigger": {
+        "event": "unspecified",
+        "subject": "self",
+        "interveningIf": {
+          "check": "stat",
+          "of": "self",
+          "stat": "page_counters",
+          "cmp": {
+            "op": ">=",
+            "value": 4
+          }
+        }
+      },
+      "steps": [
+        {
+          "kind": "move_card_zone",
+          "id": "s1",
+          "target": "self",
+          "moveTo": "exile",
+          "src": 0
+        },
+        {
+          "kind": "life_change",
+          "lifeDelta": 4,
+          "who": "you",
+          "src": 1,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "step_done",
+              "step": "s1"
+            },
+            "src": 1
+          }
+        }
+      ],
+      "srcs": [
+        0
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:unspecified",
+        "trigger:intervening_if",
+        "predicate:stat",
+        "predicate:step_done"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

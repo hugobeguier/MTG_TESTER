@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "mana",
+      "text": "{T}: Add one mana of any color in your commander's color identity.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "commanderIdentity": 1
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "mana:variable"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "Sacrifice this artifact: Draw a card.",
+      "costs": [
+        {
+          "sacrifice": "self",
+          "count": 1
+        }
+      ],
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": 1,
+          "who": "you"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "cost:sacrifice"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

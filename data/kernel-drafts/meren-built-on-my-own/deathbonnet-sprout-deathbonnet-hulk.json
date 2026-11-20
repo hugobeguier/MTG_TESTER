@@ -1,0 +1,141 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Deathbonnet Sprout: At the beginning of your upkeep, mill a card. Then if there are three or more creature cards in your graveyard, transform this creature. (To mill a card, put the top card of your library into your graveyard.)",
+      "trigger": {
+        "event": "begin_step",
+        "step": "upkeep",
+        "whose": "yours"
+      },
+      "steps": [
+        {
+          "kind": "mill",
+          "who": "you",
+          "amount": 1,
+          "src": 0
+        },
+        {
+          "kind": "transform",
+          "target": "self",
+          "src": 1,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "zone_count",
+              "who": "you",
+              "zone": "graveyard",
+              "filter": {
+                "types": [
+                  "creature"
+                ]
+              },
+              "cmp": {
+                "op": ">=",
+                "value": 3
+              }
+            },
+            "src": 1
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:transform"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Deathbonnet Hulk: At the beginning of your upkeep, you may exile a card from a graveyard. If a creature card was exiled this way, put a +1/+1 counter on this creature.",
+      "trigger": {
+        "event": "begin_step",
+        "step": "upkeep",
+        "whose": "yours"
+      },
+      "steps": [
+        {
+          "kind": "choose",
+          "id": "s1",
+          "optional": true,
+          "from": {
+            "zone": "graveyard"
+          },
+          "count": 1,
+          "saveAs": "chosen",
+          "src": 0,
+          "prompt": {
+            "title": "Deathbonnet Sprout // Deathbonnet Hulk: optional",
+            "instruction": "Do you want to choose a card in a graveyard?",
+            "source": {
+              "card": "Deathbonnet Sprout // Deathbonnet Hulk",
+              "ability": "a2"
+            }
+          }
+        },
+        {
+          "kind": "move_card_zone",
+          "id": "s2",
+          "target": "chosen",
+          "from": "graveyard",
+          "moveTo": "exile",
+          "src": 0,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "step_done",
+              "step": "s1"
+            },
+            "src": 0
+          }
+        },
+        {
+          "kind": "add_counters",
+          "on": "self",
+          "counterKind": "+1/+1",
+          "amount": 1,
+          "src": 1,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "all": [
+                {
+                  "check": "step_done",
+                  "step": "s2"
+                },
+                {
+                  "check": "matches",
+                  "obj": "chosen",
+                  "filter": {
+                    "types": [
+                      "creature"
+                    ]
+                  }
+                }
+              ]
+            },
+            "src": 1
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:choose",
+        "field:choose.count",
+        "field:choose.from",
+        "field:choose.saveAs",
+        "field:move_card_zone.from",
+        "predicate:step_done",
+        "step:add_counters",
+        "field:add_counters.on",
+        "predicate:all",
+        "predicate:matches"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

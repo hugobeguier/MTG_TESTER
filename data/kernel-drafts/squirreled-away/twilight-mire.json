@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "mana",
+      "text": "{T}: Add {C}.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{C}"
+          }
+        ]
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "mana",
+      "text": "{B/G}, {T}: Add {B}{B}, {B}{G}, or {G}{G}.",
+      "costs": [
+        {
+          "mana": "{B/G}"
+        },
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{B}{B}"
+          },
+          {
+            "colors": "{B}{G}"
+          },
+          {
+            "colors": "{G}{G}"
+          }
+        ]
+      },
+      "implementation": "implemented",
+      "needs": []
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

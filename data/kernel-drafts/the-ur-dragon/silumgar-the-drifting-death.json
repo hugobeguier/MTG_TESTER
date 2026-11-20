@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "keyword",
+      "text": "Hexproof",
+      "keyword": {
+        "name": "hexproof"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "triggered",
+      "text": "Whenever a Dragon you control attacks, creatures defending player controls get -1/-1 until end of turn.",
+      "trigger": {
+        "event": "attack",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "subtypes": [
+            "Dragon"
+          ],
+          "controller": "you"
+        }
+      },
+      "steps": [
+        {
+          "kind": "mass_pump",
+          "who": "that_player",
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "power": -1,
+          "toughness": -1,
+          "duration": "until_end_of_turn"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject",
+        "field:mass_pump.filter",
+        "field:mass_pump.who"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

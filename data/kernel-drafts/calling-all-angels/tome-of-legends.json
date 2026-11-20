@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "replacement",
+      "text": "This artifact enters with a page counter on it.",
+      "replacement": {
+        "event": "would_enter",
+        "result": {
+          "mode": "modify",
+          "set": {
+            "counters": {
+              "page": 1
+            }
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_enter"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever your commander enters or attacks, put a page counter on this artifact.",
+      "trigger": {
+        "event": "etb",
+        "subject": {
+          "controller": "you",
+          "isCommander": true
+        },
+        "alsoOn": [
+          {
+            "event": "attack"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "src": 0,
+          "kind": "add_counters",
+          "on": "self",
+          "counterKind": "page",
+          "amount": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "filter:isCommander",
+        "trigger:subject",
+        "trigger:multi_event",
+        "step:add_counters",
+        "field:add_counters.on"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "activated",
+      "text": "{1}, {T}, Remove a page counter from this artifact: Draw a card.",
+      "costs": [
+        {
+          "mana": "{1}"
+        },
+        {
+          "tap": "self"
+        },
+        {
+          "counters": {
+            "kind": "page",
+            "count": 1,
+            "remove": true,
+            "from": "self"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "src": 0,
+          "kind": "draw_cards",
+          "amount": 1,
+          "who": "you"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "cost:counters"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "mana",
+      "text": "{T}: Add {G}.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{G}"
+          }
+        ]
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "mana",
+      "text": "Ferocious — {T}: Add {G}{G}. Activate only if you control a creature with power 4 or greater.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "timing": {
+        "only": [
+          {
+            "check": "controls",
+            "filter": {
+              "types": [
+                "creature"
+              ],
+              "controller": "you",
+              "power": {
+                "op": ">=",
+                "value": 4
+              }
+            }
+          }
+        ]
+      },
+      "mana": {
+        "produces": [
+          {
+            "colors": "{G}{G}"
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "timing"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

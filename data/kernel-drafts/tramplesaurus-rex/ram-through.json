@@ -1,0 +1,112 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Target creature you control deals damage equal to its power to target creature you don't control. If the creature you control has trample, excess damage is dealt to that creature's controller instead.",
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Ram Through: choose a target",
+            "instruction": "Choose target creature you control.",
+            "source": {
+              "card": "Ram Through",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "id": "t2",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "controller": "opponent"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Ram Through: choose a target",
+            "instruction": "Choose target creature an opponent controls.",
+            "source": {
+              "card": "Ram Through",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "if_else",
+          "if": {
+            "check": "matches",
+            "obj": "t1",
+            "filter": {
+              "with": [
+                "trample"
+              ]
+            }
+          },
+          "then": [
+            {
+              "kind": "damage_target",
+              "target": "t2",
+              "source": "t1",
+              "amount": {
+                "ref": "stat",
+                "of": "t1",
+                "stat": "power"
+              },
+              "excessTo": "controller_of_target",
+              "src": 0
+            }
+          ],
+          "else": [
+            {
+              "kind": "damage_target",
+              "target": "t2",
+              "source": "t1",
+              "amount": {
+                "ref": "stat",
+                "of": "t1",
+                "stat": "power"
+              },
+              "src": 0
+            }
+          ],
+          "src": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:if_else",
+        "field:if_else.else",
+        "field:if_else.if",
+        "field:if_else.then",
+        "predicate:matches",
+        "quantity:stat",
+        "field:damage_target.excessTo",
+        "field:damage_target.source"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

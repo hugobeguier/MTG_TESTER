@@ -1,0 +1,158 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "At the beginning of your end step, you may sacrifice an artifact, creature, enchantment, land, or planeswalker. If you do, each opponent may sacrifice a permanent of their choice that shares a card type with it. For each opponent who doesn't, that player loses 2 life and you draw a card.",
+      "trigger": {
+        "event": "begin_step",
+        "step": "end_step",
+        "whose": "yours"
+      },
+      "steps": [
+        {
+          "kind": "sacrifice_permanent",
+          "id": "s1",
+          "who": "you",
+          "optional": true,
+          "src": 0,
+          "filter": {
+            "anyOf": [
+              {
+                "types": [
+                  "artifact"
+                ]
+              },
+              {
+                "types": [
+                  "creature"
+                ]
+              },
+              {
+                "types": [
+                  "enchantment"
+                ]
+              },
+              {
+                "types": [
+                  "land"
+                ]
+              },
+              {
+                "types": [
+                  "planeswalker"
+                ]
+              }
+            ],
+            "controller": "you"
+          },
+          "prompt": {
+            "title": "Braids, Arisen Nightmare: optional",
+            "instruction": "Do you want to sacrifice an artifact, creature, enchantment, land, or planeswalker you control?",
+            "source": {
+              "card": "Braids, Arisen Nightmare",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "kind": "sacrifice_permanent",
+          "id": "s2",
+          "who": "each_opponent",
+          "optional": true,
+          "sharesCardTypeWith": "sacrificed",
+          "filter": {
+            "types": [
+              "permanent"
+            ]
+          },
+          "src": 1,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "step_done",
+              "step": "s1"
+            },
+            "src": 1
+          },
+          "prompt": {
+            "title": "Braids, Arisen Nightmare: optional",
+            "instruction": "Do you want to each opponent sacrifices a permanent?",
+            "source": {
+              "card": "Braids, Arisen Nightmare",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "kind": "life_change",
+          "who": "each_opponent",
+          "lose": true,
+          "amount": 2,
+          "src": 2,
+          "onlyForPlayersWhoDidNot": "s2",
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "all": [
+                {
+                  "check": "step_done",
+                  "step": "s1"
+                },
+                {
+                  "not": {
+                    "check": "step_done",
+                    "step": "s2"
+                  }
+                }
+              ]
+            },
+            "src": 2
+          }
+        },
+        {
+          "kind": "draw_cards",
+          "who": "you",
+          "amount": {
+            "ref": "players_count",
+            "who": "each_opponent",
+            "where": {
+              "not": {
+                "check": "step_done",
+                "step": "s2"
+              }
+            }
+          },
+          "src": 2,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "step_done",
+              "step": "s1"
+            },
+            "src": 2
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "ref:sacrificed",
+        "quantity:players_count",
+        "field:sacrifice_permanent.filter",
+        "field:sacrifice_permanent.sharesCardTypeWith",
+        "field:sacrifice_permanent.who",
+        "predicate:step_done",
+        "field:life_change.amount",
+        "field:life_change.lose",
+        "field:life_change.onlyForPlayersWhoDidNot",
+        "field:life_change.who",
+        "predicate:all",
+        "predicate:not"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

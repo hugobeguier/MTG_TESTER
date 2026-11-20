@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Fear (This creature can't be blocked except by artifact creatures and/or black creatures.)",
+      "keyword": {
+        "name": "fear"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "When this creature enters, destroy target nonartifact, nonblack creature.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "notTypes": [
+              "artifact"
+            ],
+            "notColors": [
+              "black"
+            ]
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Shriekmaw: choose a target",
+            "instruction": "Choose target nonartifact nonblack creature.",
+            "source": {
+              "card": "Shriekmaw",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "destroy_target",
+          "target": "t1"
+        }
+      ],
+      "implementation": "implemented",
+      "needs": []
+    }
+  ],
+  "castOptions": [
+    {
+      "id": "c1",
+      "kind": "evoke",
+      "from": "hand",
+      "cost": [
+        {
+          "mana": "{1}{B}"
+        }
+      ],
+      "replacesManaCost": true,
+      "optional": true,
+      "effects": {
+        "addSteps": [
+          {
+            "kind": "sacrifice_permanent",
+            "target": "self"
+          }
+        ]
+      },
+      "prompt": {
+        "title": "Shriekmaw: evoke option",
+        "instruction": "Do you want to cast it using its evoke cost ({1}{B})?",
+        "source": {
+          "card": "Shriekmaw",
+          "ability": "c1"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "cast_option:evoke"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

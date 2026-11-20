@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Ward {2}",
+      "keyword": {
+        "name": "ward",
+        "param": 2
+      },
+      "trigger": {
+        "event": "becomes_target",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "counter_spell",
+          "target": "event_object",
+          "unlessPay": {
+            "payer": "that_player",
+            "cost": [
+              {
+                "mana": "{2}"
+              }
+            ],
+            "prompt": {
+              "title": "Rith, Liberated Primeval: pay or not",
+              "instruction": "Do you want to pay {2}? If you don't, counter that object.",
+              "source": {
+                "card": "Rith, Liberated Primeval",
+                "ability": "a2"
+              }
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:becomes_target",
+        "step:counter_spell",
+        "step:unless_pay"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "static",
+      "text": "Other Dragons you control have ward {2}.",
+      "static": {
+        "affects": {
+          "types": [
+            "creature"
+          ],
+          "subtypes": [
+            "Dragon"
+          ],
+          "controller": "you",
+          "another": true
+        },
+        "modify": [
+          {
+            "grant": "ward {2}"
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "id": "a4",
+      "kind": "triggered",
+      "text": "At the beginning of your end step, if a creature or planeswalker an opponent controlled was dealt excess damage this turn, create a 4/4 red Dragon creature token with flying.",
+      "trigger": {
+        "event": "begin_step",
+        "step": "end_step",
+        "whose": "yours",
+        "interveningIf": {
+          "check": "did_this_turn",
+          "event": "dealt_damage",
+          "actor": "opponent"
+        }
+      },
+      "scripted": {
+        "handler": "excess_damage_dealt_to_opponent_creature_or_planeswalker"
+      },
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Dragon",
+          "tokenPower": 4,
+          "tokenToughness": 4,
+          "tokenColors": [
+            "red"
+          ],
+          "tokenTypeLine": "Creature — Dragon",
+          "tokenKeywords": [
+            "flying"
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "scripted:excess_damage_dealt_to_opponent_creature_or_planeswalker",
+        "trigger:intervening_if",
+        "field:create_tokens.tokenKeywords"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

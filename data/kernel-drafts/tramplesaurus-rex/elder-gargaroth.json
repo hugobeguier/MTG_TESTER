@@ -1,0 +1,114 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Vigilance",
+      "keyword": {
+        "name": "vigilance"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "keyword",
+      "text": "Reach",
+      "keyword": {
+        "name": "reach"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "keyword",
+      "text": "Trample",
+      "keyword": {
+        "name": "trample"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a4",
+      "kind": "triggered",
+      "text": "Whenever this creature attacks or blocks, choose one —\n• Create a 3/3 green Beast creature token.\n• You gain 3 life.\n• Draw a card.",
+      "trigger": {
+        "event": "attack",
+        "subject": "self",
+        "alsoOn": [
+          {
+            "event": "block"
+          }
+        ]
+      },
+      "modes": {
+        "choose": {
+          "min": 1,
+          "max": 1
+        },
+        "distinct": true,
+        "options": [
+          {
+            "id": "m1",
+            "text": "Create a 3/3 green Beast creature token.",
+            "steps": [
+              {
+                "kind": "create_tokens",
+                "tokenCount": 1,
+                "tokenName": "Beast",
+                "tokenPower": 3,
+                "tokenToughness": 3,
+                "tokenColors": [
+                  "green"
+                ],
+                "tokenTypeLine": "Creature — Beast"
+              }
+            ]
+          },
+          {
+            "id": "m2",
+            "text": "You gain 3 life.",
+            "steps": [
+              {
+                "kind": "life_change",
+                "lifeDelta": 3,
+                "who": "you"
+              }
+            ]
+          },
+          {
+            "id": "m3",
+            "text": "Draw a card.",
+            "steps": [
+              {
+                "kind": "draw_cards",
+                "amount": 1,
+                "who": "you"
+              }
+            ]
+          }
+        ],
+        "prompt": {
+          "title": "Elder Gargaroth: choose a mode",
+          "instruction": "Choose one mode.",
+          "source": {
+            "card": "Elder Gargaroth",
+            "ability": "a4"
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "modes",
+        "trigger:multi_event",
+        "trigger:block"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

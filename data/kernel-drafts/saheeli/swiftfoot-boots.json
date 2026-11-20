@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "Equipped creature has hexproof and haste. (It can't be the target of spells or abilities your opponents control. It can attack and {T} no matter when it came under your control.)",
+      "static": {
+        "affects": "equipped",
+        "modify": [
+          {
+            "grant": "hexproof"
+          },
+          {
+            "grant": "haste"
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "Equip {1} ({1}: Attach to target creature you control. Equip only as a sorcery.)",
+      "keyword": {
+        "name": "equip"
+      },
+      "timing": {
+        "speed": "sorcery"
+      },
+      "costs": [
+        {
+          "mana": "{1}"
+        }
+      ],
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Swiftfoot Boots: choose a target",
+            "instruction": "Choose target creature you control.",
+            "source": {
+              "card": "Swiftfoot Boots",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "src": 0,
+          "kind": "attach",
+          "what": "self",
+          "to": "t1"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:attach",
+        "field:attach.to",
+        "field:attach.what"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "Skeletons you control and other Zombies you control get +1/+1 and have deathtouch. (Any amount of damage they deal to a creature is enough to destroy it.)",
+      "static": {
+        "affects": {
+          "controller": "you",
+          "anyOf": [
+            {
+              "subtypes": [
+                "Skeleton"
+              ]
+            },
+            {
+              "subtypes": [
+                "Zombie"
+              ],
+              "another": true
+            }
+          ]
+        },
+        "modify": [
+          {
+            "pt": {
+              "power": 1,
+              "toughness": 1
+            }
+          },
+          {
+            "grant": "deathtouch"
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

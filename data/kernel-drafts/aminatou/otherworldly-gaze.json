@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Surveil 3. (Look at the top three cards of your library, then put any number of them into your graveyard and the rest on top of your library in any order.)",
+      "steps": [
+        {
+          "kind": "surveil",
+          "amount": 3,
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:surveil"
+      ]
+    }
+  ],
+  "castOptions": [
+    {
+      "id": "c1",
+      "kind": "flashback",
+      "from": "graveyard",
+      "cost": [
+        {
+          "mana": "{1}{U}"
+        }
+      ],
+      "replacesManaCost": true,
+      "afterResolution": "exile",
+      "optional": true,
+      "prompt": {
+        "title": "Otherworldly Gaze: flashback option",
+        "instruction": "Do you want to cast it using its flashback cost ({1}{U})?",
+        "source": {
+          "card": "Otherworldly Gaze",
+          "ability": "c1"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "cast_option:flashback"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

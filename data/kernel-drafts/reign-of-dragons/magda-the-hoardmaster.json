@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Whenever you commit a crime, create a tapped Treasure token. This ability triggers only once each turn. (Targeting opponents, anything they control, and/or cards in their graveyards is a crime.)",
+      "trigger": {
+        "event": "commit_crime",
+        "nth": {
+          "n": 1,
+          "per": "turn"
+        },
+        "whose": "yours"
+      },
+      "srcs": [
+        1
+      ],
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Treasure",
+          "tokenColors": [
+            "colorless"
+          ],
+          "tokenTypeLine": "Artifact — Treasure",
+          "tokenTapped": true,
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:commit_crime",
+        "trigger:nth",
+        "field:create_tokens.tokenTapped"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "Sacrifice three Treasures: Create a 4/4 red Scorpion Dragon creature token with flying and haste. Activate only as a sorcery.",
+      "costs": [
+        {
+          "sacrifice": {
+            "subtypes": [
+              "Treasure"
+            ],
+            "controller": "you"
+          },
+          "count": 3,
+          "prompt": {
+            "title": "Magda, the Hoardmaster: choose what to sacrifice",
+            "instruction": "Choose 3 Treasures you control to sacrifice.",
+            "source": {
+              "card": "Magda, the Hoardmaster",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "timing": {
+        "speed": "sorcery"
+      },
+      "srcs": [
+        1
+      ],
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Scorpion Dragon",
+          "tokenPower": 4,
+          "tokenToughness": 4,
+          "tokenColors": [
+            "red"
+          ],
+          "tokenTypeLine": "Creature — Scorpion Dragon",
+          "tokenKeywords": [
+            "flying",
+            "haste"
+          ],
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "cost:sacrifice",
+        "field:create_tokens.tokenKeywords"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

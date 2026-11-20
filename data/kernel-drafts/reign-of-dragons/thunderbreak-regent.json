@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever a Dragon you control becomes the target of a spell or ability an opponent controls, this creature deals 3 damage to that player.",
+      "trigger": {
+        "event": "becomes_target",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "subtypes": [
+            "Dragon"
+          ],
+          "controller": "you"
+        },
+        "whose": "opponents"
+      },
+      "steps": [
+        {
+          "kind": "damage_target",
+          "source": "self",
+          "who": "that_player",
+          "amount": 3
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:becomes_target",
+        "trigger:subject",
+        "field:damage_target.source",
+        "field:damage_target.who"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "target",
+        "reason": "'becomes the target' is the trigger event (becomes_target); nothing is targeted by this ability"
+      }
+    ]
+  }
+}

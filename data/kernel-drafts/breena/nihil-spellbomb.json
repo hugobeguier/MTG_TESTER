@@ -1,0 +1,109 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "kind": "activated",
+      "text": "{T}, Sacrifice this artifact: Exile target player's graveyard.",
+      "costs": [
+        {
+          "tap": "self"
+        },
+        {
+          "sacrifice": "self",
+          "count": 1
+        }
+      ],
+      "targets": [
+        {
+          "id": "t1",
+          "what": "player",
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Nihil Spellbomb: choose a target",
+            "instruction": "Choose target player.",
+            "source": {
+              "card": "Nihil Spellbomb",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "move_card_zone",
+          "who": "target_player",
+          "moveFrom": "graveyard",
+          "moveTo": "exile",
+          "moveCount": "all",
+          "src": 0
+        }
+      ],
+      "id": "a1",
+      "implementation": "needed",
+      "needs": [
+        "cost:sacrifice",
+        "field:move_card_zone.who"
+      ]
+    },
+    {
+      "kind": "triggered",
+      "text": "When this artifact is put into a graveyard from the battlefield, you may pay {B}. If you do, draw a card.",
+      "trigger": {
+        "event": "leaves",
+        "subject": "self",
+        "fromZone": "battlefield",
+        "toZone": "graveyard"
+      },
+      "steps": [
+        {
+          "kind": "if_else",
+          "id": "s1",
+          "optional": true,
+          "optionalCost": [
+            {
+              "mana": "{B}"
+            }
+          ],
+          "src": 0,
+          "prompt": {
+            "title": "Nihil Spellbomb: optional",
+            "instruction": "Do you want to if ?: ?",
+            "source": {
+              "card": "Nihil Spellbomb",
+              "ability": "a2"
+            }
+          }
+        },
+        {
+          "kind": "draw_cards",
+          "who": "you",
+          "amount": 1,
+          "src": 1,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "step_done",
+              "step": "s1"
+            },
+            "src": 1
+          }
+        }
+      ],
+      "id": "a2",
+      "implementation": "needed",
+      "needs": [
+        "trigger:leaves",
+        "trigger:zones",
+        "step:if_else",
+        "field:if_else.optionalCost",
+        "predicate:step_done"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

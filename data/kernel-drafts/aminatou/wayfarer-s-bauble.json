@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "activated",
+      "text": "{2}, {T}, Sacrifice this artifact: Search your library for a basic land card, put that card onto the battlefield tapped, then shuffle.",
+      "costs": [
+        {
+          "mana": "{2}"
+        },
+        {
+          "tap": "self"
+        },
+        {
+          "sacrifice": "self",
+          "count": 1
+        }
+      ],
+      "steps": [
+        {
+          "kind": "search_library",
+          "who": "you",
+          "filter": {
+            "types": [
+              "land"
+            ],
+            "supertypes": [
+              "basic"
+            ]
+          },
+          "count": 1,
+          "to": "battlefield",
+          "tapped": true,
+          "shuffle": true,
+          "prompt": {
+            "title": "Wayfarer's Bauble: search",
+            "instruction": "Choose a basic land from the library.",
+            "source": {
+              "card": "Wayfarer's Bauble",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "cost:sacrifice",
+        "step:search_library",
+        "field:search_library.count",
+        "field:search_library.filter",
+        "field:search_library.shuffle",
+        "field:search_library.tapped",
+        "field:search_library.to"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

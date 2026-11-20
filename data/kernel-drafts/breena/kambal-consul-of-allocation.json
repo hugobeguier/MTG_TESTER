@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "kind": "triggered",
+      "text": "Whenever an opponent casts a noncreature spell, that player loses 2 life and you gain 2 life.",
+      "trigger": {
+        "event": "cast",
+        "subject": {
+          "notTypes": [
+            "creature"
+          ]
+        },
+        "whose": "opponents"
+      },
+      "steps": [
+        {
+          "kind": "life_change",
+          "who": "that_player",
+          "lifeDelta": -2,
+          "src": 0
+        },
+        {
+          "kind": "life_change",
+          "who": "you",
+          "lifeDelta": 2,
+          "src": 0
+        }
+      ],
+      "id": "a1",
+      "implementation": "needed",
+      "needs": [
+        "field:life_change.who"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "kind": "static",
+      "text": "Equipped creature gets +1/+1 and has trample and lifelink.",
+      "static": {
+        "affects": "equipped",
+        "modify": [
+          {
+            "pt": {
+              "power": 1,
+              "toughness": 1
+            }
+          },
+          {
+            "grant": "trample"
+          },
+          {
+            "grant": "lifelink"
+          }
+        ]
+      },
+      "id": "a1",
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "kind": "activated",
+      "text": "{1}: Permanents your opponents control lose hexproof and indestructible until end of turn.",
+      "costs": [
+        {
+          "mana": "{1}"
+        }
+      ],
+      "steps": [
+        {
+          "kind": "grant_effect",
+          "who": "each_opponent",
+          "filter": {
+            "controller": "opponent"
+          },
+          "modify": [
+            {
+              "lose": "hexproof"
+            },
+            {
+              "lose": "indestructible"
+            }
+          ],
+          "duration": "until_end_of_turn",
+          "src": 0
+        }
+      ],
+      "id": "a2",
+      "implementation": "needed",
+      "needs": [
+        "step:grant_effect",
+        "field:grant_effect.filter",
+        "field:grant_effect.modify",
+        "field:grant_effect.who"
+      ]
+    },
+    {
+      "kind": "activated",
+      "keyword": {
+        "name": "equip",
+        "param": "{2}"
+      },
+      "text": "Equip {2}",
+      "timing": {
+        "speed": "sorcery"
+      },
+      "costs": [
+        {
+          "mana": "{2}"
+        }
+      ],
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Shadowspear: choose a target",
+            "instruction": "Choose target creature you control.",
+            "source": {
+              "card": "Shadowspear",
+              "ability": "a3"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "attach",
+          "what": "self",
+          "to": "t1"
+        }
+      ],
+      "id": "a3",
+      "implementation": "needed",
+      "needs": [
+        "step:attach",
+        "field:attach.to",
+        "field:attach.what"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

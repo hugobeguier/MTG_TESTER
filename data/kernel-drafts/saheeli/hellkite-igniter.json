@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "keyword",
+      "text": "haste",
+      "keyword": {
+        "name": "haste"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "activated",
+      "text": "{1}{R}: This creature gets +X/+0 until end of turn, where X is the number of artifacts you control.",
+      "costs": [
+        {
+          "mana": "{1}{R}"
+        }
+      ],
+      "steps": [
+        {
+          "kind": "pump_target",
+          "target": "self",
+          "power": {
+            "ref": "count",
+            "of": {
+              "types": [
+                "artifact"
+              ],
+              "controller": "you"
+            }
+          },
+          "toughness": 0,
+          "duration": "until_end_of_turn"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "quantity:count"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "where",
+        "reason": "X is the count of artifacts you control, written inline in the pump amount"
+      },
+      {
+        "lexeme": "X",
+        "reason": "X is replaced inline by a count quantity"
+      }
+    ]
+  }
+}

@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Myriad (Whenever this creature attacks, for each opponent other than defending player, you may create a token copy that's tapped and attacking that player or a planeswalker they control. Exile the tokens at end of combat.)",
+      "keyword": {
+        "name": "myriad"
+      },
+      "scripted": {
+        "handler": "myriad"
+      },
+      "trigger": {
+        "event": "attack",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "copy",
+          "target": "self",
+          "forEach": "opponent_other_than_defending_player",
+          "tapped": true,
+          "attacking": true,
+          "optional": true,
+          "exileAt": "end_of_combat",
+          "token": true,
+          "prompt": {
+            "title": "Goldlust Triad: optional",
+            "instruction": "Do you want to copy Goldlust Triad?",
+            "source": {
+              "card": "Goldlust Triad",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "scripted:myriad",
+        "step:copy",
+        "field:copy.attacking",
+        "field:copy.exileAt",
+        "field:copy.forEach",
+        "field:copy.tapped",
+        "field:copy.token"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "triggered",
+      "text": "Whenever this creature deals combat damage to a player, create a Treasure token.",
+      "trigger": {
+        "event": "deals_combat_damage_to_player",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Treasure",
+          "tokenColors": [
+            "colorless"
+          ],
+          "tokenTypeLine": "Artifact — Treasure"
+        }
+      ],
+      "implementation": "implemented",
+      "needs": []
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

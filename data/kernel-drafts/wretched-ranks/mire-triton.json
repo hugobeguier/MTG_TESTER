@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Deathtouch",
+      "keyword": {
+        "name": "deathtouch"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "When this creature enters, mill two cards and you gain 2 life. (To mill a card, put the top card of your library into your graveyard.)",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "mill",
+          "amount": 2,
+          "who": "you"
+        },
+        {
+          "kind": "life_change",
+          "who": "you",
+          "lifeDelta": 2
+        }
+      ],
+      "implementation": "implemented",
+      "needs": []
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

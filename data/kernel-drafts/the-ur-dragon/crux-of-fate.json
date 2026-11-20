@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "srcs": [
+        0
+      ],
+      "text": "Choose one —\n• Destroy all Dragon creatures.\n• Destroy all non-Dragon creatures.",
+      "modes": {
+        "choose": {
+          "min": 1,
+          "max": 1
+        },
+        "distinct": true,
+        "options": [
+          {
+            "id": "m1",
+            "text": "Destroy all Dragon creatures.",
+            "steps": [
+              {
+                "kind": "destroy_all",
+                "filter": {
+                  "types": [
+                    "creature"
+                  ],
+                  "subtypes": [
+                    "Dragon"
+                  ]
+                },
+                "src": 1
+              }
+            ]
+          },
+          {
+            "id": "m2",
+            "text": "Destroy all non-Dragon creatures.",
+            "steps": [
+              {
+                "kind": "destroy_all",
+                "filter": {
+                  "types": [
+                    "creature"
+                  ],
+                  "notSubtypes": [
+                    "Dragon"
+                  ]
+                },
+                "src": 2
+              }
+            ]
+          }
+        ],
+        "prompt": {
+          "title": "Crux of Fate: choose a mode",
+          "instruction": "Choose one mode.",
+          "source": {
+            "card": "Crux of Fate",
+            "ability": "a1"
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "modes",
+        "filter:notSubtypes",
+        "field:destroy_all.filter"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

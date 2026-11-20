@@ -1,0 +1,155 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Whenever a creature attacks you or a planeswalker you control, each Dragon you control deals 1 damage to that creature.",
+      "trigger": {
+        "event": "attack",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "controller": "opponent"
+        },
+        "defender": "you_or_your_planeswalkers"
+      },
+      "steps": [
+        {
+          "kind": "repeat_for_each",
+          "over": {
+            "types": [
+              "creature"
+            ],
+            "subtypes": [
+              "Dragon"
+            ],
+            "controller": "you"
+          },
+          "steps": [
+            {
+              "kind": "damage_target",
+              "source": "iterated",
+              "target": "event_object",
+              "amount": 1
+            }
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "ref:iterated",
+        "trigger:subject",
+        "trigger:defender",
+        "step:repeat_for_each",
+        "field:repeat_for_each.over",
+        "field:repeat_for_each.steps",
+        "field:damage_target.source"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "+1: Until end of turn, each planeswalker you control becomes a 4/4 red Dragon creature and gains flying.",
+      "costs": [
+        {
+          "loyalty": 1
+        }
+      ],
+      "timing": {
+        "speed": "sorcery",
+        "limit": {
+          "count": 1,
+          "per": "turn"
+        }
+      },
+      "steps": [
+        {
+          "kind": "grant_effect",
+          "all": true,
+          "filter": {
+            "types": [
+              "planeswalker"
+            ],
+            "controller": "you"
+          },
+          "modify": [
+            {
+              "addTypes": [
+                "Creature",
+                "Dragon"
+              ]
+            },
+            {
+              "setColors": [
+                "red"
+              ]
+            },
+            {
+              "setBasePT": {
+                "power": 4,
+                "toughness": 4
+              }
+            },
+            {
+              "grant": "flying"
+            }
+          ],
+          "duration": "until_end_of_turn"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "timing",
+        "cost:loyalty",
+        "step:grant_effect",
+        "field:grant_effect.all",
+        "field:grant_effect.filter",
+        "field:grant_effect.modify"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "activated",
+      "text": "−3: Create a 4/4 red Dragon creature token with flying.",
+      "costs": [
+        {
+          "loyalty": -3
+        }
+      ],
+      "timing": {
+        "speed": "sorcery",
+        "limit": {
+          "count": 1,
+          "per": "turn"
+        }
+      },
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Dragon",
+          "tokenPower": 4,
+          "tokenToughness": 4,
+          "tokenColors": [
+            "red"
+          ],
+          "tokenTypeLine": "Creature — Dragon",
+          "tokenKeywords": [
+            "flying"
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "timing",
+        "cost:loyalty",
+        "field:create_tokens.tokenKeywords"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

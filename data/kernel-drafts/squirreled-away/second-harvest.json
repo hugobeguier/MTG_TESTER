@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "For each token you control, create a token that's a copy of that permanent.",
+      "steps": [
+        {
+          "kind": "repeat_for_each",
+          "over": {
+            "token": true,
+            "controller": "you"
+          },
+          "steps": [
+            {
+              "kind": "copy",
+              "target": "iterated",
+              "token": true,
+              "count": 1
+            }
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "ref:iterated",
+        "step:repeat_for_each",
+        "field:repeat_for_each.over",
+        "field:repeat_for_each.steps",
+        "step:copy",
+        "field:copy.count",
+        "field:copy.token"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

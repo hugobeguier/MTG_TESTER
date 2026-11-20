@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Trample",
+      "keyword": {
+        "name": "trample"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "When this creature enters, put a +1/+1 counter on it for each other Squirrel and/or Food you control.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "add_counters",
+          "on": "self",
+          "counterKind": "+1/+1",
+          "amount": {
+            "ref": "count",
+            "of": {
+              "anyOf": [
+                {
+                  "subtypes": [
+                    "Squirrel"
+                  ],
+                  "another": true
+                },
+                {
+                  "subtypes": [
+                    "Food"
+                  ],
+                  "another": true
+                }
+              ],
+              "controller": "you"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:add_counters",
+        "quantity:count",
+        "field:add_counters.on"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "triggered",
+      "text": "Whenever another Squirrel or Food you control enters, put a +1/+1 counter on this creature.",
+      "trigger": {
+        "event": "etb",
+        "subject": {
+          "anyOf": [
+            {
+              "subtypes": [
+                "Squirrel"
+              ],
+              "another": true
+            },
+            {
+              "subtypes": [
+                "Food"
+              ],
+              "another": true
+            }
+          ],
+          "controller": "you"
+        }
+      },
+      "steps": [
+        {
+          "kind": "add_counters",
+          "on": "self",
+          "counterKind": "+1/+1",
+          "amount": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject",
+        "step:add_counters",
+        "field:add_counters.on"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

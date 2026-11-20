@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "kind": "replacement",
+      "text": "As this land enters, you may reveal a Plains or Swamp card from your hand. If you don't, this land enters tapped.",
+      "replacement": {
+        "event": "would_enter",
+        "result": {
+          "mode": "also",
+          "steps": [
+            {
+              "kind": "reveal",
+              "id": "r1",
+              "optional": true,
+              "src": 0,
+              "filter": {
+                "anyOf": [
+                  {
+                    "subtypes": [
+                      "Plains"
+                    ]
+                  },
+                  {
+                    "subtypes": [
+                      "Swamp"
+                    ]
+                  }
+                ],
+                "zone": "hand",
+                "owner": "you"
+              },
+              "prompt": {
+                "title": "Shineshadow Snarl: optional",
+                "instruction": "Do you want to reveal the target?",
+                "source": {
+                  "card": "Shineshadow Snarl",
+                  "ability": "a1"
+                }
+              }
+            },
+            {
+              "kind": "tap_target",
+              "target": "self",
+              "src": 1,
+              "condition": {
+                "when": "on_resolution",
+                "if": {
+                  "not": {
+                    "check": "step_done",
+                    "step": "r1"
+                  }
+                },
+                "src": 1
+              }
+            }
+          ]
+        }
+      },
+      "id": "a1",
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_enter",
+        "step:reveal",
+        "field:reveal.filter",
+        "predicate:not",
+        "predicate:step_done"
+      ]
+    },
+    {
+      "kind": "mana",
+      "text": "{T}: Add {W} or {B}.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{W}"
+          },
+          {
+            "colors": "{B}"
+          }
+        ]
+      },
+      "id": "a2",
+      "implementation": "implemented",
+      "needs": []
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

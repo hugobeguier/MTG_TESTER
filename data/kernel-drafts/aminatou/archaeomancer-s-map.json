@@ -1,0 +1,149 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "When this artifact enters, search your library for up to two basic Plains cards, reveal them, put them into your hand, then shuffle.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "search_library",
+          "who": "you",
+          "filter": {
+            "types": [
+              "land"
+            ],
+            "supertypes": [
+              "basic"
+            ],
+            "subtypes": [
+              "Plains"
+            ]
+          },
+          "count": 2,
+          "upTo": true,
+          "reveal": true,
+          "to": "hand",
+          "shuffle": true,
+          "src": 0,
+          "prompt": {
+            "title": "Archaeomancer's Map: search",
+            "instruction": "Choose a basic Plains from the library.",
+            "source": {
+              "card": "Archaeomancer's Map",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:search_library",
+        "field:search_library.count",
+        "field:search_library.filter",
+        "field:search_library.reveal",
+        "field:search_library.shuffle",
+        "field:search_library.to",
+        "field:search_library.upTo"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever a land an opponent controls enters, if that player controls more lands than you, you may put a land card from your hand onto the battlefield.",
+      "trigger": {
+        "event": "etb",
+        "subject": {
+          "types": [
+            "land"
+          ],
+          "controller": "opponent"
+        },
+        "interveningIf": {
+          "check": "compare",
+          "left": {
+            "ref": "count",
+            "of": {
+              "types": [
+                "land"
+              ],
+              "controller": "opponent"
+            }
+          },
+          "cmp": {
+            "op": ">",
+            "value": {
+              "ref": "count",
+              "of": {
+                "types": [
+                  "land"
+                ],
+                "controller": "you"
+              }
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "kind": "choose",
+          "from": {
+            "types": [
+              "land"
+            ],
+            "zone": "hand",
+            "owner": "you"
+          },
+          "count": 1,
+          "saveAs": "chosen",
+          "optional": true,
+          "src": 0,
+          "prompt": {
+            "title": "Archaeomancer's Map: optional",
+            "instruction": "Do you want to choose a land card in your hand?",
+            "source": {
+              "card": "Archaeomancer's Map",
+              "ability": "a2"
+            }
+          }
+        },
+        {
+          "kind": "move_card_zone",
+          "what": "chosen",
+          "from": "hand",
+          "moveTo": "battlefield",
+          "who": "you",
+          "optional": true,
+          "src": 0,
+          "prompt": {
+            "title": "Archaeomancer's Map: optional",
+            "instruction": "Do you want to put a card onto the battlefield?",
+            "source": {
+              "card": "Archaeomancer's Map",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:intervening_if",
+        "predicate:compare",
+        "trigger:subject",
+        "step:choose",
+        "field:choose.count",
+        "field:choose.from",
+        "field:choose.saveAs",
+        "field:move_card_zone.from",
+        "field:move_card_zone.what"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

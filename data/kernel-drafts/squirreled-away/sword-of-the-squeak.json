@@ -1,0 +1,181 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "Equipped creature gets +1/+1 for each creature you control with base power or toughness 1.",
+      "static": {
+        "affects": "equipped",
+        "modify": [
+          {
+            "pt": {
+              "power": {
+                "ref": "count",
+                "of": {
+                  "types": [
+                    "creature"
+                  ],
+                  "controller": "you",
+                  "anyOf": [
+                    {
+                      "power": {
+                        "op": "=",
+                        "value": 1
+                      }
+                    },
+                    {
+                      "toughness": {
+                        "op": "=",
+                        "value": 1
+                      }
+                    }
+                  ]
+                }
+              },
+              "toughness": {
+                "ref": "count",
+                "of": {
+                  "types": [
+                    "creature"
+                  ],
+                  "controller": "you",
+                  "anyOf": [
+                    {
+                      "power": {
+                        "op": "=",
+                        "value": 1
+                      }
+                    },
+                    {
+                      "toughness": {
+                        "op": "=",
+                        "value": 1
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever a Hamster, Mouse, Rat, or Squirrel you control enters, you may attach this Equipment to that creature.",
+      "trigger": {
+        "event": "etb",
+        "subject": {
+          "anyOf": [
+            {
+              "subtypes": [
+                "Hamster"
+              ]
+            },
+            {
+              "subtypes": [
+                "Mouse"
+              ]
+            },
+            {
+              "subtypes": [
+                "Rat"
+              ]
+            },
+            {
+              "subtypes": [
+                "Squirrel"
+              ]
+            }
+          ],
+          "controller": "you"
+        }
+      },
+      "optional": true,
+      "steps": [
+        {
+          "kind": "attach",
+          "what": "self",
+          "to": "event_object"
+        }
+      ],
+      "prompt": {
+        "title": "Sword of the Squeak: optional",
+        "instruction": "Do you want to attach Sword of the Squeak to that object?",
+        "source": {
+          "card": "Sword of the Squeak",
+          "ability": "a2"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject",
+        "step:attach",
+        "field:attach.to",
+        "field:attach.what"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "activated",
+      "text": "Equip {2}",
+      "keyword": {
+        "name": "equip"
+      },
+      "timing": {
+        "speed": "sorcery"
+      },
+      "costs": [
+        {
+          "mana": "{2}"
+        }
+      ],
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Sword of the Squeak: choose a target",
+            "instruction": "Choose target creature you control.",
+            "source": {
+              "card": "Sword of the Squeak",
+              "ability": "a3"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "attach",
+          "what": "self",
+          "to": "t1"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:attach",
+        "field:attach.to",
+        "field:attach.what"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

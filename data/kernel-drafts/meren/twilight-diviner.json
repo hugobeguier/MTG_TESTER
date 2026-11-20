@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "When this creature enters, surveil 2. (Look at the top two cards of your library, then put any number of them into your graveyard and the rest on top of your library in any order.)",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "surveil",
+          "amount": 2
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:surveil"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever one or more other creatures you control enter, if they entered or were cast from a graveyard, create a token that's a copy of one of them. This ability triggers only once each turn.",
+      "trigger": {
+        "event": "etb",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "controller": "you",
+          "another": true
+        },
+        "batch": true,
+        "fromZone": "graveyard"
+      },
+      "timing": {
+        "limit": {
+          "count": 1,
+          "per": "turn"
+        }
+      },
+      "srcs": [
+        1
+      ],
+      "steps": [
+        {
+          "kind": "copy",
+          "src": 0,
+          "what": "event_object",
+          "chooseOne": true,
+          "token": true,
+          "controller": "you"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "timing",
+        "trigger:batch",
+        "trigger:subject",
+        "trigger:zones",
+        "step:copy",
+        "field:copy.chooseOne",
+        "field:copy.controller",
+        "field:copy.token",
+        "field:copy.what"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

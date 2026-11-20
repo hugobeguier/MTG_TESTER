@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "At the beginning of each upkeep, create a 1/1 black and green Pest creature token with \"When this token dies, you gain 1 life.\"",
+      "trigger": {
+        "event": "begin_step",
+        "step": "upkeep",
+        "whose": "each"
+      },
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Pest",
+          "tokenPower": 1,
+          "tokenToughness": 1,
+          "tokenColors": [
+            "black",
+            "green"
+          ],
+          "tokenTypeLine": "Creature — Pest",
+          "tokenAbilities": [
+            {
+              "kind": "triggered",
+              "text": "When this token dies, you gain 1 life.",
+              "trigger": {
+                "event": "dies",
+                "subject": "self"
+              },
+              "steps": [
+                {
+                  "kind": "life_change",
+                  "who": "you",
+                  "amount": 1
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:create_tokens.tokenAbilities"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "activated",
+      "text": "Pay 10 life: Untap all lands you control. Activate only once each turn.",
+      "costs": [
+        {
+          "life": 10
+        }
+      ],
+      "timing": {
+        "limit": {
+          "count": 1,
+          "per": "turn"
+        }
+      },
+      "srcs": [
+        1
+      ],
+      "steps": [
+        {
+          "kind": "untap_target",
+          "all": true,
+          "filter": {
+            "types": [
+              "land"
+            ],
+            "controller": "you"
+          },
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "timing",
+        "cost:life",
+        "field:untap_target.all",
+        "field:untap_target.filter"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "mana",
+      "text": "{T}: Add {C}.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{C}"
+          }
+        ]
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "{T}, Sacrifice this land: Put your commander into your hand from the command zone.",
+      "costs": [
+        {
+          "tap": "self"
+        },
+        {
+          "sacrifice": "self",
+          "count": 1
+        }
+      ],
+      "steps": [
+        {
+          "kind": "move_card_zone",
+          "filter": {
+            "isCommander": true,
+            "owner": "you",
+            "zone": "command"
+          },
+          "from": "command",
+          "moveTo": "hand"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "filter:isCommander",
+        "cost:sacrifice",
+        "field:move_card_zone.filter",
+        "field:move_card_zone.from"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

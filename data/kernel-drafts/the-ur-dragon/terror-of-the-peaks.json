@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "scripted",
+      "text": "Spells your opponents cast that target this creature cost an additional 3 life to cast.",
+      "scripted": {
+        "handler": "additional_cost_life_when_targeting_this",
+        "params": {
+          "additional": "3 life",
+          "caster": "opponent"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "scripted:additional_cost_life_when_targeting_this"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "triggered",
+      "text": "Whenever another creature you control enters, this creature deals damage equal to that creature's power to any target.",
+      "trigger": {
+        "event": "etb",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "controller": "you",
+          "another": true
+        }
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "any",
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Terror of the Peaks: choose a target",
+            "instruction": "Choose target.",
+            "source": {
+              "card": "Terror of the Peaks",
+              "ability": "a3"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "damage_target",
+          "source": "self",
+          "target": "t1",
+          "amount": {
+            "ref": "stat",
+            "of": "event_object",
+            "stat": "power"
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject",
+        "quantity:stat",
+        "field:damage_target.source"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "target",
+        "reason": "'spells that target this creature' is the scripted marker's condition, not a targeted effect"
+      }
+    ]
+  }
+}

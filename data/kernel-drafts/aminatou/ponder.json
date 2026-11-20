@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Look at the top three cards of your library, then put them back in any order. You may shuffle.\nDraw a card.",
+      "steps": [
+        {
+          "kind": "look_top",
+          "amount": 3,
+          "src": 0
+        },
+        {
+          "kind": "move_card_zone",
+          "what": "rest_of_looked_cards",
+          "moveTo": "library",
+          "position": "top",
+          "ordered": "any_order",
+          "src": 0
+        },
+        {
+          "kind": "shuffle",
+          "who": "you",
+          "optional": true,
+          "src": 1,
+          "prompt": {
+            "title": "Ponder: optional",
+            "instruction": "Do you want to shuffle?",
+            "source": {
+              "card": "Ponder",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "kind": "draw_cards",
+          "amount": 1,
+          "who": "you",
+          "src": 2
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:look_top",
+        "field:move_card_zone.ordered",
+        "field:move_card_zone.position",
+        "field:move_card_zone.what",
+        "step:shuffle"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

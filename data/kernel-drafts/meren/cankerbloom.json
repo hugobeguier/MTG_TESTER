@@ -1,0 +1,120 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "activated",
+      "text": "{1}, Sacrifice this creature: Choose one —\n• Destroy target artifact.\n• Destroy target enchantment.\n• Proliferate. (Choose any number of permanents and/or players, then give each another counter of each kind already there.)",
+      "costs": [
+        {
+          "mana": "{1}"
+        },
+        {
+          "sacrifice": "self",
+          "count": 1
+        }
+      ],
+      "modes": {
+        "choose": {
+          "min": 1,
+          "max": 1
+        },
+        "distinct": true,
+        "options": [
+          {
+            "id": "m1",
+            "text": "Destroy target artifact.",
+            "targets": [
+              {
+                "id": "t1",
+                "what": "object",
+                "filter": {
+                  "types": [
+                    "artifact"
+                  ]
+                },
+                "count": {
+                  "min": 1,
+                  "max": 1
+                },
+                "prompt": {
+                  "title": "Cankerbloom: choose a target",
+                  "instruction": "Choose target artifact.",
+                  "source": {
+                    "card": "Cankerbloom",
+                    "ability": "a1"
+                  }
+                }
+              }
+            ],
+            "steps": [
+              {
+                "kind": "destroy_target",
+                "target": "t1"
+              }
+            ]
+          },
+          {
+            "id": "m2",
+            "text": "Destroy target enchantment.",
+            "targets": [
+              {
+                "id": "t1",
+                "what": "object",
+                "filter": {
+                  "types": [
+                    "enchantment"
+                  ]
+                },
+                "count": {
+                  "min": 1,
+                  "max": 1
+                },
+                "prompt": {
+                  "title": "Cankerbloom: choose a target",
+                  "instruction": "Choose target enchantment.",
+                  "source": {
+                    "card": "Cankerbloom",
+                    "ability": "a1"
+                  }
+                }
+              }
+            ],
+            "steps": [
+              {
+                "kind": "destroy_target",
+                "target": "t1"
+              }
+            ]
+          },
+          {
+            "id": "m3",
+            "text": "Proliferate.",
+            "steps": [
+              {
+                "kind": "proliferate"
+              }
+            ]
+          }
+        ],
+        "prompt": {
+          "title": "Cankerbloom: choose a mode",
+          "instruction": "Choose one mode.",
+          "source": {
+            "card": "Cankerbloom",
+            "ability": "a1"
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "modes",
+        "cost:sacrifice",
+        "step:proliferate"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

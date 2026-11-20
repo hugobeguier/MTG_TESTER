@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Search your library for a Dragon creature card, reveal it, put it into your hand, then shuffle.",
+      "steps": [
+        {
+          "kind": "search_library",
+          "who": "you",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "subtypes": [
+              "Dragon"
+            ]
+          },
+          "count": 1,
+          "to": "hand",
+          "reveal": true,
+          "shuffle": true,
+          "prompt": {
+            "title": "Sarkhan's Triumph: search",
+            "instruction": "Choose a Dragon from the library.",
+            "source": {
+              "card": "Sarkhan's Triumph",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:search_library",
+        "field:search_library.count",
+        "field:search_library.filter",
+        "field:search_library.reveal",
+        "field:search_library.shuffle",
+        "field:search_library.to"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

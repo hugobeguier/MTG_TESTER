@@ -1,0 +1,180 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "kind": "spell_effect",
+      "text": "Create four 2/2 blue Bird creature tokens with flying. If the gift was promised, all permanents you control phase out, and until your next turn, your life total can't change and you gain protection from everything.",
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "who": "you",
+          "tokenCount": 4,
+          "tokenName": "Bird",
+          "tokenPower": 2,
+          "tokenToughness": 2,
+          "tokenColors": [
+            "blue"
+          ],
+          "tokenTypeLine": "Creature — Bird",
+          "tokenKeywords": [
+            "flying"
+          ],
+          "src": 0
+        },
+        {
+          "kind": "grant_effect",
+          "who": "you",
+          "filter": {
+            "controller": "you"
+          },
+          "modify": [
+            {
+              "grant": "phased out"
+            }
+          ],
+          "duration": "instant",
+          "src": 1,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "paid_additional_cost",
+              "option": "gift"
+            },
+            "src": 1
+          }
+        },
+        {
+          "kind": "grant_effect",
+          "who": "you",
+          "duration": "until_your_next_turn",
+          "src": 1,
+          "replacement": {
+            "event": "would_gain_life",
+            "subject": "you",
+            "duration": "until_your_next_turn",
+            "result": {
+              "mode": "prevent"
+            }
+          },
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "paid_additional_cost",
+              "option": "gift"
+            },
+            "src": 1
+          }
+        },
+        {
+          "kind": "grant_effect",
+          "who": "you",
+          "duration": "until_your_next_turn",
+          "src": 1,
+          "replacement": {
+            "event": "would_lose_life",
+            "subject": "you",
+            "duration": "until_your_next_turn",
+            "result": {
+              "mode": "prevent"
+            }
+          },
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "paid_additional_cost",
+              "option": "gift"
+            },
+            "src": 1
+          }
+        },
+        {
+          "kind": "grant_effect",
+          "who": "you",
+          "modify": [
+            {
+              "grant": "protection from everything"
+            }
+          ],
+          "duration": "until_your_next_turn",
+          "src": 1,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "paid_additional_cost",
+              "option": "gift"
+            },
+            "src": 1
+          }
+        }
+      ],
+      "id": "a1",
+      "implementation": "needed",
+      "needs": [
+        "field:create_tokens.tokenKeywords",
+        "step:grant_effect",
+        "field:grant_effect.filter",
+        "field:grant_effect.modify",
+        "predicate:paid_additional_cost",
+        "field:grant_effect.replacement",
+        "duration:until_your_next_turn"
+      ]
+    },
+    {
+      "kind": "spell_effect",
+      "text": "Exile Perch Protection.",
+      "steps": [
+        {
+          "kind": "move_card_zone",
+          "target": "self",
+          "moveTo": "exile",
+          "src": 0
+        }
+      ],
+      "id": "a2",
+      "implementation": "implemented",
+      "needs": []
+    }
+  ],
+  "castOptions": [
+    {
+      "id": "c1",
+      "kind": "gift",
+      "from": "hand",
+      "cost": [],
+      "replacesManaCost": false,
+      "effects": {
+        "addSteps": [
+          {
+            "kind": "extra_turn",
+            "who": "opponent"
+          }
+        ]
+      },
+      "optional": true,
+      "gift": "extra turn",
+      "prompt": {
+        "title": "Perch Protection: gift",
+        "instruction": "Do you want to promise a extra turn to an opponent? If you do, choose that opponent.",
+        "source": {
+          "card": "Perch Protection",
+          "ability": "c1"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "cast_option:gift",
+        "step:extra_turn",
+        "field:extra_turn.who"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "each",
+        "reason": "all permanents you control is the filter of the phase-out grant_effect"
+      }
+    ]
+  }
+}

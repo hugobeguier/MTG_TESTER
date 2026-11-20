@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Whenever another nontoken creature dies, you may create a 1/1 black Rat creature token.",
+      "trigger": {
+        "event": "dies",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "another": true,
+          "token": false
+        }
+      },
+      "optional": true,
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Rat",
+          "tokenPower": 1,
+          "tokenToughness": 1,
+          "tokenColors": [
+            "black"
+          ],
+          "tokenTypeLine": "Creature — Rat"
+        }
+      ],
+      "prompt": {
+        "title": "Ogre Slumlord: optional",
+        "instruction": "Do you want to create a 1/1 black Rat creature token?",
+        "source": {
+          "card": "Ogre Slumlord",
+          "ability": "a1"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "static",
+      "text": "Rats you control have deathtouch.",
+      "static": {
+        "affects": {
+          "types": [
+            "creature"
+          ],
+          "subtypes": [
+            "Rat"
+          ],
+          "controller": "you"
+        },
+        "modify": [
+          {
+            "grant": "deathtouch"
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

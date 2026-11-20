@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Counter target spell. Its controller may draw up to two cards at the beginning of the next turn's upkeep.\nYou draw a card at the beginning of the next turn's upkeep.",
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "spell"
+            ],
+            "zone": "stack"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Arcane Denial: choose a target",
+            "instruction": "Choose target spell.",
+            "source": {
+              "card": "Arcane Denial",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "counter_spell",
+          "target": "t1",
+          "src": 0
+        },
+        {
+          "kind": "create_delayed_trigger",
+          "at": {
+            "event": "begin_step",
+            "step": "upkeep",
+            "whose": "each",
+            "next": true
+          },
+          "steps": [
+            {
+              "kind": "draw_cards",
+              "amount": 2,
+              "upTo": true,
+              "who": "controller_of_target",
+              "optional": true,
+              "src": 1,
+              "prompt": {
+                "title": "Arcane Denial: optional",
+                "instruction": "Do you want to its controller draws 2 cards?",
+                "source": {
+                  "card": "Arcane Denial",
+                  "ability": "a1"
+                }
+              }
+            }
+          ],
+          "src": 1
+        },
+        {
+          "kind": "create_delayed_trigger",
+          "at": {
+            "event": "begin_step",
+            "step": "upkeep",
+            "whose": "each",
+            "next": true
+          },
+          "steps": [
+            {
+              "kind": "draw_cards",
+              "amount": 1,
+              "who": "you",
+              "src": 2
+            }
+          ],
+          "src": 2
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:counter_spell",
+        "step:create_delayed_trigger",
+        "field:create_delayed_trigger.at",
+        "field:create_delayed_trigger.steps",
+        "field:draw_cards.upTo",
+        "field:draw_cards.who"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

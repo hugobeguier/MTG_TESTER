@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "kind": "triggered",
+      "text": "At the beginning of your upkeep, if an opponent controls more lands than you, you may search your library for up to three basic land cards, reveal them, put them into your hand, then shuffle.",
+      "trigger": {
+        "event": "begin_step",
+        "step": "upkeep",
+        "whose": "yours",
+        "interveningIf": {
+          "check": "compare",
+          "left": {
+            "ref": "count",
+            "of": {
+              "types": [
+                "land"
+              ],
+              "controller": "opponent"
+            }
+          },
+          "cmp": {
+            "op": ">",
+            "value": {
+              "ref": "count",
+              "of": {
+                "types": [
+                  "land"
+                ],
+                "controller": "you"
+              }
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "kind": "search_library",
+          "who": "you",
+          "optional": true,
+          "filter": {
+            "types": [
+              "land"
+            ],
+            "supertypes": [
+              "basic"
+            ]
+          },
+          "count": 3,
+          "upTo": true,
+          "reveal": true,
+          "to": "hand",
+          "shuffle": true,
+          "src": 0,
+          "prompt": {
+            "title": "Land Tax: optional",
+            "instruction": "Do you want to search your library for a basic land, put it onto your hand, then shuffle?",
+            "source": {
+              "card": "Land Tax",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "id": "a1",
+      "implementation": "needed",
+      "needs": [
+        "trigger:intervening_if",
+        "predicate:compare",
+        "step:search_library",
+        "field:search_library.count",
+        "field:search_library.filter",
+        "field:search_library.reveal",
+        "field:search_library.shuffle",
+        "field:search_library.to",
+        "field:search_library.upTo"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

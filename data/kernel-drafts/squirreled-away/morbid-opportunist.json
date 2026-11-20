@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Whenever one or more other creatures die, draw a card. This ability triggers only once each turn.",
+      "trigger": {
+        "event": "dies",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "another": true
+        },
+        "batch": true
+      },
+      "timing": {
+        "limit": {
+          "count": 1,
+          "per": "turn"
+        }
+      },
+      "srcs": [
+        1
+      ],
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "who": "you",
+          "amount": 1,
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "timing",
+        "trigger:batch",
+        "trigger:subject"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,117 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "kind": "triggered",
+      "keyword": {
+        "name": "demonstrate"
+      },
+      "text": "Demonstrate (When you cast this spell, you may copy it. If you do, choose an opponent to also copy it.)",
+      "trigger": {
+        "event": "cast",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "copy",
+          "id": "d1",
+          "target": "self",
+          "optional": true,
+          "src": 0,
+          "prompt": {
+            "title": "Incarnation Technique: optional",
+            "instruction": "Do you want to copy Incarnation Technique?",
+            "source": {
+              "card": "Incarnation Technique",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "kind": "choose",
+          "id": "d2",
+          "choice": "opponent",
+          "saveAs": "chosen",
+          "src": 0,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "step_done",
+              "step": "d1"
+            },
+            "src": 0
+          },
+          "prompt": {
+            "title": "Incarnation Technique: choose",
+            "instruction": "Choose a opponent.",
+            "source": {
+              "card": "Incarnation Technique",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "kind": "copy",
+          "target": "self",
+          "who": "opponent",
+          "src": 0,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "step_done",
+              "step": "d1"
+            },
+            "src": 0
+          }
+        }
+      ],
+      "id": "a1",
+      "implementation": "needed",
+      "needs": [
+        "step:copy",
+        "step:choose",
+        "field:choose.choice",
+        "field:choose.saveAs",
+        "predicate:step_done",
+        "field:copy.who"
+      ]
+    },
+    {
+      "kind": "spell_effect",
+      "text": "Mill five cards, then return a creature card from your graveyard to the battlefield.",
+      "steps": [
+        {
+          "kind": "mill",
+          "who": "you",
+          "amount": 5,
+          "src": 0
+        },
+        {
+          "kind": "move_card_zone",
+          "what": "choose",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "zone": "graveyard",
+            "owner": "you"
+          },
+          "from": "graveyard",
+          "moveTo": "battlefield",
+          "who": "you",
+          "src": 0
+        }
+      ],
+      "id": "a2",
+      "implementation": "needed",
+      "needs": [
+        "field:move_card_zone.filter",
+        "field:move_card_zone.from",
+        "field:move_card_zone.what"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

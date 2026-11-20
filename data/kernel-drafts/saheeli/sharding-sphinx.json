@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever an artifact creature you control deals combat damage to a player, you may create a 1/1 blue Thopter artifact creature token with flying.",
+      "trigger": {
+        "event": "deals_combat_damage_to_player",
+        "subject": {
+          "types": [
+            "artifact",
+            "creature"
+          ],
+          "controller": "you"
+        }
+      },
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Thopter",
+          "tokenPower": 1,
+          "tokenToughness": 1,
+          "tokenColors": [
+            "blue"
+          ],
+          "tokenTypeLine": "Artifact Creature — Thopter",
+          "tokenKeywords": [
+            "flying"
+          ],
+          "optional": true,
+          "prompt": {
+            "title": "Sharding Sphinx: optional",
+            "instruction": "Do you want to create a 1/1 blue Thopter artifact creature token with flying?",
+            "source": {
+              "card": "Sharding Sphinx",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject",
+        "field:create_tokens.tokenKeywords"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

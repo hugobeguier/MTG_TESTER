@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "replacement",
+      "text": "If you would gain life, you gain that much life plus 1 instead.",
+      "replacement": {
+        "event": "would_gain_life",
+        "subject": "you",
+        "result": {
+          "mode": "instead",
+          "steps": [
+            {
+              "kind": "life_change",
+              "who": "you",
+              "amount": {
+                "math": "+",
+                "args": [
+                  {
+                    "ref": "event_amount"
+                  },
+                  1
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_gain_life",
+        "quantity:math",
+        "field:life_change.amount"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "static",
+      "text": "This creature gets +2/+2 as long as you have 25 or more life.",
+      "static": {
+        "affects": "self",
+        "modify": [
+          {
+            "pt": {
+              "power": 2,
+              "toughness": 2
+            }
+          }
+        ],
+        "while": {
+          "check": "life",
+          "who": "you",
+          "cmp": {
+            "op": ">=",
+            "value": 25
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

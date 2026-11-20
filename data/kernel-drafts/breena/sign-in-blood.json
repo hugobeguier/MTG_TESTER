@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "kind": "spell_effect",
+      "text": "Target player draws two cards and loses 2 life.",
+      "targets": [
+        {
+          "id": "t1",
+          "what": "player",
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Sign in Blood: choose a target",
+            "instruction": "Choose target player.",
+            "source": {
+              "card": "Sign in Blood",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "who": "target_player",
+          "amount": 2,
+          "src": 0
+        },
+        {
+          "kind": "life_change",
+          "who": "target_player",
+          "lifeDelta": -2,
+          "src": 0
+        }
+      ],
+      "id": "a1",
+      "implementation": "needed",
+      "needs": [
+        "field:draw_cards.who",
+        "field:life_change.who"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

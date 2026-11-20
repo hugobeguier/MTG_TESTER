@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "Zombies you control get +1/+1.",
+      "static": {
+        "affects": {
+          "subtypes": [
+            "Zombie"
+          ],
+          "controller": "you"
+        },
+        "modify": [
+          {
+            "pt": {
+              "power": 1,
+              "toughness": 1
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "When this enchantment enters, create two 2/2 black Zombie creature tokens.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 2,
+          "tokenName": "Zombie",
+          "tokenPower": 2,
+          "tokenToughness": 2,
+          "tokenColors": [
+            "black"
+          ],
+          "tokenTypeLine": "Creature — Zombie"
+        }
+      ],
+      "implementation": "implemented",
+      "needs": []
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever a creature you control deals combat damage to a player, create that many Treasure tokens.",
+      "trigger": {
+        "event": "deals_combat_damage_to_player",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "controller": "you"
+        }
+      },
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": {
+            "ref": "event_amount"
+          },
+          "tokenName": "Treasure",
+          "tokenColors": [
+            "colorless"
+          ],
+          "tokenTypeLine": "Artifact — Treasure"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject",
+        "quantity:event_amount"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

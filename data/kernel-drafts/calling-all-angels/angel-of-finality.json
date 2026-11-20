@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "When this creature enters, exile target player's graveyard.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "player",
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Angel of Finality: choose a target",
+            "instruction": "Choose target player.",
+            "source": {
+              "card": "Angel of Finality",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "src": 0,
+          "kind": "move_card_zone",
+          "who": "target_player",
+          "from": "graveyard",
+          "all": true,
+          "moveTo": "exile"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:move_card_zone.all",
+        "field:move_card_zone.from",
+        "field:move_card_zone.who"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

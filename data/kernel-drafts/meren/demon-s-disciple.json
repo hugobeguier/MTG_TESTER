@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "When this creature enters, each player sacrifices a creature or planeswalker of their choice.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "sacrifice_permanent",
+          "who": "each_player",
+          "filter": {
+            "anyOf": [
+              {
+                "types": [
+                  "creature"
+                ]
+              },
+              {
+                "types": [
+                  "planeswalker"
+                ]
+              }
+            ]
+          },
+          "prompt": {
+            "title": "Demon's Disciple: sacrifice",
+            "instruction": "Choose a permanent to sacrifice.",
+            "source": {
+              "card": "Demon's Disciple",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:sacrifice_permanent.filter",
+        "field:sacrifice_permanent.who"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

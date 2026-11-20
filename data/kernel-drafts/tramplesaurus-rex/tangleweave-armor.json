@@ -1,0 +1,135 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Living weapon (When this Equipment enters, create a 0/0 black Phyrexian Germ creature token, then attach this to it.)",
+      "keyword": {
+        "name": "living_weapon"
+      },
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Germ",
+          "tokenPower": 0,
+          "tokenToughness": 0,
+          "tokenColors": [
+            "black"
+          ],
+          "tokenTypeLine": "Creature — Phyrexian Germ"
+        },
+        {
+          "kind": "attach",
+          "what": "self",
+          "to": "created"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "ref:created",
+        "step:attach",
+        "field:attach.to",
+        "field:attach.what"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "static",
+      "text": "Equipped creature gets +X/+X, where X is the greatest mana value among your commanders.",
+      "static": {
+        "affects": "equipped",
+        "modify": [
+          {
+            "pt": {
+              "power": {
+                "ref": "greatest",
+                "of": {
+                  "owner": "you",
+                  "zone": "any",
+                  "isCommander": true
+                },
+                "stat": "mana_value"
+              },
+              "toughness": {
+                "ref": "greatest",
+                "of": {
+                  "owner": "you",
+                  "zone": "any",
+                  "isCommander": true
+                },
+                "stat": "mana_value"
+              }
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static",
+        "filter:isCommander"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "activated",
+      "text": "Equip {4}",
+      "keyword": {
+        "name": "equip"
+      },
+      "timing": {
+        "speed": "sorcery"
+      },
+      "costs": [
+        {
+          "mana": "{4}"
+        }
+      ],
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Tangleweave Armor: choose a target",
+            "instruction": "Choose target creature you control.",
+            "source": {
+              "card": "Tangleweave Armor",
+              "ability": "a3"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "attach",
+          "what": "self",
+          "to": "t1"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:attach",
+        "field:attach.to",
+        "field:attach.what"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

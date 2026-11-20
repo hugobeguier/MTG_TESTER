@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Until end of turn, creatures you control gain trample and get +X/+X, where X is the greatest power among creatures you control.",
+      "steps": [
+        {
+          "kind": "mass_pump",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you"
+          },
+          "power": {
+            "ref": "greatest",
+            "of": {
+              "types": [
+                "creature"
+              ],
+              "controller": "you"
+            },
+            "stat": "power"
+          },
+          "toughness": {
+            "ref": "greatest",
+            "of": {
+              "types": [
+                "creature"
+              ],
+              "controller": "you"
+            },
+            "stat": "power"
+          },
+          "duration": "until_end_of_turn",
+          "src": 0
+        },
+        {
+          "kind": "grant_effect",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you"
+          },
+          "modify": [
+            {
+              "grant": "trample"
+            }
+          ],
+          "duration": "until_end_of_turn",
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "quantity:greatest",
+        "field:mass_pump.filter",
+        "step:grant_effect",
+        "field:grant_effect.filter",
+        "field:grant_effect.modify"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

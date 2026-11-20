@@ -1,0 +1,119 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "replacement",
+      "text": "This land enters tapped. As it enters, choose a color other than blue.",
+      "replacement": {
+        "event": "would_enter",
+        "result": {
+          "mode": "modify",
+          "set": {
+            "tapped": true
+          }
+        }
+      },
+      "srcs": [
+        0,
+        1
+      ],
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_enter"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "replacement",
+      "text": "This land enters tapped. As it enters, choose a color other than blue.",
+      "replacement": {
+        "event": "would_enter",
+        "result": {
+          "mode": "also",
+          "steps": [
+            {
+              "kind": "choose",
+              "choice": "color",
+              "exclude": [
+                "blue"
+              ],
+              "remember": true,
+              "src": 1,
+              "prompt": {
+                "title": "Thriving Isle: choose",
+                "instruction": "Choose a color.",
+                "source": {
+                  "card": "Thriving Isle",
+                  "ability": "a2"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "srcs": [
+        0
+      ],
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_enter",
+        "step:choose",
+        "field:choose.choice",
+        "field:choose.exclude",
+        "field:choose.remember"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "mana",
+      "text": "{T}: Add {U} or one mana of the chosen color.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{U}"
+          }
+        ]
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a4",
+      "kind": "mana",
+      "text": "{T}: Add {U} or one mana of the chosen color.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "chosenColor": 1
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "mana:variable",
+        "filter:chosenColor",
+        "mana:chosen_color"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "another",
+        "reason": "'other than' is a color exclusion (step field exclude), not 'another object'"
+      }
+    ]
+  }
+}

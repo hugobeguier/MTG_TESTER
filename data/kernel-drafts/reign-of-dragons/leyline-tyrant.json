@@ -1,0 +1,104 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "static",
+      "text": "You don't lose unspent red mana as steps and phases end.",
+      "static": {
+        "affects": "you",
+        "modify": [
+          {
+            "grant": "keep_unspent_red_mana_between_steps_and_phases"
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "triggered",
+      "text": "When this creature dies, you may pay any amount of {R}. When you do, it deals that much damage to any target.",
+      "trigger": {
+        "event": "dies",
+        "subject": "self"
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "any",
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "src": 1,
+          "prompt": {
+            "title": "Leyline Tyrant: choose a target",
+            "instruction": "Choose target.",
+            "source": {
+              "card": "Leyline Tyrant",
+              "ability": "a3"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "damage_target",
+          "source": "self",
+          "target": "t1",
+          "amount": {
+            "ref": "X"
+          },
+          "optional": true,
+          "optionalCost": [
+            {
+              "mana": "{R}",
+              "anyAmount": true
+            }
+          ],
+          "src": 0,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "paid_additional_cost",
+              "option": "{R}"
+            },
+            "src": 1
+          },
+          "prompt": {
+            "title": "Leyline Tyrant: optional",
+            "instruction": "Do you want to Leyline Tyrant deals X damage to target?",
+            "source": {
+              "card": "Leyline Tyrant",
+              "ability": "a3"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "quantity:X",
+        "field:damage_target.optionalCost",
+        "field:damage_target.source",
+        "predicate:paid_additional_cost"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

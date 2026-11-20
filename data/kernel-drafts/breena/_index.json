@@ -1,0 +1,443 @@
+{
+  "deck": "Breena, the Demagogue",
+  "cards": [
+    {
+      "slug": "archangel-of-tithes",
+      "name": "Archangel of Tithes"
+    },
+    {
+      "slug": "caves-of-koilos",
+      "name": "Caves of Koilos"
+    },
+    {
+      "slug": "command-tower",
+      "name": "Command Tower"
+    },
+    {
+      "slug": "commander-s-sphere",
+      "name": "Commander's Sphere"
+    },
+    {
+      "slug": "evolving-wilds",
+      "name": "Evolving Wilds"
+    },
+    {
+      "slug": "exotic-orchard",
+      "name": "Exotic Orchard"
+    },
+    {
+      "slug": "inkshield",
+      "name": "Inkshield"
+    },
+    {
+      "slug": "isolated-chapel",
+      "name": "Isolated Chapel"
+    },
+    {
+      "slug": "marble-diamond",
+      "name": "Marble Diamond"
+    },
+    {
+      "slug": "myriad-landscape",
+      "name": "Myriad Landscape"
+    },
+    {
+      "slug": "plains",
+      "name": "Plains"
+    },
+    {
+      "slug": "rogue-s-passage",
+      "name": "Rogue's Passage"
+    },
+    {
+      "slug": "secluded-steppe",
+      "name": "Secluded Steppe"
+    },
+    {
+      "slug": "secret-rendezvous",
+      "name": "Secret Rendezvous"
+    },
+    {
+      "slug": "swamp",
+      "name": "Swamp"
+    },
+    {
+      "slug": "swords-to-plowshares",
+      "name": "Swords to Plowshares"
+    },
+    {
+      "slug": "tainted-field",
+      "name": "Tainted Field"
+    },
+    {
+      "slug": "temple-of-silence",
+      "name": "Temple of Silence"
+    },
+    {
+      "slug": "war-room",
+      "name": "War Room"
+    },
+    {
+      "slug": "breena-the-demagogue",
+      "name": "Breena, the Demagogue",
+      "questions": [
+        "Trigger 'that opponent has more life than another of your opponents': no way to name the attacked opponent inside a Quantity. Written as players_count(each_opponent where life < life_total{who:'opponent'}) >= 1 with who:'opponent' meaning the attacked opponent. Needs an explicit 'defending/attacked player' PlayerRef.",
+        "'that attacking player draws a card' uses who:'that_player' (the event's player = the attacker). The attacked opponent is a second player in the same event; the schema has one 'that_player'."
+      ]
+    },
+    {
+      "slug": "anguished-unmaking",
+      "name": "Anguished Unmaking"
+    },
+    {
+      "slug": "ash-barrens",
+      "name": "Ash Barrens"
+    },
+    {
+      "slug": "batwing-brume",
+      "name": "Batwing Brume",
+      "questions": [
+        "Batwing Brume checks which colors of mana were spent on the spell. There is no 'mana of color X was spent to cast this' predicate; written as paid_additional_cost with option 'mana_spent:{W}' / 'mana_spent:B'. Needs a real predicate (and engine tracking of mana spent).",
+        "'each attacking creature they control' inside a per-player loop: ObjectFilter.controller has no 'the iterated player' value, so the count filter is not tied to the player; needs controller:'that_player'."
+      ]
+    },
+    {
+      "slug": "bloodthirsty-blade",
+      "name": "Bloodthirsty Blade"
+    },
+    {
+      "slug": "citadel-siege",
+      "name": "Citadel Siege",
+      "questions": [
+        "Citadel Siege (Dragons): the target must be a creature controlled by the opponent whose turn it is ('that player'). ObjectFilter.controller:'opponent' allows any opponent's creature; needs controller:'active_player'."
+      ]
+    },
+    {
+      "slug": "combat-calligrapher",
+      "name": "Combat Calligrapher",
+      "questions": [
+        "Static 'can't attack you or planeswalkers you control': StaticSpec cant:'attack' has no 'protects/only-against' field (only attackTax has protects), so it reads as 'Inklings can't attack at all'. Needs cant:{attack, protects:'you_and_planeswalkers'}.",
+        "Token 'tapped and attacking that opponent': create_tokens has no tapped/attacking fields; written as passthrough tokenTapped / tokenAttacking:'attacked_opponent'. Needs typed fields."
+      ]
+    },
+    {
+      "slug": "council-s-judgment",
+      "name": "Council's Judgment",
+      "questions": [
+        "Voting (Will of the council): no vote step. Written as choose{who:each_player, vote:true} then exile_target{winners:'most_votes_or_tied'} (passthrough). Needs a vote step: each player (in turn order starting with the caster) picks one candidate, ties resolve by exiling all tied objects. Also 'permanent you don't control' (relative to the caster, not the voter) is approximated by controller:'opponent'."
+      ]
+    },
+    {
+      "slug": "deathbringer-liege",
+      "name": "Deathbringer Liege"
+    },
+    {
+      "slug": "despark",
+      "name": "Despark"
+    },
+    {
+      "slug": "duelist-s-heritage",
+      "name": "Duelist's Heritage"
+    },
+    {
+      "slug": "dusk-legion-duelist",
+      "name": "Dusk Legion Duelist"
+    },
+    {
+      "slug": "eiganjo-seat-of-the-empire",
+      "name": "Eiganjo, Seat of the Empire",
+      "questions": [
+        "Eiganjo targets 'attacking or blocking creature': ObjectFilter has `attacking` but no `blocking`; written as anyOf with with:['blocking']. Needs a typed `blocking` field."
+      ]
+    },
+    {
+      "slug": "enshrouding-mist",
+      "name": "Enshrouding Mist",
+      "questions": [
+        "Enshrouding Mist: damage prevention aimed at a specific targeted object (it). ReplacementSpec.recipient accepts a filter/player/'self' but not an ObjRef like t1; written as a grant_effect on t1 with recipient:'self'. 'renowned' is a designation: written as filter.with:['renowned']."
+      ]
+    },
+    {
+      "slug": "envoy-of-the-ancestors",
+      "name": "Envoy of the Ancestors",
+      "questions": [
+        "'Modified' (equipped, enchanted by your Aura, or has a counter) is written as filter.with:['modified']; there is no typed `modified` filter field."
+      ]
+    },
+    {
+      "slug": "felisa-fang-of-silverquill",
+      "name": "Felisa, Fang of Silverquill",
+      "questions": [
+        "Felisa/Ozolith/Reluctant Role Model/Resourceful Defense: 'had counters on it' of an object that already left the battlefield (last-known information). Written as filter.hasCounter:'any' and Quantity counters{kind:'any', on:'event_object'}; needs an agreed 'any counter kind' and LKI semantics.",
+        "Tapped token: create_tokens has no `tapped` field; written as passthrough tokenTapped."
+      ]
+    },
+    {
+      "slug": "fetid-heath",
+      "name": "Fetid Heath"
+    },
+    {
+      "slug": "flawless-maneuver",
+      "name": "Flawless Maneuver"
+    },
+    {
+      "slug": "fracture",
+      "name": "Fracture"
+    },
+    {
+      "slug": "generous-gift",
+      "name": "Generous Gift"
+    },
+    {
+      "slug": "ghostly-prison",
+      "name": "Ghostly Prison"
+    },
+    {
+      "slug": "gix-yawgmoth-praetor",
+      "name": "Gix, Yawgmoth Praetor",
+      "questions": [
+        "Gix trigger 'a creature deals combat damage to one of your opponents': deals_combat_damage_to_player has no qualifier for the damaged player being your opponent (any creature, any victim). 'Its controller' is written as who:'that_player'."
+      ]
+    },
+    {
+      "slug": "godless-shrine",
+      "name": "Godless Shrine"
+    },
+    {
+      "slug": "hall-of-heliod-s-generosity",
+      "name": "Hall of Heliod's Generosity"
+    },
+    {
+      "slug": "hopeful-initiate",
+      "name": "Hopeful Initiate",
+      "questions": [
+        "Hopeful Initiate / Retribution of the Ancients cost 'Remove N +1/+1 counters from among creatures you control': the counters cost atom only supports from:'self'. Written with from:'self' (lossy). Needs from:{filter} (any creatures you control) and the player choosing which."
+      ]
+    },
+    {
+      "slug": "incarnation-technique",
+      "name": "Incarnation Technique",
+      "questions": [
+        "Demonstrate has no castOption kind. Written as a triggered ability on cast (copy optional, then a second copy for a chosen opponent). The chosen opponent's copy should be controlled by that opponent: copy {who:'chosen'} is passthrough."
+      ]
+    },
+    {
+      "slug": "kambal-consul-of-allocation",
+      "name": "Kambal, Consul of Allocation"
+    },
+    {
+      "slug": "keen-duelist",
+      "name": "Keen Duelist",
+      "questions": [
+        "Keen Duelist / Parker Luck: two revealed cards (one per player) must be referred to separately ('the mana value of the card revealed by the other player'). ObjRef has only one 'chosen' slot, so the two life_change steps use of:'chosen' plus a passthrough lifeFrom:'<saveAs name>'. Needs ObjRef by saveAs name (e.g. {saved:'theirs'})."
+      ]
+    },
+    {
+      "slug": "knight-of-the-white-orchid",
+      "name": "Knight of the White Orchid"
+    },
+    {
+      "slug": "land-tax",
+      "name": "Land Tax"
+    },
+    {
+      "slug": "lightning-greaves",
+      "name": "Lightning Greaves"
+    },
+    {
+      "slug": "loran-s-escape",
+      "name": "Loran's Escape"
+    },
+    {
+      "slug": "mana-tithe",
+      "name": "Mana Tithe"
+    },
+    {
+      "slug": "mangara-the-diplomat",
+      "name": "Mangara, the Diplomat"
+    },
+    {
+      "slug": "martial-impetus",
+      "name": "Martial Impetus",
+      "questions": [
+        "Martial Impetus 'each other creature that's attacking one of your opponents' is written as other attacking creatures; the 'attacking one of your opponents' (not you) restriction is not modelled (ObjectFilter has attackingYou but no attackingOpponent)."
+      ]
+    },
+    {
+      "slug": "master-of-ceremonies",
+      "name": "Master of Ceremonies",
+      "questions": [
+        "Master of Ceremonies: each opponent chooses an option for themselves. choose{who:'that_player', remember:true} stores the answer per iteration; chosen_is reads 'the option remembered by the source', which is a single slot. Needs a per-iteration chosen value."
+      ]
+    },
+    {
+      "slug": "mister-negative",
+      "name": "Mister Negative",
+      "questions": [
+        "Mister Negative: no 'exchange life totals' step. Written as set_life {who:'you', target:'t1', exchange:true} (passthrough). Needs a dedicated step."
+      ]
+    },
+    {
+      "slug": "mortify",
+      "name": "Mortify"
+    },
+    {
+      "slug": "nihil-spellbomb",
+      "name": "Nihil Spellbomb"
+    },
+    {
+      "slug": "nils-discipline-enforcer",
+      "name": "Nils, Discipline Enforcer",
+      "questions": [
+        "Nils: attackTax.cost is a mana string; 'pays {X}, where X is the number of counters on that creature' has no place for the per-creature Quantity (Sphere of Safety used a scripted attack_tax handler). Left as cost '{X}' with no quantity."
+      ]
+    },
+    {
+      "slug": "orzhov-advokist",
+      "name": "Orzhov Advokist",
+      "questions": [
+        "Orzhov Advokist / Nils / Vow of Malice / Combat Calligrapher / Promise of Loyalty: StaticSpec cant:'attack' cannot be limited to 'attacking you or planeswalkers you control' (only attackTax has protects). ObjectFilter.controller cannot name 'the target player' / 'the iterated player' (only you/opponent/any/defending_player); the step is written with passthrough fields (ofPlayer / owner iterated). Needs controller:'target_player' | 'iterated_player'."
+      ]
+    },
+    {
+      "slug": "orzhov-basilica",
+      "name": "Orzhov Basilica"
+    },
+    {
+      "slug": "orzhov-guildgate",
+      "name": "Orzhov Guildgate"
+    },
+    {
+      "slug": "orzhov-locket",
+      "name": "Orzhov Locket"
+    },
+    {
+      "slug": "parker-luck",
+      "name": "Parker Luck",
+      "questions": [
+        "Parker Luck: see Keen Duelist (two revealed cards cross-referenced between the two target players)."
+      ]
+    },
+    {
+      "slug": "parting-gust",
+      "name": "Parting Gust",
+      "questions": [
+        "Parting Gust: 'return ... under its owner's control with a +1/+1 counter' written with passthrough fields underControlOf:'owner' and withCounters on move_card_zone."
+      ]
+    },
+    {
+      "slug": "path-to-exile",
+      "name": "Path to Exile"
+    },
+    {
+      "slug": "perch-protection",
+      "name": "Perch Protection",
+      "questions": [
+        "Perch Protection: no phase-out step (written as grant_effect granting 'phased out' to all your permanents); 'your life total can't change' is two prevent replacements (would_gain_life and would_lose_life). The opponent's extra turn comes 'after this one' (extra_turn who:'opponent')."
+      ]
+    },
+    {
+      "slug": "promise-of-loyalty",
+      "name": "Promise of Loyalty",
+      "questions": [
+        "Promise of Loyalty: 'sacrifices the rest' (all creatures except the chosen one) is written with passthrough except:'chosen', amount:'all'. ObjectFilter.controller cannot name 'the target player' / 'the iterated player' (only you/opponent/any/defending_player); the step is written with passthrough fields (ofPlayer / owner iterated). Needs controller:'target_player' | 'iterated_player'."
+      ]
+    },
+    {
+      "slug": "reluctant-role-model",
+      "name": "Reluctant Role Model",
+      "questions": [
+        "Reluctant Role Model / The Ozolith / Resourceful Defense: 'put those counters on X' (all counters of every kind, by kind) is written as add_counters{counterKind:'same_as_source', amount: counters(any)} (passthrough); needs a real 'move/copy counters from <object> (LKI)' step. The choice of flying/lifelink/+1/+1 counter kind is choose(mode) then counterKind:'chosen'."
+      ]
+    },
+    {
+      "slug": "resourceful-defense",
+      "name": "Resourceful Defense"
+    },
+    {
+      "slug": "retribution-of-the-ancients",
+      "name": "Retribution of the Ancients"
+    },
+    {
+      "slug": "scheming-symmetry",
+      "name": "Scheming Symmetry"
+    },
+    {
+      "slug": "selfless-spirit",
+      "name": "Selfless Spirit"
+    },
+    {
+      "slug": "selfless-squire",
+      "name": "Selfless Squire",
+      "questions": [
+        "Selfless Squire: 'whenever damage that would be dealt to you is prevented' has no trigger event (EVENT_NAMES lacks damage_prevented). Written with event:'unspecified' and Quantity event_amount = the amount prevented. Needs event damage_prevented {recipient, amount}."
+      ]
+    },
+    {
+      "slug": "shadowspear",
+      "name": "Shadowspear"
+    },
+    {
+      "slug": "shadrix-silverquill",
+      "name": "Shadrix Silverquill",
+      "questions": [
+        "Shadrix Silverquill: 'Each mode must target a different player' has no field (modes.options each target a player but nothing forces the targets to differ). Written as plain modes (choose exactly two, distinct) - the different-player constraint is only in the text. Also 'you may choose two' = optional ability choosing exactly two. ObjectFilter.controller cannot name 'the target player' / 'the iterated player'; written with a passthrough field (ofPlayer)."
+      ]
+    },
+    {
+      "slug": "shattered-sanctum",
+      "name": "Shattered Sanctum"
+    },
+    {
+      "slug": "shineshadow-snarl",
+      "name": "Shineshadow Snarl"
+    },
+    {
+      "slug": "sigarda-s-summons",
+      "name": "Sigarda's Summons"
+    },
+    {
+      "slug": "sign-in-blood",
+      "name": "Sign in Blood"
+    },
+    {
+      "slug": "spectacular-spider-man",
+      "name": "Spectacular Spider-Man"
+    },
+    {
+      "slug": "sword-of-the-animist",
+      "name": "Sword of the Animist"
+    },
+    {
+      "slug": "the-ozolith",
+      "name": "The Ozolith"
+    },
+    {
+      "slug": "together-forever",
+      "name": "Together Forever"
+    },
+    {
+      "slug": "toxic-deluge",
+      "name": "Toxic Deluge"
+    },
+    {
+      "slug": "vault-of-champions",
+      "name": "Vault of Champions",
+      "questions": [
+        "Vault of Champions: 'two or more opponents' has no Quantity for the number of opponents; written as players_count(each_opponent where a trivially-true life check) >= 2. Needs {ref:'players_count', who:'each_opponent'} without a required 'where'."
+      ]
+    },
+    {
+      "slug": "vow-of-malice",
+      "name": "Vow of Malice"
+    },
+    {
+      "slug": "windborn-muse",
+      "name": "Windborn Muse"
+    },
+    {
+      "slug": "yathan-tombguard",
+      "name": "Yathan Tombguard"
+    }
+  ]
+}

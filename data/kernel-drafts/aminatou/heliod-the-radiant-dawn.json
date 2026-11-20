@@ -1,0 +1,147 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Heliod, the Radiant Dawn: When Heliod enters, return target enchantment card that isn't a God from your graveyard to your hand.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "enchantment"
+            ],
+            "notSubtypes": [
+              "God"
+            ],
+            "zone": "graveyard",
+            "owner": "you"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Heliod, the Radiant Dawn: choose a target",
+            "instruction": "Choose target non-God enchantment card in your graveyard.",
+            "source": {
+              "card": "Heliod, the Radiant Dawn",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "move_card_zone",
+          "target": "t1",
+          "from": "graveyard",
+          "moveTo": "hand",
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "filter:notSubtypes",
+        "field:move_card_zone.from"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "{3}{U/P}: Transform Heliod. Activate only as a sorcery. ({U/P} can be paid with either {U} or 2 life.)",
+      "costs": [
+        {
+          "mana": "{3}{U/P}"
+        }
+      ],
+      "timing": {
+        "speed": "sorcery"
+      },
+      "srcs": [
+        1
+      ],
+      "steps": [
+        {
+          "kind": "transform",
+          "target": "self",
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:transform"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "scripted",
+      "text": "Heliod, the Warped Eclipse: You may cast spells as though they had flash.",
+      "optional": true,
+      "scripted": {
+        "handler": "cast_spells_as_though_flash",
+        "params": {
+          "face": "Heliod, the Warped Eclipse"
+        }
+      },
+      "prompt": {
+        "title": "Heliod, the Radiant Dawn: optional",
+        "instruction": "Do you want to use this ability?",
+        "source": {
+          "card": "Heliod, the Radiant Dawn",
+          "ability": "a3"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "scripted:cast_spells_as_though_flash"
+      ]
+    },
+    {
+      "id": "a4",
+      "kind": "static",
+      "text": "Spells you cast cost {1} less to cast for each card your opponents have drawn this turn.",
+      "static": {
+        "affects": "you",
+        "modify": [
+          {
+            "costMod": {
+              "filter": {
+                "types": [
+                  "spell"
+                ],
+                "controller": "you"
+              },
+              "delta": {
+                "math": "*",
+                "args": [
+                  -1,
+                  {
+                    "ref": "count_this_turn",
+                    "event": "draw",
+                    "actor": "each_opponent"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static",
+        "quantity:count_this_turn",
+        "static:costMod_quantity"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

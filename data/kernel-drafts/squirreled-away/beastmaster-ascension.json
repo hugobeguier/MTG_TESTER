@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Whenever a creature you control attacks, you may put a quest counter on this enchantment.",
+      "trigger": {
+        "event": "attack",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "controller": "you"
+        }
+      },
+      "optional": true,
+      "steps": [
+        {
+          "kind": "add_counters",
+          "on": "self",
+          "counterKind": "quest",
+          "amount": 1
+        }
+      ],
+      "prompt": {
+        "title": "Beastmaster Ascension: optional",
+        "instruction": "Do you want to put a quest counter on Beastmaster Ascension?",
+        "source": {
+          "card": "Beastmaster Ascension",
+          "ability": "a1"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject",
+        "step:add_counters",
+        "field:add_counters.on"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "static",
+      "text": "As long as this enchantment has seven or more quest counters on it, creatures you control get +5/+5.",
+      "static": {
+        "affects": {
+          "types": [
+            "creature"
+          ],
+          "controller": "you"
+        },
+        "modify": [
+          {
+            "pt": {
+              "power": 5,
+              "toughness": 5
+            }
+          }
+        ],
+        "while": {
+          "check": "compare",
+          "left": {
+            "ref": "counters",
+            "kind": "quest",
+            "on": "self"
+          },
+          "cmp": {
+            "op": ">=",
+            "value": 7
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

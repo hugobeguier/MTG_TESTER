@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "When this creature enters, sacrifice another creature. You gain X life and draw X cards, where X is that creature's power.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "choose",
+          "from": {
+            "types": [
+              "creature"
+            ],
+            "another": true,
+            "controller": "you"
+          },
+          "count": 1,
+          "saveAs": "chosen",
+          "src": 0,
+          "prompt": {
+            "title": "Disciple of Bolas: choose",
+            "instruction": "Choose an another creature you control.",
+            "source": {
+              "card": "Disciple of Bolas",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "kind": "sacrifice_permanent",
+          "who": "you",
+          "target": "chosen",
+          "src": 0,
+          "prompt": {
+            "title": "Disciple of Bolas: sacrifice",
+            "instruction": "Choose a permanent to sacrifice.",
+            "source": {
+              "card": "Disciple of Bolas",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "kind": "life_change",
+          "who": "you",
+          "amount": {
+            "ref": "stat",
+            "of": "chosen",
+            "stat": "power"
+          },
+          "src": 1
+        },
+        {
+          "kind": "draw_cards",
+          "who": "you",
+          "amount": {
+            "ref": "stat",
+            "of": "chosen",
+            "stat": "power"
+          },
+          "src": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:choose",
+        "field:choose.count",
+        "field:choose.from",
+        "field:choose.saveAs",
+        "quantity:stat",
+        "field:life_change.amount"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

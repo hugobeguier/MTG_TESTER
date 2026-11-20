@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "When this creature enters, each opponent loses X life, where X is your devotion to black. You gain life equal to the life lost this way. (Each {B} in the mana costs of permanents you control counts toward your devotion to black.)",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "life_change",
+          "who": "each_opponent",
+          "lose": true,
+          "amount": {
+            "ref": "devotion",
+            "color": "B"
+          }
+        },
+        {
+          "kind": "life_change",
+          "who": "you",
+          "amount": {
+            "ref": "life_lost_this_way"
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "quantity:devotion",
+        "field:life_change.amount",
+        "field:life_change.lose",
+        "field:life_change.who",
+        "quantity:life_lost_this_way"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

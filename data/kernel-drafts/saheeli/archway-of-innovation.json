@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "replacement",
+      "text": "This land enters tapped unless you control an Island.",
+      "replacement": {
+        "event": "would_enter",
+        "condition": {
+          "not": {
+            "check": "controls",
+            "filter": {
+              "subtypes": [
+                "Island"
+              ],
+              "controller": "you"
+            }
+          }
+        },
+        "result": {
+          "mode": "modify",
+          "set": {
+            "tapped": true
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_enter"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "mana",
+      "text": "{T}: Add {U}.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{U}"
+          }
+        ]
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "activated",
+      "text": "{U}, {T}: The next spell you cast this turn has improvise. (Your artifacts can help cast that spell. Each artifact you tap after you're done activating mana abilities pays for {1}.)",
+      "costs": [
+        {
+          "mana": "{U}"
+        },
+        {
+          "tap": "self"
+        }
+      ],
+      "scripted": {
+        "handler": "next_spell_gains_keyword",
+        "params": {
+          "keyword": "improvise"
+        }
+      },
+      "steps": [
+        {
+          "kind": "grant_effect",
+          "who": "you",
+          "appliesTo": "next_spell_cast",
+          "modify": [
+            {
+              "grant": "improvise"
+            }
+          ],
+          "duration": "until_end_of_turn"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "scripted:next_spell_gains_keyword",
+        "step:grant_effect",
+        "field:grant_effect.appliesTo",
+        "field:grant_effect.modify"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

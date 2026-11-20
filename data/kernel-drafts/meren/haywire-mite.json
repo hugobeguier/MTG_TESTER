@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "When this creature dies, you gain 2 life.",
+      "trigger": {
+        "event": "dies",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "life_change",
+          "who": "you",
+          "amount": 2
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:life_change.amount"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "{G}, Sacrifice this creature: Exile target noncreature artifact or noncreature enchantment.",
+      "costs": [
+        {
+          "mana": "{G}"
+        },
+        {
+          "sacrifice": "self",
+          "count": 1
+        }
+      ],
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "anyOf": [
+              {
+                "types": [
+                  "artifact"
+                ],
+                "notTypes": [
+                  "creature"
+                ]
+              },
+              {
+                "types": [
+                  "enchantment"
+                ],
+                "notTypes": [
+                  "creature"
+                ]
+              }
+            ]
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Haywire Mite: choose a target",
+            "instruction": "Choose target noncreature artifact or noncreature enchantment.",
+            "source": {
+              "card": "Haywire Mite",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "exile_target",
+          "target": "t1"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "cost:sacrifice"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

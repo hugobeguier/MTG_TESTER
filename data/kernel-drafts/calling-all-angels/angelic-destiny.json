@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Enchant creature",
+      "keyword": {
+        "name": "enchant"
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Angelic Destiny: choose a target",
+            "instruction": "Choose target creature.",
+            "source": {
+              "card": "Angelic Destiny",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "keyword:enchant"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "static",
+      "text": "Enchanted creature gets +4/+4, has flying and first strike, and is an Angel in addition to its other types.",
+      "static": {
+        "affects": "enchanted",
+        "modify": [
+          {
+            "pt": {
+              "power": 4,
+              "toughness": 4
+            }
+          },
+          {
+            "grant": "flying"
+          },
+          {
+            "grant": "first strike"
+          },
+          {
+            "addTypes": [
+              "Angel"
+            ]
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static",
+        "static:addTypes"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "triggered",
+      "text": "When enchanted creature dies, return this card to its owner's hand.",
+      "trigger": {
+        "event": "dies",
+        "subject": "enchanted"
+      },
+      "steps": [
+        {
+          "src": 0,
+          "kind": "move_card_zone",
+          "target": "self",
+          "from": "graveyard",
+          "moveTo": "hand"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject",
+        "field:move_card_zone.from"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,87 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "Dragon spells you cast cost {1} less to cast.",
+      "static": {
+        "affects": "you",
+        "modify": [
+          {
+            "costMod": {
+              "filter": {
+                "subtypes": [
+                  "Dragon"
+                ],
+                "zone": "stack"
+              },
+              "delta": -1
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever Nogi attacks, if you control three or more Dragons, until end of turn, Nogi becomes a Dragon with base power and toughness 5/5 and gains flying.",
+      "trigger": {
+        "event": "attack",
+        "subject": "self",
+        "interveningIf": {
+          "check": "controls",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "subtypes": [
+              "Dragon"
+            ],
+            "controller": "you"
+          },
+          "count": {
+            "op": ">=",
+            "value": 3
+          }
+        }
+      },
+      "steps": [
+        {
+          "kind": "grant_effect",
+          "target": "self",
+          "modify": [
+            {
+              "setTypes": [
+                "Dragon"
+              ]
+            },
+            {
+              "setBasePT": {
+                "power": 5,
+                "toughness": 5
+              }
+            },
+            {
+              "grant": "flying"
+            }
+          ],
+          "duration": "until_end_of_turn"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:intervening_if",
+        "step:grant_effect",
+        "field:grant_effect.modify"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

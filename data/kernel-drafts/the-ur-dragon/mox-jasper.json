@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "mana",
+      "text": "{T}: Add one mana of any color. Activate only if you control a Dragon.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "anyColor": 1
+          }
+        ]
+      },
+      "timing": {
+        "only": [
+          {
+            "check": "controls",
+            "filter": {
+              "types": [
+                "creature"
+              ],
+              "subtypes": [
+                "Dragon"
+              ],
+              "controller": "you"
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "mana:variable",
+        "timing"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

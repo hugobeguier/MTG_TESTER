@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "Equipped creature gets +1/+1 for each other creature you control that shares a creature type with it.",
+      "static": {
+        "affects": "equipped",
+        "modify": [
+          {
+            "pt": {
+              "power": {
+                "ref": "count",
+                "of": {
+                  "types": [
+                    "creature"
+                  ],
+                  "controller": "you",
+                  "another": true,
+                  "sharesCreatureTypeWith": "equipped"
+                }
+              },
+              "toughness": {
+                "ref": "count",
+                "of": {
+                  "types": [
+                    "creature"
+                  ],
+                  "controller": "you",
+                  "another": true,
+                  "sharesCreatureTypeWith": "equipped"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static",
+        "filter:sharesCreatureTypeWith"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "Equip {2}",
+      "keyword": {
+        "name": "equip"
+      },
+      "timing": {
+        "speed": "sorcery"
+      },
+      "costs": [
+        {
+          "mana": "{2}"
+        }
+      ],
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Stoneforge Masterwork: choose a target",
+            "instruction": "Choose target creature you control.",
+            "source": {
+              "card": "Stoneforge Masterwork",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "attach",
+          "what": "self",
+          "to": "t1"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:attach",
+        "field:attach.to",
+        "field:attach.what"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

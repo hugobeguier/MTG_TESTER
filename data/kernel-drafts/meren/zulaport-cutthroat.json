@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Whenever this creature or another creature you control dies, each opponent loses 1 life and you gain 1 life.",
+      "trigger": {
+        "event": "dies",
+        "subject": "self",
+        "alsoOn": [
+          {
+            "event": "dies",
+            "subject": {
+              "types": [
+                "creature"
+              ],
+              "controller": "you",
+              "another": true
+            }
+          }
+        ]
+      },
+      "steps": [
+        {
+          "kind": "life_change",
+          "who": "each_opponent",
+          "lose": true,
+          "amount": 1
+        },
+        {
+          "kind": "life_change",
+          "who": "you",
+          "amount": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:multi_event",
+        "trigger:subject",
+        "field:life_change.amount",
+        "field:life_change.lose",
+        "field:life_change.who"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

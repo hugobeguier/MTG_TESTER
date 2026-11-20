@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Dethrone (Whenever this creature attacks the player with the most life or tied for most life, put a +1/+1 counter on it.)",
+      "keyword": {
+        "name": "dethrone"
+      },
+      "trigger": {
+        "event": "attack",
+        "subject": "self",
+        "interveningIf": {
+          "check": "most_life",
+          "who": "that_player"
+        }
+      },
+      "steps": [
+        {
+          "kind": "add_counters",
+          "on": "self",
+          "counterKind": "+1/+1",
+          "amount": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:intervening_if",
+        "predicate:most_life",
+        "step:add_counters",
+        "field:add_counters.on"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "triggered",
+      "text": "Whenever this creature attacks for the first time each turn, if it's attacking the player with the most life or tied for most life, untap all attacking creatures. After this phase, there is an additional combat phase.",
+      "trigger": {
+        "event": "attack",
+        "subject": "self",
+        "nth": {
+          "n": 1,
+          "per": "turn"
+        },
+        "interveningIf": {
+          "check": "most_life",
+          "who": "that_player"
+        }
+      },
+      "steps": [
+        {
+          "kind": "untap_target",
+          "all": true,
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "attacking": true
+          },
+          "src": 0
+        },
+        {
+          "kind": "extra_combat",
+          "src": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:nth",
+        "trigger:intervening_if",
+        "predicate:most_life",
+        "field:untap_target.all",
+        "field:untap_target.filter",
+        "step:extra_combat"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

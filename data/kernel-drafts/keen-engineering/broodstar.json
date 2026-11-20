@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Affinity for artifacts (This spell costs {1} less to cast for each artifact you control.)",
+      "keyword": {
+        "name": "affinity",
+        "param": "artifacts"
+      },
+      "costReduction": {
+        "per": {
+          "types": [
+            "artifact"
+          ],
+          "controller": "you"
+        },
+        "amount": 1,
+        "applies": "generic"
+      },
+      "implementation": "needed",
+      "needs": [
+        "cost_reduction"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "static",
+      "text": "Broodstar's power and toughness are each equal to the number of artifacts you control.",
+      "static": {
+        "affects": "self",
+        "modify": [
+          {
+            "setBasePT": {
+              "power": {
+                "ref": "count",
+                "of": {
+                  "types": [
+                    "artifact"
+                  ],
+                  "controller": "you"
+                }
+              },
+              "toughness": {
+                "ref": "count",
+                "of": {
+                  "types": [
+                    "artifact"
+                  ],
+                  "controller": "you"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static",
+        "static:setBasePT"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

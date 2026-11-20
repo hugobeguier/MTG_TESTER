@@ -1,0 +1,370 @@
+{
+  "deck": "Squirreled Away",
+  "cards": [
+    {
+      "slug": "hazel-of-the-rootbloom",
+      "name": "Hazel of the Rootbloom"
+    },
+    {
+      "slug": "academy-manufactor",
+      "name": "Academy Manufactor"
+    },
+    {
+      "slug": "arasta-of-the-endless-web",
+      "name": "Arasta of the Endless Web"
+    },
+    {
+      "slug": "arcane-signet",
+      "name": "Arcane Signet"
+    },
+    {
+      "slug": "barren-moor",
+      "name": "Barren Moor"
+    },
+    {
+      "slug": "bastion-of-remembrance",
+      "name": "Bastion of Remembrance"
+    },
+    {
+      "slug": "beastmaster-ascension",
+      "name": "Beastmaster Ascension"
+    },
+    {
+      "slug": "beledros-witherbloom",
+      "name": "Beledros Witherbloom"
+    },
+    {
+      "slug": "binding-the-old-gods",
+      "name": "Binding the Old Gods"
+    },
+    {
+      "slug": "bojuka-bog",
+      "name": "Bojuka Bog"
+    },
+    {
+      "slug": "cache-grab",
+      "name": "Cache Grab"
+    },
+    {
+      "slug": "casualties-of-war",
+      "name": "Casualties of War"
+    },
+    {
+      "slug": "chatterfang-squirrel-general",
+      "name": "Chatterfang, Squirrel General"
+    },
+    {
+      "slug": "chatterstorm",
+      "name": "Chatterstorm"
+    },
+    {
+      "slug": "chittering-witch",
+      "name": "Chittering Witch"
+    },
+    {
+      "slug": "chitterspitter",
+      "name": "Chitterspitter"
+    },
+    {
+      "slug": "command-tower",
+      "name": "Command Tower"
+    },
+    {
+      "slug": "deadly-dispute",
+      "name": "Deadly Dispute"
+    },
+    {
+      "slug": "decree-of-pain",
+      "name": "Decree of Pain"
+    },
+    {
+      "slug": "deep-forest-hermit",
+      "name": "Deep Forest Hermit"
+    },
+    {
+      "slug": "end-raze-forerunners",
+      "name": "End-Raze Forerunners"
+    },
+    {
+      "slug": "evolving-wilds",
+      "name": "Evolving Wilds"
+    },
+    {
+      "slug": "exotic-orchard",
+      "name": "Exotic Orchard"
+    },
+    {
+      "slug": "forest",
+      "name": "Forest"
+    },
+    {
+      "slug": "garruk-cursed-huntsman",
+      "name": "Garruk, Cursed Huntsman"
+    },
+    {
+      "slug": "gilded-goose",
+      "name": "Gilded Goose"
+    },
+    {
+      "slug": "golgari-rot-farm",
+      "name": "Golgari Rot Farm"
+    },
+    {
+      "slug": "golgari-signet",
+      "name": "Golgari Signet"
+    },
+    {
+      "slug": "gourmand-s-talent",
+      "name": "Gourmand's Talent"
+    },
+    {
+      "slug": "grim-backwoods",
+      "name": "Grim Backwoods"
+    },
+    {
+      "slug": "haunted-mire",
+      "name": "Haunted Mire"
+    },
+    {
+      "slug": "haywire-mite",
+      "name": "Haywire Mite"
+    },
+    {
+      "slug": "hazel-s-brewmaster",
+      "name": "Hazel's Brewmaster"
+    },
+    {
+      "slug": "honored-dreyleader",
+      "name": "Honored Dreyleader"
+    },
+    {
+      "slug": "idol-of-oblivion",
+      "name": "Idol of Oblivion"
+    },
+    {
+      "slug": "insatiable-frugivore",
+      "name": "Insatiable Frugivore"
+    },
+    {
+      "slug": "jungle-hollow",
+      "name": "Jungle Hollow"
+    },
+    {
+      "slug": "llanowar-wastes",
+      "name": "Llanowar Wastes"
+    },
+    {
+      "slug": "maelstrom-pulse",
+      "name": "Maelstrom Pulse"
+    },
+    {
+      "slug": "maskwood-nexus",
+      "name": "Maskwood Nexus"
+    },
+    {
+      "slug": "moldervine-reclamation",
+      "name": "Moldervine Reclamation"
+    },
+    {
+      "slug": "moonstone-eulogist",
+      "name": "Moonstone Eulogist"
+    },
+    {
+      "slug": "morbid-opportunist",
+      "name": "Morbid Opportunist"
+    },
+    {
+      "slug": "nadier-s-nightblade",
+      "name": "Nadier's Nightblade"
+    },
+    {
+      "slug": "necroblossom-snarl",
+      "name": "Necroblossom Snarl"
+    },
+    {
+      "slug": "nested-shambler",
+      "name": "Nested Shambler"
+    },
+    {
+      "slug": "ogre-slumlord",
+      "name": "Ogre Slumlord"
+    },
+    {
+      "slug": "oran-rief-the-vastwood",
+      "name": "Oran-Rief, the Vastwood"
+    },
+    {
+      "slug": "path-of-ancestry",
+      "name": "Path of Ancestry"
+    },
+    {
+      "slug": "plaguecrafter",
+      "name": "Plaguecrafter"
+    },
+    {
+      "slug": "plumb-the-forbidden",
+      "name": "Plumb the Forbidden"
+    },
+    {
+      "slug": "poison-tip-archer",
+      "name": "Poison-Tip Archer"
+    },
+    {
+      "slug": "prosperous-innkeeper",
+      "name": "Prosperous Innkeeper"
+    },
+    {
+      "slug": "putrefy",
+      "name": "Putrefy"
+    },
+    {
+      "slug": "ravenous-squirrel",
+      "name": "Ravenous Squirrel"
+    },
+    {
+      "slug": "rootcast-apprenticeship",
+      "name": "Rootcast Apprenticeship"
+    },
+    {
+      "slug": "saw-in-half",
+      "name": "Saw in Half"
+    },
+    {
+      "slug": "scurry-of-squirrels",
+      "name": "Scurry of Squirrels"
+    },
+    {
+      "slug": "second-harvest",
+      "name": "Second Harvest"
+    },
+    {
+      "slug": "shamanic-revelation",
+      "name": "Shamanic Revelation"
+    },
+    {
+      "slug": "skullclamp",
+      "name": "Skullclamp"
+    },
+    {
+      "slug": "skyfisher-spider",
+      "name": "Skyfisher Spider"
+    },
+    {
+      "slug": "sol-ring",
+      "name": "Sol Ring"
+    },
+    {
+      "slug": "squirrel-nest",
+      "name": "Squirrel Nest"
+    },
+    {
+      "slug": "squirrel-sovereign",
+      "name": "Squirrel Sovereign"
+    },
+    {
+      "slug": "swamp",
+      "name": "Swamp"
+    },
+    {
+      "slug": "swarmyard",
+      "name": "Swarmyard"
+    },
+    {
+      "slug": "swarmyard-massacre",
+      "name": "Swarmyard Massacre"
+    },
+    {
+      "slug": "sword-of-the-squeak",
+      "name": "Sword of the Squeak"
+    },
+    {
+      "slug": "tainted-wood",
+      "name": "Tainted Wood"
+    },
+    {
+      "slug": "talisman-of-resilience",
+      "name": "Talisman of Resilience"
+    },
+    {
+      "slug": "tear-asunder",
+      "name": "Tear Asunder"
+    },
+    {
+      "slug": "temple-of-malady",
+      "name": "Temple of Malady"
+    },
+    {
+      "slug": "terramorphic-expanse",
+      "name": "Terramorphic Expanse"
+    },
+    {
+      "slug": "the-odd-acorn-gang",
+      "name": "The Odd Acorn Gang"
+    },
+    {
+      "slug": "tireless-provisioner",
+      "name": "Tireless Provisioner"
+    },
+    {
+      "slug": "toski-bearer-of-secrets",
+      "name": "Toski, Bearer of Secrets"
+    },
+    {
+      "slug": "tranquil-thicket",
+      "name": "Tranquil Thicket"
+    },
+    {
+      "slug": "twilight-mire",
+      "name": "Twilight Mire"
+    },
+    {
+      "slug": "viridescent-bog",
+      "name": "Viridescent Bog"
+    },
+    {
+      "slug": "windgrace-s-judgment",
+      "name": "Windgrace's Judgment"
+    },
+    {
+      "slug": "woe-strider",
+      "name": "Woe Strider"
+    },
+    {
+      "slug": "wolfwillow-haven",
+      "name": "Wolfwillow Haven"
+    },
+    {
+      "slug": "woodland-cemetery",
+      "name": "Woodland Cemetery"
+    },
+    {
+      "slug": "zulaport-cutthroat",
+      "name": "Zulaport Cutthroat"
+    }
+  ],
+  "decisions": [
+    "SCHEMA QUESTION: variable-count mana (Hazel of the Rootbloom \"Add X mana in any combination of colors\"): ManaSpec.anyColor is a fixed int, so the kind:mana ability says anyColor 1 and the real amount is an add_mana step with amount X. Wanted: anyColor accepting a Quantity.",
+    "SCHEMA QUESTION: \"the number of opponents you have\" (Chittering Witch) has no Quantity; drafted as players_count(each_opponent, not life<0) as an always-true predicate. Wanted: Quantity ref opponents_count.",
+    "SCHEMA QUESTION: \"for each creature destroyed this way\" (Decree of Pain) has no Quantity; drafted as event_amount plus step field amountOf:\"s1\" on draw_cards. Wanted: Quantity ref step_count {step} (also usable for Plumb the Forbidden \"for each creature sacrificed this way\").",
+    "SCHEMA QUESTION: Plumb the Forbidden: optional additional cost \"sacrifice one or more creatures\" has no variable-count cost atom; drafted as castOptions additional optional with count X (X is not in the oracle) and a reflexive copy trigger (kind triggered, zone stack, trigger cast self, interveningIf paid_additional_cost). Wanted: cost count range {min,max} and a reflexive cast trigger.",
+    "SCHEMA QUESTION: keywords with built-in rules and no scripted marker in the allowed list: Vanishing (Deep Forest Hermit), Escape (Woe Strider, castOptions escape is fine but \"escapes with two +1/+1 counters\" is a would_enter modify set {counters} with condition cast_from graveyard), Cycling (keyword + zone hand, as in earlier decks), Class levels (Gourmand's Talent). Vanishing is a bare keyword ability (param 3); the time-counter upkeep/sacrifice loop is a kernel rule like Saga.",
+    "SCHEMA QUESTION: Class (Gourmand's Talent): level-up abilities are kind activated with keyword class_level (param N), sorcery timing and the mana cost, no steps; the level-gated abilities use conditions [{when:static, if: stat(self, class_level) >= N}]. Wanted: first-class Class levels (ability.level / class_level counter).",
+    "SCHEMA QUESTION: repeat-until loop (Insatiable Frugivore \"you may exile three cards from your graveyard. If you do, repeat this process\"): drafted as if_else on step_done s2 whose then is a repeat_for_each step carrying repeatProcess {from:s1, through:s2}. Wanted: a repeat step (kind repeat_process) with a stop condition.",
+    "SCHEMA QUESTION: no emblem step (Garruk, Cursed Huntsman -6): drafted as grant_effect with emblem:true, all:true, filter creatures you control, no duration. Wanted: kind create_emblem with static modifiers.",
+    "SCHEMA QUESTION: no regenerate step or \"can't be regenerated\" rider: Swarmyard drafts grant_effect grant \"regeneration shield\"; Putrefy/Decree of Pain use the step flag noRegenerate:true.",
+    "SCHEMA QUESTION: tokens with their own abilities (Beledros Witherbloom Pests, Garruk Wolves) use the passthrough field tokenAbilities: [ability records]. Wanted: typed tokenAbilities on create_tokens.",
+    "SCHEMA QUESTION: ObjectFilter has no \"entered the battlefield this turn\" (Oran-Rief): repeat_for_each carries the flag enteredThisTurn:true and a review.ignore for the \"duration\" lexeme. Similarly no \"base power or toughness\" (Sword of the Squeak: anyOf power=1 / toughness=1, which is current not base).",
+    "SCHEMA QUESTION: \"same name as that permanent\" (Maelstrom Pulse): destroy_all with filter another:true plus step field sameNameAs:\"t1\". ObjectFilter.sameName is a group qualifier, not a reference.",
+    "SCHEMA QUESTION: \"for each token\" copies with changed stats (Saw in Half \"half that creature's power, round up\") are copy steps with setPower/setToughness Quantities (div_up) and who controller_of_target; the copy step has no typed fields for this.",
+    "SCHEMA QUESTION: Tear Asunder: the second target (t2, nonland permanent) only exists if kicked; both targets are declared and an if_else on kicked picks which one is used. Wanted: TargetSpec.condition (e.g. only when kicked).",
+    "SCHEMA QUESTION: Wolfwillow Haven \"Whenever enchanted land is tapped for mana, its controller adds an additional {G}\" is a triggered mana ability: trigger event tap on enchanted (no \"for mana\" qualifier) with an add_mana step. Wanted: trigger qualifier tapped_for_mana (the marker tapped_for_colorless_mana is only for colorless).",
+    "SCHEMA QUESTION: validator: STRUCT_UNDECLARED_TARGET scans nested grantAbility records, so a granted ability that has its own target (The Odd Acorn Gang) cannot name it t1; its inner target uses id g1 and the step field targetRef g1. Granted-ability records have no schema (loose record).",
+    "SCHEMA QUESTION: Maskwood Nexus applies changeling to creatures on the battlefield and to creature spells / cards outside the battlefield: static affects is an anyOf of six zone-specific filters (battlefield/stack controlled by you, hand/graveyard/library/exile owned by you).",
+    "SCHEMA QUESTION: Hazel's Brewmaster: \"Foods you control have all activated abilities of all creature cards exiled with this creature\" is a grantAbility record with linkedExile:true (copy abilities); the exile step carries linkExile:true. Wanted: modify copyAbilitiesOf linked_exile.",
+    "SCHEMA QUESTION: Tireless Provisioner \"Food token or a Treasure token\" is a choose step (choice mode, remember) followed by two create_tokens steps gated by chosen_is. Landfall is written as etb with subject land you control.",
+    "Identical cards copied from other decks (latest copy): Arasta of the Endless Web, Arcane Signet, Barren Moor, Bojuka Bog, Command Tower, Evolving Wilds, Exotic Orchard, Forest, Grim Backwoods, Haywire Mite, Idol of Oblivion, Path of Ancestry, Plaguecrafter, Shamanic Revelation, Skullclamp, Sol Ring, Swamp, Terramorphic Expanse, Tranquil Thicket, Zulaport Cutthroat.",
+    "BEHAVIOUR QUESTION: Cache Grab \"returned a Squirrel card to your hand this way\" is drafted as step_done on the optional choose plus matches(chosen, Squirrel). Confirm the Food is made when you control a Squirrel even if you take nothing.",
+    "BEHAVIOUR QUESTION: Chatterfang + Academy Manufactor both replace token creation (Academy: instead one of each; Chatterfang: also Squirrels). The kernel needs the 616.1 ordering prompt for the affected player; no card field is involved.",
+    "BEHAVIOUR QUESTION: Woe Strider \"escapes with two +1/+1 counters\": drafted as would_enter modify with condition cast_from graveyard (cast via escape is the only way a Woe Strider is cast from the graveyard). Confirm."
+  ]
+}

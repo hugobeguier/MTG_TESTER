@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "Callaphe's power is equal to your devotion to blue. (Each {U} in the mana costs of permanents you control counts toward your devotion to blue.)",
+      "static": {
+        "affects": "self",
+        "modify": [
+          {
+            "setBasePT": {
+              "power": {
+                "ref": "devotion",
+                "color": "U"
+              },
+              "toughness": {
+                "ref": "stat",
+                "of": "self",
+                "stat": "toughness"
+              }
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static",
+        "static:setBasePT"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "static",
+      "text": "Creatures and enchantments you control have \"Spells your opponents cast that target this permanent cost {1} more to cast.\"",
+      "static": {
+        "affects": {
+          "anyOf": [
+            {
+              "types": [
+                "creature"
+              ],
+              "controller": "you"
+            },
+            {
+              "types": [
+                "enchantment"
+              ],
+              "controller": "you"
+            }
+          ]
+        },
+        "modify": [
+          {
+            "grantAbility": {
+              "kind": "static",
+              "text": "Spells your opponents cast that target this permanent cost {1} more to cast.",
+              "static": {
+                "affects": {
+                  "types": [
+                    "spell"
+                  ],
+                  "controller": "opponent"
+                },
+                "modify": [
+                  {
+                    "costMod": {
+                      "filter": {
+                        "types": [
+                          "spell"
+                        ],
+                        "controller": "opponent"
+                      },
+                      "delta": 1
+                    }
+                  }
+                ]
+              },
+              "onlyIfTargets": "self"
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "target",
+        "reason": "'target' appears inside the quoted ability granted via grantAbility (onlyIfTargets), it is not a target of this ability"
+      }
+    ]
+  }
+}

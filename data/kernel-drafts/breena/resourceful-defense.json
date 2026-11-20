@@ -1,0 +1,159 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "kind": "triggered",
+      "text": "Whenever a permanent you control leaves the battlefield, if it had counters on it, put those counters on target permanent you control.",
+      "trigger": {
+        "event": "leaves",
+        "subject": {
+          "controller": "you"
+        },
+        "fromZone": "battlefield",
+        "interveningIf": {
+          "check": "matches",
+          "obj": "event_object",
+          "filter": {
+            "hasCounter": "any"
+          }
+        }
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "controller": "you"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Resourceful Defense: choose a target",
+            "instruction": "Choose target permanent you control.",
+            "source": {
+              "card": "Resourceful Defense",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "add_counters",
+          "on": "t1",
+          "counterKind": "same_as_source",
+          "amount": {
+            "ref": "counters",
+            "kind": "any",
+            "on": "event_object"
+          }
+        }
+      ],
+      "id": "a1",
+      "implementation": "needed",
+      "needs": [
+        "trigger:leaves",
+        "trigger:intervening_if",
+        "predicate:matches",
+        "trigger:subject",
+        "trigger:zones",
+        "step:add_counters",
+        "quantity:counters",
+        "field:add_counters.on"
+      ]
+    },
+    {
+      "kind": "activated",
+      "text": "{4}{W}: Move any number of counters from target permanent you control onto a second target permanent you control.",
+      "costs": [
+        {
+          "mana": "{4}{W}"
+        }
+      ],
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "controller": "you"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Resourceful Defense: choose a target",
+            "instruction": "Choose target permanent you control.",
+            "source": {
+              "card": "Resourceful Defense",
+              "ability": "a2"
+            }
+          }
+        },
+        {
+          "id": "t2",
+          "what": "object",
+          "filter": {
+            "controller": "you"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Resourceful Defense: choose a target",
+            "instruction": "Choose target permanent you control.",
+            "source": {
+              "card": "Resourceful Defense",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "remove_counters",
+          "on": "t1",
+          "counterKind": "any",
+          "amount": {
+            "ref": "counters",
+            "kind": "any",
+            "on": "t1"
+          },
+          "upTo": true,
+          "saveAs": "moved",
+          "src": 0
+        },
+        {
+          "kind": "add_counters",
+          "on": "t2",
+          "counterKind": "same_as_source",
+          "amount": {
+            "ref": "counters",
+            "kind": "any",
+            "on": "t1"
+          },
+          "from": "moved",
+          "src": 0
+        }
+      ],
+      "id": "a2",
+      "implementation": "needed",
+      "needs": [
+        "step:remove_counters",
+        "quantity:counters",
+        "field:remove_counters.on",
+        "field:remove_counters.saveAs",
+        "field:remove_counters.upTo",
+        "step:add_counters",
+        "field:add_counters.from",
+        "field:add_counters.on"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

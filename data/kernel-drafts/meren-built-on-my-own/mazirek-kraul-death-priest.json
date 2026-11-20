@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever a player sacrifices another permanent, put a +1/+1 counter on each creature you control.",
+      "trigger": {
+        "event": "sacrifice",
+        "subject": {
+          "types": [
+            "permanent"
+          ],
+          "controller": "any",
+          "another": true
+        },
+        "whose": "each"
+      },
+      "steps": [
+        {
+          "kind": "add_counters",
+          "all": true,
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you"
+          },
+          "counterKind": "+1/+1",
+          "amount": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:sacrifice",
+        "trigger:subject",
+        "step:add_counters",
+        "field:add_counters.all",
+        "field:add_counters.filter"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

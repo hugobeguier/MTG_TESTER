@@ -1,0 +1,136 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Hideaway 5 (When this enchantment enters, look at the top five cards of your library, exile one face down, then put the rest on the bottom in a random order.)",
+      "keyword": {
+        "name": "hideaway",
+        "param": 5
+      },
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "look_top",
+          "amount": 5
+        },
+        {
+          "kind": "choose",
+          "from": {
+            "zone": "library"
+          },
+          "fromLooked": true,
+          "count": 1,
+          "saveAs": "chosen",
+          "prompt": {
+            "title": "Cemetery Tampering: choose",
+            "instruction": "Choose a card from among the looked-at cards.",
+            "source": {
+              "card": "Cemetery Tampering",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "kind": "move_card_zone",
+          "target": "chosen",
+          "moveTo": "exile",
+          "faceDown": true,
+          "linkExile": true
+        },
+        {
+          "kind": "move_card_zone",
+          "what": "rest_of_looked_cards",
+          "moveTo": "library",
+          "position": "bottom",
+          "order": "random"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:look_top",
+        "step:choose",
+        "field:choose.count",
+        "field:choose.from",
+        "field:choose.fromLooked",
+        "field:choose.saveAs",
+        "field:move_card_zone.faceDown",
+        "field:move_card_zone.linkExile",
+        "field:move_card_zone.order",
+        "field:move_card_zone.position",
+        "field:move_card_zone.what"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "At the beginning of your upkeep, you may mill three cards. Then if there are twenty or more cards in your graveyard, you may play the exiled card without paying its mana cost.",
+      "trigger": {
+        "event": "begin_step",
+        "step": "upkeep",
+        "whose": "yours"
+      },
+      "steps": [
+        {
+          "kind": "mill",
+          "amount": 3,
+          "who": "you",
+          "optional": true,
+          "src": 0,
+          "prompt": {
+            "title": "Cemetery Tampering: optional",
+            "instruction": "Do you want to mill 3 cards?",
+            "source": {
+              "card": "Cemetery Tampering",
+              "ability": "a2"
+            }
+          }
+        },
+        {
+          "kind": "permission_to_play",
+          "what": "linked_exile",
+          "zone": "exile",
+          "withoutPaying": true,
+          "optional": true,
+          "src": 1,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "zone_count",
+              "who": "you",
+              "zone": "graveyard",
+              "cmp": {
+                "op": ">=",
+                "value": 20
+              }
+            },
+            "src": 1
+          },
+          "prompt": {
+            "title": "Cemetery Tampering: optional",
+            "instruction": "Do you want to you may play linked_exile without paying its mana cost?",
+            "source": {
+              "card": "Cemetery Tampering",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "ref:linked_exile",
+        "step:permission_to_play",
+        "field:permission_to_play.what",
+        "field:permission_to_play.withoutPaying",
+        "field:permission_to_play.zone"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

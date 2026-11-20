@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Destroy each nonland permanent with mana value 2 or less. Add {B} or {G} for each permanent destroyed this way.",
+      "steps": [
+        {
+          "kind": "destroy_all",
+          "id": "s1",
+          "filter": {
+            "notTypes": [
+              "land"
+            ],
+            "mv": {
+              "op": "<=",
+              "value": 2
+            }
+          },
+          "src": 0
+        },
+        {
+          "kind": "add_mana",
+          "produces": [
+            {
+              "colors": "{B}"
+            },
+            {
+              "colors": "{G}"
+            }
+          ],
+          "amount": {
+            "ref": "event_amount"
+          },
+          "amountOf": "s1",
+          "src": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:destroy_all.filter",
+        "step:add_mana",
+        "quantity:event_amount",
+        "field:add_mana.amountOf",
+        "field:add_mana.produces"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

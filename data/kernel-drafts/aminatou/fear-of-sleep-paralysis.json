@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Eerie — Whenever this creature or another enchantment you control enters and whenever you fully unlock a Room, tap up to one target creature and put a stun counter on it.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self",
+        "alsoOn": [
+          {
+            "event": "etb",
+            "subject": {
+              "types": [
+                "enchantment"
+              ],
+              "controller": "you",
+              "another": true
+            }
+          },
+          {
+            "event": "unspecified",
+            "subject": "you"
+          }
+        ]
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "count": {
+            "min": 0,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Fear of Sleep Paralysis: choose a target",
+            "instruction": "Choose up to one target creature.",
+            "source": {
+              "card": "Fear of Sleep Paralysis",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "tap_target",
+          "target": "t1",
+          "src": 0
+        },
+        {
+          "kind": "add_counters",
+          "on": "t1",
+          "counterKind": "stun",
+          "amount": 1,
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:multi_event",
+        "trigger:subject",
+        "trigger:unspecified",
+        "targets:multi",
+        "step:add_counters",
+        "field:add_counters.on"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "scripted",
+      "text": "Stun counters can't be removed from permanents your opponents control. (They won't untap if they have stun counters.)",
+      "scripted": {
+        "handler": "stun_counters_cant_be_removed_from_opponent_permanents"
+      },
+      "implementation": "needed",
+      "needs": [
+        "scripted:stun_counters_cant_be_removed_from_opponent_permanents"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,501 @@
+{
+  "deck": "The Ur-Dragon",
+  "cards": [
+    {
+      "slug": "the-ur-dragon",
+      "name": "The Ur-Dragon",
+      "questions": [
+        "Eminence: 'in the command zone or on the battlefield' is a static `while` of source_state on_battlefield OR a command-zone zone_count of the card itself. The schema has no way to say an ability works from two zones, so this is how the command-zone half is expressed."
+      ]
+    },
+    {
+      "slug": "mox-jasper",
+      "name": "Mox Jasper"
+    },
+    {
+      "slug": "urza-s-incubator",
+      "name": "Urza's Incubator"
+    },
+    {
+      "slug": "savage-ventmaw",
+      "name": "Savage Ventmaw"
+    },
+    {
+      "slug": "dracogenesis",
+      "name": "Dracogenesis",
+      "questions": [
+        "'Cast Dragon spells without paying their mana costs' is a scripted marker; the schema has no static modifier for a free-cast permission on other cards' spells (castOptions only describe the card's own casting)."
+      ]
+    },
+    {
+      "slug": "goldspan-dragon",
+      "name": "Goldspan Dragon",
+      "questions": [
+        "'Becomes the target of a spell' (not an ability) has no field on the becomes_target trigger; written as plain becomes_target self.",
+        "'Two mana of any one color' is written {anyColor:2} (any combination); the schema has no 'all the same color' flag on ManaSpec."
+      ]
+    },
+    {
+      "slug": "balefire-dragon",
+      "name": "Balefire Dragon",
+      "questions": [
+        "'Each creature that player controls' is written as a damage_target all:true with who:'that_player' plus a creature filter (the filter has no 'controlled by that player' value)."
+      ]
+    },
+    {
+      "slug": "ancient-copper-dragon",
+      "name": "Ancient Copper Dragon",
+      "questions": [
+        "Rolling dice has no step kind or Quantity: the ability carries a scripted marker roll_d20_result_is_X and the roll result is bound to X (same on Ancient Silver/Gold/Brass Dragon)."
+      ]
+    },
+    {
+      "slug": "call-the-spirit-dragons",
+      "name": "Call the Spirit Dragons",
+      "questions": [
+        "'For each color, put a counter on a Dragon of that color' and the 'if five Dragons, you win the game' clause have no vocabulary (no win_game step, no iterate-over-colors); a scripted marker carries the win threshold and the counter step is a simplified repeat_for_each."
+      ]
+    },
+    {
+      "slug": "dragonlord-dromoka",
+      "name": "Dragonlord Dromoka"
+    },
+    {
+      "slug": "klauth-unrivaled-ancient",
+      "name": "Klauth, Unrivaled Ancient"
+    },
+    {
+      "slug": "morophon-the-boundless",
+      "name": "Morophon, the Boundless",
+      "questions": [
+        "{W}{U}{B}{R}{G} cost reduction affecting only colored mana: costMod.delta is a number, so the colored-only rule is a scripted marker (delta -5 is a stand-in)."
+      ]
+    },
+    {
+      "slug": "tiamat",
+      "name": "Tiamat",
+      "questions": [
+        "'If you cast it' is a stat predicate was_cast (no dedicated predicate). 'Not named Tiamat' and 'each have different names' are the step fields excludeNamed and distinctNames (ObjectFilter has no notNamed)."
+      ]
+    },
+    {
+      "slug": "crux-of-fate",
+      "name": "Crux of Fate"
+    },
+    {
+      "slug": "scion-of-draco",
+      "name": "Scion of Draco",
+      "questions": [
+        "Domain (distinct basic land types) cannot be counted by a costReduction.per filter; the scripted marker domain_count_distinct_basic_land_types makes it count distinct types. Per-color keyword grants ('vigilance if white, hexproof if blue...') have no conditional grant: the five grants are listed without their color gates."
+      ]
+    },
+    {
+      "slug": "sarkhan-soul-aflame",
+      "name": "Sarkhan, Soul Aflame"
+    },
+    {
+      "slug": "rhythm-of-the-wild",
+      "name": "Rhythm of the Wild"
+    },
+    {
+      "slug": "temur-ascendancy",
+      "name": "Temur Ascendancy"
+    },
+    {
+      "slug": "rivaz-of-the-claw",
+      "name": "Rivaz of the Claw",
+      "questions": [
+        "'May cast a Dragon creature spell from your graveyard once each turn' is a scripted permission marker (castOptions only describe the card's own casting)."
+      ]
+    },
+    {
+      "slug": "silumgar-the-drifting-death",
+      "name": "Silumgar, the Drifting Death",
+      "questions": [
+        "'Creatures defending player controls' is written who:'that_player' (the defending player); PlayerRef has no defending_player value."
+      ]
+    },
+    {
+      "slug": "bladewing-the-risen",
+      "name": "Bladewing the Risen"
+    },
+    {
+      "slug": "ureni-of-the-unwritten",
+      "name": "Ureni of the Unwritten"
+    },
+    {
+      "slug": "scalelord-reckoner",
+      "name": "Scalelord Reckoner",
+      "questions": [
+        "'A spell or ability an opponent controls' is an interveningIf matches on event_object (the targeting source) controller=opponent; 'that player controls' is just controller:opponent."
+      ]
+    },
+    {
+      "slug": "old-gnawbone",
+      "name": "Old Gnawbone"
+    },
+    {
+      "slug": "hellkite-courser",
+      "name": "Hellkite Courser"
+    },
+    {
+      "slug": "rith-liberated-primeval",
+      "name": "Rith, Liberated Primeval",
+      "questions": [
+        "'Was dealt excess damage this turn' (to an opponent's creature/planeswalker) has no predicate; interveningIf did_this_turn dealt_damage + the scripted marker excess_damage_dealt_to_opponent_creature_or_planeswalker."
+      ]
+    },
+    {
+      "slug": "ancient-silver-dragon",
+      "name": "Ancient Silver Dragon",
+      "questions": [
+        "'For the rest of the game' has no Duration value; written as duration {until:'unspecified'} on a grant_effect with the player as the target."
+      ]
+    },
+    {
+      "slug": "terror-of-the-peaks",
+      "name": "Terror of the Peaks",
+      "questions": [
+        "'Cost an additional 3 life' for opponents' spells that target this creature is a scripted marker: costMod only changes mana, and no static modifier adds a life cost to other players' spells."
+      ]
+    },
+    {
+      "slug": "mox-opal",
+      "name": "Mox Opal"
+    },
+    {
+      "slug": "miirym-sentinel-wyrm",
+      "name": "Miirym, Sentinel Wyrm"
+    },
+    {
+      "slug": "atarka-world-render",
+      "name": "Atarka, World Render"
+    },
+    {
+      "slug": "ancient-gold-dragon",
+      "name": "Ancient Gold Dragon"
+    },
+    {
+      "slug": "twinflame-tyrant",
+      "name": "Twinflame Tyrant",
+      "questions": [
+        "Recipient 'an opponent or a permanent an opponent controls' is one filter controller:opponent; the recipient field cannot mix a player and a permanent filter."
+      ]
+    },
+    {
+      "slug": "scion-of-the-ur-dragon",
+      "name": "Scion of the Ur-Dragon",
+      "questions": [
+        "'Dragon permanent card' written as subtypes Dragon + creature (Dragon is only a creature subtype); the copy target is the found card (ref 'chosen')."
+      ]
+    },
+    {
+      "slug": "ramos-dragon-engine",
+      "name": "Ramos, Dragon Engine",
+      "questions": [
+        "'For each of that spell's colors' has no Quantity; amount is event_amount with the scripted marker count_spell_colors."
+      ]
+    },
+    {
+      "slug": "herald-s-horn",
+      "name": "Herald's Horn"
+    },
+    {
+      "slug": "ancient-brass-dragon",
+      "name": "Ancient Brass Dragon",
+      "questions": [
+        "'Any number of target creature cards with total mana value X or less' is a target spec with count 0..99; the total-mana-value cap is not expressible (X is the roll via the scripted marker)."
+      ]
+    },
+    {
+      "slug": "two-headed-hellkite",
+      "name": "Two-Headed Hellkite"
+    },
+    {
+      "slug": "ganax-astral-hunter",
+      "name": "Ganax, Astral Hunter",
+      "questions": [
+        "Choose a Background is a deck-building rule (second commander); written as a keyword with a scripted marker, no play effect."
+      ]
+    },
+    {
+      "slug": "thrakkus-the-butcher",
+      "name": "Thrakkus the Butcher",
+      "questions": [
+        "'Double the power of each Dragon' = repeat_for_each over Dragons you control with pump_target by its own power; event_object stands for the object currently iterated (no dedicated ObjRef for the loop variable)."
+      ]
+    },
+    {
+      "slug": "korlessa-scale-singer",
+      "name": "Korlessa, Scale Singer"
+    },
+    {
+      "slug": "hellkite-tyrant",
+      "name": "Hellkite Tyrant",
+      "questions": [
+        "'Twenty' (and 'win the game') cannot be plain numbers/steps: the win is a scripted marker win_the_game; the 20 is in the interveningIf count (the validator's number-word table may complain)."
+      ]
+    },
+    {
+      "slug": "roaming-throne",
+      "name": "Roaming Throne"
+    },
+    {
+      "slug": "wrathful-red-dragon",
+      "name": "Wrathful Red Dragon"
+    },
+    {
+      "slug": "zurgo-and-ojutai",
+      "name": "Zurgo and Ojutai",
+      "questions": [
+        "'Entered this turn' is a stat predicate entered_this_turn (no dedicated predicate). 'A player or battle' damage is written as the player-damage event only (no battle recipient)."
+      ]
+    },
+    {
+      "slug": "sarkhan-unbroken",
+      "name": "Sarkhan Unbroken"
+    },
+    {
+      "slug": "scavenger-regent-exude-toxin",
+      "name": "Scavenger Regent // Exude Toxin",
+      "questions": [
+        "Exude Toxin (Omen back half; its cost {X}{B}{B} comes from the card face, not the oracle text) is a spell_effect ability usable from hand; the 'shuffle this card into its owner's library' rider is a shuffle step targeting self. Omen has no dedicated cast-option kind."
+      ]
+    },
+    {
+      "slug": "the-great-henge",
+      "name": "The Great Henge"
+    },
+    {
+      "slug": "farseek",
+      "name": "Farseek"
+    },
+    {
+      "slug": "crucible-of-the-spirit-dragon",
+      "name": "Crucible of the Spirit Dragon",
+      "questions": [
+        "Crucible's X mana is an activated ability with an add_mana step (kind 'mana' cannot carry a variable amount); rules-wise it is a mana ability."
+      ]
+    },
+    {
+      "slug": "arena-of-glory",
+      "name": "Arena of Glory",
+      "questions": [
+        "Exert is not a cost atom; it is carried by the scripted marker exert_and_haste_if_spent_on_creature_spell (which also holds the haste-on-creature-spell rider on the mana)."
+      ]
+    },
+    {
+      "slug": "mistrise-village",
+      "name": "Mistrise Village",
+      "questions": [
+        "'The next spell you cast this turn can't be countered' is a grant_effect on the player with a scripted marker next_spell_this_turn_cant_be_countered (no 'next spell' ObjRef)."
+      ]
+    },
+    {
+      "slug": "three-tree-city",
+      "name": "Three Tree City"
+    },
+    {
+      "slug": "boseiju-who-endures",
+      "name": "Boseiju, Who Endures"
+    },
+    {
+      "slug": "yavimaya-cradle-of-growth",
+      "name": "Yavimaya, Cradle of Growth"
+    },
+    {
+      "slug": "reliquary-tower",
+      "name": "Reliquary Tower"
+    },
+    {
+      "slug": "cascading-cataracts",
+      "name": "Cascading Cataracts"
+    },
+    {
+      "slug": "command-tower",
+      "name": "Command Tower"
+    },
+    {
+      "slug": "path-of-ancestry",
+      "name": "Path of Ancestry",
+      "questions": [
+        "The 'when that mana is spent' trigger is a cast trigger plus a scripted marker (no way to link a trigger to the mana it came from, and no 'shares a creature type with your commander' filter value other than sharesCreatureTypeWith an ObjRef)."
+      ]
+    },
+    {
+      "slug": "exotic-orchard",
+      "name": "Exotic Orchard",
+      "questions": [
+        "'Any color that a land an opponent controls could produce' (also Reflecting Pool) has no ManaSpec; written {anyColor:1} plus a scripted marker naming the restriction."
+      ]
+    },
+    {
+      "slug": "reflecting-pool",
+      "name": "Reflecting Pool"
+    },
+    {
+      "slug": "myriad-landscape",
+      "name": "Myriad Landscape",
+      "questions": [
+        "'Share a land type' between the two fetched basics is a scripted marker (cards_share_a_land_type); ObjectFilter.sameName is the only group qualifier."
+      ]
+    },
+    {
+      "slug": "evolving-wilds",
+      "name": "Evolving Wilds"
+    },
+    {
+      "slug": "terramorphic-expanse",
+      "name": "Terramorphic Expanse"
+    },
+    {
+      "slug": "prairie-stream",
+      "name": "Prairie Stream"
+    },
+    {
+      "slug": "drowned-catacomb",
+      "name": "Drowned Catacomb"
+    },
+    {
+      "slug": "glacial-fortress",
+      "name": "Glacial Fortress"
+    },
+    {
+      "slug": "isolated-chapel",
+      "name": "Isolated Chapel"
+    },
+    {
+      "slug": "caves-of-koilos",
+      "name": "Caves of Koilos"
+    },
+    {
+      "slug": "adarkar-wastes",
+      "name": "Adarkar Wastes"
+    },
+    {
+      "slug": "underground-river",
+      "name": "Underground River"
+    },
+    {
+      "slug": "temple-of-deceit",
+      "name": "Temple of Deceit"
+    },
+    {
+      "slug": "temple-of-silence",
+      "name": "Temple of Silence"
+    },
+    {
+      "slug": "dragon-tempest",
+      "name": "Dragon Tempest"
+    },
+    {
+      "slug": "scourge-of-valkas",
+      "name": "Scourge of Valkas"
+    },
+    {
+      "slug": "lathliss-dragon-queen",
+      "name": "Lathliss, Dragon Queen"
+    },
+    {
+      "slug": "dragon-s-hoard",
+      "name": "Dragon's Hoard"
+    },
+    {
+      "slug": "garruk-s-uprising",
+      "name": "Garruk's Uprising"
+    },
+    {
+      "slug": "dragonspeaker-shaman",
+      "name": "Dragonspeaker Shaman"
+    },
+    {
+      "slug": "dragonlord-s-servant",
+      "name": "Dragonlord's Servant"
+    },
+    {
+      "slug": "utvara-hellkite",
+      "name": "Utvara Hellkite"
+    },
+    {
+      "slug": "dragonstorm-globe",
+      "name": "Dragonstorm Globe"
+    },
+    {
+      "slug": "orb-of-dragonkind",
+      "name": "Orb of Dragonkind",
+      "questions": [
+        "Mana restriction 'Dragon spells or abilities of Dragons' is a filter {subtypes:['Dragon']} (no spell-or-ability distinction in ManaSpec.restriction). OK?"
+      ]
+    },
+    {
+      "slug": "hellkite-charger",
+      "name": "Hellkite Charger",
+      "questions": [
+        "SCHEMA QUESTION: no step kind for 'additional combat phase'; marked with scripted handler additional_combat_phase on the ability (same for Scourge of the Throne). Add a step kind?"
+      ]
+    },
+    {
+      "slug": "sarkhan-s-triumph",
+      "name": "Sarkhan's Triumph"
+    },
+    {
+      "slug": "carnelian-orb-of-dragonkind",
+      "name": "Carnelian Orb of Dragonkind",
+      "questions": [
+        "A mana ability with a rider effect: 'it' is the Dragon spell the mana was spent on (event_object). The schema has no way to say 'mana was spent on X'; I used a matches predicate on the spell. OK?"
+      ]
+    },
+    {
+      "slug": "scourge-of-the-throne",
+      "name": "Scourge of the Throne",
+      "questions": [
+        "SCHEMA QUESTION: 'the player with the most life or tied for most life' is written as life(that_player) >= greatest life of any player, using a pseudo-filter {types:['player']}. Needs a proper Quantity/Predicate. 'Additional combat phase' is a scripted marker (see Hellkite Charger).",
+        "'This creature attacks the player' = that_player (the defending player)."
+      ]
+    },
+    {
+      "slug": "temple-of-the-false-god",
+      "name": "Temple of the False God"
+    },
+    {
+      "slug": "bojuka-bog",
+      "name": "Bojuka Bog"
+    },
+    {
+      "slug": "rogue-s-passage",
+      "name": "Rogue's Passage"
+    },
+    {
+      "slug": "war-room",
+      "name": "War Room"
+    },
+    {
+      "slug": "swamp",
+      "name": "Swamp"
+    },
+    {
+      "slug": "forest",
+      "name": "Forest"
+    },
+    {
+      "slug": "mountain",
+      "name": "Mountain"
+    },
+    {
+      "slug": "island",
+      "name": "Island"
+    },
+    {
+      "slug": "plains",
+      "name": "Plains"
+    }
+  ],
+  "decisions": [
+    "Copied unchanged from other decks' drafts (identical cards): Dragon Tempest (reign-of-dragons), Scourge of Valkas (reign-of-dragons), Lathliss, Dragon Queen (reign-of-dragons), Dragon's Hoard (reign-of-dragons), Garruk's Uprising (tramplesaurus-rex), Dragonspeaker Shaman (reign-of-dragons), Dragonlord's Servant (reign-of-dragons), Utvara Hellkite (reign-of-dragons), Dragonstorm Globe (reign-of-dragons), Orb of Dragonkind (reign-of-dragons), Hellkite Charger (reign-of-dragons), Sarkhan's Triumph (reign-of-dragons), Carnelian Orb of Dragonkind (reign-of-dragons), Scourge of the Throne (reign-of-dragons), Temple of the False God (calling-all-angels), Bojuka Bog (wretched-ranks), Rogue's Passage (tramplesaurus-rex), War Room (calling-all-angels), Swamp (wretched-ranks), Forest (tramplesaurus-rex), Mountain (reign-of-dragons), Island (keen-engineering), Plains (calling-all-angels).",
+    "SCHEMA QUESTION: no Roll step or roll-result Quantity (Ancient Copper/Silver/Gold/Brass Dragon): scripted marker roll_d20_result_is_X with the result bound to X.",
+    "SCHEMA QUESTION: no win_the_game step (Call the Spirit Dragons, Hellkite Tyrant): scripted marker.",
+    "SCHEMA QUESTION: no way to express a dual-colour tap ability (\"Add {W} or {U}\"): written as two mana abilities with identical text (player picks one). ManaSpec has no one-of or all-same-colour (Goldspan Treasure) flag.",
+    "SCHEMA QUESTION: no exert cost atom (Arena of Glory), no loop-variable ObjRef for repeat_for_each (Thrakkus), no was_cast / entered_this_turn / excess-damage predicates (Tiamat, Zurgo and Ojutai, Rith), no defending_player PlayerRef (Silumgar), no notNamed filter, no free-cast static modifier (Dracogenesis), no cast-other-cards-from-zone permission (Rivaz, Korlessa), no additional life cost on opponents spells (Terror of the Peaks), no colored-only cost reduction (Morophon), no domain count.",
+    "VALIDATOR NOTE: number words (twenty, five-with-math) and digits in costMod/count need the {math:max} wrapper trick; mana symbols for a second card face (Exude Toxin {X}{B}{B}) are not in the oracle text, so no cast option is written for it."
+  ]
+}

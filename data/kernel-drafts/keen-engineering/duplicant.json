@@ -1,0 +1,104 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Imprint — When this creature enters, you may exile target nontoken creature.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "token": false
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Duplicant: choose a target",
+            "instruction": "Choose target nontoken creature.",
+            "source": {
+              "card": "Duplicant",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "exile_target",
+          "target": "t1",
+          "optional": true,
+          "linkExile": true,
+          "prompt": {
+            "title": "Duplicant: optional",
+            "instruction": "Do you want to exile target nontoken creature?",
+            "source": {
+              "card": "Duplicant",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:exile_target.linkExile"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "static",
+      "text": "As long as a card exiled with this creature is a creature card, this creature has the power, toughness, and creature types of the last creature card exiled with it. It's still a Shapeshifter.",
+      "static": {
+        "affects": "self",
+        "modify": [
+          {
+            "setBasePT": {
+              "power": {
+                "ref": "stat",
+                "of": "linked_exile",
+                "stat": "power"
+              },
+              "toughness": {
+                "ref": "stat",
+                "of": "linked_exile",
+                "stat": "toughness"
+              }
+            }
+          },
+          {
+            "copySubtypesOf": "linked_exile"
+          }
+        ],
+        "while": {
+          "check": "matches",
+          "obj": "linked_exile",
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "static",
+        "ref:linked_exile",
+        "static:setBasePT",
+        "static:copySubtypesOf"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,160 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "kind": "triggered",
+      "text": "Whenever a creature deals combat damage to one of your opponents, its controller may pay 1 life. If they do, they draw a card.",
+      "trigger": {
+        "event": "deals_combat_damage_to_player",
+        "subject": {
+          "types": [
+            "creature"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "kind": "life_change",
+          "id": "s1",
+          "who": "that_player",
+          "lifeDelta": -1,
+          "optional": true,
+          "src": 0,
+          "prompt": {
+            "title": "Gix, Yawgmoth Praetor: optional",
+            "instruction": "Do you want to that player loses 1 life?",
+            "source": {
+              "card": "Gix, Yawgmoth Praetor",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "kind": "draw_cards",
+          "who": "that_player",
+          "amount": 1,
+          "src": 1,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "step_done",
+              "step": "s1"
+            },
+            "src": 1
+          }
+        }
+      ],
+      "id": "a1",
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject",
+        "field:life_change.who",
+        "field:draw_cards.who",
+        "predicate:step_done"
+      ]
+    },
+    {
+      "kind": "activated",
+      "text": "{4}{B}{B}{B}, Discard X cards: Exile the top X cards of target opponent's library. You may play lands and cast spells from among cards exiled this way without paying their mana costs.",
+      "costs": [
+        {
+          "mana": "{4}{B}{B}{B}"
+        },
+        {
+          "discard": {
+            "zone": "hand",
+            "owner": "you"
+          },
+          "count": {
+            "ref": "X"
+          },
+          "prompt": {
+            "title": "Gix, Yawgmoth Praetor: choose what to discard",
+            "instruction": "Choose X cards in your hand to discard.",
+            "source": {
+              "card": "Gix, Yawgmoth Praetor",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "targets": [
+        {
+          "id": "t1",
+          "what": "player",
+          "filter": {
+            "controller": "opponent"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Gix, Yawgmoth Praetor: choose a target",
+            "instruction": "Choose target player.",
+            "source": {
+              "card": "Gix, Yawgmoth Praetor",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "move_card_zone",
+          "who": "target_player",
+          "moveFrom": "library",
+          "moveTo": "exile",
+          "moveCount": {
+            "ref": "X"
+          },
+          "position": "top",
+          "saveAs": "exiled",
+          "src": 0
+        },
+        {
+          "kind": "permission_to_play",
+          "what": "exiled",
+          "optional": true,
+          "withoutPayingManaCost": true,
+          "allow": [
+            "land",
+            "spell"
+          ],
+          "src": 1,
+          "prompt": {
+            "title": "Gix, Yawgmoth Praetor: optional",
+            "instruction": "Do you want to you may play exiled?",
+            "source": {
+              "card": "Gix, Yawgmoth Praetor",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "id": "a2",
+      "xPrompt": {
+        "title": "Gix, Yawgmoth Praetor: choose X",
+        "instruction": "Choose a value for X (the amount used in the cost).",
+        "source": {
+          "card": "Gix, Yawgmoth Praetor",
+          "ability": "a2"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "cost:discard",
+        "field:move_card_zone.position",
+        "field:move_card_zone.saveAs",
+        "field:move_card_zone.who",
+        "step:permission_to_play",
+        "field:permission_to_play.allow",
+        "field:permission_to_play.what",
+        "field:permission_to_play.withoutPayingManaCost"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

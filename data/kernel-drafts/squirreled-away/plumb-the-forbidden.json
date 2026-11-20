@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "zone": "stack",
+      "text": "As an additional cost to cast this spell, you may sacrifice one or more creatures. When you do, copy this spell for each creature sacrificed this way.",
+      "srcs": [
+        0
+      ],
+      "trigger": {
+        "event": "cast",
+        "subject": "self",
+        "interveningIf": {
+          "check": "paid_additional_cost"
+        }
+      },
+      "steps": [
+        {
+          "kind": "copy",
+          "target": "self",
+          "count": {
+            "ref": "event_amount"
+          },
+          "reflexive": true,
+          "src": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "zone:stack",
+        "trigger:intervening_if",
+        "predicate:paid_additional_cost",
+        "step:copy",
+        "field:copy.count",
+        "field:copy.reflexive"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "spell_effect",
+      "text": "You draw a card and lose 1 life.",
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "who": "you",
+          "amount": 1
+        },
+        {
+          "kind": "life_change",
+          "who": "you",
+          "lose": true,
+          "amount": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:life_change.amount",
+        "field:life_change.lose"
+      ]
+    }
+  ],
+  "castOptions": [
+    {
+      "id": "c1",
+      "kind": "additional",
+      "from": "hand",
+      "cost": [
+        {
+          "sacrifice": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you"
+          },
+          "count": {
+            "ref": "X"
+          }
+        }
+      ],
+      "replacesManaCost": false,
+      "optional": true,
+      "prompt": {
+        "title": "Plumb the Forbidden: additional option",
+        "instruction": "Do you want to pay the additional cost (sacrifice X creatures you control)?",
+        "source": {
+          "card": "Plumb the Forbidden",
+          "ability": "c1"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "cast_option:additional",
+        "cost:sacrifice"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

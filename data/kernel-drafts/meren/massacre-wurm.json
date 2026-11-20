@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "When this creature enters, creatures your opponents control get -2/-2 until end of turn.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "mass_pump",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "controller": "opponent"
+          },
+          "power": -2,
+          "toughness": -2,
+          "duration": "until_end_of_turn"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:mass_pump.filter"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever a creature an opponent controls dies, that player loses 2 life.",
+      "trigger": {
+        "event": "dies",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "controller": "opponent"
+        }
+      },
+      "steps": [
+        {
+          "kind": "life_change",
+          "who": "that_player",
+          "lose": true,
+          "amount": 2
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject",
+        "field:life_change.amount",
+        "field:life_change.lose",
+        "field:life_change.who"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

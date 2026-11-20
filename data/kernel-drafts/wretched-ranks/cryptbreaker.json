@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "activated",
+      "text": "{1}{B}, {T}, Discard a card: Create a 2/2 black Zombie creature token.",
+      "costs": [
+        {
+          "mana": "{1}{B}"
+        },
+        {
+          "tap": "self"
+        },
+        {
+          "discard": {
+            "zone": "hand"
+          },
+          "count": 1,
+          "prompt": {
+            "title": "Cryptbreaker: choose what to discard",
+            "instruction": "Choose 1 card in a hand to discard.",
+            "source": {
+              "card": "Cryptbreaker",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Zombie",
+          "tokenPower": 2,
+          "tokenToughness": 2,
+          "tokenColors": [
+            "black"
+          ],
+          "tokenTypeLine": "Creature — Zombie"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "cost:discard"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "Tap three untapped Zombies you control: You draw a card and you lose 1 life.",
+      "costs": [
+        {
+          "tapOther": {
+            "subtypes": [
+              "Zombie"
+            ],
+            "controller": "you",
+            "tapped": false
+          },
+          "count": 3,
+          "prompt": {
+            "title": "Cryptbreaker: choose what to tap",
+            "instruction": "Choose 3 untapped untapped Zombies you control to tap.",
+            "source": {
+              "card": "Cryptbreaker",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": 1,
+          "who": "you"
+        },
+        {
+          "kind": "life_change",
+          "who": "you",
+          "lifeDelta": -1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "cost:tapOther"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,286 @@
+{
+  "deck": "Tramplesaurus Rex",
+  "cards": [
+    {
+      "slug": "ghalta-primal-hunger",
+      "name": "Ghalta, Primal Hunger"
+    },
+    {
+      "slug": "arachnogenesis",
+      "name": "Arachnogenesis"
+    },
+    {
+      "slug": "arasta-of-the-endless-web",
+      "name": "Arasta of the Endless Web"
+    },
+    {
+      "slug": "beast-whisperer",
+      "name": "Beast Whisperer"
+    },
+    {
+      "slug": "birds-of-paradise",
+      "name": "Birds of Paradise"
+    },
+    {
+      "slug": "carnage-tyrant",
+      "name": "Carnage Tyrant"
+    },
+    {
+      "slug": "curious-altisaur",
+      "name": "Curious Altisaur"
+    },
+    {
+      "slug": "dungrove-elder",
+      "name": "Dungrove Elder"
+    },
+    {
+      "slug": "elder-gargaroth",
+      "name": "Elder Gargaroth"
+    },
+    {
+      "slug": "ezuri-s-predation",
+      "name": "Ezuri's Predation"
+    },
+    {
+      "slug": "gigantosaurus",
+      "name": "Gigantosaurus"
+    },
+    {
+      "slug": "hulking-raptor",
+      "name": "Hulking Raptor"
+    },
+    {
+      "slug": "loot-exuberant-explorer",
+      "name": "Loot, Exuberant Explorer"
+    },
+    {
+      "slug": "managorger-hydra",
+      "name": "Managorger Hydra"
+    },
+    {
+      "slug": "overwhelming-stampede",
+      "name": "Overwhelming Stampede"
+    },
+    {
+      "slug": "pugnacious-hammerskull",
+      "name": "Pugnacious Hammerskull"
+    },
+    {
+      "slug": "regal-imperiosaur",
+      "name": "Regal Imperiosaur"
+    },
+    {
+      "slug": "rhonas-the-indomitable",
+      "name": "Rhonas the Indomitable"
+    },
+    {
+      "slug": "ripjaw-raptor",
+      "name": "Ripjaw Raptor"
+    },
+    {
+      "slug": "rishkar-s-expertise",
+      "name": "Rishkar's Expertise"
+    },
+    {
+      "slug": "scavenging-ooze",
+      "name": "Scavenging Ooze"
+    },
+    {
+      "slug": "scrapshooter",
+      "name": "Scrapshooter"
+    },
+    {
+      "slug": "shamanic-revelation",
+      "name": "Shamanic Revelation"
+    },
+    {
+      "slug": "steel-leaf-champion",
+      "name": "Steel Leaf Champion"
+    },
+    {
+      "slug": "surrak-and-goreclaw",
+      "name": "Surrak and Goreclaw"
+    },
+    {
+      "slug": "surrak-the-hunt-caller",
+      "name": "Surrak, the Hunt Caller"
+    },
+    {
+      "slug": "tangleweave-armor",
+      "name": "Tangleweave Armor"
+    },
+    {
+      "slug": "thickest-in-the-thicket",
+      "name": "Thickest in the Thicket"
+    },
+    {
+      "slug": "unnatural-growth",
+      "name": "Unnatural Growth"
+    },
+    {
+      "slug": "verdant-sun-s-avatar",
+      "name": "Verdant Sun's Avatar"
+    },
+    {
+      "slug": "whiptongue-hydra",
+      "name": "Whiptongue Hydra"
+    },
+    {
+      "slug": "yeva-nature-s-herald",
+      "name": "Yeva, Nature's Herald"
+    },
+    {
+      "slug": "bonders-enclave",
+      "name": "Bonders' Enclave"
+    },
+    {
+      "slug": "mosswort-bridge",
+      "name": "Mosswort Bridge"
+    },
+    {
+      "slug": "scavenger-grounds",
+      "name": "Scavenger Grounds"
+    },
+    {
+      "slug": "war-room",
+      "name": "War Room"
+    },
+    {
+      "slug": "witch-s-clinic",
+      "name": "Witch's Clinic"
+    },
+    {
+      "slug": "beast-within",
+      "name": "Beast Within"
+    },
+    {
+      "slug": "bite-down",
+      "name": "Bite Down"
+    },
+    {
+      "slug": "challenger-troll",
+      "name": "Challenger Troll"
+    },
+    {
+      "slug": "clifftop-lookout",
+      "name": "Clifftop Lookout"
+    },
+    {
+      "slug": "collective-resistance",
+      "name": "Collective Resistance"
+    },
+    {
+      "slug": "colossal-majesty",
+      "name": "Colossal Majesty"
+    },
+    {
+      "slug": "elemental-bond",
+      "name": "Elemental Bond"
+    },
+    {
+      "slug": "elvish-mystic",
+      "name": "Elvish Mystic"
+    },
+    {
+      "slug": "fyndhorn-elves",
+      "name": "Fyndhorn Elves"
+    },
+    {
+      "slug": "garruk-s-packleader",
+      "name": "Garruk's Packleader"
+    },
+    {
+      "slug": "garruk-s-uprising",
+      "name": "Garruk's Uprising"
+    },
+    {
+      "slug": "goreclaw-terror-of-qal-sisma",
+      "name": "Goreclaw, Terror of Qal Sisma"
+    },
+    {
+      "slug": "harmonize",
+      "name": "Harmonize"
+    },
+    {
+      "slug": "ilysian-caryatid",
+      "name": "Ilysian Caryatid"
+    },
+    {
+      "slug": "kenrith-s-transformation",
+      "name": "Kenrith's Transformation"
+    },
+    {
+      "slug": "llanowar-elves",
+      "name": "Llanowar Elves"
+    },
+    {
+      "slug": "llanowar-tribe",
+      "name": "Llanowar Tribe"
+    },
+    {
+      "slug": "monstrous-onslaught",
+      "name": "Monstrous Onslaught"
+    },
+    {
+      "slug": "paradise-druid",
+      "name": "Paradise Druid"
+    },
+    {
+      "slug": "ram-through",
+      "name": "Ram Through"
+    },
+    {
+      "slug": "rishkar-peema-renegade",
+      "name": "Rishkar, Peema Renegade"
+    },
+    {
+      "slug": "tamiyo-s-safekeeping",
+      "name": "Tamiyo's Safekeeping"
+    },
+    {
+      "slug": "terrian-world-tyrant",
+      "name": "Terrian, World Tyrant"
+    },
+    {
+      "slug": "thrashing-brontodon",
+      "name": "Thrashing Brontodon"
+    },
+    {
+      "slug": "whisperer-of-the-wilds",
+      "name": "Whisperer of the Wilds"
+    },
+    {
+      "slug": "commander-s-sphere",
+      "name": "Commander's Sphere"
+    },
+    {
+      "slug": "rhonas-s-monument",
+      "name": "Rhonas's Monument"
+    },
+    {
+      "slug": "sol-ring",
+      "name": "Sol Ring"
+    },
+    {
+      "slug": "swiftfoot-boots",
+      "name": "Swiftfoot Boots"
+    },
+    {
+      "slug": "rogue-s-passage",
+      "name": "Rogue's Passage"
+    },
+    {
+      "slug": "tranquil-thicket",
+      "name": "Tranquil Thicket"
+    },
+    {
+      "slug": "forest",
+      "name": "Forest"
+    }
+  ],
+  "decisions": [
+    "Consolidated schema pass: the workarounds reported by the five pilot decks (sentinels, review.ignore hacks, scripted stubs, placeholder refs) now use real fields; see src/kernel/SCHEMA_CHANGELOG.md.",
+    "Monarch stays a scripted marker (become_monarch + the controller_is_monarch stat) by user decision; Crew, Improvise, Myriad, Storm, Read ahead, Manifest dread, Reselect attack target and tapped-for-{C} stay scripted markers (vocabulary listed in the changelog).",
+    "Remaining genuine card-behaviour questions are collected in data/kernel-drafts/CONSOLIDATED_QUESTIONS.md, not per deck."
+  ]
+}

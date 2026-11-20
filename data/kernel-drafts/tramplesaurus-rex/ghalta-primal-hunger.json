@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "zone": "stack",
+      "text": "This spell costs {X} less to cast, where X is the total power of creatures you control.",
+      "costReduction": {
+        "amount": {
+          "ref": "sum",
+          "of": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you"
+          },
+          "stat": "power"
+        },
+        "applies": "generic"
+      },
+      "implementation": "needed",
+      "needs": [
+        "zone:stack",
+        "cost_reduction",
+        "cost_reduction:variable"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "keyword",
+      "text": "Trample",
+      "keyword": {
+        "name": "trample"
+      },
+      "implementation": "implemented",
+      "needs": []
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

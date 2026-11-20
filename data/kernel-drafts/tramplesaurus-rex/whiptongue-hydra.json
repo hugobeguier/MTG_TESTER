@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Reach",
+      "keyword": {
+        "name": "reach"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "When this creature enters, destroy all creatures with flying. Put a +1/+1 counter on this creature for each creature destroyed this way.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "destroy_all",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "with": [
+              "flying"
+            ]
+          },
+          "src": 0
+        },
+        {
+          "kind": "add_counters",
+          "on": "self",
+          "counterKind": "+1/+1",
+          "amount": {
+            "math": "*",
+            "args": [
+              1,
+              {
+                "ref": "event_amount"
+              }
+            ]
+          },
+          "src": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:destroy_all.filter",
+        "step:add_counters",
+        "quantity:math",
+        "field:add_counters.on"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

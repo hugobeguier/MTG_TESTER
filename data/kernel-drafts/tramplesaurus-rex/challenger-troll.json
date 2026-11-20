@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "Each creature you control with power 4 or greater can't be blocked by more than one creature.",
+      "static": {
+        "affects": {
+          "types": [
+            "creature"
+          ],
+          "controller": "you",
+          "power": {
+            "op": ">=",
+            "value": 4
+          }
+        },
+        "modify": [
+          {
+            "grant": "can't be blocked by more than one creature"
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

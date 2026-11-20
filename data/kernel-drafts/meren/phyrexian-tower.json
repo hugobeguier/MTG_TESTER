@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "mana",
+      "text": "{T}: Add {C}.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{C}"
+          }
+        ]
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "mana",
+      "text": "{T}, Sacrifice a creature: Add {B}{B}.",
+      "costs": [
+        {
+          "tap": "self"
+        },
+        {
+          "sacrifice": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you"
+          },
+          "count": 1,
+          "prompt": {
+            "title": "Phyrexian Tower: choose what to sacrifice",
+            "instruction": "Choose 1 creature you control to sacrifice.",
+            "source": {
+              "card": "Phyrexian Tower",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{B}{B}"
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "cost:sacrifice"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

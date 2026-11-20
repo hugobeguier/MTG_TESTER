@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Whenever Ayara or another black creature you control enters, each opponent loses 1 life and you gain 1 life.",
+      "trigger": {
+        "event": "etb",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "colors": [
+            "black"
+          ],
+          "controller": "you"
+        }
+      },
+      "steps": [
+        {
+          "kind": "life_change",
+          "who": "each_opponent",
+          "lifeDelta": -1
+        },
+        {
+          "kind": "life_change",
+          "who": "you",
+          "lifeDelta": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject",
+        "field:life_change.who"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "{T}, Sacrifice another black creature: Draw a card.",
+      "costs": [
+        {
+          "tap": "self"
+        },
+        {
+          "sacrifice": {
+            "types": [
+              "creature"
+            ],
+            "colors": [
+              "black"
+            ],
+            "another": true,
+            "controller": "you"
+          },
+          "count": 1,
+          "prompt": {
+            "title": "Ayara, First of Locthwain: choose what to sacrifice",
+            "instruction": "Choose 1 another black creature you control to sacrifice.",
+            "source": {
+              "card": "Ayara, First of Locthwain",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": 1,
+          "who": "you"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "cost:sacrifice"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

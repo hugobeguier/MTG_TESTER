@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "Psychosis Crawler's power and toughness are each equal to the number of cards in your hand.",
+      "static": {
+        "affects": "self",
+        "modify": [
+          {
+            "setBasePT": {
+              "power": {
+                "ref": "count",
+                "of": {
+                  "zone": "hand",
+                  "owner": "you"
+                }
+              },
+              "toughness": {
+                "ref": "count",
+                "of": {
+                  "zone": "hand",
+                  "owner": "you"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static",
+        "static:setBasePT"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever you draw a card, each opponent loses 1 life.",
+      "trigger": {
+        "event": "draw",
+        "whose": "yours"
+      },
+      "steps": [
+        {
+          "kind": "life_change",
+          "lifeDelta": -1,
+          "who": "each_opponent"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:draw",
+        "field:life_change.who"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

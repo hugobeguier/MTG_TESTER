@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "trigger": {
+        "event": "deals_combat_damage_to_player",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "damage_target",
+          "source": "self",
+          "all": true,
+          "who": "that_player",
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "amount": {
+            "ref": "event_amount"
+          }
+        }
+      ],
+      "text": "Whenever this creature deals combat damage to a player, it deals that much damage to each creature that player controls.",
+      "implementation": "needed",
+      "needs": [
+        "quantity:event_amount",
+        "field:damage_target.all",
+        "field:damage_target.filter",
+        "field:damage_target.source",
+        "field:damage_target.who"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "keyword",
+      "text": "Haste",
+      "keyword": {
+        "name": "haste"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "replacement",
+      "text": "This creature enters with X +1/+1 counters on it.",
+      "replacement": {
+        "event": "would_enter",
+        "result": {
+          "mode": "also",
+          "steps": [
+            {
+              "kind": "add_counters",
+              "on": "self",
+              "counterKind": "+1/+1",
+              "counterPT": [
+                1,
+                1
+              ],
+              "amount": {
+                "ref": "X"
+              }
+            }
+          ]
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_enter",
+        "step:add_counters",
+        "quantity:X",
+        "field:add_counters.counterPT",
+        "field:add_counters.on"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

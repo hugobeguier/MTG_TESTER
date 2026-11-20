@@ -1,0 +1,135 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "When Old Rutstein enters and at the beginning of your upkeep, mill a card. If a land card is milled this way, create a Treasure token. If a creature card is milled this way, create a 1/1 green Insect creature token. If a noncreature, nonland card is milled this way, create a Blood token.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self",
+        "alsoOn": [
+          {
+            "event": "begin_step",
+            "step": "upkeep",
+            "whose": "yours"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "kind": "mill",
+          "id": "s1",
+          "who": "you",
+          "amount": 1,
+          "src": 0
+        },
+        {
+          "kind": "choose",
+          "id": "s2",
+          "from": {
+            "zone": "graveyard",
+            "owner": "you"
+          },
+          "fromMilled": true,
+          "count": 1,
+          "saveAs": "chosen",
+          "src": 1,
+          "prompt": {
+            "title": "Old Rutstein: choose",
+            "instruction": "Choose a card in your graveyard.",
+            "source": {
+              "card": "Old Rutstein",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Treasure",
+          "tokenColors": [
+            "colorless"
+          ],
+          "tokenTypeLine": "Artifact — Treasure",
+          "src": 1,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "matches",
+              "obj": "chosen",
+              "filter": {
+                "types": [
+                  "land"
+                ]
+              }
+            },
+            "src": 1
+          }
+        },
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Insect",
+          "tokenPower": 1,
+          "tokenToughness": 1,
+          "tokenColors": [
+            "green"
+          ],
+          "tokenTypeLine": "Creature — Insect",
+          "src": 2,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "matches",
+              "obj": "chosen",
+              "filter": {
+                "types": [
+                  "creature"
+                ]
+              }
+            },
+            "src": 2
+          }
+        },
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Blood",
+          "tokenColors": [
+            "colorless"
+          ],
+          "tokenTypeLine": "Artifact — Blood",
+          "src": 3,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "matches",
+              "obj": "chosen",
+              "filter": {
+                "notTypes": [
+                  "creature",
+                  "land"
+                ]
+              }
+            },
+            "src": 3
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:multi_event",
+        "step:choose",
+        "field:choose.count",
+        "field:choose.from",
+        "field:choose.fromMilled",
+        "field:choose.saveAs",
+        "predicate:matches"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

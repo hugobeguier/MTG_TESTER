@@ -1,0 +1,110 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Ward—Pay 2 life. (Whenever this creature becomes the target of a spell or ability an opponent controls, counter it unless that player pays 2 life.)",
+      "keyword": {
+        "name": "ward",
+        "param": "Pay 2 life"
+      },
+      "trigger": {
+        "event": "becomes_target",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "counter_spell",
+          "target": "event_object",
+          "unlessPay": {
+            "payer": "that_player",
+            "cost": [
+              {
+                "life": 2
+              }
+            ],
+            "prompt": {
+              "title": "Zul Ashur, Lich Lord: pay or not",
+              "instruction": "Do you want to pay 2 life? If you don't, counter that object.",
+              "source": {
+                "card": "Zul Ashur, Lich Lord",
+                "ability": "a1"
+              }
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:becomes_target",
+        "step:counter_spell",
+        "step:unless_pay"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "{T}: You may cast target Zombie creature card from your graveyard this turn.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "subtypes": [
+              "Zombie"
+            ],
+            "zone": "graveyard",
+            "owner": "you"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Zul Ashur, Lich Lord: choose a target",
+            "instruction": "Choose target Zombie card in your graveyard.",
+            "source": {
+              "card": "Zul Ashur, Lich Lord",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "permission_to_play",
+          "what": "t1",
+          "zone": "graveyard",
+          "duration": "until_end_of_turn",
+          "optional": true,
+          "prompt": {
+            "title": "Zul Ashur, Lich Lord: optional",
+            "instruction": "Do you want to you may play t1 until end of turn?",
+            "source": {
+              "card": "Zul Ashur, Lich Lord",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:permission_to_play",
+        "field:permission_to_play.what",
+        "field:permission_to_play.zone"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

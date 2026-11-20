@@ -1,0 +1,126 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "kind": "spell_effect",
+      "text": "Each player puts a vow counter on a creature they control and sacrifices the rest. Each of those creatures can't attack you or planeswalkers you control for as long as it has a vow counter on it.",
+      "steps": [
+        {
+          "kind": "repeat_for_each",
+          "over": "each_player",
+          "src": 0,
+          "steps": [
+            {
+              "kind": "choose",
+              "who": "that_player",
+              "from": {
+                "types": [
+                  "creature"
+                ],
+                "zone": "battlefield"
+              },
+              "ofPlayer": "iterated",
+              "count": 1,
+              "saveAs": "chosen",
+              "src": 0,
+              "prompt": {
+                "title": "Promise of Loyalty: choose",
+                "instruction": "Choose a creature.",
+                "source": {
+                  "card": "Promise of Loyalty",
+                  "ability": "a1"
+                }
+              }
+            },
+            {
+              "kind": "add_counters",
+              "on": "chosen",
+              "counterKind": "vow",
+              "amount": 1,
+              "src": 0
+            },
+            {
+              "kind": "sacrifice_permanent",
+              "who": "that_player",
+              "filter": {
+                "types": [
+                  "creature"
+                ]
+              },
+              "except": "chosen",
+              "amount": {
+                "math": "-",
+                "args": [
+                  {
+                    "ref": "count",
+                    "of": {
+                      "types": [
+                        "creature"
+                      ]
+                    }
+                  },
+                  1
+                ]
+              },
+              "src": 0,
+              "prompt": {
+                "title": "Promise of Loyalty: sacrifice",
+                "instruction": "Choose a permanent to sacrifice.",
+                "source": {
+                  "card": "Promise of Loyalty",
+                  "ability": "a1"
+                }
+              }
+            },
+            {
+              "kind": "grant_effect",
+              "target": "chosen",
+              "modify": [
+                {
+                  "cant": "attack"
+                }
+              ],
+              "duration": {
+                "forAsLongAs": {
+                  "check": "matches",
+                  "obj": "chosen",
+                  "filter": {
+                    "hasCounter": "vow"
+                  }
+                }
+              },
+              "src": 1
+            }
+          ]
+        }
+      ],
+      "id": "a1",
+      "implementation": "needed",
+      "needs": [
+        "ref:iterated",
+        "step:repeat_for_each",
+        "field:repeat_for_each.over",
+        "field:repeat_for_each.steps",
+        "step:choose",
+        "field:choose.count",
+        "field:choose.from",
+        "field:choose.ofPlayer",
+        "field:choose.saveAs",
+        "field:choose.who",
+        "step:add_counters",
+        "field:add_counters.on",
+        "quantity:math",
+        "field:sacrifice_permanent.amount",
+        "field:sacrifice_permanent.except",
+        "field:sacrifice_permanent.filter",
+        "field:sacrifice_permanent.who",
+        "step:grant_effect",
+        "field:grant_effect.modify",
+        "duration:forAsLongAs"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

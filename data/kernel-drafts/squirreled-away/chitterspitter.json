@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "At the beginning of your upkeep, you may sacrifice a token. If you do, put an acorn counter on this artifact.",
+      "trigger": {
+        "event": "begin_step",
+        "step": "upkeep",
+        "whose": "yours"
+      },
+      "steps": [
+        {
+          "kind": "sacrifice_permanent",
+          "id": "s1",
+          "optional": true,
+          "filter": {
+            "token": true,
+            "controller": "you"
+          },
+          "src": 0,
+          "prompt": {
+            "title": "Chitterspitter: optional",
+            "instruction": "Do you want to sacrifice a token permanent you control?",
+            "source": {
+              "card": "Chitterspitter",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "kind": "add_counters",
+          "on": "self",
+          "counterKind": "acorn",
+          "amount": 1,
+          "src": 1,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "step_done",
+              "step": "s1"
+            },
+            "src": 1
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:sacrifice_permanent.filter",
+        "step:add_counters",
+        "field:add_counters.on",
+        "predicate:step_done"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "static",
+      "text": "Squirrels you control get +1/+1 for each acorn counter on this artifact.",
+      "static": {
+        "affects": {
+          "types": [
+            "creature"
+          ],
+          "subtypes": [
+            "Squirrel"
+          ],
+          "controller": "you"
+        },
+        "modify": [
+          {
+            "pt": {
+              "power": {
+                "ref": "counters",
+                "kind": "acorn",
+                "on": "self"
+              },
+              "toughness": {
+                "ref": "counters",
+                "kind": "acorn",
+                "on": "self"
+              }
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "activated",
+      "text": "{G}, {T}: Create a 1/1 green Squirrel creature token.",
+      "costs": [
+        {
+          "mana": "{G}"
+        },
+        {
+          "tap": "self"
+        }
+      ],
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Squirrel",
+          "tokenPower": 1,
+          "tokenToughness": 1,
+          "tokenColors": [
+            "green"
+          ],
+          "tokenTypeLine": "Creature — Squirrel"
+        }
+      ],
+      "implementation": "implemented",
+      "needs": []
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

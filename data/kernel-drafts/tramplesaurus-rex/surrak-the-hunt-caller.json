@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Formidable — At the beginning of combat on your turn, if creatures you control have total power 8 or greater, target creature you control gains haste until end of turn. (It can attack and {T} no matter when it came under your control.)",
+      "trigger": {
+        "event": "begin_step",
+        "step": "beginning_of_combat",
+        "whose": "yours",
+        "interveningIf": {
+          "check": "compare",
+          "left": {
+            "ref": "sum",
+            "of": {
+              "types": [
+                "creature"
+              ],
+              "controller": "you"
+            },
+            "stat": "power"
+          },
+          "cmp": {
+            "op": ">=",
+            "value": 8
+          }
+        }
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Surrak, the Hunt Caller: choose a target",
+            "instruction": "Choose target creature you control.",
+            "source": {
+              "card": "Surrak, the Hunt Caller",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "grant_effect",
+          "target": "t1",
+          "modify": [
+            {
+              "grant": "haste"
+            }
+          ],
+          "duration": "until_end_of_turn"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:intervening_if",
+        "predicate:compare",
+        "step:grant_effect",
+        "field:grant_effect.modify"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

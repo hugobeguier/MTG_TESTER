@@ -1,0 +1,454 @@
+{
+  "deck": "Aminatou",
+  "cards": [
+    {
+      "slug": "aminatou-veil-piercer",
+      "name": "Aminatou, Veil Piercer",
+      "questions": [
+        "Miracle granted by a static ability has no schema field: it is a grantAbility record {kind:\"cast_option\",keyword:\"miracle\",reduceBy:\"{4}\"} on enchantment cards in hand. The kernel needs a \"grants miracle with cost = mana cost reduced by N\" capability."
+      ]
+    },
+    {
+      "slug": "adarkar-wastes",
+      "name": "Adarkar Wastes"
+    },
+    {
+      "slug": "aminatou-the-fateshifter",
+      "name": "Aminatou, the Fateshifter",
+      "questions": [
+        "The -6 (\"each player gains control of all nonland permanents other than Aminatou controlled by the next player in the chosen direction\") is a simultaneous rotation of control around the table. gain_control has no rotate/direction fields; written as gain_control with passthrough fields rotate + excludeSelf. Needs a kernel-defined rotate_control step.",
+        "-1: \"Exile another target permanent you own\" - the permanent returns as a NEW object (loses counters, summoning sick); expressed as exile then move_card_zone from exile to battlefield."
+      ]
+    },
+    {
+      "slug": "arcane-denial",
+      "name": "Arcane Denial",
+      "questions": [
+        "\"Its controller may draw up to two cards\": modelled as a delayed trigger whose draw step is who:controller_of_target, optional, upTo:true (number chosen by that player, 0-2). OK?"
+      ]
+    },
+    {
+      "slug": "arcane-sanctum",
+      "name": "Arcane Sanctum"
+    },
+    {
+      "slug": "arcane-signet",
+      "name": "Arcane Signet"
+    },
+    {
+      "slug": "archaeomancer-s-map",
+      "name": "Archaeomancer's Map",
+      "questions": [
+        "\"if that player controls more lands than you\": the comparison uses the count of lands controlled by ANY opponent; with several opponents it should compare the specific player whose land entered. The schema has no event-player-scoped count; written with controller:\"opponent\"."
+      ]
+    },
+    {
+      "slug": "archon-of-sun-s-grace",
+      "name": "Archon of Sun's Grace"
+    },
+    {
+      "slug": "athreos-shroud-veiled",
+      "name": "Athreos, Shroud-Veiled",
+      "questions": [
+        "Devotion to \"white and black\" is written as the sum of devotion to W and devotion to B (hybrid symbols count once per symbol per the rules, which this sum matches only if the kernel counts a W/B hybrid once). OK?"
+      ]
+    },
+    {
+      "slug": "blasphemous-edict",
+      "name": "Blasphemous Edict"
+    },
+    {
+      "slug": "boon-of-the-spirit-realm",
+      "name": "Boon of the Spirit Realm"
+    },
+    {
+      "slug": "brainstorm",
+      "name": "Brainstorm"
+    },
+    {
+      "slug": "brainsurge",
+      "name": "Brainsurge"
+    },
+    {
+      "slug": "callaphe-beloved-of-the-sea",
+      "name": "Callaphe, Beloved of the Sea",
+      "questions": [
+        "Characteristic-defining \"power is equal to devotion\" has no dedicated modifier: written as setBasePT with toughness = its own current toughness (3 printed). The schema needs a power-only CDA modifier.",
+        "The granted tax only applies to spells that TARGET the permanent: grantAbility record carries onlyIfTargets:\"self\" (loose record, not validated)."
+      ]
+    },
+    {
+      "slug": "caves-of-koilos",
+      "name": "Caves of Koilos"
+    },
+    {
+      "slug": "command-tower",
+      "name": "Command Tower"
+    },
+    {
+      "slug": "contaminated-aquifer",
+      "name": "Contaminated Aquifer"
+    },
+    {
+      "slug": "counterspell",
+      "name": "Counterspell"
+    },
+    {
+      "slug": "debtors-knell",
+      "name": "Debtors' Knell"
+    },
+    {
+      "slug": "demon-of-fate-s-design",
+      "name": "Demon of Fate's Design",
+      "questions": [
+        "\"Cast an enchantment spell by paying life equal to its mana value rather than paying its mana cost\" (once each of your turns) is an alternative-cost permission granted to OTHER cards by a static ability. castOptions only describe the card's own casting, so it is a scripted marker cast_enchantment_paying_life."
+      ]
+    },
+    {
+      "slug": "devastation-tide",
+      "name": "Devastation Tide"
+    },
+    {
+      "slug": "diabolic-vision",
+      "name": "Diabolic Vision"
+    },
+    {
+      "slug": "doomwake-giant",
+      "name": "Doomwake Giant"
+    },
+    {
+      "slug": "drowned-catacomb",
+      "name": "Drowned Catacomb"
+    },
+    {
+      "slug": "enhanced-surveillance",
+      "name": "Enhanced Surveillance",
+      "questions": [
+        "\"Look at an additional two cards each time you surveil\" modifies the surveil step (look at 2 more cards before choosing). There is no static modifier for changing another step's amount, so it is a scripted marker surveil_additional_cards {extra:2}; the surveil step needs to read it."
+      ]
+    },
+    {
+      "slug": "esper-sentinel",
+      "name": "Esper Sentinel"
+    },
+    {
+      "slug": "estrid-s-invocation",
+      "name": "Estrid's Invocation",
+      "questions": [
+        "A clone-as-enters replacement with an extra granted triggered ability: the copy step carries addAbility (loose passthrough record, not validated). The kernel needs a copy-with-exceptions capability."
+      ]
+    },
+    {
+      "slug": "evolving-wilds",
+      "name": "Evolving Wilds"
+    },
+    {
+      "slug": "extravagant-replication",
+      "name": "Extravagant Replication"
+    },
+    {
+      "slug": "fear-of-sleep-paralysis",
+      "name": "Fear of Sleep Paralysis",
+      "questions": [
+        "\"Whenever you fully unlock a Room\" has no event: written as an alsoOn alternative with event \"unspecified\" subject \"you\". The schema needs an event such as unlock_room (and \"fully unlock\").",
+        "\"Stun counters can't be removed from permanents your opponents control\" is a restriction on counter removal; no static modifier exists, so it is a scripted marker."
+      ]
+    },
+    {
+      "slug": "glacial-fortress",
+      "name": "Glacial Fortress"
+    },
+    {
+      "slug": "greed",
+      "name": "Greed"
+    },
+    {
+      "slug": "halimar-depths",
+      "name": "Halimar Depths"
+    },
+    {
+      "slug": "heliod-the-radiant-dawn",
+      "name": "Heliod, the Radiant Dawn",
+      "questions": [
+        "Double-faced card: both faces live in one JSON (ability text prefixed with the face name as in the oracle text). The schema has no per-ability face field; the kernel needs to know that abilities a3-a4 belong to the back face (Heliod, the Warped Eclipse). The back-face flash permission is a scripted marker."
+      ]
+    },
+    {
+      "slug": "inkshield",
+      "name": "Inkshield",
+      "questions": [
+        "The shield (prevent all combat damage to you this turn) creates one Inkling per 1 damage prevented. Written as a grant_effect step carrying a replacement record (instead: create tokens with count = damage prevented). The schema cannot attach a replacement to a spell's resolution; kernel needs a prevention-shield-with-rider capability."
+      ]
+    },
+    {
+      "slug": "inquisitive-glimmer",
+      "name": "Inquisitive Glimmer",
+      "questions": [
+        "\"Unlock costs you pay cost {1} less\" (Room unlocking) has no cost-modification target: scripted marker unlock_cost_reduction."
+      ]
+    },
+    {
+      "slug": "island",
+      "name": "Island"
+    },
+    {
+      "slug": "isolated-chapel",
+      "name": "Isolated Chapel"
+    },
+    {
+      "slug": "ledger-shredder",
+      "name": "Ledger Shredder"
+    },
+    {
+      "slug": "lim-dul-s-vault",
+      "name": "Lim-Dûl's Vault",
+      "questions": [
+        "\"As many times as you choose, you may pay 1 life ... then look at the top five again\" is an optional loop chosen by the player. repeat_for_each has no \"repeat while the player says yes\" form; written as repeat_for_each with repeatCount \"as_many_as_you_choose\" (passthrough). Needs a loop-with-prompt step. The kernel loop guard (player names an iteration count) fits."
+      ]
+    },
+    {
+      "slug": "mind-s-dilation",
+      "name": "Mind's Dilation"
+    },
+    {
+      "slug": "monologue-tax",
+      "name": "Monologue Tax"
+    },
+    {
+      "slug": "moon-blessed-cleric",
+      "name": "Moon-Blessed Cleric"
+    },
+    {
+      "slug": "myriad-landscape",
+      "name": "Myriad Landscape"
+    },
+    {
+      "slug": "mystic-remora",
+      "name": "Mystic Remora",
+      "questions": [
+        "Cumulative upkeep: the unlessPay cost is {1} PER age counter; unlessPay has no multiplier, so the step carries a passthrough field costPerCounter:\"age\". Needs a Quantity-scaled payment."
+      ]
+    },
+    {
+      "slug": "negate",
+      "name": "Negate"
+    },
+    {
+      "slug": "obscura-storefront",
+      "name": "Obscura Storefront"
+    },
+    {
+      "slug": "omniscience",
+      "name": "Omniscience",
+      "questions": [
+        "A static permission to cast other cards for free has no schema form (same gap as Dracogenesis): scripted marker free_cast_from_hand."
+      ]
+    },
+    {
+      "slug": "one-with-the-multiverse",
+      "name": "One with the Multiverse",
+      "questions": [
+        "Three scripted permission markers (look at top card any time, play from top of library, once-per-turn free cast): the schema has no zone-permission static modifier."
+      ]
+    },
+    {
+      "slug": "otherworldly-gaze",
+      "name": "Otherworldly Gaze"
+    },
+    {
+      "slug": "overwhelming-splendor",
+      "name": "Overwhelming Splendor",
+      "questions": [
+        "No way to refer to \"the enchanted player\" or \"creatures enchanted player controls\" in an ObjectFilter (controller has only you/opponent/any/defending_player). Written with controller:\"opponent\", which is only right in a 2-player game; the kernel must resolve it to the enchanted player. Needs controller:\"enchanted_player\".",
+        "\"Enchanted player can't activate abilities...\" is a restriction on a player: scripted marker (cant has no \"activate\" value)."
+      ]
+    },
+    {
+      "slug": "plains",
+      "name": "Plains"
+    },
+    {
+      "slug": "ponder",
+      "name": "Ponder"
+    },
+    {
+      "slug": "portent",
+      "name": "Portent"
+    },
+    {
+      "slug": "prairie-stream",
+      "name": "Prairie Stream"
+    },
+    {
+      "slug": "propaganda",
+      "name": "Propaganda"
+    },
+    {
+      "slug": "redress-fate",
+      "name": "Redress Fate"
+    },
+    {
+      "slug": "secret-arcade",
+      "name": "Secret Arcade",
+      "questions": [
+        "Room: two doors in one JSON (ability text prefixed by the door name as in the oracle text). The schema has no door/unlock state: the kernel must know a3-a4 only apply while that door is unlocked, and \"permanent spells you control are enchantments\" also applies on the stack. The reminder lines about casting/unlocking a Room are kernel rules."
+      ]
+    },
+    {
+      "slug": "shadow-of-the-second-sun",
+      "name": "Shadow of the Second Sun",
+      "questions": [
+        "\"An additional beginning phase after this phase\" (untap, upkeep, draw again) has no step kind (extra_combat exists, nothing for other phases): scripted marker additional_beginning_phase on the trigger. The trigger is \"at the beginning of each of the ENCHANTED PLAYER's postcombat main phases\"; encoded with subject:\"enchanted\"."
+      ]
+    },
+    {
+      "slug": "shark-typhoon",
+      "name": "Shark Typhoon",
+      "questions": [
+        "The X of the cycling trigger is the X paid for the cycling cost (linked ability payload, spec gap 4); written as {ref:\"X\"} and the kernel must carry X from the cycling activation to its trigger."
+      ]
+    },
+    {
+      "slug": "sigil-of-the-empty-throne",
+      "name": "Sigil of the Empty Throne"
+    },
+    {
+      "slug": "soaring-lightbringer",
+      "name": "Soaring Lightbringer",
+      "questions": [
+        "\"Whenever you attack a player\" fires once per player attacked (not per attacker) and needs that player for the token to attack: encoded as an attack trigger with batch:true and token field attackTarget:\"that_player\". The schema has no \"attacks a player\" event payload."
+      ]
+    },
+    {
+      "slug": "sol-ring",
+      "name": "Sol Ring"
+    },
+    {
+      "slug": "sphere-of-safety",
+      "name": "Sphere of Safety",
+      "questions": [
+        "attackTax.cost is a string, so the variable X (number of enchantments you control) is carried in scripted.params.x on the ability. Needs attackTax.cost as a Quantity-scaled cost."
+      ]
+    },
+    {
+      "slug": "starfield-of-nyx",
+      "name": "Starfield of Nyx",
+      "questions": [
+        "\"Base power and toughness each equal to ITS mana value\": the quantity refers to each affected permanent, not the source. Written with ObjRef \"iterated\" (normally the repeat_for_each object); the schema has no \"the affected object\" ref for static modifiers."
+      ]
+    },
+    {
+      "slug": "sunken-palace",
+      "name": "Sunken Palace"
+    },
+    {
+      "slug": "swamp",
+      "name": "Swamp"
+    },
+    {
+      "slug": "swords-to-plowshares",
+      "name": "Swords to Plowshares"
+    },
+    {
+      "slug": "tainted-field",
+      "name": "Tainted Field"
+    },
+    {
+      "slug": "talisman-of-dominance",
+      "name": "Talisman of Dominance"
+    },
+    {
+      "slug": "talisman-of-hierarchy",
+      "name": "Talisman of Hierarchy"
+    },
+    {
+      "slug": "talisman-of-progress",
+      "name": "Talisman of Progress"
+    },
+    {
+      "slug": "temple-of-deceit",
+      "name": "Temple of Deceit"
+    },
+    {
+      "slug": "temple-of-silence",
+      "name": "Temple of Silence"
+    },
+    {
+      "slug": "temporal-mastery",
+      "name": "Temporal Mastery"
+    },
+    {
+      "slug": "thriving-heath",
+      "name": "Thriving Heath"
+    },
+    {
+      "slug": "thriving-isle",
+      "name": "Thriving Isle"
+    },
+    {
+      "slug": "thriving-moor",
+      "name": "Thriving Moor"
+    },
+    {
+      "slug": "timely-ward",
+      "name": "Timely Ward",
+      "questions": [
+        "Conditional flash (\"as though it had flash if it targets a commander\") is a casting-timing condition on a target; encoded as a scripted marker flash_if_targets_commander. castOptions/timing have no \"if it targets\" predicate."
+      ]
+    },
+    {
+      "slug": "underground-river",
+      "name": "Underground River"
+    },
+    {
+      "slug": "utter-end",
+      "name": "Utter End"
+    },
+    {
+      "slug": "utter-insignificance",
+      "name": "Utter Insignificance"
+    },
+    {
+      "slug": "vanishing",
+      "name": "Vanishing",
+      "questions": [
+        "No phase_out step kind (or phased-out state): written as grant_effect with phaseOut:true; it phases in during its controller's next untap step. The kernel needs phasing."
+      ]
+    },
+    {
+      "slug": "virtue-of-persistence",
+      "name": "Virtue of Persistence",
+      "questions": [
+        "Adventure card: the Adventure half (Locthwain Scorn) is a second spell_effect on the same card. Its mana cost ({1}{B}) is NOT in data/cards.db oracle text, so no cast option is written (validator would reject the mana symbols); there is no adventure cast option kind (cast Locthwain Scorn from hand, exile it, later cast the enchantment from exile). Needs an \"adventure\" cast option."
+      ]
+    },
+    {
+      "slug": "void-rend",
+      "name": "Void Rend"
+    },
+    {
+      "slug": "wayfarer-s-bauble",
+      "name": "Wayfarer's Bauble"
+    },
+    {
+      "slug": "zur-eternal-schemer",
+      "name": "Zur, Eternal Schemer",
+      "questions": [
+        "Zur's activated ability has no duration in the oracle text (the enchantment stays a creature permanently, until it leaves the battlefield). duration is therefore omitted; the schema has no explicit \"indefinite\" duration value, so the omission has to mean permanent. Needs duration \"indefinite\"."
+      ]
+    }
+  ],
+  "decisions": [
+    "Copied unchanged from other decks' drafts (identical cards): Adarkar Wastes (the-ur-dragon), Arcane Signet (calling-all-angels), Caves of Koilos (the-ur-dragon), Command Tower (saheeli), Counterspell (keen-engineering), Drowned Catacomb (the-ur-dragon), Evolving Wilds (the-ur-dragon), Glacial Fortress (the-ur-dragon), Island (keen-engineering), Isolated Chapel (the-ur-dragon), Myriad Landscape (the-ur-dragon), Negate (keen-engineering), Plains (calling-all-angels), Prairie Stream (the-ur-dragon), Propaganda (keen-engineering), Sol Ring (calling-all-angels), Sunken Palace (saheeli), Swamp (the-ur-dragon), Swords to Plowshares (calling-all-angels), Temple of Deceit (the-ur-dragon), Temple of Silence (the-ur-dragon), Underground River (the-ur-dragon).",
+    "All 87 cards were found in data/cards.db; no oracleOverride was needed. Heliod, Secret Arcade and Virtue of Persistence are double-faced / Room / Adventure cards: each is one JSON with the face-prefixed oracle lines.",
+    "VALIDATOR BUG: move_card_zone / step field order:\"chosen\" (put cards back in any order) is read as the ObjRef \"chosen\" and raises STRUCT_CHOSEN_UNDEFINED when no choose step saves it (Ponder, Halimar Depths, Portent). Workaround: passthrough field ordered:\"any_order\".",
+    "VALIDATOR BUG: the lexeme \"another/other\" fires on \"choose a color other than white\" (Thriving lands). Workaround: review.ignore on 'another'.",
+    "VALIDATOR NOTE: a mana ability line with \"Add {W} or {B}\" plus an extra sentence passes with ONE ability listing both colors in mana.produces and srcs:[0] (Talisman of Creativity pattern), but two separate mana abilities with identical text fail CLAUSE_UNCOVERED when a following sentence is present; plain dual lands with the two-ability pattern (copied drafts) still pass.",
+    "SCHEMA QUESTION: no \"enchanted player\" filter/controller (Overwhelming Splendor, Shadow of the Second Sun): written with controller:\"opponent\" / subject:\"enchanted\".",
+    "SCHEMA QUESTION: no field for characteristic-defining power (Callaphe: power = devotion to blue); written as setBasePT with the current toughness.",
+    "SCHEMA QUESTION: no way to grant miracle with a derived cost (Aminatou, Veil Piercer), no static free-cast / cast-from-top / alternative-cost-for-other-cards permissions (Omniscience, One with the Multiverse, Demon of Fate's Design): scripted markers.",
+    "SCHEMA QUESTION: no unlock_room event, no door state (Fear of Sleep Paralysis, Secret Arcade/Dusty Parlor), no adventure cast option (Virtue of Persistence), no phase_out step (Vanishing), no additional-phase step (Shadow of the Second Sun), no indefinite duration (Zur), no copy-with-exceptions/addAbility (Estrid's Invocation), no loop-while-player-chooses step (Lim-Dul's Vault), no rotate-control step (Aminatou, the Fateshifter -6), no Quantity-scaled attackTax cost (Sphere of Safety) or unlessPay multiplier (Mystic Remora cumulative upkeep).",
+    "SCHEMA QUESTION: no cumulative_upkeep marker in the known scripted list; written as a triggered ability with keyword cumulative_upkeep plus add_counters and sacrifice unlessPay (costPerCounter passthrough).",
+    "SCHEMA QUESTION: step field exclude (choose a color other than X) and token fields tokenAttacking / attackTarget are untyped passthrough."
+  ]
+}

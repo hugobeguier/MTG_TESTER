@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Draw cards equal to the greatest power among creatures you control.",
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": {
+            "ref": "greatest",
+            "of": {
+              "types": [
+                "creature"
+              ],
+              "controller": "you"
+            },
+            "stat": "power"
+          },
+          "who": "you"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "quantity:greatest"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "spell_effect",
+      "text": "You may cast a spell with mana value 5 or less from your hand without paying its mana cost.",
+      "steps": [
+        {
+          "kind": "choose",
+          "from": {
+            "zone": "hand",
+            "owner": "you",
+            "notTypes": [
+              "land"
+            ],
+            "mv": {
+              "op": "<=",
+              "value": 5
+            }
+          },
+          "count": 1,
+          "saveAs": "chosen",
+          "optional": true,
+          "prompt": {
+            "title": "Rishkar's Expertise: optional",
+            "instruction": "Do you want to choose a nonland card with mana value 5 or less in your hand?",
+            "source": {
+              "card": "Rishkar's Expertise",
+              "ability": "a2"
+            }
+          }
+        },
+        {
+          "kind": "permission_to_play",
+          "what": "chosen",
+          "zone": "hand",
+          "withoutPaying": true,
+          "duration": "instant"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:choose",
+        "field:choose.count",
+        "field:choose.from",
+        "field:choose.saveAs",
+        "step:permission_to_play",
+        "field:permission_to_play.what",
+        "field:permission_to_play.withoutPaying",
+        "field:permission_to_play.zone"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "replacement",
+      "optional": true,
+      "text": "You may have this enchantment enter as a copy of an enchantment you control, except it has \"At the beginning of your upkeep, you may exile this enchantment. If you do, return it to the battlefield under its owner's control.\"",
+      "replacement": {
+        "event": "would_enter",
+        "subject": "you",
+        "optional": true,
+        "result": {
+          "mode": "instead",
+          "steps": [
+            {
+              "kind": "copy",
+              "what": {
+                "types": [
+                  "enchantment"
+                ],
+                "controller": "you",
+                "zone": "battlefield"
+              },
+              "asEnters": true,
+              "addAbility": {
+                "kind": "triggered",
+                "text": "At the beginning of your upkeep, you may exile this enchantment. If you do, return it to the battlefield under its owner's control.",
+                "trigger": {
+                  "event": "begin_step",
+                  "step": "upkeep",
+                  "whose": "yours"
+                },
+                "optional": true,
+                "steps": [
+                  {
+                    "kind": "exile_target",
+                    "target": "self"
+                  },
+                  {
+                    "kind": "move_card_zone",
+                    "target": "self",
+                    "from": "exile",
+                    "moveTo": "battlefield",
+                    "who": "owner_of_target",
+                    "reflexive": true
+                  }
+                ]
+              },
+              "src": 0
+            }
+          ]
+        },
+        "prompt": {
+          "title": "Estrid's Invocation: optional",
+          "instruction": "Do you want to apply this replacement?",
+          "source": {
+            "card": "Estrid's Invocation",
+            "ability": "a1"
+          }
+        }
+      },
+      "srcs": [
+        0,
+        1
+      ],
+      "prompt": {
+        "title": "Estrid's Invocation: optional",
+        "instruction": "Do you want to use this ability?",
+        "source": {
+          "card": "Estrid's Invocation",
+          "ability": "a1"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_enter",
+        "step:copy",
+        "field:copy.addAbility",
+        "field:copy.asEnters",
+        "field:copy.what"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

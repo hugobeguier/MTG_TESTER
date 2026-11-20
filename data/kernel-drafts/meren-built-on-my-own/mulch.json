@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Reveal the top four cards of your library. Put all land cards revealed this way into your hand and the rest into your graveyard.",
+      "steps": [
+        {
+          "kind": "look_top",
+          "amount": 4,
+          "reveal": true,
+          "src": 0
+        },
+        {
+          "kind": "move_card_zone",
+          "what": "looked_cards",
+          "filter": {
+            "types": [
+              "land"
+            ]
+          },
+          "all": true,
+          "from": "library",
+          "moveTo": "hand",
+          "src": 1
+        },
+        {
+          "kind": "move_card_zone",
+          "what": "rest_of_looked_cards",
+          "moveTo": "graveyard",
+          "src": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:look_top",
+        "field:look_top.reveal",
+        "field:move_card_zone.all",
+        "field:move_card_zone.filter",
+        "field:move_card_zone.from",
+        "field:move_card_zone.what"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

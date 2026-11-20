@@ -1,0 +1,144 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "keyword",
+      "text": "Haste",
+      "keyword": {
+        "name": "haste"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "static",
+      "text": "Zurgo and Ojutai has hexproof as long as it entered this turn.",
+      "static": {
+        "affects": "self",
+        "modify": [
+          {
+            "grant": "hexproof"
+          }
+        ],
+        "while": {
+          "check": "stat",
+          "of": "self",
+          "stat": "entered_this_turn",
+          "cmp": {
+            "op": "=",
+            "value": 1
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "id": "a4",
+      "kind": "triggered",
+      "srcs": [
+        0
+      ],
+      "text": "Whenever one or more Dragons you control deal combat damage to a player or battle, look at the top three cards of your library. Put one of them into your hand and the rest on the bottom of your library in any order. You may return one of those Dragons to its owner's hand.",
+      "trigger": {
+        "event": "deals_combat_damage_to_player",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "subtypes": [
+            "Dragon"
+          ],
+          "controller": "you"
+        },
+        "batch": true
+      },
+      "steps": [
+        {
+          "kind": "look_top",
+          "amount": 3,
+          "src": 1
+        },
+        {
+          "kind": "choose",
+          "from": {
+            "zone": "library",
+            "owner": "you"
+          },
+          "fromLooked": true,
+          "count": 1,
+          "saveAs": "chosen",
+          "src": 1,
+          "prompt": {
+            "title": "Zurgo and Ojutai: choose",
+            "instruction": "Choose a card from among the looked-at cards.",
+            "source": {
+              "card": "Zurgo and Ojutai",
+              "ability": "a4"
+            }
+          }
+        },
+        {
+          "kind": "move_card_zone",
+          "target": "chosen",
+          "moveFrom": "library",
+          "moveTo": "hand",
+          "src": 1
+        },
+        {
+          "kind": "move_card_zone",
+          "what": "rest_of_looked_cards",
+          "moveTo": "library",
+          "position": "bottom",
+          "order": "chosen",
+          "src": 1
+        },
+        {
+          "kind": "bounce_target",
+          "target": "event_object",
+          "optional": true,
+          "src": 2,
+          "prompt": {
+            "title": "Zurgo and Ojutai: optional",
+            "instruction": "Do you want to return that object to its owner's hand?",
+            "source": {
+              "card": "Zurgo and Ojutai",
+              "ability": "a4"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:batch",
+        "trigger:subject",
+        "step:look_top",
+        "step:choose",
+        "field:choose.count",
+        "field:choose.from",
+        "field:choose.fromLooked",
+        "field:choose.saveAs",
+        "field:move_card_zone.order",
+        "field:move_card_zone.position",
+        "field:move_card_zone.what"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

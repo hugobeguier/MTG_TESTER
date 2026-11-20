@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Search your library for up to three creature cards, put them into your graveyard, then shuffle.",
+      "steps": [
+        {
+          "kind": "search_library",
+          "who": "you",
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "count": 3,
+          "upTo": true,
+          "to": "graveyard",
+          "shuffle": true,
+          "prompt": {
+            "title": "Buried Alive: search",
+            "instruction": "Choose a creature from the library.",
+            "source": {
+              "card": "Buried Alive",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:search_library",
+        "field:search_library.count",
+        "field:search_library.filter",
+        "field:search_library.shuffle",
+        "field:search_library.to",
+        "field:search_library.upTo"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

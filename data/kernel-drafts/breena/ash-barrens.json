@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "kind": "mana",
+      "text": "{T}: Add {C}.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{C}"
+          }
+        ]
+      },
+      "id": "a1",
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "kind": "activated",
+      "zone": "hand",
+      "keyword": {
+        "name": "basic landcycling"
+      },
+      "text": "Basic landcycling {1} ({1}, Discard this card: Search your library for a basic land card, reveal it, put it into your hand, then shuffle.)",
+      "costs": [
+        {
+          "mana": "{1}"
+        },
+        {
+          "discard": "self",
+          "count": 1
+        }
+      ],
+      "steps": [
+        {
+          "kind": "search_library",
+          "who": "you",
+          "filter": {
+            "types": [
+              "land"
+            ],
+            "supertypes": [
+              "basic"
+            ]
+          },
+          "count": 1,
+          "reveal": true,
+          "to": "hand",
+          "shuffle": true,
+          "src": 0,
+          "prompt": {
+            "title": "Ash Barrens: search",
+            "instruction": "Choose a basic land from the library.",
+            "source": {
+              "card": "Ash Barrens",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "id": "a2",
+      "implementation": "needed",
+      "needs": [
+        "zone:hand",
+        "cost:discard",
+        "step:search_library",
+        "field:search_library.count",
+        "field:search_library.filter",
+        "field:search_library.reveal",
+        "field:search_library.shuffle",
+        "field:search_library.to"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

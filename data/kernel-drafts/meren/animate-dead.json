@@ -1,0 +1,127 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Enchant creature card in a graveyard",
+      "keyword": {
+        "name": "enchant"
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "zone": "graveyard"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Animate Dead: choose a target",
+            "instruction": "Choose target creature card in a graveyard.",
+            "source": {
+              "card": "Animate Dead",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "keyword:enchant"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "When this Aura enters, if it's on the battlefield, it loses \"enchant creature card in a graveyard\" and gains \"enchant creature put onto the battlefield with this Aura.\" Return enchanted creature card to the battlefield under your control and attach this Aura to it. When this Aura leaves the battlefield, that creature's controller sacrifices it.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self",
+        "interveningIf": {
+          "check": "source_state",
+          "state": "on_battlefield"
+        }
+      },
+      "steps": [
+        {
+          "kind": "rewrite_enchant"
+        },
+        {
+          "kind": "reanimate",
+          "target": "enchanted",
+          "who": "you"
+        },
+        {
+          "kind": "attach",
+          "what": "self",
+          "to": "event_object"
+        },
+        {
+          "kind": "create_delayed_trigger",
+          "trigger": {
+            "event": "leaves",
+            "subject": "self"
+          },
+          "steps": [
+            {
+              "kind": "sacrifice_permanent",
+              "target": "enchanted",
+              "who": "controller_of_target",
+              "prompt": {
+                "title": "Animate Dead: sacrifice",
+                "instruction": "Choose a permanent to sacrifice.",
+                "source": {
+                  "card": "Animate Dead",
+                  "ability": "a2"
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:intervening_if",
+        "predicate:source_state",
+        "step:rewrite_enchant",
+        "step:attach",
+        "field:attach.to",
+        "field:attach.what",
+        "step:create_delayed_trigger",
+        "field:create_delayed_trigger.steps",
+        "field:create_delayed_trigger.trigger",
+        "field:sacrifice_permanent.who"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "static",
+      "text": "Enchanted creature gets -1/-0.",
+      "static": {
+        "affects": "enchanted",
+        "modify": [
+          {
+            "pt": {
+              "power": -1,
+              "toughness": 0
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

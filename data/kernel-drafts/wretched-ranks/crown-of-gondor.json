@@ -1,0 +1,152 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "Equipped creature gets +1/+1 for each creature you control.",
+      "static": {
+        "affects": "equipped",
+        "modify": [
+          {
+            "pt": {
+              "power": {
+                "ref": "count",
+                "of": {
+                  "types": [
+                    "creature"
+                  ],
+                  "controller": "you"
+                }
+              },
+              "toughness": {
+                "ref": "count",
+                "of": {
+                  "types": [
+                    "creature"
+                  ],
+                  "controller": "you"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "When a legendary creature you control enters, if there is no monarch, you become the monarch.",
+      "trigger": {
+        "event": "etb",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "supertypes": [
+            "Legendary"
+          ],
+          "controller": "you"
+        },
+        "interveningIf": {
+          "check": "stat",
+          "of": "self",
+          "stat": "monarch_exists",
+          "cmp": {
+            "op": "=",
+            "value": 0
+          }
+        }
+      },
+      "scripted": {
+        "handler": "become_monarch"
+      },
+      "steps": [],
+      "implementation": "needed",
+      "needs": [
+        "scripted:become_monarch",
+        "trigger:intervening_if",
+        "predicate:stat",
+        "trigger:subject"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "activated",
+      "text": "Equip {4}. This ability costs {3} less to activate if you're the monarch.",
+      "keyword": {
+        "name": "equip"
+      },
+      "timing": {
+        "speed": "sorcery"
+      },
+      "costs": [
+        {
+          "mana": "{4}"
+        }
+      ],
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Crown of Gondor: choose a target",
+            "instruction": "Choose target creature you control.",
+            "source": {
+              "card": "Crown of Gondor",
+              "ability": "a3"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "attach",
+          "what": "self",
+          "to": "t1",
+          "src": 0
+        }
+      ],
+      "costReduction": {
+        "amount": 3,
+        "applies": "generic",
+        "condition": {
+          "check": "stat",
+          "of": "self",
+          "stat": "controller_is_monarch",
+          "cmp": {
+            "op": "=",
+            "value": 1
+          }
+        },
+        "src": 1
+      },
+      "implementation": "needed",
+      "needs": [
+        "cost_reduction",
+        "cost_reduction:conditional",
+        "predicate:stat",
+        "step:attach",
+        "field:attach.to",
+        "field:attach.what"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

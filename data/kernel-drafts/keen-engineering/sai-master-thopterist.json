@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Whenever you cast an artifact spell, create a 1/1 colorless Thopter artifact creature token with flying.",
+      "trigger": {
+        "event": "cast",
+        "subject": {
+          "types": [
+            "artifact"
+          ]
+        },
+        "whose": "yours"
+      },
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Thopter",
+          "tokenPower": 1,
+          "tokenToughness": 1,
+          "tokenColors": [
+            "colorless"
+          ],
+          "tokenTypeLine": "Artifact Creature — Thopter",
+          "tokenKeywords": [
+            "flying"
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:create_tokens.tokenKeywords"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "{1}{U}, Sacrifice two artifacts: Draw a card.",
+      "costs": [
+        {
+          "mana": "{1}{U}"
+        },
+        {
+          "sacrifice": {
+            "types": [
+              "artifact"
+            ],
+            "controller": "you"
+          },
+          "count": 2,
+          "prompt": {
+            "title": "Sai, Master Thopterist: choose what to sacrifice",
+            "instruction": "Choose 2 artifacts you control to sacrifice.",
+            "source": {
+              "card": "Sai, Master Thopterist",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": 1,
+          "who": "you"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "cost:sacrifice"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

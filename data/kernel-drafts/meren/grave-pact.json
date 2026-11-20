@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Whenever a creature you control dies, each other player sacrifices a creature of their choice.",
+      "trigger": {
+        "event": "dies",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "controller": "you"
+        }
+      },
+      "steps": [
+        {
+          "kind": "sacrifice_permanent",
+          "who": "each_opponent",
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "prompt": {
+            "title": "Grave Pact: sacrifice",
+            "instruction": "Choose a permanent to sacrifice.",
+            "source": {
+              "card": "Grave Pact",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject",
+        "field:sacrifice_permanent.filter",
+        "field:sacrifice_permanent.who"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

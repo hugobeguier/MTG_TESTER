@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Whenever an opponent casts their second spell each turn, you create a Treasure token.",
+      "trigger": {
+        "event": "cast",
+        "whose": "opponents",
+        "nth": {
+          "n": 2,
+          "per": "turn"
+        }
+      },
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Treasure",
+          "tokenColors": [
+            "colorless"
+          ],
+          "tokenTypeLine": "Artifact — Treasure",
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:nth"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

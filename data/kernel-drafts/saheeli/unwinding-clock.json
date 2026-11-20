@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "scripted",
+      "text": "Untap all artifacts you control during each other player's untap step.",
+      "scripted": {
+        "handler": "untap_during_each_other_players_untap_step"
+      },
+      "steps": [
+        {
+          "kind": "untap_target",
+          "all": true,
+          "filter": {
+            "types": [
+              "artifact"
+            ],
+            "controller": "you"
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "scripted:untap_during_each_other_players_untap_step",
+        "field:untap_target.all",
+        "field:untap_target.filter"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "during",
+        "reason": "the untap-step timing lives inside the scripted marker untap_during_each_other_players_untap_step"
+      }
+    ]
+  }
+}

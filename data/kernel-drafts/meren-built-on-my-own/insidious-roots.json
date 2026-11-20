@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "Creature tokens you control have \"{T}: Add one mana of any color.\"",
+      "static": {
+        "affects": {
+          "types": [
+            "creature"
+          ],
+          "token": true,
+          "controller": "you"
+        },
+        "modify": [
+          {
+            "grantAbility": {
+              "kind": "mana",
+              "text": "{T}: Add one mana of any color.",
+              "costs": [
+                {
+                  "tap": "self"
+                }
+              ],
+              "mana": {
+                "produces": [
+                  {
+                    "anyColor": 1
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever one or more creature cards leave your graveyard, create a 0/1 green Plant creature token, then put a +1/+1 counter on each Plant you control.",
+      "trigger": {
+        "event": "leaves",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "zone": "graveyard",
+          "owner": "you"
+        },
+        "fromZone": "graveyard",
+        "batch": true
+      },
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Plant",
+          "tokenPower": 0,
+          "tokenToughness": 1,
+          "tokenColors": [
+            "green"
+          ],
+          "tokenTypeLine": "Creature — Plant",
+          "src": 0
+        },
+        {
+          "kind": "add_counters",
+          "all": true,
+          "filter": {
+            "subtypes": [
+              "Plant"
+            ],
+            "controller": "you"
+          },
+          "counterKind": "+1/+1",
+          "amount": 1,
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:leaves",
+        "trigger:batch",
+        "trigger:subject",
+        "trigger:zones",
+        "step:add_counters",
+        "field:add_counters.all",
+        "field:add_counters.filter"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

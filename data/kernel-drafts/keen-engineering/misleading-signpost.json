@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flash",
+      "keyword": {
+        "name": "flash"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "When this artifact enters during the declare attackers step, you may reselect which player or permanent target attacking creature is attacking. (It can't attack its controller or their permanents.)",
+      "optional": true,
+      "trigger": {
+        "event": "etb",
+        "subject": "self",
+        "interveningIf": {
+          "check": "phase_is",
+          "phase": "declare_attackers"
+        }
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "attacking": true
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Misleading Signpost: choose a target",
+            "instruction": "Choose target attacking creature.",
+            "source": {
+              "card": "Misleading Signpost",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "scripted": {
+        "handler": "reselect_attack_target"
+      },
+      "prompt": {
+        "title": "Misleading Signpost: optional",
+        "instruction": "Do you want to use this ability?",
+        "source": {
+          "card": "Misleading Signpost",
+          "ability": "a2"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "scripted:reselect_attack_target",
+        "trigger:intervening_if",
+        "predicate:phase_is"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "mana",
+      "text": "{T}: Add {U}.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{U}"
+          }
+        ]
+      },
+      "implementation": "implemented",
+      "needs": []
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

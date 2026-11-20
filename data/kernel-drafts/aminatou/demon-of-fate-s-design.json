@@ -1,0 +1,115 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying, trample",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "keyword",
+      "text": "Flying, trample",
+      "keyword": {
+        "name": "trample"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "scripted",
+      "optional": true,
+      "text": "Once during each of your turns, you may cast an enchantment spell by paying life equal to its mana value rather than paying its mana cost.",
+      "timing": {
+        "limit": {
+          "count": 1,
+          "per": "turn"
+        }
+      },
+      "scripted": {
+        "handler": "cast_enchantment_paying_life",
+        "params": {
+          "perTurn": 1,
+          "lifeEqualTo": "mana_value",
+          "type": "enchantment"
+        }
+      },
+      "prompt": {
+        "title": "Demon of Fate's Design: optional",
+        "instruction": "Do you want to use this ability?",
+        "source": {
+          "card": "Demon of Fate's Design",
+          "ability": "a3"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "scripted:cast_enchantment_paying_life",
+        "timing"
+      ]
+    },
+    {
+      "id": "a4",
+      "kind": "activated",
+      "text": "{2}{B}, Sacrifice another enchantment: This creature gets +X/+0 until end of turn, where X is the sacrificed enchantment's mana value.",
+      "costs": [
+        {
+          "mana": "{2}{B}"
+        },
+        {
+          "sacrifice": {
+            "types": [
+              "enchantment"
+            ],
+            "controller": "you",
+            "another": true
+          },
+          "count": 1,
+          "prompt": {
+            "title": "Demon of Fate's Design: choose what to sacrifice",
+            "instruction": "Choose 1 another enchantment you control to sacrifice.",
+            "source": {
+              "card": "Demon of Fate's Design",
+              "ability": "a4"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "pump_target",
+          "target": "self",
+          "power": {
+            "ref": "stat",
+            "of": "sacrificed",
+            "stat": "mana_value"
+          },
+          "toughness": 0,
+          "duration": "until_end_of_turn",
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "ref:sacrificed",
+        "cost:sacrifice",
+        "quantity:stat"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "each",
+        "reason": "\"each of your turns\" is the per-turn limit in timing.limit"
+      }
+    ]
+  }
+}

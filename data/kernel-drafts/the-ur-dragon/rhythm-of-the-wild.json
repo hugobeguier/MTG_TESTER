@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "Creature spells you control can't be countered.",
+      "static": {
+        "affects": {
+          "types": [
+            "creature"
+          ],
+          "zone": "stack",
+          "controller": "you"
+        },
+        "modify": [
+          {
+            "cant": "be_countered"
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "static",
+      "text": "Nontoken creatures you control have riot. (They enter with your choice of a +1/+1 counter or haste.)",
+      "static": {
+        "affects": {
+          "types": [
+            "creature"
+          ],
+          "controller": "you",
+          "token": false
+        },
+        "modify": [
+          {
+            "grant": "riot"
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

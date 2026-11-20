@@ -1,0 +1,87 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever you draw your second card each turn, create a 1/1 colorless Thopter artifact creature token with flying.",
+      "trigger": {
+        "event": "draw",
+        "whose": "yours",
+        "nth": {
+          "n": 2,
+          "per": "turn"
+        }
+      },
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Thopter",
+          "tokenPower": 1,
+          "tokenToughness": 1,
+          "tokenColors": [
+            "colorless"
+          ],
+          "tokenTypeLine": "Artifact Creature — Thopter",
+          "tokenKeywords": [
+            "flying"
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:draw",
+        "trigger:nth",
+        "field:create_tokens.tokenKeywords"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "activated",
+      "text": "Crew 2",
+      "keyword": {
+        "name": "crew",
+        "param": 2
+      },
+      "scripted": {
+        "handler": "crew"
+      },
+      "steps": [
+        {
+          "kind": "grant_effect",
+          "target": "self",
+          "modify": [
+            {
+              "addTypes": [
+                "Artifact",
+                "Creature"
+              ]
+            }
+          ],
+          "duration": "until_end_of_turn"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "scripted:crew",
+        "keyword:crew",
+        "step:grant_effect",
+        "field:grant_effect.modify"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

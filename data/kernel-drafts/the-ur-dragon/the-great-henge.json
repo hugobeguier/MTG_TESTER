@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "cast_option",
+      "legacy": {
+        "cost": "{X}"
+      },
+      "text": "This spell costs {X} less to cast, where X is the greatest power among creatures you control.",
+      "costReduction": {
+        "amount": {
+          "ref": "greatest",
+          "of": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you"
+          },
+          "stat": "power"
+        },
+        "applies": "generic"
+      },
+      "implementation": "needed",
+      "needs": [
+        "cast_option",
+        "cost_reduction",
+        "cost_reduction:variable"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "mana",
+      "text": "{T}: Add {G}{G}. You gain 2 life.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{G}{G}"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "kind": "life_change",
+          "lifeDelta": 2,
+          "who": "you"
+        }
+      ],
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "triggered",
+      "text": "Whenever a nontoken creature you control enters, put a +1/+1 counter on it and draw a card.",
+      "trigger": {
+        "event": "etb",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "controller": "you",
+          "token": false
+        }
+      },
+      "steps": [
+        {
+          "kind": "add_counters",
+          "on": "event_object",
+          "counterKind": "+1/+1",
+          "amount": 1
+        },
+        {
+          "kind": "draw_cards",
+          "who": "you",
+          "amount": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject",
+        "step:add_counters",
+        "field:add_counters.on"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

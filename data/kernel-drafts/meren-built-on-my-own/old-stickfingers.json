@@ -1,0 +1,107 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "When you cast this spell, reveal cards from the top of your library until you reveal X creature cards. Put all creature cards revealed this way into your graveyard, then put the rest on the bottom of your library in a random order.",
+      "zone": "stack",
+      "trigger": {
+        "event": "cast",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "reveal",
+          "who": "you",
+          "until": {
+            "count": {
+              "ref": "X"
+            },
+            "filter": {
+              "types": [
+                "creature"
+              ]
+            }
+          },
+          "saveAs": "revealed",
+          "src": 0
+        },
+        {
+          "kind": "move_card_zone",
+          "what": "revealed_cards",
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "all": true,
+          "moveTo": "graveyard",
+          "src": 1
+        },
+        {
+          "kind": "move_card_zone",
+          "what": "rest_of_revealed_cards",
+          "moveTo": "library",
+          "position": "bottom",
+          "order": "random",
+          "src": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "zone:stack",
+        "step:reveal",
+        "field:reveal.saveAs",
+        "field:reveal.until",
+        "field:move_card_zone.all",
+        "field:move_card_zone.filter",
+        "field:move_card_zone.what",
+        "field:move_card_zone.order",
+        "field:move_card_zone.position"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "static",
+      "text": "Old Stickfingers's power and toughness are each equal to the number of creature cards in your graveyard.",
+      "static": {
+        "affects": "self",
+        "modify": [
+          {
+            "setBasePT": {
+              "power": {
+                "ref": "count",
+                "of": {
+                  "types": [
+                    "creature"
+                  ],
+                  "zone": "graveyard",
+                  "owner": "you"
+                }
+              },
+              "toughness": {
+                "ref": "count",
+                "of": {
+                  "types": [
+                    "creature"
+                  ],
+                  "zone": "graveyard",
+                  "owner": "you"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static",
+        "static:setBasePT"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

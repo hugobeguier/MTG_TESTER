@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "trigger": {
+        "event": "deals_combat_damage_to_player",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "who": "you",
+          "amount": {
+            "ref": "X"
+          },
+          "src": 1
+        },
+        {
+          "kind": "grant_effect",
+          "who": "you",
+          "modify": [
+            {
+              "grant": "no maximum hand size"
+            }
+          ],
+          "duration": {
+            "until": "unspecified"
+          },
+          "src": 2
+        }
+      ],
+      "srcs": [
+        0
+      ],
+      "text": "Whenever this creature deals combat damage to a player, roll a d20. Draw cards equal to the result. You have no maximum hand size for the rest of the game.",
+      "scripted": {
+        "handler": "roll_d20_result_is_X",
+        "params": {
+          "sides": 20
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "scripted:roll_d20_result_is_X",
+        "quantity:X",
+        "step:grant_effect",
+        "field:grant_effect.modify",
+        "duration:until"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,103 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Whenever a creature you control with flying enters, it gains haste until end of turn.",
+      "trigger": {
+        "event": "etb",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "controller": "you",
+          "with": [
+            "flying"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "kind": "grant_effect",
+          "target": "event_object",
+          "modify": [
+            {
+              "grant": "haste"
+            }
+          ],
+          "duration": "until_end_of_turn"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject",
+        "step:grant_effect",
+        "field:grant_effect.modify"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever a Dragon you control enters, it deals X damage to any target, where X is the number of Dragons you control.",
+      "trigger": {
+        "event": "etb",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "subtypes": [
+            "Dragon"
+          ],
+          "controller": "you"
+        }
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "any",
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Dragon Tempest: choose a target",
+            "instruction": "Choose target.",
+            "source": {
+              "card": "Dragon Tempest",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "damage_target",
+          "source": "event_object",
+          "target": "t1",
+          "amount": {
+            "ref": "count",
+            "of": {
+              "types": [
+                "creature"
+              ],
+              "subtypes": [
+                "Dragon"
+              ],
+              "controller": "you"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject",
+        "quantity:count",
+        "field:damage_target.source"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

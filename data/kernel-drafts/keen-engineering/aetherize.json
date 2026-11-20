@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Return all attacking creatures to their owner's hand.",
+      "steps": [
+        {
+          "kind": "mass_bounce",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "attacking": true
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:mass_bounce.filter"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

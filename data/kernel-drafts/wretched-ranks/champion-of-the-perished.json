@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Whenever another Zombie you control enters, put a +1/+1 counter on this creature.",
+      "trigger": {
+        "event": "etb",
+        "subject": {
+          "subtypes": [
+            "Zombie"
+          ],
+          "controller": "you",
+          "another": true
+        }
+      },
+      "steps": [
+        {
+          "kind": "add_counters",
+          "on": "self",
+          "counterKind": "+1/+1",
+          "amount": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject",
+        "step:add_counters",
+        "field:add_counters.on"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

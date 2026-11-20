@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "For any number of opponents, destroy target nonland permanent that player controls.",
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "permanent"
+            ],
+            "notTypes": [
+              "land"
+            ],
+            "controller": "opponent"
+          },
+          "count": {
+            "min": 0,
+            "max": 1
+          },
+          "perOpponent": true,
+          "prompt": {
+            "title": "Windgrace's Judgment: choose a target",
+            "instruction": "Choose up to one target nonland permanent an opponent controls (one choice for each opponent).",
+            "source": {
+              "card": "Windgrace's Judgment",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "destroy_target",
+          "target": "t1"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "targets:multi",
+        "targets:per_opponent"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

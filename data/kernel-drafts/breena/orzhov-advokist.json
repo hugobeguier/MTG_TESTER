@@ -1,0 +1,105 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "kind": "triggered",
+      "text": "At the beginning of your upkeep, each player may put two +1/+1 counters on a creature they control. If a player does, creatures that player controls can't attack you or planeswalkers you control until your next turn.",
+      "trigger": {
+        "event": "begin_step",
+        "step": "upkeep",
+        "whose": "yours"
+      },
+      "steps": [
+        {
+          "kind": "repeat_for_each",
+          "over": "each_player",
+          "src": 0,
+          "steps": [
+            {
+              "kind": "choose",
+              "id": "c1",
+              "who": "that_player",
+              "from": {
+                "types": [
+                  "creature"
+                ],
+                "zone": "battlefield"
+              },
+              "ofPlayer": "iterated",
+              "count": 1,
+              "saveAs": "chosen",
+              "optional": true,
+              "src": 0,
+              "prompt": {
+                "title": "Orzhov Advokist: optional",
+                "instruction": "Do you want to choose a creature?",
+                "source": {
+                  "card": "Orzhov Advokist",
+                  "ability": "a1"
+                }
+              }
+            },
+            {
+              "kind": "add_counters",
+              "on": "chosen",
+              "counterKind": "+1/+1",
+              "amount": 2,
+              "src": 0
+            },
+            {
+              "kind": "grant_effect",
+              "who": "that_player",
+              "filter": {
+                "types": [
+                  "creature"
+                ]
+              },
+              "ofPlayer": "iterated",
+              "modify": [
+                {
+                  "cant": "attack"
+                }
+              ],
+              "duration": "until_your_next_turn",
+              "src": 1,
+              "condition": {
+                "when": "on_resolution",
+                "if": {
+                  "check": "step_done",
+                  "step": "c1"
+                },
+                "src": 1
+              }
+            }
+          ]
+        }
+      ],
+      "id": "a1",
+      "implementation": "needed",
+      "needs": [
+        "ref:iterated",
+        "step:repeat_for_each",
+        "field:repeat_for_each.over",
+        "field:repeat_for_each.steps",
+        "step:choose",
+        "field:choose.count",
+        "field:choose.from",
+        "field:choose.ofPlayer",
+        "field:choose.saveAs",
+        "field:choose.who",
+        "step:add_counters",
+        "field:add_counters.on",
+        "step:grant_effect",
+        "field:grant_effect.filter",
+        "field:grant_effect.modify",
+        "field:grant_effect.ofPlayer",
+        "field:grant_effect.who",
+        "predicate:step_done",
+        "duration:until_your_next_turn"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

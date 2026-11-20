@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "All creatures get -1/-1 until end of turn for each Swamp you control.",
+      "steps": [
+        {
+          "kind": "mass_pump",
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "power": {
+            "math": "*",
+            "args": [
+              -1,
+              {
+                "ref": "count",
+                "of": {
+                  "subtypes": [
+                    "Swamp"
+                  ],
+                  "controller": "you"
+                }
+              }
+            ]
+          },
+          "toughness": {
+            "math": "*",
+            "args": [
+              -1,
+              {
+                "ref": "count",
+                "of": {
+                  "subtypes": [
+                    "Swamp"
+                  ],
+                  "controller": "you"
+                }
+              }
+            ]
+          },
+          "duration": "until_end_of_turn"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "quantity:math",
+        "field:mass_pump.filter"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

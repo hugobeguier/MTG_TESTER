@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Whenever a nontoken creature you control dies, this creature deals 1 damage to you and you draw a card.",
+      "trigger": {
+        "event": "dies",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "token": false,
+          "controller": "you"
+        }
+      },
+      "steps": [
+        {
+          "kind": "damage_target",
+          "who": "you",
+          "amount": 1
+        },
+        {
+          "kind": "draw_cards",
+          "amount": 1,
+          "who": "you"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

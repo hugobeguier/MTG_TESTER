@@ -1,0 +1,116 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Whenever you sacrifice a black creature, you may pay 2 life. If you do, each other player sacrifices a creature of their choice.",
+      "trigger": {
+        "event": "sacrifice",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "colors": [
+            "black"
+          ],
+          "controller": "you"
+        }
+      },
+      "steps": [
+        {
+          "kind": "life_change",
+          "id": "s1",
+          "who": "you",
+          "lose": true,
+          "amount": 2,
+          "optional": true,
+          "prompt": {
+            "title": "Savra, Queen of the Golgari: optional",
+            "instruction": "Do you want to gain 2 life?",
+            "source": {
+              "card": "Savra, Queen of the Golgari",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "kind": "sacrifice_permanent",
+          "who": "each_opponent",
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "step_done",
+              "step": "s1"
+            }
+          },
+          "prompt": {
+            "title": "Savra, Queen of the Golgari: sacrifice",
+            "instruction": "Choose a permanent to sacrifice.",
+            "source": {
+              "card": "Savra, Queen of the Golgari",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:sacrifice",
+        "trigger:subject",
+        "field:life_change.amount",
+        "field:life_change.lose",
+        "field:sacrifice_permanent.filter",
+        "field:sacrifice_permanent.who",
+        "predicate:step_done"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever you sacrifice a green creature, you may gain 2 life.",
+      "trigger": {
+        "event": "sacrifice",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "colors": [
+            "green"
+          ],
+          "controller": "you"
+        }
+      },
+      "steps": [
+        {
+          "kind": "life_change",
+          "who": "you",
+          "amount": 2,
+          "optional": true,
+          "prompt": {
+            "title": "Savra, Queen of the Golgari: optional",
+            "instruction": "Do you want to gain 2 life?",
+            "source": {
+              "card": "Savra, Queen of the Golgari",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:sacrifice",
+        "trigger:subject",
+        "field:life_change.amount"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

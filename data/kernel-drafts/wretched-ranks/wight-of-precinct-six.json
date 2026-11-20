@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "This creature gets +1/+1 for each creature card in your opponents' graveyards.",
+      "static": {
+        "affects": "self",
+        "modify": [
+          {
+            "pt": {
+              "power": {
+                "ref": "count",
+                "of": {
+                  "types": [
+                    "creature"
+                  ],
+                  "zone": "graveyard",
+                  "owner": "opponent"
+                }
+              },
+              "toughness": {
+                "ref": "count",
+                "of": {
+                  "types": [
+                    "creature"
+                  ],
+                  "zone": "graveyard",
+                  "owner": "opponent"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

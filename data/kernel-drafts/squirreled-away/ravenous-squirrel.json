@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Whenever you sacrifice an artifact or creature, put a +1/+1 counter on this creature.",
+      "trigger": {
+        "event": "sacrifice",
+        "subject": {
+          "anyOf": [
+            {
+              "types": [
+                "artifact"
+              ]
+            },
+            {
+              "types": [
+                "creature"
+              ]
+            }
+          ],
+          "controller": "you"
+        }
+      },
+      "steps": [
+        {
+          "kind": "add_counters",
+          "on": "self",
+          "counterKind": "+1/+1",
+          "amount": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:sacrifice",
+        "trigger:subject",
+        "step:add_counters",
+        "field:add_counters.on"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "{1}{B}{G}, Sacrifice an artifact or creature: You gain 1 life and draw a card.",
+      "costs": [
+        {
+          "mana": "{1}{B}{G}"
+        },
+        {
+          "sacrifice": {
+            "anyOf": [
+              {
+                "types": [
+                  "artifact"
+                ]
+              },
+              {
+                "types": [
+                  "creature"
+                ]
+              }
+            ],
+            "controller": "you"
+          },
+          "count": 1,
+          "prompt": {
+            "title": "Ravenous Squirrel: choose what to sacrifice",
+            "instruction": "Choose 1 artifact or creature you control to sacrifice.",
+            "source": {
+              "card": "Ravenous Squirrel",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "life_change",
+          "who": "you",
+          "amount": 1
+        },
+        {
+          "kind": "draw_cards",
+          "who": "you",
+          "amount": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "cost:sacrifice",
+        "field:life_change.amount"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

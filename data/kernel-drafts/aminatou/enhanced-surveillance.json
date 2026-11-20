@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "scripted",
+      "text": "You may look at an additional two cards each time you surveil.",
+      "optional": true,
+      "scripted": {
+        "handler": "surveil_additional_cards",
+        "params": {
+          "extra": 2
+        }
+      },
+      "prompt": {
+        "title": "Enhanced Surveillance: optional",
+        "instruction": "Do you want to use this ability?",
+        "source": {
+          "card": "Enhanced Surveillance",
+          "ability": "a1"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "scripted:surveil_additional_cards"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "Exile this enchantment: Shuffle your graveyard into your library.",
+      "costs": [
+        {
+          "exileFrom": "battlefield",
+          "what": "self",
+          "count": 1
+        }
+      ],
+      "steps": [
+        {
+          "kind": "move_card_zone",
+          "what": "all",
+          "who": "you",
+          "from": "graveyard",
+          "moveTo": "library",
+          "filter": {
+            "zone": "graveyard",
+            "owner": "you"
+          },
+          "src": 0
+        },
+        {
+          "kind": "shuffle",
+          "who": "you",
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "cost:exileFrom",
+        "field:move_card_zone.filter",
+        "field:move_card_zone.from",
+        "field:move_card_zone.what",
+        "step:shuffle"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

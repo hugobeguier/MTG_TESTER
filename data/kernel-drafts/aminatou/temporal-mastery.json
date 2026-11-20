@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Take an extra turn after this one. Exile Temporal Mastery.",
+      "steps": [
+        {
+          "kind": "extra_turn",
+          "who": "you",
+          "src": 0
+        },
+        {
+          "kind": "move_card_zone",
+          "target": "self",
+          "moveTo": "exile",
+          "src": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:extra_turn"
+      ]
+    }
+  ],
+  "castOptions": [
+    {
+      "id": "c1",
+      "kind": "miracle",
+      "from": "hand",
+      "cost": [
+        {
+          "mana": "{1}{U}"
+        }
+      ],
+      "replacesManaCost": true,
+      "when": {
+        "event": "drawn",
+        "firstThisTurn": true
+      },
+      "optional": true,
+      "prompt": {
+        "title": "Temporal Mastery: miracle option",
+        "instruction": "Do you want to cast it using its miracle cost ({1}{U})?",
+        "source": {
+          "card": "Temporal Mastery",
+          "ability": "c1"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "cast_option:miracle"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

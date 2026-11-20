@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Lifelink",
+      "keyword": {
+        "name": "lifelink"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever another creature you control dies, put a +1/+1 counter on Gorma.",
+      "trigger": {
+        "event": "dies",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "controller": "you",
+          "another": true
+        }
+      },
+      "steps": [
+        {
+          "kind": "add_counters",
+          "on": "self",
+          "counterKind": "+1/+1",
+          "amount": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject",
+        "step:add_counters",
+        "field:add_counters.on"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "replacement",
+      "text": "Nontoken creatures you control enter with an additional +1/+1 counter on them for each creature that died under your control this turn.",
+      "replacement": {
+        "event": "would_enter",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "token": false,
+          "controller": "you"
+        },
+        "result": {
+          "mode": "modify",
+          "set": {
+            "counters": {
+              "kind": "+1/+1",
+              "count": {
+                "ref": "count_this_turn",
+                "event": "dies",
+                "filter": {
+                  "types": [
+                    "creature"
+                  ],
+                  "controller": "you"
+                }
+              }
+            }
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_enter",
+        "quantity:count_this_turn"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,197 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Choose three. You may choose the same mode more than once.\n• Put two +1/+1 counters on target creature.\n• Create a token that's a copy of target token you control.\n• Target player creates a 1/1 green Squirrel creature token.\n• Target opponent sacrifices a nontoken artifact of their choice.",
+      "modes": {
+        "choose": {
+          "min": 3,
+          "max": 3
+        },
+        "distinct": false,
+        "repeatable": true,
+        "options": [
+          {
+            "id": "m1",
+            "text": "Put two +1/+1 counters on target creature.",
+            "targets": [
+              {
+                "id": "t1",
+                "what": "object",
+                "filter": {
+                  "types": [
+                    "creature"
+                  ]
+                },
+                "count": {
+                  "min": 1,
+                  "max": 1
+                },
+                "prompt": {
+                  "title": "Rootcast Apprenticeship: choose a target",
+                  "instruction": "Choose target creature.",
+                  "source": {
+                    "card": "Rootcast Apprenticeship",
+                    "ability": "a1"
+                  }
+                }
+              }
+            ],
+            "steps": [
+              {
+                "kind": "add_counters",
+                "on": "t1",
+                "counterKind": "+1/+1",
+                "amount": 2
+              }
+            ]
+          },
+          {
+            "id": "m2",
+            "text": "Create a token that's a copy of target token you control.",
+            "targets": [
+              {
+                "id": "t1",
+                "what": "object",
+                "filter": {
+                  "token": true,
+                  "controller": "you"
+                },
+                "count": {
+                  "min": 1,
+                  "max": 1
+                },
+                "prompt": {
+                  "title": "Rootcast Apprenticeship: choose a target",
+                  "instruction": "Choose target token permanent you control.",
+                  "source": {
+                    "card": "Rootcast Apprenticeship",
+                    "ability": "a1"
+                  }
+                }
+              }
+            ],
+            "steps": [
+              {
+                "kind": "copy",
+                "target": "t1",
+                "token": true,
+                "count": 1
+              }
+            ]
+          },
+          {
+            "id": "m3",
+            "text": "Target player creates a 1/1 green Squirrel creature token.",
+            "targets": [
+              {
+                "id": "t1",
+                "what": "player",
+                "count": {
+                  "min": 1,
+                  "max": 1
+                },
+                "prompt": {
+                  "title": "Rootcast Apprenticeship: choose a target",
+                  "instruction": "Choose target player.",
+                  "source": {
+                    "card": "Rootcast Apprenticeship",
+                    "ability": "a1"
+                  }
+                }
+              }
+            ],
+            "steps": [
+              {
+                "kind": "create_tokens",
+                "tokenCount": 1,
+                "tokenName": "Squirrel",
+                "tokenPower": 1,
+                "tokenToughness": 1,
+                "tokenColors": [
+                  "green"
+                ],
+                "tokenTypeLine": "Creature — Squirrel",
+                "who": "target_player",
+                "target": "t1"
+              }
+            ]
+          },
+          {
+            "id": "m4",
+            "text": "Target opponent sacrifices a nontoken artifact of their choice.",
+            "targets": [
+              {
+                "id": "t1",
+                "what": "player",
+                "filter": {
+                  "controller": "opponent"
+                },
+                "count": {
+                  "min": 1,
+                  "max": 1
+                },
+                "prompt": {
+                  "title": "Rootcast Apprenticeship: choose a target",
+                  "instruction": "Choose target player.",
+                  "source": {
+                    "card": "Rootcast Apprenticeship",
+                    "ability": "a1"
+                  }
+                }
+              }
+            ],
+            "steps": [
+              {
+                "kind": "sacrifice_permanent",
+                "who": "target_player",
+                "target": "t1",
+                "filter": {
+                  "types": [
+                    "artifact"
+                  ],
+                  "token": false
+                },
+                "prompt": {
+                  "title": "Rootcast Apprenticeship: sacrifice",
+                  "instruction": "Choose a permanent to sacrifice.",
+                  "source": {
+                    "card": "Rootcast Apprenticeship",
+                    "ability": "a1"
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "prompt": {
+          "title": "Rootcast Apprenticeship: choose modes",
+          "instruction": "Choose three modes. You may choose the same mode more than once.",
+          "source": {
+            "card": "Rootcast Apprenticeship",
+            "ability": "a1"
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "modes",
+        "modes:repeatable",
+        "modes:multiple",
+        "step:add_counters",
+        "field:add_counters.on",
+        "step:copy",
+        "field:copy.count",
+        "field:copy.token",
+        "field:create_tokens.who",
+        "field:sacrifice_permanent.filter",
+        "field:sacrifice_permanent.who"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

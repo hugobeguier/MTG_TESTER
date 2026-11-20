@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "activated",
+      "text": "{T}: Put a +1/+1 counter on each artifact creature you control.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "steps": [
+        {
+          "kind": "repeat_for_each",
+          "over": {
+            "types": [
+              "artifact",
+              "creature"
+            ],
+            "controller": "you"
+          },
+          "steps": [
+            {
+              "kind": "add_counters",
+              "on": "iterated",
+              "counterKind": "+1/+1",
+              "amount": 1
+            }
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "ref:iterated",
+        "step:repeat_for_each",
+        "field:repeat_for_each.over",
+        "field:repeat_for_each.steps",
+        "step:add_counters",
+        "field:add_counters.on"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

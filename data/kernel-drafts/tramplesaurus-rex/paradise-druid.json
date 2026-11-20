@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "This creature has hexproof as long as it's untapped. (It can't be the target of spells or abilities your opponents control.)",
+      "static": {
+        "affects": "self",
+        "modify": [
+          {
+            "grant": "hexproof"
+          }
+        ],
+        "while": {
+          "not": {
+            "check": "source_state",
+            "state": "tapped"
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "mana",
+      "text": "{T}: Add one mana of any color.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "anyColor": 1
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "mana:variable"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

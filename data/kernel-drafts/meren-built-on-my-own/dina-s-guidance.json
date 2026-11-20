@@ -1,0 +1,107 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Search your library for a creature card, reveal it, put it into your hand or graveyard, then shuffle.",
+      "steps": [
+        {
+          "kind": "search_library",
+          "who": "you",
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "count": 1,
+          "reveal": true,
+          "to": "revealed",
+          "saveAs": "found",
+          "src": 0,
+          "prompt": {
+            "title": "Dina's Guidance: search",
+            "instruction": "Choose a creature from the library.",
+            "source": {
+              "card": "Dina's Guidance",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "kind": "choose",
+          "choice": "mode",
+          "options": [
+            "hand",
+            "graveyard"
+          ],
+          "remember": true,
+          "saveAs": "dest",
+          "src": 0,
+          "prompt": {
+            "title": "Dina's Guidance: choose",
+            "instruction": "Choose one of hand or graveyard.",
+            "source": {
+              "card": "Dina's Guidance",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "kind": "if_else",
+          "if": {
+            "check": "chosen_is",
+            "kind": "mode",
+            "value": "hand"
+          },
+          "then": [
+            {
+              "kind": "move_card_zone",
+              "what": "found",
+              "moveTo": "hand",
+              "src": 0
+            }
+          ],
+          "else": [
+            {
+              "kind": "move_card_zone",
+              "what": "found",
+              "moveTo": "graveyard",
+              "src": 0
+            }
+          ],
+          "src": 0
+        },
+        {
+          "kind": "shuffle",
+          "who": "you",
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:search_library",
+        "field:search_library.count",
+        "field:search_library.filter",
+        "field:search_library.reveal",
+        "field:search_library.saveAs",
+        "field:search_library.to",
+        "step:choose",
+        "field:choose.choice",
+        "field:choose.options",
+        "field:choose.remember",
+        "field:choose.saveAs",
+        "step:if_else",
+        "field:if_else.else",
+        "field:if_else.if",
+        "field:if_else.then",
+        "predicate:chosen_is",
+        "field:move_card_zone.what",
+        "step:shuffle"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Each player sacrifices six creatures of their choice. You create six tapped 2/2 black Zombie creature tokens.",
+      "steps": [
+        {
+          "kind": "sacrifice_permanent",
+          "who": "each_player",
+          "amount": 6,
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "src": 0,
+          "prompt": {
+            "title": "Necrotic Hex: sacrifice",
+            "instruction": "Choose a permanent to sacrifice.",
+            "source": {
+              "card": "Necrotic Hex",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "kind": "create_tokens",
+          "tokenCount": 6,
+          "tokenName": "Zombie",
+          "tokenPower": 2,
+          "tokenToughness": 2,
+          "tokenColors": [
+            "black"
+          ],
+          "tokenTypeLine": "Creature — Zombie",
+          "tokenTapped": true,
+          "src": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:sacrifice_permanent.amount",
+        "field:sacrifice_permanent.filter",
+        "field:sacrifice_permanent.who",
+        "field:create_tokens.tokenTapped"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

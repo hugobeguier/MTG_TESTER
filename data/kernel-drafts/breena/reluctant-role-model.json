@@ -1,0 +1,131 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "kind": "triggered",
+      "keyword": {
+        "name": "survival"
+      },
+      "text": "Survival — At the beginning of your second main phase, if this creature is tapped, put a flying, lifelink, or +1/+1 counter on it.",
+      "trigger": {
+        "event": "begin_step",
+        "step": "postcombat_main",
+        "whose": "yours",
+        "interveningIf": {
+          "check": "source_state",
+          "state": "tapped"
+        }
+      },
+      "steps": [
+        {
+          "kind": "choose",
+          "choice": "mode",
+          "options": [
+            "flying",
+            "lifelink",
+            "+1/+1"
+          ],
+          "saveAs": "kind",
+          "src": 0,
+          "prompt": {
+            "title": "Reluctant Role Model: choose",
+            "instruction": "Choose one of flying, lifelink, or +1/+1.",
+            "source": {
+              "card": "Reluctant Role Model",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "kind": "add_counters",
+          "on": "self",
+          "counterKind": "from_choice",
+          "amount": 1,
+          "src": 0
+        }
+      ],
+      "id": "a1",
+      "implementation": "needed",
+      "needs": [
+        "trigger:begin_step:postcombat_main",
+        "trigger:intervening_if",
+        "predicate:source_state",
+        "step:choose",
+        "field:choose.choice",
+        "field:choose.options",
+        "field:choose.saveAs",
+        "step:add_counters",
+        "field:add_counters.on"
+      ]
+    },
+    {
+      "kind": "triggered",
+      "text": "Whenever this creature or another creature you control dies, if it had counters on it, put those counters on up to one target creature.",
+      "trigger": {
+        "event": "dies",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "controller": "you"
+        },
+        "interveningIf": {
+          "check": "matches",
+          "obj": "event_object",
+          "filter": {
+            "hasCounter": "any"
+          }
+        }
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "count": {
+            "min": 0,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Reluctant Role Model: choose a target",
+            "instruction": "Choose up to one target creature.",
+            "source": {
+              "card": "Reluctant Role Model",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "add_counters",
+          "on": "t1",
+          "counterKind": "same_as_source",
+          "amount": {
+            "ref": "counters",
+            "kind": "any",
+            "on": "event_object"
+          }
+        }
+      ],
+      "id": "a2",
+      "implementation": "needed",
+      "needs": [
+        "trigger:intervening_if",
+        "predicate:matches",
+        "trigger:subject",
+        "targets:multi",
+        "step:add_counters",
+        "quantity:counters",
+        "field:add_counters.on"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

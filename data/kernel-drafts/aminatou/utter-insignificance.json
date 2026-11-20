@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flash",
+      "keyword": {
+        "name": "flash"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "spell_effect",
+      "text": "Enchant creature",
+      "keyword": {
+        "name": "enchant"
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Utter Insignificance: choose a target",
+            "instruction": "Choose target creature.",
+            "source": {
+              "card": "Utter Insignificance",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "keyword:enchant"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "static",
+      "text": "Enchanted creature loses all abilities and has base power and toughness 1/1.",
+      "static": {
+        "affects": "enchanted",
+        "modify": [
+          {
+            "lose": "all abilities"
+          },
+          {
+            "setBasePT": {
+              "power": 1,
+              "toughness": 1
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static",
+        "static:setBasePT"
+      ]
+    },
+    {
+      "id": "a4",
+      "kind": "activated",
+      "text": "{2}{C}: Exile enchanted creature.",
+      "costs": [
+        {
+          "mana": "{2}{C}"
+        }
+      ],
+      "steps": [
+        {
+          "kind": "exile_target",
+          "target": "enchanted",
+          "src": 0
+        }
+      ],
+      "implementation": "implemented",
+      "needs": []
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

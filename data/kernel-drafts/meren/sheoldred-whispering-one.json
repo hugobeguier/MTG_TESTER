@@ -1,0 +1,105 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Swampwalk (This creature can't be blocked as long as defending player controls a Swamp.)",
+      "keyword": {
+        "name": "landwalk",
+        "param": "Swamp"
+      },
+      "implementation": "needed",
+      "needs": [
+        "keyword:landwalk"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "At the beginning of your upkeep, return target creature card from your graveyard to the battlefield.",
+      "trigger": {
+        "event": "begin_step",
+        "step": "upkeep",
+        "whose": "yours"
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "zone": "graveyard",
+            "owner": "you"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Sheoldred, Whispering One: choose a target",
+            "instruction": "Choose target creature card in your graveyard.",
+            "source": {
+              "card": "Sheoldred, Whispering One",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "reanimate",
+          "target": "t1",
+          "who": "you"
+        }
+      ],
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "triggered",
+      "text": "At the beginning of each opponent's upkeep, that player sacrifices a creature of their choice.",
+      "trigger": {
+        "event": "begin_step",
+        "step": "upkeep",
+        "whose": "opponents"
+      },
+      "steps": [
+        {
+          "kind": "sacrifice_permanent",
+          "who": "that_player",
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "prompt": {
+            "title": "Sheoldred, Whispering One: sacrifice",
+            "instruction": "Choose a permanent to sacrifice.",
+            "source": {
+              "card": "Sheoldred, Whispering One",
+              "ability": "a3"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:sacrifice_permanent.filter",
+        "field:sacrifice_permanent.who"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "each",
+        "reason": "\"each opponent's upkeep\" is the trigger scope (whose: opponents); the sacrifice is by that one player"
+      }
+    ]
+  }
+}

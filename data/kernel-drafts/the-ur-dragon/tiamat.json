@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "When Tiamat enters, if you cast it, search your library for up to five Dragon cards not named Tiamat that each have different names, reveal them, put them into your hand, then shuffle.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self",
+        "interveningIf": {
+          "check": "stat",
+          "of": "self",
+          "stat": "was_cast",
+          "cmp": {
+            "op": "=",
+            "value": 1
+          }
+        }
+      },
+      "steps": [
+        {
+          "kind": "search_library",
+          "who": "you",
+          "filter": {
+            "subtypes": [
+              "Dragon"
+            ]
+          },
+          "count": 5,
+          "upTo": true,
+          "min": 0,
+          "distinctNames": true,
+          "excludeNamed": "Tiamat",
+          "to": "hand",
+          "reveal": true,
+          "shuffle": true,
+          "prompt": {
+            "title": "Tiamat: search",
+            "instruction": "Choose a Dragon from the library.",
+            "source": {
+              "card": "Tiamat",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:intervening_if",
+        "predicate:stat",
+        "step:search_library",
+        "field:search_library.count",
+        "field:search_library.distinctNames",
+        "field:search_library.excludeNamed",
+        "field:search_library.filter",
+        "field:search_library.min",
+        "field:search_library.reveal",
+        "field:search_library.shuffle",
+        "field:search_library.to",
+        "field:search_library.upTo"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "each",
+        "reason": "'each have different names' is the step field distinctNames"
+      }
+    ]
+  }
+}

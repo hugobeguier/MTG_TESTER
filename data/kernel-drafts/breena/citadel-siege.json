@@ -1,0 +1,159 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "kind": "replacement",
+      "text": "As this enchantment enters, choose Khans or Dragons.",
+      "replacement": {
+        "event": "would_enter",
+        "result": {
+          "mode": "also",
+          "steps": [
+            {
+              "kind": "choose",
+              "choice": "mode",
+              "options": [
+                "Khans",
+                "Dragons"
+              ],
+              "remember": true,
+              "src": 0,
+              "prompt": {
+                "title": "Citadel Siege: choose",
+                "instruction": "Choose one of Khans or Dragons.",
+                "source": {
+                  "card": "Citadel Siege",
+                  "ability": "a1"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "id": "a1",
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_enter",
+        "step:choose",
+        "field:choose.choice",
+        "field:choose.options",
+        "field:choose.remember"
+      ]
+    },
+    {
+      "kind": "triggered",
+      "text": "• Khans — At the beginning of combat on your turn, put two +1/+1 counters on target creature you control.",
+      "trigger": {
+        "event": "begin_step",
+        "step": "beginning_of_combat",
+        "whose": "yours",
+        "interveningIf": {
+          "check": "chosen_is",
+          "kind": "mode",
+          "value": "Khans"
+        }
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Citadel Siege: choose a target",
+            "instruction": "Choose target creature you control.",
+            "source": {
+              "card": "Citadel Siege",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "add_counters",
+          "on": "t1",
+          "counterKind": "+1/+1",
+          "amount": 2,
+          "src": 0
+        }
+      ],
+      "id": "a2",
+      "implementation": "needed",
+      "needs": [
+        "trigger:intervening_if",
+        "predicate:chosen_is",
+        "step:add_counters",
+        "field:add_counters.on"
+      ]
+    },
+    {
+      "kind": "triggered",
+      "text": "• Dragons — At the beginning of combat on each opponent's turn, tap target creature that player controls.",
+      "trigger": {
+        "event": "begin_step",
+        "step": "beginning_of_combat",
+        "whose": "opponents",
+        "interveningIf": {
+          "check": "chosen_is",
+          "kind": "mode",
+          "value": "Dragons"
+        }
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "controller": "opponent"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Citadel Siege: choose a target",
+            "instruction": "Choose target creature an opponent controls.",
+            "source": {
+              "card": "Citadel Siege",
+              "ability": "a3"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "tap_target",
+          "target": "t1",
+          "src": 0
+        }
+      ],
+      "id": "a3",
+      "implementation": "needed",
+      "needs": [
+        "trigger:intervening_if",
+        "predicate:chosen_is"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "each",
+        "reason": "'each opponent's turn' is the trigger whose:'opponents'"
+      }
+    ]
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "activated",
+      "text": "{1}, Sacrifice a creature: You gain life equal to the sacrificed creature's toughness.",
+      "costs": [
+        {
+          "mana": "{1}"
+        },
+        {
+          "sacrifice": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you"
+          },
+          "count": 1,
+          "prompt": {
+            "title": "Disciple of Griselbrand: choose what to sacrifice",
+            "instruction": "Choose 1 creature you control to sacrifice.",
+            "source": {
+              "card": "Disciple of Griselbrand",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "life_change",
+          "who": "you",
+          "amount": {
+            "ref": "stat",
+            "of": "sacrificed",
+            "stat": "toughness"
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "ref:sacrificed",
+        "cost:sacrifice",
+        "quantity:stat",
+        "field:life_change.amount"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

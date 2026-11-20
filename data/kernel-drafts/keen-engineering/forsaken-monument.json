@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "Colorless creatures you control get +2/+2.",
+      "static": {
+        "affects": {
+          "types": [
+            "creature"
+          ],
+          "colors": [
+            "colorless"
+          ],
+          "controller": "you"
+        },
+        "modify": [
+          {
+            "pt": {
+              "power": 2,
+              "toughness": 2
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever you tap a permanent for {C}, add an additional {C}.",
+      "trigger": {
+        "event": "tap",
+        "subject": {
+          "types": [
+            "permanent"
+          ],
+          "controller": "you"
+        }
+      },
+      "scripted": {
+        "handler": "tapped_for_colorless_mana"
+      },
+      "steps": [
+        {
+          "kind": "add_mana",
+          "produces": [
+            {
+              "colors": "{C}"
+            }
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "scripted:tapped_for_colorless_mana",
+        "trigger:tap",
+        "trigger:subject",
+        "step:add_mana",
+        "field:add_mana.produces"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "triggered",
+      "text": "Whenever you cast a colorless spell, you gain 2 life.",
+      "trigger": {
+        "event": "cast",
+        "subject": {
+          "colors": [
+            "colorless"
+          ]
+        },
+        "whose": "yours"
+      },
+      "steps": [
+        {
+          "kind": "life_change",
+          "lifeDelta": 2,
+          "who": "you"
+        }
+      ],
+      "implementation": "implemented",
+      "needs": []
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

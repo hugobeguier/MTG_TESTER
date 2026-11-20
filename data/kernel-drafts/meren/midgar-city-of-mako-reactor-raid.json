@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "replacement",
+      "text": "Midgar, City of Mako: This land enters tapped.",
+      "replacement": {
+        "event": "would_enter",
+        "result": {
+          "mode": "modify",
+          "set": {
+            "tapped": true
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_enter"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "mana",
+      "text": "{T}: Add {B}.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{B}"
+          }
+        ]
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "spell_effect",
+      "text": "Reactor Raid: You may sacrifice an artifact or creature. If you do, draw two cards. (Then exile this card. You may play the land later from exile.)",
+      "steps": [
+        {
+          "kind": "sacrifice_permanent",
+          "id": "s1",
+          "who": "you",
+          "optional": true,
+          "filter": {
+            "anyOf": [
+              {
+                "types": [
+                  "artifact"
+                ]
+              },
+              {
+                "types": [
+                  "creature"
+                ]
+              }
+            ],
+            "controller": "you"
+          },
+          "src": 0,
+          "prompt": {
+            "title": "Midgar, City of Mako // Reactor Raid: optional",
+            "instruction": "Do you want to sacrifice an artifact or creature you control?",
+            "source": {
+              "card": "Midgar, City of Mako // Reactor Raid",
+              "ability": "a3"
+            }
+          }
+        },
+        {
+          "kind": "draw_cards",
+          "who": "you",
+          "amount": 2,
+          "src": 1,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "step_done",
+              "step": "s1"
+            },
+            "src": 1
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:sacrifice_permanent.filter",
+        "predicate:step_done"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

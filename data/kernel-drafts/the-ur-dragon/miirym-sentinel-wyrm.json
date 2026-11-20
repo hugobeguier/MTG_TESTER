@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Ward {2}",
+      "keyword": {
+        "name": "ward",
+        "param": 2
+      },
+      "trigger": {
+        "event": "becomes_target",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "counter_spell",
+          "target": "event_object",
+          "unlessPay": {
+            "payer": "that_player",
+            "cost": [
+              {
+                "mana": "{2}"
+              }
+            ],
+            "prompt": {
+              "title": "Miirym, Sentinel Wyrm: pay or not",
+              "instruction": "Do you want to pay {2}? If you don't, counter that object.",
+              "source": {
+                "card": "Miirym, Sentinel Wyrm",
+                "ability": "a2"
+              }
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:becomes_target",
+        "step:counter_spell",
+        "step:unless_pay"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "triggered",
+      "text": "Whenever another nontoken Dragon you control enters, create a token that's a copy of it, except the token isn't legendary.",
+      "trigger": {
+        "event": "etb",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "subtypes": [
+            "Dragon"
+          ],
+          "controller": "you",
+          "another": true,
+          "token": false
+        }
+      },
+      "steps": [
+        {
+          "kind": "copy",
+          "target": "event_object",
+          "token": true,
+          "notLegendary": true
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject",
+        "step:copy",
+        "field:copy.notLegendary",
+        "field:copy.token"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

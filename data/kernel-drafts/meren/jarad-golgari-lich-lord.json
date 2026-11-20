@@ -1,0 +1,163 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "Jarad gets +1/+1 for each creature card in your graveyard.",
+      "static": {
+        "affects": "self",
+        "modify": [
+          {
+            "pt": {
+              "power": {
+                "math": "*",
+                "args": [
+                  1,
+                  {
+                    "ref": "count",
+                    "of": {
+                      "types": [
+                        "creature"
+                      ],
+                      "zone": "graveyard",
+                      "owner": "you"
+                    }
+                  }
+                ]
+              },
+              "toughness": {
+                "math": "*",
+                "args": [
+                  1,
+                  {
+                    "ref": "count",
+                    "of": {
+                      "types": [
+                        "creature"
+                      ],
+                      "zone": "graveyard",
+                      "owner": "you"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "{1}{B}{G}, Sacrifice another creature: Each opponent loses life equal to the sacrificed creature's power.",
+      "costs": [
+        {
+          "mana": "{1}{B}{G}"
+        },
+        {
+          "sacrifice": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you",
+            "another": true
+          },
+          "count": 1,
+          "prompt": {
+            "title": "Jarad, Golgari Lich Lord: choose what to sacrifice",
+            "instruction": "Choose 1 another creature you control to sacrifice.",
+            "source": {
+              "card": "Jarad, Golgari Lich Lord",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "life_change",
+          "who": "each_opponent",
+          "lose": true,
+          "amount": {
+            "ref": "stat",
+            "of": "sacrificed",
+            "stat": "power"
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "ref:sacrificed",
+        "cost:sacrifice",
+        "quantity:stat",
+        "field:life_change.amount",
+        "field:life_change.lose",
+        "field:life_change.who"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "activated",
+      "text": "Sacrifice a Swamp and a Forest: Return this card from your graveyard to your hand.",
+      "zone": "graveyard",
+      "costs": [
+        {
+          "sacrifice": {
+            "subtypes": [
+              "Swamp"
+            ],
+            "controller": "you"
+          },
+          "count": 1,
+          "prompt": {
+            "title": "Jarad, Golgari Lich Lord: choose what to sacrifice",
+            "instruction": "Choose 1 Swamp you control to sacrifice.",
+            "source": {
+              "card": "Jarad, Golgari Lich Lord",
+              "ability": "a3"
+            }
+          }
+        },
+        {
+          "sacrifice": {
+            "subtypes": [
+              "Forest"
+            ],
+            "controller": "you"
+          },
+          "count": 1,
+          "prompt": {
+            "title": "Jarad, Golgari Lich Lord: choose what to sacrifice",
+            "instruction": "Choose 1 Forest you control to sacrifice.",
+            "source": {
+              "card": "Jarad, Golgari Lich Lord",
+              "ability": "a3"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "move_card_zone",
+          "target": "self",
+          "from": "graveyard",
+          "moveTo": "hand"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "zone:graveyard",
+        "cost:sacrifice",
+        "field:move_card_zone.from"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

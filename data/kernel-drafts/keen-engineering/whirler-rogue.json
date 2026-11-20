@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "When this creature enters, create two 1/1 colorless Thopter artifact creature tokens with flying.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 2,
+          "tokenName": "Thopter",
+          "tokenPower": 1,
+          "tokenToughness": 1,
+          "tokenColors": [
+            "colorless"
+          ],
+          "tokenTypeLine": "Artifact Creature — Thopter",
+          "tokenKeywords": [
+            "flying"
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:create_tokens.tokenKeywords"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "Tap two untapped artifacts you control: Target creature can't be blocked this turn.",
+      "costs": [
+        {
+          "tapOther": {
+            "types": [
+              "artifact"
+            ],
+            "controller": "you"
+          },
+          "count": 2,
+          "prompt": {
+            "title": "Whirler Rogue: choose what to tap",
+            "instruction": "Choose 2 untapped artifacts you control to tap.",
+            "source": {
+              "card": "Whirler Rogue",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Whirler Rogue: choose a target",
+            "instruction": "Choose target creature.",
+            "source": {
+              "card": "Whirler Rogue",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "grant_effect",
+          "target": "t1",
+          "modify": [
+            {
+              "cant": "be_blocked"
+            }
+          ],
+          "duration": "until_end_of_turn"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "cost:tapOther",
+        "step:grant_effect",
+        "field:grant_effect.modify"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

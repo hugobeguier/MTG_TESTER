@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "replacement",
+      "text": "If you would create a Clue, Food, or Treasure token, instead create one of each.",
+      "replacement": {
+        "event": "would_create_token",
+        "subject": {
+          "anyOf": [
+            {
+              "subtypes": [
+                "Clue"
+              ]
+            },
+            {
+              "subtypes": [
+                "Food"
+              ]
+            },
+            {
+              "subtypes": [
+                "Treasure"
+              ]
+            }
+          ],
+          "token": true,
+          "controller": "you"
+        },
+        "result": {
+          "mode": "instead",
+          "steps": [
+            {
+              "kind": "create_tokens",
+              "tokenCount": 1,
+              "tokenName": "Clue",
+              "tokenColors": [
+                "colorless"
+              ],
+              "tokenTypeLine": "Artifact — Clue"
+            },
+            {
+              "kind": "create_tokens",
+              "tokenCount": 1,
+              "tokenName": "Food",
+              "tokenColors": [
+                "colorless"
+              ],
+              "tokenTypeLine": "Artifact — Food"
+            },
+            {
+              "kind": "create_tokens",
+              "tokenCount": 1,
+              "tokenName": "Treasure",
+              "tokenColors": [
+                "colorless"
+              ],
+              "tokenTypeLine": "Artifact — Treasure"
+            }
+          ]
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_create_token"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

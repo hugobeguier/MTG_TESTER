@@ -1,0 +1,108 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Imprint — Whenever a nontoken creature dies, you may exile that card. If you do, return each other card exiled with this artifact to its owner's graveyard.",
+      "trigger": {
+        "event": "dies",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "token": false
+        }
+      },
+      "steps": [
+        {
+          "kind": "exile_target",
+          "id": "e1",
+          "target": "event_object",
+          "optional": true,
+          "linkExile": true,
+          "src": 0,
+          "prompt": {
+            "title": "Mimic Vat: optional",
+            "instruction": "Do you want to exile that object?",
+            "source": {
+              "card": "Mimic Vat",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "kind": "move_card_zone",
+          "target": "linked_exile",
+          "all": true,
+          "filter": {
+            "another": true
+          },
+          "excludeLatest": true,
+          "from": "exile",
+          "moveTo": "graveyard",
+          "src": 1,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "step_done",
+              "step": "e1"
+            },
+            "src": 1
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "ref:linked_exile",
+        "trigger:subject",
+        "field:exile_target.linkExile",
+        "field:move_card_zone.all",
+        "field:move_card_zone.excludeLatest",
+        "field:move_card_zone.filter",
+        "field:move_card_zone.from",
+        "predicate:step_done"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "{3}, {T}: Create a token that's a copy of a card exiled with this artifact. It gains haste. Exile it at the beginning of the next end step.",
+      "costs": [
+        {
+          "mana": "{3}"
+        },
+        {
+          "tap": "self"
+        }
+      ],
+      "steps": [
+        {
+          "kind": "copy",
+          "target": "linked_exile",
+          "token": true,
+          "gainKeywords": [
+            "haste"
+          ],
+          "exileAt": "next_end_step",
+          "src": 0
+        }
+      ],
+      "srcs": [
+        1,
+        2
+      ],
+      "implementation": "needed",
+      "needs": [
+        "ref:linked_exile",
+        "step:copy",
+        "field:copy.exileAt",
+        "field:copy.gainKeywords",
+        "field:copy.token"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

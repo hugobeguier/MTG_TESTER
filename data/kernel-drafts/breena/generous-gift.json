@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "kind": "spell_effect",
+      "text": "Destroy target permanent. Its controller creates a 3/3 green Elephant creature token.",
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Generous Gift: choose a target",
+            "instruction": "Choose target permanent.",
+            "source": {
+              "card": "Generous Gift",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "destroy_target",
+          "target": "t1",
+          "src": 0
+        },
+        {
+          "kind": "create_tokens",
+          "who": "controller_of_target",
+          "tokenCount": 1,
+          "tokenName": "Elephant",
+          "tokenPower": 3,
+          "tokenToughness": 3,
+          "tokenColors": [
+            "green"
+          ],
+          "tokenTypeLine": "Creature — Elephant",
+          "src": 1
+        }
+      ],
+      "id": "a1",
+      "implementation": "needed",
+      "needs": [
+        "field:create_tokens.who"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Myriad, myriad (Whenever this creature attacks, for each opponent other than defending player, you may create a token that's a copy of this creature that's tapped and attacking that player or a planeswalker they control. Then do it again. Exile the tokens at end of combat.)",
+      "keyword": {
+        "name": "myriad"
+      },
+      "scripted": {
+        "handler": "myriad"
+      },
+      "trigger": {
+        "event": "attack",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "copy",
+          "target": "self",
+          "forEach": "opponent_other_than_defending_player",
+          "tapped": true,
+          "attacking": true,
+          "optional": true,
+          "exileAt": "end_of_combat",
+          "token": true,
+          "prompt": {
+            "title": "Scurry of Squirrels: optional",
+            "instruction": "Do you want to copy Scurry of Squirrels?",
+            "source": {
+              "card": "Scurry of Squirrels",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "scripted:myriad",
+        "step:copy",
+        "field:copy.attacking",
+        "field:copy.exileAt",
+        "field:copy.forEach",
+        "field:copy.tapped",
+        "field:copy.token"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever this creature deals combat damage to a player, put a +1/+1 counter on target creature you control.",
+      "trigger": {
+        "event": "deals_combat_damage_to_player",
+        "subject": "self"
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Scurry of Squirrels: choose a target",
+            "instruction": "Choose target creature you control.",
+            "source": {
+              "card": "Scurry of Squirrels",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "add_counters",
+          "on": "t1",
+          "counterKind": "+1/+1",
+          "amount": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:add_counters",
+        "field:add_counters.on"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

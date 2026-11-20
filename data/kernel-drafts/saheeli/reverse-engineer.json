@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Improvise (Your artifacts can help cast this spell. Each artifact you tap after you're done activating mana abilities pays for {1}.)",
+      "keyword": {
+        "name": "improvise"
+      },
+      "scripted": {
+        "handler": "improvise"
+      },
+      "implementation": "needed",
+      "needs": [
+        "scripted:improvise",
+        "keyword:improvise"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "spell_effect",
+      "text": "Draw three cards.",
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": 3,
+          "who": "you"
+        }
+      ],
+      "implementation": "implemented",
+      "needs": []
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

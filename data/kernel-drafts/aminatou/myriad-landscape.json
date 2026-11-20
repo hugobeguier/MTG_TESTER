@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "replacement",
+      "text": "This land enters tapped.",
+      "replacement": {
+        "event": "would_enter",
+        "result": {
+          "mode": "modify",
+          "set": {
+            "tapped": true
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_enter"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "mana",
+      "text": "{T}: Add {C}.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{C}"
+          }
+        ]
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "activated",
+      "text": "{2}, {T}, Sacrifice this land: Search your library for up to two basic land cards that share a land type, put them onto the battlefield tapped, then shuffle.",
+      "costs": [
+        {
+          "mana": "{2}"
+        },
+        {
+          "tap": "self"
+        },
+        {
+          "sacrifice": "self",
+          "count": 1
+        }
+      ],
+      "scripted": {
+        "handler": "cards_share_a_land_type"
+      },
+      "steps": [
+        {
+          "kind": "search_library",
+          "who": "you",
+          "filter": {
+            "types": [
+              "land"
+            ],
+            "supertypes": [
+              "basic"
+            ]
+          },
+          "count": 2,
+          "upTo": true,
+          "min": 0,
+          "to": "battlefield",
+          "tapped": true,
+          "shuffle": true,
+          "prompt": {
+            "title": "Myriad Landscape: search",
+            "instruction": "Choose a basic land from the library.",
+            "source": {
+              "card": "Myriad Landscape",
+              "ability": "a3"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "scripted:cards_share_a_land_type",
+        "cost:sacrifice",
+        "step:search_library",
+        "field:search_library.count",
+        "field:search_library.filter",
+        "field:search_library.min",
+        "field:search_library.shuffle",
+        "field:search_library.tapped",
+        "field:search_library.to",
+        "field:search_library.upTo"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

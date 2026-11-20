@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "keyword",
+      "text": "Lifelink (Damage dealt by this creature also causes you to gain that much life.)",
+      "keyword": {
+        "name": "lifelink"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "static",
+      "text": "Pegasus creatures you control have lifelink.",
+      "static": {
+        "affects": {
+          "types": [
+            "creature"
+          ],
+          "subtypes": [
+            "Pegasus"
+          ],
+          "controller": "you"
+        },
+        "modify": [
+          {
+            "grant": "lifelink"
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "id": "a4",
+      "kind": "triggered",
+      "text": "Constellation — Whenever an enchantment you control enters, create a 2/2 white Pegasus creature token with flying.",
+      "trigger": {
+        "event": "etb",
+        "subject": {
+          "types": [
+            "enchantment"
+          ],
+          "controller": "you"
+        }
+      },
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Pegasus",
+          "tokenPower": 2,
+          "tokenToughness": 2,
+          "tokenColors": [
+            "white"
+          ],
+          "tokenTypeLine": "Creature — Pegasus",
+          "tokenKeywords": [
+            "flying"
+          ],
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject",
+        "field:create_tokens.tokenKeywords"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

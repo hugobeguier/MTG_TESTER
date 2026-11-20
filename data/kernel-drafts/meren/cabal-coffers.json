@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "mana",
+      "text": "{2}, {T}: Add {B} for each Swamp you control.",
+      "costs": [
+        {
+          "mana": "{2}"
+        },
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "perCount": {
+              "subtypes": [
+                "Swamp"
+              ],
+              "controller": "you"
+            },
+            "color": "{B}"
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "mana:variable"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "quantity",
+        "reason": "the \"for each\" count is ManaSpec.perCount"
+      }
+    ]
+  }
+}

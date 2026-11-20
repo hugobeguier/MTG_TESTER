@@ -1,0 +1,144 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever one or more Dragons you control deal combat damage to an opponent, choose one that hasn't been chosen this turn —\n• Destroy target artifact that opponent controls.\n• This creature deals 4 damage to each other opponent.\n• Exile the top card of your library. You may play it this turn.",
+      "trigger": {
+        "event": "deals_combat_damage_to_player",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "subtypes": [
+            "Dragon"
+          ],
+          "controller": "you"
+        },
+        "batch": true
+      },
+      "modes": {
+        "choose": {
+          "min": 1,
+          "max": 1
+        },
+        "distinct": true,
+        "options": [
+          {
+            "id": "m1",
+            "text": "Destroy target artifact that opponent controls.",
+            "targets": [
+              {
+                "id": "t1",
+                "what": "object",
+                "filter": {
+                  "types": [
+                    "artifact"
+                  ],
+                  "controller": "opponent"
+                },
+                "count": {
+                  "min": 1,
+                  "max": 1
+                },
+                "prompt": {
+                  "title": "Parapet Thrasher: choose a target",
+                  "instruction": "Choose target artifact an opponent controls.",
+                  "source": {
+                    "card": "Parapet Thrasher",
+                    "ability": "a2"
+                  }
+                }
+              }
+            ],
+            "steps": [
+              {
+                "kind": "destroy_target",
+                "target": "t1"
+              }
+            ]
+          },
+          {
+            "id": "m2",
+            "text": "This creature deals 4 damage to each other opponent.",
+            "steps": [
+              {
+                "kind": "damage_target",
+                "source": "self",
+                "who": "each_opponent",
+                "excludeWho": "that_player",
+                "amount": 4
+              }
+            ]
+          },
+          {
+            "id": "m3",
+            "text": "Exile the top card of your library. You may play it this turn.",
+            "steps": [
+              {
+                "kind": "move_card_zone",
+                "who": "you",
+                "moveFrom": "library",
+                "moveTo": "exile",
+                "moveCount": 1,
+                "position": "top",
+                "saveAs": "exiled"
+              },
+              {
+                "kind": "permission_to_play",
+                "what": "exiled",
+                "optional": true,
+                "duration": "until_end_of_turn",
+                "prompt": {
+                  "title": "Parapet Thrasher: optional",
+                  "instruction": "Do you want to you may play exiled until end of turn?",
+                  "source": {
+                    "card": "Parapet Thrasher",
+                    "ability": "a2"
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "repeatRestriction": "this_turn",
+        "prompt": {
+          "title": "Parapet Thrasher: choose a mode",
+          "instruction": "Choose one mode.",
+          "source": {
+            "card": "Parapet Thrasher",
+            "ability": "a2"
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "modes",
+        "modes:repeat_restriction",
+        "trigger:batch",
+        "trigger:subject",
+        "field:damage_target.excludeWho",
+        "field:damage_target.source",
+        "field:damage_target.who",
+        "field:move_card_zone.position",
+        "field:move_card_zone.saveAs",
+        "step:permission_to_play",
+        "field:permission_to_play.what"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

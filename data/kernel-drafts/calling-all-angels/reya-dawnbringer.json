@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "At the beginning of your upkeep, you may return target creature card from your graveyard to the battlefield.",
+      "trigger": {
+        "event": "begin_step",
+        "step": "upkeep",
+        "whose": "yours"
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "zone": "graveyard",
+            "owner": "you"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Reya Dawnbringer: choose a target",
+            "instruction": "Choose target creature card in your graveyard.",
+            "source": {
+              "card": "Reya Dawnbringer",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "src": 0,
+          "kind": "reanimate",
+          "target": "t1",
+          "who": "you",
+          "optional": true,
+          "prompt": {
+            "title": "Reya Dawnbringer: optional",
+            "instruction": "Do you want to return target creature card in your graveyard from the graveyard to the battlefield?",
+            "source": {
+              "card": "Reya Dawnbringer",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "implementation": "implemented",
+      "needs": []
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "activated",
+      "text": "Tap five untapped Zombies you control: Put target creature card from a graveyard onto the battlefield under your control.",
+      "costs": [
+        {
+          "tapOther": {
+            "subtypes": [
+              "Zombie"
+            ],
+            "controller": "you",
+            "tapped": false
+          },
+          "count": 5,
+          "prompt": {
+            "title": "Gravespawn Sovereign: choose what to tap",
+            "instruction": "Choose 5 untapped untapped Zombies you control to tap.",
+            "source": {
+              "card": "Gravespawn Sovereign",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "zone": "graveyard"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Gravespawn Sovereign: choose a target",
+            "instruction": "Choose target creature card in a graveyard.",
+            "source": {
+              "card": "Gravespawn Sovereign",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "reanimate",
+          "target": "t1",
+          "who": "you",
+          "anyGraveyard": true
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "cost:tapOther"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

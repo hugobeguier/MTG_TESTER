@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "When this creature enters, mill three cards. You may put a land card from your graveyard on top of your library. (To mill a card, put the top card of your library into your graveyard.)",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "mill",
+          "who": "you",
+          "amount": 3,
+          "src": 0
+        },
+        {
+          "kind": "choose",
+          "id": "s1",
+          "optional": true,
+          "from": {
+            "types": [
+              "land"
+            ],
+            "zone": "graveyard",
+            "owner": "you"
+          },
+          "count": 1,
+          "saveAs": "chosen",
+          "src": 1,
+          "prompt": {
+            "title": "Glowspore Shaman: optional",
+            "instruction": "Do you want to choose a land card in your graveyard?",
+            "source": {
+              "card": "Glowspore Shaman",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "kind": "move_card_zone",
+          "target": "chosen",
+          "from": "graveyard",
+          "moveTo": "library",
+          "position": "top",
+          "src": 1,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "step_done",
+              "step": "s1"
+            },
+            "src": 1
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:choose",
+        "field:choose.count",
+        "field:choose.from",
+        "field:choose.saveAs",
+        "field:move_card_zone.from",
+        "field:move_card_zone.position",
+        "predicate:step_done"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "When this creature enters, you may destroy target artifact or enchantment.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "anyOf": [
+              {
+                "types": [
+                  "artifact"
+                ]
+              },
+              {
+                "types": [
+                  "enchantment"
+                ]
+              }
+            ]
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Reclamation Sage: choose a target",
+            "instruction": "Choose target artifact or enchantment.",
+            "source": {
+              "card": "Reclamation Sage",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "destroy_target",
+          "target": "t1",
+          "optional": true,
+          "prompt": {
+            "title": "Reclamation Sage: optional",
+            "instruction": "Do you want to destroy target artifact or enchantment?",
+            "source": {
+              "card": "Reclamation Sage",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "implementation": "implemented",
+      "needs": []
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

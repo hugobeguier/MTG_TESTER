@@ -1,0 +1,122 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "replacement",
+      "text": "This land enters tapped.",
+      "replacement": {
+        "event": "would_enter",
+        "result": {
+          "mode": "modify",
+          "set": {
+            "tapped": true
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_enter"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "mana",
+      "text": "{T}: Add {U}.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{U}"
+          }
+        ]
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "mana",
+      "text": "{1}{U}, {T}, Exile seven cards from your graveyard: Add {U}. When you spend this mana to cast a spell or activate an ability, copy that spell or ability. You may choose new targets for the copy. (Mana abilities can't be copied.)",
+      "costs": [
+        {
+          "mana": "{1}{U}"
+        },
+        {
+          "tap": "self"
+        },
+        {
+          "exileFrom": "graveyard",
+          "what": {
+            "zone": "graveyard",
+            "owner": "you"
+          },
+          "count": 7,
+          "prompt": {
+            "title": "Sunken Palace: choose what to exile",
+            "instruction": "Choose 7 cards in your graveyard to exile.",
+            "source": {
+              "card": "Sunken Palace",
+              "ability": "a3"
+            }
+          }
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{U}"
+          }
+        ]
+      },
+      "scripted": {
+        "handler": "copy_spell_or_ability_when_mana_spent"
+      },
+      "srcs": [
+        0,
+        2
+      ],
+      "steps": [
+        {
+          "kind": "copy",
+          "target": "event_object",
+          "optional": true,
+          "chooseNewTargets": true,
+          "src": 1,
+          "prompt": {
+            "title": "Sunken Palace: optional",
+            "instruction": "Do you want to copy that object?",
+            "source": {
+              "card": "Sunken Palace",
+              "ability": "a3"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "scripted:copy_spell_or_ability_when_mana_spent",
+        "cost:exileFrom",
+        "step:copy",
+        "field:copy.chooseNewTargets"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "trigger",
+        "reason": "the rider is the scripted marker"
+      },
+      {
+        "lexeme": "may",
+        "reason": "choosing new targets is the chooseNewTargets flag"
+      }
+    ]
+  }
+}

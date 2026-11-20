@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Constellation — Whenever this creature or another enchantment you control enters, creatures your opponents control get -1/-1 until end of turn.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self",
+        "alsoOn": [
+          {
+            "event": "etb",
+            "subject": {
+              "types": [
+                "enchantment"
+              ],
+              "controller": "you",
+              "another": true
+            }
+          }
+        ]
+      },
+      "steps": [
+        {
+          "kind": "mass_pump",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "controller": "opponent"
+          },
+          "power": -1,
+          "toughness": -1,
+          "duration": "until_end_of_turn",
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:multi_event",
+        "trigger:subject",
+        "field:mass_pump.filter"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

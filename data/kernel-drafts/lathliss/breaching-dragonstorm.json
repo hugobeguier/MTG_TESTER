@@ -1,0 +1,116 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "When this enchantment enters, exile cards from the top of your library until you exile a nonland card. You may cast it without paying its mana cost if that spell's mana value is 8 or less. If you don't, put that card into your hand.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "move_card_zone",
+          "who": "you",
+          "moveFrom": "library",
+          "moveTo": "exile",
+          "position": "top",
+          "until": {
+            "notTypes": [
+              "land"
+            ]
+          },
+          "saveAs": "event_object",
+          "src": 0
+        },
+        {
+          "kind": "permission_to_play",
+          "what": "event_object",
+          "withoutPaying": true,
+          "optional": true,
+          "src": 1,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "matches",
+              "obj": "event_object",
+              "filter": {
+                "mv": {
+                  "op": "<=",
+                  "value": 8
+                }
+              }
+            },
+            "src": 1
+          },
+          "prompt": {
+            "title": "Breaching Dragonstorm: optional",
+            "instruction": "Do you want to you may play event_object without paying its mana cost?",
+            "source": {
+              "card": "Breaching Dragonstorm",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "kind": "move_card_zone",
+          "target": "event_object",
+          "moveTo": "hand",
+          "src": 2,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "matches",
+              "obj": "event_object",
+              "filter": {
+                "zone": "exile"
+              }
+            },
+            "src": 2
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:move_card_zone.position",
+        "field:move_card_zone.saveAs",
+        "field:move_card_zone.until",
+        "step:permission_to_play",
+        "field:permission_to_play.what",
+        "field:permission_to_play.withoutPaying",
+        "predicate:matches"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "When a Dragon you control enters, return this enchantment to its owner's hand.",
+      "trigger": {
+        "event": "etb",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "subtypes": [
+            "Dragon"
+          ],
+          "controller": "you"
+        }
+      },
+      "steps": [
+        {
+          "kind": "bounce_target",
+          "target": "self"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

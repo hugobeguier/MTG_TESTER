@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "kind": "keyword",
+      "text": "Menace",
+      "keyword": {
+        "name": "menace"
+      },
+      "id": "a1",
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "kind": "triggered",
+      "text": "Whenever a creature you control with a counter on it deals combat damage to a player, you draw a card and you lose 1 life.",
+      "trigger": {
+        "event": "deals_combat_damage_to_player",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "controller": "you",
+          "hasCounter": "any"
+        }
+      },
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "who": "you",
+          "amount": 1,
+          "src": 0
+        },
+        {
+          "kind": "life_change",
+          "who": "you",
+          "lifeDelta": -1,
+          "src": 0
+        }
+      ],
+      "id": "a2",
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

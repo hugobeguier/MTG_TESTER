@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Choose one —\n• Abrade deals 3 damage to target creature.\n• Destroy target artifact.",
+      "modes": {
+        "choose": {
+          "min": 1,
+          "max": 1
+        },
+        "distinct": true,
+        "options": [
+          {
+            "id": "m1",
+            "text": "Abrade deals 3 damage to target creature.",
+            "targets": [
+              {
+                "id": "t1",
+                "what": "object",
+                "filter": {
+                  "types": [
+                    "creature"
+                  ]
+                },
+                "count": {
+                  "min": 1,
+                  "max": 1
+                },
+                "prompt": {
+                  "title": "Abrade: choose a target",
+                  "instruction": "Choose target creature.",
+                  "source": {
+                    "card": "Abrade",
+                    "ability": "a1"
+                  }
+                }
+              }
+            ],
+            "steps": [
+              {
+                "kind": "damage_target",
+                "target": "t1",
+                "amount": 3
+              }
+            ]
+          },
+          {
+            "id": "m2",
+            "text": "Destroy target artifact.",
+            "targets": [
+              {
+                "id": "t1",
+                "what": "object",
+                "filter": {
+                  "types": [
+                    "artifact"
+                  ]
+                },
+                "count": {
+                  "min": 1,
+                  "max": 1
+                },
+                "prompt": {
+                  "title": "Abrade: choose a target",
+                  "instruction": "Choose target artifact.",
+                  "source": {
+                    "card": "Abrade",
+                    "ability": "a1"
+                  }
+                }
+              }
+            ],
+            "steps": [
+              {
+                "kind": "destroy_target",
+                "target": "t1"
+              }
+            ]
+          }
+        ],
+        "prompt": {
+          "title": "Abrade: choose a mode",
+          "instruction": "Choose one mode.",
+          "source": {
+            "card": "Abrade",
+            "ability": "a1"
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "modes"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

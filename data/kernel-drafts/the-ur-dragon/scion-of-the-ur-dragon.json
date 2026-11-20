@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "{2}: Search your library for a Dragon permanent card and put it into your graveyard. If you do, Scion of the Ur-Dragon becomes a copy of that card until end of turn. Then shuffle.",
+      "costs": [
+        {
+          "mana": "{2}"
+        }
+      ],
+      "steps": [
+        {
+          "kind": "choose",
+          "from": {
+            "subtypes": [
+              "Dragon"
+            ],
+            "types": [
+              "creature"
+            ],
+            "zone": "library",
+            "owner": "you"
+          },
+          "count": 1,
+          "saveAs": "chosen",
+          "src": 0,
+          "prompt": {
+            "title": "Scion of the Ur-Dragon: choose",
+            "instruction": "Choose a Dragon card in your library.",
+            "source": {
+              "card": "Scion of the Ur-Dragon",
+              "ability": "a2"
+            }
+          }
+        },
+        {
+          "kind": "move_card_zone",
+          "target": "chosen",
+          "moveFrom": "library",
+          "moveTo": "graveyard",
+          "id": "s1",
+          "src": 0
+        },
+        {
+          "kind": "grant_effect",
+          "target": "self",
+          "modify": [
+            {
+              "copyOf": "chosen"
+            }
+          ],
+          "duration": "until_end_of_turn",
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "step_done",
+              "step": "s1"
+            },
+            "src": 1
+          },
+          "src": 1
+        },
+        {
+          "kind": "shuffle",
+          "who": "you",
+          "src": 2
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:choose",
+        "field:choose.count",
+        "field:choose.from",
+        "field:choose.saveAs",
+        "step:grant_effect",
+        "field:grant_effect.modify",
+        "predicate:step_done",
+        "step:shuffle"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Destroy all creatures.",
+      "steps": [
+        {
+          "src": 0,
+          "kind": "destroy_all",
+          "targetType": "creature"
+        }
+      ],
+      "implementation": "implemented",
+      "needs": []
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

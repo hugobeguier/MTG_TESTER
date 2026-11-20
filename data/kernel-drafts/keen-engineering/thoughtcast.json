@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Affinity for artifacts (This spell costs {1} less to cast for each artifact you control.)",
+      "keyword": {
+        "name": "affinity",
+        "param": "artifacts"
+      },
+      "costReduction": {
+        "per": {
+          "types": [
+            "artifact"
+          ],
+          "controller": "you"
+        },
+        "amount": 1,
+        "applies": "generic"
+      },
+      "implementation": "needed",
+      "needs": [
+        "cost_reduction"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "spell_effect",
+      "text": "Draw two cards.",
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": 2,
+          "who": "you"
+        }
+      ],
+      "implementation": "implemented",
+      "needs": []
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

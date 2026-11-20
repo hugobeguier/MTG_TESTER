@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever you gain life for the first time each turn, surveil 1. (Look at the top card of your library. You may put it into your graveyard.)",
+      "trigger": {
+        "event": "gain_life",
+        "whose": "yours",
+        "nth": {
+          "n": 1,
+          "per": "turn"
+        }
+      },
+      "steps": [
+        {
+          "src": 0,
+          "kind": "surveil",
+          "amount": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:gain_life",
+        "trigger:nth",
+        "step:surveil"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

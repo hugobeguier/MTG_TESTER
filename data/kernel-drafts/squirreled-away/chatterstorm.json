@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Create a 1/1 green Squirrel creature token.",
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Squirrel",
+          "tokenPower": 1,
+          "tokenToughness": 1,
+          "tokenColors": [
+            "green"
+          ],
+          "tokenTypeLine": "Creature — Squirrel"
+        }
+      ],
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Storm (When you cast this spell, copy it for each spell cast before it this turn.)",
+      "keyword": {
+        "name": "storm"
+      },
+      "zone": "stack",
+      "scripted": {
+        "handler": "storm"
+      },
+      "trigger": {
+        "event": "cast",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "copy",
+          "target": "self",
+          "count": {
+            "ref": "event_amount"
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "scripted:storm",
+        "zone:stack",
+        "step:copy",
+        "field:copy.count"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

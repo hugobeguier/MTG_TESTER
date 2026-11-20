@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "replacement",
+      "text": "This creature enters with a +1/+1 counter on it for each Zombie card in your graveyard.",
+      "replacement": {
+        "event": "would_enter",
+        "result": {
+          "mode": "modify",
+          "set": {
+            "counters": {
+              "kind": "+1/+1",
+              "amount": {
+                "ref": "count",
+                "of": {
+                  "subtypes": [
+                    "Zombie"
+                  ],
+                  "zone": "graveyard",
+                  "owner": "you"
+                }
+              }
+            }
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_enter"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever you cast a Zombie spell, create a tapped 2/2 black Zombie creature token.",
+      "trigger": {
+        "event": "cast",
+        "subject": {
+          "subtypes": [
+            "Zombie"
+          ]
+        },
+        "whose": "yours"
+      },
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Zombie",
+          "tokenPower": 2,
+          "tokenToughness": 2,
+          "tokenColors": [
+            "black"
+          ],
+          "tokenTypeLine": "Creature — Zombie",
+          "tokenTapped": true
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:create_tokens.tokenTapped"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

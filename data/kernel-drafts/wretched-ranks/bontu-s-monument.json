@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "Black creature spells you cast cost {1} less to cast.",
+      "static": {
+        "affects": "you",
+        "modify": [
+          {
+            "costMod": {
+              "filter": {
+                "types": [
+                  "creature"
+                ],
+                "colors": [
+                  "black"
+                ]
+              },
+              "delta": -1
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever you cast a creature spell, each opponent loses 1 life and you gain 1 life.",
+      "trigger": {
+        "event": "cast",
+        "subject": {
+          "types": [
+            "creature"
+          ]
+        },
+        "whose": "yours"
+      },
+      "steps": [
+        {
+          "kind": "life_change",
+          "who": "each_opponent",
+          "lifeDelta": -1
+        },
+        {
+          "kind": "life_change",
+          "who": "you",
+          "lifeDelta": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:life_change.who"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "keyword",
+      "text": "Vigilance",
+      "keyword": {
+        "name": "vigilance"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "replacement",
+      "text": "Each other Angel you control enters with an additional +1/+1 counter on it for each Angel you already control.",
+      "replacement": {
+        "event": "would_enter",
+        "subject": {
+          "subtypes": [
+            "Angel"
+          ],
+          "controller": "you",
+          "another": true
+        },
+        "result": {
+          "mode": "modify",
+          "set": {
+            "additionalCounters": {
+              "kind": "+1/+1",
+              "amount": 1,
+              "per": {
+                "ref": "count",
+                "of": {
+                  "subtypes": [
+                    "Angel"
+                  ],
+                  "controller": "you"
+                }
+              }
+            }
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_enter"
+      ]
+    },
+    {
+      "id": "a4",
+      "kind": "mana",
+      "text": "{T}: Add {W}. Spend this mana only to cast an Angel spell.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{W}",
+            "restriction": {
+              "subtypes": [
+                "Angel"
+              ]
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "mana:restriction"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

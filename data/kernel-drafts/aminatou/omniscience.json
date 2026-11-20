@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "scripted",
+      "optional": true,
+      "text": "You may cast spells from your hand without paying their mana costs.",
+      "scripted": {
+        "handler": "free_cast_from_hand"
+      },
+      "prompt": {
+        "title": "Omniscience: optional",
+        "instruction": "Do you want to use this ability?",
+        "source": {
+          "card": "Omniscience",
+          "ability": "a1"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "scripted:free_cast_from_hand"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

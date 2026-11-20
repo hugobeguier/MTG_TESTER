@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "replacement",
+      "text": "This land enters tapped unless you control an Island or a Mountain.",
+      "replacement": {
+        "event": "would_enter",
+        "condition": {
+          "not": {
+            "check": "controls",
+            "filter": {
+              "anyOf": [
+                {
+                  "subtypes": [
+                    "Island"
+                  ]
+                },
+                {
+                  "subtypes": [
+                    "Mountain"
+                  ]
+                }
+              ],
+              "controller": "you"
+            }
+          }
+        },
+        "result": {
+          "mode": "modify",
+          "set": {
+            "tapped": true
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_enter"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "mana",
+      "text": "{T}: Add {U} or {R}.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{U}"
+          },
+          {
+            "colors": "{R}"
+          }
+        ]
+      },
+      "implementation": "implemented",
+      "needs": []
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

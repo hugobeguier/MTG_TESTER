@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "When this creature enters, each player sacrifices a creature or planeswalker of their choice. Each player who can't discards a card.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "sacrifice_permanent",
+          "id": "s1",
+          "who": "each_player",
+          "filter": {
+            "anyOf": [
+              {
+                "types": [
+                  "creature"
+                ]
+              },
+              {
+                "types": [
+                  "planeswalker"
+                ]
+              }
+            ]
+          },
+          "src": 0,
+          "prompt": {
+            "title": "Plaguecrafter: sacrifice",
+            "instruction": "Choose a permanent to sacrifice.",
+            "source": {
+              "card": "Plaguecrafter",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "kind": "discard",
+          "who": "each_player",
+          "amount": 1,
+          "src": 1,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "not": {
+                "check": "step_done",
+                "step": "s1"
+              }
+            },
+            "src": 1
+          },
+          "prompt": {
+            "title": "Plaguecrafter: discard",
+            "instruction": "Choose a card to discard.",
+            "source": {
+              "card": "Plaguecrafter",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:sacrifice_permanent.filter",
+        "field:sacrifice_permanent.who",
+        "field:discard.who",
+        "predicate:not",
+        "predicate:step_done"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

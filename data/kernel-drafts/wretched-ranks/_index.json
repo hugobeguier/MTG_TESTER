@@ -1,0 +1,282 @@
+{
+  "deck": "Wretched Ranks",
+  "cards": [
+    {
+      "slug": "ghoulcaller-gisa",
+      "name": "Ghoulcaller Gisa"
+    },
+    {
+      "slug": "ambition-s-cost",
+      "name": "Ambition's Cost"
+    },
+    {
+      "slug": "arcane-signet",
+      "name": "Arcane Signet"
+    },
+    {
+      "slug": "army-of-the-damned",
+      "name": "Army of the Damned"
+    },
+    {
+      "slug": "ayara-first-of-locthwain",
+      "name": "Ayara, First of Locthwain"
+    },
+    {
+      "slug": "bad-moon",
+      "name": "Bad Moon"
+    },
+    {
+      "slug": "barren-moor",
+      "name": "Barren Moor"
+    },
+    {
+      "slug": "bojuka-bog",
+      "name": "Bojuka Bog"
+    },
+    {
+      "slug": "bonehoard",
+      "name": "Bonehoard"
+    },
+    {
+      "slug": "bontu-s-monument",
+      "name": "Bontu's Monument"
+    },
+    {
+      "slug": "carrion-feeder",
+      "name": "Carrion Feeder"
+    },
+    {
+      "slug": "castle-locthwain",
+      "name": "Castle Locthwain"
+    },
+    {
+      "slug": "cemetery-reaper",
+      "name": "Cemetery Reaper"
+    },
+    {
+      "slug": "cemetery-recruitment",
+      "name": "Cemetery Recruitment"
+    },
+    {
+      "slug": "cemetery-tampering",
+      "name": "Cemetery Tampering"
+    },
+    {
+      "slug": "champion-of-the-perished",
+      "name": "Champion of the Perished"
+    },
+    {
+      "slug": "charcoal-diamond",
+      "name": "Charcoal Diamond"
+    },
+    {
+      "slug": "commander-s-sphere",
+      "name": "Commander's Sphere"
+    },
+    {
+      "slug": "consumed-by-greed",
+      "name": "Consumed by Greed"
+    },
+    {
+      "slug": "consuming-corruption",
+      "name": "Consuming Corruption"
+    },
+    {
+      "slug": "crown-of-gondor",
+      "name": "Crown of Gondor"
+    },
+    {
+      "slug": "cryptbreaker",
+      "name": "Cryptbreaker"
+    },
+    {
+      "slug": "death-baron",
+      "name": "Death Baron"
+    },
+    {
+      "slug": "diregraf-colossus",
+      "name": "Diregraf Colossus"
+    },
+    {
+      "slug": "disciple-of-bolas",
+      "name": "Disciple of Bolas"
+    },
+    {
+      "slug": "disciple-of-griselbrand",
+      "name": "Disciple of Griselbrand"
+    },
+    {
+      "slug": "dissection-tools",
+      "name": "Dissection Tools"
+    },
+    {
+      "slug": "endless-ranks-of-the-dead",
+      "name": "Endless Ranks of the Dead"
+    },
+    {
+      "slug": "fleshbag-marauder",
+      "name": "Fleshbag Marauder"
+    },
+    {
+      "slug": "geier-reach-sanitarium",
+      "name": "Geier Reach Sanitarium"
+    },
+    {
+      "slug": "go-for-the-throat",
+      "name": "Go for the Throat"
+    },
+    {
+      "slug": "grave-titan",
+      "name": "Grave Titan"
+    },
+    {
+      "slug": "graveborn-muse",
+      "name": "Graveborn Muse"
+    },
+    {
+      "slug": "gravecrawler",
+      "name": "Gravecrawler"
+    },
+    {
+      "slug": "gravespawn-sovereign",
+      "name": "Gravespawn Sovereign"
+    },
+    {
+      "slug": "gray-merchant-of-asphodel",
+      "name": "Gray Merchant of Asphodel"
+    },
+    {
+      "slug": "headless-rider",
+      "name": "Headless Rider"
+    },
+    {
+      "slug": "kalitas-traitor-of-ghet",
+      "name": "Kalitas, Traitor of Ghet"
+    },
+    {
+      "slug": "lashwrithe",
+      "name": "Lashwrithe"
+    },
+    {
+      "slug": "liliana-s-mastery",
+      "name": "Liliana's Mastery"
+    },
+    {
+      "slug": "lord-of-the-accursed",
+      "name": "Lord of the Accursed"
+    },
+    {
+      "slug": "lord-of-the-undead",
+      "name": "Lord of the Undead"
+    },
+    {
+      "slug": "memorial-to-folly",
+      "name": "Memorial to Folly"
+    },
+    {
+      "slug": "midnight-reaper",
+      "name": "Midnight Reaper"
+    },
+    {
+      "slug": "mind-stone",
+      "name": "Mind Stone"
+    },
+    {
+      "slug": "mire-triton",
+      "name": "Mire Triton"
+    },
+    {
+      "slug": "mutilate",
+      "name": "Mutilate"
+    },
+    {
+      "slug": "necrotic-hex",
+      "name": "Necrotic Hex"
+    },
+    {
+      "slug": "night-s-whisper",
+      "name": "Night's Whisper"
+    },
+    {
+      "slug": "noxious-ghoul",
+      "name": "Noxious Ghoul"
+    },
+    {
+      "slug": "oversold-cemetery",
+      "name": "Oversold Cemetery"
+    },
+    {
+      "slug": "patchwork-banner",
+      "name": "Patchwork Banner"
+    },
+    {
+      "slug": "phyrexian-arena",
+      "name": "Phyrexian Arena"
+    },
+    {
+      "slug": "phyrexian-reclamation",
+      "name": "Phyrexian Reclamation"
+    },
+    {
+      "slug": "sol-ring",
+      "name": "Sol Ring"
+    },
+    {
+      "slug": "soulless-one",
+      "name": "Soulless One"
+    },
+    {
+      "slug": "stoneforge-masterwork",
+      "name": "Stoneforge Masterwork"
+    },
+    {
+      "slug": "swamp",
+      "name": "Swamp"
+    },
+    {
+      "slug": "tendrils-of-corruption",
+      "name": "Tendrils of Corruption"
+    },
+    {
+      "slug": "umbral-collar-zealot",
+      "name": "Umbral Collar Zealot"
+    },
+    {
+      "slug": "undead-augur",
+      "name": "Undead Augur"
+    },
+    {
+      "slug": "undead-butler",
+      "name": "Undead Butler"
+    },
+    {
+      "slug": "undead-warchief",
+      "name": "Undead Warchief"
+    },
+    {
+      "slug": "vengeful-dead",
+      "name": "Vengeful Dead"
+    },
+    {
+      "slug": "wight-of-precinct-six",
+      "name": "Wight of Precinct Six"
+    },
+    {
+      "slug": "witch-s-cottage",
+      "name": "Witch's Cottage"
+    },
+    {
+      "slug": "withering-torment",
+      "name": "Withering Torment"
+    },
+    {
+      "slug": "zul-ashur-lich-lord",
+      "name": "Zul Ashur, Lich Lord"
+    }
+  ],
+  "decisions": [
+    "Consolidated schema pass: the workarounds reported by the five pilot decks (sentinels, review.ignore hacks, scripted stubs, placeholder refs) now use real fields; see src/kernel/SCHEMA_CHANGELOG.md.",
+    "Monarch stays a scripted marker (become_monarch + the controller_is_monarch stat) by user decision; Crew, Improvise, Myriad, Storm, Read ahead, Manifest dread, Reselect attack target and tapped-for-{C} stay scripted markers (vocabulary listed in the changelog).",
+    "Remaining genuine card-behaviour questions are collected in data/kernel-drafts/CONSOLIDATED_QUESTIONS.md, not per deck."
+  ]
+}

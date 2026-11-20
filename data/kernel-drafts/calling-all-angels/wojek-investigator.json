@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "keyword",
+      "text": "Vigilance",
+      "keyword": {
+        "name": "vigilance"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "triggered",
+      "text": "At the beginning of your upkeep, investigate once for each opponent who has more cards in hand than you. (Create a Clue token. It's an artifact with \"{2}, Sacrifice this token: Draw a card.\")",
+      "trigger": {
+        "event": "begin_step",
+        "step": "upkeep",
+        "whose": "yours"
+      },
+      "steps": [
+        {
+          "kind": "investigate",
+          "src": 0,
+          "amount": {
+            "ref": "players_count",
+            "who": "each_opponent",
+            "where": {
+              "check": "zone_count",
+              "who": "that_player",
+              "zone": "hand",
+              "cmp": {
+                "op": ">",
+                "value": {
+                  "ref": "count",
+                  "of": {
+                    "zone": "hand",
+                    "owner": "you"
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "quantity:players_count",
+        "step:investigate"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

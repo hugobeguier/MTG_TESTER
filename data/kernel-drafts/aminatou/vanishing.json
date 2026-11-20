@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Enchant creature",
+      "keyword": {
+        "name": "enchant"
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Vanishing: choose a target",
+            "instruction": "Choose target creature.",
+            "source": {
+              "card": "Vanishing",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "keyword:enchant"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "{U}{U}: Enchanted creature phases out. (While it's phased out, it's treated as though it doesn't exist. It phases in before its controller untaps during their next untap step.)",
+      "costs": [
+        {
+          "mana": "{U}{U}"
+        }
+      ],
+      "steps": [
+        {
+          "kind": "grant_effect",
+          "target": "enchanted",
+          "phaseOut": true,
+          "modify": [
+            {
+              "grant": "phased out"
+            }
+          ],
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:grant_effect",
+        "field:grant_effect.modify",
+        "field:grant_effect.phaseOut"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

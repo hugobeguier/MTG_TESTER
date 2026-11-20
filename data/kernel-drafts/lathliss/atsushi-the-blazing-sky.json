@@ -1,0 +1,113 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "keyword",
+      "text": "Trample",
+      "keyword": {
+        "name": "trample"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "triggered",
+      "text": "When Atsushi dies, choose one —\n• Exile the top two cards of your library. Until the end of your next turn, you may play those cards.\n• Create three Treasure tokens.",
+      "trigger": {
+        "event": "dies",
+        "subject": "self"
+      },
+      "modes": {
+        "choose": {
+          "min": 1,
+          "max": 1
+        },
+        "distinct": true,
+        "options": [
+          {
+            "id": "m1",
+            "text": "Exile the top two cards of your library. Until the end of your next turn, you may play those cards.",
+            "steps": [
+              {
+                "kind": "move_card_zone",
+                "who": "you",
+                "moveFrom": "library",
+                "moveTo": "exile",
+                "moveCount": 2,
+                "position": "top",
+                "saveAs": "exiled",
+                "src": 1
+              },
+              {
+                "kind": "permission_to_play",
+                "what": "exiled",
+                "optional": true,
+                "duration": "until_end_of_your_next_turn",
+                "src": 1,
+                "prompt": {
+                  "title": "Atsushi, the Blazing Sky: optional",
+                  "instruction": "Do you want to you may play exiled until end of your next turn?",
+                  "source": {
+                    "card": "Atsushi, the Blazing Sky",
+                    "ability": "a3"
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "id": "m2",
+            "text": "Create three Treasure tokens.",
+            "steps": [
+              {
+                "kind": "create_tokens",
+                "tokenCount": 3,
+                "tokenName": "Treasure",
+                "tokenColors": [
+                  "colorless"
+                ],
+                "tokenTypeLine": "Artifact — Treasure",
+                "src": 2
+              }
+            ]
+          }
+        ],
+        "prompt": {
+          "title": "Atsushi, the Blazing Sky: choose a mode",
+          "instruction": "Choose one mode.",
+          "source": {
+            "card": "Atsushi, the Blazing Sky",
+            "ability": "a3"
+          }
+        }
+      },
+      "srcs": [
+        0
+      ],
+      "implementation": "needed",
+      "needs": [
+        "modes",
+        "field:move_card_zone.position",
+        "field:move_card_zone.saveAs",
+        "step:permission_to_play",
+        "field:permission_to_play.what",
+        "duration:until_end_of_your_next_turn"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

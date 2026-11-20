@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "scripted",
+      "text": "You may cast this spell as though it had flash if it targets a commander.",
+      "optional": true,
+      "zone": "hand",
+      "timing": {
+        "speed": "flash"
+      },
+      "scripted": {
+        "handler": "flash_if_targets_commander"
+      },
+      "prompt": {
+        "title": "Timely Ward: optional",
+        "instruction": "Do you want to use this ability?",
+        "source": {
+          "card": "Timely Ward",
+          "ability": "a1"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "scripted:flash_if_targets_commander",
+        "zone:hand"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "spell_effect",
+      "text": "Enchant creature",
+      "keyword": {
+        "name": "enchant"
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Timely Ward: choose a target",
+            "instruction": "Choose target creature.",
+            "source": {
+              "card": "Timely Ward",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "keyword:enchant"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "static",
+      "text": "Enchanted creature has indestructible.",
+      "static": {
+        "affects": "enchanted",
+        "modify": [
+          {
+            "grant": "indestructible"
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "if",
+        "reason": "the condition (targets a commander) lives in the scripted marker flash_if_targets_commander"
+      }
+    ]
+  }
+}

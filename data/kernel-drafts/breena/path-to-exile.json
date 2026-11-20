@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "kind": "spell_effect",
+      "text": "Exile target creature. Its controller may search their library for a basic land card, put that card onto the battlefield tapped, then shuffle.",
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Path to Exile: choose a target",
+            "instruction": "Choose target creature.",
+            "source": {
+              "card": "Path to Exile",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "exile_target",
+          "target": "t1",
+          "src": 0
+        },
+        {
+          "kind": "search_library",
+          "who": "controller_of_target",
+          "optional": true,
+          "filter": {
+            "types": [
+              "land"
+            ],
+            "supertypes": [
+              "basic"
+            ]
+          },
+          "count": 1,
+          "to": "battlefield",
+          "tapped": true,
+          "shuffle": true,
+          "src": 1,
+          "prompt": {
+            "title": "Path to Exile: optional",
+            "instruction": "Do you want to its controller searches their library for a basic land, put it onto the battlefield, then shuffle?",
+            "source": {
+              "card": "Path to Exile",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "id": "a1",
+      "implementation": "needed",
+      "needs": [
+        "step:search_library",
+        "field:search_library.count",
+        "field:search_library.filter",
+        "field:search_library.shuffle",
+        "field:search_library.tapped",
+        "field:search_library.to",
+        "field:search_library.who"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

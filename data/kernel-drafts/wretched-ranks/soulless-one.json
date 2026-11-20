@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "Soulless One's power and toughness are each equal to the number of Zombies on the battlefield plus the number of Zombie cards in all graveyards.",
+      "static": {
+        "affects": "self",
+        "modify": [
+          {
+            "setBasePT": {
+              "power": {
+                "math": "+",
+                "args": [
+                  {
+                    "ref": "count",
+                    "of": {
+                      "subtypes": [
+                        "Zombie"
+                      ]
+                    }
+                  },
+                  {
+                    "ref": "count",
+                    "of": {
+                      "subtypes": [
+                        "Zombie"
+                      ],
+                      "zone": "graveyard"
+                    }
+                  }
+                ]
+              },
+              "toughness": {
+                "math": "+",
+                "args": [
+                  {
+                    "ref": "count",
+                    "of": {
+                      "subtypes": [
+                        "Zombie"
+                      ]
+                    }
+                  },
+                  {
+                    "ref": "count",
+                    "of": {
+                      "subtypes": [
+                        "Zombie"
+                      ],
+                      "zone": "graveyard"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static",
+        "static:setBasePT"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "each",
+        "reason": "'power and toughness are each equal' means both P and T use the same quantity"
+      }
+    ]
+  }
+}

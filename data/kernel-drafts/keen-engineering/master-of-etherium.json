@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "Master of Etherium's power and toughness are each equal to the number of artifacts you control.",
+      "static": {
+        "affects": "self",
+        "modify": [
+          {
+            "setBasePT": {
+              "power": {
+                "ref": "count",
+                "of": {
+                  "types": [
+                    "artifact"
+                  ],
+                  "controller": "you"
+                }
+              },
+              "toughness": {
+                "ref": "count",
+                "of": {
+                  "types": [
+                    "artifact"
+                  ],
+                  "controller": "you"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static",
+        "static:setBasePT"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "static",
+      "text": "Other artifact creatures you control get +1/+1.",
+      "static": {
+        "affects": {
+          "types": [
+            "artifact",
+            "creature"
+          ],
+          "controller": "you",
+          "another": true
+        },
+        "modify": [
+          {
+            "pt": {
+              "power": 1,
+              "toughness": 1
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

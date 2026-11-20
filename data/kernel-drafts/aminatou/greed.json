@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "activated",
+      "text": "{B}, Pay 2 life: Draw a card.",
+      "costs": [
+        {
+          "mana": "{B}"
+        },
+        {
+          "life": 2
+        }
+      ],
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": 1,
+          "who": "you"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "cost:life"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

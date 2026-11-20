@@ -1,0 +1,204 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "activated",
+      "text": "+1: Draw a card, then put a card from your hand on top of your library.",
+      "costs": [
+        {
+          "loyalty": 1
+        }
+      ],
+      "timing": {
+        "speed": "sorcery",
+        "limit": {
+          "count": 1,
+          "per": "turn"
+        }
+      },
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": 1,
+          "who": "you",
+          "src": 0
+        },
+        {
+          "kind": "choose",
+          "from": {
+            "zone": "hand",
+            "owner": "you"
+          },
+          "count": 1,
+          "saveAs": "chosen",
+          "src": 0,
+          "prompt": {
+            "title": "Aminatou, the Fateshifter: choose",
+            "instruction": "Choose a card in your hand.",
+            "source": {
+              "card": "Aminatou, the Fateshifter",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "kind": "move_card_zone",
+          "what": "chosen",
+          "moveTo": "library",
+          "position": "top",
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "timing",
+        "cost:loyalty",
+        "step:choose",
+        "field:choose.count",
+        "field:choose.from",
+        "field:choose.saveAs",
+        "field:move_card_zone.position",
+        "field:move_card_zone.what"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "−1: Exile another target permanent you own, then return it to the battlefield under your control.",
+      "costs": [
+        {
+          "loyalty": -1
+        }
+      ],
+      "timing": {
+        "speed": "sorcery",
+        "limit": {
+          "count": 1,
+          "per": "turn"
+        }
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "owner": "you",
+            "another": true
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Aminatou, the Fateshifter: choose a target",
+            "instruction": "Choose another target permanent.",
+            "source": {
+              "card": "Aminatou, the Fateshifter",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "exile_target",
+          "target": "t1",
+          "src": 0
+        },
+        {
+          "kind": "move_card_zone",
+          "target": "t1",
+          "from": "exile",
+          "moveTo": "battlefield",
+          "who": "you",
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "timing",
+        "cost:loyalty",
+        "field:move_card_zone.from"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "activated",
+      "text": "−6: Choose left or right. Each player gains control of all nonland permanents other than Aminatou controlled by the next player in the chosen direction.",
+      "costs": [
+        {
+          "loyalty": -6
+        }
+      ],
+      "timing": {
+        "speed": "sorcery",
+        "limit": {
+          "count": 1,
+          "per": "turn"
+        }
+      },
+      "steps": [
+        {
+          "kind": "choose",
+          "choice": "mode",
+          "options": [
+            "left",
+            "right"
+          ],
+          "remember": true,
+          "src": 0,
+          "prompt": {
+            "title": "Aminatou, the Fateshifter: choose",
+            "instruction": "Choose one of left or right.",
+            "source": {
+              "card": "Aminatou, the Fateshifter",
+              "ability": "a3"
+            }
+          }
+        },
+        {
+          "kind": "gain_control",
+          "who": "each_player",
+          "filter": {
+            "notTypes": [
+              "land"
+            ]
+          },
+          "rotate": "next_player_in_chosen_direction",
+          "excludeSelf": true,
+          "src": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "timing",
+        "cost:loyalty",
+        "step:choose",
+        "field:choose.choice",
+        "field:choose.options",
+        "field:choose.remember",
+        "step:gain_control",
+        "field:gain_control.excludeSelf",
+        "field:gain_control.filter",
+        "field:gain_control.rotate",
+        "field:gain_control.who"
+      ]
+    },
+    {
+      "id": "a4",
+      "kind": "scripted",
+      "text": "Aminatou, the Fateshifter can be your commander.",
+      "scripted": {
+        "handler": "can_be_your_commander"
+      },
+      "implementation": "needed",
+      "needs": [
+        "scripted:can_be_your_commander"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "kind": "static",
+      "text": "Creatures you control with +1/+1 counters on them have base power and toughness 4/4, have flying, and are Angels in addition to their other types.",
+      "static": {
+        "affects": {
+          "types": [
+            "creature"
+          ],
+          "controller": "you",
+          "hasCounter": "+1/+1"
+        },
+        "modify": [
+          {
+            "setBasePT": {
+              "power": 4,
+              "toughness": 4
+            }
+          },
+          {
+            "grant": "flying"
+          },
+          {
+            "addTypes": [
+              "Angel"
+            ]
+          }
+        ]
+      },
+      "id": "a1",
+      "implementation": "needed",
+      "needs": [
+        "static",
+        "static:setBasePT",
+        "static:addTypes"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

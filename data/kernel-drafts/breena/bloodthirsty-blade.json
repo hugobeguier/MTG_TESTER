@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "kind": "static",
+      "text": "Equipped creature gets +2/+0 and is goaded. (It attacks each combat if able and attacks a player other than you if able.)",
+      "static": {
+        "affects": "equipped",
+        "modify": [
+          {
+            "pt": {
+              "power": 2,
+              "toughness": 0
+            }
+          },
+          {
+            "grant": "goaded"
+          }
+        ]
+      },
+      "id": "a1",
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "kind": "activated",
+      "text": "{1}: Attach this Equipment to target creature an opponent controls. Activate only as a sorcery.",
+      "timing": {
+        "speed": "sorcery"
+      },
+      "costs": [
+        {
+          "mana": "{1}"
+        }
+      ],
+      "srcs": [
+        1
+      ],
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "controller": "opponent"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Bloodthirsty Blade: choose a target",
+            "instruction": "Choose target creature an opponent controls.",
+            "source": {
+              "card": "Bloodthirsty Blade",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "attach",
+          "what": "self",
+          "to": "t1",
+          "src": 0
+        }
+      ],
+      "id": "a2",
+      "implementation": "needed",
+      "needs": [
+        "step:attach",
+        "field:attach.to",
+        "field:attach.what"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

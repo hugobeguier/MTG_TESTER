@@ -1,0 +1,153 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "(As this Saga enters and after your draw step, add a lore counter. Sacrifice after III.)",
+      "keyword": {
+        "name": "saga"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "I — Destroy target nonland permanent an opponent controls.",
+      "trigger": {
+        "event": "counter_put",
+        "subject": "self",
+        "chapters": [
+          1
+        ]
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "permanent"
+            ],
+            "notTypes": [
+              "land"
+            ],
+            "controller": "opponent"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Binding the Old Gods: choose a target",
+            "instruction": "Choose target nonland permanent an opponent controls.",
+            "source": {
+              "card": "Binding the Old Gods",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "destroy_target",
+          "target": "t1"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:counter_put",
+        "trigger:chapters"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "triggered",
+      "text": "II — Search your library for a Forest card, put it onto the battlefield tapped, then shuffle.",
+      "trigger": {
+        "event": "counter_put",
+        "subject": "self",
+        "chapters": [
+          2
+        ]
+      },
+      "steps": [
+        {
+          "kind": "search_library",
+          "who": "you",
+          "filter": {
+            "subtypes": [
+              "Forest"
+            ]
+          },
+          "count": 1,
+          "to": "battlefield",
+          "tapped": true,
+          "shuffle": true,
+          "prompt": {
+            "title": "Binding the Old Gods: search",
+            "instruction": "Choose a Forest from the library.",
+            "source": {
+              "card": "Binding the Old Gods",
+              "ability": "a3"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:counter_put",
+        "trigger:chapters",
+        "step:search_library",
+        "field:search_library.count",
+        "field:search_library.filter",
+        "field:search_library.shuffle",
+        "field:search_library.tapped",
+        "field:search_library.to"
+      ]
+    },
+    {
+      "id": "a4",
+      "kind": "triggered",
+      "text": "III — Creatures you control gain deathtouch until end of turn.",
+      "trigger": {
+        "event": "counter_put",
+        "subject": "self",
+        "chapters": [
+          3
+        ]
+      },
+      "steps": [
+        {
+          "kind": "grant_effect",
+          "all": true,
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you"
+          },
+          "modify": [
+            {
+              "grant": "deathtouch"
+            }
+          ],
+          "duration": "until_end_of_turn"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:counter_put",
+        "trigger:chapters",
+        "step:grant_effect",
+        "field:grant_effect.all",
+        "field:grant_effect.filter",
+        "field:grant_effect.modify"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

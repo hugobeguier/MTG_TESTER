@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "kind": "keyword",
+      "text": "Flash",
+      "keyword": {
+        "name": "flash"
+      },
+      "id": "a1",
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "kind": "triggered",
+      "text": "When this creature enters, prevent all damage that would be dealt to you this turn.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "grant_effect",
+          "who": "you",
+          "duration": "until_end_of_turn",
+          "src": 0,
+          "replacement": {
+            "event": "would_deal_damage",
+            "recipient": "you",
+            "duration": "until_end_of_turn",
+            "result": {
+              "mode": "prevent"
+            }
+          }
+        }
+      ],
+      "id": "a2",
+      "implementation": "needed",
+      "needs": [
+        "step:grant_effect",
+        "field:grant_effect.replacement"
+      ]
+    },
+    {
+      "kind": "triggered",
+      "text": "Whenever damage that would be dealt to you is prevented, put that many +1/+1 counters on this creature.",
+      "trigger": {
+        "event": "unspecified",
+        "subject": "you"
+      },
+      "steps": [
+        {
+          "kind": "add_counters",
+          "on": "self",
+          "counterKind": "+1/+1",
+          "amount": {
+            "ref": "event_amount"
+          },
+          "src": 0
+        }
+      ],
+      "id": "a3",
+      "implementation": "needed",
+      "needs": [
+        "trigger:unspecified",
+        "trigger:subject",
+        "step:add_counters",
+        "quantity:event_amount",
+        "field:add_counters.on"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "each",
+        "reason": "'all damage' is the would_deal_damage prevent replacement"
+      },
+      {
+        "lexeme": "instead",
+        "reason": "'would be dealt ... is prevented' is the prevention event this trigger reacts to; no replacement is applied by this ability"
+      }
+    ]
+  }
+}

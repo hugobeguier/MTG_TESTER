@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "All permanents are artifacts in addition to their other types.",
+      "static": {
+        "affects": {
+          "zone": "battlefield"
+        },
+        "modify": [
+          {
+            "addTypes": [
+              "Artifact"
+            ]
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static",
+        "static:addTypes"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "static",
+      "text": "All cards that aren't on the battlefield, spells, and permanents are colorless.",
+      "static": {
+        "affects": {
+          "zone": "any"
+        },
+        "modify": [
+          {
+            "setColors": []
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static",
+        "static:setColors"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "static",
+      "text": "Players may spend mana as though it were mana of any color.",
+      "static": {
+        "affects": "each_player",
+        "modify": [
+          {
+            "grant": "spend mana as though it were mana of any color"
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "may",
+        "reason": "a static permission, not a choice"
+      },
+      {
+        "lexeme": "each",
+        "reason": "'all' is a static over every object, the affects filter"
+      }
+    ]
+  }
+}

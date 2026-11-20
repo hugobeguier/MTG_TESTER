@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Each player sacrifices a creature or planeswalker of their choice. If you sacrificed a permanent this way, you may return another permanent card from your graveyard to your hand.",
+      "steps": [
+        {
+          "kind": "sacrifice_permanent",
+          "id": "s1",
+          "who": "each_player",
+          "filter": {
+            "anyOf": [
+              {
+                "types": [
+                  "creature"
+                ]
+              },
+              {
+                "types": [
+                  "planeswalker"
+                ]
+              }
+            ]
+          },
+          "src": 0,
+          "prompt": {
+            "title": "Deadly Brew: sacrifice",
+            "instruction": "Choose a permanent to sacrifice.",
+            "source": {
+              "card": "Deadly Brew",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "kind": "choose",
+          "id": "s2",
+          "optional": true,
+          "from": {
+            "types": [
+              "permanent"
+            ],
+            "zone": "graveyard",
+            "owner": "you",
+            "another": true
+          },
+          "count": 1,
+          "saveAs": "chosen",
+          "src": 1,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "step_done",
+              "step": "s1"
+            },
+            "src": 1
+          },
+          "prompt": {
+            "title": "Deadly Brew: optional",
+            "instruction": "Do you want to choose an another permanent card in your graveyard?",
+            "source": {
+              "card": "Deadly Brew",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "kind": "move_card_zone",
+          "target": "chosen",
+          "from": "graveyard",
+          "moveTo": "hand",
+          "src": 1,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "step_done",
+              "step": "s2"
+            },
+            "src": 1
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:sacrifice_permanent.filter",
+        "field:sacrifice_permanent.who",
+        "step:choose",
+        "field:choose.count",
+        "field:choose.from",
+        "field:choose.saveAs",
+        "predicate:step_done",
+        "field:move_card_zone.from"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

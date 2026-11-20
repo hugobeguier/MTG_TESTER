@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flash",
+      "keyword": {
+        "name": "flash"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "static",
+      "text": "You may cast artifact spells as though they had flash.",
+      "static": {
+        "affects": "you",
+        "modify": [
+          {
+            "grant": "cast artifact spells as though they had flash"
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "may",
+        "reason": "a static permission, not a choice made on resolution"
+      }
+    ]
+  }
+}

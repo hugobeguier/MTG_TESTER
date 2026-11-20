@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Whenever a token you control leaves the battlefield, each opponent loses 1 life and you gain 1 life.",
+      "trigger": {
+        "event": "leaves",
+        "subject": {
+          "token": true,
+          "controller": "you"
+        },
+        "fromZone": "battlefield"
+      },
+      "steps": [
+        {
+          "kind": "life_change",
+          "who": "each_opponent",
+          "lose": true,
+          "amount": 1
+        },
+        {
+          "kind": "life_change",
+          "who": "you",
+          "amount": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:leaves",
+        "trigger:subject",
+        "trigger:zones",
+        "field:life_change.amount",
+        "field:life_change.lose",
+        "field:life_change.who"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

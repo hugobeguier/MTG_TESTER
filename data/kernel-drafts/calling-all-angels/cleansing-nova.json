@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Choose one —\n• Destroy all creatures.\n• Destroy all artifacts and enchantments.",
+      "modes": {
+        "choose": {
+          "min": 1,
+          "max": 1
+        },
+        "distinct": true,
+        "options": [
+          {
+            "id": "m1",
+            "text": "Destroy all creatures.",
+            "steps": [
+              {
+                "kind": "destroy_all",
+                "targetType": "creature"
+              }
+            ]
+          },
+          {
+            "id": "m2",
+            "text": "Destroy all artifacts and enchantments.",
+            "steps": [
+              {
+                "kind": "destroy_all",
+                "filter": {
+                  "anyOf": [
+                    {
+                      "types": [
+                        "artifact"
+                      ]
+                    },
+                    {
+                      "types": [
+                        "enchantment"
+                      ]
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ],
+        "prompt": {
+          "title": "Cleansing Nova: choose a mode",
+          "instruction": "Choose one mode.",
+          "source": {
+            "card": "Cleansing Nova",
+            "ability": "a1"
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "modes",
+        "field:destroy_all.filter"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

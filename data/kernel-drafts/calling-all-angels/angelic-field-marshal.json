@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "static",
+      "text": "Lieutenant — As long as you control your commander, this creature gets +2/+2 and creatures you control have vigilance.",
+      "static": {
+        "affects": "self",
+        "modify": [
+          {
+            "pt": {
+              "power": 2,
+              "toughness": 2
+            }
+          }
+        ],
+        "while": {
+          "check": "controls",
+          "filter": {
+            "controller": "you",
+            "isCommander": true
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "static",
+        "filter:isCommander"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "static",
+      "text": "Lieutenant — As long as you control your commander, this creature gets +2/+2 and creatures you control have vigilance.",
+      "static": {
+        "affects": {
+          "types": [
+            "creature"
+          ],
+          "controller": "you"
+        },
+        "modify": [
+          {
+            "grant": "vigilance"
+          }
+        ],
+        "while": {
+          "check": "controls",
+          "filter": {
+            "controller": "you",
+            "isCommander": true
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "static",
+        "filter:isCommander"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

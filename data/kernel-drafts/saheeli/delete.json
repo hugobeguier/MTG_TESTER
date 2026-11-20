@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Delete deals X damage to each nonartifact creature and each player.",
+      "xPrompt": {
+        "title": "Delete: choose X",
+        "instruction": "Choose a value for X (paid in mana as part of the spell's cost)."
+      },
+      "steps": [
+        {
+          "kind": "damage_target",
+          "all": true,
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "notTypes": [
+              "artifact"
+            ]
+          },
+          "amount": {
+            "ref": "X"
+          }
+        },
+        {
+          "kind": "damage_target",
+          "who": "each_player",
+          "amount": {
+            "ref": "X"
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "quantity:X",
+        "field:damage_target.all",
+        "field:damage_target.filter",
+        "field:damage_target.who"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

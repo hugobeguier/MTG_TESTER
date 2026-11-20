@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "mana",
+      "text": "{T}: Add {C}.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{C}"
+          }
+        ]
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "mana",
+      "text": "{T}: Add {W} or {B}. Activate only if you control a Swamp.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{W}"
+          }
+        ]
+      },
+      "timing": {
+        "only": [
+          {
+            "check": "controls",
+            "filter": {
+              "subtypes": [
+                "Swamp"
+              ],
+              "controller": "you"
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "timing"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "mana",
+      "text": "{T}: Add {W} or {B}. Activate only if you control a Swamp.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{B}"
+          }
+        ]
+      },
+      "timing": {
+        "only": [
+          {
+            "check": "controls",
+            "filter": {
+              "subtypes": [
+                "Swamp"
+              ],
+              "controller": "you"
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "timing"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

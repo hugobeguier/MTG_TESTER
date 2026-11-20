@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Each opponent draws a card, then you draw a card for each opponent who drew a card this way.",
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": 1,
+          "who": "each_opponent",
+          "src": 0
+        },
+        {
+          "kind": "draw_cards",
+          "amount": {
+            "ref": "event_amount"
+          },
+          "who": "you",
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:draw_cards.who",
+        "quantity:event_amount"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

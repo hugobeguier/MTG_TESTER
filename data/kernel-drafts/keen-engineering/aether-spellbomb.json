@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "activated",
+      "text": "{U}, Sacrifice this artifact: Return target creature to its owner's hand.",
+      "costs": [
+        {
+          "mana": "{U}"
+        },
+        {
+          "sacrifice": "self",
+          "count": 1
+        }
+      ],
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Aether Spellbomb: choose a target",
+            "instruction": "Choose target creature.",
+            "source": {
+              "card": "Aether Spellbomb",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "bounce_target",
+          "target": "t1"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "cost:sacrifice"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "{1}, Sacrifice this artifact: Draw a card.",
+      "costs": [
+        {
+          "mana": "{1}"
+        },
+        {
+          "sacrifice": "self",
+          "count": 1
+        }
+      ],
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": 1,
+          "who": "you"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "cost:sacrifice"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

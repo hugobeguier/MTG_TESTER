@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "mana",
+      "text": "{T}: Add {C}.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{C}"
+          }
+        ]
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "mana",
+      "text": "{T}: Add one mana of any color. Spend this mana only to cast a Dragon creature spell.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "anyColor": 1,
+            "restriction": {
+              "types": [
+                "creature"
+              ],
+              "subtypes": [
+                "Dragon"
+              ]
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "mana:variable",
+        "mana:restriction"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "activated",
+      "text": "{2}, {T}, Sacrifice this land: Return target Dragon creature card or Ugin planeswalker card from your graveyard to your hand.",
+      "costs": [
+        {
+          "mana": "{2}"
+        },
+        {
+          "tap": "self"
+        },
+        {
+          "sacrifice": "self",
+          "count": 1
+        }
+      ],
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "owner": "you",
+            "zone": "graveyard",
+            "anyOf": [
+              {
+                "types": [
+                  "creature"
+                ],
+                "subtypes": [
+                  "Dragon"
+                ]
+              },
+              {
+                "types": [
+                  "planeswalker"
+                ],
+                "subtypes": [
+                  "Ugin"
+                ]
+              }
+            ]
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Haven of the Spirit Dragon: choose a target",
+            "instruction": "Choose target Dragon or Ugin.",
+            "source": {
+              "card": "Haven of the Spirit Dragon",
+              "ability": "a3"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "move_card_zone",
+          "target": "t1",
+          "moveTo": "hand"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "cost:sacrifice"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "mana",
+      "text": "{T}: Add {R}. If that mana is spent on a Dragon creature spell, it gains haste until end of turn.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{R}"
+          }
+        ]
+      },
+      "srcs": [
+        0
+      ],
+      "steps": [
+        {
+          "kind": "grant_effect",
+          "target": "event_object",
+          "modify": [
+            {
+              "grant": "haste"
+            }
+          ],
+          "duration": "until_end_of_turn",
+          "src": 1,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "matches",
+              "obj": "event_object",
+              "filter": {
+                "types": [
+                  "creature"
+                ],
+                "subtypes": [
+                  "Dragon"
+                ],
+                "zone": "stack"
+              }
+            },
+            "src": 1
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:grant_effect",
+        "field:grant_effect.modify",
+        "predicate:matches"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

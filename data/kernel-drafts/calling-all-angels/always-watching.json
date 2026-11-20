@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "Nontoken creatures you control get +1/+1 and have vigilance.",
+      "static": {
+        "affects": {
+          "types": [
+            "creature"
+          ],
+          "token": false,
+          "controller": "you"
+        },
+        "modify": [
+          {
+            "pt": {
+              "power": 1,
+              "toughness": 1
+            }
+          },
+          {
+            "grant": "vigilance"
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

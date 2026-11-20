@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Whenever this creature attacks while you don't control another Dinosaur, put a stun counter on it. (If a permanent with a stun counter would become untapped, remove one from it instead.)",
+      "trigger": {
+        "event": "attack",
+        "subject": "self",
+        "interveningIf": {
+          "not": {
+            "check": "controls",
+            "filter": {
+              "subtypes": [
+                "Dinosaur"
+              ],
+              "controller": "you",
+              "another": true
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "kind": "add_counters",
+          "on": "self",
+          "counterKind": "stun",
+          "amount": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:intervening_if",
+        "predicate:not",
+        "step:add_counters",
+        "field:add_counters.on"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

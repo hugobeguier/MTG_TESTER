@@ -1,0 +1,112 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Choose one —\n• Target creature gains indestructible until end of turn. (Damage and effects that say \"destroy\" don't destroy it.)\n• Destroy target creature with toughness 4 or greater.",
+      "modes": {
+        "choose": {
+          "min": 1,
+          "max": 1
+        },
+        "distinct": true,
+        "options": [
+          {
+            "id": "m1",
+            "text": "Target creature gains indestructible until end of turn.",
+            "targets": [
+              {
+                "id": "t1",
+                "what": "object",
+                "filter": {
+                  "types": [
+                    "creature"
+                  ]
+                },
+                "count": {
+                  "min": 1,
+                  "max": 1
+                },
+                "prompt": {
+                  "title": "Valorous Stance: choose a target",
+                  "instruction": "Choose target creature.",
+                  "source": {
+                    "card": "Valorous Stance",
+                    "ability": "a1"
+                  }
+                }
+              }
+            ],
+            "steps": [
+              {
+                "kind": "grant_effect",
+                "target": "t1",
+                "modify": [
+                  {
+                    "grant": "indestructible"
+                  }
+                ],
+                "duration": "until_end_of_turn"
+              }
+            ]
+          },
+          {
+            "id": "m2",
+            "text": "Destroy target creature with toughness 4 or greater.",
+            "targets": [
+              {
+                "id": "t1",
+                "what": "object",
+                "filter": {
+                  "types": [
+                    "creature"
+                  ],
+                  "toughness": {
+                    "op": ">=",
+                    "value": 4
+                  }
+                },
+                "count": {
+                  "min": 1,
+                  "max": 1
+                },
+                "prompt": {
+                  "title": "Valorous Stance: choose a target",
+                  "instruction": "Choose target creature with toughness 4 or greater.",
+                  "source": {
+                    "card": "Valorous Stance",
+                    "ability": "a1"
+                  }
+                }
+              }
+            ],
+            "steps": [
+              {
+                "kind": "destroy_target",
+                "target": "t1"
+              }
+            ]
+          }
+        ],
+        "prompt": {
+          "title": "Valorous Stance: choose a mode",
+          "instruction": "Choose one mode.",
+          "source": {
+            "card": "Valorous Stance",
+            "ability": "a1"
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "modes",
+        "step:grant_effect",
+        "field:grant_effect.modify"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

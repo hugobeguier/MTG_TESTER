@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "keyword",
+      "text": "Haste",
+      "keyword": {
+        "name": "haste"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "triggered",
+      "text": "Whenever Klauth attacks, add X mana in any combination of colors, where X is the total power of attacking creatures. Spend this mana only to cast spells. Until end of turn, you don't lose this mana as steps and phases end.",
+      "trigger": {
+        "event": "attack",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "add_mana",
+          "produces": [
+            {
+              "anyColor": 1,
+              "restriction": {
+                "zone": "stack"
+              }
+            }
+          ],
+          "amount": {
+            "ref": "sum",
+            "of": {
+              "types": [
+                "creature"
+              ],
+              "attacking": true
+            },
+            "stat": "power"
+          },
+          "duration": "until_end_of_turn",
+          "src": 0
+        }
+      ],
+      "srcs": [
+        1,
+        2
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:add_mana",
+        "quantity:sum",
+        "field:add_mana.produces"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "duration",
+        "reason": "the until-end-of-turn mana-persistence is the step duration field on the add_mana step"
+      },
+      {
+        "lexeme": "only",
+        "reason": "'Spend this mana only to cast spells' is the restriction on the produced mana (restriction filter zone:stack)"
+      }
+    ]
+  }
+}

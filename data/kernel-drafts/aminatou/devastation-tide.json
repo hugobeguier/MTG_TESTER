@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Return all nonland permanents to their owners' hands.",
+      "steps": [
+        {
+          "kind": "mass_bounce",
+          "filter": {
+            "notTypes": [
+              "land"
+            ]
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:mass_bounce.filter"
+      ]
+    }
+  ],
+  "castOptions": [
+    {
+      "id": "c1",
+      "kind": "miracle",
+      "from": "hand",
+      "cost": [
+        {
+          "mana": "{1}{U}"
+        }
+      ],
+      "replacesManaCost": true,
+      "when": {
+        "event": "drawn",
+        "firstThisTurn": true
+      },
+      "optional": true,
+      "prompt": {
+        "title": "Devastation Tide: miracle option",
+        "instruction": "Do you want to cast it using its miracle cost ({1}{U})?",
+        "source": {
+          "card": "Devastation Tide",
+          "ability": "c1"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "cast_option:miracle"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

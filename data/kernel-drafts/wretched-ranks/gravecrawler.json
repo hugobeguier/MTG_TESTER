@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "This creature can't block.",
+      "static": {
+        "affects": "self",
+        "modify": [
+          {
+            "cant": "block"
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "cast_option",
+      "text": "You may cast this card from your graveyard as long as you control a Zombie.",
+      "implementation": "needed",
+      "needs": [
+        "cast_option"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  },
+  "castOptions": [
+    {
+      "id": "c1",
+      "kind": "cast_from_zone",
+      "from": "graveyard",
+      "cost": [],
+      "replacesManaCost": false,
+      "optional": true,
+      "condition": {
+        "check": "controls",
+        "filter": {
+          "subtypes": [
+            "Zombie"
+          ],
+          "controller": "you"
+        }
+      },
+      "prompt": {
+        "title": "Gravecrawler: cast_from_zone option",
+        "instruction": "Do you want to cast it from graveyard?",
+        "source": {
+          "card": "Gravecrawler",
+          "ability": "c1"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "cast_option:cast_from_zone",
+        "cast_option:conditional"
+      ]
+    }
+  ]
+}

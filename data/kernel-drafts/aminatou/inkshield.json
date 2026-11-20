@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Prevent all combat damage that would be dealt to you this turn. For each 1 damage prevented this way, create a 2/1 white and black Inkling creature token with flying.",
+      "steps": [
+        {
+          "kind": "grant_effect",
+          "who": "you",
+          "duration": "until_end_of_turn",
+          "src": 0,
+          "replacement": {
+            "event": "would_deal_damage",
+            "recipient": "you",
+            "damageType": "combat",
+            "duration": "until_end_of_turn",
+            "result": {
+              "mode": "instead",
+              "steps": [
+                {
+                  "kind": "create_tokens",
+                  "tokenCount": {
+                    "ref": "event_amount"
+                  },
+                  "tokenName": "Inkling",
+                  "tokenPower": 2,
+                  "tokenToughness": 1,
+                  "tokenColors": [
+                    "white",
+                    "black"
+                  ],
+                  "tokenTypeLine": "Creature — Inkling",
+                  "tokenKeywords": [
+                    "flying"
+                  ],
+                  "src": 1
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:grant_effect",
+        "field:grant_effect.replacement"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

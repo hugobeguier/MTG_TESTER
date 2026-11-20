@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "kind": "spell_effect",
+      "text": "Enchant creature",
+      "keyword": {
+        "name": "enchant"
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Martial Impetus: choose a target",
+            "instruction": "Choose target creature.",
+            "source": {
+              "card": "Martial Impetus",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "id": "a1",
+      "implementation": "needed",
+      "needs": [
+        "keyword:enchant"
+      ]
+    },
+    {
+      "kind": "static",
+      "text": "Enchanted creature gets +1/+1 and is goaded. (It attacks each combat if able and attacks a player other than you if able.)",
+      "static": {
+        "affects": "enchanted",
+        "modify": [
+          {
+            "pt": {
+              "power": 1,
+              "toughness": 1
+            }
+          },
+          {
+            "grant": "goaded"
+          }
+        ]
+      },
+      "id": "a2",
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "kind": "triggered",
+      "text": "Whenever enchanted creature attacks, each other creature that's attacking one of your opponents gets +1/+1 until end of turn.",
+      "trigger": {
+        "event": "attack",
+        "subject": "enchanted"
+      },
+      "steps": [
+        {
+          "kind": "mass_pump",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "attacking": true,
+            "another": true
+          },
+          "power": 1,
+          "toughness": 1,
+          "duration": "until_end_of_turn",
+          "src": 0
+        }
+      ],
+      "id": "a3",
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject",
+        "field:mass_pump.filter"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

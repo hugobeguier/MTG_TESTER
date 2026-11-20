@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever this creature attacks, add {R}{R}{R}{G}{G}{G}. Until end of turn, you don't lose this mana as steps and phases end.",
+      "trigger": {
+        "event": "attack",
+        "subject": "self"
+      },
+      "srcs": [
+        1
+      ],
+      "steps": [
+        {
+          "kind": "add_mana",
+          "produces": [
+            {
+              "colors": "{R}{R}{R}{G}{G}{G}"
+            }
+          ],
+          "duration": "until_end_of_turn",
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:add_mana",
+        "field:add_mana.produces"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "duration",
+        "reason": "the until-end-of-turn mana-persistence is the step duration field on the add_mana step"
+      }
+    ]
+  }
+}

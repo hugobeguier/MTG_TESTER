@@ -1,0 +1,140 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Menace",
+      "keyword": {
+        "name": "menace"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "keyword",
+      "text": "Trample",
+      "keyword": {
+        "name": "trample"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "keyword",
+      "text": "Reach",
+      "keyword": {
+        "name": "reach"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a4",
+      "kind": "static",
+      "text": "Squirrels you control have \"{T}: Target Squirrel gets +2/+2 and gains trample until end of turn. Activate only as a sorcery.\"",
+      "static": {
+        "affects": {
+          "types": [
+            "creature"
+          ],
+          "subtypes": [
+            "Squirrel"
+          ],
+          "controller": "you"
+        },
+        "modify": [
+          {
+            "grantAbility": {
+              "kind": "activated",
+              "text": "{T}: Target Squirrel gets +2/+2 and gains trample until end of turn. Activate only as a sorcery.",
+              "costs": [
+                {
+                  "tap": "self"
+                }
+              ],
+              "timing": {
+                "speed": "sorcery"
+              },
+              "targets": [
+                {
+                  "id": "g1",
+                  "what": "object",
+                  "filter": {
+                    "types": [
+                      "creature"
+                    ],
+                    "subtypes": [
+                      "Squirrel"
+                    ]
+                  },
+                  "count": {
+                    "min": 1,
+                    "max": 1
+                  }
+                }
+              ],
+              "steps": [
+                {
+                  "kind": "grant_effect",
+                  "targetRef": "g1",
+                  "modify": [
+                    {
+                      "pt": {
+                        "power": 2,
+                        "toughness": 2
+                      }
+                    },
+                    {
+                      "grant": "trample"
+                    }
+                  ],
+                  "duration": "until_end_of_turn"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "id": "a5",
+      "kind": "triggered",
+      "text": "Whenever one or more Squirrels you control deal combat damage to a player, draw a card.",
+      "trigger": {
+        "event": "deals_combat_damage_to_player",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "subtypes": [
+            "Squirrel"
+          ],
+          "controller": "you"
+        },
+        "batch": true
+      },
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "who": "you",
+          "amount": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:batch",
+        "trigger:subject"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

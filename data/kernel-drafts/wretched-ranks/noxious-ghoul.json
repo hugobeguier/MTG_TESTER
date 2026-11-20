@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Whenever this creature or another Zombie enters, all non-Zombie creatures get -1/-1 until end of turn.",
+      "trigger": {
+        "event": "etb",
+        "subject": {
+          "subtypes": [
+            "Zombie"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "kind": "mass_pump",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "notSubtypes": [
+              "Zombie"
+            ]
+          },
+          "power": -1,
+          "toughness": -1,
+          "duration": "until_end_of_turn"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "filter:notSubtypes",
+        "trigger:subject",
+        "field:mass_pump.filter"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

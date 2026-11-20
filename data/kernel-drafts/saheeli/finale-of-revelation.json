@@ -1,0 +1,120 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Draw X cards. If X is 10 or more, instead shuffle your graveyard into your library, draw X cards, untap up to five lands, and you have no maximum hand size for the rest of the game.",
+      "xPrompt": {
+        "title": "Finale of Revelation: choose X",
+        "instruction": "Choose a value for X (paid in mana as part of the spell's cost)."
+      },
+      "steps": [
+        {
+          "kind": "if_else",
+          "src": 1,
+          "if": {
+            "check": "compare",
+            "left": {
+              "ref": "X"
+            },
+            "cmp": {
+              "op": ">=",
+              "value": 10
+            }
+          },
+          "then": [
+            {
+              "kind": "move_card_zone",
+              "who": "you",
+              "from": "graveyard",
+              "all": true,
+              "moveTo": "library",
+              "src": 1
+            },
+            {
+              "kind": "shuffle",
+              "who": "you",
+              "src": 1
+            },
+            {
+              "kind": "draw_cards",
+              "amount": {
+                "ref": "X"
+              },
+              "who": "you",
+              "src": 1
+            },
+            {
+              "kind": "untap_target",
+              "filter": {
+                "types": [
+                  "land"
+                ],
+                "controller": "you"
+              },
+              "amount": 5,
+              "upTo": true,
+              "src": 1
+            },
+            {
+              "kind": "grant_effect",
+              "who": "you",
+              "modify": [
+                {
+                  "grant": "no maximum hand size"
+                }
+              ],
+              "duration": "instant",
+              "src": 1
+            }
+          ],
+          "else": [
+            {
+              "kind": "draw_cards",
+              "amount": {
+                "ref": "X"
+              },
+              "who": "you",
+              "src": 0
+            }
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:if_else",
+        "field:if_else.else",
+        "field:if_else.if",
+        "field:if_else.then",
+        "predicate:compare",
+        "field:move_card_zone.all",
+        "field:move_card_zone.from",
+        "step:shuffle",
+        "quantity:X",
+        "field:untap_target.amount",
+        "field:untap_target.filter",
+        "field:untap_target.upTo",
+        "step:grant_effect",
+        "field:grant_effect.modify"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "spell_effect",
+      "text": "Exile Finale of Revelation.",
+      "steps": [
+        {
+          "kind": "move_card_zone",
+          "target": "self",
+          "moveTo": "exile"
+        }
+      ],
+      "implementation": "implemented",
+      "needs": []
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

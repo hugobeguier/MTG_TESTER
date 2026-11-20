@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "This creature can't be blocked by creatures with power 2 or less.",
+      "static": {
+        "affects": "self",
+        "modify": [
+          {
+            "evasion": {
+              "cantBeBlockedBy": {
+                "types": [
+                  "creature"
+                ],
+                "power": {
+                  "op": "<=",
+                  "value": 2
+                }
+              }
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

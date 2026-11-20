@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Draw four cards.",
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": 4,
+          "who": "you"
+        }
+      ],
+      "implementation": "implemented",
+      "needs": []
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

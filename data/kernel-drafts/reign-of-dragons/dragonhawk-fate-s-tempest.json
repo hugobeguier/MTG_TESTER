@@ -1,0 +1,118 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever Dragonhawk enters or attacks, exile the top X cards of your library, where X is the number of creatures you control with power 4 or greater. You may play those cards until your next end step. At the beginning of your next end step, Dragonhawk deals 2 damage to each opponent for each of those cards that are still exiled.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self",
+        "alsoOn": [
+          {
+            "event": "attack"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "kind": "move_card_zone",
+          "who": "you",
+          "moveFrom": "library",
+          "moveTo": "exile",
+          "moveCount": {
+            "ref": "count",
+            "of": {
+              "types": [
+                "creature"
+              ],
+              "controller": "you",
+              "power": {
+                "op": ">=",
+                "value": 4
+              }
+            }
+          },
+          "position": "top",
+          "saveAs": "exiled",
+          "src": 0
+        },
+        {
+          "kind": "permission_to_play",
+          "what": "exiled",
+          "optional": true,
+          "duration": "until_your_next_end_step",
+          "src": 1,
+          "prompt": {
+            "title": "Dragonhawk, Fate's Tempest: optional",
+            "instruction": "Do you want to you may play exiled until your next end step?",
+            "source": {
+              "card": "Dragonhawk, Fate's Tempest",
+              "ability": "a2"
+            }
+          }
+        },
+        {
+          "kind": "create_delayed_trigger",
+          "src": 2,
+          "at": {
+            "event": "begin_step",
+            "step": "end_step",
+            "whose": "yours",
+            "next": true
+          },
+          "steps": [
+            {
+              "kind": "damage_target",
+              "source": "self",
+              "who": "each_opponent",
+              "from": "exiled",
+              "amount": {
+                "math": "*",
+                "args": [
+                  2,
+                  {
+                    "ref": "count",
+                    "of": {
+                      "zone": "exile",
+                      "owner": "you"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:multi_event",
+        "field:move_card_zone.position",
+        "field:move_card_zone.saveAs",
+        "step:permission_to_play",
+        "field:permission_to_play.what",
+        "duration:until_your_next_end_step",
+        "step:create_delayed_trigger",
+        "field:create_delayed_trigger.at",
+        "field:create_delayed_trigger.steps",
+        "quantity:math",
+        "field:damage_target.from",
+        "field:damage_target.source",
+        "field:damage_target.who"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

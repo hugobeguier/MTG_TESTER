@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "Red creature spells you cast cost {1} less to cast.",
+      "static": {
+        "affects": "you",
+        "modify": [
+          {
+            "costMod": {
+              "filter": {
+                "types": [
+                  "creature"
+                ],
+                "colors": [
+                  "red"
+                ],
+                "zone": "stack"
+              },
+              "delta": -1
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever you cast a creature spell, you may discard a card. If you do, draw a card.",
+      "trigger": {
+        "event": "cast",
+        "subject": {
+          "types": [
+            "creature"
+          ]
+        },
+        "whose": "yours"
+      },
+      "steps": [
+        {
+          "kind": "discard",
+          "amount": 1,
+          "who": "you",
+          "optional": true,
+          "src": 0,
+          "prompt": {
+            "title": "Hazoret's Monument: optional",
+            "instruction": "Do you want to discard a card?",
+            "source": {
+              "card": "Hazoret's Monument",
+              "ability": "a2"
+            }
+          }
+        },
+        {
+          "kind": "draw_cards",
+          "amount": 1,
+          "who": "you",
+          "src": 1,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "paid_additional_cost",
+              "option": "discard a card"
+            },
+            "src": 1
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "predicate:paid_additional_cost"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

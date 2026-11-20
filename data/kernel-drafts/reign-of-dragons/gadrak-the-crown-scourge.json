@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "static",
+      "text": "Gadrak can't attack unless you control four or more artifacts.",
+      "static": {
+        "affects": "self",
+        "modify": [
+          {
+            "cant": "attack"
+          }
+        ],
+        "while": {
+          "not": {
+            "check": "controls",
+            "filter": {
+              "types": [
+                "artifact"
+              ],
+              "controller": "you"
+            },
+            "count": {
+              "op": ">=",
+              "value": 4
+            }
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "triggered",
+      "text": "At the beginning of your end step, create a Treasure token for each nontoken creature that died this turn.",
+      "trigger": {
+        "event": "begin_step",
+        "step": "end_step",
+        "whose": "yours"
+      },
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": {
+            "ref": "count_this_turn",
+            "event": "dies",
+            "filter": {
+              "types": [
+                "creature"
+              ],
+              "token": false
+            }
+          },
+          "tokenName": "Treasure",
+          "tokenColors": [
+            "colorless"
+          ],
+          "tokenTypeLine": "Artifact — Treasure"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "quantity:count_this_turn"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

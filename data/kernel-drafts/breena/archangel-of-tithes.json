@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "static",
+      "text": "As long as this creature is untapped, creatures can't attack you or planeswalkers you control unless their controller pays {1} for each of those creatures.",
+      "static": {
+        "affects": {
+          "types": [
+            "creature"
+          ]
+        },
+        "modify": [
+          {
+            "attackTax": {
+              "cost": "{1}",
+              "per": "attacker",
+              "protects": "you_and_planeswalkers"
+            }
+          }
+        ],
+        "while": {
+          "not": {
+            "check": "source_state",
+            "state": "tapped"
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "static",
+        "static:attackTax"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "static",
+      "text": "As long as this creature is attacking, creatures can't block unless their controller pays {1} for each of those creatures.",
+      "static": {
+        "affects": {
+          "types": [
+            "creature"
+          ]
+        },
+        "modify": [
+          {
+            "blockTax": {
+              "cost": "{1}",
+              "per": "blocker"
+            }
+          }
+        ],
+        "while": {
+          "check": "source_state",
+          "state": "attacking"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "static",
+        "static:blockTax"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

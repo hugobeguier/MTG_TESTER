@@ -1,0 +1,149 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Menace",
+      "keyword": {
+        "name": "menace"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "mana",
+      "text": "{T}: Add two mana in any combination of colors. Spend this mana only to cast Dragon creature spells.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "anyColor": 2,
+            "restriction": {
+              "types": [
+                "creature"
+              ],
+              "subtypes": [
+                "Dragon"
+              ]
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "mana:variable",
+        "mana:restriction"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "scripted",
+      "text": "Once during each of your turns, you may cast a Dragon creature spell from your graveyard.",
+      "optional": true,
+      "timing": {
+        "limit": {
+          "count": 1,
+          "per": "turn"
+        },
+        "only": [
+          {
+            "check": "turn_is",
+            "whose": "yours"
+          }
+        ]
+      },
+      "scripted": {
+        "handler": "cast_from_graveyard_permission",
+        "params": {
+          "spells": "Dragon creature",
+          "from": "graveyard"
+        }
+      },
+      "prompt": {
+        "title": "Rivaz of the Claw: optional",
+        "instruction": "Do you want to use this ability?",
+        "source": {
+          "card": "Rivaz of the Claw",
+          "ability": "a3"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "scripted:cast_from_graveyard_permission",
+        "timing",
+        "predicate:turn_is"
+      ]
+    },
+    {
+      "id": "a4",
+      "kind": "triggered",
+      "text": "Whenever you cast a Dragon creature spell from your graveyard, it gains \"When this creature dies, exile it.\"",
+      "trigger": {
+        "event": "cast",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "subtypes": [
+            "Dragon"
+          ]
+        },
+        "whose": "yours",
+        "interveningIf": {
+          "check": "cast_from",
+          "zone": "graveyard"
+        }
+      },
+      "steps": [
+        {
+          "kind": "grant_effect",
+          "target": "event_object",
+          "modify": [
+            {
+              "grantAbility": {
+                "kind": "triggered",
+                "text": "When this creature dies, exile it.",
+                "trigger": {
+                  "event": "dies",
+                  "subject": "self"
+                },
+                "steps": [
+                  {
+                    "kind": "exile_target",
+                    "target": "self"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:intervening_if",
+        "predicate:cast_from",
+        "step:grant_effect",
+        "field:grant_effect.modify"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "only",
+        "reason": "'Spend this mana only to cast Dragon creature spells' is the mana restriction filter"
+      },
+      {
+        "lexeme": "each",
+        "reason": "'during each of your turns' is the turn_is timing predicate"
+      }
+    ]
+  }
+}

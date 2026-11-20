@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Vigilance",
+      "keyword": {
+        "name": "vigilance"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "keyword",
+      "text": "Lifelink",
+      "keyword": {
+        "name": "lifelink"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "activated",
+      "text": "{T}: Create a 4/4 white Angel creature token with flying. Activate only if you have at least 7 life more than your starting life total and only as a sorcery.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "timing": {
+        "speed": "sorcery",
+        "only": [
+          {
+            "check": "life",
+            "who": "you",
+            "cmp": {
+              "op": ">=",
+              "value": {
+                "math": "+",
+                "args": [
+                  {
+                    "ref": "starting_life"
+                  },
+                  7
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "srcs": [
+        1
+      ],
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Angel",
+          "tokenPower": 4,
+          "tokenToughness": 4,
+          "tokenColors": [
+            "white"
+          ],
+          "tokenTypeLine": "Creature — Angel",
+          "tokenKeywords": [
+            "flying"
+          ],
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "quantity:starting_life",
+        "timing",
+        "field:create_tokens.tokenKeywords"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

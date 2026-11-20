@@ -1,0 +1,111 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "Dragons you control have indestructible.",
+      "static": {
+        "affects": {
+          "types": [
+            "creature"
+          ],
+          "subtypes": [
+            "Dragon"
+          ],
+          "controller": "you"
+        },
+        "modify": [
+          {
+            "grant": "indestructible"
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "At the beginning of your upkeep, for each color, put a +1/+1 counter on a Dragon you control of that color. If you put +1/+1 counters on five Dragons this way, you win the game.",
+      "trigger": {
+        "event": "begin_step",
+        "step": "upkeep",
+        "whose": "yours"
+      },
+      "scripted": {
+        "handler": "one_counter_per_color_on_distinct_dragons_win_if_five",
+        "params": {
+          "dragons": 5
+        }
+      },
+      "steps": [
+        {
+          "kind": "repeat_for_each",
+          "over": {
+            "colored": true
+          },
+          "steps": [
+            {
+              "kind": "choose",
+              "from": {
+                "types": [
+                  "creature"
+                ],
+                "subtypes": [
+                  "Dragon"
+                ],
+                "controller": "you"
+              },
+              "count": 1,
+              "saveAs": "chosen",
+              "prompt": {
+                "title": "Call the Spirit Dragons: choose",
+                "instruction": "Choose a Dragon you control.",
+                "source": {
+                  "card": "Call the Spirit Dragons",
+                  "ability": "a2"
+                }
+              }
+            },
+            {
+              "kind": "add_counters",
+              "on": "chosen",
+              "counterKind": "+1/+1",
+              "amount": 1
+            }
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "scripted:one_counter_per_color_on_distinct_dragons_win_if_five",
+        "filter:colored",
+        "step:repeat_for_each",
+        "field:repeat_for_each.over",
+        "field:repeat_for_each.steps",
+        "step:choose",
+        "field:choose.count",
+        "field:choose.from",
+        "field:choose.saveAs",
+        "step:add_counters",
+        "field:add_counters.on"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "quantity",
+        "reason": "'for each color' iterates over the five colors; no Quantity is needed"
+      },
+      {
+        "lexeme": "if",
+        "reason": "'If you put counters on five Dragons, you win' is the scripted marker one_counter_per_color_on_distinct_dragons_win_if_five"
+      }
+    ]
+  }
+}

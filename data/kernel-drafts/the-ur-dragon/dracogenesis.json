@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "scripted",
+      "text": "You may cast Dragon spells without paying their mana costs.",
+      "optional": true,
+      "scripted": {
+        "handler": "cast_without_paying_mana_cost",
+        "params": {
+          "spells": "Dragon",
+          "controller": "you"
+        }
+      },
+      "prompt": {
+        "title": "Dracogenesis: optional",
+        "instruction": "Do you want to use this ability?",
+        "source": {
+          "card": "Dracogenesis",
+          "ability": "a1"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "scripted:cast_without_paying_mana_cost"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

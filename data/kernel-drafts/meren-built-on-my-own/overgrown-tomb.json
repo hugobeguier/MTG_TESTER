@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "mana",
+      "text": "({T}: Add {B} or {G}.)",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{B}"
+          },
+          {
+            "colors": "{G}"
+          }
+        ]
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "replacement",
+      "text": "As this land enters, you may pay 2 life. If you don't, it enters tapped.",
+      "replacement": {
+        "event": "would_enter",
+        "result": {
+          "mode": "also",
+          "steps": [
+            {
+              "kind": "life_change",
+              "id": "p1",
+              "who": "you",
+              "lifeDelta": -2,
+              "optional": true,
+              "src": 0,
+              "prompt": {
+                "title": "Overgrown Tomb: optional",
+                "instruction": "Do you want to lose 2 life?",
+                "source": {
+                  "card": "Overgrown Tomb",
+                  "ability": "a2"
+                }
+              }
+            },
+            {
+              "kind": "tap_target",
+              "target": "self",
+              "src": 1,
+              "condition": {
+                "when": "on_resolution",
+                "if": {
+                  "not": {
+                    "check": "step_done",
+                    "step": "p1"
+                  }
+                },
+                "src": 1
+              }
+            }
+          ]
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_enter",
+        "predicate:not",
+        "predicate:step_done"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

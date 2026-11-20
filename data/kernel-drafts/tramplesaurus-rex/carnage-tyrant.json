@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "zone": "stack",
+      "text": "This spell can't be countered.",
+      "static": {
+        "affects": "self",
+        "modify": [
+          {
+            "cant": "be_countered"
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static",
+        "zone:stack"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "keyword",
+      "text": "Trample",
+      "keyword": {
+        "name": "trample"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "keyword",
+      "text": "Hexproof",
+      "keyword": {
+        "name": "hexproof"
+      },
+      "implementation": "implemented",
+      "needs": []
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

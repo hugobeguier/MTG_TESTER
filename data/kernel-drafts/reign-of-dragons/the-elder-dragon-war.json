@@ -1,0 +1,140 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Read ahead",
+      "keyword": {
+        "name": "read_ahead"
+      },
+      "scripted": {
+        "handler": "read_ahead"
+      },
+      "implementation": "needed",
+      "needs": [
+        "scripted:read_ahead"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "I — This Saga deals 2 damage to each creature and each opponent.",
+      "trigger": {
+        "event": "counter_put",
+        "subject": "self",
+        "chapters": [
+          1
+        ]
+      },
+      "steps": [
+        {
+          "kind": "damage_target",
+          "source": "self",
+          "all": true,
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "alsoWho": "each_opponent",
+          "amount": 2
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:counter_put",
+        "trigger:chapters",
+        "field:damage_target.all",
+        "field:damage_target.alsoWho",
+        "field:damage_target.filter",
+        "field:damage_target.source"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "triggered",
+      "text": "II — Discard any number of cards, then draw that many cards.",
+      "trigger": {
+        "event": "counter_put",
+        "subject": "self",
+        "chapters": [
+          2
+        ]
+      },
+      "steps": [
+        {
+          "kind": "discard",
+          "who": "you",
+          "amount": {
+            "ref": "X"
+          },
+          "upTo": true,
+          "min": 0,
+          "saveAs": "discarded",
+          "prompt": {
+            "title": "The Elder Dragon War: discard",
+            "instruction": "Choose X cards to discard.",
+            "source": {
+              "card": "The Elder Dragon War",
+              "ability": "a3"
+            }
+          }
+        },
+        {
+          "kind": "draw_cards",
+          "who": "you",
+          "amount": {
+            "ref": "X"
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:counter_put",
+        "trigger:chapters",
+        "quantity:X",
+        "field:discard.min",
+        "field:discard.saveAs",
+        "field:discard.upTo"
+      ]
+    },
+    {
+      "id": "a4",
+      "kind": "triggered",
+      "text": "III — Create a 4/4 red Dragon creature token with flying.",
+      "trigger": {
+        "event": "counter_put",
+        "subject": "self",
+        "chapters": [
+          3
+        ]
+      },
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Dragon",
+          "tokenPower": 4,
+          "tokenToughness": 4,
+          "tokenColors": [
+            "red"
+          ],
+          "tokenTypeLine": "Creature — Dragon",
+          "tokenKeywords": [
+            "flying"
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:counter_put",
+        "trigger:chapters",
+        "field:create_tokens.tokenKeywords"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

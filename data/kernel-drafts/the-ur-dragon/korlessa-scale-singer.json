@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "scripted",
+      "text": "You may look at the top card of your library any time.",
+      "optional": true,
+      "scripted": {
+        "handler": "look_at_top_card_any_time"
+      },
+      "prompt": {
+        "title": "Korlessa, Scale Singer: optional",
+        "instruction": "Do you want to use this ability?",
+        "source": {
+          "card": "Korlessa, Scale Singer",
+          "ability": "a1"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "scripted:look_at_top_card_any_time"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "scripted",
+      "text": "You may cast Dragon spells from the top of your library.",
+      "optional": true,
+      "scripted": {
+        "handler": "cast_from_top_of_library_permission",
+        "params": {
+          "spells": "Dragon"
+        }
+      },
+      "prompt": {
+        "title": "Korlessa, Scale Singer: optional",
+        "instruction": "Do you want to use this ability?",
+        "source": {
+          "card": "Korlessa, Scale Singer",
+          "ability": "a2"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "scripted:cast_from_top_of_library_permission"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

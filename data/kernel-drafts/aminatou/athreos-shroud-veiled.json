@@ -1,0 +1,138 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Indestructible",
+      "keyword": {
+        "name": "indestructible"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "static",
+      "text": "As long as your devotion to white and black is less than seven, Athreos isn't a creature.",
+      "static": {
+        "affects": "self",
+        "modify": [
+          {
+            "lose": "creature"
+          }
+        ],
+        "while": {
+          "check": "compare",
+          "left": {
+            "math": "+",
+            "args": [
+              {
+                "ref": "devotion",
+                "color": "W"
+              },
+              {
+                "ref": "devotion",
+                "color": "B"
+              }
+            ]
+          },
+          "cmp": {
+            "op": "<",
+            "value": 7
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "triggered",
+      "text": "At the beginning of your end step, put a coin counter on another target creature.",
+      "trigger": {
+        "event": "begin_step",
+        "step": "end_step",
+        "whose": "yours"
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "another": true
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Athreos, Shroud-Veiled: choose a target",
+            "instruction": "Choose another target creature.",
+            "source": {
+              "card": "Athreos, Shroud-Veiled",
+              "ability": "a3"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "add_counters",
+          "on": "t1",
+          "counterKind": "coin",
+          "amount": 1,
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:add_counters",
+        "field:add_counters.on"
+      ]
+    },
+    {
+      "id": "a4",
+      "kind": "triggered",
+      "text": "Whenever a creature with a coin counter on it dies or is put into exile, return that card to the battlefield under your control.",
+      "trigger": {
+        "event": "dies",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "hasCounter": "coin"
+        },
+        "alsoOn": [
+          {
+            "event": "leaves",
+            "toZone": "exile"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "kind": "reanimate",
+          "target": "event_object",
+          "who": "you",
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject",
+        "trigger:multi_event",
+        "trigger:leaves",
+        "trigger:zones"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Reach",
+      "keyword": {
+        "name": "reach"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "When this creature enters, reveal cards from the top of your library until you reveal a land card. Put that card onto the battlefield tapped and the rest on the bottom of your library in a random order.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "reveal",
+          "until": {
+            "types": [
+              "land"
+            ],
+            "zone": "library"
+          },
+          "who": "you",
+          "src": 0
+        },
+        {
+          "kind": "choose",
+          "from": {
+            "types": [
+              "land"
+            ],
+            "zone": "library"
+          },
+          "fromRevealed": true,
+          "count": 1,
+          "saveAs": "chosen",
+          "src": 0,
+          "prompt": {
+            "title": "Clifftop Lookout: choose",
+            "instruction": "Choose a land card in a library.",
+            "source": {
+              "card": "Clifftop Lookout",
+              "ability": "a2"
+            }
+          }
+        },
+        {
+          "kind": "move_card_zone",
+          "target": "chosen",
+          "moveTo": "battlefield",
+          "tapped": true,
+          "src": 1
+        },
+        {
+          "kind": "move_card_zone",
+          "what": "rest_of_revealed_cards",
+          "moveTo": "library",
+          "position": "bottom",
+          "order": "random",
+          "src": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:reveal",
+        "field:reveal.until",
+        "step:choose",
+        "field:choose.count",
+        "field:choose.from",
+        "field:choose.fromRevealed",
+        "field:choose.saveAs",
+        "field:move_card_zone.tapped",
+        "field:move_card_zone.order",
+        "field:move_card_zone.position",
+        "field:move_card_zone.what"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

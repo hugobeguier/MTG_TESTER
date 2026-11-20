@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Add {R} for each tapped land your opponents control.",
+      "steps": [
+        {
+          "kind": "add_mana",
+          "produces": [
+            {
+              "colors": "{R}"
+            }
+          ],
+          "amount": {
+            "ref": "count",
+            "of": {
+              "types": [
+                "land"
+              ],
+              "controller": "opponent",
+              "tapped": true
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:add_mana",
+        "quantity:count",
+        "field:add_mana.produces"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

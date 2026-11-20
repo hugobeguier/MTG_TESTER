@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "activated",
+      "text": "{1}{U}{U}: Target permanent becomes an artifact in addition to its other types. (This effect lasts indefinitely.)",
+      "costs": [
+        {
+          "mana": "{1}{U}{U}"
+        }
+      ],
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "zone": "battlefield"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Memnarch: choose a target",
+            "instruction": "Choose target permanent.",
+            "source": {
+              "card": "Memnarch",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "grant_effect",
+          "target": "t1",
+          "modify": [
+            {
+              "addTypes": [
+                "Artifact"
+              ]
+            }
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:grant_effect",
+        "field:grant_effect.modify"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "{3}{U}: Gain control of target artifact. (This effect lasts indefinitely.)",
+      "costs": [
+        {
+          "mana": "{3}{U}"
+        }
+      ],
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "artifact"
+            ],
+            "zone": "battlefield"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Memnarch: choose a target",
+            "instruction": "Choose target artifact.",
+            "source": {
+              "card": "Memnarch",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "gain_control",
+          "target": "t1"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:gain_control"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

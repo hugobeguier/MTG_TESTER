@@ -1,0 +1,107 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Menace",
+      "keyword": {
+        "name": "menace"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever this creature enters or attacks, exile up to one target card from a graveyard and create a Food token.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self",
+        "alsoOn": [
+          {
+            "event": "attack",
+            "subject": "self"
+          }
+        ]
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "zone": "graveyard"
+          },
+          "count": {
+            "min": 0,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Hazel's Brewmaster: choose a target",
+            "instruction": "Choose up to one target card in a graveyard.",
+            "source": {
+              "card": "Hazel's Brewmaster",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "exile_target",
+          "target": "t1",
+          "linkExile": true
+        },
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Food",
+          "tokenColors": [
+            "colorless"
+          ],
+          "tokenTypeLine": "Artifact — Food"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:multi_event",
+        "targets:multi",
+        "field:exile_target.linkExile"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "static",
+      "text": "Foods you control have all activated abilities of all creature cards exiled with this creature.",
+      "static": {
+        "affects": {
+          "subtypes": [
+            "Food"
+          ],
+          "controller": "you"
+        },
+        "modify": [
+          {
+            "grantAbility": {
+              "kind": "activated",
+              "text": "all activated abilities of all creature cards exiled with this creature",
+              "linkedExile": true,
+              "filter": {
+                "types": [
+                  "creature"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

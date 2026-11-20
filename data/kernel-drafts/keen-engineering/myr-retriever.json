@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "When this creature dies, return another target artifact card from your graveyard to your hand.",
+      "trigger": {
+        "event": "dies",
+        "subject": "self"
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "artifact"
+            ],
+            "zone": "graveyard",
+            "owner": "you",
+            "another": true
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Myr Retriever: choose a target",
+            "instruction": "Choose another target artifact card in your graveyard.",
+            "source": {
+              "card": "Myr Retriever",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "move_card_zone",
+          "target": "t1",
+          "moveTo": "hand"
+        }
+      ],
+      "implementation": "implemented",
+      "needs": []
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

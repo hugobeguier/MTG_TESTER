@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "When this creature dies, create X tapped 1/1 green Squirrel creature tokens, where X is this creature's power.",
+      "trigger": {
+        "event": "dies",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": {
+            "ref": "stat",
+            "of": "self",
+            "stat": "power"
+          },
+          "tokenName": "Squirrel",
+          "tokenPower": 1,
+          "tokenToughness": 1,
+          "tokenColors": [
+            "green"
+          ],
+          "tokenTypeLine": "Creature — Squirrel",
+          "tokenTapped": true
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "quantity:stat",
+        "field:create_tokens.tokenTapped"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

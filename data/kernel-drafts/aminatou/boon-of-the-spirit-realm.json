@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Constellation — Whenever this enchantment or another enchantment you control enters, put a blessing counter on this enchantment.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self",
+        "alsoOn": [
+          {
+            "event": "etb",
+            "subject": {
+              "types": [
+                "enchantment"
+              ],
+              "controller": "you",
+              "another": true
+            }
+          }
+        ]
+      },
+      "steps": [
+        {
+          "kind": "add_counters",
+          "on": "self",
+          "counterKind": "blessing",
+          "amount": 1,
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:multi_event",
+        "trigger:subject",
+        "step:add_counters",
+        "field:add_counters.on"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "static",
+      "text": "Creatures you control get +1/+1 for each blessing counter on this enchantment.",
+      "static": {
+        "affects": {
+          "types": [
+            "creature"
+          ],
+          "controller": "you"
+        },
+        "modify": [
+          {
+            "pt": {
+              "power": {
+                "ref": "counters",
+                "kind": "blessing",
+                "on": "self"
+              },
+              "toughness": {
+                "ref": "counters",
+                "kind": "blessing",
+                "on": "self"
+              }
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

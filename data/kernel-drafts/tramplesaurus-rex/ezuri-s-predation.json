@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "For each creature your opponents control, create a 4/4 green Phyrexian Beast creature token. Each of those tokens fights a different one of those creatures.",
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "id": "s1",
+          "tokenCount": {
+            "ref": "count",
+            "of": {
+              "types": [
+                "creature"
+              ],
+              "controller": "opponent"
+            }
+          },
+          "tokenName": "Beast",
+          "tokenPower": 4,
+          "tokenToughness": 4,
+          "tokenColors": [
+            "green"
+          ],
+          "tokenTypeLine": "Creature — Phyrexian Beast",
+          "src": 0
+        },
+        {
+          "kind": "fight_pairs",
+          "fighters": "created",
+          "against": {
+            "types": [
+              "creature"
+            ],
+            "controller": "opponent"
+          },
+          "pairing": "controller_chooses",
+          "src": 1,
+          "prompt": {
+            "title": "Ezuri's Predation: choose fights",
+            "instruction": "Choose which creature an opponent controls each token fights. Each token fights a different one; tokens beyond the number of creatures fight nothing.",
+            "source": {
+              "card": "Ezuri's Predation",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "ref:created",
+        "quantity:count",
+        "step:fight_pairs",
+        "field:fight_pairs.against",
+        "field:fight_pairs.fighters",
+        "field:fight_pairs.pairing"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

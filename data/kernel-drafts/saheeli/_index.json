@@ -1,0 +1,418 @@
+{
+  "deck": "Saheeli",
+  "cards": [
+    {
+      "slug": "saheeli-the-gifted",
+      "name": "Saheeli, the Gifted",
+      "questions": [
+        "Loyalty costs use the {loyalty: N} cost atom (+N adds counters, -N removes) with sorcery-speed, once-per-turn timing. OK?",
+        "'The next spell you cast this turn has affinity for artifacts' has no 'next spell' target, so it is a grant_effect step (appliesTo:'next_spell_cast') plus the scripted marker next_spell_gains_keyword. Should the schema grow a next-spell grant?",
+        "'Create a token that's a copy of each artifact you control, haste, exile at the next end step' is repeat_for_each + copy with gainKeywords:['haste'] and exileAt:'next_end_step' (same shape as Goldlust Triad's exileAt). 'Can be your commander' is a scripted marker (can_be_your_commander) the deck loader would read."
+      ]
+    },
+    {
+      "slug": "ancient-stone-idol",
+      "name": "Ancient Stone Idol"
+    },
+    {
+      "slug": "arcane-signet",
+      "name": "Arcane Signet"
+    },
+    {
+      "slug": "archway-of-innovation",
+      "name": "Archway of Innovation",
+      "questions": [
+        "'This land enters tapped unless you control an Island' is a would_enter modify tapped with a negated controls condition. 'The next spell you cast this turn has improvise' reuses the next_spell_cast grant shape from Saheeli, the Gifted. OK?"
+      ]
+    },
+    {
+      "slug": "blasphemous-act",
+      "name": "Blasphemous Act"
+    },
+    {
+      "slug": "brudiclad-telchor-engineer",
+      "name": "Brudiclad, Telchor Engineer",
+      "questions": [
+        "'Each other token you control becomes a copy of that token' is a copy step with all:true, becomes:true (the objects themselves change, no new tokens) and excludeChosen:true, gated by step_done on the optional choose. OK?"
+      ]
+    },
+    {
+      "slug": "buried-ruin",
+      "name": "Buried Ruin"
+    },
+    {
+      "slug": "chaos-warp",
+      "name": "Chaos Warp"
+    },
+    {
+      "slug": "chief-of-the-foundry",
+      "name": "Chief of the Foundry"
+    },
+    {
+      "slug": "command-tower",
+      "name": "Command Tower"
+    },
+    {
+      "slug": "counterspell",
+      "name": "Counterspell"
+    },
+    {
+      "slug": "crackle-with-power",
+      "name": "Crackle with Power",
+      "questions": [
+        "'Each of up to X targets': TargetSpec.count.max must be a fixed integer, so it is {min:0,max:1} plus the scripted marker target_count_up_to_X. Should count.max accept a Quantity?"
+      ]
+    },
+    {
+      "slug": "daretti-scrap-savant",
+      "name": "Daretti, Scrap Savant",
+      "questions": [
+        "Loyalty costs use the {loyalty: N} cost atom (+N adds counters, -N removes) with sorcery-speed, once-per-turn timing. OK?",
+        "Emblems have no step kind. Written as a grant_effect step with emblem:true whose modify.grantAbility carries the emblem's ability. Should the schema get a create_emblem step?",
+        "'Discard up to two cards, then draw that many': discard has upTo:true and the draw amount is event_amount (the number actually discarded). OK?"
+      ]
+    },
+    {
+      "slug": "darksteel-citadel",
+      "name": "Darksteel Citadel"
+    },
+    {
+      "slug": "darksteel-forge",
+      "name": "Darksteel Forge"
+    },
+    {
+      "slug": "darksteel-juggernaut",
+      "name": "Darksteel Juggernaut"
+    },
+    {
+      "slug": "delete",
+      "name": "Delete"
+    },
+    {
+      "slug": "emry-lurker-of-the-loch",
+      "name": "Emry, Lurker of the Loch"
+    },
+    {
+      "slug": "enthusiastic-mechanaut",
+      "name": "Enthusiastic Mechanaut"
+    },
+    {
+      "slug": "etherium-sculptor",
+      "name": "Etherium Sculptor"
+    },
+    {
+      "slug": "fellwar-stone",
+      "name": "Fellwar Stone",
+      "questions": [
+        "'One mana of any color that a land an opponent controls could produce' is {anyColor:1} plus the scripted marker mana_colors_an_opponent_land_could_produce (the kernel must restrict the colors). Should ManaSpec get an 'optionsFrom' filter?"
+      ]
+    },
+    {
+      "slug": "finale-of-revelation",
+      "name": "Finale of Revelation",
+      "questions": [
+        "'Draw X cards. If X is 10 or more, instead shuffle your graveyard into your library, draw X cards, untap up to five lands, and you have no maximum hand size for the rest of the game' is an if_else (compare X >= 10). The permanent 'no maximum hand size' is a grant_effect with duration 'instant' (= no expiry). 'Exile Finale of Revelation' is its own line and a move_card_zone step on self. OK?"
+      ]
+    },
+    {
+      "slug": "forsaken-monument",
+      "name": "Forsaken Monument"
+    },
+    {
+      "slug": "foundry-inspector",
+      "name": "Foundry Inspector"
+    },
+    {
+      "slug": "frostboil-snarl",
+      "name": "Frostboil Snarl",
+      "questions": [
+        "'Add {U} or {R}': ManaSpec has no 'choose one' form. Written as one mana ability whose produces list has two single-colour entries ({U}, {R}); the convention is that several entries in one ability are alternatives the player chooses from, while a single entry like {U}{R} is all produced together. OK?",
+        "'As this land enters, you may reveal an Island or Mountain card from your hand. If you don't, this land enters tapped.' is a would_enter 'also' replacement: optional reveal step, then tap self unless the reveal happened (step_done). OK?"
+      ]
+    },
+    {
+      "slug": "gilded-lotus",
+      "name": "Gilded Lotus"
+    },
+    {
+      "slug": "great-furnace",
+      "name": "Great Furnace"
+    },
+    {
+      "slug": "hedron-archive",
+      "name": "Hedron Archive"
+    },
+    {
+      "slug": "hellkite-igniter",
+      "name": "Hellkite Igniter"
+    },
+    {
+      "slug": "idol-of-oblivion",
+      "name": "Idol of Oblivion"
+    },
+    {
+      "slug": "island",
+      "name": "Island"
+    },
+    {
+      "slug": "izzet-boilerworks",
+      "name": "Izzet Boilerworks"
+    },
+    {
+      "slug": "izzet-signet",
+      "name": "Izzet Signet"
+    },
+    {
+      "slug": "jhoira-weatherlight-captain",
+      "name": "Jhoira, Weatherlight Captain",
+      "questions": [
+        "'Historic' (artifacts, legendaries and Sagas, from the reminder text) is written as an anyOf filter on the cast trigger subject. OK?"
+      ]
+    },
+    {
+      "slug": "loyal-apprentice",
+      "name": "Loyal Apprentice",
+      "questions": [
+        "Lieutenant (an ability word) is just the intervening-if 'you control your commander', written with the filter flag isCommander. OK?"
+      ]
+    },
+    {
+      "slug": "loyal-drake",
+      "name": "Loyal Drake"
+    },
+    {
+      "slug": "memnarch",
+      "name": "Memnarch",
+      "questions": [
+        "'Lasts indefinitely' is written as no duration on the step (permanent effect). OK?"
+      ]
+    },
+    {
+      "slug": "mimic-vat",
+      "name": "Mimic Vat",
+      "questions": [
+        "Imprint uses the pilot's linkExile / linked_exile pair. 'Return each other card exiled with this artifact' is a move_card_zone on linked_exile with excludeLatest:true (all but the card just exiled). OK?"
+      ]
+    },
+    {
+      "slug": "mind-unbound",
+      "name": "Mind Unbound"
+    },
+    {
+      "slug": "mirrorworks",
+      "name": "Mirrorworks",
+      "questions": [
+        "'You may pay {2}. If you do, create a token copy' follows the Mind's Eye shape: optional step + optionalCost + paid_additional_cost condition. OK?"
+      ]
+    },
+    {
+      "slug": "mountain",
+      "name": "Mountain"
+    },
+    {
+      "slug": "mycosynth-lattice",
+      "name": "Mycosynth Lattice",
+      "questions": [
+        "Line 2 ('all cards that aren't on the battlefield, spells, and permanents are colorless') is a static over zone:'any' with setColors:[] (empty = colorless). OK?"
+      ]
+    },
+    {
+      "slug": "myr-battlesphere",
+      "name": "Myr Battlesphere"
+    },
+    {
+      "slug": "ornithopter-of-paradise",
+      "name": "Ornithopter of Paradise"
+    },
+    {
+      "slug": "padeem-consul-of-innovation",
+      "name": "Padeem, Consul of Innovation"
+    },
+    {
+      "slug": "prismatic-lens",
+      "name": "Prismatic Lens"
+    },
+    {
+      "slug": "pull-from-tomorrow",
+      "name": "Pull from Tomorrow"
+    },
+    {
+      "slug": "reality-heist",
+      "name": "Reality Heist"
+    },
+    {
+      "slug": "reliquary-tower",
+      "name": "Reliquary Tower"
+    },
+    {
+      "slug": "reverse-engineer",
+      "name": "Reverse Engineer"
+    },
+    {
+      "slug": "saheeli-sublime-artificer",
+      "name": "Saheeli, Sublime Artificer",
+      "questions": [
+        "'Becomes a copy of another target artifact or creature until end of turn, except it's an artifact in addition' is a copy step with of:'t2', duration and exceptAddTypes:['Artifact'] (like Cursed Mirror's exceptGrant). OK?",
+        "Loyalty costs use the {loyalty: N} cost atom (+N adds counters, -N removes) with sorcery-speed, once-per-turn timing. OK?"
+      ]
+    },
+    {
+      "slug": "saheeli-s-artistry",
+      "name": "Saheeli's Artistry",
+      "questions": [
+        "VALIDATOR BUG: the mode check reads 'Choose one or both' as 'choose one' (regex has no 'one or both' branch) and demands choose 1..1. Workaround: the header line is left out of the ability text (marker choose_one_or_both on the ability) and the bullets are the text with modes.choose 1..2. Fix the validator (one or both = 1..2) and the header can be merged back."
+      ]
+    },
+    {
+      "slug": "saheeli-s-directive",
+      "name": "Saheeli's Directive",
+      "questions": [
+        "'Any number of' has no count form: written as anyNumber:true on the choose step. 'Reveal the top X cards' is look_top with reveal:true. OK?"
+      ]
+    },
+    {
+      "slug": "seat-of-the-synod",
+      "name": "Seat of the Synod"
+    },
+    {
+      "slug": "sharding-sphinx",
+      "name": "Sharding Sphinx"
+    },
+    {
+      "slug": "shimmer-dragon",
+      "name": "Shimmer Dragon"
+    },
+    {
+      "slug": "shivan-reef",
+      "name": "Shivan Reef",
+      "questions": [
+        "'Add {U} or {R}': ManaSpec has no 'choose one' form. Written as one mana ability whose produces list has two single-colour entries ({U}, {R}); the convention is that several entries in one ability are alternatives the player chooses from, while a single entry like {U}{R} is all produced together. OK?",
+        "The 1 damage a painland deals to you is a step on the mana ability (no target). OK?"
+      ]
+    },
+    {
+      "slug": "silverbluff-bridge",
+      "name": "Silverbluff Bridge",
+      "questions": [
+        "'Add {U} or {R}': ManaSpec has no 'choose one' form. Written as one mana ability whose produces list has two single-colour entries ({U}, {R}); the convention is that several entries in one ability are alternatives the player chooses from, while a single entry like {U}{R} is all produced together. OK?"
+      ]
+    },
+    {
+      "slug": "skullclamp",
+      "name": "Skullclamp"
+    },
+    {
+      "slug": "sol-ring",
+      "name": "Sol Ring"
+    },
+    {
+      "slug": "steel-hellkite",
+      "name": "Steel Hellkite"
+    },
+    {
+      "slug": "sulfur-falls",
+      "name": "Sulfur Falls",
+      "questions": [
+        "'Add {U} or {R}': ManaSpec has no 'choose one' form. Written as one mana ability whose produces list has two single-colour entries ({U}, {R}); the convention is that several entries in one ability are alternatives the player chooses from, while a single entry like {U}{R} is all produced together. OK?"
+      ]
+    },
+    {
+      "slug": "sunken-palace",
+      "name": "Sunken Palace",
+      "questions": [
+        "'When you spend this mana to cast a spell or activate an ability, copy that spell or ability' is a rider on a mana ability. Written as a copy step (optional, chooseNewTargets) on the mana ability plus a scripted marker; the kernel has no 'mana spent' trigger. OK?"
+      ]
+    },
+    {
+      "slug": "swan-song",
+      "name": "Swan Song"
+    },
+    {
+      "slug": "swiftfoot-boots",
+      "name": "Swiftfoot Boots"
+    },
+    {
+      "slug": "swiftwater-cliffs",
+      "name": "Swiftwater Cliffs",
+      "questions": [
+        "'Add {U} or {R}': ManaSpec has no 'choose one' form. Written as one mana ability whose produces list has two single-colour entries ({U}, {R}); the convention is that several entries in one ability are alternatives the player chooses from, while a single entry like {U}{R} is all produced together. OK?"
+      ]
+    },
+    {
+      "slug": "talisman-of-creativity",
+      "name": "Talisman of Creativity",
+      "questions": [
+        "'Add {U} or {R}': ManaSpec has no 'choose one' form. Written as one mana ability whose produces list has two single-colour entries ({U}, {R}); the convention is that several entries in one ability are alternatives the player chooses from, while a single entry like {U}{R} is all produced together. OK?"
+      ]
+    },
+    {
+      "slug": "tezzeret-artifice-master",
+      "name": "Tezzeret, Artifice Master",
+      "questions": [
+        "Loyalty costs use the {loyalty: N} cost atom (+N adds counters, -N removes) with sorcery-speed, once-per-turn timing. OK?",
+        "Emblems have no step kind. Written as a grant_effect step with emblem:true whose modify.grantAbility carries the emblem's ability. Should the schema get a create_emblem step?"
+      ]
+    },
+    {
+      "slug": "thirst-for-knowledge",
+      "name": "Thirst for Knowledge"
+    },
+    {
+      "slug": "thopter-assembly",
+      "name": "Thopter Assembly"
+    },
+    {
+      "slug": "thopter-engineer",
+      "name": "Thopter Engineer"
+    },
+    {
+      "slug": "thopter-spy-network",
+      "name": "Thopter Spy Network"
+    },
+    {
+      "slug": "thought-monitor",
+      "name": "Thought Monitor"
+    },
+    {
+      "slug": "thran-dynamo",
+      "name": "Thran Dynamo"
+    },
+    {
+      "slug": "tidings",
+      "name": "Tidings"
+    },
+    {
+      "slug": "treasure-nabber",
+      "name": "Treasure Nabber",
+      "questions": [
+        "'Taps an artifact for mana' is a tap trigger plus the scripted marker tapped_for_mana (same as Forsaken Monument). OK?"
+      ]
+    },
+    {
+      "slug": "triplicate-titan",
+      "name": "Triplicate Titan"
+    },
+    {
+      "slug": "unwinding-clock",
+      "name": "Unwinding Clock",
+      "questions": [
+        "'Untap all artifacts you control during each other player's untap step' is a turn-based action, not a trigger, so it is a scripted ability with an untap_target step. Should the schema get a step-based static ('during <step>')?"
+      ]
+    },
+    {
+      "slug": "vedalken-humiliator",
+      "name": "Vedalken Humiliator",
+      "questions": [
+        "Metalcraft is the intervening-if 'controls three or more artifacts'. 'Lose all abilities' is a lose entry in the grant_effect modify list. OK?"
+      ]
+    },
+    {
+      "slug": "whirler-rogue",
+      "name": "Whirler Rogue"
+    },
+    {
+      "slug": "worn-powerstone",
+      "name": "Worn Powerstone"
+    }
+  ]
+}

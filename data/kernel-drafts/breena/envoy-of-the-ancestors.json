@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "kind": "activated",
+      "keyword": {
+        "name": "outlast",
+        "param": "{W}"
+      },
+      "text": "Outlast {W} ({W}, {T}: Put a +1/+1 counter on this creature. Outlast only as a sorcery.)",
+      "timing": {
+        "speed": "sorcery"
+      },
+      "costs": [
+        {
+          "mana": "{W}"
+        },
+        {
+          "tap": "self"
+        }
+      ],
+      "steps": [
+        {
+          "kind": "add_counters",
+          "on": "self",
+          "counterKind": "+1/+1",
+          "amount": 1,
+          "src": 0
+        }
+      ],
+      "id": "a1",
+      "implementation": "needed",
+      "needs": [
+        "step:add_counters",
+        "field:add_counters.on"
+      ]
+    },
+    {
+      "kind": "static",
+      "text": "Modified creatures you control have lifelink. (Equipment, Auras you control, and counters are modifications.)",
+      "static": {
+        "affects": {
+          "types": [
+            "creature"
+          ],
+          "controller": "you",
+          "with": [
+            "modified"
+          ]
+        },
+        "modify": [
+          {
+            "grant": "lifelink"
+          }
+        ]
+      },
+      "id": "a2",
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "kind": "spell_effect",
+      "text": "Counter target spell unless its controller pays {1}.",
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "spell"
+            ],
+            "zone": "stack"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Mana Tithe: choose a target",
+            "instruction": "Choose target spell.",
+            "source": {
+              "card": "Mana Tithe",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "counter_spell",
+          "target": "t1",
+          "unlessPay": {
+            "payer": "controller_of_target",
+            "cost": [
+              {
+                "mana": "{1}"
+              }
+            ],
+            "prompt": {
+              "title": "Mana Tithe: pay or not",
+              "instruction": "Do you want to pay {1}? If you don't, counter target spell.",
+              "source": {
+                "card": "Mana Tithe",
+                "ability": "a1"
+              }
+            }
+          },
+          "src": 0
+        }
+      ],
+      "id": "a1",
+      "implementation": "needed",
+      "needs": [
+        "step:counter_spell",
+        "step:unless_pay"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

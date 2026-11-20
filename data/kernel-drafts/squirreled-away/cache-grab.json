@@ -1,0 +1,117 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Mill four cards. You may put a permanent card from among the cards milled this way into your hand. If you control a Squirrel or returned a Squirrel card to your hand this way, create a Food token. (To mill four cards, put the top four cards of your library into your graveyard. A Food token is an artifact with \"{2}, {T}, Sacrifice this token: You gain 3 life.\")",
+      "steps": [
+        {
+          "kind": "mill",
+          "id": "s1",
+          "who": "you",
+          "amount": 4,
+          "src": 0
+        },
+        {
+          "kind": "choose",
+          "id": "s2",
+          "optional": true,
+          "from": {
+            "types": [
+              "permanent"
+            ],
+            "zone": "graveyard",
+            "owner": "you"
+          },
+          "fromMilled": true,
+          "count": 1,
+          "saveAs": "chosen",
+          "src": 1,
+          "prompt": {
+            "title": "Cache Grab: optional",
+            "instruction": "Do you want to choose a permanent card in your graveyard?",
+            "source": {
+              "card": "Cache Grab",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "kind": "move_card_zone",
+          "target": "chosen",
+          "from": "graveyard",
+          "moveTo": "hand",
+          "src": 1,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "step_done",
+              "step": "s2"
+            },
+            "src": 1
+          }
+        },
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Food",
+          "tokenColors": [
+            "colorless"
+          ],
+          "tokenTypeLine": "Artifact — Food",
+          "src": 2,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "any": [
+                {
+                  "check": "controls",
+                  "filter": {
+                    "subtypes": [
+                      "Squirrel"
+                    ],
+                    "controller": "you"
+                  }
+                },
+                {
+                  "all": [
+                    {
+                      "check": "step_done",
+                      "step": "s2"
+                    },
+                    {
+                      "check": "matches",
+                      "obj": "chosen",
+                      "filter": {
+                        "subtypes": [
+                          "Squirrel"
+                        ]
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "src": 2
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:choose",
+        "field:choose.count",
+        "field:choose.from",
+        "field:choose.fromMilled",
+        "field:choose.saveAs",
+        "field:move_card_zone.from",
+        "predicate:step_done",
+        "predicate:all",
+        "predicate:matches"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

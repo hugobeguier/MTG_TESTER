@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "activated",
+      "text": "Sacrifice a creature: Target player mills cards equal to the sacrificed creature's power.",
+      "costs": [
+        {
+          "sacrifice": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you"
+          },
+          "count": 1,
+          "prompt": {
+            "title": "Altar of Dementia: choose what to sacrifice",
+            "instruction": "Choose 1 creature you control to sacrifice.",
+            "source": {
+              "card": "Altar of Dementia",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "targets": [
+        {
+          "id": "t1",
+          "what": "player",
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Altar of Dementia: choose a target",
+            "instruction": "Choose target player.",
+            "source": {
+              "card": "Altar of Dementia",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "mill",
+          "who": "target_player",
+          "amount": {
+            "ref": "stat",
+            "of": "sacrificed",
+            "stat": "power"
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "ref:sacrificed",
+        "cost:sacrifice",
+        "quantity:stat",
+        "field:mill.who"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

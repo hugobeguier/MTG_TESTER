@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "cast_option",
+      "text": "This spell costs {1} less to cast for each creature on the battlefield.",
+      "costReduction": {
+        "per": {
+          "types": [
+            "creature"
+          ],
+          "controller": "any"
+        },
+        "amount": 1,
+        "applies": "generic"
+      },
+      "implementation": "needed",
+      "needs": [
+        "cast_option",
+        "cost_reduction"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "spell_effect",
+      "text": "Blasphemous Act deals 13 damage to each creature.",
+      "steps": [
+        {
+          "kind": "damage_target",
+          "all": true,
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "amount": 13
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:damage_target.all",
+        "field:damage_target.filter"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

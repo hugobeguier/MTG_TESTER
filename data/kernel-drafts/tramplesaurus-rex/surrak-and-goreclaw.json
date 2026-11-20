@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Trample",
+      "keyword": {
+        "name": "trample"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "static",
+      "text": "Other creatures you control have trample.",
+      "static": {
+        "affects": {
+          "types": [
+            "creature"
+          ],
+          "controller": "you",
+          "another": true
+        },
+        "modify": [
+          {
+            "grant": "trample"
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "triggered",
+      "text": "Whenever another nontoken creature you control enters, put a +1/+1 counter on it. It gains haste until end of turn.",
+      "trigger": {
+        "event": "etb",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "controller": "you",
+          "another": true,
+          "token": false
+        }
+      },
+      "steps": [
+        {
+          "kind": "add_counters",
+          "on": "event_object",
+          "counterKind": "+1/+1",
+          "amount": 1,
+          "src": 0
+        },
+        {
+          "kind": "grant_effect",
+          "target": "event_object",
+          "modify": [
+            {
+              "grant": "haste"
+            }
+          ],
+          "duration": "until_end_of_turn",
+          "src": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject",
+        "step:add_counters",
+        "field:add_counters.on",
+        "step:grant_effect",
+        "field:grant_effect.modify"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

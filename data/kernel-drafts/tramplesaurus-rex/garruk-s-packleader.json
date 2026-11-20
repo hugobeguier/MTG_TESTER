@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Whenever another creature you control with power 3 or greater enters, you may draw a card.",
+      "trigger": {
+        "event": "etb",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "controller": "you",
+          "another": true,
+          "power": {
+            "op": ">=",
+            "value": 3
+          }
+        }
+      },
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": 1,
+          "who": "you",
+          "optional": true,
+          "prompt": {
+            "title": "Garruk's Packleader: optional",
+            "instruction": "Do you want to draw a card?",
+            "source": {
+              "card": "Garruk's Packleader",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

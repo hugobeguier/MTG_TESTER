@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "When this creature enters, exile up to two target artifacts and/or enchantments.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "anyOf": [
+              {
+                "types": [
+                  "artifact"
+                ]
+              },
+              {
+                "types": [
+                  "enchantment"
+                ]
+              }
+            ]
+          },
+          "count": {
+            "min": 0,
+            "max": 2
+          },
+          "prompt": {
+            "title": "Angel of the Ruins: choose targets",
+            "instruction": "Choose up to two target artifacts or enchantments.",
+            "source": {
+              "card": "Angel of the Ruins",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "src": 0,
+          "kind": "exile_target",
+          "target": "t1"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "targets:multi"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "activated",
+      "text": "Plainscycling {2} ({2}, Discard this card: Search your library for a Plains card, reveal it, put it into your hand, then shuffle.)",
+      "zone": "hand",
+      "keyword": {
+        "name": "plainscycling",
+        "param": 2
+      },
+      "costs": [
+        {
+          "mana": "{2}"
+        },
+        {
+          "discard": "self",
+          "count": 1
+        }
+      ],
+      "steps": [
+        {
+          "src": 0,
+          "kind": "search_library",
+          "who": "you",
+          "filter": {
+            "subtypes": [
+              "Plains"
+            ]
+          },
+          "count": 1,
+          "to": "hand",
+          "reveal": true,
+          "shuffle": true,
+          "prompt": {
+            "title": "Angel of the Ruins: search",
+            "instruction": "Choose a Plains from the library.",
+            "source": {
+              "card": "Angel of the Ruins",
+              "ability": "a3"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "zone:hand",
+        "cost:discard",
+        "step:search_library",
+        "field:search_library.count",
+        "field:search_library.filter",
+        "field:search_library.reveal",
+        "field:search_library.shuffle",
+        "field:search_library.to"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

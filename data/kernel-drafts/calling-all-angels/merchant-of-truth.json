@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever a nontoken creature you control dies, investigate.",
+      "trigger": {
+        "event": "dies",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "token": false,
+          "controller": "you"
+        }
+      },
+      "steps": [
+        {
+          "kind": "investigate",
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject",
+        "step:investigate"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "static",
+      "text": "Clues you control have exalted. (Whenever a creature you control attacks alone, that creature gets +1/+1 until end of turn for each instance of exalted among permanents you control.)",
+      "static": {
+        "affects": {
+          "subtypes": [
+            "Clue"
+          ],
+          "controller": "you"
+        },
+        "modify": [
+          {
+            "grant": "exalted"
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

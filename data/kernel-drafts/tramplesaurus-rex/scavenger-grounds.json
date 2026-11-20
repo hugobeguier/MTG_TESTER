@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "mana",
+      "text": "{T}: Add {C}.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{C}"
+          }
+        ]
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "{2}, {T}, Sacrifice a Desert: Exile all graveyards.",
+      "costs": [
+        {
+          "mana": "{2}"
+        },
+        {
+          "tap": "self"
+        },
+        {
+          "sacrifice": {
+            "subtypes": [
+              "Desert"
+            ],
+            "controller": "you"
+          },
+          "count": 1,
+          "prompt": {
+            "title": "Scavenger Grounds: choose what to sacrifice",
+            "instruction": "Choose 1 Desert you control to sacrifice.",
+            "source": {
+              "card": "Scavenger Grounds",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "move_card_zone",
+          "who": "each_player",
+          "from": "graveyard",
+          "all": true,
+          "moveTo": "exile"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "cost:sacrifice",
+        "field:move_card_zone.all",
+        "field:move_card_zone.from",
+        "field:move_card_zone.who"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

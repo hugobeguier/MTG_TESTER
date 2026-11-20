@@ -1,0 +1,118 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Whenever another creature dies, or a creature card is put into a graveyard from anywhere other than the battlefield, or a creature card leaves your graveyard, Syr Konrad deals 1 damage to each opponent.",
+      "trigger": {
+        "event": "dies",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "another": true
+        },
+        "alsoOn": [
+          {
+            "event": "unspecified",
+            "subject": {
+              "types": [
+                "creature"
+              ],
+              "zone": "any"
+            },
+            "fromZone": "hand",
+            "toZone": "graveyard"
+          },
+          {
+            "event": "unspecified",
+            "subject": {
+              "types": [
+                "creature"
+              ],
+              "zone": "any"
+            },
+            "fromZone": "library",
+            "toZone": "graveyard"
+          },
+          {
+            "event": "unspecified",
+            "subject": {
+              "types": [
+                "creature"
+              ],
+              "zone": "any"
+            },
+            "fromZone": "exile",
+            "toZone": "graveyard"
+          },
+          {
+            "event": "unspecified",
+            "subject": {
+              "types": [
+                "creature"
+              ],
+              "zone": "any"
+            },
+            "fromZone": "stack",
+            "toZone": "graveyard"
+          },
+          {
+            "event": "leaves",
+            "subject": {
+              "types": [
+                "creature"
+              ],
+              "owner": "you",
+              "zone": "graveyard"
+            },
+            "fromZone": "graveyard"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "kind": "damage_target",
+          "source": "self",
+          "who": "each_opponent",
+          "amount": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject",
+        "trigger:multi_event",
+        "trigger:unspecified",
+        "trigger:zones",
+        "trigger:leaves",
+        "field:damage_target.source",
+        "field:damage_target.who"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "{1}{B}: Each player mills a card. (They each put the top card of their library into their graveyard.)",
+      "costs": [
+        {
+          "mana": "{1}{B}"
+        }
+      ],
+      "steps": [
+        {
+          "kind": "mill",
+          "who": "each_player",
+          "amount": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:mill.who"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

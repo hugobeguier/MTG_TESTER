@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Reach",
+      "keyword": {
+        "name": "reach"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever an opponent casts an instant or sorcery spell, create a 1/2 green Spider creature token with reach.",
+      "trigger": {
+        "event": "cast",
+        "subject": {
+          "anyOf": [
+            {
+              "types": [
+                "instant"
+              ]
+            },
+            {
+              "types": [
+                "sorcery"
+              ]
+            }
+          ]
+        },
+        "whose": "opponents"
+      },
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Spider",
+          "tokenPower": 1,
+          "tokenToughness": 2,
+          "tokenColors": [
+            "green"
+          ],
+          "tokenTypeLine": "Creature — Spider",
+          "tokenKeywords": [
+            "reach"
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject",
+        "field:create_tokens.tokenKeywords"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

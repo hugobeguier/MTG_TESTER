@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "mana",
+      "text": "{T}: Add one mana of any color that a land an opponent controls could produce.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "anyColor": 1
+          }
+        ]
+      },
+      "scripted": {
+        "handler": "colors_lands_opponents_control_could_produce"
+      },
+      "implementation": "needed",
+      "needs": [
+        "scripted:colors_lands_opponents_control_could_produce",
+        "mana:variable"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

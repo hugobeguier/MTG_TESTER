@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "Enchantment spells you cast cost {1} less to cast.",
+      "static": {
+        "affects": "you",
+        "modify": [
+          {
+            "costMod": {
+              "filter": {
+                "types": [
+                  "enchantment",
+                  "spell"
+                ],
+                "controller": "you"
+              },
+              "delta": -1
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "scripted",
+      "text": "Unlock costs you pay cost {1} less.",
+      "scripted": {
+        "handler": "unlock_cost_reduction",
+        "params": {
+          "amount": "{1}"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "scripted:unlock_cost_reduction"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

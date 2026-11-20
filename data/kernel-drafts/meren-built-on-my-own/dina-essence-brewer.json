@@ -1,0 +1,130 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Whenever you sacrifice a creature, draw a card. This ability triggers only once each turn.",
+      "trigger": {
+        "event": "sacrifice",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "controller": "you"
+        }
+      },
+      "timing": {
+        "limit": {
+          "count": 1,
+          "per": "turn"
+        }
+      },
+      "srcs": [
+        1
+      ],
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "who": "you",
+          "amount": 1,
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "timing",
+        "trigger:sacrifice",
+        "trigger:subject"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "{2}, {T}, Sacrifice another creature: You gain X life and put X +1/+1 counters on target creature you control, where X is the sacrificed creature's power.",
+      "costs": [
+        {
+          "mana": "{2}"
+        },
+        {
+          "tap": "self"
+        },
+        {
+          "sacrifice": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you",
+            "another": true
+          },
+          "count": 1,
+          "prompt": {
+            "title": "Dina, Essence Brewer: choose what to sacrifice",
+            "instruction": "Choose 1 another creature you control to sacrifice.",
+            "source": {
+              "card": "Dina, Essence Brewer",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Dina, Essence Brewer: choose a target",
+            "instruction": "Choose target creature you control.",
+            "source": {
+              "card": "Dina, Essence Brewer",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "life_change",
+          "who": "you",
+          "amount": {
+            "ref": "stat",
+            "of": "sacrificed",
+            "stat": "power"
+          }
+        },
+        {
+          "kind": "add_counters",
+          "on": "t1",
+          "counterKind": "+1/+1",
+          "amount": {
+            "ref": "stat",
+            "of": "sacrificed",
+            "stat": "power"
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "ref:sacrificed",
+        "cost:sacrifice",
+        "quantity:stat",
+        "field:life_change.amount",
+        "step:add_counters",
+        "field:add_counters.on"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

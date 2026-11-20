@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Monstrous Onslaught deals X damage divided as you choose among any number of target creatures, where X is the greatest power among creatures you control as you cast this spell.",
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "count": {
+            "min": 0,
+            "max": 99
+          },
+          "prompt": {
+            "title": "Monstrous Onslaught: choose targets",
+            "instruction": "Choose up to 99 target creatures.",
+            "source": {
+              "card": "Monstrous Onslaught",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "damage_target",
+          "target": "t1",
+          "divided": true,
+          "amount": {
+            "ref": "greatest",
+            "of": {
+              "types": [
+                "creature"
+              ],
+              "controller": "you"
+            },
+            "stat": "power"
+          },
+          "amountLockedOn": "cast"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "targets:multi",
+        "quantity:greatest",
+        "field:damage_target.amountLockedOn",
+        "field:damage_target.divided"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

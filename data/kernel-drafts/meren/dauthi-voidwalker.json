@@ -1,0 +1,113 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Shadow (This creature can block or be blocked by only creatures with shadow.)",
+      "keyword": {
+        "name": "shadow"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "replacement",
+      "text": "If a card would be put into an opponent's graveyard from anywhere, instead exile it with a void counter on it.",
+      "replacement": {
+        "event": "would_be_put_into_zone",
+        "subject": {
+          "zone": "any",
+          "owner": "opponent"
+        },
+        "toZone": "graveyard",
+        "result": {
+          "mode": "instead",
+          "steps": [
+            {
+              "kind": "move_card_zone",
+              "target": "event_object",
+              "moveTo": "exile"
+            },
+            {
+              "kind": "add_counters",
+              "on": "event_object",
+              "counterKind": "void",
+              "amount": 1
+            }
+          ]
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_be_put_into_zone",
+        "step:add_counters",
+        "field:add_counters.on"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "activated",
+      "text": "{T}, Sacrifice this creature: Choose an exiled card an opponent owns with a void counter on it. You may play it this turn without paying its mana cost.",
+      "costs": [
+        {
+          "tap": "self"
+        },
+        {
+          "sacrifice": "self",
+          "count": 1
+        }
+      ],
+      "steps": [
+        {
+          "kind": "choose",
+          "from": {
+            "zone": "exile",
+            "owner": "opponent",
+            "hasCounter": "void"
+          },
+          "count": 1,
+          "saveAs": "chosen",
+          "prompt": {
+            "title": "Dauthi Voidwalker: choose",
+            "instruction": "Choose a card with a void counter on it an opponent owns in exile.",
+            "source": {
+              "card": "Dauthi Voidwalker",
+              "ability": "a3"
+            }
+          }
+        },
+        {
+          "kind": "permission_to_play",
+          "what": "chosen",
+          "withoutPaying": true,
+          "duration": "until_end_of_turn",
+          "optional": true,
+          "prompt": {
+            "title": "Dauthi Voidwalker: optional",
+            "instruction": "Do you want to you may play chosen without paying its mana cost until end of turn?",
+            "source": {
+              "card": "Dauthi Voidwalker",
+              "ability": "a3"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "cost:sacrifice",
+        "step:choose",
+        "field:choose.count",
+        "field:choose.from",
+        "field:choose.saveAs",
+        "step:permission_to_play",
+        "field:permission_to_play.what",
+        "field:permission_to_play.withoutPaying"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

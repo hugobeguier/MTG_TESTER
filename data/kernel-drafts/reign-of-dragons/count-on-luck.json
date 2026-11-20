@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "At the beginning of your upkeep, exile the top card of your library. You may play that card this turn.",
+      "trigger": {
+        "event": "begin_step",
+        "step": "upkeep",
+        "whose": "yours"
+      },
+      "steps": [
+        {
+          "kind": "move_card_zone",
+          "who": "you",
+          "moveFrom": "library",
+          "moveTo": "exile",
+          "moveCount": 1,
+          "position": "top",
+          "saveAs": "exiled",
+          "src": 0
+        },
+        {
+          "kind": "permission_to_play",
+          "what": "exiled",
+          "optional": true,
+          "duration": "until_end_of_turn",
+          "src": 1,
+          "prompt": {
+            "title": "Count on Luck: optional",
+            "instruction": "Do you want to you may play exiled until end of turn?",
+            "source": {
+              "card": "Count on Luck",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:move_card_zone.position",
+        "field:move_card_zone.saveAs",
+        "step:permission_to_play",
+        "field:permission_to_play.what"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

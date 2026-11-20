@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Metalcraft — Whenever this creature attacks, if you control three or more artifacts, creatures your opponents control lose all abilities and have base power and toughness 1/1 until end of turn.",
+      "trigger": {
+        "event": "attack",
+        "subject": "self",
+        "interveningIf": {
+          "check": "controls",
+          "filter": {
+            "types": [
+              "artifact"
+            ],
+            "controller": "you"
+          },
+          "count": {
+            "op": ">=",
+            "value": 3
+          }
+        }
+      },
+      "steps": [
+        {
+          "kind": "grant_effect",
+          "all": true,
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "controller": "opponent"
+          },
+          "modify": [
+            {
+              "lose": "all abilities"
+            },
+            {
+              "setBasePT": {
+                "power": 1,
+                "toughness": 1
+              }
+            }
+          ],
+          "duration": "until_end_of_turn"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:intervening_if",
+        "step:grant_effect",
+        "field:grant_effect.all",
+        "field:grant_effect.filter",
+        "field:grant_effect.modify"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

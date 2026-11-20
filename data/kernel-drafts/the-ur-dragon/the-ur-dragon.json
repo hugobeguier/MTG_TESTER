@@ -1,0 +1,122 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "Eminence — As long as The Ur-Dragon is in the command zone or on the battlefield, other Dragon spells you cast cost {1} less to cast.",
+      "static": {
+        "affects": "you",
+        "modify": [
+          {
+            "costMod": {
+              "filter": {
+                "subtypes": [
+                  "Dragon"
+                ],
+                "zone": "stack",
+                "another": true
+              },
+              "delta": -1
+            }
+          }
+        ],
+        "while": {
+          "any": [
+            {
+              "check": "source_state",
+              "state": "on_battlefield"
+            },
+            {
+              "check": "zone_count",
+              "who": "you",
+              "zone": "command",
+              "filter": {
+                "named": "The Ur-Dragon"
+              },
+              "cmp": {
+                "op": ">=",
+                "value": 1
+              }
+            }
+          ]
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "triggered",
+      "text": "Whenever one or more Dragons you control attack, draw that many cards, then you may put a permanent card from your hand onto the battlefield.",
+      "trigger": {
+        "event": "attack",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "subtypes": [
+            "Dragon"
+          ],
+          "controller": "you"
+        },
+        "batch": true
+      },
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "who": "you",
+          "amount": {
+            "ref": "event_amount"
+          }
+        },
+        {
+          "kind": "move_card_zone",
+          "who": "you",
+          "moveFrom": "hand",
+          "moveTo": "battlefield",
+          "moveCount": 1,
+          "optional": true,
+          "filter": {
+            "zone": "hand",
+            "owner": "you",
+            "notTypes": [
+              "instant",
+              "sorcery"
+            ]
+          },
+          "prompt": {
+            "title": "The Ur-Dragon: optional",
+            "instruction": "Do you want to put a card onto the battlefield?",
+            "source": {
+              "card": "The Ur-Dragon",
+              "ability": "a3"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:batch",
+        "trigger:subject",
+        "quantity:event_amount",
+        "field:move_card_zone.filter"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

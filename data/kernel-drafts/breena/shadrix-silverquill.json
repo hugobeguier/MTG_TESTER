@@ -1,0 +1,216 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "kind": "keyword",
+      "text": "Flying, double strike",
+      "keyword": {
+        "name": "flying"
+      },
+      "id": "a1",
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "kind": "keyword",
+      "text": "Flying, double strike",
+      "keyword": {
+        "name": "double strike"
+      },
+      "id": "a2",
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "kind": "triggered",
+      "optional": true,
+      "text": "At the beginning of combat on your turn, you may choose two. Each mode must target a different player.\n• Target player creates a 2/1 white and black Inkling creature token with flying.\n• Target player draws a card and loses 1 life.\n• Target player puts a +1/+1 counter on each creature they control.",
+      "trigger": {
+        "event": "begin_step",
+        "step": "beginning_of_combat",
+        "whose": "yours"
+      },
+      "srcs": [
+        0,
+        1
+      ],
+      "modes": {
+        "choose": {
+          "min": 2,
+          "max": 2
+        },
+        "distinct": true,
+        "options": [
+          {
+            "id": "m1",
+            "src": 2,
+            "text": "Target player creates a 2/1 white and black Inkling creature token with flying.",
+            "targets": [
+              {
+                "id": "t1",
+                "what": "player",
+                "count": {
+                  "min": 1,
+                  "max": 1
+                },
+                "prompt": {
+                  "title": "Shadrix Silverquill: choose a target",
+                  "instruction": "Choose target player.",
+                  "source": {
+                    "card": "Shadrix Silverquill",
+                    "ability": "a3"
+                  }
+                }
+              }
+            ],
+            "steps": [
+              {
+                "kind": "create_tokens",
+                "who": "target_player",
+                "tokenCount": 1,
+                "tokenName": "Inkling",
+                "tokenPower": 2,
+                "tokenToughness": 1,
+                "tokenColors": [
+                  "white",
+                  "black"
+                ],
+                "tokenTypeLine": "Creature — Inkling",
+                "tokenKeywords": [
+                  "flying"
+                ],
+                "src": 0
+              }
+            ]
+          },
+          {
+            "id": "m2",
+            "src": 3,
+            "text": "Target player draws a card and loses 1 life.",
+            "targets": [
+              {
+                "id": "t1",
+                "what": "player",
+                "count": {
+                  "min": 1,
+                  "max": 1
+                },
+                "prompt": {
+                  "title": "Shadrix Silverquill: choose a target",
+                  "instruction": "Choose target player.",
+                  "source": {
+                    "card": "Shadrix Silverquill",
+                    "ability": "a3"
+                  }
+                }
+              }
+            ],
+            "steps": [
+              {
+                "kind": "draw_cards",
+                "who": "target_player",
+                "amount": 1,
+                "src": 0
+              },
+              {
+                "kind": "life_change",
+                "who": "target_player",
+                "lifeDelta": -1,
+                "src": 0
+              }
+            ]
+          },
+          {
+            "id": "m3",
+            "src": 4,
+            "text": "Target player puts a +1/+1 counter on each creature they control.",
+            "targets": [
+              {
+                "id": "t1",
+                "what": "player",
+                "count": {
+                  "min": 1,
+                  "max": 1
+                },
+                "prompt": {
+                  "title": "Shadrix Silverquill: choose a target",
+                  "instruction": "Choose target player.",
+                  "source": {
+                    "card": "Shadrix Silverquill",
+                    "ability": "a3"
+                  }
+                }
+              }
+            ],
+            "steps": [
+              {
+                "kind": "repeat_for_each",
+                "over": {
+                  "types": [
+                    "creature"
+                  ]
+                },
+                "ofPlayer": "t1",
+                "steps": [
+                  {
+                    "kind": "add_counters",
+                    "on": "iterated",
+                    "counterKind": "+1/+1",
+                    "amount": 1
+                  }
+                ],
+                "src": 0
+              }
+            ]
+          }
+        ],
+        "prompt": {
+          "title": "Shadrix Silverquill: choose modes",
+          "instruction": "Choose two modes (each different).",
+          "source": {
+            "card": "Shadrix Silverquill",
+            "ability": "a3"
+          }
+        }
+      },
+      "id": "a3",
+      "prompt": {
+        "title": "Shadrix Silverquill: optional",
+        "instruction": "Do you want to use this ability?",
+        "source": {
+          "card": "Shadrix Silverquill",
+          "ability": "a3"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "modes",
+        "ref:iterated",
+        "modes:multiple",
+        "field:create_tokens.tokenKeywords",
+        "field:create_tokens.who",
+        "field:draw_cards.who",
+        "field:life_change.who",
+        "step:repeat_for_each",
+        "field:repeat_for_each.ofPlayer",
+        "field:repeat_for_each.over",
+        "field:repeat_for_each.steps",
+        "step:add_counters",
+        "field:add_counters.on"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "target",
+        "reason": "sentence 1 restates the per-mode player targets"
+      },
+      {
+        "lexeme": "each",
+        "reason": "each mode targets a different player: text-only constraint (see question); also each creature in mode 3 is repeat_for_each"
+      }
+    ]
+  }
+}

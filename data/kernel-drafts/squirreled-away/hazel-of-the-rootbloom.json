@@ -1,0 +1,154 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "mana",
+      "text": "{T}, Pay 2 life, Tap X untapped tokens you control: Add X mana in any combination of colors.",
+      "costs": [
+        {
+          "tap": "self"
+        },
+        {
+          "life": 2
+        },
+        {
+          "tapOther": {
+            "token": true,
+            "controller": "you",
+            "tapped": false
+          },
+          "count": {
+            "ref": "X"
+          },
+          "prompt": {
+            "title": "Hazel of the Rootbloom: choose what to tap",
+            "instruction": "Choose X untapped untapped token permanents you control to tap.",
+            "source": {
+              "card": "Hazel of the Rootbloom",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "anyColor": 1
+          }
+        ]
+      },
+      "steps": [
+        {
+          "kind": "add_mana",
+          "produces": [
+            {
+              "anyColor": 1
+            }
+          ],
+          "amount": {
+            "ref": "X"
+          }
+        }
+      ],
+      "xPrompt": {
+        "title": "Hazel of the Rootbloom: choose X",
+        "instruction": "Choose a value for X (the amount used in the cost).",
+        "source": {
+          "card": "Hazel of the Rootbloom",
+          "ability": "a1"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "mana:variable",
+        "cost:life",
+        "cost:tapOther",
+        "step:add_mana",
+        "quantity:X",
+        "field:add_mana.produces"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "At the beginning of your end step, create a token that's a copy of target token you control. If that token is a Squirrel, instead create two tokens that are copies of it.",
+      "trigger": {
+        "event": "begin_step",
+        "step": "end_step",
+        "whose": "yours"
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "token": true,
+            "controller": "you"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Hazel of the Rootbloom: choose a target",
+            "instruction": "Choose target token permanent you control.",
+            "source": {
+              "card": "Hazel of the Rootbloom",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "if_else",
+          "src": 1,
+          "if": {
+            "check": "matches",
+            "obj": "t1",
+            "filter": {
+              "subtypes": [
+                "Squirrel"
+              ]
+            }
+          },
+          "then": [
+            {
+              "kind": "copy",
+              "target": "t1",
+              "token": true,
+              "count": 2
+            }
+          ],
+          "else": [
+            {
+              "kind": "copy",
+              "target": "t1",
+              "token": true,
+              "count": 1,
+              "src": 0
+            }
+          ]
+        }
+      ],
+      "srcs": [
+        0
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:if_else",
+        "field:if_else.else",
+        "field:if_else.if",
+        "field:if_else.then",
+        "predicate:matches",
+        "step:copy",
+        "field:copy.count",
+        "field:copy.token"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Target opponent sacrifices a creature with the greatest power among creatures they control. If the gift was promised, return target creature card from your graveyard to your hand.",
+      "targets": [
+        {
+          "id": "t1",
+          "what": "player",
+          "filter": {
+            "controller": "opponent"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Consumed by Greed: choose a target",
+            "instruction": "Choose target player.",
+            "source": {
+              "card": "Consumed by Greed",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "id": "t2",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "zone": "graveyard",
+            "owner": "you"
+          },
+          "count": {
+            "min": 0,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Consumed by Greed: choose a target",
+            "instruction": "Choose up to one target creature card in your graveyard.",
+            "source": {
+              "card": "Consumed by Greed",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "sacrifice_permanent",
+          "who": "target_player",
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "greatestPower": true,
+          "src": 0,
+          "prompt": {
+            "title": "Consumed by Greed: sacrifice",
+            "instruction": "Choose a permanent to sacrifice.",
+            "source": {
+              "card": "Consumed by Greed",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "kind": "move_card_zone",
+          "target": "t2",
+          "moveTo": "hand",
+          "src": 1,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "paid_additional_cost",
+              "option": "gift"
+            },
+            "src": 1
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "targets:multi",
+        "field:sacrifice_permanent.filter",
+        "field:sacrifice_permanent.greatestPower",
+        "field:sacrifice_permanent.who",
+        "predicate:paid_additional_cost"
+      ]
+    }
+  ],
+  "castOptions": [
+    {
+      "id": "c1",
+      "kind": "gift",
+      "from": "hand",
+      "cost": [],
+      "replacesManaCost": false,
+      "effects": {
+        "addSteps": [
+          {
+            "kind": "draw_cards",
+            "amount": 1,
+            "who": "opponent"
+          }
+        ]
+      },
+      "optional": true,
+      "gift": "card",
+      "prompt": {
+        "title": "Consumed by Greed: gift",
+        "instruction": "Do you want to promise a card to an opponent? If you do, choose that opponent.",
+        "source": {
+          "card": "Consumed by Greed",
+          "ability": "c1"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "cast_option:gift",
+        "field:draw_cards.who"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

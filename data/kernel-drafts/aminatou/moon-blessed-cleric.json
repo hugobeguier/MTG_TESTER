@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "optional": true,
+      "text": "Divine Intervention — When this creature enters, you may search your library for an enchantment card, reveal it, then shuffle and put that card on top.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "search_library",
+          "who": "you",
+          "optional": true,
+          "filter": {
+            "types": [
+              "enchantment"
+            ]
+          },
+          "count": 1,
+          "reveal": true,
+          "to": "library",
+          "position": "top",
+          "shuffle": true,
+          "src": 0,
+          "prompt": {
+            "title": "Moon-Blessed Cleric: optional",
+            "instruction": "Do you want to search your library for a enchantment, put it onto the library, then shuffle?",
+            "source": {
+              "card": "Moon-Blessed Cleric",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "prompt": {
+        "title": "Moon-Blessed Cleric: optional",
+        "instruction": "Do you want to search your library for a enchantment, put it onto the library, then shuffle?",
+        "source": {
+          "card": "Moon-Blessed Cleric",
+          "ability": "a1"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "step:search_library",
+        "field:search_library.count",
+        "field:search_library.filter",
+        "field:search_library.position",
+        "field:search_library.reveal",
+        "field:search_library.shuffle",
+        "field:search_library.to"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

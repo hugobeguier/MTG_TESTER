@@ -1,0 +1,128 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "When this creature enters, create a 0/1 white Goat creature token.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Goat",
+          "tokenPower": 0,
+          "tokenToughness": 1,
+          "tokenColors": [
+            "white"
+          ],
+          "tokenTypeLine": "Creature — Goat"
+        }
+      ],
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "Sacrifice another creature: Scry 1.",
+      "costs": [
+        {
+          "sacrifice": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you",
+            "another": true
+          },
+          "count": 1,
+          "prompt": {
+            "title": "Woe Strider: choose what to sacrifice",
+            "instruction": "Choose 1 another creature you control to sacrifice.",
+            "source": {
+              "card": "Woe Strider",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "scry",
+          "amount": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "cost:sacrifice",
+        "step:scry"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "replacement",
+      "text": "This creature escapes with two +1/+1 counters on it.",
+      "replacement": {
+        "event": "would_enter",
+        "condition": {
+          "check": "cast_from",
+          "zone": "graveyard"
+        },
+        "result": {
+          "mode": "modify",
+          "set": {
+            "counters": {
+              "+1/+1": 2
+            }
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_enter"
+      ]
+    }
+  ],
+  "castOptions": [
+    {
+      "id": "c1",
+      "kind": "escape",
+      "from": "graveyard",
+      "cost": [
+        {
+          "mana": "{3}{B}{B}"
+        },
+        {
+          "exileFrom": "graveyard",
+          "what": {
+            "zone": "graveyard",
+            "owner": "you",
+            "another": true
+          },
+          "count": 4
+        }
+      ],
+      "replacesManaCost": true,
+      "optional": true,
+      "prompt": {
+        "title": "Woe Strider: escape option",
+        "instruction": "Do you want to cast it using its escape cost ({3}{B}{B}, exile 4 other cards in your graveyard)?",
+        "source": {
+          "card": "Woe Strider",
+          "ability": "c1"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "cast_option:escape",
+        "cost:exileFrom"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

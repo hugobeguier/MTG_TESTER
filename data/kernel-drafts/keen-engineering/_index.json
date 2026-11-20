@@ -1,0 +1,278 @@
+{
+  "deck": "Keen Engineering",
+  "cards": [
+    {
+      "slug": "sai-master-thopterist",
+      "name": "Sai, Master Thopterist"
+    },
+    {
+      "slug": "all-is-dust",
+      "name": "All Is Dust"
+    },
+    {
+      "slug": "broodstar",
+      "name": "Broodstar"
+    },
+    {
+      "slug": "kappa-cannoneer",
+      "name": "Kappa Cannoneer"
+    },
+    {
+      "slug": "master-of-etherium",
+      "name": "Master of Etherium"
+    },
+    {
+      "slug": "master-transmuter",
+      "name": "Master Transmuter"
+    },
+    {
+      "slug": "misleading-signpost",
+      "name": "Misleading Signpost"
+    },
+    {
+      "slug": "pull-from-tomorrow",
+      "name": "Pull from Tomorrow"
+    },
+    {
+      "slug": "research-thief",
+      "name": "Research Thief"
+    },
+    {
+      "slug": "shimmer-dragon",
+      "name": "Shimmer Dragon"
+    },
+    {
+      "slug": "thopter-fabricator",
+      "name": "Thopter Fabricator"
+    },
+    {
+      "slug": "thopter-spy-network",
+      "name": "Thopter Spy Network"
+    },
+    {
+      "slug": "thought-monitor",
+      "name": "Thought Monitor"
+    },
+    {
+      "slug": "vedalken-archmage",
+      "name": "Vedalken Archmage"
+    },
+    {
+      "slug": "adaptive-omnitool",
+      "name": "Adaptive Omnitool"
+    },
+    {
+      "slug": "cultivator-s-caravan",
+      "name": "Cultivator's Caravan"
+    },
+    {
+      "slug": "darksteel-juggernaut",
+      "name": "Darksteel Juggernaut"
+    },
+    {
+      "slug": "duplicant",
+      "name": "Duplicant"
+    },
+    {
+      "slug": "forsaken-monument",
+      "name": "Forsaken Monument"
+    },
+    {
+      "slug": "graaz-unstoppable-juggernaut",
+      "name": "Graaz, Unstoppable Juggernaut"
+    },
+    {
+      "slug": "mazemind-tome",
+      "name": "Mazemind Tome"
+    },
+    {
+      "slug": "mind-s-eye",
+      "name": "Mind's Eye"
+    },
+    {
+      "slug": "myr-battlesphere",
+      "name": "Myr Battlesphere"
+    },
+    {
+      "slug": "nettlecyst",
+      "name": "Nettlecyst"
+    },
+    {
+      "slug": "nevinyrral-s-disk",
+      "name": "Nevinyrral's Disk"
+    },
+    {
+      "slug": "psychosis-crawler",
+      "name": "Psychosis Crawler"
+    },
+    {
+      "slug": "scrawling-crawler",
+      "name": "Scrawling Crawler"
+    },
+    {
+      "slug": "skysovereign-consul-flagship",
+      "name": "Skysovereign, Consul Flagship"
+    },
+    {
+      "slug": "steel-hellkite",
+      "name": "Steel Hellkite"
+    },
+    {
+      "slug": "steel-overseer",
+      "name": "Steel Overseer"
+    },
+    {
+      "slug": "war-room",
+      "name": "War Room"
+    },
+    {
+      "slug": "aetherize",
+      "name": "Aetherize"
+    },
+    {
+      "slug": "counterspell",
+      "name": "Counterspell"
+    },
+    {
+      "slug": "etherium-sculptor",
+      "name": "Etherium Sculptor"
+    },
+    {
+      "slug": "fall-from-favor",
+      "name": "Fall from Favor"
+    },
+    {
+      "slug": "launch-mishap",
+      "name": "Launch Mishap"
+    },
+    {
+      "slug": "memory-guardian",
+      "name": "Memory Guardian"
+    },
+    {
+      "slug": "negate",
+      "name": "Negate"
+    },
+    {
+      "slug": "padeem-consul-of-innovation",
+      "name": "Padeem, Consul of Innovation"
+    },
+    {
+      "slug": "propaganda",
+      "name": "Propaganda"
+    },
+    {
+      "slug": "tamiyo-s-logbook",
+      "name": "Tamiyo's Logbook"
+    },
+    {
+      "slug": "thirst-for-knowledge",
+      "name": "Thirst for Knowledge"
+    },
+    {
+      "slug": "thoughtcast",
+      "name": "Thoughtcast"
+    },
+    {
+      "slug": "whirler-rogue",
+      "name": "Whirler Rogue"
+    },
+    {
+      "slug": "aether-spellbomb",
+      "name": "Aether Spellbomb"
+    },
+    {
+      "slug": "arcane-signet",
+      "name": "Arcane Signet"
+    },
+    {
+      "slug": "chief-of-the-foundry",
+      "name": "Chief of the Foundry"
+    },
+    {
+      "slug": "foundry-inspector",
+      "name": "Foundry Inspector"
+    },
+    {
+      "slug": "hedron-archive",
+      "name": "Hedron Archive"
+    },
+    {
+      "slug": "ichor-wellspring",
+      "name": "Ichor Wellspring"
+    },
+    {
+      "slug": "meteor-golem",
+      "name": "Meteor Golem"
+    },
+    {
+      "slug": "mind-stone",
+      "name": "Mind Stone"
+    },
+    {
+      "slug": "myr-retriever",
+      "name": "Myr Retriever"
+    },
+    {
+      "slug": "ornithopter-of-paradise",
+      "name": "Ornithopter of Paradise"
+    },
+    {
+      "slug": "palladium-myr",
+      "name": "Palladium Myr"
+    },
+    {
+      "slug": "shimmer-myr",
+      "name": "Shimmer Myr"
+    },
+    {
+      "slug": "silver-myr",
+      "name": "Silver Myr"
+    },
+    {
+      "slug": "sol-ring",
+      "name": "Sol Ring"
+    },
+    {
+      "slug": "soul-guide-lantern",
+      "name": "Soul-Guide Lantern"
+    },
+    {
+      "slug": "spire-golem",
+      "name": "Spire Golem"
+    },
+    {
+      "slug": "thought-vessel",
+      "name": "Thought Vessel"
+    },
+    {
+      "slug": "buried-ruin",
+      "name": "Buried Ruin"
+    },
+    {
+      "slug": "darksteel-citadel",
+      "name": "Darksteel Citadel"
+    },
+    {
+      "slug": "foundry-of-the-consuls",
+      "name": "Foundry of the Consuls"
+    },
+    {
+      "slug": "lonely-sandbar",
+      "name": "Lonely Sandbar"
+    },
+    {
+      "slug": "remote-isle",
+      "name": "Remote Isle"
+    },
+    {
+      "slug": "island",
+      "name": "Island"
+    }
+  ],
+  "decisions": [
+    "Consolidated schema pass: the workarounds reported by the five pilot decks (sentinels, review.ignore hacks, scripted stubs, placeholder refs) now use real fields; see src/kernel/SCHEMA_CHANGELOG.md.",
+    "Monarch stays a scripted marker (become_monarch + the controller_is_monarch stat) by user decision; Crew, Improvise, Myriad, Storm, Read ahead, Manifest dread, Reselect attack target and tapped-for-{C} stay scripted markers (vocabulary listed in the changelog).",
+    "Remaining genuine card-behaviour questions are collected in data/kernel-drafts/CONSOLIDATED_QUESTIONS.md, not per deck."
+  ]
+}

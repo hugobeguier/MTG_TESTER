@@ -1,0 +1,110 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Scavenger Regent: Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Ward—Discard a card.",
+      "keyword": {
+        "name": "ward",
+        "param": "Discard a card"
+      },
+      "trigger": {
+        "event": "becomes_target",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "counter_spell",
+          "target": "event_object",
+          "unlessPay": {
+            "payer": "that_player",
+            "cost": [
+              {
+                "discard": "hand",
+                "count": 1
+              }
+            ],
+            "prompt": {
+              "title": "Scavenger Regent // Exude Toxin: pay or not",
+              "instruction": "Do you want to discard your hand? If you don't, counter that object.",
+              "source": {
+                "card": "Scavenger Regent // Exude Toxin",
+                "ability": "a2"
+              }
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:becomes_target",
+        "step:counter_spell",
+        "step:unless_pay"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "spell_effect",
+      "text": "Exude Toxin: Each non-Dragon creature gets -X/-X until end of turn. (Then shuffle this card into its owner's library.)",
+      "zone": "hand",
+      "steps": [
+        {
+          "kind": "mass_pump",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "notSubtypes": [
+              "Dragon"
+            ]
+          },
+          "power": {
+            "math": "*",
+            "args": [
+              -1,
+              {
+                "ref": "X"
+              }
+            ]
+          },
+          "toughness": {
+            "math": "*",
+            "args": [
+              -1,
+              {
+                "ref": "X"
+              }
+            ]
+          },
+          "duration": "until_end_of_turn"
+        },
+        {
+          "kind": "shuffle",
+          "target": "self",
+          "who": "you"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "filter:notSubtypes",
+        "quantity:math",
+        "field:mass_pump.filter",
+        "step:shuffle"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

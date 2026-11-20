@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Draw three cards. Then discard two cards unless you discard an artifact card.",
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": 3,
+          "who": "you"
+        },
+        {
+          "kind": "discard",
+          "amount": 2,
+          "who": "you",
+          "unlessPay": {
+            "payer": "you",
+            "cost": [
+              {
+                "discard": {
+                  "types": [
+                    "artifact"
+                  ],
+                  "zone": "hand",
+                  "owner": "you"
+                },
+                "count": 1
+              }
+            ],
+            "prompt": {
+              "title": "Thirst for Knowledge: pay or not",
+              "instruction": "Do you want to discard an artifact card in your hand? If you don't, discard 2 cards.",
+              "source": {
+                "card": "Thirst for Knowledge",
+                "ability": "a1"
+              }
+            }
+          },
+          "prompt": {
+            "title": "Thirst for Knowledge: discard",
+            "instruction": "Choose 2 cards to discard.",
+            "source": {
+              "card": "Thirst for Knowledge",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:unless_pay"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

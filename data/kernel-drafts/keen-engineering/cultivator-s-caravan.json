@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "mana",
+      "text": "{T}: Add one mana of any color.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "anyColor": 1
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "mana:variable"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "Crew 3 (Tap any number of creatures you control with total power 3 or more: This Vehicle becomes an artifact creature until end of turn.)",
+      "keyword": {
+        "name": "crew",
+        "param": 3
+      },
+      "scripted": {
+        "handler": "crew"
+      },
+      "steps": [
+        {
+          "kind": "grant_effect",
+          "target": "self",
+          "modify": [
+            {
+              "addTypes": [
+                "Artifact",
+                "Creature"
+              ]
+            }
+          ],
+          "duration": "until_end_of_turn"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "scripted:crew",
+        "keyword:crew",
+        "step:grant_effect",
+        "field:grant_effect.modify"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

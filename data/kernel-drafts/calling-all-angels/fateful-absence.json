@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Destroy target creature or planeswalker. Its controller investigates. (Create a Clue token. It's an artifact with \"{2}, Sacrifice this token: Draw a card.\")",
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "anyOf": [
+              {
+                "types": [
+                  "creature"
+                ]
+              },
+              {
+                "types": [
+                  "planeswalker"
+                ]
+              }
+            ]
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Fateful Absence: choose a target",
+            "instruction": "Choose target creature or planeswalker.",
+            "source": {
+              "card": "Fateful Absence",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "destroy_target",
+          "target": "t1",
+          "src": 0
+        },
+        {
+          "kind": "investigate",
+          "src": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:investigate"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever Drakuseth attacks, it deals 4 damage to any target and 3 damage to each of up to two other targets.",
+      "trigger": {
+        "event": "attack",
+        "subject": "self"
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "any",
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Drakuseth, Maw of Flames: choose a target",
+            "instruction": "Choose target.",
+            "source": {
+              "card": "Drakuseth, Maw of Flames",
+              "ability": "a2"
+            }
+          }
+        },
+        {
+          "id": "t2",
+          "what": "any",
+          "filter": {
+            "another": true
+          },
+          "count": {
+            "min": 0,
+            "max": 2
+          },
+          "distinct": true,
+          "prompt": {
+            "title": "Drakuseth, Maw of Flames: choose targets",
+            "instruction": "Choose up to two other targets.",
+            "source": {
+              "card": "Drakuseth, Maw of Flames",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "damage_target",
+          "source": "self",
+          "target": "t1",
+          "amount": 4
+        },
+        {
+          "kind": "damage_target",
+          "source": "self",
+          "target": "t2",
+          "amount": 3
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "targets:multi",
+        "field:damage_target.source"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

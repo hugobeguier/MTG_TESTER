@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Whenever an opponent draws a card, you may pay {1}. If you do, draw a card.",
+      "trigger": {
+        "event": "draw",
+        "whose": "opponents"
+      },
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": 1,
+          "who": "you",
+          "optional": true,
+          "optionalCost": [
+            {
+              "mana": "{1}"
+            }
+          ],
+          "src": 0,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "paid_additional_cost",
+              "option": "{1}"
+            },
+            "src": 1
+          },
+          "prompt": {
+            "title": "Mind's Eye: optional",
+            "instruction": "Do you want to draw a card?",
+            "source": {
+              "card": "Mind's Eye",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:draw",
+        "field:draw_cards.optionalCost",
+        "predicate:paid_additional_cost"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

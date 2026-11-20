@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "kind": "spell_effect",
+      "text": "Prevent all combat damage that would be dealt this turn if {W} was spent to cast this spell. Each player loses 1 life for each attacking creature they control if {B} was spent to cast this spell. (Do both if {W}{B} was spent.)",
+      "steps": [
+        {
+          "kind": "grant_effect",
+          "who": "each_player",
+          "duration": "until_end_of_turn",
+          "src": 0,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "paid_additional_cost",
+              "option": "mana_spent:{W}"
+            },
+            "src": 0
+          },
+          "replacement": {
+            "event": "would_deal_damage",
+            "damageType": "combat",
+            "duration": "until_end_of_turn",
+            "result": {
+              "mode": "prevent"
+            }
+          }
+        },
+        {
+          "kind": "repeat_for_each",
+          "who": "each_player",
+          "src": 1,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "paid_additional_cost",
+              "option": "mana_spent:{B}"
+            },
+            "src": 1
+          },
+          "steps": [
+            {
+              "kind": "life_change",
+              "who": "that_player",
+              "amount": {
+                "math": "*",
+                "args": [
+                  -1,
+                  {
+                    "ref": "count",
+                    "of": {
+                      "types": [
+                        "creature"
+                      ],
+                      "attacking": true
+                    }
+                  }
+                ]
+              },
+              "src": 1
+            }
+          ]
+        }
+      ],
+      "id": "a1",
+      "implementation": "needed",
+      "needs": [
+        "step:grant_effect",
+        "field:grant_effect.replacement",
+        "field:grant_effect.who",
+        "predicate:paid_additional_cost",
+        "step:repeat_for_each",
+        "field:repeat_for_each.steps",
+        "field:repeat_for_each.who",
+        "quantity:math",
+        "field:life_change.amount",
+        "field:life_change.who"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "kind": "triggered",
+      "text": "Whenever one or more creatures attack, you may have target attacking creature gain double strike until end of turn.",
+      "trigger": {
+        "event": "attack",
+        "subject": {
+          "types": [
+            "creature"
+          ]
+        },
+        "batch": true
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "attacking": true
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Duelist's Heritage: choose a target",
+            "instruction": "Choose target attacking creature.",
+            "source": {
+              "card": "Duelist's Heritage",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "grant_effect",
+          "target": "t1",
+          "modify": [
+            {
+              "grant": "double strike"
+            }
+          ],
+          "duration": "until_end_of_turn",
+          "optional": true,
+          "src": 0,
+          "prompt": {
+            "title": "Duelist's Heritage: optional",
+            "instruction": "Do you want to target attacking creature gains double strike until end of turn?",
+            "source": {
+              "card": "Duelist's Heritage",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "id": "a1",
+      "implementation": "needed",
+      "needs": [
+        "trigger:batch",
+        "trigger:subject",
+        "step:grant_effect",
+        "field:grant_effect.modify"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

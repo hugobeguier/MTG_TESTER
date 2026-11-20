@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "When this enchantment enters, for each opponent, exile up to one target nonland permanent that player controls until this enchantment leaves the battlefield. (Those permanents return under their owners' control.)",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "controller": "opponent",
+            "notTypes": [
+              "land"
+            ]
+          },
+          "count": {
+            "min": 0,
+            "max": 1
+          },
+          "perOpponent": true,
+          "prompt": {
+            "title": "Grasp of Fate: choose a target",
+            "instruction": "Choose up to one target nonland permanent an opponent controls (one choice for each opponent).",
+            "source": {
+              "card": "Grasp of Fate",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "src": 0,
+          "kind": "exile_target",
+          "target": "t1",
+          "who": "each_opponent",
+          "duration": "while_source_on_battlefield"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "targets:multi",
+        "targets:per_opponent",
+        "field:exile_target.who",
+        "duration:while_source_on_battlefield"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

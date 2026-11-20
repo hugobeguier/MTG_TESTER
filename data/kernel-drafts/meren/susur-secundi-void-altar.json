@@ -1,0 +1,130 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "replacement",
+      "text": "This land enters tapped.",
+      "replacement": {
+        "event": "would_enter",
+        "result": {
+          "mode": "modify",
+          "set": {
+            "tapped": true
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_enter"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "mana",
+      "text": "{T}: Add {B}.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{B}"
+          }
+        ]
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "keyword",
+      "text": "Station (Tap another creature you control: Put charge counters equal to its power on this Planet. Station only as a sorcery.)",
+      "keyword": {
+        "name": "station"
+      },
+      "scripted": {
+        "handler": "station"
+      },
+      "implementation": "needed",
+      "needs": [
+        "scripted:station"
+      ]
+    },
+    {
+      "id": "a4",
+      "kind": "activated",
+      "text": "12+ | {1}{B}, {T}, Pay 2 life, Sacrifice a creature: Draw cards equal to the sacrificed creature's power. Activate only as a sorcery.",
+      "costs": [
+        {
+          "mana": "{1}{B}"
+        },
+        {
+          "tap": "self"
+        },
+        {
+          "life": 2
+        },
+        {
+          "sacrifice": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you"
+          },
+          "count": 1,
+          "prompt": {
+            "title": "Susur Secundi, Void Altar: choose what to sacrifice",
+            "instruction": "Choose 1 creature you control to sacrifice.",
+            "source": {
+              "card": "Susur Secundi, Void Altar",
+              "ability": "a4"
+            }
+          }
+        }
+      ],
+      "timing": {
+        "speed": "sorcery",
+        "only": [
+          {
+            "check": "compare",
+            "left": {
+              "ref": "counters",
+              "kind": "charge",
+              "on": "self"
+            },
+            "cmp": {
+              "op": ">=",
+              "value": 12
+            }
+          }
+        ]
+      },
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "who": "you",
+          "amount": {
+            "ref": "stat",
+            "of": "sacrificed",
+            "stat": "power"
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "ref:sacrificed",
+        "timing",
+        "predicate:compare",
+        "cost:life",
+        "cost:sacrifice",
+        "quantity:stat"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

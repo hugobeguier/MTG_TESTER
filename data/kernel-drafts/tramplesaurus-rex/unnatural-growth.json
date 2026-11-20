@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "At the beginning of each combat, double the power and toughness of each creature you control until end of turn.",
+      "trigger": {
+        "event": "begin_step",
+        "step": "beginning_of_combat",
+        "whose": "each"
+      },
+      "steps": [
+        {
+          "kind": "repeat_for_each",
+          "over": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you"
+          },
+          "steps": [
+            {
+              "kind": "pump_target",
+              "target": "iterated",
+              "power": {
+                "ref": "stat",
+                "of": "iterated",
+                "stat": "power"
+              },
+              "toughness": {
+                "ref": "stat",
+                "of": "iterated",
+                "stat": "toughness"
+              },
+              "duration": "until_end_of_turn"
+            }
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "ref:iterated",
+        "step:repeat_for_each",
+        "field:repeat_for_each.over",
+        "field:repeat_for_each.steps",
+        "quantity:stat"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

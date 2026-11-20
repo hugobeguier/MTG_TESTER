@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "activated",
+      "text": "Sacrifice another creature or artifact: Surveil 1. (Look at the top card of your library. You may put it into your graveyard.)",
+      "costs": [
+        {
+          "sacrifice": {
+            "another": true,
+            "controller": "you",
+            "anyOf": [
+              {
+                "types": [
+                  "creature"
+                ]
+              },
+              {
+                "types": [
+                  "artifact"
+                ]
+              }
+            ]
+          },
+          "count": 1,
+          "prompt": {
+            "title": "Umbral Collar Zealot: choose what to sacrifice",
+            "instruction": "Choose 1 creature or artifact you control to sacrifice.",
+            "source": {
+              "card": "Umbral Collar Zealot",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "surveil",
+          "amount": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "cost:sacrifice",
+        "step:surveil"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

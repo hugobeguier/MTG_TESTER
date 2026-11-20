@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Whenever a creature attacks you or a planeswalker you control, investigate. (Create a Clue token. It's an artifact with \"{2}, Sacrifice this token: Draw a card.\")",
+      "trigger": {
+        "event": "attack",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "controller": "opponent"
+        },
+        "defender": "you_or_your_planeswalkers"
+      },
+      "steps": [
+        {
+          "kind": "investigate",
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject",
+        "trigger:defender",
+        "step:investigate"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

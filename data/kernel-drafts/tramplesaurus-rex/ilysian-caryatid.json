@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "mana",
+      "text": "{T}: Add one mana of any color. If you control a creature with power 4 or greater, add two mana of any one color instead.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "conditional": {
+              "if": {
+                "check": "controls",
+                "filter": {
+                  "types": [
+                    "creature"
+                  ],
+                  "controller": "you",
+                  "power": {
+                    "op": ">=",
+                    "value": 4
+                  }
+                }
+              },
+              "then": [
+                {
+                  "anyColor": 2
+                }
+              ],
+              "else": [
+                {
+                  "anyColor": 1
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "mana:variable",
+        "mana:conditional"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

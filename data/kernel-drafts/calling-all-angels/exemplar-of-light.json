@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever you gain life, put a +1/+1 counter on this creature.",
+      "trigger": {
+        "event": "gain_life",
+        "whose": "yours"
+      },
+      "steps": [
+        {
+          "src": 0,
+          "kind": "add_counters",
+          "on": "self",
+          "counterKind": "+1/+1",
+          "amount": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:gain_life",
+        "step:add_counters",
+        "field:add_counters.on"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "triggered",
+      "text": "Whenever you put one or more +1/+1 counters on this creature, draw a card. This ability triggers only once each turn.",
+      "trigger": {
+        "event": "counter_put",
+        "subject": "self",
+        "batch": true
+      },
+      "timing": {
+        "limit": {
+          "count": 1,
+          "per": "turn"
+        }
+      },
+      "srcs": [
+        1
+      ],
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": 1,
+          "who": "you",
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "timing",
+        "trigger:counter_put",
+        "trigger:batch"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

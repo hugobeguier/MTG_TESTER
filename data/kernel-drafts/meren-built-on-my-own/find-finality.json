@@ -1,0 +1,119 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Find: Return up to two target creature cards from your graveyard to your hand.",
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "zone": "graveyard",
+            "owner": "you"
+          },
+          "count": {
+            "min": 0,
+            "max": 2
+          },
+          "prompt": {
+            "title": "Find // Finality: choose targets",
+            "instruction": "Choose up to two target creature cards in your graveyard.",
+            "source": {
+              "card": "Find // Finality",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "move_card_zone",
+          "target": "t1",
+          "from": "graveyard",
+          "moveTo": "hand",
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "targets:multi",
+        "field:move_card_zone.from"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "spell_effect",
+      "text": "Finality: You may put two +1/+1 counters on a creature you control. Then all creatures get -4/-4 until end of turn.",
+      "steps": [
+        {
+          "kind": "choose",
+          "id": "s1",
+          "optional": true,
+          "from": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you"
+          },
+          "count": 1,
+          "saveAs": "chosen",
+          "src": 0,
+          "prompt": {
+            "title": "Find // Finality: optional",
+            "instruction": "Do you want to choose a creature you control?",
+            "source": {
+              "card": "Find // Finality",
+              "ability": "a2"
+            }
+          }
+        },
+        {
+          "kind": "add_counters",
+          "on": "chosen",
+          "counterKind": "+1/+1",
+          "amount": 2,
+          "src": 0,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "step_done",
+              "step": "s1"
+            },
+            "src": 0
+          }
+        },
+        {
+          "kind": "mass_pump",
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "power": -4,
+          "toughness": -4,
+          "duration": "until_end_of_turn",
+          "src": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:choose",
+        "field:choose.count",
+        "field:choose.from",
+        "field:choose.saveAs",
+        "step:add_counters",
+        "field:add_counters.on",
+        "predicate:step_done",
+        "field:mass_pump.filter"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

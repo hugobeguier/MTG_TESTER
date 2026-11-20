@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Changeling",
+      "keyword": {
+        "name": "changeling"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever an opponent casts a spell, you may put a +1/+1 counter on this creature.",
+      "trigger": {
+        "event": "cast",
+        "whose": "opponents"
+      },
+      "steps": [
+        {
+          "kind": "add_counters",
+          "on": "self",
+          "counterKind": "+1/+1",
+          "amount": 1,
+          "optional": true,
+          "prompt": {
+            "title": "Taurean Mauler: optional",
+            "instruction": "Do you want to put a +1/+1 counter on Taurean Mauler?",
+            "source": {
+              "card": "Taurean Mauler",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:add_counters",
+        "field:add_counters.on"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

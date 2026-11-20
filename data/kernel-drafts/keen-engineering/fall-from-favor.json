@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Enchant creature",
+      "keyword": {
+        "name": "enchant"
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Fall from Favor: choose a target",
+            "instruction": "Choose target creature.",
+            "source": {
+              "card": "Fall from Favor",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "keyword:enchant"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "When this Aura enters, tap enchanted creature and you become the monarch.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "scripted": {
+        "handler": "become_monarch"
+      },
+      "steps": [
+        {
+          "kind": "tap_target",
+          "target": "enchanted"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "scripted:become_monarch"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "static",
+      "text": "Enchanted creature doesn't untap during its controller's untap step unless that player is the monarch.",
+      "static": {
+        "affects": "enchanted",
+        "modify": [
+          {
+            "grant": "doesn't untap during its controller's untap step"
+          }
+        ],
+        "while": {
+          "not": {
+            "check": "stat",
+            "of": "enchanted",
+            "stat": "controller_is_monarch",
+            "cmp": {
+              "op": "=",
+              "value": 1
+            }
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

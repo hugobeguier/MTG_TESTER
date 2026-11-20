@@ -1,0 +1,137 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Ward—Sacrifice a Food.",
+      "keyword": {
+        "name": "ward",
+        "param": "Sacrifice a Food"
+      },
+      "trigger": {
+        "event": "becomes_target",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "counter_spell",
+          "target": "event_object",
+          "unlessPay": {
+            "payer": "that_player",
+            "cost": [
+              {
+                "sacrifice": {
+                  "subtypes": [
+                    "Food"
+                  ],
+                  "controller": "you"
+                },
+                "count": 1
+              }
+            ],
+            "prompt": {
+              "title": "Ygra, Eater of All: pay or not",
+              "instruction": "Do you want to sacrifice a Food you control? If you don't, counter that object.",
+              "source": {
+                "card": "Ygra, Eater of All",
+                "ability": "a1"
+              }
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:becomes_target",
+        "step:counter_spell",
+        "step:unless_pay"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "static",
+      "text": "Other creatures are Food artifacts in addition to their other types and have \"{2}, {T}, Sacrifice this permanent: You gain 3 life.\"",
+      "static": {
+        "affects": {
+          "types": [
+            "creature"
+          ],
+          "another": true
+        },
+        "modify": [
+          {
+            "addTypes": [
+              "Artifact",
+              "Food"
+            ]
+          },
+          {
+            "grantAbility": {
+              "kind": "activated",
+              "text": "{2}, {T}, Sacrifice this permanent: You gain 3 life.",
+              "costs": [
+                {
+                  "mana": "{2}"
+                },
+                {
+                  "tap": "self"
+                },
+                {
+                  "sacrifice": "self",
+                  "count": 1
+                }
+              ],
+              "steps": [
+                {
+                  "kind": "life_change",
+                  "who": "you",
+                  "amount": 3
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static",
+        "static:addTypes"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "triggered",
+      "text": "Whenever a Food is put into a graveyard from the battlefield, put two +1/+1 counters on Ygra.",
+      "trigger": {
+        "event": "leaves",
+        "subject": {
+          "subtypes": [
+            "Food"
+          ]
+        },
+        "fromZone": "battlefield",
+        "toZone": "graveyard"
+      },
+      "steps": [
+        {
+          "kind": "add_counters",
+          "on": "self",
+          "counterKind": "+1/+1",
+          "amount": 2
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:leaves",
+        "trigger:subject",
+        "trigger:zones",
+        "step:add_counters",
+        "field:add_counters.on"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

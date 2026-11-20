@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Create X 1/2 green Spider creature tokens with reach, where X is the number of creatures attacking you. Prevent all combat damage that would be dealt this turn by non-Spider creatures.",
+      "replacement": {
+        "event": "would_deal_damage",
+        "damageType": "combat",
+        "damageSource": {
+          "types": [
+            "creature"
+          ],
+          "notSubtypes": [
+            "Spider"
+          ]
+        },
+        "duration": "until_end_of_turn",
+        "result": {
+          "mode": "prevent"
+        }
+      },
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": {
+            "ref": "count",
+            "of": {
+              "types": [
+                "creature"
+              ],
+              "attackingYou": true
+            }
+          },
+          "tokenName": "Spider",
+          "tokenPower": 1,
+          "tokenToughness": 2,
+          "tokenColors": [
+            "green"
+          ],
+          "tokenTypeLine": "Creature — Spider",
+          "tokenKeywords": [
+            "reach"
+          ],
+          "src": 0
+        }
+      ],
+      "srcs": [
+        1
+      ],
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_deal_damage",
+        "filter:notSubtypes",
+        "filter:attackingYou",
+        "replacement:duration",
+        "replacement:damage_qualifiers",
+        "quantity:count",
+        "field:create_tokens.tokenKeywords"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

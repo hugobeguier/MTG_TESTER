@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Target creature you control deals damage equal to its power to target creature or planeswalker you don't control.",
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Bite Down: choose a target",
+            "instruction": "Choose target creature you control.",
+            "source": {
+              "card": "Bite Down",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "id": "t2",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature",
+              "planeswalker"
+            ],
+            "controller": "opponent"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Bite Down: choose a target",
+            "instruction": "Choose target creature planeswalker an opponent controls.",
+            "source": {
+              "card": "Bite Down",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "damage_target",
+          "target": "t2",
+          "source": "t1",
+          "amount": {
+            "ref": "stat",
+            "of": "t1",
+            "stat": "power"
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "quantity:stat",
+        "field:damage_target.source"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

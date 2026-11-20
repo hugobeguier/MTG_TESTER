@@ -1,0 +1,118 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Malakir Rebirth: Choose target creature. You lose 2 life. Until end of turn, that creature gains \"When this creature dies, return it to the battlefield tapped under its owner's control.\"",
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "src": 0,
+          "prompt": {
+            "title": "Malakir Rebirth // Malakir Mire: choose a target",
+            "instruction": "Choose target creature.",
+            "source": {
+              "card": "Malakir Rebirth // Malakir Mire",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "life_change",
+          "who": "you",
+          "lose": true,
+          "amount": 2,
+          "src": 1
+        },
+        {
+          "kind": "grant_effect",
+          "target": "t1",
+          "duration": "until_end_of_turn",
+          "src": 2,
+          "modify": [
+            {
+              "grantAbility": {
+                "kind": "triggered",
+                "text": "When this creature dies, return it to the battlefield tapped under its owner's control.",
+                "trigger": {
+                  "event": "dies",
+                  "subject": "self"
+                },
+                "steps": [
+                  {
+                    "kind": "move_card_zone",
+                    "target": "self",
+                    "from": "graveyard",
+                    "moveTo": "battlefield",
+                    "tapped": true,
+                    "who": "owner_of_target"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:life_change.amount",
+        "field:life_change.lose",
+        "step:grant_effect",
+        "field:grant_effect.modify"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "replacement",
+      "text": "Malakir Mire: This land enters tapped.",
+      "replacement": {
+        "event": "would_enter",
+        "result": {
+          "mode": "modify",
+          "set": {
+            "tapped": true
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_enter"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "mana",
+      "text": "{T}: Add {B}.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{B}"
+          }
+        ]
+      },
+      "implementation": "implemented",
+      "needs": []
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

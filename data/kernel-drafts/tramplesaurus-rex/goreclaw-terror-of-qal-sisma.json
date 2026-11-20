@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "Creature spells you cast with power 4 or greater cost {2} less to cast.",
+      "static": {
+        "affects": "you",
+        "modify": [
+          {
+            "costMod": {
+              "filter": {
+                "types": [
+                  "creature"
+                ],
+                "power": {
+                  "op": ">=",
+                  "value": 4
+                }
+              },
+              "delta": -2
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever Goreclaw attacks, each creature you control with power 4 or greater gets +1/+1 and gains trample until end of turn.",
+      "trigger": {
+        "event": "attack",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "repeat_for_each",
+          "over": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you",
+            "power": {
+              "op": ">=",
+              "value": 4
+            }
+          },
+          "steps": [
+            {
+              "kind": "pump_target",
+              "target": "iterated",
+              "power": 1,
+              "toughness": 1,
+              "duration": "until_end_of_turn"
+            },
+            {
+              "kind": "grant_effect",
+              "target": "iterated",
+              "modify": [
+                {
+                  "grant": "trample"
+                }
+              ],
+              "duration": "until_end_of_turn"
+            }
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "ref:iterated",
+        "step:repeat_for_each",
+        "field:repeat_for_each.over",
+        "field:repeat_for_each.steps",
+        "step:grant_effect",
+        "field:grant_effect.modify"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

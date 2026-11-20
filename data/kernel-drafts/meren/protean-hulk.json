@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "When this creature dies, search your library for any number of creature cards with total mana value 6 or less, put them onto the battlefield, then shuffle.",
+      "trigger": {
+        "event": "dies",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "search_library",
+          "who": "you",
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "count": "any",
+          "upTo": true,
+          "totalManaValueAtMost": 6,
+          "to": "battlefield",
+          "shuffle": true,
+          "prompt": {
+            "title": "Protean Hulk: search",
+            "instruction": "Choose a creature from the library.",
+            "source": {
+              "card": "Protean Hulk",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:search_library",
+        "field:search_library.count",
+        "field:search_library.filter",
+        "field:search_library.shuffle",
+        "field:search_library.to",
+        "field:search_library.totalManaValueAtMost",
+        "field:search_library.upTo"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

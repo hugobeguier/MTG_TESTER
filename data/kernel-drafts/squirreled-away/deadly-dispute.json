@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "cast_option",
+      "text": "As an additional cost to cast this spell, sacrifice an artifact or creature.",
+      "implementation": "needed",
+      "needs": [
+        "cast_option"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "spell_effect",
+      "text": "Draw two cards and create a Treasure token. (It's an artifact with \"{T}, Sacrifice this token: Add one mana of any color.\")",
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "who": "you",
+          "amount": 2
+        },
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Treasure",
+          "tokenColors": [
+            "colorless"
+          ],
+          "tokenTypeLine": "Artifact — Treasure"
+        }
+      ],
+      "implementation": "implemented",
+      "needs": []
+    }
+  ],
+  "castOptions": [
+    {
+      "id": "c1",
+      "kind": "additional",
+      "from": "hand",
+      "cost": [
+        {
+          "sacrifice": {
+            "anyOf": [
+              {
+                "types": [
+                  "artifact"
+                ]
+              },
+              {
+                "types": [
+                  "creature"
+                ]
+              }
+            ],
+            "controller": "you"
+          },
+          "count": 1
+        }
+      ],
+      "replacesManaCost": false,
+      "optional": false,
+      "prompt": {
+        "title": "Deadly Dispute: additional cost",
+        "instruction": "Choose how to pay the additional cost (sacrifice an artifact or creature you control).",
+        "source": {
+          "card": "Deadly Dispute",
+          "ability": "c1"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "cast_option:additional",
+        "cast_option:mandatory",
+        "cost:sacrifice"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

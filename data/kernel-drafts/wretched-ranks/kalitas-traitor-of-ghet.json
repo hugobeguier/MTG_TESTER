@@ -1,0 +1,109 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Lifelink",
+      "keyword": {
+        "name": "lifelink"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "replacement",
+      "text": "If a nontoken creature an opponent controls would die, instead exile that card and create a 2/2 black Zombie creature token.",
+      "replacement": {
+        "event": "would_die",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "token": false,
+          "controller": "opponent"
+        },
+        "result": {
+          "mode": "instead",
+          "steps": [
+            {
+              "kind": "move_card_zone",
+              "target": "event_object",
+              "moveTo": "exile"
+            },
+            {
+              "kind": "create_tokens",
+              "tokenCount": 1,
+              "tokenName": "Zombie",
+              "tokenPower": 2,
+              "tokenToughness": 2,
+              "tokenColors": [
+                "black"
+              ],
+              "tokenTypeLine": "Creature — Zombie"
+            }
+          ]
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_die"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "activated",
+      "text": "{2}{B}, Sacrifice another Vampire or Zombie: Put two +1/+1 counters on Kalitas.",
+      "costs": [
+        {
+          "mana": "{2}{B}"
+        },
+        {
+          "sacrifice": {
+            "another": true,
+            "controller": "you",
+            "anyOf": [
+              {
+                "subtypes": [
+                  "Vampire"
+                ]
+              },
+              {
+                "subtypes": [
+                  "Zombie"
+                ]
+              }
+            ]
+          },
+          "count": 1,
+          "prompt": {
+            "title": "Kalitas, Traitor of Ghet: choose what to sacrifice",
+            "instruction": "Choose 1 Vampire or Zombie you control to sacrifice.",
+            "source": {
+              "card": "Kalitas, Traitor of Ghet",
+              "ability": "a3"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "add_counters",
+          "on": "self",
+          "counterKind": "+1/+1",
+          "amount": 2
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "cost:sacrifice",
+        "step:add_counters",
+        "field:add_counters.on"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

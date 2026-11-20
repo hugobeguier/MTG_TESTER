@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "kind": "cast_option",
+      "text": "As an additional cost to cast this spell, pay X life.",
+      "id": "a1",
+      "implementation": "needed",
+      "needs": [
+        "cast_option"
+      ]
+    },
+    {
+      "kind": "spell_effect",
+      "text": "All creatures get -X/-X until end of turn.",
+      "steps": [
+        {
+          "kind": "mass_pump",
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "power": {
+            "math": "*",
+            "args": [
+              -1,
+              {
+                "ref": "X"
+              }
+            ]
+          },
+          "toughness": {
+            "math": "*",
+            "args": [
+              -1,
+              {
+                "ref": "X"
+              }
+            ]
+          },
+          "duration": "until_end_of_turn",
+          "amountLockedOn": "cast",
+          "src": 0
+        }
+      ],
+      "id": "a2",
+      "implementation": "needed",
+      "needs": [
+        "quantity:math",
+        "field:mass_pump.amountLockedOn",
+        "field:mass_pump.filter"
+      ]
+    }
+  ],
+  "castOptions": [
+    {
+      "id": "c1",
+      "kind": "additional",
+      "from": "hand",
+      "cost": [
+        {
+          "life": {
+            "ref": "X"
+          }
+        }
+      ],
+      "replacesManaCost": false,
+      "optional": false,
+      "prompt": {
+        "title": "Toxic Deluge: additional cost",
+        "instruction": "Choose how to pay the additional cost (pay life equal to X).",
+        "source": {
+          "card": "Toxic Deluge",
+          "ability": "c1"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "cast_option:additional",
+        "cast_option:mandatory",
+        "cost:life"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Whenever this creature or another Zombie you control dies, you draw a card and you lose 1 life.",
+      "trigger": {
+        "event": "dies",
+        "subject": {
+          "subtypes": [
+            "Zombie"
+          ],
+          "controller": "you"
+        }
+      },
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": 1,
+          "who": "you"
+        },
+        {
+          "kind": "life_change",
+          "who": "you",
+          "lifeDelta": -1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

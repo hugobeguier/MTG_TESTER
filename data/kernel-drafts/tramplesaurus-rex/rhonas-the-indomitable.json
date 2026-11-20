@@ -1,0 +1,122 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Deathtouch",
+      "keyword": {
+        "name": "deathtouch"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "keyword",
+      "text": "Indestructible",
+      "keyword": {
+        "name": "indestructible"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "static",
+      "text": "Rhonas can't attack or block unless you control another creature with power 4 or greater.",
+      "static": {
+        "affects": "self",
+        "modify": [
+          {
+            "cant": "attack"
+          },
+          {
+            "cant": "block"
+          }
+        ],
+        "while": {
+          "not": {
+            "check": "controls",
+            "filter": {
+              "types": [
+                "creature"
+              ],
+              "controller": "you",
+              "another": true,
+              "power": {
+                "op": ">=",
+                "value": 4
+              }
+            }
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "id": "a4",
+      "kind": "activated",
+      "text": "{2}{G}: Another target creature gets +2/+0 and gains trample until end of turn.",
+      "costs": [
+        {
+          "mana": "{2}{G}"
+        }
+      ],
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "another": true
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Rhonas the Indomitable: choose a target",
+            "instruction": "Choose another target creature.",
+            "source": {
+              "card": "Rhonas the Indomitable",
+              "ability": "a4"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "pump_target",
+          "target": "t1",
+          "power": 2,
+          "toughness": 0,
+          "duration": "until_end_of_turn"
+        },
+        {
+          "kind": "grant_effect",
+          "target": "t1",
+          "modify": [
+            {
+              "grant": "trample"
+            }
+          ],
+          "duration": "until_end_of_turn"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:grant_effect",
+        "field:grant_effect.modify"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

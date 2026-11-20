@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "Juggernauts you control attack each combat if able.",
+      "static": {
+        "affects": {
+          "subtypes": [
+            "Juggernaut"
+          ],
+          "controller": "you"
+        },
+        "modify": [
+          {
+            "mustAttack": true
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static",
+        "static:mustAttack"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "static",
+      "text": "Juggernauts you control can't be blocked by Walls.",
+      "static": {
+        "affects": {
+          "subtypes": [
+            "Juggernaut"
+          ],
+          "controller": "you"
+        },
+        "modify": [
+          {
+            "evasion": {
+              "cantBeBlockedBy": {
+                "subtypes": [
+                  "Wall"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "static",
+      "text": "Other creatures you control have base power and toughness 5/3 and are Juggernauts in addition to their other creature types.",
+      "static": {
+        "affects": {
+          "types": [
+            "creature"
+          ],
+          "controller": "you",
+          "another": true
+        },
+        "modify": [
+          {
+            "setBasePT": {
+              "power": 5,
+              "toughness": 3
+            }
+          },
+          {
+            "addTypes": [
+              "Juggernaut"
+            ]
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static",
+        "static:setBasePT",
+        "static:addTypes"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

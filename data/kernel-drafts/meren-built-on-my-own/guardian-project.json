@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Whenever a nontoken creature you control enters, if it doesn't have the same name as another creature you control or a creature card in your graveyard, draw a card.",
+      "trigger": {
+        "event": "etb",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "token": false,
+          "controller": "you"
+        }
+      },
+      "scripted": {
+        "handler": "unique_name_check",
+        "params": {
+          "sameNameAs": [
+            "another creature you control",
+            "a creature card in your graveyard"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "who": "you",
+          "amount": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "scripted:unique_name_check",
+        "trigger:subject"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "if",
+        "reason": "the intervening-if is the scripted handler unique_name_check (no 'same name as' predicate in the schema; see SCHEMA QUESTION)"
+      },
+      {
+        "lexeme": "another",
+        "reason": "'another creature you control' is a parameter of the scripted unique_name_check handler"
+      }
+    ]
+  }
+}

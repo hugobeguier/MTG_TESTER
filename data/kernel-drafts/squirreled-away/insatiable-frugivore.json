@@ -1,0 +1,152 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "When this creature enters, create a Food token, then you may exile three cards from your graveyard. If you do, repeat this process.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Food",
+          "tokenColors": [
+            "colorless"
+          ],
+          "tokenTypeLine": "Artifact — Food",
+          "id": "s1",
+          "src": 0
+        },
+        {
+          "kind": "move_card_zone",
+          "id": "s2",
+          "optional": true,
+          "who": "you",
+          "from": "graveyard",
+          "moveTo": "exile",
+          "filter": {
+            "zone": "graveyard",
+            "owner": "you"
+          },
+          "count": 3,
+          "src": 0,
+          "prompt": {
+            "title": "Insatiable Frugivore: optional",
+            "instruction": "Do you want to exile a card?",
+            "source": {
+              "card": "Insatiable Frugivore",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "kind": "if_else",
+          "src": 1,
+          "if": {
+            "check": "step_done",
+            "step": "s2"
+          },
+          "then": [
+            {
+              "kind": "repeat_for_each",
+              "repeatProcess": {
+                "from": "s1",
+                "through": "s2"
+              }
+            }
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:move_card_zone.count",
+        "field:move_card_zone.filter",
+        "field:move_card_zone.from",
+        "step:if_else",
+        "field:if_else.if",
+        "field:if_else.then",
+        "predicate:step_done",
+        "step:repeat_for_each",
+        "field:repeat_for_each.repeatProcess"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "{3}{B}, Sacrifice X Foods: Creatures you control get +X/+0 and gain menace until end of turn.",
+      "costs": [
+        {
+          "mana": "{3}{B}"
+        },
+        {
+          "sacrifice": {
+            "subtypes": [
+              "Food"
+            ],
+            "controller": "you"
+          },
+          "count": {
+            "ref": "X"
+          },
+          "prompt": {
+            "title": "Insatiable Frugivore: choose what to sacrifice",
+            "instruction": "Choose X Foods you control to sacrifice.",
+            "source": {
+              "card": "Insatiable Frugivore",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "grant_effect",
+          "all": true,
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you"
+          },
+          "modify": [
+            {
+              "pt": {
+                "power": {
+                  "ref": "X"
+                },
+                "toughness": 0
+              }
+            },
+            {
+              "grant": "menace"
+            }
+          ],
+          "duration": "until_end_of_turn"
+        }
+      ],
+      "xPrompt": {
+        "title": "Insatiable Frugivore: choose X",
+        "instruction": "Choose a value for X (the amount used in the cost).",
+        "source": {
+          "card": "Insatiable Frugivore",
+          "ability": "a2"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "cost:sacrifice",
+        "step:grant_effect",
+        "field:grant_effect.all",
+        "field:grant_effect.filter",
+        "field:grant_effect.modify"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

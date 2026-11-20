@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "At the beginning of your upkeep, create a token that's a copy of another target nonland permanent you control.",
+      "trigger": {
+        "event": "begin_step",
+        "step": "upkeep",
+        "whose": "yours"
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "notTypes": [
+              "land"
+            ],
+            "controller": "you",
+            "another": true
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Extravagant Replication: choose a target",
+            "instruction": "Choose another target nonland permanent you control.",
+            "source": {
+              "card": "Extravagant Replication",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "copy",
+          "what": "t1",
+          "token": true,
+          "controller": "you",
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:copy",
+        "field:copy.controller",
+        "field:copy.token",
+        "field:copy.what"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

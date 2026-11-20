@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "When this enchantment enters, you become the monarch.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "scripted": {
+        "handler": "become_monarch"
+      },
+      "implementation": "needed",
+      "needs": [
+        "scripted:become_monarch"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "At the beginning of your upkeep, create a 1/1 white Spirit creature token with flying. If you're the monarch, create a 4/4 white Angel creature token with flying instead.",
+      "trigger": {
+        "event": "begin_step",
+        "step": "upkeep",
+        "whose": "yours"
+      },
+      "steps": [
+        {
+          "kind": "if_else",
+          "src": 1,
+          "if": {
+            "check": "stat",
+            "of": "self",
+            "stat": "controller_is_monarch",
+            "cmp": {
+              "op": "=",
+              "value": 1
+            }
+          },
+          "then": [
+            {
+              "kind": "create_tokens",
+              "tokenCount": 1,
+              "tokenName": "Angel",
+              "tokenPower": 4,
+              "tokenToughness": 4,
+              "tokenColors": [
+                "white"
+              ],
+              "tokenTypeLine": "Creature — Angel",
+              "tokenKeywords": [
+                "flying"
+              ],
+              "src": 1
+            }
+          ],
+          "else": [
+            {
+              "kind": "create_tokens",
+              "tokenCount": 1,
+              "tokenName": "Spirit",
+              "tokenPower": 1,
+              "tokenToughness": 1,
+              "tokenColors": [
+                "white"
+              ],
+              "tokenTypeLine": "Creature — Spirit",
+              "tokenKeywords": [
+                "flying"
+              ],
+              "src": 0
+            }
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:if_else",
+        "field:if_else.else",
+        "field:if_else.if",
+        "field:if_else.then",
+        "predicate:stat",
+        "field:create_tokens.tokenKeywords"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

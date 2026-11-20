@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Look at the top five cards of your library. Put one of them into your hand and the rest on top of your library in any order.",
+      "steps": [
+        {
+          "kind": "look_top",
+          "amount": 5,
+          "src": 0
+        },
+        {
+          "kind": "choose",
+          "from": {
+            "zone": "library"
+          },
+          "fromLooked": true,
+          "count": 1,
+          "saveAs": "chosen",
+          "src": 1,
+          "prompt": {
+            "title": "Diabolic Vision: choose",
+            "instruction": "Choose a card from among the looked-at cards.",
+            "source": {
+              "card": "Diabolic Vision",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "kind": "move_card_zone",
+          "what": "chosen",
+          "moveTo": "hand",
+          "src": 1
+        },
+        {
+          "kind": "move_card_zone",
+          "what": "rest_of_looked_cards",
+          "moveTo": "library",
+          "position": "top",
+          "ordered": "any_order",
+          "src": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:look_top",
+        "step:choose",
+        "field:choose.count",
+        "field:choose.from",
+        "field:choose.fromLooked",
+        "field:choose.saveAs",
+        "field:move_card_zone.what",
+        "field:move_card_zone.ordered",
+        "field:move_card_zone.position"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

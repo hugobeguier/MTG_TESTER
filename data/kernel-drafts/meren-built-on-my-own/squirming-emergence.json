@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Fathomless descent — Return to the battlefield target nonland permanent card in your graveyard with mana value less than or equal to the number of permanent cards in your graveyard.",
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "permanent"
+            ],
+            "notTypes": [
+              "land"
+            ],
+            "zone": "graveyard",
+            "owner": "you",
+            "mv": {
+              "op": "<=",
+              "value": {
+                "ref": "count",
+                "of": {
+                  "types": [
+                    "permanent"
+                  ],
+                  "zone": "graveyard",
+                  "owner": "you"
+                }
+              }
+            }
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Squirming Emergence: choose a target",
+            "instruction": "Choose target nonland permanent card with mana value less than or equal to the number of permanent cards in your graveyard in your graveyard.",
+            "source": {
+              "card": "Squirming Emergence",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "reanimate",
+          "target": "t1",
+          "who": "you"
+        }
+      ],
+      "implementation": "implemented",
+      "needs": []
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

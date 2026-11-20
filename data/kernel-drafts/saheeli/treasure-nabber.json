@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Whenever an opponent taps an artifact for mana, gain control of that artifact until the end of your next turn.",
+      "trigger": {
+        "event": "tap",
+        "subject": {
+          "types": [
+            "artifact"
+          ],
+          "controller": "opponent"
+        }
+      },
+      "scripted": {
+        "handler": "tapped_for_mana"
+      },
+      "steps": [
+        {
+          "kind": "gain_control",
+          "target": "event_object",
+          "duration": "until_end_of_your_next_turn"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "scripted:tapped_for_mana",
+        "trigger:tap",
+        "trigger:subject",
+        "step:gain_control",
+        "duration:until_end_of_your_next_turn"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,109 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "When this land enters, sacrifice it. When you do, search your library for a basic Plains, Island, or Swamp card, put it onto the battlefield tapped, then shuffle and you gain 1 life.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "sacrifice_permanent",
+          "target": "self",
+          "id": "s1",
+          "src": 0,
+          "prompt": {
+            "title": "Obscura Storefront: sacrifice",
+            "instruction": "Choose a permanent to sacrifice.",
+            "source": {
+              "card": "Obscura Storefront",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "kind": "search_library",
+          "who": "you",
+          "filter": {
+            "types": [
+              "land"
+            ],
+            "supertypes": [
+              "basic"
+            ],
+            "anyOf": [
+              {
+                "subtypes": [
+                  "Plains"
+                ]
+              },
+              {
+                "subtypes": [
+                  "Island"
+                ]
+              },
+              {
+                "subtypes": [
+                  "Swamp"
+                ]
+              }
+            ]
+          },
+          "count": 1,
+          "to": "battlefield",
+          "tapped": true,
+          "shuffle": true,
+          "reflexive": true,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "step_done",
+              "step": "s1"
+            },
+            "src": 1
+          },
+          "src": 1,
+          "prompt": {
+            "title": "Obscura Storefront: search",
+            "instruction": "Choose a Plains, Island, or Swamp from the library.",
+            "source": {
+              "card": "Obscura Storefront",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "kind": "life_change",
+          "lifeDelta": 1,
+          "who": "you",
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "step_done",
+              "step": "s1"
+            },
+            "src": 1
+          },
+          "src": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:search_library",
+        "field:search_library.count",
+        "field:search_library.filter",
+        "field:search_library.reflexive",
+        "field:search_library.shuffle",
+        "field:search_library.tapped",
+        "field:search_library.to",
+        "predicate:step_done"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

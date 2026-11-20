@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever you cast a noncreature or Dragon spell, this creature deals 1 damage to each opponent.",
+      "trigger": {
+        "event": "cast",
+        "subject": {
+          "anyOf": [
+            {
+              "notTypes": [
+                "creature"
+              ]
+            },
+            {
+              "subtypes": [
+                "Dragon"
+              ]
+            }
+          ]
+        },
+        "whose": "yours"
+      },
+      "steps": [
+        {
+          "kind": "damage_target",
+          "source": "self",
+          "who": "each_opponent",
+          "amount": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject",
+        "field:damage_target.source",
+        "field:damage_target.who"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

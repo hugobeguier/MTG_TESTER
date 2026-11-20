@@ -1,0 +1,286 @@
+{
+  "deck": "Calling All Angels",
+  "cards": [
+    {
+      "slug": "always-watching",
+      "name": "Always Watching"
+    },
+    {
+      "slug": "angel-of-finality",
+      "name": "Angel of Finality"
+    },
+    {
+      "slug": "angel-of-vitality",
+      "name": "Angel of Vitality"
+    },
+    {
+      "slug": "angel-of-the-ruins",
+      "name": "Angel of the Ruins"
+    },
+    {
+      "slug": "angelic-destiny",
+      "name": "Angelic Destiny"
+    },
+    {
+      "slug": "angelic-field-marshal",
+      "name": "Angelic Field Marshal"
+    },
+    {
+      "slug": "angelic-sleuth",
+      "name": "Angelic Sleuth"
+    },
+    {
+      "slug": "archangel-of-tithes",
+      "name": "Archangel of Tithes"
+    },
+    {
+      "slug": "austere-command",
+      "name": "Austere Command"
+    },
+    {
+      "slug": "bishop-of-wings",
+      "name": "Bishop of Wings"
+    },
+    {
+      "slug": "bonders-enclave",
+      "name": "Bonders' Enclave"
+    },
+    {
+      "slug": "cleansing-nova",
+      "name": "Cleansing Nova"
+    },
+    {
+      "slug": "commander-s-sphere",
+      "name": "Commander's Sphere"
+    },
+    {
+      "slug": "court-of-grace",
+      "name": "Court of Grace"
+    },
+    {
+      "slug": "cut-a-deal",
+      "name": "Cut a Deal"
+    },
+    {
+      "slug": "day-of-judgment",
+      "name": "Day of Judgment"
+    },
+    {
+      "slug": "dazzling-angel",
+      "name": "Dazzling Angel"
+    },
+    {
+      "slug": "defy-death",
+      "name": "Defy Death"
+    },
+    {
+      "slug": "destroy-evil",
+      "name": "Destroy Evil"
+    },
+    {
+      "slug": "emeria-shepherd",
+      "name": "Emeria Shepherd"
+    },
+    {
+      "slug": "endless-atlas",
+      "name": "Endless Atlas"
+    },
+    {
+      "slug": "exemplar-of-light",
+      "name": "Exemplar of Light"
+    },
+    {
+      "slug": "exorcise",
+      "name": "Exorcise"
+    },
+    {
+      "slug": "fateful-absence",
+      "name": "Fateful Absence"
+    },
+    {
+      "slug": "firemane-commando",
+      "name": "Firemane Commando"
+    },
+    {
+      "slug": "grasp-of-fate",
+      "name": "Grasp of Fate"
+    },
+    {
+      "slug": "herald-of-eternal-dawn",
+      "name": "Herald of Eternal Dawn"
+    },
+    {
+      "slug": "herald-of-war",
+      "name": "Herald of War"
+    },
+    {
+      "slug": "heraldic-banner",
+      "name": "Heraldic Banner"
+    },
+    {
+      "slug": "inspiring-overseer",
+      "name": "Inspiring Overseer"
+    },
+    {
+      "slug": "invoke-the-divine",
+      "name": "Invoke the Divine"
+    },
+    {
+      "slug": "linvala-the-preserver",
+      "name": "Linvala, the Preserver"
+    },
+    {
+      "slug": "lyra-dawnbringer",
+      "name": "Lyra Dawnbringer"
+    },
+    {
+      "slug": "marble-diamond",
+      "name": "Marble Diamond"
+    },
+    {
+      "slug": "merchant-of-truth",
+      "name": "Merchant of Truth"
+    },
+    {
+      "slug": "metallic-mimic",
+      "name": "Metallic Mimic"
+    },
+    {
+      "slug": "metropolis-reformer",
+      "name": "Metropolis Reformer"
+    },
+    {
+      "slug": "norn-s-choirmaster",
+      "name": "Norn's Choirmaster"
+    },
+    {
+      "slug": "patchwork-banner",
+      "name": "Patchwork Banner"
+    },
+    {
+      "slug": "plains",
+      "name": "Plains"
+    },
+    {
+      "slug": "radiant-fountain",
+      "name": "Radiant Fountain"
+    },
+    {
+      "slug": "reya-dawnbringer",
+      "name": "Reya Dawnbringer"
+    },
+    {
+      "slug": "righteous-valkyrie",
+      "name": "Righteous Valkyrie"
+    },
+    {
+      "slug": "search-the-premises",
+      "name": "Search the Premises"
+    },
+    {
+      "slug": "secluded-steppe",
+      "name": "Secluded Steppe"
+    },
+    {
+      "slug": "secret-rendezvous",
+      "name": "Secret Rendezvous"
+    },
+    {
+      "slug": "segovian-angel",
+      "name": "Segovian Angel"
+    },
+    {
+      "slug": "sephara-sky-s-blade",
+      "name": "Sephara, Sky's Blade"
+    },
+    {
+      "slug": "seraph-sanctuary",
+      "name": "Seraph Sanctuary"
+    },
+    {
+      "slug": "seraph-of-the-sword",
+      "name": "Seraph of the Sword"
+    },
+    {
+      "slug": "serra-avenger",
+      "name": "Serra Avenger"
+    },
+    {
+      "slug": "speaker-of-the-heavens",
+      "name": "Speaker of the Heavens"
+    },
+    {
+      "slug": "starnheim-aspirant",
+      "name": "Starnheim Aspirant"
+    },
+    {
+      "slug": "sunblast-angel",
+      "name": "Sunblast Angel"
+    },
+    {
+      "slug": "swiftfoot-boots",
+      "name": "Swiftfoot Boots"
+    },
+    {
+      "slug": "swords-to-plowshares",
+      "name": "Swords to Plowshares"
+    },
+    {
+      "slug": "temple-of-the-false-god",
+      "name": "Temple of the False God"
+    },
+    {
+      "slug": "thraben-watcher",
+      "name": "Thraben Watcher"
+    },
+    {
+      "slug": "tome-of-legends",
+      "name": "Tome of Legends"
+    },
+    {
+      "slug": "valorous-stance",
+      "name": "Valorous Stance"
+    },
+    {
+      "slug": "vanguard-seraph",
+      "name": "Vanguard Seraph"
+    },
+    {
+      "slug": "vanquisher-s-banner",
+      "name": "Vanquisher's Banner"
+    },
+    {
+      "slug": "wojek-investigator",
+      "name": "Wojek Investigator"
+    },
+    {
+      "slug": "youthful-valkyrie",
+      "name": "Youthful Valkyrie"
+    },
+    {
+      "slug": "giada-font-of-hope",
+      "name": "Giada, Font of Hope"
+    },
+    {
+      "slug": "arcane-signet",
+      "name": "Arcane Signet"
+    },
+    {
+      "slug": "mind-stone",
+      "name": "Mind Stone"
+    },
+    {
+      "slug": "sol-ring",
+      "name": "Sol Ring"
+    },
+    {
+      "slug": "war-room",
+      "name": "War Room"
+    }
+  ],
+  "decisions": [
+    "Consolidated schema pass: the workarounds reported by the five pilot decks (sentinels, review.ignore hacks, scripted stubs, placeholder refs) now use real fields; see src/kernel/SCHEMA_CHANGELOG.md.",
+    "Monarch stays a scripted marker (become_monarch + the controller_is_monarch stat) by user decision; Crew, Improvise, Myriad, Storm, Read ahead, Manifest dread, Reselect attack target and tapped-for-{C} stay scripted markers (vocabulary listed in the changelog).",
+    "Remaining genuine card-behaviour questions are collected in data/kernel-drafts/CONSOLIDATED_QUESTIONS.md, not per deck."
+  ]
+}

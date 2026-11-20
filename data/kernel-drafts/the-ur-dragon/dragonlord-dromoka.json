@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "This spell can't be countered.",
+      "zone": "stack",
+      "static": {
+        "affects": "self",
+        "modify": [
+          {
+            "cant": "be_countered"
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static",
+        "zone:stack"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "keyword",
+      "text": "Lifelink",
+      "keyword": {
+        "name": "lifelink"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a4",
+      "kind": "static",
+      "text": "Your opponents can't cast spells during your turn.",
+      "static": {
+        "affects": "each_opponent",
+        "modify": [
+          {
+            "cant": "cast"
+          }
+        ],
+        "while": {
+          "check": "turn_is",
+          "whose": "yours"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

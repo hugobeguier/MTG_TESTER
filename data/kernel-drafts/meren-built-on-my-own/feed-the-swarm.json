@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Destroy target creature or enchantment an opponent controls. You lose life equal to that permanent's mana value.",
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "anyOf": [
+              {
+                "types": [
+                  "creature"
+                ],
+                "controller": "opponent"
+              },
+              {
+                "types": [
+                  "enchantment"
+                ],
+                "controller": "opponent"
+              }
+            ]
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Feed the Swarm: choose a target",
+            "instruction": "Choose target creature an opponent controls or enchantment an opponent controls.",
+            "source": {
+              "card": "Feed the Swarm",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "destroy_target",
+          "target": "t1",
+          "src": 0
+        },
+        {
+          "kind": "life_change",
+          "who": "you",
+          "lose": true,
+          "amount": {
+            "ref": "stat",
+            "of": "t1",
+            "stat": "mana_value"
+          },
+          "src": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "quantity:stat",
+        "field:life_change.amount",
+        "field:life_change.lose"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

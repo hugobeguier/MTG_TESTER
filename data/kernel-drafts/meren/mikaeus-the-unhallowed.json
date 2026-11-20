@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Intimidate (This creature can't be blocked except by artifact creatures and/or creatures that share a color with it.)",
+      "keyword": {
+        "name": "intimidate"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever a Human deals damage to you, destroy it.",
+      "trigger": {
+        "event": "dealt_damage",
+        "subject": "you",
+        "interveningIf": {
+          "check": "matches",
+          "obj": "event_object",
+          "filter": {
+            "subtypes": [
+              "Human"
+            ]
+          }
+        }
+      },
+      "steps": [
+        {
+          "kind": "destroy_target",
+          "target": "event_object"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:dealt_damage",
+        "trigger:intervening_if",
+        "predicate:matches",
+        "trigger:subject"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "static",
+      "text": "Other non-Human creatures you control get +1/+1 and have undying. (When a creature with undying dies, if it had no +1/+1 counters on it, return it to the battlefield under its owner's control with a +1/+1 counter on it.)",
+      "static": {
+        "affects": {
+          "types": [
+            "creature"
+          ],
+          "notSubtypes": [
+            "Human"
+          ],
+          "controller": "you",
+          "another": true
+        },
+        "modify": [
+          {
+            "pt": {
+              "power": 1,
+              "toughness": 1
+            }
+          },
+          {
+            "grant": "undying"
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static",
+        "filter:notSubtypes"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

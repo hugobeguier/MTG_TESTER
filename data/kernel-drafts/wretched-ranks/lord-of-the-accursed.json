@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "static",
+      "text": "Other Zombies you control get +1/+1.",
+      "static": {
+        "affects": {
+          "subtypes": [
+            "Zombie"
+          ],
+          "controller": "you",
+          "another": true
+        },
+        "modify": [
+          {
+            "pt": {
+              "power": 1,
+              "toughness": 1
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "{1}{B}, {T}: All Zombies gain menace until end of turn.",
+      "costs": [
+        {
+          "mana": "{1}{B}"
+        },
+        {
+          "tap": "self"
+        }
+      ],
+      "steps": [
+        {
+          "kind": "repeat_for_each",
+          "over": {
+            "subtypes": [
+              "Zombie"
+            ]
+          },
+          "steps": [
+            {
+              "kind": "grant_effect",
+              "target": "iterated",
+              "modify": [
+                {
+                  "grant": "menace"
+                }
+              ],
+              "duration": "until_end_of_turn"
+            }
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "ref:iterated",
+        "step:repeat_for_each",
+        "field:repeat_for_each.over",
+        "field:repeat_for_each.steps",
+        "step:grant_effect",
+        "field:grant_effect.modify"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

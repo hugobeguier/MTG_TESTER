@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "replacement",
+      "text": "If one or more artifact tokens would be created under your control, that many 5/5 red Dragon creature tokens with flying are created instead.",
+      "replacement": {
+        "event": "would_create_token",
+        "subject": {
+          "types": [
+            "artifact"
+          ],
+          "token": true,
+          "controller": "you"
+        },
+        "result": {
+          "mode": "instead",
+          "steps": [
+            {
+              "kind": "create_tokens",
+              "tokenCount": {
+                "ref": "event_amount"
+              },
+              "tokenName": "Dragon",
+              "tokenPower": 5,
+              "tokenToughness": 5,
+              "tokenColors": [
+                "red"
+              ],
+              "tokenTypeLine": "Creature — Dragon",
+              "tokenKeywords": [
+                "flying"
+              ]
+            }
+          ]
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_create_token",
+        "quantity:event_amount",
+        "field:create_tokens.tokenKeywords"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "oracleOverride": {
+      "text": "Flying\nIf one or more artifact tokens would be created under your control, that many 5/5 red Dragon creature tokens with flying are created instead.",
+      "source": "mtg.wtf https://mtg.wtf/card/pfra/80p/Draconic-Visitor (Reality Fracture Promos pfra 80p; not in data/cards.db or XMage; not verified against Scryfall). Rulings 2026-08-21: (1) effects changing who controls a token being created apply before this replacement; effects changing control as it enters apply after. (2) A nonartifact token that becomes an artifact only as it enters (Mycosynth Lattice) is not replaced; artifact-ness is judged from the token own characteristics at creation, before static effects. Tokens that are artifact by definition (Treasure, Clue, Food, Thopter) ARE replaced. (3) Replaced tokens become 5/5 red Dragon creature tokens with flying and lose any abilities they would have been created with; other instructions of the creating effect still apply (enters tapped, enters attacking, haste, exile at end of combat).",
+      "typeLine": "Creature — Dragon"
+    }
+  }
+}

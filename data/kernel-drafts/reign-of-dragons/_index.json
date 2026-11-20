@@ -1,0 +1,278 @@
+{
+  "deck": "Reign Of Dragons",
+  "cards": [
+    {
+      "slug": "lathliss-dragon-queen",
+      "name": "Lathliss, Dragon Queen"
+    },
+    {
+      "slug": "abrade",
+      "name": "Abrade"
+    },
+    {
+      "slug": "arcane-signet",
+      "name": "Arcane Signet"
+    },
+    {
+      "slug": "atsushi-the-blazing-sky",
+      "name": "Atsushi, the Blazing Sky"
+    },
+    {
+      "slug": "basilisk-collar",
+      "name": "Basilisk Collar"
+    },
+    {
+      "slug": "blasphemous-act",
+      "name": "Blasphemous Act"
+    },
+    {
+      "slug": "bonders-enclave",
+      "name": "Bonders' Enclave"
+    },
+    {
+      "slug": "breaching-dragonstorm",
+      "name": "Breaching Dragonstorm"
+    },
+    {
+      "slug": "breath-weapon",
+      "name": "Breath Weapon"
+    },
+    {
+      "slug": "carnelian-orb-of-dragonkind",
+      "name": "Carnelian Orb of Dragonkind"
+    },
+    {
+      "slug": "chandra-s-ignition",
+      "name": "Chandra's Ignition"
+    },
+    {
+      "slug": "chaos-warp",
+      "name": "Chaos Warp"
+    },
+    {
+      "slug": "commander-s-sphere",
+      "name": "Commander's Sphere"
+    },
+    {
+      "slug": "count-on-luck",
+      "name": "Count on Luck"
+    },
+    {
+      "slug": "crucible-of-fire",
+      "name": "Crucible of Fire"
+    },
+    {
+      "slug": "cursed-mirror",
+      "name": "Cursed Mirror"
+    },
+    {
+      "slug": "desolation-of-smaug",
+      "name": "Desolation of Smaug"
+    },
+    {
+      "slug": "dragon-tempest",
+      "name": "Dragon Tempest"
+    },
+    {
+      "slug": "dragon-s-hoard",
+      "name": "Dragon's Hoard"
+    },
+    {
+      "slug": "dragonhawk-fate-s-tempest",
+      "name": "Dragonhawk, Fate's Tempest"
+    },
+    {
+      "slug": "dragonlord-s-servant",
+      "name": "Dragonlord's Servant"
+    },
+    {
+      "slug": "dragonmaster-outcast",
+      "name": "Dragonmaster Outcast"
+    },
+    {
+      "slug": "dragonspeaker-shaman",
+      "name": "Dragonspeaker Shaman"
+    },
+    {
+      "slug": "dragonstorm-globe",
+      "name": "Dragonstorm Globe"
+    },
+    {
+      "slug": "drakuseth-maw-of-flames",
+      "name": "Drakuseth, Maw of Flames"
+    },
+    {
+      "slug": "fire-diamond",
+      "name": "Fire Diamond"
+    },
+    {
+      "slug": "firespitter-whelp",
+      "name": "Firespitter Whelp"
+    },
+    {
+      "slug": "forgotten-cave",
+      "name": "Forgotten Cave"
+    },
+    {
+      "slug": "gadrak-the-crown-scourge",
+      "name": "Gadrak, the Crown-Scourge"
+    },
+    {
+      "slug": "goldlust-triad",
+      "name": "Goldlust Triad"
+    },
+    {
+      "slug": "haven-of-the-spirit-dragon",
+      "name": "Haven of the Spirit Dragon"
+    },
+    {
+      "slug": "hazoret-s-monument",
+      "name": "Hazoret's Monument"
+    },
+    {
+      "slug": "hellkite-charger",
+      "name": "Hellkite Charger"
+    },
+    {
+      "slug": "leyline-tyrant",
+      "name": "Leyline Tyrant"
+    },
+    {
+      "slug": "lightning-bolt",
+      "name": "Lightning Bolt"
+    },
+    {
+      "slug": "magda-the-hoardmaster",
+      "name": "Magda, the Hoardmaster"
+    },
+    {
+      "slug": "magmaquake",
+      "name": "Magmaquake"
+    },
+    {
+      "slug": "mana-geyser",
+      "name": "Mana Geyser"
+    },
+    {
+      "slug": "mountain",
+      "name": "Mountain"
+    },
+    {
+      "slug": "nogi-draco-zealot",
+      "name": "Nogi, Draco-Zealot"
+    },
+    {
+      "slug": "orb-of-dragonkind",
+      "name": "Orb of Dragonkind"
+    },
+    {
+      "slug": "outpost-siege",
+      "name": "Outpost Siege"
+    },
+    {
+      "slug": "parapet-thrasher",
+      "name": "Parapet Thrasher"
+    },
+    {
+      "slug": "rapacious-dragon",
+      "name": "Rapacious Dragon"
+    },
+    {
+      "slug": "sarkhan-the-masterless",
+      "name": "Sarkhan the Masterless"
+    },
+    {
+      "slug": "sarkhan-dragon-ascendant",
+      "name": "Sarkhan, Dragon Ascendant"
+    },
+    {
+      "slug": "sarkhan-s-triumph",
+      "name": "Sarkhan's Triumph"
+    },
+    {
+      "slug": "scourge-of-the-throne",
+      "name": "Scourge of the Throne"
+    },
+    {
+      "slug": "scourge-of-valkas",
+      "name": "Scourge of Valkas"
+    },
+    {
+      "slug": "shivan-devastator",
+      "name": "Shivan Devastator"
+    },
+    {
+      "slug": "skyline-despot",
+      "name": "Skyline Despot"
+    },
+    {
+      "slug": "sol-ring",
+      "name": "Sol Ring"
+    },
+    {
+      "slug": "spinerock-knoll",
+      "name": "Spinerock Knoll"
+    },
+    {
+      "slug": "stormscale-scion",
+      "name": "Stormscale Scion"
+    },
+    {
+      "slug": "swiftfoot-boots",
+      "name": "Swiftfoot Boots"
+    },
+    {
+      "slug": "taurean-mauler",
+      "name": "Taurean Mauler"
+    },
+    {
+      "slug": "temple-of-the-false-god",
+      "name": "Temple of the False God"
+    },
+    {
+      "slug": "terror-of-mount-velus",
+      "name": "Terror of Mount Velus"
+    },
+    {
+      "slug": "the-elder-dragon-war",
+      "name": "The Elder Dragon War"
+    },
+    {
+      "slug": "the-misty-mountains-cold",
+      "name": "The Misty Mountains Cold"
+    },
+    {
+      "slug": "thunderbreak-regent",
+      "name": "Thunderbreak Regent"
+    },
+    {
+      "slug": "thundermane-dragon",
+      "name": "Thundermane Dragon"
+    },
+    {
+      "slug": "tyrant-s-familiar",
+      "name": "Tyrant's Familiar"
+    },
+    {
+      "slug": "unexpected-windfall",
+      "name": "Unexpected Windfall"
+    },
+    {
+      "slug": "utvara-hellkite",
+      "name": "Utvara Hellkite"
+    },
+    {
+      "slug": "war-room",
+      "name": "War Room"
+    },
+    {
+      "slug": "warstorm-surge",
+      "name": "Warstorm Surge"
+    }
+  ],
+  "decisions": [
+    "Consolidated schema pass: the workarounds reported by the five pilot decks (sentinels, review.ignore hacks, scripted stubs, placeholder refs) now use real fields; see src/kernel/SCHEMA_CHANGELOG.md.",
+    "Monarch stays a scripted marker (become_monarch + the controller_is_monarch stat) by user decision; Crew, Improvise, Myriad, Storm, Read ahead, Manifest dread, Reselect attack target and tapped-for-{C} stay scripted markers (vocabulary listed in the changelog).",
+    "Remaining genuine card-behaviour questions are collected in data/kernel-drafts/CONSOLIDATED_QUESTIONS.md, not per deck."
+  ]
+}

@@ -1,0 +1,131 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Ward {2}",
+      "keyword": {
+        "name": "ward",
+        "param": 2
+      },
+      "trigger": {
+        "event": "becomes_target",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "counter_spell",
+          "target": "event_object",
+          "unlessPay": {
+            "payer": "that_player",
+            "cost": [
+              {
+                "mana": "{2}"
+              }
+            ],
+            "prompt": {
+              "title": "Roaming Throne: pay or not",
+              "instruction": "Do you want to pay {2}? If you don't, counter that object.",
+              "source": {
+                "card": "Roaming Throne",
+                "ability": "a1"
+              }
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:becomes_target",
+        "step:counter_spell",
+        "step:unless_pay"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "replacement",
+      "text": "As this creature enters, choose a creature type.",
+      "replacement": {
+        "event": "would_enter",
+        "result": {
+          "mode": "also",
+          "steps": [
+            {
+              "kind": "choose",
+              "choice": "creature_type",
+              "what": "creature_type",
+              "remember": true,
+              "saveAs": "chosen",
+              "prompt": {
+                "title": "Roaming Throne: choose",
+                "instruction": "Choose a creature type.",
+                "source": {
+                  "card": "Roaming Throne",
+                  "ability": "a2"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_enter",
+        "step:choose",
+        "field:choose.choice",
+        "field:choose.remember",
+        "field:choose.saveAs",
+        "field:choose.what"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "static",
+      "text": "This creature is the chosen type in addition to its other types.",
+      "static": {
+        "affects": "self",
+        "modify": [
+          {
+            "addTypes": [
+              "chosen type"
+            ]
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static",
+        "static:addTypes"
+      ]
+    },
+    {
+      "id": "a4",
+      "kind": "scripted",
+      "text": "If a triggered ability of another creature you control of the chosen type triggers, it triggers an additional time.",
+      "scripted": {
+        "handler": "triggers_additional_time",
+        "params": {
+          "creatures": "another creature you control of the chosen type"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "scripted:triggers_additional_time"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "another",
+        "reason": "'its other types' / 'another creature of the chosen type' in the static and the scripted marker"
+      },
+      {
+        "lexeme": "if",
+        "reason": "'If a triggered ability ... triggers, it triggers an additional time' is the scripted marker triggers_additional_time"
+      }
+    ]
+  }
+}

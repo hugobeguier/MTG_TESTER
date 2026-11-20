@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "kind": "spell_effect",
+      "text": "Target creature gets +1/+1 until end of turn. Prevent all damage that would be dealt to it this turn. If it's renowned, untap it.",
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Enshrouding Mist: choose a target",
+            "instruction": "Choose target creature.",
+            "source": {
+              "card": "Enshrouding Mist",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "pump_target",
+          "target": "t1",
+          "power": 1,
+          "toughness": 1,
+          "duration": "until_end_of_turn",
+          "src": 0
+        },
+        {
+          "kind": "grant_effect",
+          "target": "t1",
+          "duration": "until_end_of_turn",
+          "src": 1,
+          "replacement": {
+            "event": "would_deal_damage",
+            "recipient": "self",
+            "duration": "until_end_of_turn",
+            "result": {
+              "mode": "prevent"
+            }
+          }
+        },
+        {
+          "kind": "untap_target",
+          "target": "t1",
+          "src": 2,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "matches",
+              "obj": "t1",
+              "filter": {
+                "with": [
+                  "renowned"
+                ]
+              }
+            },
+            "src": 2
+          }
+        }
+      ],
+      "id": "a1",
+      "implementation": "needed",
+      "needs": [
+        "step:grant_effect",
+        "field:grant_effect.replacement",
+        "predicate:matches"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "each",
+        "reason": "'all damage that would be dealt to it' is the would_deal_damage replacement (prevent)"
+      }
+    ]
+  }
+}

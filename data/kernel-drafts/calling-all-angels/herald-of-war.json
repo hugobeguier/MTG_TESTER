@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever this creature attacks, put a +1/+1 counter on it.",
+      "trigger": {
+        "event": "attack",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "src": 0,
+          "kind": "add_counters",
+          "on": "self",
+          "counterKind": "+1/+1",
+          "amount": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:add_counters",
+        "field:add_counters.on"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "static",
+      "text": "Angel spells and Human spells you cast cost {1} less to cast for each +1/+1 counter on this creature.",
+      "static": {
+        "affects": "you",
+        "modify": [
+          {
+            "costMod": {
+              "filter": {
+                "anyOf": [
+                  {
+                    "subtypes": [
+                      "Angel"
+                    ]
+                  },
+                  {
+                    "subtypes": [
+                      "Human"
+                    ]
+                  }
+                ]
+              },
+              "delta": {
+                "math": "*",
+                "args": [
+                  -1,
+                  {
+                    "ref": "counters",
+                    "kind": "+1/+1",
+                    "on": "self"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static",
+        "static:costMod_quantity"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

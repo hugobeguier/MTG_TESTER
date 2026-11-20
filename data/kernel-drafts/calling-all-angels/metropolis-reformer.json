@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "keyword",
+      "text": "Vigilance",
+      "keyword": {
+        "name": "vigilance"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "static",
+      "text": "You have hexproof.",
+      "static": {
+        "affects": "you",
+        "modify": [
+          {
+            "grant": "hexproof"
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "id": "a4",
+      "kind": "triggered",
+      "text": "Whenever this creature is dealt damage, you gain that much life.",
+      "trigger": {
+        "event": "dealt_damage",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "src": 0,
+          "kind": "life_change",
+          "who": "you",
+          "amount": {
+            "ref": "event_amount"
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:dealt_damage",
+        "quantity:event_amount",
+        "field:life_change.amount"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

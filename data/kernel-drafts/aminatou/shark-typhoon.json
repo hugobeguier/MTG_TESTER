@@ -1,0 +1,131 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Whenever you cast a noncreature spell, create an X/X blue Shark creature token with flying, where X is that spell's mana value.",
+      "trigger": {
+        "event": "cast",
+        "subject": {
+          "notTypes": [
+            "creature"
+          ]
+        },
+        "whose": "yours"
+      },
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Shark",
+          "tokenPower": {
+            "ref": "stat",
+            "of": "event_object",
+            "stat": "mana_value"
+          },
+          "tokenToughness": {
+            "ref": "stat",
+            "of": "event_object",
+            "stat": "mana_value"
+          },
+          "tokenColors": [
+            "blue"
+          ],
+          "tokenTypeLine": "Creature — Shark",
+          "tokenKeywords": [
+            "flying"
+          ],
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "quantity:stat",
+        "field:create_tokens.tokenKeywords"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "zone": "hand",
+      "text": "Cycling {X}{1}{U} ({X}{1}{U}, Discard this card: Draw a card.)",
+      "keyword": {
+        "name": "cycling",
+        "param": "{X}{1}{U}"
+      },
+      "costs": [
+        {
+          "mana": "{X}{1}{U}"
+        },
+        {
+          "discard": "self",
+          "count": 1
+        }
+      ],
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": 1,
+          "who": "you",
+          "src": 0
+        }
+      ],
+      "xPrompt": {
+        "title": "Shark Typhoon: choose X",
+        "instruction": "Choose a value for X (paid in mana).",
+        "source": {
+          "card": "Shark Typhoon",
+          "ability": "a2"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "zone:hand",
+        "cost:x",
+        "cost:discard"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "triggered",
+      "zone": "hand",
+      "text": "When you cycle this card, create an X/X blue Shark creature token with flying.",
+      "trigger": {
+        "event": "cycle",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Shark",
+          "tokenPower": {
+            "ref": "X"
+          },
+          "tokenToughness": {
+            "ref": "X"
+          },
+          "tokenColors": [
+            "blue"
+          ],
+          "tokenTypeLine": "Creature — Shark",
+          "tokenKeywords": [
+            "flying"
+          ],
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "zone:hand",
+        "trigger:cycle",
+        "quantity:X",
+        "field:create_tokens.tokenKeywords"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

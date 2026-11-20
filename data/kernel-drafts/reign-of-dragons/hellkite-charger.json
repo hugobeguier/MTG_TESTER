@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "keyword",
+      "text": "Haste",
+      "keyword": {
+        "name": "haste"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "triggered",
+      "text": "Whenever this creature attacks, you may pay {5}{R}{R}. If you do, untap all attacking creatures and after this phase, there is an additional combat phase.",
+      "trigger": {
+        "event": "attack",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "untap_target",
+          "all": true,
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "attacking": true
+          },
+          "optional": true,
+          "optionalCost": [
+            {
+              "mana": "{5}{R}{R}"
+            }
+          ],
+          "src": 0,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "paid_additional_cost",
+              "option": "{5}{R}{R}"
+            },
+            "src": 1
+          },
+          "prompt": {
+            "title": "Hellkite Charger: optional",
+            "instruction": "Do you want to untap the target?",
+            "source": {
+              "card": "Hellkite Charger",
+              "ability": "a3"
+            }
+          }
+        },
+        {
+          "kind": "extra_combat",
+          "src": 1,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "paid_additional_cost",
+              "option": "{5}{R}{R}"
+            },
+            "src": 1
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:untap_target.all",
+        "field:untap_target.filter",
+        "field:untap_target.optionalCost",
+        "predicate:paid_additional_cost",
+        "step:extra_combat"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

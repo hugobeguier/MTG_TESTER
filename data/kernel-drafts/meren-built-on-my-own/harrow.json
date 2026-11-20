@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "cast_option",
+      "text": "As an additional cost to cast this spell, sacrifice a land.",
+      "costs": [
+        {
+          "sacrifice": {
+            "types": [
+              "land"
+            ],
+            "controller": "you"
+          },
+          "count": 1,
+          "prompt": {
+            "title": "Harrow: choose what to sacrifice",
+            "instruction": "Choose 1 land you control to sacrifice.",
+            "source": {
+              "card": "Harrow",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "cast_option",
+        "cost:sacrifice"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "spell_effect",
+      "text": "Search your library for up to two basic land cards, put them onto the battlefield, then shuffle.",
+      "steps": [
+        {
+          "kind": "search_library",
+          "who": "you",
+          "filter": {
+            "types": [
+              "land"
+            ],
+            "supertypes": [
+              "basic"
+            ]
+          },
+          "count": 2,
+          "upTo": true,
+          "to": "battlefield",
+          "shuffle": true,
+          "prompt": {
+            "title": "Harrow: search",
+            "instruction": "Choose a basic land from the library.",
+            "source": {
+              "card": "Harrow",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:search_library",
+        "field:search_library.count",
+        "field:search_library.filter",
+        "field:search_library.shuffle",
+        "field:search_library.to",
+        "field:search_library.upTo"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

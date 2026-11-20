@@ -1,0 +1,110 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "kind": "triggered",
+      "text": "At the beginning of your end step, two target players each reveal the top card of their library. They each lose life equal to the mana value of the card revealed by the other player. Then they each put the card they revealed into their hand.",
+      "trigger": {
+        "event": "begin_step",
+        "step": "end_step",
+        "whose": "yours"
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "player",
+          "count": {
+            "min": 2,
+            "max": 2
+          },
+          "prompt": {
+            "title": "Parker Luck: choose targets",
+            "instruction": "Choose two target players.",
+            "source": {
+              "card": "Parker Luck",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "choose",
+          "who": "target_player",
+          "from": {
+            "zone": "library"
+          },
+          "position": "top",
+          "count": 1,
+          "reveal": true,
+          "saveAs": "chosen",
+          "src": 0,
+          "prompt": {
+            "title": "Parker Luck: choose",
+            "instruction": "Choose a card in a library.",
+            "source": {
+              "card": "Parker Luck",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "kind": "life_change",
+          "who": "target_player",
+          "amount": {
+            "math": "*",
+            "args": [
+              -1,
+              {
+                "ref": "stat",
+                "of": "chosen",
+                "stat": "mana_value"
+              }
+            ]
+          },
+          "lifeFrom": "the other target player's revealed card",
+          "src": 1
+        },
+        {
+          "kind": "move_card_zone",
+          "what": "chosen",
+          "moveFrom": "library",
+          "moveTo": "hand",
+          "who": "target_player",
+          "src": 2
+        }
+      ],
+      "id": "a1",
+      "implementation": "needed",
+      "needs": [
+        "targets:multi",
+        "step:choose",
+        "field:choose.count",
+        "field:choose.from",
+        "field:choose.position",
+        "field:choose.reveal",
+        "field:choose.saveAs",
+        "field:choose.who",
+        "quantity:math",
+        "field:life_change.amount",
+        "field:life_change.lifeFrom",
+        "field:life_change.who",
+        "field:move_card_zone.what",
+        "field:move_card_zone.who"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "another",
+        "reason": "'the other player' (the other target), not a second object of the same filter"
+      },
+      {
+        "lexeme": "each",
+        "reason": "'two target players each': targets count 2 and who:target_player applies to both"
+      }
+    ]
+  }
+}

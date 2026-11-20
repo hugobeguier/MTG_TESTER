@@ -1,0 +1,123 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "replacement",
+      "text": "As Three Tree City enters, choose a creature type.",
+      "replacement": {
+        "event": "would_enter",
+        "result": {
+          "mode": "also",
+          "steps": [
+            {
+              "kind": "choose",
+              "choice": "creature_type",
+              "what": "creature_type",
+              "remember": true,
+              "saveAs": "chosen",
+              "prompt": {
+                "title": "Three Tree City: choose",
+                "instruction": "Choose a creature type.",
+                "source": {
+                  "card": "Three Tree City",
+                  "ability": "a1"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_enter",
+        "step:choose",
+        "field:choose.choice",
+        "field:choose.remember",
+        "field:choose.saveAs",
+        "field:choose.what"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "mana",
+      "text": "{T}: Add {C}.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{C}"
+          }
+        ]
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "activated",
+      "text": "{2}, {T}: Choose a color. Add an amount of mana of that color equal to the number of creatures you control of the chosen type.",
+      "costs": [
+        {
+          "mana": "{2}"
+        },
+        {
+          "tap": "self"
+        }
+      ],
+      "steps": [
+        {
+          "kind": "choose",
+          "choice": "color",
+          "remember": true,
+          "src": 0,
+          "prompt": {
+            "title": "Three Tree City: choose",
+            "instruction": "Choose a color.",
+            "source": {
+              "card": "Three Tree City",
+              "ability": "a3"
+            }
+          }
+        },
+        {
+          "kind": "add_mana",
+          "produces": [
+            {
+              "chosenColor": 1
+            }
+          ],
+          "amount": {
+            "ref": "count",
+            "of": {
+              "types": [
+                "creature"
+              ],
+              "controller": "you",
+              "chosenType": true
+            }
+          },
+          "src": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "filter:chosenType",
+        "filter:chosenColor",
+        "step:choose",
+        "field:choose.choice",
+        "field:choose.remember",
+        "step:add_mana",
+        "quantity:count",
+        "field:add_mana.produces"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

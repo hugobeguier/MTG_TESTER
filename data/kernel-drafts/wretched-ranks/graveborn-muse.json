@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "At the beginning of your upkeep, you draw X cards and you lose X life, where X is the number of Zombies you control.",
+      "trigger": {
+        "event": "begin_step",
+        "step": "upkeep",
+        "whose": "yours"
+      },
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "who": "you",
+          "amount": {
+            "ref": "count",
+            "of": {
+              "subtypes": [
+                "Zombie"
+              ],
+              "controller": "you"
+            }
+          }
+        },
+        {
+          "kind": "life_change",
+          "who": "you",
+          "lose": true,
+          "amount": {
+            "ref": "count",
+            "of": {
+              "subtypes": [
+                "Zombie"
+              ],
+              "controller": "you"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "quantity:count",
+        "field:life_change.amount",
+        "field:life_change.lose"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

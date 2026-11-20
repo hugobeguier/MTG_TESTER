@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "keyword",
+      "text": "First strike",
+      "keyword": {
+        "name": "first strike"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "triggered",
+      "text": "Whenever a commander you control enters or attacks, proliferate. (Choose any number of permanents and/or players, then give each another counter of each kind already there.)",
+      "trigger": {
+        "event": "etb",
+        "subject": {
+          "controller": "you",
+          "isCommander": true
+        },
+        "alsoOn": [
+          {
+            "event": "attack"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "kind": "proliferate"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "filter:isCommander",
+        "trigger:subject",
+        "trigger:multi_event",
+        "step:proliferate"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

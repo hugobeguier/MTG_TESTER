@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Trample",
+      "keyword": {
+        "name": "trample"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "Whenever Thrakkus attacks, double the power of each Dragon you control until end of turn.",
+      "trigger": {
+        "event": "attack",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "repeat_for_each",
+          "over": {
+            "types": [
+              "creature"
+            ],
+            "subtypes": [
+              "Dragon"
+            ],
+            "controller": "you"
+          },
+          "steps": [
+            {
+              "kind": "pump_target",
+              "target": "event_object",
+              "power": {
+                "ref": "stat",
+                "of": "event_object",
+                "stat": "power"
+              },
+              "toughness": 0,
+              "duration": "until_end_of_turn"
+            }
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:repeat_for_each",
+        "field:repeat_for_each.over",
+        "field:repeat_for_each.steps",
+        "quantity:stat"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

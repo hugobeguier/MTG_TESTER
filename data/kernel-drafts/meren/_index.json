@@ -1,0 +1,418 @@
+{
+  "deck": "Meren",
+  "cards": [
+    {
+      "slug": "meren-of-clan-nel-toth",
+      "name": "Meren of Clan Nel Toth"
+    },
+    {
+      "slug": "spore-frog",
+      "name": "Spore Frog"
+    },
+    {
+      "slug": "plaguecrafter",
+      "name": "Plaguecrafter"
+    },
+    {
+      "slug": "sakura-tribe-elder",
+      "name": "Sakura-Tribe Elder"
+    },
+    {
+      "slug": "gray-merchant-of-asphodel",
+      "name": "Gray Merchant of Asphodel"
+    },
+    {
+      "slug": "eternal-witness",
+      "name": "Eternal Witness"
+    },
+    {
+      "slug": "buried-alive",
+      "name": "Buried Alive"
+    },
+    {
+      "slug": "viscera-seer",
+      "name": "Viscera Seer"
+    },
+    {
+      "slug": "victimize",
+      "name": "Victimize"
+    },
+    {
+      "slug": "accursed-marauder",
+      "name": "Accursed Marauder"
+    },
+    {
+      "slug": "grim-haruspex",
+      "name": "Grim Haruspex"
+    },
+    {
+      "slug": "protean-hulk",
+      "name": "Protean Hulk"
+    },
+    {
+      "slug": "carrion-feeder",
+      "name": "Carrion Feeder"
+    },
+    {
+      "slug": "fleshbag-marauder",
+      "name": "Fleshbag Marauder"
+    },
+    {
+      "slug": "cankerbloom",
+      "name": "Cankerbloom"
+    },
+    {
+      "slug": "ravenous-chupacabra",
+      "name": "Ravenous Chupacabra"
+    },
+    {
+      "slug": "high-market",
+      "name": "High Market"
+    },
+    {
+      "slug": "entomb",
+      "name": "Entomb"
+    },
+    {
+      "slug": "blood-artist",
+      "name": "Blood Artist"
+    },
+    {
+      "slug": "massacre-wurm",
+      "name": "Massacre Wurm"
+    },
+    {
+      "slug": "syr-konrad-the-grim",
+      "name": "Syr Konrad, the Grim"
+    },
+    {
+      "slug": "mikaeus-the-unhallowed",
+      "name": "Mikaeus, the Unhallowed"
+    },
+    {
+      "slug": "shriekmaw",
+      "name": "Shriekmaw"
+    },
+    {
+      "slug": "sheoldred-the-true-scriptures",
+      "name": "Sheoldred // The True Scriptures"
+    },
+    {
+      "slug": "ashnod-s-altar",
+      "name": "Ashnod's Altar"
+    },
+    {
+      "slug": "haywire-mite",
+      "name": "Haywire Mite"
+    },
+    {
+      "slug": "zulaport-cutthroat",
+      "name": "Zulaport Cutthroat"
+    },
+    {
+      "slug": "living-death",
+      "name": "Living Death"
+    },
+    {
+      "slug": "solemn-simulacrum",
+      "name": "Solemn Simulacrum"
+    },
+    {
+      "slug": "butcher-of-malakir",
+      "name": "Butcher of Malakir"
+    },
+    {
+      "slug": "birthing-pod",
+      "name": "Birthing Pod"
+    },
+    {
+      "slug": "skullclamp",
+      "name": "Skullclamp"
+    },
+    {
+      "slug": "wood-elves",
+      "name": "Wood Elves"
+    },
+    {
+      "slug": "twilight-diviner",
+      "name": "Twilight Diviner"
+    },
+    {
+      "slug": "animate-dead",
+      "name": "Animate Dead"
+    },
+    {
+      "slug": "reclamation-sage",
+      "name": "Reclamation Sage"
+    },
+    {
+      "slug": "phyrexian-tower",
+      "name": "Phyrexian Tower"
+    },
+    {
+      "slug": "grave-pact",
+      "name": "Grave Pact"
+    },
+    {
+      "slug": "wight-of-the-reliquary",
+      "name": "Wight of the Reliquary"
+    },
+    {
+      "slug": "braids-arisen-nightmare",
+      "name": "Braids, Arisen Nightmare"
+    },
+    {
+      "slug": "reanimate",
+      "name": "Reanimate"
+    },
+    {
+      "slug": "sheoldred-whispering-one",
+      "name": "Sheoldred, Whispering One"
+    },
+    {
+      "slug": "satyr-wayfinder",
+      "name": "Satyr Wayfinder"
+    },
+    {
+      "slug": "yawgmoth-thran-physician",
+      "name": "Yawgmoth, Thran Physician"
+    },
+    {
+      "slug": "kokusho-the-evening-star",
+      "name": "Kokusho, the Evening Star"
+    },
+    {
+      "slug": "caustic-caterpillar",
+      "name": "Caustic Caterpillar"
+    },
+    {
+      "slug": "junji-the-midnight-sky",
+      "name": "Junji, the Midnight Sky"
+    },
+    {
+      "slug": "midnight-reaper",
+      "name": "Midnight Reaper"
+    },
+    {
+      "slug": "altar-of-dementia",
+      "name": "Altar of Dementia"
+    },
+    {
+      "slug": "demon-s-disciple",
+      "name": "Demon's Disciple"
+    },
+    {
+      "slug": "merciless-executioner",
+      "name": "Merciless Executioner"
+    },
+    {
+      "slug": "fauna-shaman",
+      "name": "Fauna Shaman"
+    },
+    {
+      "slug": "dictate-of-erebos",
+      "name": "Dictate of Erebos"
+    },
+    {
+      "slug": "sidisi-undead-vizier",
+      "name": "Sidisi, Undead Vizier"
+    },
+    {
+      "slug": "fiend-artisan",
+      "name": "Fiend Artisan"
+    },
+    {
+      "slug": "insidious-fungus",
+      "name": "Insidious Fungus"
+    },
+    {
+      "slug": "dauthi-voidwalker",
+      "name": "Dauthi Voidwalker"
+    },
+    {
+      "slug": "diabolic-intent",
+      "name": "Diabolic Intent"
+    },
+    {
+      "slug": "village-rites",
+      "name": "Village Rites"
+    },
+    {
+      "slug": "warren-soultrader",
+      "name": "Warren Soultrader"
+    },
+    {
+      "slug": "phyrexian-altar",
+      "name": "Phyrexian Altar"
+    },
+    {
+      "slug": "acidic-slime",
+      "name": "Acidic Slime"
+    },
+    {
+      "slug": "jarad-golgari-lich-lord",
+      "name": "Jarad, Golgari Lich Lord"
+    },
+    {
+      "slug": "grisly-salvage",
+      "name": "Grisly Salvage"
+    },
+    {
+      "slug": "umbral-collar-zealot",
+      "name": "Umbral Collar Zealot"
+    },
+    {
+      "slug": "grim-backwoods",
+      "name": "Grim Backwoods"
+    },
+    {
+      "slug": "journey-to-eternity-atzal-cave-of-eternity",
+      "name": "Journey to Eternity // Atzal, Cave of Eternity"
+    },
+    {
+      "slug": "urborg-tomb-of-yawgmoth",
+      "name": "Urborg, Tomb of Yawgmoth"
+    },
+    {
+      "slug": "cabal-coffers",
+      "name": "Cabal Coffers"
+    },
+    {
+      "slug": "crypt-of-agadeem",
+      "name": "Crypt of Agadeem"
+    },
+    {
+      "slug": "dryad-arbor",
+      "name": "Dryad Arbor"
+    },
+    {
+      "slug": "westvale-abbey-ormendahl-profane-prince",
+      "name": "Westvale Abbey // Ormendahl, Profane Prince"
+    },
+    {
+      "slug": "takenuma-abandoned-mire",
+      "name": "Takenuma, Abandoned Mire"
+    },
+    {
+      "slug": "agadeem-s-awakening-agadeem-the-undercrypt",
+      "name": "Agadeem's Awakening // Agadeem, the Undercrypt"
+    },
+    {
+      "slug": "disciple-of-freyalise-garden-of-freyalise",
+      "name": "Disciple of Freyalise // Garden of Freyalise"
+    },
+    {
+      "slug": "command-beacon",
+      "name": "Command Beacon"
+    },
+    {
+      "slug": "spymaster-s-vault",
+      "name": "Spymaster's Vault"
+    },
+    {
+      "slug": "shifting-woodland",
+      "name": "Shifting Woodland"
+    },
+    {
+      "slug": "malakir-rebirth-malakir-mire",
+      "name": "Malakir Rebirth // Malakir Mire"
+    },
+    {
+      "slug": "susur-secundi-void-altar",
+      "name": "Susur Secundi, Void Altar"
+    },
+    {
+      "slug": "hissing-quagmire",
+      "name": "Hissing Quagmire"
+    },
+    {
+      "slug": "midgar-city-of-mako-reactor-raid",
+      "name": "Midgar, City of Mako // Reactor Raid"
+    },
+    {
+      "slug": "bojuka-bog",
+      "name": "Bojuka Bog"
+    },
+    {
+      "slug": "khalni-garden",
+      "name": "Khalni Garden"
+    },
+    {
+      "slug": "fell-the-profane-fell-mire",
+      "name": "Fell the Profane // Fell Mire"
+    },
+    {
+      "slug": "temple-of-the-false-god",
+      "name": "Temple of the False God"
+    },
+    {
+      "slug": "dakmor-salvage",
+      "name": "Dakmor Salvage"
+    },
+    {
+      "slug": "boseiju-who-endures",
+      "name": "Boseiju, Who Endures"
+    },
+    {
+      "slug": "bala-ged-recovery-bala-ged-sanctuary",
+      "name": "Bala Ged Recovery // Bala Ged Sanctuary"
+    },
+    {
+      "slug": "yavimaya-cradle-of-growth",
+      "name": "Yavimaya, Cradle of Growth"
+    },
+    {
+      "slug": "reliquary-tower",
+      "name": "Reliquary Tower"
+    },
+    {
+      "slug": "revitalizing-repast-old-growth-grove",
+      "name": "Revitalizing Repast // Old-Growth Grove"
+    },
+    {
+      "slug": "rogue-s-passage",
+      "name": "Rogue's Passage"
+    },
+    {
+      "slug": "command-tower",
+      "name": "Command Tower"
+    },
+    {
+      "slug": "path-of-ancestry",
+      "name": "Path of Ancestry"
+    },
+    {
+      "slug": "exotic-orchard",
+      "name": "Exotic Orchard"
+    },
+    {
+      "slug": "reflecting-pool",
+      "name": "Reflecting Pool"
+    },
+    {
+      "slug": "myriad-landscape",
+      "name": "Myriad Landscape"
+    },
+    {
+      "slug": "war-room",
+      "name": "War Room"
+    },
+    {
+      "slug": "evolving-wilds",
+      "name": "Evolving Wilds"
+    }
+  ],
+  "decisions": [
+    "SCHEMA QUESTION: double-faced / modal-double-faced cards (Sheoldred // The True Scriptures, Journey to Eternity // Atzal, Westvale Abbey // Ormendahl, and the six spell//land MDFCs) have no face marker; both faces' abilities sit in one abilities[] and each text carries its face-name prefix exactly as in the oracle line. Reminder-only face headers (\"Atzal, Cave of Eternity: (Transforms from ...)\", \"The True Scriptures: (As this Saga enters ...)\") are keyword abilities (back_face, saga) just to claim the line. Wanted: ability.face or card.faces[].",
+    "SCHEMA QUESTION: a Saga chapter ability uses trigger.chapters (new field); the lore-counter rules are kernel rules (see changelog).",
+    "SCHEMA QUESTION: 'each player who can't' / 'for each opponent who doesn't' (Plaguecrafter, Braids) are written with step_done on an earlier sacrifice step plus players_count; step_done has no per-player meaning. Braids' 'shares a card type with it' is the step field sharesCardTypeWith:'sacrificed' (no ObjectFilter field for it).",
+    "SCHEMA QUESTION: Syr Konrad's 'creature card is put into a graveyard from anywhere other than the battlefield' is four alsoOn entries (hand, library, exile, stack) because fromZone cannot be negated; event 'unspecified' is used for them.",
+    "SCHEMA QUESTION: Mikaeus 'Whenever a Human deals damage to you' = event dealt_damage, subject you, interveningIf matches(event_object, Human) (event_object = the damage source). No TriggerSpec field for the damage source.",
+    "SCHEMA QUESTION: Twilight Diviner 'if they entered or were cast from a graveyard' is written as trigger.fromZone:'graveyard' only (cast-from-graveyard is not covered). No 'entered_from' / OR with cast_from. The 'if' lexeme is backed by timing.limit by accident.",
+    "SCHEMA QUESTION: no Quantity for 'card types among cards in your graveyard' (Shifting Woodland, delirium): stat predicate card_types_in_your_graveyard >= 4 (boolean-style stat like controller_is_monarch). No target-count 'any number' (Agadeem's Awakening: count max 99, step flag differentManaValues). Protean Hulk 'total mana value 6 or less' is step field totalManaValueAtMost with count 'any'.",
+    "SCHEMA QUESTION: shock lands ('you may pay 3 life, otherwise enters tapped') are a would_enter modify set {tapped:true, unlessPay:{life:3}} with optional:true; the 'set' record is free-form. Hissing Quagmire / Old-Growth Grove 'Add {B} or {G}' follow the two-mana-abilities convention. Station is a scripted marker (like Crew) and its charge threshold is a counters compare predicate.",
+    "Monarch/crew-style scripted markers: only Station (Susur Secundi) was needed. Evoke is a castOptions entry (sacrifice when it enters) for Shriekmaw.",
+    "Identical cards copied from other decks (latest copy): Gray Merchant, Carrion Feeder, Fleshbag Marauder, Midnight Reaper, Umbral Collar Zealot, Skullclamp, Bojuka Bog, Temple of the False God, Boseiju, Yavimaya, Reliquary Tower, Rogue's Passage, Command Tower, Path of Ancestry, Exotic Orchard, Reflecting Pool, Myriad Landscape, War Room, Evolving Wilds.",
+    "BEHAVIOUR QUESTION: Living Death is drafted as 'each player does step 1, then everyone does step 2, then step 3' (three sequential all-player steps), matching the oracle's 'then'. Confirm."
+  ]
+}

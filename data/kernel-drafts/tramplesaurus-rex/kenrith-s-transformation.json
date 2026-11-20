@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Enchant creature",
+      "keyword": {
+        "name": "enchant"
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Kenrith's Transformation: choose a target",
+            "instruction": "Choose target creature.",
+            "source": {
+              "card": "Kenrith's Transformation",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "keyword:enchant"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "When this Aura enters, draw a card.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": 1,
+          "who": "you"
+        }
+      ],
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "static",
+      "text": "Enchanted creature loses all abilities and is a green Elk creature with base power and toughness 3/3. (It loses all other card types and creature types.)",
+      "static": {
+        "affects": "enchanted",
+        "modify": [
+          {
+            "lose": "all abilities"
+          },
+          {
+            "setTypes": [
+              "Creature",
+              "Elk"
+            ]
+          },
+          {
+            "setColors": [
+              "green"
+            ]
+          },
+          {
+            "setBasePT": {
+              "power": 3,
+              "toughness": 3
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static",
+        "static:setColors",
+        "static:setBasePT"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "activated",
+      "text": "Sacrifice this creature: Prevent all combat damage that would be dealt this turn.",
+      "costs": [
+        {
+          "sacrifice": "self",
+          "count": 1
+        }
+      ],
+      "replacement": {
+        "event": "would_deal_damage",
+        "damageType": "combat",
+        "duration": "until_end_of_turn",
+        "result": {
+          "mode": "prevent"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_deal_damage",
+        "replacement:duration",
+        "replacement:damage_qualifiers",
+        "cost:sacrifice"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

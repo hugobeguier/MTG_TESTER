@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Landfall — Whenever a land you control enters, create a Food token or a Treasure token. (Food is an artifact with \"{2}, {T}, Sacrifice this token: You gain 3 life.\" Treasure is an artifact with \"{T}, Sacrifice this token: Add one mana of any color.\")",
+      "trigger": {
+        "event": "etb",
+        "subject": {
+          "types": [
+            "land"
+          ],
+          "controller": "you"
+        }
+      },
+      "steps": [
+        {
+          "kind": "choose",
+          "id": "s1",
+          "choice": "mode",
+          "options": [
+            "Food",
+            "Treasure"
+          ],
+          "remember": true,
+          "src": 0,
+          "prompt": {
+            "title": "Tireless Provisioner: choose",
+            "instruction": "Choose one of Food or Treasure.",
+            "source": {
+              "card": "Tireless Provisioner",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Food",
+          "tokenColors": [
+            "colorless"
+          ],
+          "tokenTypeLine": "Artifact — Food",
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "chosen_is",
+              "kind": "mode",
+              "value": "Food"
+            },
+            "src": 0
+          }
+        },
+        {
+          "kind": "create_tokens",
+          "tokenCount": 1,
+          "tokenName": "Treasure",
+          "tokenColors": [
+            "colorless"
+          ],
+          "tokenTypeLine": "Artifact — Treasure",
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "chosen_is",
+              "kind": "mode",
+              "value": "Treasure"
+            },
+            "src": 0
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject",
+        "step:choose",
+        "field:choose.choice",
+        "field:choose.options",
+        "field:choose.remember",
+        "predicate:chosen_is"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Whenever an opponent casts their first spell each turn, that player exiles the top card of their library. If it's a nonland card, you may cast it without paying its mana cost.",
+      "trigger": {
+        "event": "cast",
+        "whose": "opponents",
+        "nth": {
+          "n": 1,
+          "per": "turn"
+        }
+      },
+      "steps": [
+        {
+          "kind": "move_card_zone",
+          "what": "top_of_library",
+          "who": "that_player",
+          "moveTo": "exile",
+          "linkExile": true,
+          "src": 0
+        },
+        {
+          "kind": "permission_to_play",
+          "what": "linked_exile",
+          "zone": "exile",
+          "withoutPaying": true,
+          "optional": true,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "matches",
+              "obj": "linked_exile",
+              "filter": {
+                "notTypes": [
+                  "land"
+                ]
+              }
+            },
+            "src": 1
+          },
+          "src": 1,
+          "prompt": {
+            "title": "Mind's Dilation: optional",
+            "instruction": "Do you want to you may play linked_exile without paying its mana cost?",
+            "source": {
+              "card": "Mind's Dilation",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "ref:linked_exile",
+        "trigger:nth",
+        "field:move_card_zone.linkExile",
+        "field:move_card_zone.what",
+        "field:move_card_zone.who",
+        "step:permission_to_play",
+        "field:permission_to_play.what",
+        "field:permission_to_play.withoutPaying",
+        "field:permission_to_play.zone",
+        "predicate:matches"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

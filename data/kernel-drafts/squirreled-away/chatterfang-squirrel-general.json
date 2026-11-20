@@ -1,0 +1,138 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Forestwalk (This creature can't be blocked as long as defending player controls a Forest.)",
+      "keyword": {
+        "name": "landwalk",
+        "param": "Forest"
+      },
+      "implementation": "needed",
+      "needs": [
+        "keyword:landwalk"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "replacement",
+      "text": "If one or more tokens would be created under your control, those tokens plus that many 1/1 green Squirrel creature tokens are created instead.",
+      "replacement": {
+        "event": "would_create_token",
+        "subject": "you",
+        "result": {
+          "mode": "also",
+          "steps": [
+            {
+              "kind": "create_tokens",
+              "tokenCount": {
+                "ref": "event_amount"
+              },
+              "tokenName": "Squirrel",
+              "tokenPower": 1,
+              "tokenToughness": 1,
+              "tokenColors": [
+                "green"
+              ],
+              "tokenTypeLine": "Creature — Squirrel"
+            }
+          ]
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_create_token",
+        "quantity:event_amount"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "activated",
+      "text": "{B}, Sacrifice X Squirrels: Target creature gets +X/-X until end of turn.",
+      "costs": [
+        {
+          "mana": "{B}"
+        },
+        {
+          "sacrifice": {
+            "subtypes": [
+              "Squirrel"
+            ],
+            "controller": "you"
+          },
+          "count": {
+            "ref": "X"
+          },
+          "prompt": {
+            "title": "Chatterfang, Squirrel General: choose what to sacrifice",
+            "instruction": "Choose X Squirrels you control to sacrifice.",
+            "source": {
+              "card": "Chatterfang, Squirrel General",
+              "ability": "a3"
+            }
+          }
+        }
+      ],
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Chatterfang, Squirrel General: choose a target",
+            "instruction": "Choose target creature.",
+            "source": {
+              "card": "Chatterfang, Squirrel General",
+              "ability": "a3"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "pump_target",
+          "target": "t1",
+          "power": {
+            "ref": "X"
+          },
+          "toughness": {
+            "math": "*",
+            "args": [
+              -1,
+              {
+                "ref": "X"
+              }
+            ]
+          },
+          "duration": "until_end_of_turn"
+        }
+      ],
+      "xPrompt": {
+        "title": "Chatterfang, Squirrel General: choose X",
+        "instruction": "Choose a value for X (the amount used in the cost).",
+        "source": {
+          "card": "Chatterfang, Squirrel General",
+          "ability": "a3"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "cost:sacrifice",
+        "quantity:X",
+        "quantity:math"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

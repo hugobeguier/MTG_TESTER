@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Draw three cards, then put two cards from your hand on top of your library in any order.",
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": 3,
+          "who": "you",
+          "src": 0
+        },
+        {
+          "kind": "choose",
+          "from": {
+            "zone": "hand",
+            "owner": "you"
+          },
+          "count": 2,
+          "saveAs": "chosen",
+          "src": 0,
+          "prompt": {
+            "title": "Brainstorm: choose",
+            "instruction": "Choose 2 cards in your hand.",
+            "source": {
+              "card": "Brainstorm",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "kind": "move_card_zone",
+          "what": "chosen",
+          "moveTo": "library",
+          "position": "top",
+          "ordered": "any_order",
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:choose",
+        "field:choose.count",
+        "field:choose.from",
+        "field:choose.saveAs",
+        "field:move_card_zone.ordered",
+        "field:move_card_zone.position",
+        "field:move_card_zone.what"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

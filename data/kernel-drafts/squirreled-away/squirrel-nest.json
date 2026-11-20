@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Enchant land",
+      "keyword": {
+        "name": "enchant"
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "land"
+            ]
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Squirrel Nest: choose a target",
+            "instruction": "Choose target land.",
+            "source": {
+              "card": "Squirrel Nest",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "keyword:enchant"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "static",
+      "text": "Enchanted land has \"{T}: Create a 1/1 green Squirrel creature token.\"",
+      "static": {
+        "affects": "enchanted",
+        "modify": [
+          {
+            "grantAbility": {
+              "kind": "activated",
+              "text": "{T}: Create a 1/1 green Squirrel creature token.",
+              "costs": [
+                {
+                  "tap": "self"
+                }
+              ],
+              "steps": [
+                {
+                  "kind": "create_tokens",
+                  "tokenCount": 1,
+                  "tokenName": "Squirrel",
+                  "tokenPower": 1,
+                  "tokenToughness": 1,
+                  "tokenColors": [
+                    "green"
+                  ],
+                  "tokenTypeLine": "Creature — Squirrel"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "activated",
+      "text": "{5}{U}, {T}: Draw a card. This ability costs {1} less to activate for each other artifact you control.",
+      "costs": [
+        {
+          "mana": "{5}{U}"
+        },
+        {
+          "tap": "self"
+        }
+      ],
+      "costReduction": {
+        "per": {
+          "types": [
+            "artifact"
+          ],
+          "controller": "you",
+          "another": true
+        },
+        "amount": 1,
+        "applies": "generic",
+        "src": 1
+      },
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": 1,
+          "who": "you",
+          "src": 0
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "cost_reduction"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

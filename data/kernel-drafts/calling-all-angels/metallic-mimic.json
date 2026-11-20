@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "replacement",
+      "text": "As this creature enters, choose a creature type.",
+      "replacement": {
+        "event": "would_enter",
+        "result": {
+          "mode": "also",
+          "steps": [
+            {
+              "kind": "choose",
+              "choice": "creature_type",
+              "remember": true,
+              "prompt": {
+                "title": "Metallic Mimic: choose",
+                "instruction": "Choose a creature type.",
+                "source": {
+                  "card": "Metallic Mimic",
+                  "ability": "a1"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_enter",
+        "step:choose",
+        "field:choose.choice",
+        "field:choose.remember"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "static",
+      "text": "This creature is the chosen type in addition to its other types.",
+      "static": {
+        "affects": "self",
+        "modify": [
+          {
+            "addChosenType": true
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static",
+        "static:addChosenType"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "replacement",
+      "text": "Each other creature you control of the chosen type enters with an additional +1/+1 counter on it.",
+      "replacement": {
+        "event": "would_enter",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "controller": "you",
+          "another": true,
+          "chosenType": true
+        },
+        "result": {
+          "mode": "modify",
+          "set": {
+            "additionalCounters": {
+              "kind": "+1/+1",
+              "count": 1
+            }
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_enter",
+        "filter:chosenType"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

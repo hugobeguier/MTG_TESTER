@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "When this enchantment enters, if you control a creature with power 4 or greater, draw a card.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self",
+        "interveningIf": {
+          "check": "controls",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you",
+            "power": {
+              "op": ">=",
+              "value": 4
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": 1,
+          "who": "you"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:intervening_if"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "static",
+      "text": "Creatures you control have trample. (Each of those creatures can deal excess combat damage to the player or planeswalker it's attacking.)",
+      "static": {
+        "affects": {
+          "types": [
+            "creature"
+          ],
+          "controller": "you"
+        },
+        "modify": [
+          {
+            "grant": "trample"
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "triggered",
+      "text": "Whenever a creature you control with power 4 or greater enters, draw a card.",
+      "trigger": {
+        "event": "etb",
+        "subject": {
+          "types": [
+            "creature"
+          ],
+          "controller": "you",
+          "power": {
+            "op": ">=",
+            "value": 4
+          }
+        }
+      },
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": 1,
+          "who": "you"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:subject"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

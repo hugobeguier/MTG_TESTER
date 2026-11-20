@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Undergrowth — When Izoni enters, create a 1/1 black and green Insect creature token for each creature card in your graveyard.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": {
+            "ref": "count",
+            "of": {
+              "types": [
+                "creature"
+              ],
+              "zone": "graveyard",
+              "owner": "you"
+            }
+          },
+          "tokenName": "Insect",
+          "tokenPower": 1,
+          "tokenToughness": 1,
+          "tokenColors": [
+            "black",
+            "green"
+          ],
+          "tokenTypeLine": "Creature — Insect"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "quantity:count"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "{B}{G}, Sacrifice another creature: You gain 1 life and draw a card.",
+      "costs": [
+        {
+          "mana": "{B}{G}"
+        },
+        {
+          "sacrifice": {
+            "types": [
+              "creature"
+            ],
+            "controller": "you",
+            "another": true
+          },
+          "count": 1,
+          "prompt": {
+            "title": "Izoni, Thousand-Eyed: choose what to sacrifice",
+            "instruction": "Choose 1 another creature you control to sacrifice.",
+            "source": {
+              "card": "Izoni, Thousand-Eyed",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "life_change",
+          "who": "you",
+          "amount": 1
+        },
+        {
+          "kind": "draw_cards",
+          "who": "you",
+          "amount": 1
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "cost:sacrifice",
+        "field:life_change.amount"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "mana",
+      "text": "{T}: Add {C}.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{C}"
+          }
+        ]
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "{3}, {T}, Pay life equal to the number of colors in your commanders' color identity: Draw a card.",
+      "costs": [
+        {
+          "mana": "{3}"
+        },
+        {
+          "tap": "self"
+        },
+        {
+          "life": {
+            "ref": "commander_colors"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": 1,
+          "who": "you"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "cost:life"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

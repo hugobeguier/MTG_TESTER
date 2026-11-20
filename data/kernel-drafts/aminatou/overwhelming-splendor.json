@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Enchant player",
+      "keyword": {
+        "name": "enchant"
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "player",
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Overwhelming Splendor: choose a target",
+            "instruction": "Choose target player.",
+            "source": {
+              "card": "Overwhelming Splendor",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "keyword:enchant"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "static",
+      "text": "Creatures enchanted player controls lose all abilities and have base power and toughness 1/1.",
+      "static": {
+        "affects": {
+          "types": [
+            "creature"
+          ],
+          "controller": "opponent"
+        },
+        "modify": [
+          {
+            "lose": "all abilities"
+          },
+          {
+            "setBasePT": {
+              "power": 1,
+              "toughness": 1
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static",
+        "static:setBasePT"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "scripted",
+      "text": "Enchanted player can't activate abilities that aren't mana abilities or loyalty abilities.",
+      "scripted": {
+        "handler": "enchanted_player_cant_activate_nonmana_nonloyalty_abilities"
+      },
+      "implementation": "needed",
+      "needs": [
+        "scripted:enchanted_player_cant_activate_nonmana_nonloyalty_abilities"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

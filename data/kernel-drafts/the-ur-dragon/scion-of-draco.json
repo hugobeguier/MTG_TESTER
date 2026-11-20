@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "cast_option",
+      "text": "Domain — This spell costs {2} less to cast for each basic land type among lands you control.",
+      "scripted": {
+        "handler": "domain_count_distinct_basic_land_types"
+      },
+      "costReduction": {
+        "per": {
+          "types": [
+            "land"
+          ],
+          "controller": "you",
+          "hasBasicLandType": true
+        },
+        "amount": {
+          "math": "max",
+          "args": [
+            2
+          ]
+        },
+        "applies": "generic"
+      },
+      "implementation": "needed",
+      "needs": [
+        "scripted:domain_count_distinct_basic_land_types",
+        "cast_option",
+        "cost_reduction",
+        "cost_reduction:variable"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "keyword",
+      "text": "Flying",
+      "keyword": {
+        "name": "flying"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "static",
+      "text": "Each creature you control has vigilance if it's white, hexproof if it's blue, lifelink if it's black, first strike if it's red, and trample if it's green.",
+      "static": {
+        "affects": {
+          "types": [
+            "creature"
+          ],
+          "controller": "you"
+        },
+        "modify": [
+          {
+            "grant": "vigilance"
+          },
+          {
+            "grant": "hexproof"
+          },
+          {
+            "grant": "lifelink"
+          },
+          {
+            "grant": "first strike"
+          },
+          {
+            "grant": "trample"
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "each",
+        "reason": "'Each creature you control' is the static's affects filter"
+      },
+      {
+        "lexeme": "if",
+        "reason": "per-color keyword grant ('vigilance if it's white...') is expressed as one grant per keyword with a color gate in the scripted marker below"
+      }
+    ]
+  }
+}

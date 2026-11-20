@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Ward {2}",
+      "keyword": {
+        "name": "ward",
+        "param": 2
+      },
+      "trigger": {
+        "event": "becomes_target",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "counter_spell",
+          "target": "event_object",
+          "unlessPay": {
+            "payer": "that_player",
+            "cost": [
+              {
+                "mana": "{2}"
+              }
+            ],
+            "prompt": {
+              "title": "Hulking Raptor: pay or not",
+              "instruction": "Do you want to pay {2}? If you don't, counter that object.",
+              "source": {
+                "card": "Hulking Raptor",
+                "ability": "a1"
+              }
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:becomes_target",
+        "step:counter_spell",
+        "step:unless_pay"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "At the beginning of your first main phase, add {G}{G}.",
+      "trigger": {
+        "event": "begin_step",
+        "step": "precombat_main",
+        "whose": "yours"
+      },
+      "steps": [
+        {
+          "kind": "add_mana",
+          "produces": [
+            {
+              "colors": "{G}{G}"
+            }
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:begin_step:precombat_main",
+        "step:add_mana",
+        "field:add_mana.produces"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

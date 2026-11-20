@@ -1,0 +1,104 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "keyword",
+      "text": "Affinity for artifacts (This spell costs {1} less to cast for each artifact you control.)",
+      "keyword": {
+        "name": "affinity",
+        "param": "artifacts"
+      },
+      "costReduction": {
+        "per": {
+          "types": [
+            "artifact"
+          ],
+          "controller": "you"
+        },
+        "amount": 1,
+        "applies": "generic"
+      },
+      "implementation": "needed",
+      "needs": [
+        "cost_reduction"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "When Emry enters, mill four cards.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "mill",
+          "who": "you",
+          "amount": 4
+        }
+      ],
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "activated",
+      "text": "{T}: Choose target artifact card in your graveyard. You may cast that card this turn. (You still pay its costs. Timing rules still apply.)",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "artifact"
+            ],
+            "zone": "graveyard",
+            "owner": "you"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Emry, Lurker of the Loch: choose a target",
+            "instruction": "Choose target artifact card in your graveyard.",
+            "source": {
+              "card": "Emry, Lurker of the Loch",
+              "ability": "a3"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "permission_to_play",
+          "target": "t1",
+          "optional": true,
+          "duration": "until_end_of_turn",
+          "prompt": {
+            "title": "Emry, Lurker of the Loch: optional",
+            "instruction": "Do you want to you may play undefined until end of turn?",
+            "source": {
+              "card": "Emry, Lurker of the Loch",
+              "ability": "a3"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:permission_to_play"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "mana",
+      "text": "Metalcraft — {T}: Add one mana of any color. Activate only if you control three or more artifacts.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "anyColor": 1
+          }
+        ]
+      },
+      "timing": {
+        "only": [
+          {
+            "check": "controls",
+            "filter": {
+              "types": [
+                "artifact"
+              ],
+              "controller": "you"
+            },
+            "count": {
+              "op": ">=",
+              "value": 3
+            }
+          }
+        ]
+      },
+      "implementation": "needed",
+      "needs": [
+        "mana:variable",
+        "timing"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

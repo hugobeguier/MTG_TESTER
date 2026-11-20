@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Create thirteen tapped 2/2 black Zombie creature tokens.",
+      "steps": [
+        {
+          "kind": "create_tokens",
+          "tokenCount": 13,
+          "tokenName": "Zombie",
+          "tokenPower": 2,
+          "tokenToughness": 2,
+          "tokenColors": [
+            "black"
+          ],
+          "tokenTypeLine": "Creature — Zombie",
+          "tokenTapped": true
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:create_tokens.tokenTapped"
+      ]
+    }
+  ],
+  "castOptions": [
+    {
+      "id": "c1",
+      "kind": "flashback",
+      "from": "graveyard",
+      "cost": [
+        {
+          "mana": "{7}{B}{B}{B}"
+        }
+      ],
+      "replacesManaCost": true,
+      "afterResolution": "exile",
+      "optional": true,
+      "prompt": {
+        "title": "Army of the Damned: flashback option",
+        "instruction": "Do you want to cast it using its flashback cost ({7}{B}{B}{B})?",
+        "source": {
+          "card": "Army of the Damned",
+          "ability": "c1"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "cast_option:flashback"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

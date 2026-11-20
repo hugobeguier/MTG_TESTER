@@ -1,0 +1,111 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Fell the Profane: Destroy target creature or planeswalker.",
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "anyOf": [
+              {
+                "types": [
+                  "creature"
+                ]
+              },
+              {
+                "types": [
+                  "planeswalker"
+                ]
+              }
+            ]
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Fell the Profane // Fell Mire: choose a target",
+            "instruction": "Choose target creature or planeswalker.",
+            "source": {
+              "card": "Fell the Profane // Fell Mire",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "destroy_target",
+          "target": "t1"
+        }
+      ],
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "replacement",
+      "text": "Fell Mire: As this land enters, you may pay 3 life. If you don't, it enters tapped.",
+      "optional": true,
+      "replacement": {
+        "event": "would_enter",
+        "optional": true,
+        "result": {
+          "mode": "modify",
+          "set": {
+            "tapped": true,
+            "unlessPay": {
+              "life": 3
+            }
+          }
+        },
+        "prompt": {
+          "title": "Fell the Profane // Fell Mire: optional",
+          "instruction": "Do you want to apply this replacement?",
+          "source": {
+            "card": "Fell the Profane // Fell Mire",
+            "ability": "a2"
+          }
+        }
+      },
+      "prompt": {
+        "title": "Fell the Profane // Fell Mire: optional",
+        "instruction": "Do you want to use this ability?",
+        "source": {
+          "card": "Fell the Profane // Fell Mire",
+          "ability": "a2"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_enter"
+      ]
+    },
+    {
+      "id": "a3",
+      "kind": "mana",
+      "text": "{T}: Add {B}.",
+      "costs": [
+        {
+          "tap": "self"
+        }
+      ],
+      "mana": {
+        "produces": [
+          {
+            "colors": "{B}"
+          }
+        ]
+      },
+      "implementation": "implemented",
+      "needs": []
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

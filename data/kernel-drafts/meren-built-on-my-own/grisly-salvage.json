@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Reveal the top five cards of your library. You may put a creature or land card from among them into your hand. Put the rest into your graveyard.",
+      "steps": [
+        {
+          "kind": "look_top",
+          "amount": 5,
+          "reveal": true,
+          "src": 0
+        },
+        {
+          "kind": "choose",
+          "from": {
+            "anyOf": [
+              {
+                "types": [
+                  "creature"
+                ]
+              },
+              {
+                "types": [
+                  "land"
+                ]
+              }
+            ],
+            "zone": "library"
+          },
+          "fromLooked": true,
+          "count": 1,
+          "saveAs": "chosen",
+          "optional": true,
+          "src": 1,
+          "prompt": {
+            "title": "Grisly Salvage: optional",
+            "instruction": "Do you want to choose a creature or land from among the looked-at cards?",
+            "source": {
+              "card": "Grisly Salvage",
+              "ability": "a1"
+            }
+          }
+        },
+        {
+          "kind": "move_card_zone",
+          "target": "chosen",
+          "moveTo": "hand",
+          "src": 1
+        },
+        {
+          "kind": "move_card_zone",
+          "what": "rest_of_looked_cards",
+          "moveTo": "graveyard",
+          "src": 2
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:look_top",
+        "field:look_top.reveal",
+        "step:choose",
+        "field:choose.count",
+        "field:choose.from",
+        "field:choose.fromLooked",
+        "field:choose.saveAs",
+        "field:move_card_zone.what"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "replacement",
+      "text": "This artifact enters tapped.",
+      "replacement": {
+        "event": "would_enter",
+        "result": {
+          "mode": "modify",
+          "set": {
+            "tapped": true
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "replacement:would_enter"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "activated",
+      "text": "{1}, {T}: Destroy all artifacts, creatures, and enchantments.",
+      "costs": [
+        {
+          "mana": "{1}"
+        },
+        {
+          "tap": "self"
+        }
+      ],
+      "steps": [
+        {
+          "kind": "destroy_all",
+          "filter": {
+            "anyOf": [
+              {
+                "types": [
+                  "artifact"
+                ]
+              },
+              {
+                "types": [
+                  "creature"
+                ]
+              },
+              {
+                "types": [
+                  "enchantment"
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "field:destroy_all.filter"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

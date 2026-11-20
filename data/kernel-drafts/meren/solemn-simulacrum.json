@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "When this creature enters, you may search your library for a basic land card, put that card onto the battlefield tapped, then shuffle.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "search_library",
+          "who": "you",
+          "filter": {
+            "types": [
+              "land"
+            ],
+            "supertypes": [
+              "basic"
+            ]
+          },
+          "count": 1,
+          "to": "battlefield",
+          "tapped": true,
+          "shuffle": true,
+          "optional": true,
+          "prompt": {
+            "title": "Solemn Simulacrum: optional",
+            "instruction": "Do you want to search your library for a basic land, put it onto the battlefield, then shuffle?",
+            "source": {
+              "card": "Solemn Simulacrum",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "step:search_library",
+        "field:search_library.count",
+        "field:search_library.filter",
+        "field:search_library.shuffle",
+        "field:search_library.tapped",
+        "field:search_library.to"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "triggered",
+      "text": "When this creature dies, you may draw a card.",
+      "trigger": {
+        "event": "dies",
+        "subject": "self"
+      },
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": 1,
+          "who": "you",
+          "optional": true,
+          "prompt": {
+            "title": "Solemn Simulacrum: optional",
+            "instruction": "Do you want to draw a card?",
+            "source": {
+              "card": "Solemn Simulacrum",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "implementation": "implemented",
+      "needs": []
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

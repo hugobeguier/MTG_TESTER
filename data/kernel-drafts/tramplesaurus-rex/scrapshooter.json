@@ -1,0 +1,128 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Gift a card (You may promise an opponent a gift as you cast this spell. If you do, when it enters, they draw a card.)",
+      "keyword": {
+        "name": "gift",
+        "param": "a card"
+      },
+      "trigger": {
+        "event": "etb",
+        "subject": "self",
+        "interveningIf": {
+          "check": "paid_additional_cost",
+          "option": "gift"
+        }
+      },
+      "steps": [
+        {
+          "kind": "draw_cards",
+          "amount": 1,
+          "who": "opponent"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:intervening_if",
+        "predicate:paid_additional_cost",
+        "field:draw_cards.who"
+      ]
+    },
+    {
+      "id": "a2",
+      "kind": "keyword",
+      "text": "Reach",
+      "keyword": {
+        "name": "reach"
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a3",
+      "kind": "triggered",
+      "text": "When this creature enters, if the gift was promised, destroy target artifact or enchantment an opponent controls.",
+      "trigger": {
+        "event": "etb",
+        "subject": "self",
+        "interveningIf": {
+          "check": "paid_additional_cost",
+          "option": "gift"
+        }
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "anyOf": [
+              {
+                "types": [
+                  "artifact"
+                ]
+              },
+              {
+                "types": [
+                  "enchantment"
+                ]
+              }
+            ],
+            "controller": "opponent"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Scrapshooter: choose a target",
+            "instruction": "Choose target artifact or enchantment an opponent controls.",
+            "source": {
+              "card": "Scrapshooter",
+              "ability": "a3"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "destroy_target",
+          "target": "t1"
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "trigger:intervening_if",
+        "predicate:paid_additional_cost"
+      ]
+    }
+  ],
+  "castOptions": [
+    {
+      "id": "c1",
+      "kind": "gift",
+      "from": "hand",
+      "cost": [],
+      "replacesManaCost": false,
+      "optional": true,
+      "gift": "card",
+      "prompt": {
+        "title": "Scrapshooter: gift",
+        "instruction": "Do you want to promise a card to an opponent? If you do, choose that opponent.",
+        "source": {
+          "card": "Scrapshooter",
+          "ability": "c1"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "cast_option:gift"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

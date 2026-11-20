@@ -1,0 +1,130 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "At the beginning of your upkeep, you may return target enchantment card from your graveyard to the battlefield.",
+      "trigger": {
+        "event": "begin_step",
+        "step": "upkeep",
+        "whose": "yours"
+      },
+      "optional": true,
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "enchantment"
+            ],
+            "zone": "graveyard",
+            "owner": "you"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Starfield of Nyx: choose a target",
+            "instruction": "Choose target enchantment card in your graveyard.",
+            "source": {
+              "card": "Starfield of Nyx",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "reanimate",
+          "target": "t1",
+          "who": "you",
+          "optional": true,
+          "src": 0,
+          "prompt": {
+            "title": "Starfield of Nyx: optional",
+            "instruction": "Do you want to return target enchantment card in your graveyard from the graveyard to the battlefield?",
+            "source": {
+              "card": "Starfield of Nyx",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "prompt": {
+        "title": "Starfield of Nyx: optional",
+        "instruction": "Do you want to return target enchantment card in your graveyard from the graveyard to the battlefield?",
+        "source": {
+          "card": "Starfield of Nyx",
+          "ability": "a1"
+        }
+      },
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "static",
+      "text": "As long as you control five or more enchantments, each other non-Aura enchantment you control is a creature in addition to its other types and has base power and base toughness each equal to its mana value.",
+      "static": {
+        "affects": {
+          "types": [
+            "enchantment"
+          ],
+          "notSubtypes": [
+            "Aura"
+          ],
+          "controller": "you",
+          "another": true
+        },
+        "modify": [
+          {
+            "addTypes": [
+              "Creature"
+            ]
+          },
+          {
+            "setBasePT": {
+              "power": {
+                "ref": "stat",
+                "of": "iterated",
+                "stat": "mana_value"
+              },
+              "toughness": {
+                "ref": "stat",
+                "of": "iterated",
+                "stat": "mana_value"
+              }
+            }
+          }
+        ],
+        "while": {
+          "check": "controls",
+          "filter": {
+            "types": [
+              "enchantment"
+            ],
+            "controller": "you"
+          },
+          "count": {
+            "op": ">=",
+            "value": 5
+          }
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "static",
+        "ref:iterated",
+        "filter:notSubtypes",
+        "static:addTypes",
+        "static:setBasePT"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

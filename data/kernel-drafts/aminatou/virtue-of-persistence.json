@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "triggered",
+      "text": "Virtue of Persistence: At the beginning of your upkeep, put target creature card from a graveyard onto the battlefield under your control.",
+      "trigger": {
+        "event": "begin_step",
+        "step": "upkeep",
+        "whose": "yours"
+      },
+      "targets": [
+        {
+          "id": "t1",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "zone": "graveyard"
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Virtue of Persistence: choose a target",
+            "instruction": "Choose target creature card in a graveyard.",
+            "source": {
+              "card": "Virtue of Persistence",
+              "ability": "a1"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "reanimate",
+          "target": "t1",
+          "who": "you",
+          "src": 0
+        }
+      ],
+      "implementation": "implemented",
+      "needs": []
+    },
+    {
+      "id": "a2",
+      "kind": "spell_effect",
+      "text": "Locthwain Scorn: Target creature gets -3/-3 until end of turn. You gain 2 life.",
+      "targets": [
+        {
+          "id": "t2",
+          "what": "object",
+          "filter": {
+            "types": [
+              "creature"
+            ]
+          },
+          "count": {
+            "min": 1,
+            "max": 1
+          },
+          "prompt": {
+            "title": "Virtue of Persistence: choose a target",
+            "instruction": "Choose target creature.",
+            "source": {
+              "card": "Virtue of Persistence",
+              "ability": "a2"
+            }
+          }
+        }
+      ],
+      "steps": [
+        {
+          "kind": "pump_target",
+          "target": "t2",
+          "power": -3,
+          "toughness": -3,
+          "duration": "until_end_of_turn",
+          "src": 0
+        },
+        {
+          "kind": "life_change",
+          "lifeDelta": 2,
+          "who": "you",
+          "src": 1
+        }
+      ],
+      "implementation": "implemented",
+      "needs": []
+    }
+  ],
+  "review": {
+    "status": "draft"
+  }
+}

@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 2,
+  "abilities": [
+    {
+      "id": "a1",
+      "kind": "spell_effect",
+      "text": "Desolation of Smaug deals 3 damage to each non-Dragon creature.\nAdd four mana in any combination of colors. Spend this mana only to cast Dragon spells.",
+      "steps": [
+        {
+          "kind": "damage_target",
+          "all": true,
+          "filter": {
+            "types": [
+              "creature"
+            ],
+            "notSubtypes": [
+              "Dragon"
+            ]
+          },
+          "amount": 3,
+          "src": 0
+        },
+        {
+          "kind": "add_mana",
+          "produces": [
+            {
+              "anyColor": 4,
+              "restriction": {
+                "subtypes": [
+                  "Dragon"
+                ]
+              }
+            }
+          ],
+          "srcs": [
+            1,
+            2
+          ]
+        }
+      ],
+      "implementation": "needed",
+      "needs": [
+        "filter:notSubtypes",
+        "field:damage_target.all",
+        "field:damage_target.filter",
+        "step:add_mana",
+        "field:add_mana.produces",
+        "field:add_mana.srcs"
+      ]
+    }
+  ],
+  "review": {
+    "status": "draft",
+    "oracleOverride": {
+      "text": "Desolation of Smaug deals 3 damage to each non-Dragon creature.\nAdd four mana in any combination of colors. Spend this mana only to cast Dragon spells.",
+      "source": "XMage source, data/xmage-source/Mage.Sets/src/mage/cards/d/DesolationOfSmaug.java (card absent from data/cards.db)",
+      "typeLine": "Sorcery"
+    }
+  }
+}
