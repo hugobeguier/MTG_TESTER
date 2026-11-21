@@ -36,7 +36,7 @@ Reading guide: each card below shows the oracle text and what the structured JSO
 - **Sign in Blood** (Sorcery): [targets: target player] Target player draws 2 cards, then target player loses 2 life [needs: field:draw_cards.who, field:life_change.who]
 - **Sword of the Animist** (Legendary Artifact — Equipment): The equipped creature gets +1/+1 | Whenever the equipped creature attacks: You may search your library for a basic land, put it onto the battlefield, then shuffle | {2}: [targets: target creature you control] Attach Sword of the Animist to target creature you control [needs: static, trigger:subject, step:search_library, field:search_library.count, field:search_library.filter, field:search_library.shuffle, field:search_library.tapped, field:search_library.to, step:attach, field:attach.to, field:attach.what]
 - **Together Forever** (Enchantment): Whenever Together Forever enters: [targets: up to two target creatures] Put a +1/+1 counter on up to two target creatures | {1}: [targets: target creature with a counter on it] Create a delayed trigger [needs: targets:multi, step:add_counters, field:add_counters.on, step:create_delayed_trigger, field:create_delayed_trigger.at, field:create_delayed_trigger.steps]
-- **Vow of Malice** (Enchantment — Aura): [targets: target creature] | The enchanted creature gets +2/+2 and has intimidate and can't attack [needs: keyword:enchant, static]
+- **Vow of Malice** (Enchantment — Aura): [targets: target creature] | The enchanted creature gets +2/+2 and has intimidate and can't attack you or planeswalkers you control [needs: keyword:enchant, static, static:cant_protects]
 - **Yathan Tombguard** (Creature — Human Warrior): Keyword menace | Whenever a creature with a counter on it you control deals combat damage to a player: Draw a card, then lose 1 life [needs: trigger:subject]
 
 ## (B) Complex cards
@@ -300,16 +300,16 @@ Re-rendered plain English:
 
 ```
 Batwing Brume [draft]
-  [a1] spell_effect [needed: needs step:grant_effect, field:grant_effect.replacement, field:grant_effect.who, predicate:paid_additional_cost, step:repeat_for_each, field:repeat_for_each.steps, field:repeat_for_each.who, quantity:math, field:life_change.amount, field:life_change.who]
+  [a1] spell_effect [needed: needs predicate:mana_spent, step:grant_effect, field:grant_effect.replacement, field:grant_effect.who, step:repeat_for_each, field:repeat_for_each.steps, field:repeat_for_each.who, quantity:math, field:life_change.amount, field:life_change.who]
     Oracle: Prevent all combat damage that would be dealt this turn if {W} was spent to cast this spell. Each player loses 1 life for each attacking creature they control if {B} was spent to cast this spell. (Do both if {W}{B} was spent.)
-    Effect: IF the additional cost (mana_spent:{W}) was paid: the target gains an effect until end of turn. Then, IF the additional cost (mana_spent:{B}) was paid: repeat for each matching object.
+    Effect: IF at least one {W} mana was spent to cast this spell: the target gains an effect until end of turn. Then, IF at least one {B} mana was spent to cast this spell: repeat for each matching object.
 ```
 
 Player prompts:
 
 - (none: no decisions)
 
-Implementation: needed (step:grant_effect, field:grant_effect.replacement, field:grant_effect.who, predicate:paid_additional_cost, step:repeat_for_each, field:repeat_for_each.steps, field:repeat_for_each.who, quantity:math, field:life_change.amount, field:life_change.who)
+Implementation: needed (predicate:mana_spent, step:grant_effect, field:grant_effect.replacement, field:grant_effect.who, step:repeat_for_each, field:repeat_for_each.steps, field:repeat_for_each.who, quantity:math, field:life_change.amount, field:life_change.who)
 
 Questions for you:
 
@@ -371,8 +371,8 @@ Citadel Siege [draft]
   [a3] triggered [needed: needs trigger:intervening_if, predicate:chosen_is]
     Oracle: • Dragons — At the beginning of combat on each opponent's turn, tap target creature that player controls.
     Trigger: At the beginning of combat on each opponent's turn, if the chosen mode is Dragons
-    Target t1: target creature an opponent controls  <- prompt: "Choose target creature an opponent controls."
-    Effect: Tap target creature an opponent controls.
+    Target t1: target creature the active player controls  <- prompt: "Choose target creature an opponent controls."
+    Effect: Tap target creature the active player controls.
 ```
 
 Player prompts:
@@ -404,20 +404,20 @@ Combat Calligrapher [draft]
   [a1] keyword [implemented]
     Oracle: Flying
     Keyword: flying
-  [a2] static [needed: needs static]
+  [a2] static [needed: needs static, static:cant_protects]
     Oracle: Inklings can't attack you or planeswalkers you control.
-    Static: Inklings can't attack
+    Static: Inklings can't attack you or planeswalkers you control
   [a3] triggered [needed: needs trigger:batch, trigger:subject, trigger:defender, field:create_tokens.tokenAttacking, field:create_tokens.tokenKeywords, field:create_tokens.tokenTapped, field:create_tokens.who]
     Oracle: Whenever a player attacks one of your opponents, that attacking player creates a tapped 2/1 white and black Inkling creature token with flying that's attacking that opponent.
     Trigger: Whenever a player attacks a player other than you
-    Effect: Create a 2/1 white and black Inkling creature token with flying.
+    Effect: Create a 2/1 white and black Inkling creature token with flying tapped and attacking that opponent.
 ```
 
 Player prompts:
 
 - (none: no decisions)
 
-Implementation: needed (static, trigger:batch, trigger:subject, trigger:defender, field:create_tokens.tokenAttacking, field:create_tokens.tokenKeywords, field:create_tokens.tokenTapped, field:create_tokens.who)
+Implementation: needed (static, static:cant_protects, trigger:batch, trigger:subject, trigger:defender, field:create_tokens.tokenAttacking, field:create_tokens.tokenKeywords, field:create_tokens.tokenTapped, field:create_tokens.who)
 
 Questions for you:
 
@@ -436,16 +436,16 @@ Re-rendered plain English:
 
 ```
 Council's Judgment [draft]
-  [a1] spell_effect [needed: needs step:choose, field:choose.count, field:choose.from, field:choose.order, field:choose.saveAs, field:choose.vote, field:choose.who, field:exile_target.winners]
+  [a1] spell_effect [needed: needs step:vote, field:vote.candidates, field:vote.tie, field:vote.voters]
     Oracle: Will of the council — Starting with you, each player votes for a nonland permanent you don't control. Exile each permanent with the most votes or tied for most votes.
-    Effect: Choose a nonland permanent an opponent controls. Then, exile the chosen object.
+    Effect: Each player votes for a nonland permanent an opponent controls (starting with you); every one tied for the most votes wins. Then, exile vote_winners.
 ```
 
 Player prompts:
 
-- Council's Judgment: choose: Choose a nonland permanent an opponent controls.
+- Council's Judgment: vote: Vote for a nonland permanent an opponent controls. Players vote in turn order starting with the caster; every choice tied for the most votes wins.
 
-Implementation: needed (step:choose, field:choose.count, field:choose.from, field:choose.order, field:choose.saveAs, field:choose.vote, field:choose.who, field:exile_target.winners)
+Implementation: needed (step:vote, field:vote.candidates, field:vote.tie, field:vote.voters)
 
 Questions for you:
 
@@ -564,11 +564,11 @@ Eiganjo, Seat of the Empire [draft]
     Oracle: {T}: Add {W}.
     Cost: {T}
     Mana: add {W}
-  [a2] activated (from hand) [needed: needs zone:hand, cost_reduction, cost:discard, field:damage_target.source]
+  [a2] activated (from hand) [needed: needs zone:hand, cost_reduction, filter:blocking, cost:discard, field:damage_target.source]
     Oracle: Channel — {2}{W}, Discard this card: It deals 4 damage to target attacking or blocking creature. This ability costs {1} less to activate for each legendary creature you control.
     Cost: {2}{W}, discard Eiganjo, Seat of the Empire
-    Target t1: target attacking creature or creature with blocking  <- prompt: "Choose target attacking creature or creature with blocking."
-    Effect: Eiganjo, Seat of the Empire deals 4 damage to target attacking creature or creature with blocking.
+    Target t1: target attacking creature or blocking creature  <- prompt: "Choose target attacking creature or creature with blocking."
+    Effect: Eiganjo, Seat of the Empire deals 4 damage to target attacking creature or blocking creature.
     Cost reduction: this ability costs {1} less for each legendary creature you control
     Keyword: channel
 ```
@@ -577,7 +577,7 @@ Player prompts:
 
 - Eiganjo, Seat of the Empire: choose a target: Choose target attacking creature or creature with blocking.
 
-Implementation: needed (zone:hand, cost_reduction, cost:discard, field:damage_target.source)
+Implementation: needed (zone:hand, cost_reduction, filter:blocking, cost:discard, field:damage_target.source)
 
 Questions for you:
 
@@ -671,7 +671,7 @@ Felisa, Fang of Silverquill [draft]
   [a3] triggered [needed: needs trigger:intervening_if, predicate:matches, trigger:subject, quantity:counters, field:create_tokens.tokenKeywords, field:create_tokens.tokenTapped]
     Oracle: Whenever a nontoken creature you control dies, if it had counters on it, create X tapped 2/1 white and black Inkling creature tokens with flying, where X is the number of counters it had on it.
     Trigger: Whenever a nontoken creature you control dies, if that object is a permanent with a counter on it
-    Effect: Create the number of any counters on event_object 2/1 white and black Inkling creature tokens with flying.
+    Effect: Create the number of any counters on event_object 2/1 white and black Inkling creature tokens with flying tapped.
 ```
 
 Player prompts:
@@ -820,9 +820,9 @@ Hopeful Initiate [draft]
     Trigger: Whenever Hopeful Initiate attacks, if you control an another attacking creature with power greater than Hopeful Initiate's power
     Effect: Put a +1/+1 counter on Hopeful Initiate.
     Keyword: training
-  [a2] activated [needed: needs cost:counters]
+  [a2] activated [needed: needs cost:counters, cost:counters_from_filter]
     Oracle: {2}{W}, Remove two +1/+1 counters from among creatures you control: Destroy target artifact or enchantment.
-    Cost: {2}{W}, remove 2 +1/+1 counters from Hopeful Initiate
+    Cost: {2}{W}, remove 2 +1/+1 counters from among creatures you control (you choose which)
     Target t1: target artifact or enchantment  <- prompt: "Choose target artifact or enchantment."
     Effect: Destroy target artifact or enchantment.
 ```
@@ -831,7 +831,7 @@ Player prompts:
 
 - Hopeful Initiate: choose a target: Choose target artifact or enchantment.
 
-Implementation: needed (trigger:intervening_if, step:add_counters, field:add_counters.on, cost:counters)
+Implementation: needed (trigger:intervening_if, step:add_counters, field:add_counters.on, cost:counters, cost:counters_from_filter)
 
 Questions for you:
 
@@ -1056,7 +1056,7 @@ Martial Impetus [draft]
   [a2] static [needed: needs static]
     Oracle: Enchanted creature gets +1/+1 and is goaded. (It attacks each combat if able and attacks a player other than you if able.)
     Static: The enchanted creature gets +1/+1 and has goaded
-  [a3] triggered [needed: needs trigger:subject, field:mass_pump.filter]
+  [a3] triggered [needed: needs filter:attackingOpponent, trigger:subject, field:mass_pump.filter]
     Oracle: Whenever enchanted creature attacks, each other creature that's attacking one of your opponents gets +1/+1 until end of turn.
     Trigger: Whenever the enchanted creature attacks
     Effect: All creatures get +1/+1 until end of turn.
@@ -1066,7 +1066,7 @@ Player prompts:
 
 - Martial Impetus: choose a target: Choose target creature.
 
-Implementation: needed (keyword:enchant, static, trigger:subject, field:mass_pump.filter)
+Implementation: needed (keyword:enchant, static, filter:attackingOpponent, trigger:subject, field:mass_pump.filter)
 
 Questions for you:
 
@@ -1119,19 +1119,19 @@ Mister Negative [draft]
   [a2] keyword [implemented]
     Oracle: Vigilance, lifelink
     Keyword: lifelink
-  [a3] triggered [needed: needs step:set_life, field:set_life.exchange, quantity:life_lost_this_way, predicate:compare]
+  [a3] triggered [needed: needs step:exchange_life, field:exchange_life.withWho, quantity:life_lost_this_way, predicate:compare]
     Oracle: Darkforce Inversion — When Mister Negative enters, you may exchange life totals with target opponent. If you lost life this way, draw that many cards.
     Trigger: Whenever Mister Negative enters
     Target t1: target player  <- prompt: "Choose target player."
-    Effect: You may set life total to ?. Then, IF the life lost this way is greater than 0: draw the life lost this way cards.
+    Effect: You may exchange life totals with target player. Then, IF the life lost this way is greater than 0: draw the life lost this way cards.
 ```
 
 Player prompts:
 
 - Mister Negative: choose a target: Choose target player.
-- Mister Negative: optional: Do you want to set life total to ??
+- Mister Negative: optional: Do you want to exchange life totals with target player?
 
-Implementation: needed (step:set_life, field:set_life.exchange, quantity:life_lost_this_way, predicate:compare)
+Implementation: needed (step:exchange_life, field:exchange_life.withWho, quantity:life_lost_this_way, predicate:compare)
 
 Questions for you:
 
@@ -1218,7 +1218,7 @@ Orzhov Advokist [draft]
   [a1] triggered [needed: needs ref:iterated, step:repeat_for_each, field:repeat_for_each.over, field:repeat_for_each.steps, step:choose, field:choose.count, field:choose.from, field:choose.ofPlayer, field:choose.saveAs, field:choose.who, step:add_counters, field:add_counters.on, step:grant_effect, field:grant_effect.filter, field:grant_effect.modify, field:grant_effect.ofPlayer, field:grant_effect.who, predicate:step_done, duration:until_your_next_turn]
     Oracle: At the beginning of your upkeep, each player may put two +1/+1 counters on a creature they control. If a player does, creatures that player controls can't attack you or planeswalkers you control until your next turn.
     Trigger: At the beginning of your upkeep
-    Effect: For each permanent, choose a creature, then put 2 +1/+1 counters on the chosen object, then the target can't attack until your next turn.
+    Effect: For each permanent, choose a creature, then put 2 +1/+1 counters on the chosen object, then the target can't attack you or planeswalkers you control until your next turn.
 ```
 
 Player prompts:
@@ -1339,7 +1339,7 @@ Re-rendered plain English:
 Promise of Loyalty [draft]
   [a1] spell_effect [needed: needs ref:iterated, step:repeat_for_each, field:repeat_for_each.over, field:repeat_for_each.steps, step:choose, field:choose.count, field:choose.from, field:choose.ofPlayer, field:choose.saveAs, field:choose.who, step:add_counters, field:add_counters.on, quantity:math, field:sacrifice_permanent.amount, field:sacrifice_permanent.except, field:sacrifice_permanent.filter, field:sacrifice_permanent.who, step:grant_effect, field:grant_effect.modify, duration:forAsLongAs]
     Oracle: Each player puts a vow counter on a creature they control and sacrifices the rest. Each of those creatures can't attack you or planeswalkers you control for as long as it has a vow counter on it.
-    Effect: For each permanent, choose a creature, then put a vow counter on the chosen object, then that player sacrifices a creature, then the chosen object can't attack for a duration.
+    Effect: For each permanent, choose a creature, then put a vow counter on the chosen object, then that player sacrifices a creature, then the chosen object can't attack you or planeswalkers you control for a duration.
 ```
 
 Player prompts:
@@ -1433,9 +1433,9 @@ Re-rendered plain English:
 
 ```
 Retribution of the Ancients [draft]
-  [a1] activated [needed: needs cost:counters, quantity:math]
+  [a1] activated [needed: needs cost:counters, cost:counters_from_filter, quantity:math]
     Oracle: {B}, Remove X +1/+1 counters from among creatures you control: Target creature gets -X/-X until end of turn.
-    Cost: {B}, remove X +1/+1 counters from Retribution of the Ancients
+    Cost: {B}, remove X +1/+1 counters from among creatures you control (you choose which)
     Target t1: target creature  <- prompt: "Choose target creature."
     Effect: Target creature gets +-1 x X/+-1 x X until end of turn.
     X prompt: "Choose a value for X (the amount used in the cost)."
@@ -1446,7 +1446,7 @@ Player prompts:
 - Retribution of the Ancients: choose a target: Choose target creature.
 - Retribution of the Ancients: choose X: Choose a value for X (the amount used in the cost).
 
-Implementation: needed (cost:counters, quantity:math)
+Implementation: needed (cost:counters, cost:counters_from_filter, quantity:math)
 
 ### Scheming Symmetry
 
@@ -1522,9 +1522,9 @@ Selfless Squire [draft]
     Oracle: When this creature enters, prevent all damage that would be dealt to you this turn.
     Trigger: Whenever Selfless Squire enters
     Effect: The target gains an effect until end of turn.
-  [a3] triggered [needed: needs trigger:unspecified, trigger:subject, step:add_counters, quantity:event_amount, field:add_counters.on]
+  [a3] triggered [needed: needs trigger:damage_prevented, trigger:subject, step:add_counters, quantity:event_amount, field:add_counters.on]
     Oracle: Whenever damage that would be dealt to you is prevented, put that many +1/+1 counters on this creature.
-    Trigger: Whenever you unspecified
+    Trigger: Whenever damage that would be dealt to you is prevented
     Effect: Put that many +1/+1 counters on Selfless Squire.
 ```
 
@@ -1532,7 +1532,7 @@ Player prompts:
 
 - (none: no decisions)
 
-Implementation: needed (step:grant_effect, field:grant_effect.replacement, trigger:unspecified, trigger:subject, step:add_counters, quantity:event_amount, field:add_counters.on)
+Implementation: needed (step:grant_effect, field:grant_effect.replacement, trigger:damage_prevented, trigger:subject, step:add_counters, quantity:event_amount, field:add_counters.on)
 
 Questions for you:
 
@@ -1596,7 +1596,7 @@ Shadrix Silverquill [draft]
   [a2] keyword [implemented]
     Oracle: Flying, double strike
     Keyword: double strike
-  [a3] triggered [needed: needs modes, ref:iterated, modes:multiple, field:create_tokens.tokenKeywords, field:create_tokens.who, field:draw_cards.who, field:life_change.who, step:repeat_for_each, field:repeat_for_each.ofPlayer, field:repeat_for_each.over, field:repeat_for_each.steps, step:add_counters, field:add_counters.on]
+  [a3] triggered [needed: needs modes, ref:iterated, modes:multiple, modes:distinct_targets, field:create_tokens.tokenKeywords, field:create_tokens.who, field:draw_cards.who, field:life_change.who, step:repeat_for_each, field:repeat_for_each.ofPlayer, field:repeat_for_each.over, field:repeat_for_each.steps, step:add_counters, field:add_counters.on]
     Oracle: At the beginning of combat on your turn, you may choose two. Each mode must target a different player. / • Target player creates a 2/1 white and black Inkling creature token with flying. / • Target player draws a card and loses 1 life. / • Target player puts a +1/+1 counter on each creature they control.
     Trigger: At the beginning of combat on your turn
     Modes: choose 2  <- prompt: "Choose two modes (each different)."
@@ -1612,7 +1612,7 @@ Player prompts:
 - Shadrix Silverquill: choose a target: Choose target player.
 - Shadrix Silverquill: optional: Do you want to use this ability?
 
-Implementation: needed (modes, ref:iterated, modes:multiple, field:create_tokens.tokenKeywords, field:create_tokens.who, field:draw_cards.who, field:life_change.who, step:repeat_for_each, field:repeat_for_each.ofPlayer, field:repeat_for_each.over, field:repeat_for_each.steps, step:add_counters, field:add_counters.on)
+Implementation: needed (modes, ref:iterated, modes:multiple, modes:distinct_targets, field:create_tokens.tokenKeywords, field:create_tokens.who, field:draw_cards.who, field:life_change.who, step:repeat_for_each, field:repeat_for_each.ofPlayer, field:repeat_for_each.over, field:repeat_for_each.steps, step:add_counters, field:add_counters.on)
 
 Questions for you:
 
@@ -1778,9 +1778,9 @@ Re-rendered plain English:
 
 ```
 Vault of Champions [draft]
-  [a1] replacement [needed: needs replacement:would_enter, quantity:players_count]
+  [a1] replacement [needed: needs replacement:would_enter, quantity:opponents_count]
     Oracle: This land enters tapped unless you have two or more opponents.
-    Replacement: If Vault of Champions would enter (only if it is not true that the number of opponents for which that player has 0 or greater cards in battlefield is 2 or greater), it enters tapped
+    Replacement: If Vault of Champions would enter (only if it is not true that the number of opponents you have is 2 or greater), it enters tapped
   [a2] mana [implemented]
     Oracle: {T}: Add {W} or {B}.
     Cost: {T}
@@ -1791,7 +1791,7 @@ Player prompts:
 
 - (none: no decisions)
 
-Implementation: needed (replacement:would_enter, quantity:players_count)
+Implementation: needed (replacement:would_enter, quantity:opponents_count)
 
 Questions for you:
 
@@ -1834,10 +1834,10 @@ Implementation: needed (static, static:attackTax)
 | `step:grant_effect` | 14 | Inkshield; Rogue's Passage; Batwing Brume; Duelist's Heritage; Enshrouding Mist; Flawless Maneuver; Loran's Escape; Orzhov Advokist; Perch Protection; Promise of Loyalty; Selfless Spirit; Selfless Squire; Shadowspear; Spectacular Spider-Man |
 | `trigger:subject` | 13 | Breena, the Demagogue; Combat Calligrapher; Duelist's Heritage; Felisa, Fang of Silverquill; Gix, Yawgmoth Praetor; Mangara, the Diplomat; Martial Impetus; Reluctant Role Model; Resourceful Defense; Selfless Squire; Sword of the Animist; The Ozolith; Yathan Tombguard |
 | `replacement:would_enter` | 12 | Isolated Chapel; Marble Diamond; Myriad Landscape; Secluded Steppe; Temple of Silence; Citadel Siege; Godless Shrine; Orzhov Basilica; Orzhov Guildgate; Shattered Sanctum; Shineshadow Snarl; Vault of Champions |
-| `step:choose` | 11 | Breena, the Demagogue; Citadel Siege; Council's Judgment; Incarnation Technique; Keen Duelist; Master of Ceremonies; Orzhov Advokist; Orzhov Basilica; Parker Luck; Promise of Loyalty; Reluctant Role Model |
-| `field:choose.saveAs` | 10 | Breena, the Demagogue; Council's Judgment; Incarnation Technique; Keen Duelist; Master of Ceremonies; Orzhov Advokist; Orzhov Basilica; Parker Luck; Promise of Loyalty; Reluctant Role Model |
 | `field:grant_effect.modify` | 10 | Rogue's Passage; Duelist's Heritage; Flawless Maneuver; Loran's Escape; Orzhov Advokist; Perch Protection; Promise of Loyalty; Selfless Spirit; Shadowspear; Spectacular Spider-Man |
+| `step:choose` | 10 | Breena, the Demagogue; Citadel Siege; Incarnation Technique; Keen Duelist; Master of Ceremonies; Orzhov Advokist; Orzhov Basilica; Parker Luck; Promise of Loyalty; Reluctant Role Model |
 | `trigger:intervening_if` | 10 | Breena, the Demagogue; Citadel Siege; Felisa, Fang of Silverquill; Hopeful Initiate; Knight of the White Orchid; Land Tax; Mangara, the Diplomat; Reluctant Role Model; Resourceful Defense; The Ozolith |
+| `field:choose.saveAs` | 9 | Breena, the Demagogue; Incarnation Technique; Keen Duelist; Master of Ceremonies; Orzhov Advokist; Orzhov Basilica; Parker Luck; Promise of Loyalty; Reluctant Role Model |
 | `field:life_change.who` | 8 | Swords to Plowshares; Batwing Brume; Gix, Yawgmoth Praetor; Kambal, Consul of Allocation; Keen Duelist; Parker Luck; Shadrix Silverquill; Sign in Blood |
 | `field:search_library.count` | 8 | Evolving Wilds; Myriad Landscape; Ash Barrens; Knight of the White Orchid; Land Tax; Path to Exile; Scheming Symmetry; Sword of the Animist |
 | `field:search_library.filter` | 8 | Evolving Wilds; Myriad Landscape; Ash Barrens; Knight of the White Orchid; Land Tax; Path to Exile; Scheming Symmetry; Sword of the Animist |
@@ -1845,14 +1845,13 @@ Implementation: needed (static, static:attackTax)
 | `field:search_library.to` | 8 | Evolving Wilds; Myriad Landscape; Ash Barrens; Knight of the White Orchid; Land Tax; Path to Exile; Scheming Symmetry; Sword of the Animist |
 | `step:search_library` | 8 | Evolving Wilds; Myriad Landscape; Ash Barrens; Knight of the White Orchid; Land Tax; Path to Exile; Scheming Symmetry; Sword of the Animist |
 | `cost:sacrifice` | 7 | Commander's Sphere; Evolving Wilds; Myriad Landscape; Nihil Spellbomb; Orzhov Locket; Selfless Spirit; Spectacular Spider-Man |
-| `field:choose.count` | 7 | Breena, the Demagogue; Council's Judgment; Keen Duelist; Orzhov Advokist; Orzhov Basilica; Parker Luck; Promise of Loyalty |
-| `field:choose.from` | 7 | Breena, the Demagogue; Council's Judgment; Keen Duelist; Orzhov Advokist; Orzhov Basilica; Parker Luck; Promise of Loyalty |
+| `field:choose.count` | 6 | Breena, the Demagogue; Keen Duelist; Orzhov Advokist; Orzhov Basilica; Parker Luck; Promise of Loyalty |
+| `field:choose.from` | 6 | Breena, the Demagogue; Keen Duelist; Orzhov Advokist; Orzhov Basilica; Parker Luck; Promise of Loyalty |
 | `field:grant_effect.filter` | 6 | Flawless Maneuver; Orzhov Advokist; Perch Protection; Selfless Spirit; Shadowspear; Spectacular Spider-Man |
 | `predicate:compare` | 6 | Breena, the Demagogue; Knight of the White Orchid; Land Tax; Mangara, the Diplomat; Mister Negative; The Ozolith |
 | `predicate:matches` | 6 | Deathbringer Liege; Enshrouding Mist; Felisa, Fang of Silverquill; Reluctant Role Model; Resourceful Defense; The Ozolith |
 | `predicate:step_done` | 6 | Gix, Yawgmoth Praetor; Godless Shrine; Incarnation Technique; Nihil Spellbomb; Orzhov Advokist; Shineshadow Snarl |
 | `quantity:math` | 6 | Batwing Brume; Keen Duelist; Parker Luck; Promise of Loyalty; Retribution of the Ancients; Toxic Deluge |
-| `field:choose.who` | 5 | Council's Judgment; Master of Ceremonies; Orzhov Advokist; Parker Luck; Promise of Loyalty |
 | `field:grant_effect.replacement` | 5 | Inkshield; Batwing Brume; Enshrouding Mist; Perch Protection; Selfless Squire |
 | `field:repeat_for_each.steps` | 5 | Batwing Brume; Master of Ceremonies; Orzhov Advokist; Promise of Loyalty; Shadrix Silverquill |
 | `field:search_library.tapped` | 5 | Evolving Wilds; Myriad Landscape; Knight of the White Orchid; Path to Exile; Sword of the Animist |
@@ -1863,6 +1862,7 @@ Implementation: needed (static, static:attackTax)
 | `field:attach.to` | 4 | Bloodthirsty Blade; Lightning Greaves; Shadowspear; Sword of the Animist |
 | `field:attach.what` | 4 | Bloodthirsty Blade; Lightning Greaves; Shadowspear; Sword of the Animist |
 | `field:choose.choice` | 4 | Citadel Siege; Incarnation Technique; Master of Ceremonies; Reluctant Role Model |
+| `field:choose.who` | 4 | Master of Ceremonies; Orzhov Advokist; Parker Luck; Promise of Loyalty |
 | `field:create_tokens.tokenKeywords` | 4 | Combat Calligrapher; Felisa, Fang of Silverquill; Perch Protection; Shadrix Silverquill |
 | `field:create_tokens.who` | 4 | Combat Calligrapher; Generous Gift; Parting Gust; Shadrix Silverquill |
 | `field:draw_cards.who` | 4 | Breena, the Demagogue; Gix, Yawgmoth Praetor; Shadrix Silverquill; Sign in Blood |
@@ -1878,7 +1878,6 @@ Implementation: needed (static, static:attackTax)
 | `field:move_card_zone.who` | 3 | Gix, Yawgmoth Praetor; Nihil Spellbomb; Parker Luck |
 | `mana:variable` | 3 | Command Tower; Commander's Sphere; Exotic Orchard |
 | `predicate:not` | 3 | Godless Shrine; Parting Gust; Shineshadow Snarl |
-| `predicate:paid_additional_cost` | 3 | Batwing Brume; Parting Gust; Perch Protection |
 | `ref:iterated` | 3 | Orzhov Advokist; Promise of Loyalty; Shadrix Silverquill |
 | `trigger:leaves` | 3 | Nihil Spellbomb; Resourceful Defense; The Ozolith |
 | `trigger:zones` | 3 | Nihil Spellbomb; Resourceful Defense; The Ozolith |
@@ -1886,6 +1885,7 @@ Implementation: needed (static, static:attackTax)
 | `cast_option` | 2 | Flawless Maneuver; Toxic Deluge |
 | `cast_option:gift` | 2 | Parting Gust; Perch Protection |
 | `cost:counters` | 2 | Hopeful Initiate; Retribution of the Ancients |
+| `cost:counters_from_filter` | 2 | Hopeful Initiate; Retribution of the Ancients |
 | `cost:life` | 2 | War Room; Toxic Deluge |
 | `duration:until_your_next_turn` | 2 | Orzhov Advokist; Perch Protection |
 | `field:add_counters.from` | 2 | Resourceful Defense; The Ozolith |
@@ -1908,7 +1908,8 @@ Implementation: needed (static, static:attackTax)
 | `field:search_library.who` | 2 | Path to Exile; Scheming Symmetry |
 | `keyword:enchant` | 2 | Martial Impetus; Vow of Malice |
 | `predicate:chosen_is` | 2 | Citadel Siege; Master of Ceremonies |
-| `quantity:players_count` | 2 | Breena, the Demagogue; Vault of Champions |
+| `predicate:paid_additional_cost` | 2 | Parting Gust; Perch Protection |
+| `static:cant_protects` | 2 | Combat Calligrapher; Vow of Malice |
 | `step:create_delayed_trigger` | 2 | Parting Gust; Together Forever |
 | `step:remove_counters` | 2 | Resourceful Defense; The Ozolith |
 | `step:scry` | 2 | Temple of Silence; Loran's Escape |
@@ -1921,12 +1922,10 @@ Implementation: needed (static, static:attackTax)
 | `cost_reduction` | 1 | Eiganjo, Seat of the Empire |
 | `duration:forAsLongAs` | 1 | Promise of Loyalty |
 | `field:choose.alsoWho` | 1 | Keen Duelist |
-| `field:choose.order` | 1 | Council's Judgment |
-| `field:choose.vote` | 1 | Council's Judgment |
 | `field:copy.who` | 1 | Incarnation Technique |
 | `field:create_tokens.alsoWho` | 1 | Master of Ceremonies |
 | `field:create_tokens.tokenAttacking` | 1 | Combat Calligrapher |
-| `field:exile_target.winners` | 1 | Council's Judgment |
+| `field:exchange_life.withWho` | 1 | Mister Negative |
 | `field:extra_turn.who` | 1 | Perch Protection |
 | `field:grant_effect.ofPlayer` | 1 | Orzhov Advokist |
 | `field:if_else.optionalCost` | 1 | Nihil Spellbomb |
@@ -1949,14 +1948,22 @@ Implementation: needed (static, static:attackTax)
 | `field:sacrifice_permanent.who` | 1 | Promise of Loyalty |
 | `field:search_library.min` | 1 | Myriad Landscape |
 | `field:search_library.position` | 1 | Scheming Symmetry |
-| `field:set_life.exchange` | 1 | Mister Negative |
+| `field:vote.candidates` | 1 | Council's Judgment |
+| `field:vote.tie` | 1 | Council's Judgment |
+| `field:vote.voters` | 1 | Council's Judgment |
+| `filter:attackingOpponent` | 1 | Martial Impetus |
 | `filter:attackingYou` | 1 | Mangara, the Diplomat |
+| `filter:blocking` | 1 | Eiganjo, Seat of the Empire |
 | `modes` | 1 | Shadrix Silverquill |
+| `modes:distinct_targets` | 1 | Shadrix Silverquill |
 | `modes:multiple` | 1 | Shadrix Silverquill |
+| `predicate:mana_spent` | 1 | Batwing Brume |
 | `predicate:source_state` | 1 | Reluctant Role Model |
 | `quantity:event_amount` | 1 | Selfless Squire |
 | `quantity:life_lost_this_way` | 1 | Mister Negative |
 | `quantity:life_total` | 1 | Breena, the Demagogue |
+| `quantity:opponents_count` | 1 | Vault of Champions |
+| `quantity:players_count` | 1 | Breena, the Demagogue |
 | `quantity:stat` | 1 | Swords to Plowshares |
 | `scripted:cards_share_a_land_type` | 1 | Myriad Landscape |
 | `scripted:colors_lands_opponents_control_could_produce` | 1 | Exotic Orchard |
@@ -1965,14 +1972,15 @@ Implementation: needed (static, static:attackTax)
 | `static:setBasePT` | 1 | Sigarda's Summons |
 | `step:copy` | 1 | Incarnation Technique |
 | `step:counter_spell` | 1 | Mana Tithe |
+| `step:exchange_life` | 1 | Mister Negative |
 | `step:extra_turn` | 1 | Perch Protection |
 | `step:if_else` | 1 | Nihil Spellbomb |
 | `step:permission_to_play` | 1 | Gix, Yawgmoth Praetor |
 | `step:reveal` | 1 | Shineshadow Snarl |
-| `step:set_life` | 1 | Mister Negative |
 | `step:unless_pay` | 1 | Mana Tithe |
+| `step:vote` | 1 | Council's Judgment |
 | `targets:per_opponent` | 1 | Nils, Discipline Enforcer |
 | `trigger:begin_step:postcombat_main` | 1 | Reluctant Role Model |
 | `trigger:counter_put` | 1 | Dusk Legion Duelist |
+| `trigger:damage_prevented` | 1 | Selfless Squire |
 | `trigger:nth` | 1 | Mangara, the Diplomat |
-| `trigger:unspecified` | 1 | Selfless Squire |

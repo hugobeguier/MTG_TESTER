@@ -77,6 +77,7 @@
         {
           "kind": "grant_effect",
           "who": "you",
+          "appliesTo": "next_spell_cast",
           "modify": [
             {
               "cant": "be_countered"
@@ -89,6 +90,7 @@
       "needs": [
         "scripted:next_spell_this_turn_cant_be_countered",
         "step:grant_effect",
+        "field:grant_effect.appliesTo",
         "field:grant_effect.modify"
       ]
     }

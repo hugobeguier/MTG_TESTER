@@ -71,3 +71,13 @@ Audit (`npm run audit:deck-cards`, `bench/coverage/deck-card-audit.md`): 12 veri
 - Kernel `resolve` returns a pending decision (e.g. "choose a target") instead of calling the UI.
 - The user is consulted on complex cards (modal, replacement effects, odd wording), not just spot-checks.
 - New parses are an LLM draft that the user approves (with the validator as a first gate), not a straight LLM write to the DB.
+
+## Open items for the user (written 2026-11-20 evening, to review together)
+- Re-check the six changed Keen Engineering cards (Forsaken Monument, Broodstar, Master of Etherium, Darksteel Juggernaut, Psychosis Crawler, Duplicant) in data/kernel-drafts/keen-engineering/APPROVAL.md, then mark approved.
+- Behaviour questions: see data/kernel-drafts/OVERVIEW.md (deduplicated list, written by the cleanup pass).
+- Uncommitted work since checkpoint 065901c: guest answer guard (src/lib/multiplayer/answerGuard.ts, 78 tests), lockdown effects (vows, Archetype of Imagination, Gadrak, Perch Protection partly), deck drafts cleanup pass.
+- Multiplayer protocol: prompt answers carry no prompt id (stale answer lands on next prompt); a throwing setSession updater would still crash the host.
+- Perch Protection: the gift is never offered at cast time, and 'life total can't change' is not enforced. Opponent agents decline Orzhov Advokist; Promise of Loyalty keeps each agent's strongest creature.
+- Still unsupported in the old engine: Nils tax per counter, Graaz must-attack / can't be blocked by Walls, Kenrith's Transformation (becomes a green Elk), Kappa Cannoneer rider, Misleading Signpost.
+- Next kernel step (after the cleanup pass): shared static/replacement pipeline through chars() and one event pipeline; hidden-information views per player.
+- Optional: 'lost abilities' badge on card art; tooltip on the 3D table hourglass sprite.

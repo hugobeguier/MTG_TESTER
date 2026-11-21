@@ -68,8 +68,8 @@
       "replacement": {
         "event": "would_enter",
         "condition": {
-          "check": "cast_from",
-          "zone": "graveyard"
+          "check": "cast_with",
+          "option": "escape"
         },
         "result": {
           "mode": "modify",

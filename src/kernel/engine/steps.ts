@@ -5,17 +5,36 @@
 import type { ObjectFilter, Prompt, Step } from "../schema";
 import { promptForMay } from "../prompts";
 import {
-  chars, drawCards, emit, label, moveObject, newObject, obj, parseManaCost, player, shuffleInPlace, tick, tryObj, Unsupported, Reject, type Run
+  chars, drawCards, emit, label, moveObject, NeedAsk, newObject, obj, parseManaCost, player, shuffleInPlace, takeAnswer, tick, tryObj, Unsupported, Reject, type Run
 } from "./core";
-import { evalPredicate, evalQuantity, matchesFilter, objectsMatching, resolveObjs, resolvePlayers } from "./query";
+import { evalPredicate, evalQuantity, matchesFilter, objectsMatching, resolveObjs, resolvePlayers, type QCtx } from "./query";
+import { applyReplacements, runAfter } from "./replacements";
 import type { Choice, DecisionKind, DecisionOption, Env, Exec, ObjId, PlayerId, StackItem, TokenDef } from "./types";
+import type { Ability } from "../schema";
+import type { ContinuousEffect } from "./types";
 import { isObjId } from "./types";
+import { chooseStep } from "./choose";
+import { moveStep } from "./moves";
+import { lookTopStep, revealStep, searchStep } from "./library";
+import { repeatStep } from "./repeat";
+import { unlessDiscardHandler, unlessHandler, unlessPaySupported, type UnlessPay } from "./unlesspay";
+import { addMana } from "./mana";
+import { cantBeCountered } from "./layers";
+import { attachStep } from "./attach";
+import { copyStep } from "./copy";
+import { transformStep } from "./faces";
+import { delayedStep, grantToPlayers, permissionStep } from "./durablesteps";
+import { saveList, setResult } from "./saved";
+import { regenerates } from "./regen";
+import { addCommanderDamage, isCommanderObj } from "./commander";
+import { INTERNAL7, STEPS7, steps7 } from "./steps7";
+import { countersTransferSteps, INTERNAL6, STEPS6, wrapRevealStep } from "./steps6";
 
-export interface AskSpec { kind: DecisionKind; player: PlayerId; prompt: Prompt; options: DecisionOption[]; min: number; max: number; repeatable?: boolean; numeric?: boolean }
+export interface AskSpec { kind: DecisionKind; player: PlayerId; prompt: Prompt; options: DecisionOption[]; min: number; max: number; repeatable?: boolean; numeric?: boolean; mana?: { total: number; colors: string[] }; counters?: { min: number; max: number; available: Record<string, number> } }
 export type StepResult = "done" | { ask: AskSpec } | { push: Step[] };
 export type StepStatus = { status: "done" } | { status: "ask"; spec: AskSpec };
 
-export const META_FIELDS = ["kind", "id", "src", "prompt", "optional", "condition", "__asked"];
+export const META_FIELDS = ["kind", "id", "src", "srcs", "prompt", "optional", "condition", "__asked", "unlessPay", "amountLockedOn"];
 
 /** Validate an answer against the spec computed from the current state. */
 export function decide(spec: AskSpec, answer: Choice | undefined): { ask: AskSpec } | { ids: string[]; number?: number; yes?: boolean } {
@@ -33,6 +52,7 @@ export function decide(spec: AskSpec, answer: Choice | undefined): { ask: AskSpe
   return { ids, yes: ids[0] === "yes" };
 }
 
+export const fallbackPromptOf = (r: Run, env: Env, title: string, instruction: string): Prompt => ({ title: `${label(r, env.source)}: ${title}`, instruction });
 const fallbackPrompt = (r: Run, env: Env, title: string, instruction: string): Prompt => ({ title: `${label(r, env.source)}: ${title}`, instruction });
 const promptOr = (r: Run, env: Env, step: Step, title: string, instruction: string): Prompt => step.prompt ?? fallbackPrompt(r, env, title, instruction);
 const cardOptions = (r: Run, ids: ObjId[]): DecisionOption[] => ids.map((id) => ({ id, label: label(r, id) }));
@@ -41,41 +61,116 @@ const cardOptions = (r: Run, ids: ObjId[]): DecisionOption[] => ids.map((id) => 
 
 export function changeLife(r: Run, env: Env | undefined, pid: PlayerId, delta: number): void {
   if (delta === 0) return;
+  const ev = applyReplacements(r, { kind: delta > 0 ? "gain_life" : "lose_life", player: pid, amount: Math.abs(delta) });
+  if (ev.cancelled || (ev.kind !== "gain_life" && ev.kind !== "lose_life") || ev.amount <= 0) { runAfter(r, ev); return; }
+  delta = delta > 0 ? ev.amount : -ev.amount;
   const p = player(r, pid);
   p.life += delta;
   if (delta > 0) { emit(r, { type: "life_gain", player: pid, amount: delta }); r.s.turnLog.push({ type: "gain_life", player: pid, amount: delta, ts: r.s.clock }); }
   else { emit(r, { type: "life_loss", player: pid, amount: -delta }); r.s.turnLog.push({ type: "lose_life", player: pid, amount: -delta, ts: r.s.clock }); if (env) env.lastLifeLost = -delta; }
+  runAfter(r, ev);
 }
 
-export function dealDamage(r: Run, env: Env | undefined, source: string | undefined, target: string, amount: number): void {
-  if (amount <= 0) return;
+/** Deals damage through the replacement pipeline; returns the damage actually dealt (0 when prevented or nothing could be hit). */
+export function dealDamage(r: Run, env: Env | undefined, source: string | undefined, target: string, amount: number, combat = false): number {
+  if (amount <= 0) return 0;
+  const ev = applyReplacements(r, { kind: "damage", source, target, amount, combat });
+  if (ev.cancelled || ev.kind !== "damage" || ev.amount <= 0) { emit(r, { type: "damage_prevented", source, target, amount }); runAfter(r, ev); return 0; }
+  amount = ev.amount;
+  let dealt = 0;
+  const srcLive = source ? tryObj(r, source) : undefined;
+  const deathtouch = !!srcLive && srcLive.zone === "battlefield" && chars(r, srcLive.id).keywords.includes("deathtouch");
   if (!isObjId(target)) {
-    emit(r, { type: "damage", source, target, amount });
+    emit(r, { type: "damage", source, target, amount, combat, batch: r.batch });
+    dealt = amount;
+    if (combat && source && isCommanderObj(r, source)) addCommanderDamage(r, target, source, amount);
     changeLife(r, env, target, -amount);
-    return;
+    // the monarchy: combat damage to the monarch by a creature makes that creature's controller the monarch
+    const srcObj = source ? tryObj(r, source) : undefined;
+    if (combat && r.s.monarch === target && srcObj && srcObj.controller !== target && chars(r, srcObj.id).types.includes("creature")) { r.s.monarch = srcObj.controller; emit(r, { type: "monarch_changed", player: srcObj.controller }); }
+  } else {
+    const o = tryObj(r, target);
+    if (o && o.zone === "battlefield") {
+      const c = chars(r, target);
+      if (c.types.includes("creature")) { o.damage += amount; if (deathtouch) o.dtHit = true; dealt = amount; emit(r, { type: "damage", source, target, amount, combat, batch: r.batch }); }
+      else if (c.types.includes("planeswalker")) { o.counters.loyalty = Math.max(0, (o.counters.loyalty ?? 0) - amount); dealt = amount; emit(r, { type: "damage", source, target, amount, combat, batch: r.batch }); }
+      else if (c.types.includes("battle")) { o.counters.defense = Math.max(0, (o.counters.defense ?? 0) - amount); dealt = amount; emit(r, { type: "damage", source, target, amount, combat, batch: r.batch }); }
+    }
   }
-  const o = tryObj(r, target);
-  if (!o || o.zone !== "battlefield") return;
-  const c = chars(r, target);
-  if (c.types.includes("creature")) { o.damage += amount; emit(r, { type: "damage", source, target, amount }); }
-  else if (c.types.includes("planeswalker")) { o.counters.loyalty = Math.max(0, (o.counters.loyalty ?? 0) - amount); emit(r, { type: "damage", source, target, amount }); }
+  runAfter(r, ev);
+  return dealt;
 }
 
 function hasKeyword(r: Run, id: ObjId, kw: string): boolean { return chars(r, id).keywords.includes(kw); }
 
-export function destroyObject(r: Run, id: ObjId): boolean {
+export function destroyObject(r: Run, id: ObjId, noRegen = false): boolean {
   const o = tryObj(r, id);
   if (!o || o.zone !== "battlefield") return false;
   if (hasKeyword(r, id, "indestructible")) { emit(r, { type: "destroy_prevented", id }); return false; }
+  if (!noRegen && regenerates(r, id)) return false;
   emit(r, { type: "destroyed", id });
   moveObject(r, id, "graveyard");
   return true;
 }
 
-function discardCard(r: Run, pid: PlayerId, id: ObjId): void {
+export function discardCard(r: Run, pid: PlayerId, id: ObjId): void {
+  const ev = applyReplacements(r, { kind: "discard", player: pid, id });
+  if (ev.cancelled) { runAfter(r, ev); return; }
   moveObject(r, id, "graveyard");
   emit(r, { type: "discard", player: pid, id });
   r.s.turnLog.push({ type: "discard", player: pid, id, name: label(r, id), types: chars(r, id).types, ts: r.s.clock });
+  runAfter(r, ev);
+}
+
+const PREDEFINED_TOKEN_ABILITIES: Record<string, Ability> = {
+  Treasure: { id: "t:treasure", kind: "mana", text: "{T}, Sacrifice this artifact: Add one mana of any color.", costs: [{ tap: "self" }, { sacrifice: "self", count: 1 }], mana: { produces: [{ anyColor: 1 }] } },
+  Food: { id: "t:food", kind: "activated", text: "{2}, {T}, Sacrifice this artifact: You gain 3 life.", costs: [{ mana: "{2}" }, { tap: "self" }, { sacrifice: "self", count: 1 }], steps: [{ kind: "life_change", lifeDelta: 3, who: "you" }] },
+  Clue: { id: "t:clue", kind: "activated", text: "{2}, Sacrifice this artifact: Draw a card.", costs: [{ mana: "{2}" }, { sacrifice: "self", count: 1 }], steps: [{ kind: "draw_cards", amount: 1, who: "you" }] }
+};
+
+/** The token a create_tokens step describes (before any replacement effect sees it). Predefined artifact tokens carry their rules. */
+export function tokenDefFromStep(r: Run, env: QCtx, step: Step): TokenDef {
+  const { types, subtypes } = parseTypeLine(step.tokenTypeLine as string | undefined);
+  const abilities: Ability[] = [];
+  for (const s of subtypes) {
+    if (PREDEFINED_TOKEN_ABILITIES[s]) abilities.push(PREDEFINED_TOKEN_ABILITIES[s]);
+    else if (["Blood", "Map", "Powerstone", "Junk", "Gold", "Shard", "Incubator"].includes(s)) throw new Unsupported("token:predefined_abilities", s + " tokens carry rules the engine does not model yet");
+  }
+  for (const a of (step.tokenAbilities as Ability[] | undefined) ?? []) abilities.push(structuredClone(a)); // the token's own printed abilities ("When this token dies, you gain 1 life")
+  return {
+    name: String(step.tokenName ?? subtypes[0] ?? "Token"), types, subtypes,
+    colors: ((step.tokenColors as string[] | undefined) ?? []).filter((c) => c !== "colorless"),
+    power: step.tokenPower === undefined ? undefined : evalQuantity(r, step.tokenPower as never, env),
+    toughness: step.tokenToughness === undefined ? undefined : evalQuantity(r, step.tokenToughness as never, env),
+    keywords: (step.tokenKeywords as string[] | undefined) ?? [],
+    ...(abilities.length ? { abilities } : {})
+  };
+}
+
+export function createToken(r: Run, pid: PlayerId, def: TokenDef, tapped: boolean, created: string[]): void {
+  const o = newObject(r, def.name, pid, "exile", { token: structuredClone(def) });
+  // enters the battlefield through the normal zone change (enter replacements, etb triggers)
+  moveObject(r, o.id, "battlefield", { controller: pid, tapped });
+  if (r.s.objects[o.id]?.zone !== "battlefield") { delete r.s.objects[o.id]; return; } // an enter replacement kept it off the battlefield
+  created.push(o.id);
+  emit(r, { type: "token_created", id: o.id, player: pid });
+  r.s.turnLog.push({ type: "token_created", id: o.id, player: pid, name: def.name, types: def.types.map((t) => t.toLowerCase()), token: true, ts: r.s.clock });
+}
+
+/**
+ * Runs steps right now on behalf of a replacement effect. They may ask the player (shock land: "pay 2 life?", Thriving land:
+ * "choose a color"): the question aborts the whole action with NeedAsk and is answered by replaying it (replacements.ts).
+ */
+export function runInline(r: Run, o: { source: ObjId; controller: PlayerId; steps: Step[]; eventObj?: string; eventPlayer?: PlayerId; amount?: number; x?: number }): void {
+  const item: StackItem = { id: "inline", kind: "triggered", sourceId: o.source, controller: o.controller, abilityId: "", parts: [{ specs: [], steps: o.steps, targets: {} }], x: o.x ?? 0 };
+  const ex = startExec(item);
+  ex.env.eventObj = o.eventObj; ex.env.eventPlayer = o.eventPlayer; ex.env.amount = o.amount;
+  let st = runExec(r, ex);
+  while (st.status === "ask") {
+    const given = takeAnswer(r);
+    if (given === undefined) throw new NeedAsk(st.spec);
+    st = runExec(r, ex, given);
+  }
 }
 
 function parseTypeLine(tl: string | undefined): { types: string[]; subtypes: string[] } {
@@ -86,12 +181,12 @@ function parseTypeLine(tl: string | undefined): { types: string[]; subtypes: str
 
 // ---------------------------------------------------------------- step registry
 
-type Handler = (r: Run, ex: Exec, step: Step, answer: Choice | undefined) => StepResult;
-interface StepSpec { fields: string[]; run: Handler }
+export type Handler = (r: Run, ex: Exec, step: Step, answer: Choice | undefined) => StepResult;
+export interface StepSpec { fields: string[]; run: Handler }
 
-const players = (r: Run, env: Env, step: Step): PlayerId[] => resolvePlayers(r, step.who ?? "you", env);
+export const players = (r: Run, env: Env, step: Step): PlayerId[] => resolvePlayers(r, step.who ?? "you", env);
 const qty = (r: Run, env: Env, step: Step, key = "amount", dflt = 1): number => (step[key] === undefined ? dflt : evalQuantity(r, step[key] as never, env));
-const refs = (r: Run, env: Env, step: Step, key = "target"): string[] => resolveObjs(r, step[key] as string | undefined, env);
+export const refs = (r: Run, env: Env, step: Step, key = "target"): string[] => resolveObjs(r, step[key] as string | undefined, env);
 
 const STEPS: Record<string, StepSpec> = {
   draw_cards: {
@@ -99,10 +194,13 @@ const STEPS: Record<string, StepSpec> = {
     run: (r, ex, step) => { const n = qty(r, ex.env, step); for (const p of players(r, ex.env, step)) drawCards(r, p, n); return "done"; }
   },
   life_change: {
-    fields: ["lifeDelta", "amount", "who"],
+    fields: ["lifeDelta", "amount", "who", "lose"],
     run: (r, ex, step) => {
-      const delta = step.lifeDelta !== undefined ? Number(step.lifeDelta) : qty(r, ex.env, step, "amount", 0);
-      for (const p of players(r, ex.env, step)) changeLife(r, ex.env, p, delta);
+      const raw = step.lifeDelta !== undefined ? Number(step.lifeDelta) : qty(r, ex.env, step, "amount", 0);
+      const delta = step.lose ? -Math.abs(raw) : raw;
+      let lost = 0;
+      for (const p of players(r, ex.env, step)) { const before = player(r, p).life; changeLife(r, ex.env, p, delta); if (delta < 0) lost += Math.max(0, before - player(r, p).life); }
+      if (delta < 0) ex.env.lastLifeLost = lost; // "you gain life equal to the life lost this way" (all players together)
       return "done";
     }
   },
@@ -132,8 +230,8 @@ const STEPS: Record<string, StepSpec> = {
   },
   destroy_target: { fields: ["target", "noRegenerate"], run: (r, ex, step) => { for (const t of refs(r, ex.env, step)) destroyObject(r, t); return "done"; } },
   destroy_all: {
-    fields: ["filter", "noRegenerate"],
-    run: (r, ex, step) => { for (const id of objectsMatching(r, (step.filter ?? {}) as ObjectFilter, ex.env)) destroyObject(r, id); return "done"; }
+    fields: ["filter", "noRegenerate", "targetType"],
+    run: (r, ex, step) => { let n = 0; const f = (step.filter ?? (step.targetType ? { types: [String(step.targetType)] } : {})) as ObjectFilter; for (const id of objectsMatching(r, f, ex.env)) if (destroyObject(r, id)) n++; setResult(ex.env, step.id, n); return "done"; }
   },
   exile_target: {
     fields: ["target"],
@@ -151,7 +249,7 @@ const STEPS: Record<string, StepSpec> = {
     run: (r, ex, step) => { for (const id of objectsMatching(r, (step.filter ?? {}) as ObjectFilter, ex.env)) moveObject(r, id, "hand"); return "done"; }
   },
   reanimate: {
-    fields: ["target", "who", "tapped"],
+    fields: ["target", "who", "tapped", "anyGraveyard"], // anyGraveyard: only the target spec differs (any player's graveyard)
     run: (r, ex, step) => {
       const ctl = resolvePlayers(r, step.who ?? "you", ex.env)[0];
       for (const t of refs(r, ex.env, step)) { const o = tryObj(r, t); if (o && o.zone === "graveyard") { moveObject(r, t, "battlefield", { controller: ctl, tapped: !!step.tapped }); emit(r, { type: "reanimated", id: t }); } }
@@ -180,7 +278,14 @@ const STEPS: Record<string, StepSpec> = {
   },
   tap_target: {
     fields: ["target"],
-    run: (r, ex, step) => { for (const t of refs(r, ex.env, step)) { const o = tryObj(r, t); if (o && o.zone === "battlefield" && !o.tapped) { o.tapped = true; emit(r, { type: "tap", id: t }); } } return "done"; }
+    run: (r, ex, step) => {
+      for (const t of refs(r, ex.env, step)) {
+        if (r.entering?.id === t) { r.entering.tapped = true; continue; } // "enters tapped" decided while it is entering
+        const o = tryObj(r, t);
+        if (o && o.zone === "battlefield" && !o.tapped) { o.tapped = true; emit(r, { type: "tap", id: t }); }
+      }
+      return "done";
+    }
   },
   untap_target: {
     fields: ["target", "all", "filter"],
@@ -209,40 +314,43 @@ const STEPS: Record<string, StepSpec> = {
     }
   },
   grant_effect: {
-    fields: ["target", "modify", "duration"],
+    fields: ["target", "modify", "duration", "who", "filter", "replacement", "all"],
     run: (r, ex, step) => {
+      if (step.all && !step.filter && !step.target) throw new Unsupported("field:grant_effect.all", "an unfiltered mass grant");
+      // player-scoped form: a replacement shield / a player flag for a while (durable.ts)
+      if (!step.target && !step.filter) { grantToPlayers(r, ex.env, step); return "done"; }
       requireEot(step);
+      // mass form ("creatures you control gain indestructible until end of turn"): the filter picks the permanents, `who` is only whose perspective it is
       const mods = (step.modify ?? []) as Array<Record<string, unknown>>;
-      for (const m of mods) if (!("grant" in m) || Object.keys(m).length !== 1 || typeof m.grant !== "string") throw new Unsupported(`field:grant_effect.modify.${Object.keys(m)[0]}`);
-      for (const id of refs(r, ex.env, step)) for (const m of mods) addEffect(r, id, { grant: String(m.grant).toLowerCase() });
+      const GRANTABLE = ["grant", "lose", "setBasePT", "addTypes", "setColors"];
+      for (const m of mods) if (Object.keys(m).length !== 1 || !GRANTABLE.includes(Object.keys(m)[0])) throw new Unsupported(`field:grant_effect.modify.${Object.keys(m)[0]}`);
+      const granted = step.target ? refs(r, ex.env, step) : objectsMatching(r, step.filter as ObjectFilter, ex.env);
+      for (const id of granted) for (const m of mods) {
+        if ("grant" in m) addEffect(r, id, { grant: String(m.grant).toLowerCase() });
+        else if ("lose" in m) addEffect(r, id, { lose: String(m.lose) });
+        else if ("setBasePT" in m) { const b = m.setBasePT as { power: never; toughness: never }; addEffect(r, id, { base: { power: evalQuantity(r, b.power, ex.env), toughness: evalQuantity(r, b.toughness, ex.env) } }); }
+        else if ("addTypes" in m) addEffect(r, id, { addTypes: m.addTypes as string[] });
+        else addEffect(r, id, { setColors: m.setColors as string[] });
+      }
       return "done";
     }
   },
+  extra_combat: {
+    fields: [],
+    run: (r) => { r.s.extraCombats++; emit(r, { type: "extra_combat_added" }); return "done"; }
+  },
   create_tokens: {
-    fields: ["tokenCount", "tokenName", "tokenPower", "tokenToughness", "tokenColors", "tokenTypeLine", "tokenKeywords", "tokenTapped", "who"],
+    fields: ["tokenCount", "tokenName", "tokenPower", "tokenToughness", "tokenColors", "tokenTypeLine", "tokenKeywords", "tokenTapped", "who", "tokenAbilities"],
     run: (r, ex, step) => {
       const env = ex.env;
-      const { types, subtypes } = parseTypeLine(step.tokenTypeLine as string | undefined);
-      if (subtypes.some((s) => ["Treasure", "Food", "Clue", "Blood", "Map", "Powerstone"].includes(s))) throw new Unsupported("token:predefined_abilities", `${subtypes.join(" ")} tokens carry rules the engine does not model yet`);
-      const def: TokenDef = {
-        name: String(step.tokenName ?? subtypes[0] ?? "Token"), types, subtypes,
-        colors: ((step.tokenColors as string[] | undefined) ?? []).filter((c) => c !== "colorless"),
-        power: step.tokenPower === undefined ? undefined : evalQuantity(r, step.tokenPower as never, env),
-        toughness: step.tokenToughness === undefined ? undefined : evalQuantity(r, step.tokenToughness as never, env),
-        keywords: (step.tokenKeywords as string[] | undefined) ?? []
-      };
+      const def = tokenDefFromStep(r, env, step);
       const n = qty(r, env, step, "tokenCount");
       env.created = [];
       for (const pid of players(r, env, step)) {
-        for (let i = 0; i < n; i++) {
-          const o = newObject(r, def.name, pid, "exile", { token: def });
-          // enters the battlefield through the normal zone change so etb triggers fire
-          o.zone = "exile";
-          moveObject(r, o.id, "battlefield", { controller: pid, tapped: !!step.tokenTapped });
-          env.created.push(o.id);
-          emit(r, { type: "token_created", id: o.id, player: pid });
-          r.s.turnLog.push({ type: "token_created", id: o.id, player: pid, name: def.name, types: def.types.map((t) => t.toLowerCase()), token: true, ts: r.s.clock });
-        }
+        // the creation is ONE event ("tokens would be created"): replacement effects see all of it at once
+        const ev = applyReplacements(r, { kind: "tokens", player: pid, groups: n > 0 ? [{ def, count: n, tapped: !!step.tokenTapped }] : [] });
+        if (!ev.cancelled && ev.kind === "tokens") for (const g of ev.groups) for (let i = 0; i < g.count; i++) createToken(r, pid, g.def, !!g.tapped, env.created);
+        runAfter(r, ev);
       }
       return "done";
     }
@@ -252,17 +360,21 @@ const STEPS: Record<string, StepSpec> = {
     run: (r, ex, step) => { addCounters(r, [ex.env.source], String(step.counterKind), qty(r, ex.env, step)); return "done"; }
   },
   add_counters: {
-    fields: ["on", "counterKind", "amount"],
-    run: (r, ex, step) => { addCounters(r, resolveObjs(r, String(step.on ?? "self"), ex.env), String(step.counterKind), qty(r, ex.env, step)); return "done"; }
+    fields: ["on", "counterKind", "amount", "counterPT"],
+    run: (r, ex, step) => { standardCounterPT(step); addCounters(r, resolveObjs(r, String(step.on ?? "self"), ex.env), String(step.counterKind), qty(r, ex.env, step)); return "done"; }
   },
   remove_counters: {
     fields: ["on", "counterKind", "amount"],
     run: (r, ex, step) => { addCounters(r, resolveObjs(r, String(step.on ?? "self"), ex.env), String(step.counterKind), -qty(r, ex.env, step)); return "done"; }
   },
   sacrifice_permanent: {
-    fields: ["who", "amount", "filter", "target"],
+    fields: ["who", "amount", "filter", "target", "all"],
     run: (r, ex, step) => {
       const env = ex.env;
+      if (step.all) { // "each player sacrifices all ...": every matching permanent each listed player controls
+        for (const p of players(r, env, step)) for (const id of objectsMatching(r, (step.filter ?? {}) as ObjectFilter, env)) if (tryObj(r, id)?.controller === p) sacrificeObject(r, id);
+        return "done";
+      }
       if (step.target) {
         if (step.target !== "self") throw new Unsupported(`field:sacrifice_permanent.target=${String(step.target)}`);
         for (const id of refs(r, env, step)) sacrificeObject(r, id);
@@ -271,16 +383,24 @@ const STEPS: Record<string, StepSpec> = {
       return { push: players(r, env, step).map((p) => ({ kind: "__sacrifice" as never, player: p, n: qty(r, env, step), filter: step.filter, prompt: step.prompt }) as Step) };
     }
   },
-  move_card_zone: {
-    fields: ["target", "moveTo", "moveFrom", "from", "position", "tapped"],
+  attach: attachStep,
+  copy: copyStep,
+  transform: transformStep,
+  permission_to_play: permissionStep,
+  create_delayed_trigger: delayedStep,
+  move_card_zone: moveStep,
+  search_library: searchStep,
+  look_top: lookTopStep,
+  reveal: revealStep,
+  repeat_for_each: repeatStep,
+  add_mana: {
+    fields: ["produces", "amount"],
     run: (r, ex, step) => {
-      const to = step.moveTo as "hand" | "graveyard" | "exile" | "battlefield" | "library";
-      const from = (step.from ?? step.moveFrom) as string | undefined;
-      for (const t of refs(r, ex.env, step)) {
-        const o = tryObj(r, t);
-        if (!o || o.zone === "stack" || (from && o.zone !== from)) continue;
-        moveObject(r, t, to, { position: step.position as "top" | "bottom" | undefined, controller: to === "battlefield" ? ex.env.controller : undefined, tapped: !!step.tapped });
-      }
+      const specs = (step.produces ?? []) as Array<Record<string, unknown>>;
+      if (specs.length !== 1 || typeof specs[0].colors !== "string" || specs[0].restriction) throw new Unsupported("field:add_mana.produces");
+      const syms = [...String(specs[0].colors).matchAll(/\{([WUBRGC])\}/g)].map((m) => m[1] as never);
+      const n = qty(r, ex.env, step);
+      for (let i = 0; i < n; i++) addMana(r, ex.env.controller, syms, ex.env.source);
       return "done";
     }
   },
@@ -288,11 +408,12 @@ const STEPS: Record<string, StepSpec> = {
     fields: ["target"],
     run: (r, ex, step) => {
       for (const t of refs(r, ex.env, step)) {
-        const i = r.s.stack.findIndex((it) => it.objectId === t);
+        const i = r.s.stack.findIndex((it) => it.objectId === t || it.id === t); // a spell, or (ward) an ability on the stack
         if (i < 0) continue;
+        if (isObjId(t) && cantBeCountered(r, t)) { emit(r, { type: "counter_failed", id: t, by: ex.env.source, reason: "can't be countered" }); continue; }
         const [item] = r.s.stack.splice(i, 1);
         emit(r, { type: "spell_countered", id: t, by: ex.env.source, controller: item.controller });
-        moveObject(r, t, "graveyard");
+        if (item.objectId) moveObject(r, t, "graveyard");
       }
       return "done";
     }
@@ -310,11 +431,18 @@ const STEPS: Record<string, StepSpec> = {
       return { push: [{ kind: "draw_cards", amount: n, who: "you" }, { kind: "__connive_discard" as never, player: ctl, n, on, prompt: step.prompt }] };
     }
   },
+  choose: chooseStep,
   if_else: {
     fields: ["if", "then", "else"],
     run: (r, ex, step) => ({ push: (evalPredicate(r, step.if!, ex.env) ? step.then : step.else) ?? [] })
   }
 };
+
+countersTransferSteps(STEPS);
+wrapRevealStep(STEPS);
+Object.assign(STEPS, STEPS6);
+steps7(STEPS);
+Object.assign(STEPS, STEPS7);
 
 export const STEP_FIELDS: Record<string, string[]> = Object.fromEntries(Object.entries(STEPS).map(([k, v]) => [k, v.fields]));
 export const SUPPORTED_ENGINE_STEP_KINDS: ReadonlySet<string> = new Set(Object.keys(STEPS));
@@ -323,17 +451,37 @@ function requireEot(step: Step): void {
   if (step.duration !== undefined && step.duration !== "until_end_of_turn") throw new Unsupported(`duration:${typeof step.duration === "string" ? step.duration : Object.keys(step.duration)[0]}`);
 }
 
-function addEffect(r: Run, id: ObjId, e: { power?: number; toughness?: number; grant?: string }): void {
+export function addTemporaryPT(r: Run, id: ObjId, power: number, toughness: number): void { addEffect(r, id, { power, toughness }); }
+
+function addEffect(r: Run, id: ObjId, e: Partial<Pick<ContinuousEffect, "power" | "toughness" | "grant" | "lose" | "base" | "addTypes" | "setColors">>): void {
   const o = tryObj(r, id);
   if (!o || o.zone !== "battlefield") return;
   r.s.effects.push({ id: `e${r.s.effects.length}_${r.s.clock}`, timestamp: tick(r), objectId: id, objectTimestamp: o.timestamp, until: "end_of_turn", ...e });
   emit(r, { type: "effect_added", id, ...e });
 }
 
-function addCounters(r: Run, ids: string[], kind: string, n: number): void {
+/** `counterPT` restates what a +1/+1 / -1/-1 counter already does (chars() applies it by kind); any other P/T-per-counter rule is not modelled. */
+export function standardCounterPT(step: Step): void {
+  const pt = step.counterPT as number[] | undefined;
+  if (!pt) return;
+  const k = String(step.counterKind);
+  if (!((k === "+1/+1" && pt[0] === 1 && pt[1] === 1) || (k === "-1/-1" && pt[0] === -1 && pt[1] === -1))) throw new Unsupported("field:add_counters.counterPT");
+}
+
+export function addCounters(r: Run, ids: string[], kind: string, n: number): void {
   for (const id of ids) {
+    if (r.entering?.id === id && n > 0) { r.entering.counters[kind] = (r.entering.counters[kind] ?? 0) + n; continue; }
     const o = tryObj(r, id);
-    if (!o || o.zone !== "battlefield") continue;
+    if (!o || o.zone === "stack") continue;
+    if (o.zone !== "battlefield" && n < 0) continue;
+    if (n > 0) {
+      const ev = applyReplacements(r, { kind: "counters", id, counter: kind, amount: n });
+      if (ev.cancelled || ev.kind !== "counters" || ev.amount <= 0) { runAfter(r, ev); continue; }
+      o.counters[kind] = (o.counters[kind] ?? 0) + ev.amount;
+      emit(r, { type: "counter_added", id, kind, amount: ev.amount });
+      runAfter(r, ev);
+      continue;
+    }
     const next = Math.max(0, (o.counters[kind] ?? 0) + n);
     o.counters[kind] = next;
     if (next === 0) delete o.counters[kind];
@@ -341,7 +489,7 @@ function addCounters(r: Run, ids: string[], kind: string, n: number): void {
   }
 }
 
-function sacrificeObject(r: Run, id: ObjId): void {
+export function sacrificeObject(r: Run, id: ObjId): void {
   const o = tryObj(r, id);
   if (!o || o.zone !== "battlefield") return;
   const owner = o.controller;
@@ -353,13 +501,23 @@ function sacrificeObject(r: Run, id: ObjId): void {
 // ---------------------------------------------------------------- internal steps
 
 const INTERNAL: Record<string, Handler> = {
+  ...INTERNAL6,
+  ...INTERNAL7,
   __part: (_r, ex, step) => { ex.env.targets = ex.env.item.parts[Number(step.index)].targets; return "done"; },
   __may: (r, ex, step, answer) => {
-    const spec: AskSpec = { kind: "choose_yes_no", player: ex.env.controller, prompt: step.prompt!, options: [{ id: "yes", label: "Yes" }, { id: "no", label: "No" }], min: 1, max: 1 };
+    const spec: AskSpec = { kind: "choose_yes_no", player: (step.asker as PlayerId | undefined) ?? ex.env.controller, prompt: step.prompt!, options: [{ id: "yes", label: "Yes" }, { id: "no", label: "No" }], min: 1, max: 1 };
     const d = decide(spec, answer);
     if ("ask" in d) return d;
     return d.yes ? { push: [step.inner as Step] } : "done";
   },
+  __iter: (_r, ex, step) => {
+    for (const id of (step.clear as string[] | undefined) ?? []) ex.env.done = ex.env.done.filter((d) => d !== id);
+    ex.env.iterated = step.object as string | undefined;
+    ex.env.thatPlayer = step.player as PlayerId | undefined;
+    return "done";
+  },
+  __unless: (r, ex, step, answer) => unlessHandler(r, ex.env, step, answer),
+  __unless_discard: (r, ex, step, answer) => unlessDiscardHandler(r, ex.env, step, answer),
   __discard: (r, ex, step, answer) => {
     const pid = String(step.player);
     const hand = player(r, pid).hand;
@@ -434,7 +592,7 @@ export function startExec(item: StackItem): Exec {
     frames: [{ steps, i: 0 }], partIndex: 0,
     env: {
       item, source: item.sourceId, controller: item.controller, x: item.x, targets: {}, chosen: {}, done: [], created: [],
-      eventObj: item.trigger?.eventObj, eventPlayer: item.trigger?.eventPlayer, amount: item.trigger?.amount
+      eventObj: item.trigger?.eventObj, eventPlayer: item.trigger?.eventPlayer, amount: item.trigger?.amount, sacrificed: item.sacrificed
     }
   };
 }
@@ -452,13 +610,21 @@ export function runExec(r: Run, ex: Exec, answer?: Choice): StepStatus {
     else {
       const spec = STEPS[step.kind];
       if (!spec) throw new Unsupported(`step:${step.kind}`);
-      if (step.unlessPay) throw new Unsupported("step:unless_pay");
+      if (step.unlessPay && !unlessPaySupported(step.unlessPay as unknown as UnlessPay)) throw new Unsupported("step:unless_pay");
       for (const k of Object.keys(step)) if (!META_FIELDS.includes(k) && !spec.fields.includes(k)) throw new Unsupported(`field:${step.kind}.${k}`);
       if (step.condition && !pendingAnswer && !evalPredicate(r, step.condition.if, ex.env)) { frame.i++; continue; }
+      // "you may reveal a <filter> card from your hand": with nothing to reveal the step is skipped (and does not count as done)
+      if (step.kind === "reveal" && step.filter && !pendingAnswer && !objectsMatching(r, step.filter as ObjectFilter, ex.env).length) { frame.i++; continue; }
       if (step.optional && !(step as Step & { __asked?: boolean }).__asked) {
         const inner = { ...step, optional: false, condition: undefined, __asked: true } as Step;
-        const may: Step = { kind: "__may" as never, inner, prompt: step.prompt ?? promptForMay(label(r, ex.env.source), String(step.kind).replace(/_/g, " ")) } as Step;
+        const asker = step.kind === "search_library" ? resolvePlayers(r, step.who ?? "you", ex.env)[0] : undefined; // "its controller MAY search": they decide
+        const may: Step = { kind: "__may" as never, inner, asker, prompt: step.prompt ?? promptForMay(label(r, ex.env.source), String(step.kind).replace(/_/g, " ")) } as Step;
         frame.steps = [...frame.steps]; frame.steps[frame.i] = may;
+        continue;
+      }
+      if (step.unlessPay) {
+        const inner = { ...step, unlessPay: undefined } as Step;
+        frame.steps = [...frame.steps]; frame.steps[frame.i] = { kind: "__unless" as never, inner, pay: step.unlessPay } as Step;
         continue;
       }
       result = spec.run(r, ex, step, pendingAnswer);

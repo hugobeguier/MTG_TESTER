@@ -1,6 +1,6 @@
 # Kernel draft approval: Reign Of Dragons
 
-67 unique cards: 25 simple (A), 42 complex (B). Validator: 67/67 pass. Cards with implementation "needed": 63. All drafts are `review.status: "draft"`; nothing was written to the DB.
+68 unique cards: 25 simple (A), 43 complex (B). Validator: 68/68 pass. Cards with implementation "needed": 64. All drafts are `review.status: "draft"`; nothing was written to the DB.
 
 Reading guide: each card below shows the oracle text and what the structured JSON says back in plain English. Approve if they match.
 
@@ -310,7 +310,7 @@ Re-rendered plain English:
 Desolation of Smaug [draft]
   [a1] spell_effect [needed: needs filter:notSubtypes, field:damage_target.all, field:damage_target.filter, step:add_mana, field:add_mana.produces, field:add_mana.srcs]
     Oracle: Desolation of Smaug deals 3 damage to each non-Dragon creature. / Add four mana in any combination of colors. Spend this mana only to cast Dragon spells.
-    Effect: Deal 3 damage to the target. Then, add four mana of any one color (spend only to cast a Dragon spell).
+    Effect: Deal 3 damage to the target. Then, add 4 mana in any combination of colors (spend only to cast a Dragon spell).
 ```
 
 Player prompts:
@@ -671,7 +671,7 @@ Magda, the Hoardmaster [draft]
   [a1] triggered [needed: needs trigger:commit_crime, trigger:nth, field:create_tokens.tokenTapped]
     Oracle: Whenever you commit a crime, create a tapped Treasure token. This ability triggers only once each turn. (Targeting opponents, anything they control, and/or cards in their graveyards is a crime.)
     Trigger: Whenever you commit a crime for the first time each turn
-    Effect: Create a ?/? colorless Treasure artifact token.
+    Effect: Create a ?/? colorless Treasure artifact token tapped.
   [a2] activated [needed: needs cost:sacrifice, field:create_tokens.tokenKeywords]
     Oracle: Sacrifice three Treasures: Create a 4/4 red Scorpion Dragon creature token with flying and haste. Activate only as a sorcery.
     Cost: sacrifice 3 Treasures you control
@@ -1320,6 +1320,33 @@ Player prompts:
 
 Implementation: needed (cast_option, cast_option:additional, cast_option:mandatory, cost:discard)
 
+### Draconic Visitor
+
+Type: Creature — Dragon
+
+Oracle text:
+
+> Flying
+> If one or more artifact tokens would be created under your control, that many 5/5 red Dragon creature tokens with flying are created instead.
+
+Re-rendered plain English:
+
+```
+Draconic Visitor [draft]
+  [a1] keyword [implemented]
+    Oracle: Flying
+    Keyword: flying
+  [a2] replacement [needed: needs replacement:would_create_token, quantity:event_amount, field:create_tokens.tokenKeywords]
+    Oracle: If one or more artifact tokens would be created under your control, that many 5/5 red Dragon creature tokens with flying are created instead.
+    Replacement: If a token artifact you control would create token, instead: create that many 5/5 red Dragon creature tokens with flying
+```
+
+Player prompts:
+
+- (none: no decisions)
+
+Implementation: needed (replacement:would_create_token, quantity:event_amount, field:create_tokens.tokenKeywords)
+
 ## Kernel to-do: missing capabilities across this deck
 
 | capability | cards | needing it |
@@ -1327,7 +1354,7 @@ Implementation: needed (cast_option, cast_option:additional, cast_option:mandato
 | `field:damage_target.source` | 13 | Chandra's Ignition; Dragon Tempest; Dragonhawk, Fate's Tempest; Drakuseth, Maw of Flames; Firespitter Whelp; Leyline Tyrant; Outpost Siege; Parapet Thrasher; Sarkhan the Masterless; Scourge of Valkas; The Elder Dragon War; Thunderbreak Regent; Warstorm Surge |
 | `trigger:subject` | 13 | Lathliss, Dragon Queen; Breaching Dragonstorm; Dragon Tempest; Dragon's Hoard; Firespitter Whelp; Outpost Siege; Parapet Thrasher; Sarkhan the Masterless; Sarkhan, Dragon Ascendant; Scourge of Valkas; Thunderbreak Regent; Utvara Hellkite; Warstorm Surge |
 | `static` | 12 | Basilisk Collar; Crucible of Fire; Dragonlord's Servant; Dragonspeaker Shaman; Gadrak, the Crown-Scourge; Hazoret's Monument; Leyline Tyrant; Nogi, Draco-Zealot; Stormscale Scion; Swiftfoot Boots; Thundermane Dragon; Tyrant's Familiar |
-| `field:create_tokens.tokenKeywords` | 8 | Lathliss, Dragon Queen; Dragonmaster Outcast; Magda, the Hoardmaster; Sarkhan the Masterless; Skyline Despot; The Elder Dragon War; The Misty Mountains Cold; Utvara Hellkite |
+| `field:create_tokens.tokenKeywords` | 9 | Lathliss, Dragon Queen; Dragonmaster Outcast; Magda, the Hoardmaster; Sarkhan the Masterless; Skyline Despot; The Elder Dragon War; The Misty Mountains Cold; Utvara Hellkite; Draconic Visitor |
 | `field:move_card_zone.position` | 8 | Atsushi, the Blazing Sky; Breaching Dragonstorm; Count on Luck; Dragonhawk, Fate's Tempest; Orb of Dragonkind; Outpost Siege; Parapet Thrasher; Spinerock Knoll |
 | `field:grant_effect.modify` | 7 | Carnelian Orb of Dragonkind; Dragon Tempest; Nogi, Draco-Zealot; Sarkhan the Masterless; Sarkhan, Dragon Ascendant; Terror of Mount Velus; Thundermane Dragon |
 | `field:permission_to_play.what` | 7 | Atsushi, the Blazing Sky; Breaching Dragonstorm; Count on Luck; Dragonhawk, Fate's Tempest; Outpost Siege; Parapet Thrasher; Spinerock Knoll |
@@ -1440,9 +1467,11 @@ Implementation: needed (cast_option, cast_option:additional, cast_option:mandato
 | `predicate:stat` | 1 | Skyline Despot |
 | `predicate:step_done` | 1 | The Misty Mountains Cold |
 | `quantity:count_this_turn` | 1 | Gadrak, the Crown-Scourge |
+| `quantity:event_amount` | 1 | Draconic Visitor |
 | `quantity:math` | 1 | Dragonhawk, Fate's Tempest |
 | `ref:iterated` | 1 | Sarkhan the Masterless |
 | `ref:linked_exile` | 1 | Spinerock Knoll |
+| `replacement:would_create_token` | 1 | Draconic Visitor |
 | `scripted:become_monarch` | 1 | Skyline Despot |
 | `scripted:myriad` | 1 | Goldlust Triad |
 | `scripted:read_ahead` | 1 | The Elder Dragon War |

@@ -141,7 +141,7 @@ Re-rendered plain English:
 
 ```
 Arcane Denial [draft]
-  [a1] spell_effect [needed: needs step:counter_spell, step:create_delayed_trigger, field:create_delayed_trigger.at, field:create_delayed_trigger.steps, field:draw_cards.upTo, field:draw_cards.who]
+  [a1] spell_effect [needed: needs quantity:step_result, step:counter_spell, step:create_delayed_trigger, field:create_delayed_trigger.at, field:create_delayed_trigger.steps, step:choose, field:choose.choice, field:choose.max, field:choose.min, field:choose.who, field:draw_cards.who]
     Oracle: Counter target spell. Its controller may draw up to two cards at the beginning of the next turn's upkeep. / You draw a card at the beginning of the next turn's upkeep.
     Target t1: target spell  <- prompt: "Choose target spell."
     Effect: Counter target spell. Then, create a delayed trigger. Then, create a delayed trigger.
@@ -150,9 +150,9 @@ Arcane Denial [draft]
 Player prompts:
 
 - Arcane Denial: choose a target: Choose target spell.
-- Arcane Denial: optional: Do you want to its controller draws 2 cards?
+- Arcane Denial: choose: Choose a number.
 
-Implementation: needed (step:counter_spell, step:create_delayed_trigger, field:create_delayed_trigger.at, field:create_delayed_trigger.steps, field:draw_cards.upTo, field:draw_cards.who)
+Implementation: needed (quantity:step_result, step:counter_spell, step:create_delayed_trigger, field:create_delayed_trigger.at, field:create_delayed_trigger.steps, step:choose, field:choose.choice, field:choose.max, field:choose.min, field:choose.who, field:draw_cards.who)
 
 Questions for you:
 
@@ -211,9 +211,9 @@ Athreos, Shroud-Veiled [draft]
   [a1] keyword [implemented]
     Oracle: Indestructible
     Keyword: indestructible
-  [a2] static [needed: needs static]
+  [a2] static [needed: needs static, quantity:devotion_multi]
     Oracle: As long as your devotion to white and black is less than seven, Athreos isn't a creature.
-    Static: Athreos, Shroud-Veiled loses creature as long as your devotion to W + your devotion to B is less than 7
+    Static: Athreos, Shroud-Veiled loses creature as long as your devotion to W and B (one count of symbols of W or B; a hybrid symbol counts once) is less than 7
   [a3] triggered [needed: needs step:add_counters, field:add_counters.on]
     Oracle: At the beginning of your end step, put a coin counter on another target creature.
     Trigger: At the beginning of your end step
@@ -229,7 +229,7 @@ Player prompts:
 
 - Athreos, Shroud-Veiled: choose a target: Choose another target creature.
 
-Implementation: needed (static, step:add_counters, field:add_counters.on, trigger:subject, trigger:multi_event, trigger:leaves, trigger:zones)
+Implementation: needed (static, quantity:devotion_multi, step:add_counters, field:add_counters.on, trigger:subject, trigger:multi_event, trigger:leaves, trigger:zones)
 
 Questions for you:
 
@@ -1225,7 +1225,7 @@ Soaring Lightbringer [draft]
   [a3] triggered [needed: needs trigger:batch, field:create_tokens.attackTarget, field:create_tokens.tokenAttacking, field:create_tokens.tokenTapped]
     Oracle: Whenever you attack a player, create a 1/1 white Glimmer enchantment creature token that's tapped and attacking that player.
     Trigger: Whenever you attack
-    Effect: Create a 1/1 white Glimmer enchantment creature token.
+    Effect: Create a 1/1 white Glimmer enchantment creature token tapped and attacking.
 ```
 
 Player prompts:
@@ -1654,8 +1654,8 @@ Questions for you:
 | `static` | 17 | Aminatou, Veil Piercer; Archon of Sun's Grace; Athreos, Shroud-Veiled; Boon of the Spirit Realm; Callaphe, Beloved of the Sea; Heliod, the Radiant Dawn; Inquisitive Glimmer; Overwhelming Splendor; Propaganda; Secret Arcade; Soaring Lightbringer; Sphere of Safety; Starfield of Nyx; Timely Ward; Utter Insignificance; Void Rend; Zur, Eternal Schemer |
 | `replacement:would_enter` | 15 | Arcane Sanctum; Contaminated Aquifer; Drowned Catacomb; Estrid's Invocation; Glacial Fortress; Halimar Depths; Isolated Chapel; Myriad Landscape; Prairie Stream; Sunken Palace; Temple of Deceit; Temple of Silence; Thriving Heath; Thriving Isle; Thriving Moor |
 | `field:move_card_zone.what` | 11 | Aminatou, the Fateshifter; Archaeomancer's Map; Brainstorm; Brainsurge; Diabolic Vision; Enhanced Surveillance; Halimar Depths; Lim-Dûl's Vault; Mind's Dilation; Ponder; Portent |
+| `step:choose` | 9 | Aminatou, the Fateshifter; Arcane Denial; Archaeomancer's Map; Brainstorm; Brainsurge; Diabolic Vision; Thriving Heath; Thriving Isle; Thriving Moor |
 | `field:move_card_zone.position` | 8 | Aminatou, the Fateshifter; Brainstorm; Brainsurge; Diabolic Vision; Halimar Depths; Lim-Dûl's Vault; Ponder; Portent |
-| `step:choose` | 8 | Aminatou, the Fateshifter; Archaeomancer's Map; Brainstorm; Brainsurge; Diabolic Vision; Thriving Heath; Thriving Isle; Thriving Moor |
 | `trigger:subject` | 8 | Archaeomancer's Map; Archon of Sun's Grace; Athreos, Shroud-Veiled; Boon of the Spirit Realm; Doomwake Giant; Fear of Sleep Paralysis; Ledger Shredder; Shadow of the Second Sun |
 | `field:move_card_zone.ordered` | 7 | Brainstorm; Brainsurge; Diabolic Vision; Halimar Depths; Lim-Dûl's Vault; Ponder; Portent |
 | `field:damage_target.source` | 6 | Adarkar Wastes; Caves of Koilos; Talisman of Dominance; Talisman of Hierarchy; Talisman of Progress; Underground River |
@@ -1665,6 +1665,7 @@ Questions for you:
 | `field:search_library.to` | 6 | Archaeomancer's Map; Evolving Wilds; Moon-Blessed Cleric; Myriad Landscape; Obscura Storefront; Wayfarer's Bauble |
 | `step:search_library` | 6 | Archaeomancer's Map; Evolving Wilds; Moon-Blessed Cleric; Myriad Landscape; Obscura Storefront; Wayfarer's Bauble |
 | `field:add_counters.on` | 5 | Athreos, Shroud-Veiled; Boon of the Spirit Realm; Fear of Sleep Paralysis; Mystic Remora; Secret Arcade |
+| `field:choose.choice` | 5 | Aminatou, the Fateshifter; Arcane Denial; Thriving Heath; Thriving Isle; Thriving Moor |
 | `field:choose.count` | 5 | Aminatou, the Fateshifter; Archaeomancer's Map; Brainstorm; Brainsurge; Diabolic Vision |
 | `field:choose.from` | 5 | Aminatou, the Fateshifter; Archaeomancer's Map; Brainstorm; Brainsurge; Diabolic Vision |
 | `field:choose.saveAs` | 5 | Aminatou, the Fateshifter; Archaeomancer's Map; Brainstorm; Brainsurge; Diabolic Vision |
@@ -1673,7 +1674,6 @@ Questions for you:
 | `step:add_counters` | 5 | Athreos, Shroud-Veiled; Boon of the Spirit Realm; Fear of Sleep Paralysis; Mystic Remora; Secret Arcade |
 | `step:look_top` | 5 | Diabolic Vision; Halimar Depths; Lim-Dûl's Vault; Ponder; Portent |
 | `cost:sacrifice` | 4 | Demon of Fate's Design; Evolving Wilds; Myriad Landscape; Wayfarer's Bauble |
-| `field:choose.choice` | 4 | Aminatou, the Fateshifter; Thriving Heath; Thriving Isle; Thriving Moor |
 | `field:choose.remember` | 4 | Aminatou, the Fateshifter; Thriving Heath; Thriving Isle; Thriving Moor |
 | `field:move_card_zone.from` | 4 | Aminatou, the Fateshifter; Archaeomancer's Map; Enhanced Surveillance; Heliod, the Radiant Dawn |
 | `field:search_library.tapped` | 4 | Evolving Wilds; Myriad Landscape; Obscura Storefront; Wayfarer's Bauble |
@@ -1717,7 +1717,10 @@ Questions for you:
 | `cost:loyalty` | 1 | Aminatou, the Fateshifter |
 | `cost:x` | 1 | Shark Typhoon |
 | `field:choose.fromLooked` | 1 | Diabolic Vision |
+| `field:choose.max` | 1 | Arcane Denial |
+| `field:choose.min` | 1 | Arcane Denial |
 | `field:choose.options` | 1 | Aminatou, the Fateshifter |
+| `field:choose.who` | 1 | Arcane Denial |
 | `field:connive.on` | 1 | Ledger Shredder |
 | `field:copy.addAbility` | 1 | Estrid's Invocation |
 | `field:copy.asEnters` | 1 | Estrid's Invocation |
@@ -1727,7 +1730,6 @@ Questions for you:
 | `field:create_tokens.attackTarget` | 1 | Soaring Lightbringer |
 | `field:create_tokens.tokenAttacking` | 1 | Soaring Lightbringer |
 | `field:create_tokens.tokenTapped` | 1 | Soaring Lightbringer |
-| `field:draw_cards.upTo` | 1 | Arcane Denial |
 | `field:draw_cards.who` | 1 | Arcane Denial |
 | `field:gain_control.excludeSelf` | 1 | Aminatou, the Fateshifter |
 | `field:gain_control.filter` | 1 | Aminatou, the Fateshifter |
@@ -1761,6 +1763,8 @@ Questions for you:
 | `predicate:matches` | 1 | Mind's Dilation |
 | `predicate:step_done` | 1 | Obscura Storefront |
 | `quantity:count_this_turn` | 1 | Heliod, the Radiant Dawn |
+| `quantity:devotion_multi` | 1 | Athreos, Shroud-Veiled |
+| `quantity:step_result` | 1 | Arcane Denial |
 | `quantity:X` | 1 | Shark Typhoon |
 | `ref:iterated` | 1 | Starfield of Nyx |
 | `ref:linked_exile` | 1 | Mind's Dilation |

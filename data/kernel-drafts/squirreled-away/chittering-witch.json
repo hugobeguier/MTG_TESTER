@@ -13,18 +13,7 @@
         {
           "kind": "create_tokens",
           "tokenCount": {
-            "ref": "players_count",
-            "who": "each_opponent",
-            "where": {
-              "not": {
-                "check": "life",
-                "who": "that_player",
-                "cmp": {
-                  "op": "<",
-                  "value": 0
-                }
-              }
-            }
+            "ref": "opponents_count"
           },
           "tokenName": "Rat",
           "tokenPower": 1,
@@ -37,7 +26,7 @@
       ],
       "implementation": "needed",
       "needs": [
-        "quantity:players_count"
+        "quantity:opponents_count"
       ]
     },
     {

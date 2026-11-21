@@ -72,11 +72,13 @@
       "implementation": "needed",
       "needs": [
         "ref:sacrificed",
+        "face",
         "field:sacrifice_permanent.filter",
         "quantity:stat",
         "field:life_change.amount",
         "predicate:step_done"
-      ]
+      ],
+      "face": "Disciple of Freyalise"
     },
     {
       "id": "a2",
@@ -114,8 +116,10 @@
       },
       "implementation": "needed",
       "needs": [
-        "replacement:would_enter"
-      ]
+        "replacement:would_enter",
+        "face"
+      ],
+      "face": "Garden of Freyalise"
     },
     {
       "id": "a3",
@@ -133,8 +137,11 @@
           }
         ]
       },
-      "implementation": "implemented",
-      "needs": []
+      "implementation": "needed",
+      "needs": [
+        "face"
+      ],
+      "face": "Garden of Freyalise"
     }
   ],
   "review": {

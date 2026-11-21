@@ -68,11 +68,13 @@
       ],
       "implementation": "needed",
       "needs": [
+        "face",
         "field:life_change.amount",
         "field:life_change.lose",
         "step:grant_effect",
         "field:grant_effect.modify"
-      ]
+      ],
+      "face": "Malakir Rebirth"
     },
     {
       "id": "a2",
@@ -89,8 +91,10 @@
       },
       "implementation": "needed",
       "needs": [
-        "replacement:would_enter"
-      ]
+        "replacement:would_enter",
+        "face"
+      ],
+      "face": "Malakir Mire"
     },
     {
       "id": "a3",
@@ -108,8 +112,11 @@
           }
         ]
       },
-      "implementation": "implemented",
-      "needs": []
+      "implementation": "needed",
+      "needs": [
+        "face"
+      ],
+      "face": "Malakir Mire"
     }
   ],
   "review": {

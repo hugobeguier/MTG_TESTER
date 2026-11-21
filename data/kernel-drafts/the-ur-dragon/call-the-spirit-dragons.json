@@ -99,10 +99,6 @@
     "status": "draft",
     "ignore": [
       {
-        "lexeme": "quantity",
-        "reason": "'for each color' iterates over the five colors; no Quantity is needed"
-      },
-      {
         "lexeme": "if",
         "reason": "'If you put counters on five Dragons, you win' is the scripted marker one_counter_per_color_on_distinct_dragons_win_if_five"
       }

@@ -34,6 +34,11 @@
               "card": "Tear Asunder",
               "ability": "a1"
             }
+          },
+          "onlyIf": {
+            "not": {
+              "check": "kicked"
+            }
           }
         },
         {
@@ -58,6 +63,9 @@
               "card": "Tear Asunder",
               "ability": "a1"
             }
+          },
+          "onlyIf": {
+            "check": "kicked"
           }
         }
       ],

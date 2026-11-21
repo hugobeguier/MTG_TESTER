@@ -50,7 +50,8 @@
               "step": "s2"
             },
             "src": 1
-          }
+          },
+          "id": "s3"
         },
         {
           "kind": "create_tokens",
@@ -78,7 +79,7 @@
                   "all": [
                     {
                       "check": "step_done",
-                      "step": "s2"
+                      "step": "s3"
                     },
                     {
                       "check": "matches",

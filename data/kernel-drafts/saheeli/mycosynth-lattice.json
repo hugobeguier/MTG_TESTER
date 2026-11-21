@@ -67,10 +67,6 @@
       {
         "lexeme": "may",
         "reason": "a static permission, not a choice"
-      },
-      {
-        "lexeme": "each",
-        "reason": "'all' is a static over every object, the affects filter"
       }
     ]
   }

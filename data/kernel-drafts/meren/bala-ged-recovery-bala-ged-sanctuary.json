@@ -37,8 +37,10 @@
       ],
       "implementation": "needed",
       "needs": [
+        "face",
         "field:move_card_zone.from"
-      ]
+      ],
+      "face": "Bala Ged Recovery"
     },
     {
       "id": "a2",
@@ -55,8 +57,10 @@
       },
       "implementation": "needed",
       "needs": [
-        "replacement:would_enter"
-      ]
+        "replacement:would_enter",
+        "face"
+      ],
+      "face": "Bala Ged Sanctuary"
     },
     {
       "id": "a3",
@@ -74,8 +78,11 @@
           }
         ]
       },
-      "implementation": "implemented",
-      "needs": []
+      "implementation": "needed",
+      "needs": [
+        "face"
+      ],
+      "face": "Bala Ged Sanctuary"
     }
   ],
   "review": {

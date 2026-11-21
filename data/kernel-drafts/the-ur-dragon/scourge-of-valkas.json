@@ -94,12 +94,6 @@
     }
   ],
   "review": {
-    "status": "draft",
-    "ignore": [
-      {
-        "lexeme": "another",
-        "reason": "'this creature or another Dragon you control' = any Dragon you control, because this creature is itself a Dragon (same as Kappa Cannoneer in the pilot)"
-      }
-    ]
+    "status": "draft"
   }
 }

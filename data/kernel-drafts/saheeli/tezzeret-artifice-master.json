@@ -119,12 +119,11 @@
       },
       "steps": [
         {
-          "kind": "grant_effect",
+          "kind": "create_emblem",
           "who": "you",
-          "emblem": true,
-          "modify": [
-            {
-              "grantAbility": {
+          "emblem": {
+            "abilities": [
+              {
                 "kind": "triggered",
                 "text": "At the beginning of your end step, search your library for a permanent card, put it onto the battlefield, then shuffle.",
                 "trigger": {
@@ -145,20 +144,19 @@
                     "to": "battlefield",
                     "shuffle": true
                   }
-                ]
+                ],
+                "id": "em1"
               }
-            }
-          ],
-          "duration": "instant"
+            ]
+          }
         }
       ],
       "implementation": "needed",
       "needs": [
         "timing",
         "cost:loyalty",
-        "step:grant_effect",
-        "field:grant_effect.emblem",
-        "field:grant_effect.modify"
+        "step:create_emblem",
+        "field:create_emblem.emblem"
       ]
     }
   ],

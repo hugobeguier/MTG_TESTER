@@ -34,7 +34,7 @@
           "what": "player",
           "count": {
             "min": 0,
-            "max": 99
+            "max": 1
           },
           "prompt": {
             "title": "Priest of Forgotten Gods: choose targets",
@@ -43,7 +43,8 @@
               "card": "Priest of Forgotten Gods",
               "ability": "a1"
             }
-          }
+          },
+          "anyNumber": true
         }
       ],
       "steps": [
@@ -92,6 +93,7 @@
       "needs": [
         "cost:sacrifice",
         "targets:multi",
+        "targets:any_number",
         "field:life_change.amount",
         "field:life_change.lose",
         "field:life_change.who",

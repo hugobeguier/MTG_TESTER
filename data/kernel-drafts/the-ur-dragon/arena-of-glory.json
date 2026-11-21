@@ -88,10 +88,6 @@
       {
         "lexeme": "if",
         "reason": "'If that mana is spent on a creature spell, it gains haste' is the scripted marker (a rider on the mana)"
-      },
-      {
-        "lexeme": "until end of turn",
-        "reason": "haste duration lives in the scripted marker params"
       }
     ]
   }

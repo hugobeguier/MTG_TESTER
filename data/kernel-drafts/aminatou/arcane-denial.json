@@ -45,20 +45,30 @@
           },
           "steps": [
             {
-              "kind": "draw_cards",
-              "amount": 2,
-              "upTo": true,
+              "kind": "choose",
+              "id": "n1",
+              "choice": "number",
               "who": "controller_of_target",
-              "optional": true,
+              "min": 0,
+              "max": 2,
               "src": 1,
               "prompt": {
-                "title": "Arcane Denial: optional",
-                "instruction": "Do you want to its controller draws 2 cards?",
+                "title": "Arcane Denial: choose",
+                "instruction": "Choose a number.",
                 "source": {
                   "card": "Arcane Denial",
                   "ability": "a1"
                 }
               }
+            },
+            {
+              "kind": "draw_cards",
+              "amount": {
+                "ref": "step_result",
+                "step": "n1"
+              },
+              "who": "controller_of_target",
+              "src": 1
             }
           ],
           "src": 1
@@ -84,11 +94,16 @@
       ],
       "implementation": "needed",
       "needs": [
+        "quantity:step_result",
         "step:counter_spell",
         "step:create_delayed_trigger",
         "field:create_delayed_trigger.at",
         "field:create_delayed_trigger.steps",
-        "field:draw_cards.upTo",
+        "step:choose",
+        "field:choose.choice",
+        "field:choose.max",
+        "field:choose.min",
+        "field:choose.who",
         "field:draw_cards.who"
       ]
     }

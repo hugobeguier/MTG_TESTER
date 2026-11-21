@@ -18,7 +18,7 @@ Reading guide: each card below shows the oracle text and what the structured JSO
 - **High Market** (Land): {T}: add {C} | {T}, sacrifice a creature you control: Gain 1 life [needs: cost:sacrifice, field:life_change.amount]
 - **Entomb** (Instant): Search your library for a permanent, put it onto the graveyard, then shuffle [needs: step:search_library, field:search_library.count, field:search_library.filter, field:search_library.shuffle, field:search_library.to]
 - **Blood Artist** (Creature — Vampire): Whenever Blood Artist dies or an another creature dies: [targets: target player] Target player gains 1 life, then gain 1 life [needs: trigger:multi_event, trigger:subject, field:life_change.amount, field:life_change.lose, field:life_change.who]
-- **Mikaeus, the Unhallowed** (Legendary Creature — Zombie Cleric): Keyword intimidate | Whenever a creature is dealt damage, if that object is a Human: Destroy that object | Other non-Human creatures you control get +1/+1 and have undying [needs: trigger:dealt_damage, trigger:intervening_if, predicate:matches, trigger:subject, static, filter:notSubtypes]
+- **Mikaeus, the Unhallowed** (Legendary Creature — Zombie Cleric): Keyword intimidate | Whenever a creature is dealt damage (damage source: a Human): Destroy that object | Other non-Human creatures you control get +1/+1 and have undying [needs: trigger:dealt_damage, trigger:subject, trigger:damage_source, static, filter:notSubtypes]
 - **Ashnod's Altar** (Artifact): sacrifice a creature you control: add {C}{C} [needs: cost:sacrifice]
 - **Haywire Mite** (Artifact Creature — Insect): Whenever Haywire Mite dies: Gain 2 life | {G}, sacrifice Haywire Mite: [targets: target noncreature artifact or noncreature enchantment] Exile target noncreature artifact or noncreature enchantment [needs: field:life_change.amount, cost:sacrifice]
 - **Living Death** (Sorcery): Exile all cards from each player's graveyard, then each player sacrifices a creature, then put all cards from each player's exile into the battlefield [needs: field:move_card_zone.all, field:move_card_zone.filter, field:move_card_zone.from, field:move_card_zone.saveAs, field:move_card_zone.who, field:sacrifice_permanent.all, field:sacrifice_permanent.filter, field:sacrifice_permanent.who, field:move_card_zone.what]
@@ -43,17 +43,17 @@ Reading guide: each card below shows the oracle text and what the structured JSO
 - **Grisly Salvage** (Instant): Look at the top five cards of your library, then you may choose a creature or land from among the looked-at cards, then put the chosen object into your hand, then put the rest of the looked-at cards into your graveyard [needs: step:look_top, field:look_top.reveal, step:choose, field:choose.count, field:choose.from, field:choose.fromLooked, field:choose.saveAs, field:move_card_zone.what]
 - **Umbral Collar Zealot** (Creature — Human Cleric): sacrifice a creature or artifact you control: Surveil 1 [needs: cost:sacrifice, step:surveil]
 - **Grim Backwoods** (Land): {T}: add {C} | {2}{B}{G}, {T}, sacrifice a creature you control: Draw a card [needs: cost:sacrifice]
-- **Journey to Eternity // Atzal, Cave of Eternity** (Legendary Enchantment — Aura // Legendary Land): [targets: target creature you control] | Whenever the enchanted creature dies: Return that object from the graveyard to the battlefield, then put Journey to Eternity // Atzal, Cave of Eternity onto the battlefield | Keyword back_face Atzal, Cave of Eternity | {T}: add one mana of any color | {3}{B}{G}, {T}: [targets: target creature card in your graveyard] Return target creature card in your graveyard from the graveyard to the battlefield [needs: keyword:enchant, trigger:subject, field:move_card_zone.transformed, mana:variable]
+- **Journey to Eternity // Atzal, Cave of Eternity** (Legendary Enchantment — Aura // Legendary Land): [targets: target creature you control] | Whenever the enchanted creature dies: Return that object from the graveyard to the battlefield, then put Journey to Eternity // Atzal, Cave of Eternity onto the battlefield | Keyword back_face Atzal, Cave of Eternity | {T}: add one mana of any color | {3}{B}{G}, {T}: [targets: target creature card in your graveyard] Return target creature card in your graveyard from the graveyard to the battlefield [needs: keyword:enchant, face, trigger:subject, field:move_card_zone.transformed, mana:variable]
 - **Urborg, Tomb of Yawgmoth** (Legendary Land): Lands are swamps in addition to their other types [needs: static, static:addTypes]
 - **Cabal Coffers** (Land): {2}, {T}: add {{B}} for each Swamp you control [needs: mana:variable]
 - **Crypt of Agadeem** (Land): If Crypt of Agadeem would enter, it enters tapped | {T}: add {B} | {2}, {T}: add {{B}} for each black creature card in your graveyard [needs: replacement:would_enter, mana:variable]
 - **Dryad Arbor** (Land Creature — Forest Dryad): {T}: add {G} [implemented]
-- **Westvale Abbey // Ormendahl, Profane Prince** (Land // Legendary Creature — Demon): {T}: add {C} | {5}, {T}, pay 1 life: Create a 1/1 white and black Human Cleric creature token | {5}, {T}, sacrifice 5 creatures you control: Transform Westvale Abbey // Ormendahl, Profane Prince, then untap Westvale Abbey // Ormendahl, Profane Prince | Keyword flying | Keyword lifelink | Keyword indestructible | Keyword haste [needs: cost:life, cost:sacrifice, step:transform]
+- **Westvale Abbey // Ormendahl, Profane Prince** (Land // Legendary Creature — Demon): {T}: add {C} | {5}, {T}, pay 1 life: Create a 1/1 white and black Human Cleric creature token | {5}, {T}, sacrifice 5 creatures you control: Transform Westvale Abbey // Ormendahl, Profane Prince, then untap Westvale Abbey // Ormendahl, Profane Prince | Keyword flying | Keyword lifelink | Keyword indestructible | Keyword haste [needs: face, cost:life, cost:sacrifice, step:transform]
 - **Command Beacon** (Land): {T}: add {C} | {T}, sacrifice Command Beacon: Put a card into your hand [needs: filter:isCommander, cost:sacrifice, field:move_card_zone.filter, field:move_card_zone.from]
 - **Bojuka Bog** (Land): If Bojuka Bog would enter, it enters tapped | Whenever Bojuka Bog enters: [targets: target player] Exile a card | {T}: add {B} [needs: replacement:would_enter, field:move_card_zone.what]
 - **Khalni Garden** (Land): If Khalni Garden would enter, it enters tapped | Whenever Khalni Garden enters: Create a 0/1 green Plant creature token | {T}: add {G} [needs: replacement:would_enter]
 - **Dakmor Salvage** (Land): If Dakmor Salvage would enter, it enters tapped | {T}: add {B} | Keyword dredge 2 [needs: replacement:would_enter]
-- **Bala Ged Recovery // Bala Ged Sanctuary** (Sorcery // Land): [targets: target card in your graveyard] Put target card in your graveyard into your hand | If Bala Ged Recovery // Bala Ged Sanctuary would enter, it enters tapped | {T}: add {G} [needs: field:move_card_zone.from, replacement:would_enter]
+- **Bala Ged Recovery // Bala Ged Sanctuary** (Sorcery // Land): [targets: target card in your graveyard] Put target card in your graveyard into your hand | If Bala Ged Recovery // Bala Ged Sanctuary would enter, it enters tapped | {T}: add {G} [needs: face, field:move_card_zone.from, replacement:would_enter]
 - **Yavimaya, Cradle of Growth** (Legendary Land): Lands are forests in addition to their other types [needs: static, static:addTypes]
 - **Reliquary Tower** (Land): You have no maximum hand size | {T}: add {C} [needs: static]
 - **Rogue's Passage** (Land): {T}: add {C} | {4}, {T}: [targets: target creature] Target creature can't be blocked until end of turn [needs: step:grant_effect, field:grant_effect.modify]
@@ -289,7 +289,7 @@ Re-rendered plain English:
 Syr Konrad, the Grim [draft]
   [a1] triggered [needed: needs trigger:subject, trigger:multi_event, trigger:unspecified, trigger:zones, trigger:leaves, field:damage_target.source, field:damage_target.who]
     Oracle: Whenever another creature dies, or a creature card is put into a graveyard from anywhere other than the battlefield, or a creature card leaves your graveyard, Syr Konrad deals 1 damage to each opponent.
-    Trigger: Whenever an another creature dies or a creature unspecified or a creature unspecified or a creature unspecified or a creature unspecified or a creature card in your graveyard leaves a graveyard
+    Trigger: Whenever an another creature dies or a creature unspecified from anywhere other than the battlefield or a creature card in your graveyard leaves a graveyard
     Effect: Syr Konrad, the Grim deals 1 damage to the target.
   [a2] activated [needed: needs field:mill.who]
     Oracle: {1}{B}: Each player mills a card. (They each put the top card of their library into their graveyard.)
@@ -354,31 +354,31 @@ Re-rendered plain English:
 
 ```
 Sheoldred // The True Scriptures [draft]
-  [a1] keyword [implemented]
+  [a1] keyword [needed: needs face]
     Oracle: Sheoldred: Menace
     Keyword: menace
-  [a2] triggered [needed: needs field:sacrifice_permanent.filter, field:sacrifice_permanent.who]
+  [a2] triggered [needed: needs face, field:sacrifice_permanent.filter, field:sacrifice_permanent.who]
     Oracle: When Sheoldred enters, each opponent sacrifices a nontoken creature or planeswalker of their choice.
     Trigger: Whenever Sheoldred // The True Scriptures enters
     Effect: Each opponent sacrifices a creature or planeswalker.
-  [a3] activated [needed: needs timing, field:move_card_zone.from, field:move_card_zone.transformed, field:move_card_zone.who]
+  [a3] activated [needed: needs timing, face, field:move_card_zone.from, field:move_card_zone.transformed, field:move_card_zone.who]
     Oracle: {4}{B}: Exile Sheoldred, then return it to the battlefield transformed under its owner's control. Activate only as a sorcery and only if an opponent has eight or more cards in their graveyard.
     Cost: {4}{B}
     Timing: sorcery; an opponent has 8 or greater cards in graveyard
     Effect: Exile Sheoldred // The True Scriptures. Then, put Sheoldred // The True Scriptures onto the battlefield.
-  [a4] keyword [implemented]
+  [a4] keyword [needed: needs face]
     Oracle: The True Scriptures: (As this Saga enters and after your draw step, add a lore counter.)
     Keyword: saga
-  [a5] triggered [needed: needs trigger:counter_put, trigger:chapters, targets:multi, targets:per_opponent]
+  [a5] triggered [needed: needs trigger:counter_put, trigger:chapters, targets:multi, targets:per_opponent, face]
     Oracle: I — For each opponent, destroy up to one target creature or planeswalker that player controls.
     Trigger: Chapter I
     Target t1: up to one target creature or planeswalker an opponent controls (one choice for each opponent)  <- prompt: "Choose up to one target creature or planeswalker an opponent controls (one choice for each opponent)."
     Effect: Destroy up to one target creature or planeswalker an opponent controls (one choice for each opponent).
-  [a6] triggered [needed: needs trigger:counter_put, trigger:chapters, field:discard.who, field:mill.who]
+  [a6] triggered [needed: needs trigger:counter_put, trigger:chapters, face, field:discard.who, field:mill.who]
     Oracle: II — Each opponent discards three cards, then mills three cards.
     Trigger: Chapter II
     Effect: Each opponent discard 3 cards. Then, each opponent mill 3 cards.
-  [a7] triggered [needed: needs trigger:counter_put, trigger:chapters, field:move_card_zone.all, field:move_card_zone.filter, field:move_card_zone.from, field:move_card_zone.faceUp]
+  [a7] triggered [needed: needs trigger:counter_put, trigger:chapters, face, field:move_card_zone.all, field:move_card_zone.filter, field:move_card_zone.from, field:move_card_zone.faceUp]
     Oracle: III — Put all creature cards from all graveyards onto the battlefield under your control. Exile this Saga, then return it to the battlefield (front face up).
     Trigger: Chapter III
     Effect: Put all cards from your graveyard into the battlefield. Then, exile Sheoldred // The True Scriptures. Then, put Sheoldred // The True Scriptures onto the battlefield.
@@ -390,7 +390,7 @@ Player prompts:
 - Sheoldred // The True Scriptures: choose a target: Choose up to one target creature or planeswalker an opponent controls (one choice for each opponent).
 - Sheoldred // The True Scriptures: discard: Choose 3 cards to discard.
 
-Implementation: needed (field:sacrifice_permanent.filter, field:sacrifice_permanent.who, timing, field:move_card_zone.from, field:move_card_zone.transformed, field:move_card_zone.who, trigger:counter_put, trigger:chapters, targets:multi, targets:per_opponent, field:discard.who, field:mill.who, field:move_card_zone.all, field:move_card_zone.filter, field:move_card_zone.faceUp)
+Implementation: needed (face, field:sacrifice_permanent.filter, field:sacrifice_permanent.who, timing, field:move_card_zone.from, field:move_card_zone.transformed, field:move_card_zone.who, trigger:counter_put, trigger:chapters, targets:multi, targets:per_opponent, field:discard.who, field:mill.who, field:move_card_zone.all, field:move_card_zone.filter, field:move_card_zone.faceUp)
 
 ### Zulaport Cutthroat
 
@@ -550,7 +550,7 @@ Braids, Arisen Nightmare [draft]
   [a1] triggered [needed: needs ref:sacrificed, quantity:players_count, field:sacrifice_permanent.filter, field:sacrifice_permanent.sharesCardTypeWith, field:sacrifice_permanent.who, predicate:step_done, field:life_change.amount, field:life_change.lose, field:life_change.onlyForPlayersWhoDidNot, field:life_change.who, predicate:all, predicate:not]
     Oracle: At the beginning of your end step, you may sacrifice an artifact, creature, enchantment, land, or planeswalker. If you do, each opponent may sacrifice a permanent of their choice that shares a card type with it. For each opponent who doesn't, that player loses 2 life and you draw a card.
     Trigger: At the beginning of your end step
-    Effect: You may sacrifice an artifact, creature, enchantment, land, or planeswalker you control. Then, IF you did (s1): you may each opponent sacrifices a permanent. Then, IF you did (s1) and it is not true that you did (s2): each opponent gains 2 life. Then, IF you did (s1): draw the number of opponents for which it is not true that you did (s2) cards.
+    Effect: You may sacrifice an artifact, creature, enchantment, land, or planeswalker you control. Then, IF you did (s1): you may each opponent sacrifices a permanent. Then, IF you did (s1) and it is not true that that player did (s2): each opponent gains 2 life. Then, IF you did (s1): draw the number of opponents for which it is not true that that player did (s2) cards.
 ```
 
 Player prompts:
@@ -993,15 +993,15 @@ Re-rendered plain English:
 
 ```
 Agadeem's Awakening // Agadeem, the Undercrypt [draft]
-  [a1] spell_effect [needed: needs targets:multi, field:reanimate.differentManaValues]
+  [a1] spell_effect [needed: needs targets:multi, targets:any_number, face, field:reanimate.differentManaValues]
     Oracle: Agadeem's Awakening: Return from your graveyard to the battlefield any number of target creature cards that each have a different mana value X or less.
-    Target t1: up to 99 target creature cards with mana value less than or equal to X in your graveyard  <- prompt: "Choose up to 99 target creature cards with mana value less than or equal to X in your graveyard."
-    Effect: Return up to 99 target creature cards with mana value less than or equal to X in your graveyard from the graveyard to the battlefield.
-  [a2] replacement [needed: needs replacement:would_enter]
+    Target t1: any number of target creature cards with mana value less than or equal to X in your graveyard  <- prompt: "Choose up to 99 target creature cards with mana value less than or equal to X in your graveyard."
+    Effect: Return any number of target creature cards with mana value less than or equal to X in your graveyard from the graveyard to the battlefield.
+  [a2] replacement [needed: needs replacement:would_enter, face]
     Oracle: Agadeem, the Undercrypt: As this land enters, you may pay 3 life. If you don't, it enters tapped.
     Replacement: If Agadeem's Awakening // Agadeem, the Undercrypt would enter, modify it: {"tapped":true,"unlessPay":{"life":3}}
     (optional: Do you want to use this ability?)
-  [a3] mana [implemented]
+  [a3] mana [needed: needs face]
     Oracle: {T}: Add {B}.
     Cost: {T}
     Mana: add {B}
@@ -1013,7 +1013,7 @@ Player prompts:
 - Agadeem's Awakening // Agadeem, the Undercrypt: optional: Do you want to use this ability?
 - Agadeem's Awakening // Agadeem, the Undercrypt: optional: Do you want to apply this replacement?
 
-Implementation: needed (targets:multi, field:reanimate.differentManaValues, replacement:would_enter)
+Implementation: needed (targets:multi, targets:any_number, face, field:reanimate.differentManaValues, replacement:would_enter)
 
 ### Disciple of Freyalise // Garden of Freyalise
 
@@ -1030,15 +1030,15 @@ Re-rendered plain English:
 
 ```
 Disciple of Freyalise // Garden of Freyalise [draft]
-  [a1] triggered [needed: needs ref:sacrificed, field:sacrifice_permanent.filter, quantity:stat, field:life_change.amount, predicate:step_done]
+  [a1] triggered [needed: needs ref:sacrificed, face, field:sacrifice_permanent.filter, quantity:stat, field:life_change.amount, predicate:step_done]
     Oracle: Disciple of Freyalise: When this creature enters, you may sacrifice another creature. If you do, you gain X life and draw X cards, where X is that creature's power.
     Trigger: Whenever Disciple of Freyalise // Garden of Freyalise enters
     Effect: You may sacrifice an another creature you control. Then, IF you did (s1): gain the sacrificed permanent's power life. Then, IF you did (s1): draw the sacrificed permanent's power cards.
-  [a2] replacement [needed: needs replacement:would_enter]
+  [a2] replacement [needed: needs replacement:would_enter, face]
     Oracle: Garden of Freyalise: As this land enters, you may pay 3 life. If you don't, it enters tapped.
     Replacement: If Disciple of Freyalise // Garden of Freyalise would enter, modify it: {"tapped":true,"unlessPay":{"life":3}}
     (optional: Do you want to use this ability?)
-  [a3] mana [implemented]
+  [a3] mana [needed: needs face]
     Oracle: {T}: Add {G}.
     Cost: {T}
     Mana: add {G}
@@ -1050,7 +1050,7 @@ Player prompts:
 - Disciple of Freyalise // Garden of Freyalise: optional: Do you want to use this ability?
 - Disciple of Freyalise // Garden of Freyalise: optional: Do you want to apply this replacement?
 
-Implementation: needed (ref:sacrificed, field:sacrifice_permanent.filter, quantity:stat, field:life_change.amount, predicate:step_done, replacement:would_enter)
+Implementation: needed (ref:sacrificed, face, field:sacrifice_permanent.filter, quantity:stat, field:life_change.amount, predicate:step_done, replacement:would_enter)
 
 ### Spymaster's Vault
 
@@ -1137,14 +1137,14 @@ Re-rendered plain English:
 
 ```
 Malakir Rebirth // Malakir Mire [draft]
-  [a1] spell_effect [needed: needs field:life_change.amount, field:life_change.lose, step:grant_effect, field:grant_effect.modify]
+  [a1] spell_effect [needed: needs face, field:life_change.amount, field:life_change.lose, step:grant_effect, field:grant_effect.modify]
     Oracle: Malakir Rebirth: Choose target creature. You lose 2 life. Until end of turn, that creature gains "When this creature dies, return it to the battlefield tapped under its owner's control."
     Target t1: target creature  <- prompt: "Choose target creature."
     Effect: Gain 2 life. Then, target creature gains an ability until end of turn.
-  [a2] replacement [needed: needs replacement:would_enter]
+  [a2] replacement [needed: needs replacement:would_enter, face]
     Oracle: Malakir Mire: This land enters tapped.
     Replacement: If Malakir Rebirth // Malakir Mire would enter, it enters tapped
-  [a3] mana [implemented]
+  [a3] mana [needed: needs face]
     Oracle: {T}: Add {B}.
     Cost: {T}
     Mana: add {B}
@@ -1154,7 +1154,7 @@ Player prompts:
 
 - Malakir Rebirth // Malakir Mire: choose a target: Choose target creature.
 
-Implementation: needed (field:life_change.amount, field:life_change.lose, step:grant_effect, field:grant_effect.modify, replacement:would_enter)
+Implementation: needed (face, field:life_change.amount, field:life_change.lose, step:grant_effect, field:grant_effect.modify, replacement:would_enter)
 
 ### Susur Secundi, Void Altar
 
@@ -1247,14 +1247,14 @@ Re-rendered plain English:
 
 ```
 Midgar, City of Mako // Reactor Raid [draft]
-  [a1] replacement [needed: needs replacement:would_enter]
+  [a1] replacement [needed: needs replacement:would_enter, face]
     Oracle: Midgar, City of Mako: This land enters tapped.
     Replacement: If Midgar, City of Mako // Reactor Raid would enter, it enters tapped
-  [a2] mana [implemented]
+  [a2] mana [needed: needs face]
     Oracle: {T}: Add {B}.
     Cost: {T}
     Mana: add {B}
-  [a3] spell_effect [needed: needs field:sacrifice_permanent.filter, predicate:step_done]
+  [a3] spell_effect [needed: needs face, field:sacrifice_permanent.filter, predicate:step_done]
     Oracle: Reactor Raid: You may sacrifice an artifact or creature. If you do, draw two cards. (Then exile this card. You may play the land later from exile.)
     Effect: You may sacrifice an artifact or creature you control. Then, IF you did (s1): draw 2 cards.
 ```
@@ -1263,7 +1263,7 @@ Player prompts:
 
 - Midgar, City of Mako // Reactor Raid: optional: Do you want to sacrifice an artifact or creature you control?
 
-Implementation: needed (replacement:would_enter, field:sacrifice_permanent.filter, predicate:step_done)
+Implementation: needed (replacement:would_enter, face, field:sacrifice_permanent.filter, predicate:step_done)
 
 ### Fell the Profane // Fell Mire
 
@@ -1280,15 +1280,15 @@ Re-rendered plain English:
 
 ```
 Fell the Profane // Fell Mire [draft]
-  [a1] spell_effect [implemented]
+  [a1] spell_effect [needed: needs face]
     Oracle: Fell the Profane: Destroy target creature or planeswalker.
     Target t1: target creature or planeswalker  <- prompt: "Choose target creature or planeswalker."
     Effect: Destroy target creature or planeswalker.
-  [a2] replacement [needed: needs replacement:would_enter]
+  [a2] replacement [needed: needs replacement:would_enter, face]
     Oracle: Fell Mire: As this land enters, you may pay 3 life. If you don't, it enters tapped.
     Replacement: If Fell the Profane // Fell Mire would enter, modify it: {"tapped":true,"unlessPay":{"life":3}}
     (optional: Do you want to use this ability?)
-  [a3] mana [implemented]
+  [a3] mana [needed: needs face]
     Oracle: {T}: Add {B}.
     Cost: {T}
     Mana: add {B}
@@ -1300,7 +1300,7 @@ Player prompts:
 - Fell the Profane // Fell Mire: optional: Do you want to use this ability?
 - Fell the Profane // Fell Mire: optional: Do you want to apply this replacement?
 
-Implementation: needed (replacement:would_enter)
+Implementation: needed (face, replacement:would_enter)
 
 ### Temple of the False God
 
@@ -1374,18 +1374,18 @@ Re-rendered plain English:
 
 ```
 Revitalizing Repast // Old-Growth Grove [draft]
-  [a1] spell_effect [needed: needs step:add_counters, field:add_counters.on, step:grant_effect, field:grant_effect.modify]
+  [a1] spell_effect [needed: needs face, step:add_counters, field:add_counters.on, step:grant_effect, field:grant_effect.modify]
     Oracle: Revitalizing Repast: Put a +1/+1 counter on target creature. It gains indestructible until end of turn.
     Target t1: target creature  <- prompt: "Choose target creature."
     Effect: Put a +1/+1 counter on target creature. Then, target creature gains indestructible until end of turn.
-  [a2] replacement [needed: needs replacement:would_enter]
+  [a2] replacement [needed: needs replacement:would_enter, face]
     Oracle: Old-Growth Grove: This land enters tapped.
     Replacement: If Revitalizing Repast // Old-Growth Grove would enter, it enters tapped
-  [a3] mana [implemented]
+  [a3] mana [needed: needs face]
     Oracle: {T}: Add {B} or {G}.
     Cost: {T}
     Mana: add {B}
-  [a4] mana [implemented]
+  [a4] mana [needed: needs face]
     Oracle: {T}: Add {B} or {G}.
     Cost: {T}
     Mana: add {G}
@@ -1395,7 +1395,7 @@ Player prompts:
 
 - Revitalizing Repast // Old-Growth Grove: choose a target: Choose target creature.
 
-Implementation: needed (step:add_counters, field:add_counters.on, step:grant_effect, field:grant_effect.modify, replacement:would_enter)
+Implementation: needed (face, step:add_counters, field:add_counters.on, step:grant_effect, field:grant_effect.modify, replacement:would_enter)
 
 ### Path of Ancestry
 
@@ -1529,6 +1529,7 @@ Implementation: needed (replacement:would_enter, scripted:cards_share_a_land_typ
 | `trigger:subject` | 14 | Meren of Clan Nel Toth; Grim Haruspex; Blood Artist; Massacre Wurm; Syr Konrad, the Grim; Mikaeus, the Unhallowed; Zulaport Cutthroat; Butcher of Malakir; Skullclamp; Twilight Diviner; Grave Pact; Midnight Reaper; Dictate of Erebos; Journey to Eternity // Atzal, Cave of Eternity |
 | `field:life_change.amount` | 13 | Gray Merchant of Asphodel; High Market; Blood Artist; Massacre Wurm; Haywire Mite; Zulaport Cutthroat; Braids, Arisen Nightmare; Reanimate; Kokusho, the Evening Star; Junji, the Midnight Sky; Jarad, Golgari Lich Lord; Disciple of Freyalise // Garden of Freyalise; Malakir Rebirth // Malakir Mire |
 | `field:sacrifice_permanent.who` | 13 | Plaguecrafter; Accursed Marauder; Fleshbag Marauder; Sheoldred // The True Scriptures; Living Death; Butcher of Malakir; Animate Dead; Grave Pact; Braids, Arisen Nightmare; Sheoldred, Whispering One; Demon's Disciple; Merciless Executioner; Dictate of Erebos |
+| `face` | 10 | Sheoldred // The True Scriptures; Journey to Eternity // Atzal, Cave of Eternity; Westvale Abbey // Ormendahl, Profane Prince; Agadeem's Awakening // Agadeem, the Undercrypt; Disciple of Freyalise // Garden of Freyalise; Malakir Rebirth // Malakir Mire; Midgar, City of Mako // Reactor Raid; Fell the Profane // Fell Mire; Bala Ged Recovery // Bala Ged Sanctuary; Revitalizing Repast // Old-Growth Grove |
 | `field:life_change.lose` | 10 | Gray Merchant of Asphodel; Blood Artist; Massacre Wurm; Zulaport Cutthroat; Braids, Arisen Nightmare; Reanimate; Kokusho, the Evening Star; Junji, the Midnight Sky; Jarad, Golgari Lich Lord; Malakir Rebirth // Malakir Mire |
 | `static` | 10 | Carrion Feeder; Mikaeus, the Unhallowed; Skullclamp; Animate Dead; Wight of the Reliquary; Fiend Artisan; Jarad, Golgari Lich Lord; Urborg, Tomb of Yawgmoth; Yavimaya, Cradle of Growth; Reliquary Tower |
 | `field:move_card_zone.from` | 9 | Meren of Clan Nel Toth; Eternal Witness; Sheoldred // The True Scriptures; Living Death; Insidious Fungus; Jarad, Golgari Lich Lord; Takenuma, Abandoned Mire; Command Beacon; Bala Ged Recovery // Bala Ged Sanctuary |
@@ -1578,7 +1579,6 @@ Implementation: needed (replacement:would_enter, scripted:cards_share_a_land_typ
 | `step:proliferate` | 2 | Cankerbloom; Yawgmoth, Thran Physician |
 | `step:scry` | 2 | Viscera Seer; Path of Ancestry |
 | `step:surveil` | 2 | Twilight Diviner; Umbral Collar Zealot |
-| `trigger:intervening_if` | 2 | Mikaeus, the Unhallowed; Animate Dead |
 | `trigger:zones` | 2 | Syr Konrad, the Grim; Twilight Diviner |
 | `zone:hand` | 2 | Takenuma, Abandoned Mire; Boseiju, Who Endures |
 | `cast_option:evoke` | 1 | Shriekmaw |
@@ -1617,7 +1617,6 @@ Implementation: needed (replacement:would_enter, scripted:cards_share_a_land_typ
 | `keyword:landwalk` | 1 | Sheoldred, Whispering One |
 | `predicate:all` | 1 | Braids, Arisen Nightmare |
 | `predicate:compare` | 1 | Susur Secundi, Void Altar |
-| `predicate:matches` | 1 | Mikaeus, the Unhallowed |
 | `predicate:source_state` | 1 | Animate Dead |
 | `quantity:count_this_turn` | 1 | Spymaster's Vault |
 | `quantity:devotion` | 1 | Gray Merchant of Asphodel |
@@ -1638,12 +1637,15 @@ Implementation: needed (replacement:would_enter, scripted:cards_share_a_land_typ
 | `step:permission_to_play` | 1 | Dauthi Voidwalker |
 | `step:rewrite_enchant` | 1 | Animate Dead |
 | `step:transform` | 1 | Westvale Abbey // Ormendahl, Profane Prince |
+| `targets:any_number` | 1 | Agadeem's Awakening // Agadeem, the Undercrypt |
 | `targets:per_opponent` | 1 | Sheoldred // The True Scriptures |
 | `trigger:batch` | 1 | Twilight Diviner |
 | `trigger:chapters` | 1 | Sheoldred // The True Scriptures |
 | `trigger:counter_put` | 1 | Sheoldred // The True Scriptures |
+| `trigger:damage_source` | 1 | Mikaeus, the Unhallowed |
 | `trigger:dealt_damage` | 1 | Mikaeus, the Unhallowed |
 | `trigger:exploit` | 1 | Sidisi, Undead Vizier |
+| `trigger:intervening_if` | 1 | Animate Dead |
 | `trigger:leaves` | 1 | Syr Konrad, the Grim |
 | `trigger:unspecified` | 1 | Syr Konrad, the Grim |
 | `zone:graveyard` | 1 | Jarad, Golgari Lich Lord |

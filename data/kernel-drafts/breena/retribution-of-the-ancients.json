@@ -15,7 +15,12 @@
               "ref": "X"
             },
             "remove": true,
-            "from": "self"
+            "from": {
+              "types": [
+                "creature"
+              ],
+              "controller": "you"
+            }
           }
         }
       ],
@@ -80,6 +85,7 @@
       "implementation": "needed",
       "needs": [
         "cost:counters",
+        "cost:counters_from_filter",
         "quantity:math"
       ]
     }

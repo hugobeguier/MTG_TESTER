@@ -16,8 +16,10 @@
       },
       "implementation": "needed",
       "needs": [
-        "replacement:would_enter"
-      ]
+        "replacement:would_enter",
+        "face"
+      ],
+      "face": "Midgar, City of Mako"
     },
     {
       "id": "a2",
@@ -35,8 +37,11 @@
           }
         ]
       },
-      "implementation": "implemented",
-      "needs": []
+      "implementation": "needed",
+      "needs": [
+        "face"
+      ],
+      "face": "Midgar, City of Mako"
     },
     {
       "id": "a3",
@@ -90,9 +95,11 @@
       ],
       "implementation": "needed",
       "needs": [
+        "face",
         "field:sacrifice_permanent.filter",
         "predicate:step_done"
-      ]
+      ],
+      "face": "Reactor Raid"
     }
   ],
   "review": {

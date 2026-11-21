@@ -73,20 +73,14 @@
       ],
       "steps": [
         {
-          "kind": "grant_effect",
+          "kind": "regenerate",
           "target": "t1",
-          "modify": [
-            {
-              "grant": "regeneration shield"
-            }
-          ],
           "duration": "until_end_of_turn"
         }
       ],
       "implementation": "needed",
       "needs": [
-        "step:grant_effect",
-        "field:grant_effect.modify"
+        "step:regenerate"
       ]
     }
   ],

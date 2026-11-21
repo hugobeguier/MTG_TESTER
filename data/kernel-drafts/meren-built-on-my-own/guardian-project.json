@@ -13,15 +13,28 @@
           ],
           "token": false,
           "controller": "you"
-        }
-      },
-      "scripted": {
-        "handler": "unique_name_check",
-        "params": {
-          "sameNameAs": [
-            "another creature you control",
-            "a creature card in your graveyard"
-          ]
+        },
+        "interveningIf": {
+          "not": {
+            "check": "name_matches",
+            "obj": "event_object",
+            "among": [
+              {
+                "types": [
+                  "creature"
+                ],
+                "controller": "you",
+                "another": true
+              },
+              {
+                "types": [
+                  "creature"
+                ],
+                "owner": "you",
+                "zone": "graveyard"
+              }
+            ]
+          }
         }
       },
       "steps": [
@@ -33,22 +46,14 @@
       ],
       "implementation": "needed",
       "needs": [
-        "scripted:unique_name_check",
+        "trigger:intervening_if",
+        "predicate:not",
+        "predicate:name_matches",
         "trigger:subject"
       ]
     }
   ],
   "review": {
-    "status": "draft",
-    "ignore": [
-      {
-        "lexeme": "if",
-        "reason": "the intervening-if is the scripted handler unique_name_check (no 'same name as' predicate in the schema; see SCHEMA QUESTION)"
-      },
-      {
-        "lexeme": "another",
-        "reason": "'another creature you control' is a parameter of the scripted unique_name_check handler"
-      }
-    ]
+    "status": "draft"
   }
 }

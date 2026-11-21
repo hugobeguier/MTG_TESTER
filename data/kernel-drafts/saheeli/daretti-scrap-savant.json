@@ -156,12 +156,11 @@
       },
       "steps": [
         {
-          "kind": "grant_effect",
+          "kind": "create_emblem",
           "who": "you",
-          "emblem": true,
-          "modify": [
-            {
-              "grantAbility": {
+          "emblem": {
+            "abilities": [
+              {
                 "kind": "triggered",
                 "text": "Whenever an artifact is put into your graveyard from the battlefield, return that card to the battlefield at the beginning of the next end step.",
                 "trigger": {
@@ -193,20 +192,19 @@
                       }
                     ]
                   }
-                ]
+                ],
+                "id": "em1"
               }
-            }
-          ],
-          "duration": "instant"
+            ]
+          }
         }
       ],
       "implementation": "needed",
       "needs": [
         "timing",
         "cost:loyalty",
-        "step:grant_effect",
-        "field:grant_effect.emblem",
-        "field:grant_effect.modify"
+        "step:create_emblem",
+        "field:create_emblem.emblem"
       ]
     },
     {

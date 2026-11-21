@@ -275,9 +275,8 @@
     }
   ],
   "decisions": [
-    "Draconic Visitor: not in data/cards.db or XMage; oracle text from mtg.wtf (oracleOverride.source, rulings summarised there too). reign-of-dragons does not yet contain this card; copy this file there to keep both identical.",
     "Cards copied from reign-of-dragons (or the other deck dir when absent there); copies in other dirs that differ (Bonders Enclave, Commanders Sphere, Dragonstorm Globe, Orb of Dragonkind, Scourge of Valkas, Swiftfoot Boots) were deck-specific variants, reign-of-dragons version kept.",
-    "SCHEMA QUESTION: review has no notes field (strict), so card rulings (Draconic Visitor token-control ordering, Mycosynth Lattice not-an-artifact-at-creation) live in oracleOverride.source. Propose review.notes: string[].",
-    "SCHEMA QUESTION: replacement `would_create_token` with result instead + create_tokens tokenCount {ref:event_amount} (\"that many\") is used for Draconic Visitor; replaced tokens lose original abilities and other creator instructions (tapped, attacking, haste) still apply: not expressible, kernel behaviour only."
+    "SCHEMA QUESTION: replacement `would_create_token` with result instead + create_tokens tokenCount {ref:event_amount} (\"that many\") is used for Draconic Visitor; replaced tokens lose original abilities and other creator instructions (tapped, attacking, haste) still apply: not expressible, kernel behaviour only.",
+    "Draconic Visitor: not in data/cards.db or XMage; oracle text from mtg.wtf (oracleOverride.source); rulings are in review.notes. Identical copy lives in reign-of-dragons."
   ]
 }

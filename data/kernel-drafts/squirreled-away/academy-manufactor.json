@@ -33,7 +33,9 @@
           "steps": [
             {
               "kind": "create_tokens",
-              "tokenCount": 1,
+              "tokenCount": {
+                "ref": "event_amount"
+              },
               "tokenName": "Clue",
               "tokenColors": [
                 "colorless"
@@ -42,7 +44,9 @@
             },
             {
               "kind": "create_tokens",
-              "tokenCount": 1,
+              "tokenCount": {
+                "ref": "event_amount"
+              },
               "tokenName": "Food",
               "tokenColors": [
                 "colorless"
@@ -51,7 +55,9 @@
             },
             {
               "kind": "create_tokens",
-              "tokenCount": 1,
+              "tokenCount": {
+                "ref": "event_amount"
+              },
               "tokenName": "Treasure",
               "tokenColors": [
                 "colorless"
@@ -63,7 +69,8 @@
       },
       "implementation": "needed",
       "needs": [
-        "replacement:would_create_token"
+        "replacement:would_create_token",
+        "quantity:event_amount"
       ]
     }
   ],

@@ -21,9 +21,9 @@
           "kind": "draw_cards",
           "who": "you",
           "amount": {
-            "ref": "event_amount"
+            "ref": "step_result",
+            "step": "s1"
           },
-          "amountOf": "s1",
           "src": 2
         }
       ],
@@ -32,10 +32,9 @@
       ],
       "implementation": "needed",
       "needs": [
+        "quantity:step_result",
         "field:destroy_all.filter",
-        "field:destroy_all.noRegenerate",
-        "quantity:event_amount",
-        "field:draw_cards.amountOf"
+        "field:destroy_all.noRegenerate"
       ]
     },
     {

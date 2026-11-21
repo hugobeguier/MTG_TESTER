@@ -42,15 +42,15 @@
             "types": [
               "permanent"
             ],
-            "another": true
-          },
-          "sameNameAs": "t1"
+            "another": true,
+            "sameNameAs": "t1"
+          }
         }
       ],
       "implementation": "needed",
       "needs": [
-        "field:destroy_all.filter",
-        "field:destroy_all.sameNameAs"
+        "filter:sameNameAs",
+        "field:destroy_all.filter"
       ]
     }
   ],

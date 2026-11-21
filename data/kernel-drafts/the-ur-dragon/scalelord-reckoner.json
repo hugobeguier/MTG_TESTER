@@ -26,13 +26,7 @@
           ],
           "controller": "you"
         },
-        "interveningIf": {
-          "check": "matches",
-          "obj": "event_object",
-          "filter": {
-            "controller": "opponent"
-          }
-        }
+        "whose": "opponents"
       },
       "targets": [
         {
@@ -67,8 +61,6 @@
       "implementation": "needed",
       "needs": [
         "trigger:becomes_target",
-        "trigger:intervening_if",
-        "predicate:matches",
         "trigger:subject"
       ]
     }

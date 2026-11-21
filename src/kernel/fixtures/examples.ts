@@ -20,7 +20,7 @@ export const sphinx: Fixture = {
       id: "a1", kind: "spell_effect", text: SPHINX_ORACLE,
       steps: [
         { kind: "draw_cards", amount: 2, who: "you", src: 0 },
-        { kind: "life_change", lifeDelta: 2, who: "you", src: 1, condition: { when: "on_resolution", if: { check: "cast_during", phase: "main" }, src: 1 } }
+        { kind: "life_change", lifeDelta: 2, who: "you", src: 1, condition: { when: "on_resolution", if: { check: "cast_during", phase: "your_main" }, src: 1 } }
       ]
     }]
   },

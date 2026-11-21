@@ -171,7 +171,8 @@
             "card": "Shadrix Silverquill",
             "ability": "a3"
           }
-        }
+        },
+        "distinctTargets": true
       },
       "id": "a3",
       "prompt": {
@@ -187,6 +188,7 @@
         "modes",
         "ref:iterated",
         "modes:multiple",
+        "modes:distinct_targets",
         "field:create_tokens.tokenKeywords",
         "field:create_tokens.who",
         "field:draw_cards.who",

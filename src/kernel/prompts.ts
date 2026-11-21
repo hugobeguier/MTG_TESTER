@@ -68,7 +68,11 @@ export function describeQuantity(q: Quantity): string {
   switch (q.ref) {
     case "X": return "X";
     case "count": return `the number of ${describeFilter(q.of, { plural: true })}`;
-    case "devotion": return `your devotion to ${q.color}`;
+    case "devotion": return Array.isArray(q.color) ? `your devotion to ${q.color.join(" and ")} (one count of symbols of ${list(q.color)}; a hybrid symbol counts once)` : `your devotion to ${q.color}`;
+    case "opponents_count": return "the number of opponents you have";
+    case "step_result": return `the number affected this way (${q.step})`;
+    case "step_count": return `the number of times (${q.step}) was performed`;
+    case "life_gained_this_turn": return `the amount of life ${q.who === "you" ? "you have" : `${playerName(q.who)} has`} gained this turn`;
     case "stat": return `${refName(q.of)}'s ${q.stat.replace(/_/g, " ")}`;
     case "counters": return `the number of ${q.kind} counters on ${q.on === "you" ? "you" : q.on}`;
     case "life_lost_this_way": return "the life lost this way";
@@ -159,6 +163,8 @@ export function describeFilter(f: ObjectFilter, opts: FilterOptions = {}): strin
   if (f.tapped === true) adjectives.push("tapped");
   if (f.tapped === false) adjectives.push("untapped");
   if (f.attacking) adjectives.push("attacking");
+  if (f.blocking) adjectives.push("blocking");
+  if (f.enteredThisTurn) adjectives.push("that entered this turn");
   if (f.isCommander) adjectives.push("commander");
 
   for (const t of f.notTypes ?? []) adjectives.push(`non${t.toLowerCase()}`);
@@ -194,6 +200,8 @@ export function describeFilter(f: ObjectFilter, opts: FilterOptions = {}): strin
   if (f.without?.length) out += ` without ${list(f.without, "or")}`;
   if (f.chosenType) out += " of the chosen type";
   if (f.attackingYou) out += " attacking you";
+  if (f.attackingOpponent) out += " attacking one of your opponents";
+  if (f.sameNameAs) out += ` with the same name as ${refName(f.sameNameAs)}`;
   if (f.sharesCreatureTypeWith) out += ` that shares a creature type with ${refName(f.sharesCreatureTypeWith)}`;
   if (f.sameName) out += " with the same name";
   if (f.hasCounter) out += ` with ${f.hasCounter === "any" ? "a counter" : `a ${f.hasCounter} counter`} on it`;
@@ -205,6 +213,8 @@ export function describeFilter(f: ObjectFilter, opts: FilterOptions = {}): strin
   if (f.controller === "you") out += " you control";
   else if (f.controller === "opponent") out += " an opponent controls";
   else if (f.controller === "defending_player") out += " the defending player controls";
+  else if (f.controller === "that_player") out += " that player controls";
+  else if (f.controller === "active_player") out += " the active player controls";
   if (inZone) {
     const who = f.owner === "you" ? "your" : f.owner === "opponent" ? "an opponent's" : "a";
     out += f.zone === "exile" ? (f.owner === "opponent" ? " an opponent owns in exile" : " in exile") : ` in ${who} ${f.zone}`;
@@ -223,7 +233,7 @@ export function describePredicate(p: Predicate): string {
     return `it is not true that ${describePredicate(p.not)}`;
   }
   switch (p.check) {
-    case "cast_during": return `this spell was cast during ${p.phase === "main" ? "a main phase" : p.phase === "your_turn" ? "your turn" : p.phase === "opponent_turn" ? "an opponent's turn" : p.phase === "end_step" ? "an end step" : "combat"}`;
+    case "cast_during": return `this spell was cast during ${p.phase === "main" ? "a main phase" : p.phase === "your_main" ? "your own main phase" : p.phase === "your_turn" ? "your turn" : p.phase === "opponent_turn" ? "an opponent's turn" : p.phase === "end_step" ? "an end step" : "combat"}`;
     case "cast_from": return `it was cast from ${p.zone}`;
     case "turn_is": return `it is ${p.whose === "yours" ? "your" : "an opponent's"} turn`;
     case "phase_is": return `it is ${p.phase === "main" ? "a main phase" : `the ${PHASE_NOUN[p.phase]}`}`;
@@ -259,7 +269,10 @@ export function describePredicate(p: Predicate): string {
     case "turn_number": return p.cmp.op === "<=" && typeof p.cmp.value === "number" ? `it is ${p.scope === "yours" ? "one of your first" : "one of the first"} ${numberWord(p.cmp.value)} turns of the game` : `${p.scope === "yours" ? "your turn number" : "the turn number"} is ${describeCmp(p.cmp)}`;
     case "chosen_is": return `the chosen ${p.kind.replace(/_/g, " ")} is ${p.value}`;
     case "most_life": return `${p.who === "you" ? "you have" : `${playerName(p.who)} has`} the most life or are tied for the most life`;
-    case "step_done": return `you did (${p.step})`;
+    case "step_done": return `${p.who && p.who !== "you" ? `${playerName(p.who)} did` : "you did"} (${p.step})`;
+    case "mana_spent": return `${p.cmp ? `${describeCmp(p.cmp)} ` : "at least one "}{${p.color}} mana was spent to cast this spell`;
+    case "cast_with": return `it was cast with ${p.option}`;
+    case "name_matches": return `${refName(p.obj)} has the same name as ${list(p.among.map((f) => withArticle(describeFilter(f))))}`;
     case "attacked_defender": return `${p.who === "all" ? "all" : p.who === "none" ? "none" : "at least one"} of those creatures attacked ${p.defender === "you" ? "you" : "you or a planeswalker you control"}`;
   }
 }
@@ -274,7 +287,13 @@ function countPhrase(min: number, max: number): string {
 
 export function describeTarget(t: TargetSpec): string {
   const { min, max } = t.count;
-  const multi = max > 1;
+  const multi = max > 1 || !!t.anyNumber || t.maxQuantity !== undefined;
+  if (t.anyNumber || t.maxQuantity !== undefined) {
+    const lead = t.anyNumber ? "any number of " : `${min === 0 ? "up to " : ""}${describeQuantity(t.maxQuantity!)} `;
+    const another2 = t.filter?.another ? "other " : "";
+    const what = t.what === "player" ? "players" : t.what === "any" ? "targets" : describeFilter(t.filter ?? {}, { plural: true, skipAnother: true });
+    return t.what === "any" ? `${lead}${another2}targets` : `${lead}${another2}target ${what}`;
+  }
   const another = t.filter?.another ? (multi ? "other " : "another ") : "";
   let noun: string;
   if (t.what === "player") noun = multi ? "players" : "player";
@@ -286,7 +305,7 @@ export function describeTarget(t: TargetSpec): string {
 }
 
 function targetTitle(name: string, t: TargetSpec): string {
-  return `${name}: choose ${t.count.max > 1 ? "targets" : "a target"}`;
+  return `${name}: choose ${t.count.max > 1 || t.anyNumber || t.maxQuantity !== undefined ? "targets" : "a target"}`;
 }
 
 // ------------------------------------------------------------------ costs / steps
@@ -311,7 +330,7 @@ export function describeCost(c: Cost): string {
   if ("life" in c) return typeof c.life === "number" ? `pay ${c.life} life` : `pay life equal to ${describeQuantity(c.life)}`;
   if ("exileFrom" in c) return c.what === "self" ? `exile ${selfName()} from ${c.exileFrom}` : `exile ${describeQuantity(c.count)} ${describeFilter({ ...c.what, zone: c.what.zone ?? c.exileFrom }, { plural: c.count !== 1 })}`;
   if ("returnToHand" in c) return c.returnToHand === "self" ? `return ${selfName()} to its owner's hand` : `return ${countedFilter(c.count, c.returnToHand)} to its owner's hand`;
-  if ("counters" in c) return `${c.counters.remove ? "remove" : "put"} ${counterPhrase(c.counters.count, c.counters.kind)} ${c.counters.remove ? "from" : "on"} ${selfName()}`;
+  if ("counters" in c) return `${c.counters.remove ? "remove" : "put"} ${counterPhrase(c.counters.count, c.counters.kind)} ${c.counters.remove ? "from" : "on"} ${c.counters.from === "self" ? selfName() : `among ${describeFilter(c.counters.from, { plural: true })} (you choose which)`}`;
   if ("reveal" in c) return "reveal a card";
   if ("loyalty" in c) {
     const q = c.loyalty;
@@ -422,6 +441,14 @@ export function describeStep(step: Step, targets: Map<string, TargetSpec> = new 
     case "set_life": return `set life total to ${amt(step)}`;
     case "if_else": return `if ${step.if ? describePredicate(step.if) : "?"}: ${(step.then ?? []).map((s) => describeStep(s, targets)).join(", then ")}${step.else?.length ? `; otherwise ${step.else.map((s) => describeStep(s, targets)).join(", then ")}` : ""}`;
     case "rewrite_enchant": return "rewrite this Aura's enchant restriction";
+    case "vote": {
+      const cand = step.candidates ? describeFilter(step.candidates) : (step.voteOptions as string[] | undefined)?.join(" or ") ?? "an option";
+      return `${step.voters === "each_opponent" ? "each opponent" : "each player"} votes for ${step.candidates ? withArticle(cand) : cand}${step.voters === "each_opponent" ? "" : " (starting with you)"}; ${step.tie === "controller_chooses" ? "if tied you choose among the tied" : "every one tied for the most votes wins"}`;
+    }
+    case "exchange_life": return `exchange life totals with ${whoPhrase((step.withWho as Step["who"]) ?? "target_player")}`;
+    case "regenerate": return `regenerate ${t()}`;
+    case "repeat_process": return `${(step.steps ?? []).map((x) => describeStep(x, targets)).join(", then ")}; then repeat this process ${step.repeatIf ? `as long as ${describePredicate(step.repeatIf as Predicate)}` : "as often as you choose"}`;
+    case "create_emblem": return `you get an emblem with "${((step.emblem as { abilities?: { text: string }[] } | undefined)?.abilities ?? []).map((a) => a.text).join(" ")}"`;
     default: return String((step as Step).kind).replace(/_/g, " ");
   }
 }
@@ -453,6 +480,7 @@ export function promptForModes(name: string, modes: Modes): Prompt {
   else if (min === 1 && max === modes.options.length) instruction = "Choose one or more modes.";
   else instruction = `Choose ${numberWord(min)} or more modes (up to ${numberWord(max)}).`;
   if (modes.repeatable) instruction += " You may choose the same mode more than once.";
+  if (modes.distinctTargets) instruction += " Each mode must target a different object or player.";
   return { title: `${name}: choose ${min === 1 && max === 1 ? "a mode" : "modes"}`, instruction };
 }
 
@@ -488,7 +516,7 @@ export function costHasX(c: Cost): boolean {
   return JSON.stringify(c).match(/\{X\}|"ref":"X"/i) !== null;
 }
 
-const DECISION_STEP_KINDS = new Set(["choose", "search_library", "discard", "sacrifice_permanent", "connive", "exploit", "fight_pairs"]);
+const DECISION_STEP_KINDS = new Set(["choose", "search_library", "discard", "sacrifice_permanent", "connive", "exploit", "fight_pairs", "vote"]);
 export function stepNeedsPrompt(step: Step): boolean {
   return step.optional === true || DECISION_STEP_KINDS.has(step.kind);
 }
@@ -501,6 +529,7 @@ function promptForStep(name: string, step: Step, targets: Map<string, TargetSpec
     case "discard": return { title: `${name}: discard`, instruction: `Choose ${step.amount === undefined || step.amount === 1 ? "a card" : `${amt(step)} cards`} to discard.` };
     case "sacrifice_permanent": return { title: `${name}: sacrifice`, instruction: "Choose a permanent to sacrifice." };
     case "fight_pairs": return { title: `${name}: choose fights`, instruction: `Choose which ${step.against ? describeFilter(step.against) : "creature"} each token fights. Each token fights a different one; tokens beyond the number of creatures fight nothing.` };
+    case "vote": return { title: `${name}: vote`, instruction: `Vote for ${step.candidates ? withArticle(describeFilter(step.candidates)) : (step.voteOptions as string[] | undefined)?.join(" or ") ?? "an option"}. Players vote in turn order starting with the caster; ${step.tie === "controller_chooses" ? "ties are broken by the controller" : "every choice tied for the most votes wins"}.` };
     case "connive": return { title: `${name}: connive`, instruction: "Choose a card to discard after drawing (connive)." };
     default: return { title: `${name}: choose`, instruction: "Make a choice." };
   }
@@ -596,7 +625,9 @@ function describeTokens(step: Step): string {
     noun = [right, left?.toLowerCase()].filter(Boolean).join(" ").trim() || noun;
   }
   const kw = Array.isArray(step.tokenKeywords) && step.tokenKeywords.length ? ` with ${list(step.tokenKeywords as string[], "and")}` : "";
-  return `create ${cnt} ${p}/${th} ${colors}${noun} ${count === 1 ? "token" : "tokens"}${kw}`.replace(/\s+/g, " ");
+  const state = `${step.tokenTapped ? " tapped" : ""}${step.tokenAttacking ? (step.tokenAttacking === true ? " and attacking" : step.tokenAttacking === "attacked_opponent" ? " and attacking that opponent" : step.tokenAttacking === "same_defender" ? " and attacking the same defender" : " and attacking (you choose who)") : ""}`;
+  const ab = Array.isArray(step.tokenAbilities) && step.tokenAbilities.length ? ` and "${(step.tokenAbilities as { text: string }[]).map((a) => a.text).join(" ")}"` : "";
+  return `create ${cnt} ${p}/${th} ${colors}${noun} ${count === 1 ? "token" : "tokens"}${kw}${ab}${state}`.replace(/\s+/g, " ");
 }
 
 function zoneDestination(zone: unknown): string {
@@ -690,7 +721,7 @@ function modifierPhrase(m: Modifier, isPlural: boolean, ctx: "static" | "step"):
     if (ctx === "step") return `becomes ${withArticle(types.join(" "))} in addition to its other types`;
     return isPlural ? `are ${types.map(plural).join(", ")} in addition to their other types` : `is also ${withArticle(types.join(" "))}`;
   }
-  if (m.cant) return `can't ${cantText(String(m.cant))}${m.except ? ` (except ${describeFilter(m.except as ObjectFilter, { plural: true })})` : ""}`;
+  if (m.cant) return `can't ${cantText(String(m.cant))}${m.protects ? (m.protects === "you" ? " you" : " you or planeswalkers you control") : ""}${m.except ? ` (except ${describeFilter(m.except as ObjectFilter, { plural: true })})` : ""}`;
   if (m.evasion) {
     const e = m.evasion as { cantBeBlockedBy?: ObjectFilter; unlessDefenderControls?: ObjectFilter };
     const parts: string[] = [];
@@ -804,6 +835,7 @@ export function describeManaSpec(m: ManaSpec): string {
   if ("anyColor" in m) return `${m.anyColor === 1 ? "one mana" : `${numberWord(m.anyColor)} mana of a single color`} of any color${restr(m.restriction, m.abilitiesOf)}`.replace("mana of a single color of any color", "mana of any one color");
   if ("perCount" in m) return `{${m.color}} for each ${describeFilter(m.perCount)}${restr(m.restriction, m.abilitiesOf)}`;
   if ("commanderIdentity" in m) return "one mana of any color in your commander's color identity";
+  if ("anyColorAmount" in m) return `${describeQuantity(m.anyColorAmount)} mana in any combination of colors${restr(m.restriction, m.abilitiesOf)}`;
   if ("chosenColor" in m) return `${m.chosenColor === 1 ? "one mana" : `${numberWord(m.chosenColor)} mana`} of the chosen color${restr(m.restriction, m.abilitiesOf)}`;
   return `if ${describePredicate(m.conditional.if)}: ${m.conditional.then.map(describeManaSpec).join(" and ")}; otherwise ${m.conditional.else.map(describeManaSpec).join(" and ")}`;
 }
@@ -909,7 +941,8 @@ function describeTriggerSingle(tr: NonNullable<Ability["trigger"]>): string {
       if (tr.defender) body += tr.defender === "you" ? " you" : tr.defender === "you_or_your_planeswalkers" ? " you or a planeswalker you control" : " a player other than you";
       break;
     }
-    case "dealt_damage": body = `${objNp ?? "a creature"} ${objPlural ? "are" : "is"} dealt damage`; break;
+    case "damage_prevented": body = `damage that would be dealt to ${actor ?? "you"} is prevented`; break;
+    case "dealt_damage": body =`${objNp ?? "a creature"} ${objPlural ? "are" : "is"} dealt damage`; break;
     case "commit_crime": body = `${actorVerb(ev)} a crime`; break;
     case "block": body = `${objNp ?? "a creature"} ${verb(ev, objPlural)}`; break;
     case "deals_damage": body = `${objNp ?? "a source"} ${verb(ev, objPlural)} damage`; break;
@@ -934,5 +967,7 @@ function describeTriggerSingle(tr: NonNullable<Ability["trigger"]>): string {
 }
 
 function withIf(base: string, tr: NonNullable<Ability["trigger"]>): string {
-  return tr.interveningIf ? `${base}, if ${describePredicate(tr.interveningIf)}` : base;
+  const quals = [tr.notFromZone ? `from anywhere other than ${ZONE_NAMES[tr.notFromZone] ?? tr.notFromZone}` : "", tr.damageSource ? `(damage source: ${withArticle(describeFilter(tr.damageSource))})` : ""].filter(Boolean).join(" ");
+  const withQ = quals ? `${base} ${quals}` : base;
+  return tr.interveningIf ? `${withQ}, if ${describePredicate(tr.interveningIf)}` : withQ;
 }

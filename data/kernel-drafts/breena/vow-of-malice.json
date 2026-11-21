@@ -52,14 +52,16 @@
             "grant": "intimidate"
           },
           {
-            "cant": "attack"
+            "cant": "attack",
+            "protects": "you_and_planeswalkers"
           }
         ]
       },
       "id": "a2",
       "implementation": "needed",
       "needs": [
-        "static"
+        "static",
+        "static:cant_protects"
       ]
     }
   ],

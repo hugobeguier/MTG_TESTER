@@ -25,16 +25,10 @@
         "while": {
           "check": "compare",
           "left": {
-            "math": "+",
-            "args": [
-              {
-                "ref": "devotion",
-                "color": "W"
-              },
-              {
-                "ref": "devotion",
-                "color": "B"
-              }
+            "ref": "devotion",
+            "color": [
+              "W",
+              "B"
             ]
           },
           "cmp": {
@@ -45,7 +39,8 @@
       },
       "implementation": "needed",
       "needs": [
-        "static"
+        "static",
+        "quantity:devotion_multi"
       ]
     },
     {

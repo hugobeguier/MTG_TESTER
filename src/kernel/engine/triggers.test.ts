@@ -145,23 +145,15 @@ describe("Mazemind Tome (counters as costs, scry)", () => {
     expect(res.state).toBe(before);
   });
 
-  it("casting Mazemind Tome is refused: its state trigger (a3) needs trigger:unspecified", () => {
+  it("casting Mazemind Tome works since step 6 (state trigger a3 is modelled); at four page counters it is exiled and you gain 4 life", () => {
     const t = table();
     t.lands("p1", "Island", 2);
-    const tome = t.give("p1", "Mazemind Tome", "hand");
-    const res = t.do({ type: "castSpell", player: "p1", cardId: tome });
-    expect(res.error?.code).toBe("unsupported");
-    expect(res.error?.capability).toContain("trigger:unspecified");
-  });
-
-  it("lenient mode lets it through but reports every ignored ability as an event (never silent)", () => {
-    const t = table(["p1", "p2"], { config: { lenient: true } });
-    t.lands("p1", "Island", 2);
-    const tome = t.give("p1", "Mazemind Tome", "hand");
-    const res = t.ok({ type: "castSpell", player: "p1", cardId: tome });
-    const ignored = res.events.filter((e) => e.type === "unsupported_ignored");
-    expect(ignored.length).toBeGreaterThan(0);
-    expect(JSON.stringify(ignored)).toContain("trigger:unspecified");
+    for (let i = 0; i < 3; i++) t.give("p1", "Island", "library");
+    const tome = t.give("p1", "Mazemind Tome", "battlefield", { counters: { page: 3 } });
+    t.ok({ type: "activateAbility", player: "p1", sourceId: tome, abilityId: "a1" });
+    for (let i = 0; i < 6 && (t.state.stack.length || t.state.pending); i++) { if (t.state.pending) t.ok({ type: "answerDecision", player: t.state.pending.player, decisionId: t.state.pending.id, choice: { ids: t.state.pending.options.map((o) => o.id).slice(0, 1) } }); else t.resolveTop(); }
+    expect(t.obj(tome).zone).toBe("exile");
+    expect(t.p("p1").life).toBe(44);
   });
 });
 

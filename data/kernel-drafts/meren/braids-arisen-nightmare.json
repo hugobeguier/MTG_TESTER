@@ -103,7 +103,8 @@
                 {
                   "not": {
                     "check": "step_done",
-                    "step": "s2"
+                    "step": "s2",
+                    "who": "that_player"
                   }
                 }
               ]
@@ -120,7 +121,8 @@
             "where": {
               "not": {
                 "check": "step_done",
-                "step": "s2"
+                "step": "s2",
+                "who": "that_player"
               }
             }
           },

@@ -62,6 +62,7 @@
       ],
       "steps": [
         {
+          "src": 0,
           "kind": "attach",
           "what": "self",
           "to": "t1"

@@ -106,12 +106,6 @@
     }
   ],
   "review": {
-    "status": "draft",
-    "ignore": [
-      {
-        "lexeme": "only",
-        "reason": "'Spend this mana only to cast Dragon spells or activate abilities of Dragons' is the mana restriction/abilitiesOf filters"
-      }
-    ]
+    "status": "draft"
   }
 }

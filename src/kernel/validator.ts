@@ -121,7 +121,7 @@ function stripEachFalsePositives(c: string): string {
 interface Lexeme { id: string; test: (clause: string) => boolean; backed: RegExp; hint: string }
 
 const re = (r: RegExp) => (c: string) => r.test(c);
-const COND_BACK = /"conditions":\[\{|"chosen_is"|"conditional":\{|"condition":\{|"interveningIf"|"while":|"unlessPay"|"kind":"if_else"|"replacement":\{|"ifPaid"|"forAsLongAs"|"only":\[\{|"nth|"limit"|"cast_during"|"mustAttack"/;
+const COND_BACK = /"repeatIf":|"conditions":\[\{|"chosen_is"|"conditional":\{|"condition":\{|"interveningIf"|"while":|"unlessPay"|"kind":"if_else"|"replacement":\{|"ifPaid"|"forAsLongAs"|"only":\[\{|"nth|"limit"|"cast_during"|"mustAttack"/;
 const CONDITIONAL_WORDS = "addendum|threshold|delirium|metalcraft|ferocious|formidable|morbid|raid|revolt|hellbent|coven|spell mastery|descend";
 
 function costPart(c: string): string {
@@ -138,13 +138,13 @@ const LEXICON: Lexeme[] = [
   { id: "only", test: re(/\bonly\b/), backed: new RegExp(`"timing":\\{|"restriction":|"abilitiesOf":|${COND_BACK.source}`), hint: "timing.only / timing.limit / mana restriction / a condition" },
   { id: "during", test: re(/\bduring\b/), backed: new RegExp(`"timing":\\{|${COND_BACK.source}`), hint: "a condition or timing.only" },
   { id: "instead", test: re(/\binstead\b|\bwould\b/), backed: /"replacement":\{|"kind":"if_else"|"replaceSteps"|"conditional":\{/, hint: "a replacement ability" },
-  { id: "may", test: re(/\bmay\b/), backed: /"optional":true|"extraLandDrops"|"repeatable":true/, hint: "optional: true (or modes.repeatable for \"may choose the same mode more than once\")" },
+  { id: "may", test: re(/\bmay\b/), backed: /"optional":true|"extraLandDrops"|"repeatable":true|"choice":"number"/, hint: "optional: true (or modes.repeatable for \"may choose the same mode more than once\")" },
   { id: "up to", test: re(/\bup to\b|\bany number\b/), backed: /"min":0|"upTo":true/, hint: "a count with min 0" },
   // "another"/"other" on an object needs filter.another. Not objects: "its other types", "another player", "each other opponent".
   { id: "another", test: (c) => /\b(another|other)\b/.test(stripNonObjectOther(c)), backed: /"another":true|"excludeSelf"|"excludeWho"/, hint: "filter.another" },
   { id: "target", test: re(/\btarget\b/), backed: /"targets":\[\{|target_player|Scope":"target_player"/, hint: "targets[]" },
-  { id: "each", test: (c) => /(?<!for )\b(each|all)\b(?! turn| combat| time)/.test(stripEachFalsePositives(c)), backed: /each_(opponent|player)|"each"|destroy_all|mass_pump|mass_bounce|repeat_for_each|fight_pairs|Scope":"(each|all)|"all"|"perOpponent"|"alsoWho"|"alsoOn"|"affects":\{|"extraLandDrops"|"replacement":\{"event":"[a-z_]+","subject":\{/, hint: "an each_* scope, destroy_all/mass_*, repeat_for_each, perOpponent or alsoWho" },
-  { id: "duration", test: re(/\buntil end of turn\b|\bthis turn\b|\bfor as long as\b|\buntil your next turn\b/), backed: /"duration"|"until"|forAsLongAs|this_turn|"nth|"limit"|"window"|controllerDealtDamageBy|"turn_is"|"cast_during"|"per":"turn"|"repeatRestriction"|"count_this_turn"/, hint: "a duration (or a this-turn condition)" },
+  { id: "each", test: (c) => /(?<!for )\b(each|all)\b(?! turn| combat| time)/.test(stripEachFalsePositives(c)), backed: /each_(opponent|player)|"each"|"kind":"vote"|"vote_winners"|destroy_all|mass_pump|mass_bounce|repeat_for_each|fight_pairs|Scope":"(each|all)|"all"|"perOpponent"|"alsoWho"|"alsoOn"|"affects":\{|"extraLandDrops"|"replacement":\{"event":"[a-z_]+","subject":\{/, hint: "an each_* scope, destroy_all/mass_*, repeat_for_each, perOpponent or alsoWho" },
+  { id: "duration", test: re(/\buntil end of turn\b|\bthis turn\b|\bfor as long as\b|\buntil your next turn\b/), backed: /"duration"|"until"|forAsLongAs|this_turn|"nth|"limit"|"window"|controllerDealtDamageBy|"turn_is"|"cast_during"|"per":"turn"|"repeatRestriction"|"count_this_turn"|"enteredThisTurn"|"life_gained_this_turn"/, hint: "a duration (or a this-turn condition)" },
   { id: "quantity", test: re(/\bx\b|\bthat many\b|\bequal to\b|\bthe number of\b|\bfor each\b/), backed: /"ref":|"math":|"per":|\{X\}|repeat_for_each|"perOpponent"/, hint: "a Quantity object with ref/math (or repeat_for_each)" },
   { id: "trigger", test: re(/^(?:[a-z' ]+ - )?(when|whenever|at the beginning of)\b/), backed: /"trigger":\{|create_delayed_trigger/, hint: "a trigger" },
   { id: "landfall", test: re(/^landfall - /), backed: /"trigger":\{/, hint: "a trigger" },
@@ -211,6 +211,8 @@ function jsonLiterals(card: Card): { all: Set<number>; meaningful: number[]; sym
       for (const m of node.matchAll(/^[+\-\u2212]?(\d+)\/[+\-\u2212]?(\d+)$/g)) { all.add(Number(m[1])); all.add(Number(m[2])); }
     } else if (Array.isArray(node)) node.forEach((n) => visit(n, key));
     else if (node && typeof node === "object") {
+      // predicate mana_spent {color:"W"} stands for the symbol {W} of the oracle text
+      if ((node as { check?: string }).check === "mana_spent" && typeof (node as { color?: string }).color === "string") symbols.add((node as { color: string }).color.toUpperCase());
       for (const [k, v] of Object.entries(node)) if (!META_KEYS.has(k)) visit(v, k);
     }
   };

@@ -8,8 +8,11 @@
       "keyword": {
         "name": "menace"
       },
-      "implementation": "implemented",
-      "needs": []
+      "implementation": "needed",
+      "needs": [
+        "face"
+      ],
+      "face": "Sheoldred"
     },
     {
       "id": "a2",
@@ -50,9 +53,11 @@
       ],
       "implementation": "needed",
       "needs": [
+        "face",
         "field:sacrifice_permanent.filter",
         "field:sacrifice_permanent.who"
-      ]
+      ],
+      "face": "Sheoldred"
     },
     {
       "id": "a3",
@@ -100,10 +105,12 @@
       "implementation": "needed",
       "needs": [
         "timing",
+        "face",
         "field:move_card_zone.from",
         "field:move_card_zone.transformed",
         "field:move_card_zone.who"
-      ]
+      ],
+      "face": "Sheoldred"
     },
     {
       "id": "a4",
@@ -112,8 +119,11 @@
       "keyword": {
         "name": "saga"
       },
-      "implementation": "implemented",
-      "needs": []
+      "implementation": "needed",
+      "needs": [
+        "face"
+      ],
+      "face": "The True Scriptures"
     },
     {
       "id": "a5",
@@ -171,8 +181,10 @@
         "trigger:counter_put",
         "trigger:chapters",
         "targets:multi",
-        "targets:per_opponent"
-      ]
+        "targets:per_opponent",
+        "face"
+      ],
+      "face": "The True Scriptures"
     },
     {
       "id": "a6",
@@ -209,9 +221,11 @@
       "needs": [
         "trigger:counter_put",
         "trigger:chapters",
+        "face",
         "field:discard.who",
         "field:mill.who"
-      ]
+      ],
+      "face": "The True Scriptures"
     },
     {
       "id": "a7",
@@ -258,11 +272,13 @@
       "needs": [
         "trigger:counter_put",
         "trigger:chapters",
+        "face",
         "field:move_card_zone.all",
         "field:move_card_zone.filter",
         "field:move_card_zone.from",
         "field:move_card_zone.faceUp"
-      ]
+      ],
+      "face": "The True Scriptures"
     }
   ],
   "review": {

@@ -68,12 +68,6 @@
     }
   ],
   "review": {
-    "status": "draft",
-    "ignore": [
-      {
-        "lexeme": "each",
-        "reason": "'each' means both power and toughness"
-      }
-    ]
+    "status": "draft"
   }
 }

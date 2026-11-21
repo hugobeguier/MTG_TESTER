@@ -50,11 +50,13 @@
       ],
       "implementation": "needed",
       "needs": [
+        "face",
         "step:add_counters",
         "field:add_counters.on",
         "step:grant_effect",
         "field:grant_effect.modify"
-      ]
+      ],
+      "face": "Revitalizing Repast"
     },
     {
       "id": "a2",
@@ -71,8 +73,10 @@
       },
       "implementation": "needed",
       "needs": [
-        "replacement:would_enter"
-      ]
+        "replacement:would_enter",
+        "face"
+      ],
+      "face": "Old-Growth Grove"
     },
     {
       "id": "a3",
@@ -90,8 +94,11 @@
           }
         ]
       },
-      "implementation": "implemented",
-      "needs": []
+      "implementation": "needed",
+      "needs": [
+        "face"
+      ],
+      "face": "Old-Growth Grove"
     },
     {
       "id": "a4",
@@ -109,8 +116,11 @@
           }
         ]
       },
-      "implementation": "implemented",
-      "needs": []
+      "implementation": "needed",
+      "needs": [
+        "face"
+      ],
+      "face": "Old-Growth Grove"
     }
   ],
   "review": {

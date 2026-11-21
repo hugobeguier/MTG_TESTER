@@ -7,7 +7,8 @@ import { sphinx } from "../fixtures/examples";
 import { generatePrompts } from "../prompts";
 import { CardSchema, type Card } from "../schema";
 import { createEngine } from "./setup";
-import type { Action, CardDef, Choice, GameState, ObjId, PlayerId, ResolveResult } from "./types";
+import { META5 } from "./testmeta";
+import type { Action, CardDb, CardDef, Choice, GameState, ObjId, PlayerId, ResolveResult } from "./types";
 
 const DRAFTS = path.resolve(process.cwd(), "data/kernel-drafts");
 let index: Map<string, string> | undefined;
@@ -53,7 +54,30 @@ const META: Record<string, Meta> = {
   Brainstorm: { slug: "brainstorm", manaCost: "{U}", types: ["instant"] },
   "Spymaster's Vault": { slug: "spymaster-s-vault", types: ["land"] },
   "Llanowar Elves": { slug: "llanowar-elves", manaCost: "{G}", types: ["creature"], subtypes: ["Elf", "Druid"], power: 1, toughness: 1 },
-  "Caves of Koilos": { slug: "caves-of-koilos", types: ["land"] }
+  "Caves of Koilos": { slug: "caves-of-koilos", types: ["land"] },
+  Ponder: { slug: "ponder", manaCost: "{U}", types: ["sorcery"] },
+  "Diabolic Vision": { slug: "diabolic-vision", manaCost: "{3}{U}", types: ["sorcery"] },
+  "Evolving Wilds": { slug: "evolving-wilds", types: ["land"] },
+  "Archaeomancer's Map": { slug: "archaeomancer-s-map", manaCost: "{2}{W}", types: ["artifact"] },
+  "Blood Artist": { slug: "blood-artist", manaCost: "{1}{B}", types: ["creature"], subtypes: ["Vampire"], power: 0, toughness: 1 },
+  "Enhanced Surveillance": { slug: "enhanced-surveillance", manaCost: "{2}{U}", types: ["enchantment"] },
+  "Bojuka Bog": { slug: "bojuka-bog", types: ["land"] },
+  "Angel of Finality": { slug: "angel-of-finality", manaCost: "{2}{W}{W}", types: ["creature"], subtypes: ["Angel"], power: 3, toughness: 4 },
+  "Incarnation Technique": { slug: "incarnation-technique", manaCost: "{3}{B}", types: ["sorcery"] },
+  "Shimmer Dragon": { slug: "shimmer-dragon", manaCost: "{4}{U}", types: ["artifact", "creature"], subtypes: ["Dragon"], power: 4, toughness: 4 },
+  "Mana Tithe": { slug: "mana-tithe", manaCost: "{W}", types: ["instant"] },
+  "Esper Sentinel": { slug: "esper-sentinel", manaCost: "{W}", types: ["artifact", "creature"], subtypes: ["Human", "Soldier"], power: 1, toughness: 1 },
+  "Dark Ritual": { slug: "dark-ritual", manaCost: "{B}", types: ["instant"] },
+  "Mana Geyser": { slug: "mana-geyser", manaCost: "{3}{R}{R}", types: ["sorcery"] },
+  "Demon of Fate's Design": { slug: "demon-of-fate-s-design", manaCost: "{4}{B}{B}", types: ["creature"], subtypes: ["Demon", "Horror"], power: 6, toughness: 5 },
+  "Jarad, Golgari Lich Lord": { slug: "jarad-golgari-lich-lord", manaCost: "{B}{B}{G}{G}", types: ["creature"], subtypes: ["Zombie", "Elf"], supertypes: ["legendary"], power: 2, toughness: 2 },
+  "Ash Barrens": { slug: "ash-barrens", types: ["land"] },
+  "Path to Exile": { slug: "path-to-exile", manaCost: "{W}", types: ["instant"] },
+  Mulch: { slug: "mulch", manaCost: "{1}{G}", types: ["sorcery"] },
+  "Chaos Warp": { slug: "chaos-warp", manaCost: "{2}{R}", types: ["instant"] },
+  "Command Beacon": { slug: "command-beacon", types: ["land"] },
+  "Orzhov Basilica": { slug: "orzhov-basilica", types: ["land"] },
+  "Deadly Brew": { slug: "deadly-brew", manaCost: "{1}{B}{G}", types: ["sorcery"] }
 };
 
 const one = { min: 1, max: 1 };
@@ -113,12 +137,17 @@ const CUSTOM: Record<string, CardDef> = {
   }
 };
 
+const cache = new Map<string, CardDef>();
 export function lookup(name: string): CardDef | undefined {
   if (CUSTOM[name]) return CUSTOM[name];
-  const m = META[name];
+  const hit = cache.get(name);
+  if (hit) return hit;
+  const m = META[name] ?? META5[name];
   if (!m) return undefined;
   const { slug, ...rest } = m;
-  return { name, ...rest, kernel: loadDraft(slug) };
+  const def: CardDef = { name, ...rest, kernel: loadDraft(slug) };
+  cache.set(name, def); // one definition object per card (the engine may compare abilities by identity)
+  return def;
 }
 
 export const engDefault = createEngine(lookup);
@@ -127,8 +156,8 @@ export const eng = engDefault;
 type Zone = "hand" | "battlefield" | "graveyard" | "library" | "exile";
 
 /** A game with the given players and empty zones; cards are added with `give`. */
-export function table(playerIds: PlayerId[] = ["p1", "p2"], opts: { phase?: "upkeep" | "precombat_main"; config?: Parameters<typeof eng.newGame>[0]["config"]; extra?: Record<string, CardDef> } = {}) {
-  const eng = opts.extra ? createEngine((n) => opts.extra![n] ?? lookup(n)) : engDefault;
+export function table(playerIds: PlayerId[] = ["p1", "p2"], opts: { phase?: "upkeep" | "precombat_main"; config?: Parameters<typeof eng.newGame>[0]["config"]; extra?: Record<string, CardDef>; db?: CardDb } = {}) {
+  const eng = opts.extra || opts.db ? createEngine((n) => opts.extra?.[n] ?? lookup(n), opts.db) : engDefault;
   let state: GameState = eng.newGame({ players: playerIds.map((id) => ({ id, deck: [] })), seed: 7, openingHand: 0, startPhase: opts.phase ?? "precombat_main", config: opts.config });
   const api = {
     get state(): GameState { return state; },

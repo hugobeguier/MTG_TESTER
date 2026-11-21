@@ -34,7 +34,6 @@
       ],
       "steps": [
         {
-          "src": 0,
           "kind": "draw_cards",
           "amount": 1,
           "who": "you"

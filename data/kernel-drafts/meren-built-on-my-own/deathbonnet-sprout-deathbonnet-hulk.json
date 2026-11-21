@@ -43,8 +43,10 @@
       ],
       "implementation": "needed",
       "needs": [
+        "face",
         "step:transform"
-      ]
+      ],
+      "face": "Deathbonnet Sprout"
     },
     {
       "id": "a2",
@@ -122,6 +124,7 @@
       ],
       "implementation": "needed",
       "needs": [
+        "face",
         "step:choose",
         "field:choose.count",
         "field:choose.from",
@@ -132,7 +135,8 @@
         "field:add_counters.on",
         "predicate:all",
         "predicate:matches"
-      ]
+      ],
+      "face": "Deathbonnet Hulk"
     }
   ],
   "review": {

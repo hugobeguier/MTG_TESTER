@@ -70,6 +70,7 @@
       "implementation": "needed",
       "needs": [
         "trigger:batch",
+        "face",
         "step:grant_effect",
         "field:grant_effect.modify",
         "step:create_delayed_trigger",
@@ -77,7 +78,8 @@
         "field:create_delayed_trigger.steps",
         "field:create_delayed_trigger.trigger",
         "field:grant_effect.prepared"
-      ]
+      ],
+      "face": "Stensian Sanguinist"
     },
     {
       "id": "a2",
@@ -104,12 +106,14 @@
       ],
       "implementation": "needed",
       "needs": [
+        "face",
         "quantity:X",
         "field:life_change.amount",
         "field:life_change.lose",
         "field:life_change.who",
         "quantity:life_lost_this_way"
-      ]
+      ],
+      "face": "Exsanguinate"
     }
   ],
   "review": {

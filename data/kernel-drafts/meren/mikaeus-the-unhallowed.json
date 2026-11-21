@@ -18,14 +18,10 @@
       "trigger": {
         "event": "dealt_damage",
         "subject": "you",
-        "interveningIf": {
-          "check": "matches",
-          "obj": "event_object",
-          "filter": {
-            "subtypes": [
-              "Human"
-            ]
-          }
+        "damageSource": {
+          "subtypes": [
+            "Human"
+          ]
         }
       },
       "steps": [
@@ -37,9 +33,8 @@
       "implementation": "needed",
       "needs": [
         "trigger:dealt_damage",
-        "trigger:intervening_if",
-        "predicate:matches",
-        "trigger:subject"
+        "trigger:subject",
+        "trigger:damage_source"
       ]
     },
     {

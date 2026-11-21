@@ -6,23 +6,21 @@
       "text": "Will of the council — Starting with you, each player votes for a nonland permanent you don't control. Exile each permanent with the most votes or tied for most votes.",
       "steps": [
         {
-          "kind": "choose",
-          "who": "each_player",
-          "from": {
+          "kind": "vote",
+          "id": "v1",
+          "voters": "each_player",
+          "candidates": {
             "notTypes": [
               "land"
             ],
             "controller": "opponent",
             "zone": "battlefield"
           },
-          "count": 1,
-          "saveAs": "chosen",
-          "vote": true,
-          "order": "chosen",
+          "tie": "all_tied",
           "src": 0,
           "prompt": {
-            "title": "Council's Judgment: choose",
-            "instruction": "Choose a nonland permanent an opponent controls.",
+            "title": "Council's Judgment: vote",
+            "instruction": "Vote for a nonland permanent an opponent controls. Players vote in turn order starting with the caster; every choice tied for the most votes wins.",
             "source": {
               "card": "Council's Judgment",
               "ability": "a1"
@@ -31,32 +29,21 @@
         },
         {
           "kind": "exile_target",
-          "target": "chosen",
-          "winners": "most_votes_or_tied",
+          "target": "vote_winners",
           "src": 1
         }
       ],
       "id": "a1",
       "implementation": "needed",
       "needs": [
-        "step:choose",
-        "field:choose.count",
-        "field:choose.from",
-        "field:choose.order",
-        "field:choose.saveAs",
-        "field:choose.vote",
-        "field:choose.who",
-        "field:exile_target.winners"
+        "step:vote",
+        "field:vote.candidates",
+        "field:vote.tie",
+        "field:vote.voters"
       ]
     }
   ],
   "review": {
-    "status": "draft",
-    "ignore": [
-      {
-        "lexeme": "each",
-        "reason": "each permanent with the most votes is the winners:most_votes_or_tied field of the exile step"
-      }
-    ]
+    "status": "draft"
   }
 }

@@ -83,8 +83,8 @@ function castSubjectSupported(subject: unknown): boolean {
 
 // Consolidated pass: vocabulary the legacy engine has no equivalent for. Detected by key / value anywhere in an ability
 // (metadata such as text and prompts is stripped first) and reported as a need, so nothing new ever looks implemented.
-const NEW_FILTER_KEYS = ["notSubtypes", "without", "isCommander", "sameName", "sharesCreatureTypeWith", "chosenType", "chosenColor", "attackingYou"] as const;
-const NEW_QUANTITY_REFS = ["life_total", "starting_life", "count_this_turn", "players_count"] as const;
+const NEW_FILTER_KEYS = ["notSubtypes", "without", "isCommander", "sameName", "sharesCreatureTypeWith", "chosenType", "chosenColor", "attackingYou", "blocking", "enteredThisTurn", "attackingOpponent", "sameNameAs"] as const;
+const NEW_QUANTITY_REFS = ["life_total", "starting_life", "count_this_turn", "players_count", "opponents_count", "step_result", "step_count", "life_gained_this_turn"] as const;
 const NEW_STATIC_MODIFIERS = ["addChosenType", "blockTax", "setColors", "extraLandDrops", "mustAttack", "copySubtypesOf", "setBasePT", "addTypes", "attackTax"] as const;
 
 function stripMeta(ability: unknown): string {
@@ -224,12 +224,24 @@ export function computeAbilityNeeds(ability: Ability): string[] {
   const allTargets = [...(ability.targets ?? []), ...(ability.modes?.options.flatMap((o) => o.targets ?? []) ?? [])];
   if (allTargets.some((t2) => t2.count.min !== 1 || t2.count.max !== 1)) addUnique(needs, "targets:multi");
   if (allTargets.some((t2) => t2.perOpponent)) addUnique(needs, "targets:per_opponent");
+  if (allTargets.some((t2) => t2.anyNumber)) addUnique(needs, "targets:any_number");
+  if (allTargets.some((t2) => t2.maxQuantity !== undefined)) addUnique(needs, "targets:variable_count");
+  if (ability.modes?.distinctTargets) addUnique(needs, "modes:distinct_targets");
+  if (ability.face) addUnique(needs, "face");
+  if (ability.static?.modify.some((m) => "cant" in m && m.protects)) addUnique(needs, "static:cant_protects");
+  if (tr_notFrom(ability)) addUnique(needs, "trigger:zones");
+  if (ability.trigger?.damageSource) addUnique(needs, "trigger:damage_source");
+  if (JSON.stringify(ability.costs ?? []).includes('"from":{')) addUnique(needs, "cost:counters_from_filter");
+  if (json.includes('"color":[')) addUnique(needs, "quantity:devotion_multi");
+  if (json.includes('"check":"mana_spent"')) addUnique(needs, "predicate:mana_spent");
 
   ability.steps?.forEach((s) => checkStep(s, needs));
   ability.modes?.options.forEach((o) => o.steps.forEach((s) => checkStep(s, needs)));
   if (ability.replacement && "steps" in ability.replacement.result) ability.replacement.result.steps.forEach((s) => checkStep(s, needs));
   return needs;
 }
+
+function tr_notFrom(a: Ability): boolean { return !!a.trigger?.notFromZone; }
 
 export function computeCastOptionNeeds(option: CastOption): string[] {
   // No cast-option kind is executed by the kernel yet (the legacy engine handles miracle/cycling etc.).

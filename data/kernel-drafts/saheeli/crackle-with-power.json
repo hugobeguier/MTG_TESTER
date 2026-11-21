@@ -20,12 +20,12 @@
           "prompt": {
             "title": "Crackle with Power: choose targets",
             "instruction": "Choose up to X targets (any target: creatures, players or planeswalkers)."
+          },
+          "maxQuantity": {
+            "ref": "X"
           }
         }
       ],
-      "scripted": {
-        "handler": "target_count_up_to_X"
-      },
       "steps": [
         {
           "kind": "damage_target",
@@ -43,8 +43,8 @@
       ],
       "implementation": "needed",
       "needs": [
-        "scripted:target_count_up_to_X",
         "targets:multi",
+        "targets:variable_count",
         "quantity:math"
       ]
     }

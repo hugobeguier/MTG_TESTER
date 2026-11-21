@@ -76,6 +76,7 @@
       ],
       "implementation": "needed",
       "needs": [
+        "face",
         "step:look_top",
         "step:choose",
         "field:choose.count",
@@ -87,7 +88,8 @@
         "field:move_card_zone.ordered",
         "field:move_card_zone.position",
         "field:move_card_zone.what"
-      ]
+      ],
+      "face": "Growing Rites of Itlimoc"
     },
     {
       "id": "a2",
@@ -121,8 +123,10 @@
       "implementation": "needed",
       "needs": [
         "trigger:intervening_if",
+        "face",
         "step:transform"
-      ]
+      ],
+      "face": "Growing Rites of Itlimoc"
     },
     {
       "id": "a3",
@@ -131,8 +135,11 @@
       "keyword": {
         "name": "back_face"
       },
-      "implementation": "implemented",
-      "needs": []
+      "implementation": "needed",
+      "needs": [
+        "face"
+      ],
+      "face": "Itlimoc, Cradle of the Sun"
     },
     {
       "id": "a4",
@@ -150,8 +157,11 @@
           }
         ]
       },
-      "implementation": "implemented",
-      "needs": []
+      "implementation": "needed",
+      "needs": [
+        "face"
+      ],
+      "face": "Itlimoc, Cradle of the Sun"
     },
     {
       "id": "a5",
@@ -177,8 +187,10 @@
       },
       "implementation": "needed",
       "needs": [
-        "mana:variable"
-      ]
+        "mana:variable",
+        "face"
+      ],
+      "face": "Itlimoc, Cradle of the Sun"
     }
   ],
   "review": {

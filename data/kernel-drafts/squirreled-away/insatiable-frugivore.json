@@ -11,67 +11,57 @@
       },
       "steps": [
         {
-          "kind": "create_tokens",
-          "tokenCount": 1,
-          "tokenName": "Food",
-          "tokenColors": [
-            "colorless"
-          ],
-          "tokenTypeLine": "Artifact — Food",
-          "id": "s1",
-          "src": 0
-        },
-        {
-          "kind": "move_card_zone",
-          "id": "s2",
-          "optional": true,
-          "who": "you",
-          "from": "graveyard",
-          "moveTo": "exile",
-          "filter": {
-            "zone": "graveyard",
-            "owner": "you"
-          },
-          "count": 3,
-          "src": 0,
-          "prompt": {
-            "title": "Insatiable Frugivore: optional",
-            "instruction": "Do you want to exile a card?",
-            "source": {
-              "card": "Insatiable Frugivore",
-              "ability": "a1"
-            }
-          }
-        },
-        {
-          "kind": "if_else",
-          "src": 1,
-          "if": {
+          "kind": "repeat_process",
+          "repeatIf": {
             "check": "step_done",
             "step": "s2"
           },
-          "then": [
+          "steps": [
             {
-              "kind": "repeat_for_each",
-              "repeatProcess": {
-                "from": "s1",
-                "through": "s2"
+              "kind": "create_tokens",
+              "tokenCount": 1,
+              "tokenName": "Food",
+              "tokenColors": [
+                "colorless"
+              ],
+              "tokenTypeLine": "Artifact — Food",
+              "id": "s1",
+              "src": 0
+            },
+            {
+              "kind": "move_card_zone",
+              "id": "s2",
+              "optional": true,
+              "who": "you",
+              "from": "graveyard",
+              "moveTo": "exile",
+              "filter": {
+                "zone": "graveyard",
+                "owner": "you"
+              },
+              "count": 3,
+              "src": 0,
+              "prompt": {
+                "title": "Insatiable Frugivore: optional",
+                "instruction": "Do you want to exile a card?",
+                "source": {
+                  "card": "Insatiable Frugivore",
+                  "ability": "a1"
+                }
               }
             }
-          ]
+          ],
+          "src": 1
         }
       ],
       "implementation": "needed",
       "needs": [
+        "step:repeat_process",
+        "field:repeat_process.repeatIf",
+        "field:repeat_process.steps",
         "field:move_card_zone.count",
         "field:move_card_zone.filter",
-        "field:move_card_zone.from",
-        "step:if_else",
-        "field:if_else.if",
-        "field:if_else.then",
-        "predicate:step_done",
-        "step:repeat_for_each",
-        "field:repeat_for_each.repeatProcess"
+        "field:move_card_zone.from"
       ]
     },
     {

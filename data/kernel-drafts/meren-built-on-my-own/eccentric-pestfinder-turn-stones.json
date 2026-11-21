@@ -8,8 +8,11 @@
       "keyword": {
         "name": "trample"
       },
-      "implementation": "implemented",
-      "needs": []
+      "implementation": "needed",
+      "needs": [
+        "face"
+      ],
+      "face": "Eccentric Pestfinder"
     },
     {
       "id": "a2",
@@ -41,10 +44,12 @@
       "implementation": "needed",
       "needs": [
         "trigger:intervening_if",
+        "face",
         "step:grant_effect",
         "field:grant_effect.modify",
         "field:grant_effect.prepared"
-      ]
+      ],
+      "face": "Eccentric Pestfinder"
     },
     {
       "id": "a3",
@@ -89,7 +94,8 @@
                   "who": "you",
                   "amount": 1
                 }
-              ]
+              ],
+              "id": "k0"
             }
           ],
           "src": 0
@@ -98,8 +104,10 @@
       "implementation": "needed",
       "needs": [
         "quantity:players_count",
+        "face",
         "field:create_tokens.tokenAbilities"
-      ]
+      ],
+      "face": "Turn Stones"
     }
   ],
   "review": {

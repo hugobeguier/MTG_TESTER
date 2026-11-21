@@ -77,7 +77,8 @@
               "target": "chosen",
               "modify": [
                 {
-                  "cant": "attack"
+                  "cant": "attack",
+                  "protects": "you_and_planeswalkers"
                 }
               ],
               "duration": {

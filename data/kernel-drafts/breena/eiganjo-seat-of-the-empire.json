@@ -66,9 +66,7 @@
                 "types": [
                   "creature"
                 ],
-                "with": [
-                  "blocking"
-                ]
+                "blocking": true
               }
             ]
           },
@@ -100,6 +98,7 @@
       "needs": [
         "zone:hand",
         "cost_reduction",
+        "filter:blocking",
         "cost:discard",
         "field:damage_target.source"
       ]

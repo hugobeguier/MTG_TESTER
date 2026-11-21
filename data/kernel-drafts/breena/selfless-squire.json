@@ -45,7 +45,7 @@
       "kind": "triggered",
       "text": "Whenever damage that would be dealt to you is prevented, put that many +1/+1 counters on this creature.",
       "trigger": {
-        "event": "unspecified",
+        "event": "damage_prevented",
         "subject": "you"
       },
       "steps": [
@@ -62,7 +62,7 @@
       "id": "a3",
       "implementation": "needed",
       "needs": [
-        "trigger:unspecified",
+        "trigger:damage_prevented",
         "trigger:subject",
         "step:add_counters",
         "quantity:event_amount",

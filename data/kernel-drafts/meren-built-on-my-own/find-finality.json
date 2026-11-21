@@ -42,8 +42,10 @@
       "implementation": "needed",
       "needs": [
         "targets:multi",
+        "face",
         "field:move_card_zone.from"
-      ]
+      ],
+      "face": "Find"
     },
     {
       "id": "a2",
@@ -102,6 +104,7 @@
       ],
       "implementation": "needed",
       "needs": [
+        "face",
         "step:choose",
         "field:choose.count",
         "field:choose.from",
@@ -110,7 +113,8 @@
         "field:add_counters.on",
         "predicate:step_done",
         "field:mass_pump.filter"
-      ]
+      ],
+      "face": "Finality"
     }
   ],
   "review": {

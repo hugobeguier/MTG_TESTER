@@ -312,7 +312,7 @@ Re-rendered plain English:
 Desolation of Smaug [draft]
   [a1] spell_effect [needed: needs filter:notSubtypes, field:damage_target.all, field:damage_target.filter, step:add_mana, field:add_mana.produces, field:add_mana.srcs]
     Oracle: Desolation of Smaug deals 3 damage to each non-Dragon creature. / Add four mana in any combination of colors. Spend this mana only to cast Dragon spells.
-    Effect: Deal 3 damage to the target. Then, add four mana of any one color (spend only to cast a Dragon spell).
+    Effect: Deal 3 damage to the target. Then, add 4 mana in any combination of colors (spend only to cast a Dragon spell).
 ```
 
 Player prompts:
@@ -700,7 +700,7 @@ Magda, the Hoardmaster [draft]
   [a1] triggered [needed: needs trigger:commit_crime, trigger:nth, field:create_tokens.tokenTapped]
     Oracle: Whenever you commit a crime, create a tapped Treasure token. This ability triggers only once each turn. (Targeting opponents, anything they control, and/or cards in their graveyards is a crime.)
     Trigger: Whenever you commit a crime for the first time each turn
-    Effect: Create a ?/? colorless Treasure artifact token.
+    Effect: Create a ?/? colorless Treasure artifact token tapped.
   [a2] activated [needed: needs cost:sacrifice, field:create_tokens.tokenKeywords]
     Oracle: Sacrifice three Treasures: Create a 4/4 red Scorpion Dragon creature token with flying and haste. Activate only as a sorcery.
     Cost: sacrifice 3 Treasures you control
@@ -1495,7 +1495,6 @@ Implementation: needed (cast_option, cast_option:additional, cast_option:mandato
 
 ## Decisions
 
-- Draconic Visitor: not in data/cards.db or XMage; oracle text from mtg.wtf (oracleOverride.source, rulings summarised there too). reign-of-dragons does not yet contain this card; copy this file there to keep both identical.
 - Cards copied from reign-of-dragons (or the other deck dir when absent there); copies in other dirs that differ (Bonders Enclave, Commanders Sphere, Dragonstorm Globe, Orb of Dragonkind, Scourge of Valkas, Swiftfoot Boots) were deck-specific variants, reign-of-dragons version kept.
-- SCHEMA QUESTION: review has no notes field (strict), so card rulings (Draconic Visitor token-control ordering, Mycosynth Lattice not-an-artifact-at-creation) live in oracleOverride.source. Propose review.notes: string[].
 - SCHEMA QUESTION: replacement `would_create_token` with result instead + create_tokens tokenCount {ref:event_amount} ("that many") is used for Draconic Visitor; replaced tokens lose original abilities and other creator instructions (tapped, attacking, haste) still apply: not expressible, kernel behaviour only.
+- Draconic Visitor: not in data/cards.db or XMage; oracle text from mtg.wtf (oracleOverride.source); rulings are in review.notes. Identical copy lives in reign-of-dragons.

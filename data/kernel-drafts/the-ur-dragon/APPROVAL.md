@@ -646,9 +646,9 @@ Scalelord Reckoner [draft]
   [a1] keyword [implemented]
     Oracle: Flying
     Keyword: flying
-  [a2] triggered [needed: needs trigger:becomes_target, trigger:intervening_if, predicate:matches, trigger:subject]
+  [a2] triggered [needed: needs trigger:becomes_target, trigger:subject]
     Oracle: Whenever a Dragon you control becomes the target of a spell or ability an opponent controls, destroy target nonland permanent that player controls.
-    Trigger: Whenever a Dragon you control becomes the target of a spell or ability, if that object is a permanent an opponent controls
+    Trigger: Whenever a Dragon you control becomes the target of a spell or ability
     Target t1: target nonland permanent an opponent controls  <- prompt: "Choose target nonland permanent an opponent controls."
     Effect: Destroy target nonland permanent an opponent controls.
 ```
@@ -657,7 +657,7 @@ Player prompts:
 
 - Scalelord Reckoner: choose a target: Choose target nonland permanent an opponent controls.
 
-Implementation: needed (trigger:becomes_target, trigger:intervening_if, predicate:matches, trigger:subject)
+Implementation: needed (trigger:becomes_target, trigger:subject)
 
 Questions for you:
 
@@ -1388,15 +1388,15 @@ Re-rendered plain English:
 
 ```
 Scavenger Regent // Exude Toxin [draft]
-  [a1] keyword [implemented]
+  [a1] keyword [needed: needs face]
     Oracle: Scavenger Regent: Flying
     Keyword: flying
-  [a2] triggered [needed: needs trigger:becomes_target, step:counter_spell, step:unless_pay]
+  [a2] triggered [needed: needs trigger:becomes_target, face, step:counter_spell, step:unless_pay]
     Oracle: Ward—Discard a card.
     Trigger: Whenever Scavenger Regent // Exude Toxin becomes the target of a spell or ability
     Effect: Counter that object unless that player discard your hand.
     Keyword: ward Discard a card
-  [a3] spell_effect (from hand) [needed: needs filter:notSubtypes, quantity:math, field:mass_pump.filter, step:shuffle]
+  [a3] spell_effect (from hand) [needed: needs filter:notSubtypes, face, quantity:math, field:mass_pump.filter, step:shuffle]
     Oracle: Exude Toxin: Each non-Dragon creature gets -X/-X until end of turn. (Then shuffle this card into its owner's library.)
     Effect: All creatures get +-1 x X/+-1 x X until end of turn. Then, shuffle.
 ```
@@ -1405,7 +1405,7 @@ Player prompts:
 
 - Scavenger Regent // Exude Toxin: pay or not: Do you want to discard your hand? If you don't, counter that object.
 
-Implementation: needed (trigger:becomes_target, step:counter_spell, step:unless_pay, filter:notSubtypes, quantity:math, field:mass_pump.filter, step:shuffle)
+Implementation: needed (face, trigger:becomes_target, step:counter_spell, step:unless_pay, filter:notSubtypes, quantity:math, field:mass_pump.filter, step:shuffle)
 
 Questions for you:
 
@@ -1543,7 +1543,7 @@ Mistrise Village [draft]
     Oracle: {T}: Add {U}.
     Cost: {T}
     Mana: add {U}
-  [a3] activated [needed: needs scripted:next_spell_this_turn_cant_be_countered, step:grant_effect, field:grant_effect.modify]
+  [a3] activated [needed: needs scripted:next_spell_this_turn_cant_be_countered, step:grant_effect, field:grant_effect.appliesTo, field:grant_effect.modify]
     Oracle: {U}, {T}: The next spell you cast this turn can't be countered.
     Cost: {U}, {T}
     Effect: The target can't be countered until end of turn.
@@ -1554,7 +1554,7 @@ Player prompts:
 
 - (none: no decisions)
 
-Implementation: needed (replacement:would_enter, scripted:next_spell_this_turn_cant_be_countered, step:grant_effect, field:grant_effect.modify)
+Implementation: needed (replacement:would_enter, scripted:next_spell_this_turn_cant_be_countered, step:grant_effect, field:grant_effect.appliesTo, field:grant_effect.modify)
 
 Questions for you:
 
@@ -2196,9 +2196,9 @@ Implementation: needed (timing)
 | `field:choose.from` | 7 | Call the Spirit Dragons; Ureni of the Unwritten; Hellkite Courser; Scion of the Ur-Dragon; Herald's Horn; Zurgo and Ojutai; Orb of Dragonkind |
 | `field:search_library.count` | 7 | Tiamat; Farseek; Boseiju, Who Endures; Myriad Landscape; Evolving Wilds; Terramorphic Expanse; Sarkhan's Triumph |
 | `step:add_counters` | 7 | Call the Spirit Dragons; Ramos, Dragon Engine; The Great Henge; Crucible of the Spirit Dragon; Dragon's Hoard; Dragonstorm Globe; Scourge of the Throne |
-| `trigger:intervening_if` | 7 | Tiamat; Rivaz of the Claw; Scalelord Reckoner; Rith, Liberated Primeval; Hellkite Tyrant; Garruk's Uprising; Scourge of the Throne |
 | `timing` | 6 | Mox Jasper; Rivaz of the Claw; Mox Opal; Ramos, Dragon Engine; Sarkhan Unbroken; Temple of the False God |
 | `trigger:becomes_target` | 6 | Goldspan Dragon; Scalelord Reckoner; Rith, Liberated Primeval; Miirym, Sentinel Wyrm; Roaming Throne; Scavenger Regent // Exude Toxin |
+| `trigger:intervening_if` | 6 | Tiamat; Rivaz of the Claw; Rith, Liberated Primeval; Hellkite Tyrant; Garruk's Uprising; Scourge of the Throne |
 | `field:add_mana.produces` | 5 | Savage Ventmaw; Klauth, Unrivaled Ancient; Sarkhan Unbroken; Crucible of the Spirit Dragon; Three Tree City |
 | `field:choose.choice` | 5 | Urza's Incubator; Morophon, the Boundless; Herald's Horn; Roaming Throne; Three Tree City |
 | `field:choose.remember` | 5 | Urza's Incubator; Morophon, the Boundless; Herald's Horn; Roaming Throne; Three Tree City |
@@ -2224,7 +2224,6 @@ Implementation: needed (timing)
 | `field:search_library.min` | 3 | Tiamat; Sarkhan Unbroken; Myriad Landscape |
 | `field:search_library.upTo` | 3 | Tiamat; Sarkhan Unbroken; Myriad Landscape |
 | `filter:notSubtypes` | 3 | Crux of Fate; Wrathful Red Dragon; Scavenger Regent // Exude Toxin |
-| `predicate:matches` | 3 | Scalelord Reckoner; Herald's Horn; Carnelian Orb of Dragonkind |
 | `quantity:count` | 3 | Three Tree City; Dragon Tempest; Scourge of Valkas |
 | `step:scry` | 3 | Path of Ancestry; Temple of Deceit; Temple of Silence |
 | `cast_option` | 2 | Scion of Draco; The Great Henge |
@@ -2235,6 +2234,7 @@ Implementation: needed (timing)
 | `field:untap_target.all` | 2 | Hellkite Charger; Scourge of the Throne |
 | `field:untap_target.filter` | 2 | Hellkite Charger; Scourge of the Throne |
 | `mana:restriction` | 2 | Rivaz of the Claw; Orb of Dragonkind |
+| `predicate:matches` | 2 | Herald's Horn; Carnelian Orb of Dragonkind |
 | `quantity:stat` | 2 | Terror of the Peaks; Thrakkus the Butcher |
 | `static:addTypes` | 2 | Roaming Throne; Yavimaya, Cradle of Growth |
 | `step:extra_combat` | 2 | Hellkite Charger; Scourge of the Throne |
@@ -2247,6 +2247,7 @@ Implementation: needed (timing)
 | `cost:life` | 1 | War Room |
 | `cost:loyalty` | 1 | Sarkhan Unbroken |
 | `duration:until` | 1 | Ancient Silver Dragon |
+| `face` | 1 | Scavenger Regent // Exude Toxin |
 | `field:copy.notLegendary` | 1 | Miirym, Sentinel Wyrm |
 | `field:copy.token` | 1 | Miirym, Sentinel Wyrm |
 | `field:create_delayed_trigger.steps` | 1 | Hellkite Courser |
@@ -2258,6 +2259,7 @@ Implementation: needed (timing)
 | `field:gain_control.all` | 1 | Hellkite Tyrant |
 | `field:gain_control.filter` | 1 | Hellkite Tyrant |
 | `field:gain_control.who` | 1 | Hellkite Tyrant |
+| `field:grant_effect.appliesTo` | 1 | Mistrise Village |
 | `field:grant_effect.exceptName` | 1 | Sarkhan, Soul Aflame |
 | `field:mass_pump.who` | 1 | Silumgar, the Drifting Death |
 | `field:move_card_zone.filter` | 1 | The Ur-Dragon |

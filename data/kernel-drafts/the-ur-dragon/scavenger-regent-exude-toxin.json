@@ -8,8 +8,11 @@
       "keyword": {
         "name": "flying"
       },
-      "implementation": "implemented",
-      "needs": []
+      "implementation": "needed",
+      "needs": [
+        "face"
+      ],
+      "face": "Scavenger Regent"
     },
     {
       "id": "a2",
@@ -49,9 +52,11 @@
       "implementation": "needed",
       "needs": [
         "trigger:becomes_target",
+        "face",
         "step:counter_spell",
         "step:unless_pay"
-      ]
+      ],
+      "face": "Scavenger Regent"
     },
     {
       "id": "a3",
@@ -98,10 +103,12 @@
       "implementation": "needed",
       "needs": [
         "filter:notSubtypes",
+        "face",
         "quantity:math",
         "field:mass_pump.filter",
         "step:shuffle"
-      ]
+      ],
+      "face": "Exude Toxin"
     }
   ],
   "review": {

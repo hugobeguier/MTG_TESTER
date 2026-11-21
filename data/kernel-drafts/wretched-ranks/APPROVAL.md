@@ -17,7 +17,7 @@ Reading guide: each card below shows the oracle text and what the structured JSO
 - **Commander's Sphere** (Artifact): {T}: add one mana of any color in your commander's color identity | sacrifice Commander's Sphere: Draw a card [needs: mana:variable, cost:sacrifice]
 - **Cryptbreaker** (Creature — Zombie): {1}{B}, {T}, discard a card in a hand: Create a 2/2 black Zombie creature token | tap 3 untapped untapped Zombies you control: Draw a card, then lose 1 life [needs: cost:discard, cost:tapOther]
 - **Death Baron** (Creature — Zombie Wizard): Skeletons or other Zombies you control get +1/+1 and have deathtouch [needs: static]
-- **Diregraf Colossus** (Creature — Zombie Giant): If Diregraf Colossus would enter, modify it: {"counters":{"kind":"+1/+1","amount":{"ref":"count","of":{"subtypes":["Zombie"],"zone":"graveyard","owner":"you"}}}} | Whenever you cast a Zombie spell: Create a 2/2 black Zombie creature token [needs: replacement:would_enter, field:create_tokens.tokenTapped]
+- **Diregraf Colossus** (Creature — Zombie Giant): If Diregraf Colossus would enter, modify it: {"counters":{"kind":"+1/+1","amount":{"ref":"count","of":{"subtypes":["Zombie"],"zone":"graveyard","owner":"you"}}}} | Whenever you cast a Zombie spell: Create a 2/2 black Zombie creature token tapped [needs: replacement:would_enter, field:create_tokens.tokenTapped]
 - **Disciple of Griselbrand** (Creature — Human Cleric): {1}, sacrifice a creature you control: Gain the sacrificed permanent's toughness life [needs: ref:sacrificed, cost:sacrifice, quantity:stat, field:life_change.amount]
 - **Fleshbag Marauder** (Creature — Zombie Warrior): Whenever Fleshbag Marauder enters: Each player sacrifices a creature [needs: field:sacrifice_permanent.filter, field:sacrifice_permanent.who]
 - **Geier Reach Sanitarium** (Legendary Land): {T}: add {C} | {2}, {T}: Each player draws a card, then each player discard a card [needs: field:draw_cards.who, field:discard.who]
@@ -32,7 +32,7 @@ Reading guide: each card below shows the oracle text and what the structured JSO
 - **Midnight Reaper** (Creature — Zombie Knight): Whenever a nontoken creature you control dies: Deal 1 damage to the target, then draw a card [needs: trigger:subject]
 - **Mind Stone** (Artifact): {T}: add {C} | {1}, {T}, sacrifice Mind Stone: Draw a card [needs: cost:sacrifice]
 - **Mire Triton** (Creature — Zombie Merfolk): Keyword deathtouch | Whenever Mire Triton enters: Mill 2 cards, then gain 2 life [implemented]
-- **Necrotic Hex** (Sorcery): Each player sacrifices a creature, then create six 2/2 black Zombie creature tokens [needs: field:sacrifice_permanent.amount, field:sacrifice_permanent.filter, field:sacrifice_permanent.who, field:create_tokens.tokenTapped]
+- **Necrotic Hex** (Sorcery): Each player sacrifices a creature, then create six 2/2 black Zombie creature tokens tapped [needs: field:sacrifice_permanent.amount, field:sacrifice_permanent.filter, field:sacrifice_permanent.who, field:create_tokens.tokenTapped]
 - **Night's Whisper** (Sorcery): Draw 2 cards, then lose 2 life [implemented]
 - **Phyrexian Arena** (Enchantment): At the beginning of your upkeep: Draw a card, then lose 1 life [implemented]
 - **Phyrexian Reclamation** (Enchantment): {1}{B}, pay 2 life: [targets: target creature card in your graveyard] Put target creature card in your graveyard into your hand [needs: cost:life]
@@ -90,7 +90,7 @@ Army of the Damned [draft]
   Cast option c1: you may use flashback (from graveyard, cost {7}{B}{B}{B}, replaces mana cost) [needed]
   [a1] spell_effect [needed: needs field:create_tokens.tokenTapped]
     Oracle: Create thirteen tapped 2/2 black Zombie creature tokens.
-    Effect: Create thirteen 2/2 black Zombie creature tokens.
+    Effect: Create thirteen 2/2 black Zombie creature tokens tapped.
 ```
 
 Player prompts:

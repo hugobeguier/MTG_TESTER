@@ -116,7 +116,7 @@
             "types": [
               "creature"
             ],
-            "controller": "opponent"
+            "controller": "active_player"
           },
           "count": {
             "min": 1,

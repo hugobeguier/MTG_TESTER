@@ -11,7 +11,7 @@ Reading guide: each card below shows the oracle text and what the structured JSO
 - **Blood Artist** (Creature — Vampire): Whenever Blood Artist dies or an another creature dies: [targets: target player] Target player gains 1 life, then gain 1 life [needs: trigger:multi_event, trigger:subject, field:life_change.amount, field:life_change.lose, field:life_change.who]
 - **Carrion Feeder** (Creature — Zombie): Carrion Feeder can't block | sacrifice a creature you control: Put a +1/+1 counter on Carrion Feeder [needs: static, cost:sacrifice, step:add_counters, field:add_counters.on]
 - **Command Tower** (Land): {T}: add one mana of any color in your commander's color identity [needs: mana:variable]
-- **Culling Ritual** (Sorcery): Destroy each nonland permanent with mana value 2 or less, then add {B} and {G} [needs: field:destroy_all.filter, step:add_mana, quantity:event_amount, field:add_mana.amountOf, field:add_mana.produces]
+- **Culling Ritual** (Sorcery): Destroy each nonland permanent with mana value 2 or less, then add {B} and {G} [needs: quantity:step_result, field:destroy_all.filter, step:add_mana, field:add_mana.produces]
 - **Dark Ritual** (Instant): Add {B}{B}{B} [needs: step:add_mana, field:add_mana.produces]
 - **Dina's Guidance** (Instant): Search your library for a creature, put it onto the revealed, then choose one of hand or graveyard, then if the chosen mode is hand: put a card into your hand; otherwise put a card into its owner's graveyard, then shuffle [needs: step:search_library, field:search_library.count, field:search_library.filter, field:search_library.reveal, field:search_library.saveAs, field:search_library.to, step:choose, field:choose.choice, field:choose.options, field:choose.remember, field:choose.saveAs, step:if_else, field:if_else.else, field:if_else.if, field:if_else.then, predicate:chosen_is, field:move_card_zone.what, step:shuffle]
 - **Dryad Arbor** (Land Creature — Forest Dryad): {T}: add {G} [implemented]
@@ -39,7 +39,7 @@ Reading guide: each card below shows the oracle text and what the structured JSO
 - **Phyrexian Reclamation** (Enchantment): {1}{B}, pay 2 life: [targets: target creature card in your graveyard] Put target creature card in your graveyard into your hand [needs: cost:life]
 - **Plaguecrafter** (Creature — Human Shaman): Whenever Plaguecrafter enters: Each player sacrifices a creature or planeswalker, then each player discard a card [needs: field:sacrifice_permanent.filter, field:sacrifice_permanent.who, field:discard.who, predicate:not, predicate:step_done]
 - **Reanimate** (Sorcery): [targets: target creature card in a graveyard] Return target creature card in a graveyard from the graveyard to the battlefield, then gain t1's mana value life [needs: quantity:stat, field:life_change.amount, field:life_change.lose]
-- **Ribtruss Roaster** (Creature — Troll Druid): Keyword devour 1 | At the beginning of your end step: Create the number of +1/+1 counters on self 1/1 black and green Pest creature tokens [needs: quantity:counters, field:create_tokens.tokenAbilities]
+- **Ribtruss Roaster** (Creature — Troll Druid): Keyword devour 1 | At the beginning of your end step: Create the number of +1/+1 counters on self 1/1 black and green Pest creature tokens and "When this token dies, you gain 1 life." [needs: quantity:counters, field:create_tokens.tokenAbilities]
 - **Sakura-Tribe Elder** (Creature — Snake Shaman): sacrifice Sakura-Tribe Elder: Search your library for a basic land, put it onto the battlefield, then shuffle [needs: cost:sacrifice, step:search_library, field:search_library.count, field:search_library.filter, field:search_library.shuffle, field:search_library.tapped, field:search_library.to]
 - **Skull Prophet** (Creature — Human Druid): {T}: add {B} and {G} | {T}: Mill 2 cards [implemented]
 - **Skullclamp** (Artifact — Equipment): The equipped creature gets +1/-1 | Whenever the equipped creature dies: Draw 2 cards | {1}: [targets: target creature you control] Attach Skullclamp to target creature you control [needs: static, trigger:subject, step:attach, field:attach.to, field:attach.what]
@@ -130,7 +130,7 @@ Beledros Witherbloom [draft]
   [a2] triggered [needed: needs field:create_tokens.tokenAbilities]
     Oracle: At the beginning of each upkeep, create a 1/1 black and green Pest creature token with "When this token dies, you gain 1 life."
     Trigger: At the beginning of each upkeep
-    Effect: Create a 1/1 black and green Pest creature token.
+    Effect: Create a 1/1 black and green Pest creature token and "When this token dies, you gain 1 life.".
   [a3] activated [needed: needs timing, cost:life, field:untap_target.all, field:untap_target.filter]
     Oracle: Pay 10 life: Untap all lands you control. Activate only once each turn.
     Cost: pay 10 life
@@ -238,11 +238,11 @@ Re-rendered plain English:
 
 ```
 Deathbonnet Sprout // Deathbonnet Hulk [draft]
-  [a1] triggered [needed: needs step:transform]
+  [a1] triggered [needed: needs face, step:transform]
     Oracle: Deathbonnet Sprout: At the beginning of your upkeep, mill a card. Then if there are three or more creature cards in your graveyard, transform this creature. (To mill a card, put the top card of your library into your graveyard.)
     Trigger: At the beginning of your upkeep
     Effect: Mill 1 cards. Then, IF you have 3 or greater creatures in graveyard: transform Deathbonnet Sprout // Deathbonnet Hulk.
-  [a2] triggered [needed: needs step:choose, field:choose.count, field:choose.from, field:choose.saveAs, field:move_card_zone.from, predicate:step_done, step:add_counters, field:add_counters.on, predicate:all, predicate:matches]
+  [a2] triggered [needed: needs face, step:choose, field:choose.count, field:choose.from, field:choose.saveAs, field:move_card_zone.from, predicate:step_done, step:add_counters, field:add_counters.on, predicate:all, predicate:matches]
     Oracle: Deathbonnet Hulk: At the beginning of your upkeep, you may exile a card from a graveyard. If a creature card was exiled this way, put a +1/+1 counter on this creature.
     Trigger: At the beginning of your upkeep
     Effect: You may choose a card in a graveyard. Then, IF you did (s1): exile the chosen object. Then, IF you did (s2) and the chosen object is a creature: put a +1/+1 counter on Deathbonnet Sprout // Deathbonnet Hulk.
@@ -252,7 +252,7 @@ Player prompts:
 
 - Deathbonnet Sprout // Deathbonnet Hulk: optional: Do you want to choose a card in a graveyard?
 
-Implementation: needed (step:transform, step:choose, field:choose.count, field:choose.from, field:choose.saveAs, field:move_card_zone.from, predicate:step_done, step:add_counters, field:add_counters.on, predicate:all, predicate:matches)
+Implementation: needed (face, step:transform, step:choose, field:choose.count, field:choose.from, field:choose.saveAs, field:move_card_zone.from, predicate:step_done, step:add_counters, field:add_counters.on, predicate:all, predicate:matches)
 
 ### Dina, Essence Brewer
 
@@ -301,23 +301,23 @@ Re-rendered plain English:
 
 ```
 Eccentric Pestfinder // Turn Stones [draft]
-  [a1] keyword [implemented]
+  [a1] keyword [needed: needs face]
     Oracle: Eccentric Pestfinder: Trample
     Keyword: trample
-  [a2] triggered [needed: needs trigger:intervening_if, step:grant_effect, field:grant_effect.modify, field:grant_effect.prepared]
+  [a2] triggered [needed: needs trigger:intervening_if, face, step:grant_effect, field:grant_effect.modify, field:grant_effect.prepared]
     Oracle: At the beginning of each end step, if you gained life this turn, this creature becomes prepared. (While it's prepared, you may cast a copy of its spell. Doing so unprepares it.)
     Trigger: At the beginning of each end step, if you gain life this turn
     Effect: Eccentric Pestfinder // Turn Stones gains prepared.
-  [a3] spell_effect [needed: needs quantity:players_count, field:create_tokens.tokenAbilities]
+  [a3] spell_effect [needed: needs quantity:players_count, face, field:create_tokens.tokenAbilities]
     Oracle: Turn Stones: For each opponent, you create a 1/1 black and green Pest creature token with "When this token dies, you gain 1 life."
-    Effect: Create the number of opponents for which it is not true that that player's life total is less than 0 1/1 black and green Pest creature tokens.
+    Effect: Create the number of opponents for which it is not true that that player's life total is less than 0 1/1 black and green Pest creature tokens and "When this token dies, you gain 1 life.".
 ```
 
 Player prompts:
 
 - (none: no decisions)
 
-Implementation: needed (trigger:intervening_if, step:grant_effect, field:grant_effect.modify, field:grant_effect.prepared, quantity:players_count, field:create_tokens.tokenAbilities)
+Implementation: needed (face, trigger:intervening_if, step:grant_effect, field:grant_effect.modify, field:grant_effect.prepared, quantity:players_count, field:create_tokens.tokenAbilities)
 
 Questions for you:
 
@@ -397,11 +397,11 @@ Re-rendered plain English:
 
 ```
 Find // Finality [draft]
-  [a1] spell_effect [needed: needs targets:multi, field:move_card_zone.from]
+  [a1] spell_effect [needed: needs targets:multi, face, field:move_card_zone.from]
     Oracle: Find: Return up to two target creature cards from your graveyard to your hand.
     Target t1: up to two target creature cards in your graveyard  <- prompt: "Choose up to two target creature cards in your graveyard."
     Effect: Put up to two target creature cards in your graveyard into your hand.
-  [a2] spell_effect [needed: needs step:choose, field:choose.count, field:choose.from, field:choose.saveAs, step:add_counters, field:add_counters.on, predicate:step_done, field:mass_pump.filter]
+  [a2] spell_effect [needed: needs face, step:choose, field:choose.count, field:choose.from, field:choose.saveAs, step:add_counters, field:add_counters.on, predicate:step_done, field:mass_pump.filter]
     Oracle: Finality: You may put two +1/+1 counters on a creature you control. Then all creatures get -4/-4 until end of turn.
     Effect: You may choose a creature you control. Then, IF you did (s1): put 2 +1/+1 counters on the chosen object. Then, all creatures get -4/-4 until end of turn.
 ```
@@ -411,7 +411,7 @@ Player prompts:
 - Find // Finality: choose targets: Choose up to two target creature cards in your graveyard.
 - Find // Finality: optional: Do you want to choose a creature you control?
 
-Implementation: needed (targets:multi, field:move_card_zone.from, step:choose, field:choose.count, field:choose.from, field:choose.saveAs, step:add_counters, field:add_counters.on, predicate:step_done, field:mass_pump.filter)
+Implementation: needed (targets:multi, face, field:move_card_zone.from, step:choose, field:choose.count, field:choose.from, field:choose.saveAs, step:add_counters, field:add_counters.on, predicate:step_done, field:mass_pump.filter)
 
 ### Growing Rites of Itlimoc // Itlimoc, Cradle of the Sun
 
@@ -430,22 +430,22 @@ Re-rendered plain English:
 
 ```
 Growing Rites of Itlimoc // Itlimoc, Cradle of the Sun [draft]
-  [a1] triggered [needed: needs step:look_top, step:choose, field:choose.count, field:choose.from, field:choose.fromLooked, field:choose.saveAs, step:reveal, predicate:step_done, field:move_card_zone.ordered, field:move_card_zone.position, field:move_card_zone.what]
+  [a1] triggered [needed: needs face, step:look_top, step:choose, field:choose.count, field:choose.from, field:choose.fromLooked, field:choose.saveAs, step:reveal, predicate:step_done, field:move_card_zone.ordered, field:move_card_zone.position, field:move_card_zone.what]
     Oracle: Growing Rites of Itlimoc: When Growing Rites of Itlimoc enters, look at the top four cards of your library. You may reveal a creature card from among them and put it into your hand. Put the rest on the bottom of your library in any order.
     Trigger: Whenever Growing Rites of Itlimoc // Itlimoc, Cradle of the Sun enters
     Effect: Look at the top four cards of your library. Then, you may choose a creature card from among the looked-at cards. Then, IF you did (s1): reveal the chosen object. Then, IF you did (s1): put the chosen object into your hand. Then, put the rest of the looked-at cards on the bottom of your library.
-  [a2] triggered [needed: needs trigger:intervening_if, step:transform]
+  [a2] triggered [needed: needs trigger:intervening_if, face, step:transform]
     Oracle: At the beginning of your end step, if you control four or more creatures, transform Growing Rites of Itlimoc.
     Trigger: At the beginning of your end step, if you control four or more creatures
     Effect: Transform Growing Rites of Itlimoc // Itlimoc, Cradle of the Sun.
-  [a3] keyword [implemented]
+  [a3] keyword [needed: needs face]
     Oracle: Itlimoc, Cradle of the Sun: (Transforms from Growing Rites of Itlimoc.)
     Keyword: back_face
-  [a4] mana [implemented]
+  [a4] mana [needed: needs face]
     Oracle: {T}: Add {G}.
     Cost: {T}
     Mana: add {G}
-  [a5] mana [needed: needs mana:variable]
+  [a5] mana [needed: needs mana:variable, face]
     Oracle: {T}: Add {G} for each creature you control.
     Cost: {T}
     Mana: add {{G}} for each creature you control
@@ -455,7 +455,7 @@ Player prompts:
 
 - Growing Rites of Itlimoc // Itlimoc, Cradle of the Sun: optional: Do you want to choose a creature card from among the looked-at cards?
 
-Implementation: needed (step:look_top, step:choose, field:choose.count, field:choose.from, field:choose.fromLooked, field:choose.saveAs, step:reveal, predicate:step_done, field:move_card_zone.ordered, field:move_card_zone.position, field:move_card_zone.what, trigger:intervening_if, step:transform, mana:variable)
+Implementation: needed (face, step:look_top, step:choose, field:choose.count, field:choose.from, field:choose.fromLooked, field:choose.saveAs, step:reveal, predicate:step_done, field:move_card_zone.ordered, field:move_card_zone.position, field:move_card_zone.what, trigger:intervening_if, step:transform, mana:variable)
 
 ### Guardian Project
 
@@ -469,18 +469,17 @@ Re-rendered plain English:
 
 ```
 Guardian Project [draft]
-  [a1] triggered [needed: needs scripted:unique_name_check, trigger:subject]
+  [a1] triggered [needed: needs trigger:intervening_if, predicate:not, predicate:name_matches, trigger:subject]
     Oracle: Whenever a nontoken creature you control enters, if it doesn't have the same name as another creature you control or a creature card in your graveyard, draw a card.
-    Trigger: Whenever a nontoken creature you control enters
+    Trigger: Whenever a nontoken creature you control enters, if it is not true that that object has the same name as an another creature you control or a creature card in your graveyard
     Effect: Draw a card.
-    Scripted (engine-specific rule, not described by the fields above): unique_name_check
 ```
 
 Player prompts:
 
 - (none: no decisions)
 
-Implementation: needed (scripted:unique_name_check, trigger:subject)
+Implementation: needed (trigger:intervening_if, predicate:not, predicate:name_matches, trigger:subject)
 
 Questions for you:
 
@@ -566,10 +565,10 @@ Immoral Bargain [draft]
     Oracle: As an additional cost to cast this spell, sacrifice X creatures.
     Cost: sacrifice X creatures you control
     X prompt: "Choose a value for X (the amount used in the cost)."
-  [a2] spell_effect [needed: needs targets:multi, quantity:X, field:destroy_target.amount]
+  [a2] spell_effect [needed: needs targets:variable_count, quantity:X, field:destroy_target.amount]
     Oracle: Destroy X target nonland permanents.
-    Target t1: up to 99 target nonland permanents  <- prompt: "Choose up to 99 target nonland permanents."
-    Effect: Destroy up to 99 target nonland permanents.
+    Target t1: X target nonland permanents  <- prompt: "Choose up to 99 target nonland permanents."
+    Effect: Destroy X target nonland permanents.
 ```
 
 Player prompts:
@@ -578,7 +577,7 @@ Player prompts:
 - Immoral Bargain: choose what to sacrifice: Choose X creatures you control to sacrifice.
 - Immoral Bargain: choose targets: Choose up to 99 target nonland permanents.
 
-Implementation: needed (cast_option, cost:sacrifice, targets:multi, quantity:X, field:destroy_target.amount)
+Implementation: needed (cast_option, cost:sacrifice, targets:variable_count, quantity:X, field:destroy_target.amount)
 
 ### Jarad, Golgari Lich Lord
 
@@ -660,19 +659,19 @@ Moseo, Vein's New Dean [draft]
   [a2] triggered [needed: needs field:create_tokens.tokenAbilities]
     Oracle: When Moseo enters, create a 1/1 black and green Pest creature token with "Whenever this token attacks, you gain 1 life."
     Trigger: Whenever Moseo, Vein's New Dean enters
-    Effect: Create a 1/1 black and green Pest creature token.
-  [a3] triggered [needed: needs quantity:count_this_turn, trigger:intervening_if, targets:multi]
+    Effect: Create a 1/1 black and green Pest creature token and "Whenever this token attacks, you gain 1 life.".
+  [a3] triggered [needed: needs quantity:life_gained_this_turn, trigger:intervening_if, targets:multi]
     Oracle: Infusion — At the beginning of your end step, if you gained life this turn, return up to one target creature card with mana value X or less from your graveyard to the battlefield, where X is the amount of life you gained this turn.
     Trigger: At the beginning of your end step, if you gain life this turn
-    Target t1: up to one target creature card with mana value less than or equal to the number of things that gain life this turn in your graveyard  <- prompt: "Choose up to one target creature card with mana value less than or equal to the number of things that gain life this turn in your graveyard."
-    Effect: Return up to one target creature card with mana value less than or equal to the number of things that gain life this turn in your graveyard from the graveyard to the battlefield.
+    Target t1: up to one target creature card with mana value less than or equal to the amount of life you have gained this turn in your graveyard  <- prompt: "Choose up to one target creature card with mana value less than or equal to the number of things that gain life this turn in your graveyard."
+    Effect: Return up to one target creature card with mana value less than or equal to the amount of life you have gained this turn in your graveyard from the graveyard to the battlefield.
 ```
 
 Player prompts:
 
 - Moseo, Vein's New Dean: choose a target: Choose up to one target creature card with mana value less than or equal to the number of things that gain life this turn in your graveyard.
 
-Implementation: needed (field:create_tokens.tokenAbilities, quantity:count_this_turn, trigger:intervening_if, targets:multi)
+Implementation: needed (field:create_tokens.tokenAbilities, quantity:life_gained_this_turn, trigger:intervening_if, targets:multi)
 
 Questions for you:
 
@@ -802,17 +801,17 @@ Re-rendered plain English:
 
 ```
 Pest Infestation [draft]
-  [a1] spell_effect [needed: needs targets:multi, quantity:X, field:destroy_target.amount, quantity:math, field:create_tokens.tokenAbilities]
+  [a1] spell_effect [needed: needs targets:multi, targets:variable_count, quantity:X, field:destroy_target.amount, quantity:math, field:create_tokens.tokenAbilities]
     Oracle: Destroy up to X target artifacts and/or enchantments. Create twice X 1/1 black and green Pest creature tokens with "When this token dies, you gain 1 life."
-    Target t1: up to 99 target artifacts or enchantments  <- prompt: "Choose up to 99 target artifacts or enchantments."
-    Effect: Destroy up to 99 target artifacts or enchantments. Then, create 2 x X 1/1 black and green Pest creature tokens.
+    Target t1: up to X target artifacts or enchantments  <- prompt: "Choose up to 99 target artifacts or enchantments."
+    Effect: Destroy up to X target artifacts or enchantments. Then, create 2 x X 1/1 black and green Pest creature tokens and "When this token dies, you gain 1 life.".
 ```
 
 Player prompts:
 
 - Pest Infestation: choose targets: Choose up to 99 target artifacts or enchantments.
 
-Implementation: needed (targets:multi, quantity:X, field:destroy_target.amount, quantity:math, field:create_tokens.tokenAbilities)
+Implementation: needed (targets:multi, targets:variable_count, quantity:X, field:destroy_target.amount, quantity:math, field:create_tokens.tokenAbilities)
 
 ### Priest of Forgotten Gods
 
@@ -826,10 +825,10 @@ Re-rendered plain English:
 
 ```
 Priest of Forgotten Gods [draft]
-  [a1] activated [needed: needs cost:sacrifice, targets:multi, field:life_change.amount, field:life_change.lose, field:life_change.who, field:sacrifice_permanent.filter, field:sacrifice_permanent.who, step:add_mana, field:add_mana.produces]
+  [a1] activated [needed: needs cost:sacrifice, targets:multi, targets:any_number, field:life_change.amount, field:life_change.lose, field:life_change.who, field:sacrifice_permanent.filter, field:sacrifice_permanent.who, step:add_mana, field:add_mana.produces]
     Oracle: {T}, Sacrifice two other creatures: Any number of target players each lose 2 life and sacrifice a creature of their choice. You add {B}{B} and draw a card.
     Cost: {T}, sacrifice 2 other creatures you control
-    Target t1: up to 99 target players  <- prompt: "Choose up to 99 target players."
+    Target t1: any number of target players  <- prompt: "Choose up to 99 target players."
     Effect: Target player gains 2 life. Then, target player sacrifices a creature. Then, add {B}{B}. Then, draw a card.
 ```
 
@@ -839,7 +838,7 @@ Player prompts:
 - Priest of Forgotten Gods: choose what to sacrifice: Choose 2 other creatures you control to sacrifice.
 - Priest of Forgotten Gods: sacrifice: Choose a permanent to sacrifice.
 
-Implementation: needed (cost:sacrifice, targets:multi, field:life_change.amount, field:life_change.lose, field:life_change.who, field:sacrifice_permanent.filter, field:sacrifice_permanent.who, step:add_mana, field:add_mana.produces)
+Implementation: needed (cost:sacrifice, targets:multi, targets:any_number, field:life_change.amount, field:life_change.lose, field:life_change.who, field:sacrifice_permanent.filter, field:sacrifice_permanent.who, step:add_mana, field:add_mana.produces)
 
 ### Savra, Queen of the Golgari
 
@@ -909,12 +908,12 @@ Re-rendered plain English:
 
 ```
 Stensian Sanguinist // Exsanguinate [draft]
-  [a1] triggered [needed: needs trigger:batch, step:grant_effect, field:grant_effect.modify, step:create_delayed_trigger, field:create_delayed_trigger.at, field:create_delayed_trigger.steps, field:create_delayed_trigger.trigger, field:grant_effect.prepared]
+  [a1] triggered [needed: needs trigger:batch, face, step:grant_effect, field:grant_effect.modify, step:create_delayed_trigger, field:create_delayed_trigger.at, field:create_delayed_trigger.steps, field:create_delayed_trigger.trigger, field:grant_effect.prepared]
     Oracle: Stensian Sanguinist: Whenever you attack, target creature gains deathtouch until end of turn. Whenever that creature deals combat damage to a player this combat, this creature becomes prepared. (While it's prepared, you may cast a copy of its spell. Doing so unprepares it.)
     Trigger: Whenever you attack
     Target t1: target creature  <- prompt: "Choose target creature."
     Effect: Target creature gains deathtouch until end of turn. Then, create a delayed trigger.
-  [a2] spell_effect [needed: needs quantity:X, field:life_change.amount, field:life_change.lose, field:life_change.who, quantity:life_lost_this_way]
+  [a2] spell_effect [needed: needs face, quantity:X, field:life_change.amount, field:life_change.lose, field:life_change.who, quantity:life_lost_this_way]
     Oracle: Exsanguinate: Each opponent loses X life. You gain life equal to the life lost this way.
     Effect: Each opponent gains X life. Then, gain the life lost this way life.
 ```
@@ -923,7 +922,7 @@ Player prompts:
 
 - Stensian Sanguinist // Exsanguinate: choose a target: Choose target creature.
 
-Implementation: needed (trigger:batch, step:grant_effect, field:grant_effect.modify, step:create_delayed_trigger, field:create_delayed_trigger.at, field:create_delayed_trigger.steps, field:create_delayed_trigger.trigger, field:grant_effect.prepared, quantity:X, field:life_change.amount, field:life_change.lose, field:life_change.who, quantity:life_lost_this_way)
+Implementation: needed (trigger:batch, face, step:grant_effect, field:grant_effect.modify, step:create_delayed_trigger, field:create_delayed_trigger.at, field:create_delayed_trigger.steps, field:create_delayed_trigger.trigger, field:grant_effect.prepared, quantity:X, field:life_change.amount, field:life_change.lose, field:life_change.who, quantity:life_lost_this_way)
 
 Questions for you:
 
@@ -1267,16 +1266,18 @@ Implementation: needed (trigger:multi_event, trigger:subject, field:life_change.
 | `field:move_card_zone.what` | 7 | Cultivate; Dina's Guidance; Grisly Salvage; Growing Rites of Itlimoc // Itlimoc, Cradle of the Sun; Living Death; Mulch; Old Stickfingers |
 | `field:sacrifice_permanent.filter` | 7 | Deadly Brew; Living Death; Plaguecrafter; Priest of Forgotten Gods; Savra, Queen of the Golgari; Victimize; Witch of the Moors |
 | `field:search_library.shuffle` | 7 | Eldritch Evolution; Evolving Wilds; Fiend Artisan; Harrow; Sakura-Tribe Elder; Terramorphic Expanse; Wight of the Reliquary |
-| `targets:multi` | 7 | Find // Finality; Immoral Bargain; Moseo, Vein's New Dean; Pest Infestation; Priest of Forgotten Gods; Victimize; Witch of the Moors |
 | `field:sacrifice_permanent.who` | 6 | Deadly Brew; Living Death; Plaguecrafter; Priest of Forgotten Gods; Savra, Queen of the Golgari; Witch of the Moors |
+| `targets:multi` | 6 | Find // Finality; Moseo, Vein's New Dean; Pest Infestation; Priest of Forgotten Gods; Victimize; Witch of the Moors |
 | `cast_option` | 5 | Eldritch Evolution; Harrow; Immoral Bargain; Toxic Deluge; Village Rites |
+| `face` | 5 | Deathbonnet Sprout // Deathbonnet Hulk; Eccentric Pestfinder // Turn Stones; Find // Finality; Growing Rites of Itlimoc // Itlimoc, Cradle of the Sun; Stensian Sanguinist // Exsanguinate |
 | `field:create_tokens.tokenAbilities` | 5 | Beledros Witherbloom; Eccentric Pestfinder // Turn Stones; Moseo, Vein's New Dean; Pest Infestation; Ribtruss Roaster |
 | `field:life_change.who` | 5 | Blood Artist; Jarad, Golgari Lich Lord; Priest of Forgotten Gods; Stensian Sanguinist // Exsanguinate; Zulaport Cutthroat |
 | `quantity:stat` | 5 | Dina, Essence Brewer; Feed the Swarm; Jarad, Golgari Lich Lord; Reanimate; Willow Geist |
 | `timing` | 5 | Beledros Witherbloom; Dina, Essence Brewer; Morbid Opportunist; Tainted Wood; Twilight Diviner |
 | `trigger:batch` | 5 | Insidious Roots; Morbid Opportunist; Stensian Sanguinist // Exsanguinate; Twilight Diviner; Willow Geist |
+| `trigger:intervening_if` | 5 | Eccentric Pestfinder // Turn Stones; Growing Rites of Itlimoc // Itlimoc, Cradle of the Sun; Guardian Project; Moseo, Vein's New Dean; Witch of the Moors |
 | `field:search_library.tapped` | 4 | Evolving Wilds; Sakura-Tribe Elder; Terramorphic Expanse; Wight of the Reliquary |
-| `trigger:intervening_if` | 4 | Eccentric Pestfinder // Turn Stones; Growing Rites of Itlimoc // Itlimoc, Cradle of the Sun; Moseo, Vein's New Dean; Witch of the Moors |
+| `predicate:not` | 4 | Guardian Project; Necroblossom Snarl; Overgrown Tomb; Plaguecrafter |
 | `trigger:zones` | 4 | Insidious Roots; Twilight Diviner; Willow Geist; Ygra, Eater of All |
 | `cost:life` | 3 | Beledros Witherbloom; Phyrexian Reclamation; Toxic Deluge |
 | `field:add_mana.produces` | 3 | Culling Ritual; Dark Ritual; Priest of Forgotten Gods |
@@ -1285,8 +1286,6 @@ Implementation: needed (trigger:multi_event, trigger:subject, field:life_change.
 | `field:move_card_zone.filter` | 3 | Living Death; Mulch; Old Stickfingers |
 | `field:move_card_zone.position` | 3 | Glowspore Shaman; Growing Rites of Itlimoc // Itlimoc, Cradle of the Sun; Old Stickfingers |
 | `mana:variable` | 3 | Arcane Signet; Command Tower; Growing Rites of Itlimoc // Itlimoc, Cradle of the Sun |
-| `predicate:not` | 3 | Necroblossom Snarl; Overgrown Tomb; Plaguecrafter |
-| `quantity:count_this_turn` | 3 | Gorma, the Gullet; Gyome, Master Chef; Moseo, Vein's New Dean |
 | `quantity:X` | 3 | Immoral Bargain; Pest Infestation; Stensian Sanguinist // Exsanguinate |
 | `ref:sacrificed` | 3 | Dina, Essence Brewer; Eldritch Evolution; Jarad, Golgari Lich Lord |
 | `step:add_mana` | 3 | Culling Ritual; Dark Ritual; Priest of Forgotten Gods |
@@ -1313,6 +1312,7 @@ Implementation: needed (trigger:multi_event, trigger:subject, field:life_change.
 | `field:search_library.upTo` | 2 | Cultivate; Harrow |
 | `predicate:matches` | 2 | Deathbonnet Sprout // Deathbonnet Hulk; Old Rutstein |
 | `quantity:count` | 2 | Arachnogenesis; Izoni, Thousand-Eyed |
+| `quantity:count_this_turn` | 2 | Gorma, the Gullet; Gyome, Master Chef |
 | `quantity:math` | 2 | Pest Infestation; Toxic Deluge |
 | `replacement:damage_qualifiers` | 2 | Arachnogenesis; Spore Frog |
 | `replacement:duration` | 2 | Arachnogenesis; Spore Frog |
@@ -1322,11 +1322,11 @@ Implementation: needed (trigger:multi_event, trigger:subject, field:life_change.
 | `step:shuffle` | 2 | Cultivate; Dina's Guidance |
 | `step:surveil` | 2 | Twilight Diviner; Underground Mortuary |
 | `step:transform` | 2 | Deathbonnet Sprout // Deathbonnet Hulk; Growing Rites of Itlimoc // Itlimoc, Cradle of the Sun |
+| `targets:variable_count` | 2 | Immoral Bargain; Pest Infestation |
 | `zone:stack` | 2 | Old Stickfingers; Toski, Bearer of Secrets |
 | `cast_option:additional` | 1 | Toxic Deluge |
 | `cast_option:mandatory` | 1 | Toxic Deluge |
 | `cost:x` | 1 | Fiend Artisan |
-| `field:add_mana.amountOf` | 1 | Culling Ritual |
 | `field:choose.choice` | 1 | Dina's Guidance |
 | `field:choose.fromMilled` | 1 | Old Rutstein |
 | `field:choose.fromRevealed` | 1 | Cultivate |
@@ -1362,12 +1362,13 @@ Implementation: needed (trigger:multi_event, trigger:subject, field:life_change.
 | `modes` | 1 | Cankerbloom |
 | `predicate:all` | 1 | Deathbonnet Sprout // Deathbonnet Hulk |
 | `predicate:chosen_is` | 1 | Dina's Guidance |
+| `predicate:name_matches` | 1 | Guardian Project |
 | `predicate:stat` | 1 | Meren of Clan Nel Toth |
 | `quantity:counters` | 1 | Ribtruss Roaster |
-| `quantity:event_amount` | 1 | Culling Ritual |
+| `quantity:life_gained_this_turn` | 1 | Moseo, Vein's New Dean |
 | `quantity:life_lost_this_way` | 1 | Stensian Sanguinist // Exsanguinate |
 | `quantity:players_count` | 1 | Eccentric Pestfinder // Turn Stones |
-| `scripted:unique_name_check` | 1 | Guardian Project |
+| `quantity:step_result` | 1 | Culling Ritual |
 | `static:addTypes` | 1 | Ygra, Eater of All |
 | `static:mustAttack` | 1 | Toski, Bearer of Secrets |
 | `static:setBasePT` | 1 | Old Stickfingers |
@@ -1377,6 +1378,7 @@ Implementation: needed (trigger:multi_event, trigger:subject, field:life_change.
 | `step:proliferate` | 1 | Cankerbloom |
 | `step:scry` | 1 | Viscera Seer |
 | `step:unless_pay` | 1 | Ygra, Eater of All |
+| `targets:any_number` | 1 | Priest of Forgotten Gods |
 | `trigger:becomes_target` | 1 | Ygra, Eater of All |
 | `zone:graveyard` | 1 | Jarad, Golgari Lich Lord |
 

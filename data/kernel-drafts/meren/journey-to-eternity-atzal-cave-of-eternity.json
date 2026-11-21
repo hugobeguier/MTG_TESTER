@@ -34,8 +34,10 @@
       ],
       "implementation": "needed",
       "needs": [
-        "keyword:enchant"
-      ]
+        "keyword:enchant",
+        "face"
+      ],
+      "face": "Journey to Eternity"
     },
     {
       "id": "a2",
@@ -62,8 +64,10 @@
       "implementation": "needed",
       "needs": [
         "trigger:subject",
+        "face",
         "field:move_card_zone.transformed"
-      ]
+      ],
+      "face": "Journey to Eternity"
     },
     {
       "id": "a3",
@@ -73,8 +77,11 @@
         "name": "back_face",
         "param": "Atzal, Cave of Eternity"
       },
-      "implementation": "implemented",
-      "needs": []
+      "implementation": "needed",
+      "needs": [
+        "face"
+      ],
+      "face": "Atzal, Cave of Eternity"
     },
     {
       "id": "a4",
@@ -94,8 +101,10 @@
       },
       "implementation": "needed",
       "needs": [
-        "mana:variable"
-      ]
+        "mana:variable",
+        "face"
+      ],
+      "face": "Atzal, Cave of Eternity"
     },
     {
       "id": "a5",
@@ -141,8 +150,11 @@
           "who": "you"
         }
       ],
-      "implementation": "implemented",
-      "needs": []
+      "implementation": "needed",
+      "needs": [
+        "face"
+      ],
+      "face": "Atzal, Cave of Eternity"
     }
   ],
   "review": {

@@ -31,18 +31,17 @@
             }
           ],
           "amount": {
-            "ref": "event_amount"
+            "ref": "step_result",
+            "step": "s1"
           },
-          "amountOf": "s1",
           "src": 1
         }
       ],
       "implementation": "needed",
       "needs": [
+        "quantity:step_result",
         "field:destroy_all.filter",
         "step:add_mana",
-        "quantity:event_amount",
-        "field:add_mana.amountOf",
         "field:add_mana.produces"
       ]
     }

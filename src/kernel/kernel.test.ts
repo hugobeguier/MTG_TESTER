@@ -57,7 +57,7 @@ describe("kernel: Sphinx's Insight", () => {
   });
 
   it("re-render shows the condition in plain English", () => {
-    expect(renderForApproval(prep(sphinx.card, "Sphinx's Insight"), "Sphinx's Insight")).toContain("IF this spell was cast during a main phase: gain 2 life");
+    expect(renderForApproval(prep(sphinx.card, "Sphinx's Insight"), "Sphinx's Insight")).toContain("IF this spell was cast during your own main phase: gain 2 life");
   });
 });
 

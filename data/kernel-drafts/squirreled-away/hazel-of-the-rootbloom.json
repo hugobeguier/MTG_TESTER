@@ -34,23 +34,12 @@
       "mana": {
         "produces": [
           {
-            "anyColor": 1
+            "anyColorAmount": {
+              "ref": "X"
+            }
           }
         ]
       },
-      "steps": [
-        {
-          "kind": "add_mana",
-          "produces": [
-            {
-              "anyColor": 1
-            }
-          ],
-          "amount": {
-            "ref": "X"
-          }
-        }
-      ],
       "xPrompt": {
         "title": "Hazel of the Rootbloom: choose X",
         "instruction": "Choose a value for X (the amount used in the cost).",
@@ -63,10 +52,7 @@
       "needs": [
         "mana:variable",
         "cost:life",
-        "cost:tapOther",
-        "step:add_mana",
-        "quantity:X",
-        "field:add_mana.produces"
+        "cost:tapOther"
       ]
     },
     {

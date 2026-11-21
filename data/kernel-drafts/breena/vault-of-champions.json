@@ -16,17 +16,7 @@
           "not": {
             "check": "compare",
             "left": {
-              "ref": "players_count",
-              "who": "each_opponent",
-              "where": {
-                "check": "zone_count",
-                "who": "that_player",
-                "zone": "battlefield",
-                "cmp": {
-                  "op": ">=",
-                  "value": 0
-                }
-              }
+              "ref": "opponents_count"
             },
             "cmp": {
               "op": ">=",
@@ -39,7 +29,7 @@
       "implementation": "needed",
       "needs": [
         "replacement:would_enter",
-        "quantity:players_count"
+        "quantity:opponents_count"
       ]
     },
     {

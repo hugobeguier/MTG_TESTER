@@ -57,7 +57,8 @@
               "ofPlayer": "iterated",
               "modify": [
                 {
-                  "cant": "attack"
+                  "cant": "attack",
+                  "protects": "you_and_planeswalkers"
                 }
               ],
               "duration": "until_your_next_turn",

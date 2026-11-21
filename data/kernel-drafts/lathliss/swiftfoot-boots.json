@@ -4,7 +4,7 @@
     {
       "id": "a1",
       "kind": "static",
-      "text": "Equipped creature has hexproof and haste.",
+      "text": "Equipped creature has hexproof and haste. (It can't be the target of spells or abilities your opponents control. It can attack and {T} no matter when it came under your control.)",
       "static": {
         "affects": "equipped",
         "modify": [
@@ -24,7 +24,7 @@
     {
       "id": "a2",
       "kind": "activated",
-      "text": "Equip {1}",
+      "text": "Equip {1} ({1}: Attach to target creature you control. Equip only as a sorcery.)",
       "keyword": {
         "name": "equip"
       },
@@ -62,6 +62,7 @@
       ],
       "steps": [
         {
+          "src": 0,
           "kind": "attach",
           "what": "self",
           "to": "t1"

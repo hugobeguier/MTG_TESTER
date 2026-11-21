@@ -23,7 +23,9 @@ export const NEW_STEP_KINDS = [
   // consolidated pass
   "fight", "investigate", "proliferate", "extra_combat",
   // pairing pass: each of several created objects fights a different object from a pool, pairing chosen by the controller
-  "fight_pairs"
+  "fight_pairs",
+  // cleanup pass: Will-of-the-council voting, exchange life totals, regenerate, "repeat this process", emblems
+  "vote", "exchange_life", "regenerate", "repeat_process", "create_emblem"
 ] as const;
 
 export const STEP_KINDS = [...EXISTING_STEP_KINDS, ...NEW_STEP_KINDS] as const;
@@ -31,7 +33,7 @@ export type StepKind = (typeof STEP_KINDS)[number];
 
 export const PHASES = [
   "untap", "upkeep", "draw", "main", "beginning_of_combat", "combat", "declare_attackers", "declare_blockers",
-  "combat_damage", "end_of_combat", "end_step", "cleanup",
+  "first_strike_damage", "combat_damage", "end_of_combat", "end_step", "cleanup",
   // "your first main phase" / "your second main phase"
   "precombat_main", "postcombat_main"
 ] as const;
@@ -42,7 +44,9 @@ export const EVENT_NAMES = [
   "deals_combat_damage_to_player", "begin_step", "gain_life", "lose_life", "token_created", "counter_put",
   "sacrifice", "exploit", "cycle", "tap", "landfall", "becomes_target", "activate", "mill", "unspecified",
   // "is dealt damage" (the damaged object; deals_damage is the dealer) and "commits a crime"
-  "dealt_damage", "commit_crime"
+  "dealt_damage", "commit_crime",
+  // "whenever damage that would be dealt to you is prevented" (event_amount = the amount prevented)
+  "damage_prevented"
 ] as const;
 export type EventName = (typeof EVENT_NAMES)[number];
 
@@ -55,7 +59,9 @@ export type PlayerRef = z.infer<typeof PlayerRefSchema>;
 
 export const ObjRefSchema = z.union([
   // sacrificed = the object sacrificed as a cost (last known information); created = the token created by the previous step; iterated = the current object of the enclosing repeat_for_each
-  z.enum(["self", "equipped", "enchanted", "event_object", "chosen", "linked_exile", "sacrificed", "created", "iterated"]),
+  z.enum(["self", "equipped", "enchanted", "event_object", "chosen", "linked_exile", "sacrificed", "created", "iterated",
+    // vote_winners = the objects that got the most votes (all of them when tied) in the previous `vote` step
+    "vote_winners"]),
   z.string().regex(/^t\d+$/)
 ]);
 export type ObjRef = z.infer<typeof ObjRefSchema>;
@@ -86,7 +92,14 @@ export type Quantity =
   | number
   | { ref: "X" }
   | { ref: "count"; of: ObjectFilter }
-  | { ref: "devotion"; color: "W" | "U" | "B" | "R" | "G" }
+  // several colours = ONE count of symbols that are any of them (a hybrid {W/B} symbol counts once): "devotion to white and black"
+  | { ref: "devotion"; color: "W" | "U" | "B" | "R" | "G" | ("W" | "U" | "B" | "R" | "G")[] }
+  // cleanup pass: number of opponents; "for each X destroyed/sacrificed/exiled this way" (objects or amount a step affected);
+  // how many times a step ran; life points gained this turn
+  | { ref: "opponents_count" }
+  | { ref: "step_result"; step: string }
+  | { ref: "step_count"; step: string }
+  | { ref: "life_gained_this_turn"; who: PlayerRef }
   | { ref: "stat"; of: ObjRef; stat: "power" | "toughness" | "mana_value" }
   | { ref: "counters"; kind: string; on: ObjRef | PlayerRef }
   | { ref: "life_lost_this_way" }
@@ -107,7 +120,7 @@ export type Quantity =
 export interface ObjectFilter {
   types?: string[]; notTypes?: string[]; subtypes?: string[]; supertypes?: string[];
   notSupertypes?: string[]; colors?: string[]; notColors?: string[];
-  controller?: "you" | "opponent" | "any" | "defending_player"; // defending_player: the player the source creature is attacking
+  controller?: "you" | "opponent" | "any" | "defending_player" | "that_player" | "active_player"; // defending_player: the player the source creature is attacking; that_player: the player of the enclosing loop/event; active_player: the player whose turn it is
   owner?: "you" | "opponent" | "any";
   zone?: Zone | "any";
   // colored: true = "one or more colors", false = colorless
@@ -129,10 +142,15 @@ export interface ObjectFilter {
   chosenType?: boolean;            // has the creature type remembered by the source (see step choose + remember)
   chosenColor?: boolean;           // is the color remembered by the source
   attackingYou?: boolean;          // "attacking you" (the controller of the ability)
+  // cleanup pass
+  blocking?: boolean;              // "blocking creature" (attacking OR blocking = anyOf)
+  enteredThisTurn?: boolean;       // "entered the battlefield this turn"
+  attackingOpponent?: boolean;     // "attacking one of your opponents" (not you or your planeswalkers)
+  sameNameAs?: ObjRef;             // has the same name as <ref> ("same name as that permanent")
 }
 
 export type Predicate =
-  | { check: "cast_during"; phase: "main" | "combat" | "your_turn" | "opponent_turn" | "end_step" }
+  | { check: "cast_during"; phase: "main" | "your_main" | "combat" | "your_turn" | "opponent_turn" | "end_step" }
   | { check: "cast_from"; zone: Zone }
   | { check: "turn_is"; whose: "yours" | "opponents" }
   | { check: "phase_is"; phase: Phase }
@@ -150,7 +168,11 @@ export type Predicate =
   | { check: "turn_number"; scope: "game" | "yours"; cmp: Cmp }            // game turn number / "your Nth turn of the game"
   | { check: "chosen_is"; kind: "mode" | "color" | "creature_type" | "card_type" | "basic_land_type" | "card_name"; value: string } // the option remembered by the source
   | { check: "most_life"; who: PlayerRef }                                // has the most life or is tied for most life (among all players)
-  | { check: "step_done"; step: string }                                  // "if you do": an earlier optional step (by id) was performed
+  | { check: "step_done"; step: string; who?: PlayerRef }                 // "if you do": an earlier optional step (by id) was performed; `who` = by that player (per-player loops)
+  // cleanup pass
+  | { check: "mana_spent"; color: "W" | "U" | "B" | "R" | "G" | "C"; cmp?: Cmp } // "if {B} was spent to cast this spell" (cmp = how many symbols of that colour)
+  | { check: "cast_with"; option: string }                                // "was cast with escape / flashback / evoke ..."
+  | { check: "name_matches"; obj: ObjRef; among: ObjectFilter[] }         // obj has the same name as some object matching any of the filters (negate with `not`)
   | { check: "attacked_defender"; defender: "you" | "you_or_your_planeswalkers"; who: "all" | "none" | "any" } // of the attackers in this trigger, did all/none/any attack you?
   | { all: Predicate[] }
   | { any: Predicate[] }
@@ -164,7 +186,11 @@ export const QuantitySchema: z.ZodType<Quantity> = z.lazy(() =>
     z.number(),
     z.object({ ref: z.literal("X") }).strict(),
     z.object({ ref: z.literal("count"), of: ObjectFilterSchema }).strict(),
-    z.object({ ref: z.literal("devotion"), color: z.enum(["W", "U", "B", "R", "G"]) }).strict(),
+    z.object({ ref: z.literal("devotion"), color: z.union([z.enum(["W", "U", "B", "R", "G"]), z.array(z.enum(["W", "U", "B", "R", "G"])).min(1)]) }).strict(),
+    z.object({ ref: z.literal("opponents_count") }).strict(),
+    z.object({ ref: z.literal("step_result"), step: z.string() }).strict(),
+    z.object({ ref: z.literal("step_count"), step: z.string() }).strict(),
+    z.object({ ref: z.literal("life_gained_this_turn"), who: PlayerRefSchema }).strict(),
     z.object({ ref: z.literal("stat"), of: ObjRefSchema, stat: z.enum(["power", "toughness", "mana_value"]) }).strict(),
     z.object({ ref: z.literal("counters"), kind: z.string(), on: z.union([ObjRefSchema, PlayerRefSchema]) }).strict(),
     z.object({ ref: z.literal("life_lost_this_way") }).strict(),
@@ -189,7 +215,7 @@ export const ObjectFilterSchema: z.ZodType<ObjectFilter> = z.lazy(() =>
     types: strArr.optional(), notTypes: strArr.optional(), subtypes: strArr.optional(),
     supertypes: strArr.optional(), notSupertypes: strArr.optional(), colors: strArr.optional(),
     notColors: strArr.optional(),
-    controller: z.enum(["you", "opponent", "any", "defending_player"]).optional(),
+    controller: z.enum(["you", "opponent", "any", "defending_player", "that_player", "active_player"]).optional(),
     owner: z.enum(["you", "opponent", "any"]).optional(),
     zone: FilterZoneSchema.optional(),
     colored: z.boolean().optional(),
@@ -202,13 +228,15 @@ export const ObjectFilterSchema: z.ZodType<ObjectFilter> = z.lazy(() =>
     controllerDealtDamageBy: ObjRefSchema.optional(),
     notSubtypes: strArr.optional(), without: strArr.optional(), isCommander: z.boolean().optional(),
     sameName: z.boolean().optional(), sharesCreatureTypeWith: ObjRefSchema.optional(),
-    chosenType: z.boolean().optional(), chosenColor: z.boolean().optional(), attackingYou: z.boolean().optional()
+    chosenType: z.boolean().optional(), chosenColor: z.boolean().optional(), attackingYou: z.boolean().optional(),
+    blocking: z.boolean().optional(), enteredThisTurn: z.boolean().optional(), attackingOpponent: z.boolean().optional(),
+    sameNameAs: ObjRefSchema.optional()
   }).strict()
 );
 
 export const PredicateSchema: z.ZodType<Predicate> = z.lazy(() =>
   z.union([
-    z.object({ check: z.literal("cast_during"), phase: z.enum(["main", "combat", "your_turn", "opponent_turn", "end_step"]) }).strict(),
+    z.object({ check: z.literal("cast_during"), phase: z.enum(["main", "your_main", "combat", "your_turn", "opponent_turn", "end_step"]) }).strict(),
     z.object({ check: z.literal("cast_from"), zone: ZoneSchema }).strict(),
     z.object({ check: z.literal("turn_is"), whose: z.enum(["yours", "opponents"]) }).strict(),
     z.object({ check: z.literal("phase_is"), phase: z.enum(PHASES) }).strict(),
@@ -225,7 +253,10 @@ export const PredicateSchema: z.ZodType<Predicate> = z.lazy(() =>
     z.object({ check: z.literal("turn_number"), scope: z.enum(["game", "yours"]), cmp: CmpSchema }).strict(),
     z.object({ check: z.literal("chosen_is"), kind: z.enum(["mode", "color", "creature_type", "card_type", "basic_land_type", "card_name"]), value: z.string() }).strict(),
     z.object({ check: z.literal("most_life"), who: PlayerRefSchema }).strict(),
-    z.object({ check: z.literal("step_done"), step: z.string() }).strict(),
+    z.object({ check: z.literal("step_done"), step: z.string(), who: PlayerRefSchema.optional() }).strict(),
+    z.object({ check: z.literal("mana_spent"), color: z.enum(["W", "U", "B", "R", "G", "C"]), cmp: CmpSchema.optional() }).strict(),
+    z.object({ check: z.literal("cast_with"), option: z.string() }).strict(),
+    z.object({ check: z.literal("name_matches"), obj: ObjRefSchema, among: z.array(ObjectFilterSchema).min(1) }).strict(),
     z.object({ check: z.literal("attacked_defender"), defender: z.enum(["you", "you_or_your_planeswalkers"]), who: z.enum(["all", "none", "any"]) }).strict(),
     z.object({ all: z.array(PredicateSchema) }).strict(),
     z.object({ any: z.array(PredicateSchema) }).strict(),
@@ -273,6 +304,13 @@ export const TargetSpecSchema = z.object({
   distinct: z.boolean().optional(),
   // "for each opponent, up to one target ... that player controls": count applies once per opponent
   perOpponent: z.boolean().optional(),
+  // "any number of target ...": min 0, no upper bound (count.max is then only a placeholder and must be 1)
+  anyNumber: z.boolean().optional(),
+  // "up to X target ..." / "X target ...": the maximum is this Quantity (count.max is a placeholder of 1)
+  maxQuantity: QuantitySchema.optional(),
+  // conditional slot: this target exists only while the predicate holds when the spell is cast / the ability is put on the stack
+  // (Tear Asunder: the kicked target slot). An inactive slot is never asked, never validated, and its ref resolves to nothing.
+  onlyIf: PredicateSchema.optional(),
   prompt: PromptSchema.optional(),
   src: srcField
 }).strict();
@@ -292,7 +330,7 @@ export const CostSchema = z.union([
   z.object({ life: QuantitySchema, ...costMeta }).strict(),
   z.object({ exileFrom: ZoneSchema, what: selfOrFilter, count: QuantitySchema, ...costMeta }).strict(),
   z.object({ returnToHand: selfOrFilter, count: QuantitySchema, ...costMeta }).strict(),
-  z.object({ counters: z.object({ kind: z.string(), count: QuantitySchema, remove: z.boolean(), from: z.literal("self") }).strict(), ...costMeta }).strict(),
+  z.object({ counters: z.object({ kind: z.string(), count: QuantitySchema, remove: z.boolean(), from: selfOrFilter }).strict(), ...costMeta }).strict(),
   z.object({ reveal: selfOrFilter, ...costMeta }).strict(),
   z.object({ energy: int, ...costMeta }).strict(),
   // planeswalker loyalty cost: +N adds counters, negative removes ("-3"); a Quantity allows "-X"
@@ -392,7 +430,19 @@ export const StepSchema: z.ZodType<Step> = z.lazy(() =>
     options: z.array(z.string()).optional(),               // choose (choice:"mode"): the named options
     remember: z.boolean().optional(),                      // choose: store the answer on the source permanent (chosen_is / chosenType / chosenColor read it)
     amountLockedOn: z.literal("cast").optional(),          // the amount is fixed when the spell is cast ("X ... as you cast this spell")
-    reflexive: z.boolean().optional()                      // "When you do, ...": this step is a reflexive trigger, its targets are chosen when it triggers
+    reflexive: z.boolean().optional(),                     // "When you do, ...": this step is a reflexive trigger, its targets are chosen when it triggers
+    // ---- cleanup pass (typed; the legacy executor ignores them, so capabilities reports them as needs)
+    tokenTapped: z.boolean().optional(),                   // create_tokens: the tokens enter tapped
+    tokenAttacking: z.union([z.literal(true), z.enum(["attacked_opponent", "same_defender", "controller_chooses"])]).optional(), // create_tokens: enter attacking (true / controller_chooses = you choose who; that opponent; the same defender the source attacks)
+    tokenAbilities: z.array(z.lazy(() => AbilitySchema)).optional(), // create_tokens: abilities the tokens have (full ability records)
+    noRegenerate: z.boolean().optional(),                  // destroy_*: "it can't be regenerated"
+    voters: z.enum(["each_player", "each_opponent"]).optional(), // vote: who votes (in turn order starting with the caster)
+    candidates: ObjectFilterSchema.optional(),             // vote: the objects that can be voted for (omit + `voteOptions` = named options)
+    voteOptions: z.array(z.string()).optional(),           // vote: named options ("evidence" / "bribery")
+    tie: z.enum(["all_tied", "controller_chooses"]).optional(), // vote: every candidate tied for most votes wins / the controller picks among them
+    withWho: PlayerRefSchema.optional(),                   // exchange_life: the other player
+    repeatIf: PredicateSchema.optional(),                  // repeat_process: after the body ran, run it again while this holds
+    emblem: z.object({ abilities: z.array(z.lazy(() => AbilitySchema)).min(1) }).strict().optional() // create_emblem: the emblem's abilities
   }).passthrough()
 ) as unknown as z.ZodType<Step>;
 export { quantityFields };
@@ -400,6 +450,8 @@ export { quantityFields };
 export const ModesSchema = z.object({
   choose: z.object({ min: int.min(0), max: int.min(1) }).strict(),
   distinct: z.boolean(),
+  // "Each mode must target a different player": the chosen modes' targets must all differ
+  distinctTargets: z.boolean().optional(),
   // "You may choose the same mode more than once": the same option can be picked several times (distinct is then false)
   repeatable: z.boolean().optional(),
   options: z.array(z.object({
@@ -457,6 +509,10 @@ export const TriggerSpecSchema = z.object({
   // "one or more creatures ... deal damage": fires once per event batch, not once per matching object
   batch: z.boolean().optional(),
   fromZone: ZoneSchema.optional(), toZone: ZoneSchema.optional(),
+  // "from anywhere other than the battlefield": any origin zone except this one
+  notFromZone: ZoneSchema.optional(),
+  // "whenever a Human deals damage to you": the object that dealt the damage
+  damageSource: ObjectFilterSchema.optional(),
   // Saga chapter abilities: fires when a lore counter brings the Saga to one of these chapter numbers ("I, II" = [1, 2])
   chapters: z.array(int.min(1)).optional(),
   // "attacks with two or more creatures": fires only when at least this many objects are in the batch (use with batch)
@@ -470,7 +526,7 @@ export const TriggerSpecSchema = z.object({
     subject: z.union([ObjectFilterSchema, PlayerRefSchema, ObjRefSchema]).optional(),
     step: z.enum(PHASES).optional(),
     whose: z.enum(["yours", "opponents", "each"]).optional(),
-    fromZone: ZoneSchema.optional(), toZone: ZoneSchema.optional()
+    fromZone: ZoneSchema.optional(), toZone: ZoneSchema.optional(), notFromZone: ZoneSchema.optional()
   }).strict()).optional()
 }).strict();
 export type TriggerSpec = z.infer<typeof TriggerSpecSchema>;
@@ -478,7 +534,9 @@ export type TriggerSpec = z.infer<typeof TriggerSpecSchema>;
 export const ReplacementSpecSchema = z.object({
   event: z.enum([
     "would_create_token", "would_die", "would_be_put_into_zone", "would_draw", "would_gain_life",
-    "would_lose_life", "would_deal_damage", "would_enter", "would_discard", "would_become_tapped"
+    "would_lose_life", "would_deal_damage", "would_enter", "would_discard", "would_become_tapped",
+    // "if one or more counters would be put on a permanent" (Hardened Scales, Doubling Season): modify `set: {amount: {add|multiply}}`
+    "would_add_counters"
   ]),
   subject: z.union([ObjectFilterSchema, PlayerRefSchema]).optional(),
   fromZone: ZoneSchema.optional(), toZone: ZoneSchema.optional(),
@@ -491,7 +549,7 @@ export const ReplacementSpecSchema = z.object({
   optional: z.boolean().optional(),
   condition: PredicateSchema.optional(),
   // would_deal_damage / would_lose_life...: who or what is hit, whether it must be combat, and what deals it
-  recipient: z.union([ObjectFilterSchema, PlayerRefSchema, z.literal("self")]).optional(),
+  recipient: z.union([ObjectFilterSchema, PlayerRefSchema, z.literal("self"), ObjRefSchema]).optional(),
   damageType: z.enum(["combat", "noncombat"]).optional(),
   damageSource: ObjectFilterSchema.optional(),
   // a one-shot replacement/prevention shield that lasts for a while ("this turn")
@@ -509,7 +567,8 @@ export const StaticSpecSchema = z.object({
     z.object({ grantAbility: z.record(z.unknown()) }).strict(),
     z.object({ lose: z.string() }).strict(),
     z.object({ setTypes: strArr }).strict(),
-    z.object({ cant: z.enum(["attack", "block", "be_blocked", "be_countered", "cast", "gain_life", "search"]), except: ObjectFilterSchema.optional() }).strict(),
+    // protects: the restriction only covers attacks aimed at you ("can't attack you or planeswalkers you control")
+    z.object({ cant: z.enum(["attack", "block", "be_blocked", "be_countered", "cast", "gain_life", "search"]), except: ObjectFilterSchema.optional(), protects: z.enum(["you", "you_and_planeswalkers"]).optional() }).strict(),
     z.object({ evasion: z.object({ cantBeBlockedBy: ObjectFilterSchema.optional(), unlessDefenderControls: ObjectFilterSchema.optional() }).strict() }).strict(),
     z.object({ costMod: z.object({ filter: ObjectFilterSchema, delta: QuantitySchema }).strict() }).strict(),
     z.object({ copyOf: ObjRefSchema }).strict(),
@@ -541,6 +600,7 @@ export type ManaSpec =
   | { perCount: ObjectFilter; color: string; restriction?: ObjectFilter; abilitiesOf?: ObjectFilter }
   | { commanderIdentity: number }
   | { chosenColor: number; restriction?: ObjectFilter; abilitiesOf?: ObjectFilter }   // the color remembered by the source
+  | { anyColorAmount: Quantity; restriction?: ObjectFilter; abilitiesOf?: ObjectFilter } // "X mana in any combination of colors"
   | { conditional: { if: Predicate; then: ManaSpec[]; else: ManaSpec[] } };           // "if you control X, add two mana instead"
 export const ManaSpecSchema: z.ZodType<ManaSpec> = z.lazy(() => z.union([
   z.object({ colors: z.string(), ...manaRestriction }).strict(),
@@ -549,6 +609,7 @@ export const ManaSpecSchema: z.ZodType<ManaSpec> = z.lazy(() => z.union([
   // "one mana of any color in your commander's color identity"
   z.object({ commanderIdentity: int.min(1) }).strict(),
   z.object({ chosenColor: int.min(1), ...manaRestriction }).strict(),
+  z.object({ anyColorAmount: QuantitySchema, ...manaRestriction }).strict(),
   z.object({ conditional: z.object({ if: PredicateSchema, then: z.array(ManaSpecSchema), else: z.array(ManaSpecSchema) }).strict() }).strict()
 ])) as z.ZodType<ManaSpec>;
 
@@ -564,6 +625,8 @@ export const AbilitySchema = z.object({
   kind: AbilityKindSchema,
   text: z.string(),
   zone: ZoneSchema.optional(),
+  // double-faced / modal double-faced / split cards: the face this ability belongs to (omit on single-faced cards)
+  face: z.string().optional(),
   timing: TimingSchema.optional(),
   costs: z.array(CostSchema).optional(),
   costReduction: CostReductionSchema.optional(),
@@ -599,7 +662,9 @@ export const ReviewSchema = z.object({
   // validator escape hatch: a lexeme the validator flagged falsely, with the reason a human gave
   ignore: z.array(z.object({ lexeme: z.string(), reason: z.string().min(1) }).strict()).optional(),
   // for cards missing from data/cards.db: the oracle text to validate against, with where it came from
-  oracleOverride: z.object({ text: z.string().min(1), source: z.string().min(1), typeLine: z.string().optional() }).strict().optional()
+  oracleOverride: z.object({ text: z.string().min(1), source: z.string().min(1), typeLine: z.string().optional() }).strict().optional(),
+  // free-form reviewer notes: rulings, kernel implications, why a modelling choice was made (never read by the validator)
+  notes: z.array(z.string().min(1)).optional()
 }).strict();
 export type Review = z.infer<typeof ReviewSchema>;
 

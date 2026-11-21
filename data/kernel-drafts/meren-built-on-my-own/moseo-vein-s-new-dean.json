@@ -45,7 +45,8 @@
                   "who": "you",
                   "amount": 1
                 }
-              ]
+              ],
+              "id": "k0"
             }
           ]
         }
@@ -82,9 +83,8 @@
             "mv": {
               "op": "<=",
               "value": {
-                "ref": "count_this_turn",
-                "event": "gain_life",
-                "actor": "you"
+                "ref": "life_gained_this_turn",
+                "who": "you"
               }
             }
           },
@@ -112,7 +112,7 @@
       ],
       "implementation": "needed",
       "needs": [
-        "quantity:count_this_turn",
+        "quantity:life_gained_this_turn",
         "trigger:intervening_if",
         "targets:multi"
       ]

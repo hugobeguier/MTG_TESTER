@@ -30,10 +30,6 @@
     "status": "draft",
     "ignore": [
       {
-        "lexeme": "each",
-        "reason": "'Each land' is the static's affects filter"
-      },
-      {
         "lexeme": "another",
         "reason": "'its other land types' means its other land subtypes, not another object"
       }

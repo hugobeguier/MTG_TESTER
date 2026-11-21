@@ -3,8 +3,9 @@
 
 import type { Zone } from "../schema";
 import { emptyPool, newObject, shuffleInPlace, drawCards, type Run } from "./core";
-import type { CardLookup, Config, GameState, ObjId, PlayerId, PlayerState } from "./types";
+import type { CardDb, CardLookup, Config, GameState, ObjId, PlayerId, PlayerState } from "./types";
 import { resolve } from "./resolve";
+import { canBeCommander } from "./commander";
 import type { Action, EngineContext, ResolveResult } from "./types";
 
 export interface PlayerSetup {
@@ -21,6 +22,8 @@ export interface NewGameOptions {
   cards: CardLookup;
   seed?: number;
   startingLife?: number;
+  /** Commander format checks: every `commander` must be a legal commander (legendary creature or "can be your commander"); default off */
+  commanderRules?: boolean;
   shuffle?: boolean;
   /** cards drawn at the start (no mulligans yet); default 7 */
   openingHand?: number;
@@ -39,16 +42,18 @@ export function newGame(o: NewGameOptions): GameState {
   const state: GameState = {
     version: 1, config, seed: o.seed ?? 1, rngState: o.seed ?? 1, nextId: 1, clock: 0, decisionSeq: 0, players, objects: {}, battlefield: [], stack: [],
     turn: { number: 1, active: players[0].id, phase: o.startPhase ?? "precombat_main" }, priority: players[0].id, passes: [], effects: [], lki: {}, turnLog: [],
-    activations: {}, triggerQueue: [], priorityAfter: null, pending: null, gameOver: null
+    activations: {}, triggerQueue: [], priorityAfter: null, pending: null, gameOver: null, combat: null, extraCombats: 0
   };
   const r: Run = { s: state, events: [], defs: o.cards, scanned: 0 };
   for (const [i, ps] of o.players.entries()) {
     for (const name of ps.deck) { const ob = newObject(r, name, ps.id, "library"); players[i].library.push(ob.id); }
+    if (ps.commander && o.commanderRules && !canBeCommander(o.cards(ps.commander))) throw new Error(`${ps.commander} cannot be a commander`);
     if (ps.commander) { const ob = newObject(r, ps.commander, ps.id, "command", { isCommander: true }); players[i].command.push(ob.id); }
     if (o.shuffle !== false) shuffleInPlace(r, players[i].library);
   }
   const n = o.openingHand ?? 7;
   for (const p of players) drawCards(r, p.id, n);
+  state.triggerQueue = []; state.turnLog = []; // opening hands never trigger miracle and do not count as drawn this turn
   state.turn = { number: 1, active: players[0].id, phase: o.startPhase ?? "precombat_main" };
   players[0].lastTurnStartTs = ++state.clock;
   return state;
@@ -73,8 +78,8 @@ export function debugPlaceCard(state: GameState, cards: CardLookup, owner: Playe
 }
 
 /** Convenience wrapper binding a card lookup. */
-export function createEngine(cards: CardLookup) {
-  const ctx: EngineContext = { cards };
+export function createEngine(cards: CardLookup, db?: CardDb) {
+  const ctx: EngineContext = { cards, db };
   return {
     ctx,
     resolve: (state: GameState, action: Action): ResolveResult => resolve(state, action, ctx),

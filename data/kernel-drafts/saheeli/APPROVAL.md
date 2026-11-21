@@ -200,11 +200,10 @@ Re-rendered plain English:
 
 ```
 Crackle with Power [draft]
-  [a1] spell_effect [needed: needs scripted:target_count_up_to_X, targets:multi, quantity:math]
+  [a1] spell_effect [needed: needs targets:multi, targets:variable_count, quantity:math]
     Oracle: Crackle with Power deals five times X damage to each of up to X targets.
-    Target t1: up to one target  <- prompt: "Choose up to X targets (any target: creatures, players or planeswalkers)."
-    Effect: Deal 5 x X damage to up to one target.
-    Scripted (engine-specific rule, not described by the fields above): target_count_up_to_X
+    Target t1: up to X targets  <- prompt: "Choose up to X targets (any target: creatures, players or planeswalkers)."
+    Effect: Deal 5 x X damage to up to X targets.
     X prompt: "Choose a value for X (paid in mana as part of the spell's cost)."
 ```
 
@@ -213,7 +212,7 @@ Player prompts:
 - Crackle with Power: choose targets: Choose up to X targets (any target: creatures, players or planeswalkers).
 - Crackle with Power: choose X: Choose a value for X (paid in mana as part of the spell's cost).
 
-Implementation: needed (scripted:target_count_up_to_X, targets:multi, quantity:math)
+Implementation: needed (targets:multi, targets:variable_count, quantity:math)
 
 Questions for you:
 
@@ -245,11 +244,11 @@ Daretti, Scrap Savant [draft]
     Timing: sorcery; 1 per turn
     Target t1: target artifact card in your graveyard  <- prompt: "Choose target artifact card in your graveyard."
     Effect: Sacrifice an artifact you control. Then, IF you did (s1): return target artifact card in your graveyard from the graveyard to the battlefield.
-  [a3] activated [needed: needs timing, cost:loyalty, step:grant_effect, field:grant_effect.emblem, field:grant_effect.modify]
+  [a3] activated [needed: needs timing, cost:loyalty, step:create_emblem, field:create_emblem.emblem]
     Oracle: −10: You get an emblem with "Whenever an artifact is put into your graveyard from the battlefield, return that card to the battlefield at the beginning of the next end step."
     Cost: −10
     Timing: sorcery; 1 per turn
-    Effect: The target gains an ability.
+    Effect: You get an emblem with "Whenever an artifact is put into your graveyard from the battlefield, return that card to the battlefield at the beginning of the next end step.".
   [a4] scripted [needed: needs scripted:can_be_your_commander]
     Oracle: Daretti, Scrap Savant can be your commander.
     Scripted (engine-specific rule, not described by the fields above): can_be_your_commander
@@ -261,7 +260,7 @@ Player prompts:
 - Daretti, Scrap Savant: choose a target: Choose target artifact card in your graveyard.
 - Daretti, Scrap Savant: sacrifice: Choose a permanent to sacrifice.
 
-Implementation: needed (timing, cost:loyalty, field:discard.upTo, quantity:event_amount, field:sacrifice_permanent.amount, field:sacrifice_permanent.filter, predicate:step_done, step:grant_effect, field:grant_effect.emblem, field:grant_effect.modify, scripted:can_be_your_commander)
+Implementation: needed (timing, cost:loyalty, field:discard.upTo, quantity:event_amount, field:sacrifice_permanent.amount, field:sacrifice_permanent.filter, predicate:step_done, step:create_emblem, field:create_emblem.emblem, scripted:can_be_your_commander)
 
 Questions for you:
 
@@ -1279,18 +1278,18 @@ Tezzeret, Artifice Master [draft]
     Cost: +0
     Timing: sorcery; 1 per turn
     Effect: If you control three or more artifacts: draw 2 cards; otherwise draw a card.
-  [a3] activated [needed: needs timing, cost:loyalty, step:grant_effect, field:grant_effect.emblem, field:grant_effect.modify]
+  [a3] activated [needed: needs timing, cost:loyalty, step:create_emblem, field:create_emblem.emblem]
     Oracle: −9: You get an emblem with "At the beginning of your end step, search your library for a permanent card, put it onto the battlefield, then shuffle."
     Cost: −9
     Timing: sorcery; 1 per turn
-    Effect: The target gains an ability.
+    Effect: You get an emblem with "At the beginning of your end step, search your library for a permanent card, put it onto the battlefield, then shuffle.".
 ```
 
 Player prompts:
 
 - (none: no decisions)
 
-Implementation: needed (timing, cost:loyalty, field:create_tokens.tokenKeywords, step:if_else, field:if_else.else, field:if_else.if, field:if_else.then, step:grant_effect, field:grant_effect.emblem, field:grant_effect.modify)
+Implementation: needed (timing, cost:loyalty, field:create_tokens.tokenKeywords, step:if_else, field:if_else.else, field:if_else.if, field:if_else.then, step:create_emblem, field:create_emblem.emblem)
 
 Questions for you:
 
@@ -1469,11 +1468,11 @@ Questions for you:
 |---|---|---|
 | `static` | 15 | Brudiclad, Telchor Engineer; Chief of the Foundry; Darksteel Forge; Darksteel Juggernaut; Enthusiastic Mechanaut; Etherium Sculptor; Forsaken Monument; Foundry Inspector; Mycosynth Lattice; Padeem, Consul of Innovation; Reliquary Tower; Shimmer Dragon; Skullclamp; Swiftfoot Boots; Thopter Engineer |
 | `field:create_tokens.tokenKeywords` | 10 | Ancient Stone Idol; Loyal Apprentice; Sharding Sphinx; Swan Song; Tezzeret, Artifice Master; Thopter Assembly; Thopter Engineer; Thopter Spy Network; Triplicate Titan; Whirler Rogue |
-| `field:grant_effect.modify` | 9 | Saheeli, the Gifted; Archway of Innovation; Daretti, Scrap Savant; Finale of Revelation; Loyal Apprentice; Memnarch; Tezzeret, Artifice Master; Vedalken Humiliator; Whirler Rogue |
-| `step:grant_effect` | 9 | Saheeli, the Gifted; Archway of Innovation; Daretti, Scrap Savant; Finale of Revelation; Loyal Apprentice; Memnarch; Tezzeret, Artifice Master; Vedalken Humiliator; Whirler Rogue |
 | `replacement:would_enter` | 8 | Archway of Innovation; Frostboil Snarl; Izzet Boilerworks; Silverbluff Bridge; Sulfur Falls; Sunken Palace; Swiftwater Cliffs; Worn Powerstone |
 | `trigger:subject` | 8 | Forsaken Monument; Jhoira, Weatherlight Captain; Mimic Vat; Mirrorworks; Sharding Sphinx; Skullclamp; Thopter Spy Network; Treasure Nabber |
+| `field:grant_effect.modify` | 7 | Saheeli, the Gifted; Archway of Innovation; Finale of Revelation; Loyal Apprentice; Memnarch; Vedalken Humiliator; Whirler Rogue |
 | `step:copy` | 7 | Saheeli, the Gifted; Brudiclad, Telchor Engineer; Mimic Vat; Mirrorworks; Saheeli, Sublime Artificer; Saheeli's Artistry; Sunken Palace |
+| `step:grant_effect` | 7 | Saheeli, the Gifted; Archway of Innovation; Finale of Revelation; Loyal Apprentice; Memnarch; Vedalken Humiliator; Whirler Rogue |
 | `mana:variable` | 6 | Arcane Signet; Command Tower; Fellwar Stone; Gilded Lotus; Ornithopter of Paradise; Prismatic Lens |
 | `timing` | 6 | Saheeli, the Gifted; Daretti, Scrap Savant; Idol of Oblivion; Saheeli, Sublime Artificer; Steel Hellkite; Tezzeret, Artifice Master |
 | `trigger:intervening_if` | 6 | Loyal Apprentice; Loyal Drake; Padeem, Consul of Innovation; Thopter Assembly; Thopter Spy Network; Vedalken Humiliator |
@@ -1500,11 +1499,11 @@ Questions for you:
 | `field:copy.exileAt` | 2 | Saheeli, the Gifted; Mimic Vat |
 | `field:copy.gainKeywords` | 2 | Saheeli, the Gifted; Mimic Vat |
 | `field:copy.of` | 2 | Brudiclad, Telchor Engineer; Saheeli, Sublime Artificer |
+| `field:create_emblem.emblem` | 2 | Daretti, Scrap Savant; Tezzeret, Artifice Master |
 | `field:damage_target.all` | 2 | Blasphemous Act; Delete |
 | `field:damage_target.filter` | 2 | Blasphemous Act; Delete |
 | `field:damage_target.source` | 2 | Shivan Reef; Talisman of Creativity |
 | `field:grant_effect.appliesTo` | 2 | Saheeli, the Gifted; Archway of Innovation |
-| `field:grant_effect.emblem` | 2 | Daretti, Scrap Savant; Tezzeret, Artifice Master |
 | `field:if_else.else` | 2 | Finale of Revelation; Tezzeret, Artifice Master |
 | `field:move_card_zone.all` | 2 | Finale of Revelation; Mimic Vat |
 | `field:move_card_zone.from` | 2 | Finale of Revelation; Mimic Vat |
@@ -1519,6 +1518,7 @@ Questions for you:
 | `scripted:next_spell_gains_keyword` | 2 | Saheeli, the Gifted; Archway of Innovation |
 | `step:attach` | 2 | Skullclamp; Swiftfoot Boots |
 | `step:counter_spell` | 2 | Counterspell; Swan Song |
+| `step:create_emblem` | 2 | Daretti, Scrap Savant; Tezzeret, Artifice Master |
 | `step:gain_control` | 2 | Memnarch; Treasure Nabber |
 | `step:look_top` | 2 | Reality Heist; Saheeli's Directive |
 | `trigger:tap` | 2 | Forsaken Monument; Treasure Nabber |
@@ -1574,7 +1574,6 @@ Questions for you:
 | `scripted:mana_colors_an_opponent_land_could_produce` | 1 | Fellwar Stone |
 | `scripted:tapped_for_colorless_mana` | 1 | Forsaken Monument |
 | `scripted:tapped_for_mana` | 1 | Treasure Nabber |
-| `scripted:target_count_up_to_X` | 1 | Crackle with Power |
 | `scripted:untap_during_each_other_players_untap_step` | 1 | Unwinding Clock |
 | `static:addTypes` | 1 | Mycosynth Lattice |
 | `static:mustAttack` | 1 | Darksteel Juggernaut |
@@ -1587,4 +1586,5 @@ Questions for you:
 | `step:shuffle` | 1 | Finale of Revelation |
 | `step:unless_pay` | 1 | Thirst for Knowledge |
 | `targets:multi` | 1 | Crackle with Power |
+| `targets:variable_count` | 1 | Crackle with Power |
 | `trigger:batch` | 1 | Thopter Spy Network |

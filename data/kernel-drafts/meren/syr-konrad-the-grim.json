@@ -22,41 +22,8 @@
               ],
               "zone": "any"
             },
-            "fromZone": "hand",
-            "toZone": "graveyard"
-          },
-          {
-            "event": "unspecified",
-            "subject": {
-              "types": [
-                "creature"
-              ],
-              "zone": "any"
-            },
-            "fromZone": "library",
-            "toZone": "graveyard"
-          },
-          {
-            "event": "unspecified",
-            "subject": {
-              "types": [
-                "creature"
-              ],
-              "zone": "any"
-            },
-            "fromZone": "exile",
-            "toZone": "graveyard"
-          },
-          {
-            "event": "unspecified",
-            "subject": {
-              "types": [
-                "creature"
-              ],
-              "zone": "any"
-            },
-            "fromZone": "stack",
-            "toZone": "graveyard"
+            "toZone": "graveyard",
+            "notFromZone": "battlefield"
           },
           {
             "event": "leaves",

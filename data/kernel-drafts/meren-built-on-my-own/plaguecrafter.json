@@ -48,7 +48,8 @@
             "if": {
               "not": {
                 "check": "step_done",
-                "step": "s1"
+                "step": "s1",
+                "who": "that_player"
               }
             },
             "src": 1

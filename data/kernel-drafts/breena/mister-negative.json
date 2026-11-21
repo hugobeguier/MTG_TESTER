@@ -51,16 +51,15 @@
       ],
       "steps": [
         {
-          "kind": "set_life",
+          "kind": "exchange_life",
           "id": "s1",
           "who": "you",
-          "target": "t1",
-          "exchange": true,
+          "withWho": "target_player",
           "optional": true,
           "src": 0,
           "prompt": {
             "title": "Mister Negative: optional",
-            "instruction": "Do you want to set life total to ??",
+            "instruction": "Do you want to exchange life totals with target player?",
             "source": {
               "card": "Mister Negative",
               "ability": "a3"
@@ -93,8 +92,8 @@
       "id": "a3",
       "implementation": "needed",
       "needs": [
-        "step:set_life",
-        "field:set_life.exchange",
+        "step:exchange_life",
+        "field:exchange_life.withWho",
         "quantity:life_lost_this_way",
         "predicate:compare"
       ]

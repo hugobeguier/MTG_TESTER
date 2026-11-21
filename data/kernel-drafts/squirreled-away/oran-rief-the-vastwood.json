@@ -56,9 +56,9 @@
             ],
             "colors": [
               "green"
-            ]
+            ],
+            "enteredThisTurn": true
           },
-          "enteredThisTurn": true,
           "steps": [
             {
               "kind": "add_counters",
@@ -72,8 +72,8 @@
       "implementation": "needed",
       "needs": [
         "ref:iterated",
+        "filter:enteredThisTurn",
         "step:repeat_for_each",
-        "field:repeat_for_each.enteredThisTurn",
         "field:repeat_for_each.over",
         "field:repeat_for_each.steps",
         "step:add_counters",
@@ -82,12 +82,6 @@
     }
   ],
   "review": {
-    "status": "draft",
-    "ignore": [
-      {
-        "lexeme": "duration",
-        "reason": "entered this turn is the repeat_for_each flag enteredThisTurn (no ObjectFilter field); not a duration"
-      }
-    ]
+    "status": "draft"
   }
 }

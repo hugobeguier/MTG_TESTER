@@ -58,12 +58,6 @@
     }
   ],
   "review": {
-    "status": "draft",
-    "ignore": [
-      {
-        "lexeme": "each",
-        "reason": "'Each Dragon you control' is the replacement subject filter"
-      }
-    ]
+    "status": "draft"
   }
 }

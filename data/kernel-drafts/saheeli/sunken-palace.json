@@ -116,10 +116,6 @@
       {
         "lexeme": "may",
         "reason": "choosing new targets is the chooseNewTargets flag"
-      },
-      {
-        "lexeme": "When",
-        "reason": "the 'when you spend this mana' rider is the scripted marker copy_spell_or_ability_when_mana_spent"
       }
     ]
   }

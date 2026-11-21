@@ -137,10 +137,6 @@
     "status": "draft",
     "ignore": [
       {
-        "lexeme": "only",
-        "reason": "'Spend this mana only to cast Dragon creature spells' is the mana restriction filter"
-      },
-      {
         "lexeme": "each",
         "reason": "'during each of your turns' is the turn_is timing predicate"
       }

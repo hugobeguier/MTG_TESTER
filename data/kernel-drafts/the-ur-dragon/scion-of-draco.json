@@ -81,10 +81,6 @@
     "status": "draft",
     "ignore": [
       {
-        "lexeme": "each",
-        "reason": "'Each creature you control' is the static's affects filter"
-      },
-      {
         "lexeme": "if",
         "reason": "per-color keyword grant ('vigilance if it's white...') is expressed as one grant per keyword with a color gate in the scripted marker below"
       }

@@ -13,8 +13,8 @@
           "condition": {
             "when": "on_resolution",
             "if": {
-              "check": "paid_additional_cost",
-              "option": "mana_spent:{W}"
+              "check": "mana_spent",
+              "color": "W"
             },
             "src": 0
           },
@@ -34,8 +34,8 @@
           "condition": {
             "when": "on_resolution",
             "if": {
-              "check": "paid_additional_cost",
-              "option": "mana_spent:{B}"
+              "check": "mana_spent",
+              "color": "B"
             },
             "src": 1
           },
@@ -53,7 +53,8 @@
                       "types": [
                         "creature"
                       ],
-                      "attacking": true
+                      "attacking": true,
+                      "controller": "that_player"
                     }
                   }
                 ]
@@ -66,10 +67,10 @@
       "id": "a1",
       "implementation": "needed",
       "needs": [
+        "predicate:mana_spent",
         "step:grant_effect",
         "field:grant_effect.replacement",
         "field:grant_effect.who",
-        "predicate:paid_additional_cost",
         "step:repeat_for_each",
         "field:repeat_for_each.steps",
         "field:repeat_for_each.who",

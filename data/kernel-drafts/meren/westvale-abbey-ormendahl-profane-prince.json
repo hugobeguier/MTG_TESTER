@@ -17,8 +17,11 @@
           }
         ]
       },
-      "implementation": "implemented",
-      "needs": []
+      "implementation": "needed",
+      "needs": [
+        "face"
+      ],
+      "face": "Westvale Abbey"
     },
     {
       "id": "a2",
@@ -51,8 +54,10 @@
       ],
       "implementation": "needed",
       "needs": [
-        "cost:life"
-      ]
+        "cost:life",
+        "face"
+      ],
+      "face": "Westvale Abbey"
     },
     {
       "id": "a3",
@@ -96,8 +101,10 @@
       "implementation": "needed",
       "needs": [
         "cost:sacrifice",
+        "face",
         "step:transform"
-      ]
+      ],
+      "face": "Westvale Abbey"
     },
     {
       "id": "a4",
@@ -106,8 +113,11 @@
       "keyword": {
         "name": "flying"
       },
-      "implementation": "implemented",
-      "needs": []
+      "implementation": "needed",
+      "needs": [
+        "face"
+      ],
+      "face": "Ormendahl, Profane Prince"
     },
     {
       "id": "a5",
@@ -116,8 +126,11 @@
       "keyword": {
         "name": "lifelink"
       },
-      "implementation": "implemented",
-      "needs": []
+      "implementation": "needed",
+      "needs": [
+        "face"
+      ],
+      "face": "Ormendahl, Profane Prince"
     },
     {
       "id": "a6",
@@ -126,8 +139,11 @@
       "keyword": {
         "name": "indestructible"
       },
-      "implementation": "implemented",
-      "needs": []
+      "implementation": "needed",
+      "needs": [
+        "face"
+      ],
+      "face": "Ormendahl, Profane Prince"
     },
     {
       "id": "a7",
@@ -136,8 +152,11 @@
       "keyword": {
         "name": "haste"
       },
-      "implementation": "implemented",
-      "needs": []
+      "implementation": "needed",
+      "needs": [
+        "face"
+      ],
+      "face": "Ormendahl, Profane Prince"
     }
   ],
   "review": {

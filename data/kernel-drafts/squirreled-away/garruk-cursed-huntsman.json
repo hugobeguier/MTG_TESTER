@@ -58,7 +58,8 @@
                     }
                   ]
                 }
-              ]
+              ],
+              "id": "k0"
             }
           ]
         }
@@ -147,38 +148,44 @@
       },
       "steps": [
         {
-          "kind": "grant_effect",
-          "emblem": true,
+          "kind": "create_emblem",
           "who": "you",
-          "all": true,
-          "filter": {
-            "types": [
-              "creature"
-            ],
-            "controller": "you"
-          },
-          "modify": [
-            {
-              "pt": {
-                "power": 3,
-                "toughness": 3
+          "emblem": {
+            "abilities": [
+              {
+                "id": "em1",
+                "kind": "static",
+                "text": "Creatures you control get +3/+3 and have trample.",
+                "static": {
+                  "affects": {
+                    "types": [
+                      "creature"
+                    ],
+                    "controller": "you"
+                  },
+                  "modify": [
+                    {
+                      "pt": {
+                        "power": 3,
+                        "toughness": 3
+                      }
+                    },
+                    {
+                      "grant": "trample"
+                    }
+                  ]
+                }
               }
-            },
-            {
-              "grant": "trample"
-            }
-          ]
+            ]
+          }
         }
       ],
       "implementation": "needed",
       "needs": [
         "timing",
         "cost:loyalty",
-        "step:grant_effect",
-        "field:grant_effect.all",
-        "field:grant_effect.emblem",
-        "field:grant_effect.filter",
-        "field:grant_effect.modify"
+        "step:create_emblem",
+        "field:create_emblem.emblem"
       ]
     }
   ],

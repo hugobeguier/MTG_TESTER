@@ -12,32 +12,38 @@ const oddCard = (name: string, manaCost: string, step: Record<string, unknown>, 
 });
 
 describe("unsupported capabilities are errors, never silent skips", () => {
-  it("Brainstorm (step:choose) is refused with the missing capability named", () => {
-    const t = table();
+  it("a card with a step the engine lacks (step:goad_everything) is refused with the missing capability named", () => {
+    const odd = oddCard("Odd Copier", "{U}", { kind: "goad_everything", target: "self" });
+    const t = table(["p1", "p2"], { extra: { "Odd Copier": odd } });
     t.give("p1", "Island", "battlefield");
-    const bs = t.give("p1", "Brainstorm", "hand");
+    const bs = t.give("p1", "Odd Copier", "hand");
     const res = t.do({ type: "castSpell", player: "p1", cardId: bs });
     expect(res.error?.code).toBe("unsupported");
-    expect(res.error?.capability).toContain("step:choose");
-    expect(res.error?.message).toContain("Brainstorm");
+    expect(res.error?.capability).toContain("step:goad_everything");
+    expect(res.error?.message).toContain("Odd Copier");
     expect(t.obj(bs).zone).toBe("hand");
   });
 
-  it("Rootcast Apprenticeship needs step:copy (one unsupported mode blocks the whole card)", () => {
+  it("Rootcast Apprenticeship needs create_tokens.target (one unsupported step blocks the whole card)", () => {
     const t = table();
     t.lands("p1", "Forest", 5);
     const ra = t.give("p1", "Rootcast Apprenticeship", "hand");
     const res = t.do({ type: "castSpell", player: "p1", cardId: ra });
     expect(res.error?.code).toBe("unsupported");
-    expect(res.error?.capability).toContain("step:copy");
+    expect(res.error?.capability).toContain("field:create_tokens.target");
   });
 
-  it("a replacement-effect land (Spymaster's Vault: enters tapped unless...) is refused when played", () => {
+  it("a replacement-effect land (Spymaster's Vault: enters tapped unless you control a Swamp) now runs through the replacement pipeline", () => {
     const t = table();
     const v = t.give("p1", "Spymaster's Vault", "hand");
-    const res = t.do({ type: "playLand", player: "p1", cardId: v });
-    expect(res.error?.code).toBe("unsupported");
-    expect(res.error?.capability).toContain("replacement:would_enter");
+    t.ok({ type: "playLand", player: "p1", cardId: v });
+    expect(t.obj(v).tapped).toBe(true);
+    const t2 = table();
+    t2.give("p2", "Swamp", "battlefield"); // an opponent's Swamp does not count
+    t2.give("p1", "Swamp", "battlefield");
+    const v2 = t2.give("p1", "Spymaster's Vault", "hand");
+    t2.ok({ type: "playLand", player: "p1", cardId: v2 });
+    expect(t2.obj(v2).tapped).toBe(false);
   });
 
   it("an unknown field on a supported step kind is reported as field:<kind>.<field>", () => {
@@ -50,11 +56,11 @@ describe("unsupported capabilities are errors, never silent skips", () => {
   });
 
   it("an unsupported predicate inside a step condition is named", () => {
-    const odd = oddCard("Odd Cond", "{U}", { kind: "draw_cards", amount: 1, who: "you", condition: { when: "on_resolution", if: { check: "kicked" } } });
+    const odd = oddCard("Odd Cond", "{U}", { kind: "draw_cards", amount: 1, who: "you", condition: { when: "on_resolution", if: { check: "turn_number", cmp: { op: ">=", value: 2 } } } as never });
     const t = table(["p1", "p2"], { extra: { "Odd Cond": odd } });
     t.give("p1", "Island", "battlefield");
     const id = t.give("p1", "Odd Cond", "hand");
-    expect(t.do({ type: "castSpell", player: "p1", cardId: id }).error?.capability).toContain("predicate:kicked");
+    expect(t.do({ type: "castSpell", player: "p1", cardId: id }).error?.capability).toContain("predicate:turn_number");
   });
 
   it("an unsupported step kind is named and nothing resolves", () => {
@@ -65,20 +71,20 @@ describe("unsupported capabilities are errors, never silent skips", () => {
     expect(t.do({ type: "castSpell", player: "p1", cardId: id }).error?.capability).toEqual(["step:fight"]);
   });
 
-  it("a cast option (kicker etc.) is unsupported rather than ignored", () => {
+  it("a cast option the engine lacks (overload etc.) is unsupported rather than ignored", () => {
     const base = oddCard("Odd Kicker", "{U}", { kind: "draw_cards", amount: 1, who: "you" });
-    base.kernel = { ...base.kernel, castOptions: [{ id: "k", kind: "kicker", from: "hand", cost: [{ mana: "{1}" }], replacesManaCost: false, optional: true }] };
+    base.kernel = { ...base.kernel, castOptions: [{ id: "k", kind: "overload", from: "hand", cost: [{ mana: "{1}" }], replacesManaCost: true, optional: true }] };
     const t = table(["p1", "p2"], { extra: { "Odd Kicker": base } });
     t.give("p1", "Island", "battlefield");
     const id = t.give("p1", "Odd Kicker", "hand");
-    expect(t.do({ type: "castSpell", player: "p1", cardId: id }).error?.capability).toContain("cast_option:kicker");
+    expect(t.do({ type: "castSpell", player: "p1", cardId: id }).error?.capability).toContain("cast_option:overload");
   });
 
-  it("an unsupported mana symbol (hybrid) is an unsupported-cost error", () => {
-    const odd = oddCard("Odd Hybrid", "{W/U}", { kind: "draw_cards", amount: 1, who: "you" });
-    const t = table(["p1", "p2"], { extra: { "Odd Hybrid": odd } });
+  it("an unsupported mana symbol is an unsupported-cost error (hybrid symbols are supported since step 6)", () => {
+    const odd = oddCard("Odd Symbol", "{Q}", { kind: "draw_cards", amount: 1, who: "you" });
+    const t = table(["p1", "p2"], { extra: { "Odd Symbol": odd } });
     t.give("p1", "Island", "battlefield");
-    const id = t.give("p1", "Odd Hybrid", "hand");
+    const id = t.give("p1", "Odd Symbol", "hand");
     expect(t.do({ type: "castSpell", player: "p1", cardId: id }).error?.code).toBe("unsupported");
   });
 
@@ -89,13 +95,13 @@ describe("unsupported capabilities are errors, never silent skips", () => {
     expect(t.do({ type: "castSpell", player: "p1", cardId: id }).error?.code).toBe("unknown_card");
   });
 
-  it("static layers and replacement effects are out of scope: statics return unsupported", () => {
-    const odd: CardDef = { name: "Odd Static", manaCost: "{1}", types: ["artifact"], kernel: { schemaVersion: 2, abilities: [{ id: "a1", kind: "static", text: "Creatures you control get +1/+1.", static: { affects: { types: ["creature"], controller: "you" }, modify: [{ pt: { power: 1, toughness: 1 } }] } }] } };
+  it("static vocabulary without an implementation (players can't gain life) still returns unsupported with the detail", () => {
+    const odd: CardDef = { name: "Odd Static", manaCost: "{1}", types: ["artifact"], kernel: { schemaVersion: 2, abilities: [{ id: "a1", kind: "static", text: "Your opponents can't gain life.", static: { affects: "each_opponent", modify: [{ cant: "gain_life" }] } }] } };
     const t = table(["p1", "p2"], { extra: { "Odd Static": odd } });
     t.give("p1", "Island", "battlefield");
     t.give("p1", "Island", "battlefield");
     const id = t.give("p1", "Odd Static", "hand");
-    expect(t.do({ type: "castSpell", player: "p1", cardId: id }).error?.capability).toContain("static");
+    expect(t.do({ type: "castSpell", player: "p1", cardId: id }).error?.capability).toContain("static:cant:gain_life");
   });
 
   it("an unsupported ability that is not the one being activated does not block the activation", () => {

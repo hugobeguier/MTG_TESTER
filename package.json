@@ -18,6 +18,8 @@
     "choice-audit": "vite-node -c vitest.config.ts scripts/choice-audit.ts",
     "test": "vitest run",
     "kernel:validate-drafts": "vite-node -c vitest.config.ts scripts/validate-kernel-drafts.ts --",
+    "kernel:check-copies": "vite-node -c vitest.config.ts scripts/check-kernel-copies.ts",
+    "kernel:overview": "vite-node -c vitest.config.ts scripts/gen-kernel-overview.ts",
     "audit:deck-cards": "vite-node -c vitest.config.ts scripts/deck-card-audit.ts",
     "audit:abilities": "vite-node -c vitest.config.ts scripts/ability-audit.ts --"
   },

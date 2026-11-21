@@ -24,7 +24,7 @@
           "kind": "add_mana",
           "produces": [
             {
-              "anyColor": 4,
+              "anyColorAmount": 4,
               "restriction": {
                 "subtypes": [
                   "Dragon"

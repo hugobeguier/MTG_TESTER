@@ -59,7 +59,12 @@
             "kind": "+1/+1",
             "count": 2,
             "remove": true,
-            "from": "self"
+            "from": {
+              "types": [
+                "creature"
+              ],
+              "controller": "you"
+            }
           }
         }
       ],
@@ -105,7 +110,8 @@
       "id": "a2",
       "implementation": "needed",
       "needs": [
-        "cost:counters"
+        "cost:counters",
+        "cost:counters_from_filter"
       ]
     }
   ],

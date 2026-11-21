@@ -13,7 +13,7 @@ Reading guide: each card below shows the oracle text and what the structured JSO
 - **Deep Forest Hermit** (Creature — Elf Druid): Keyword vanishing 3 | Whenever Deep Forest Hermit enters: Create four 1/1 green Squirrel creature tokens | Squirrels you control get +1/+1 [needs: static]
 - **Evolving Wilds** (Land): {T}, sacrifice Evolving Wilds: Search your library for a basic land, put it onto the battlefield, then shuffle [needs: cost:sacrifice, step:search_library, field:search_library.count, field:search_library.filter, field:search_library.shuffle, field:search_library.tapped, field:search_library.to]
 - **Forest** (Basic Land — Forest): {T}: add {G} [implemented]
-- **Garruk, Cursed Huntsman** (Legendary Planeswalker — Garruk): +0: Create two 2/2 black and green Wolf creature tokens | −3: [targets: target creature] Destroy target creature, then draw a card | −6: The target gets +3/+3 and gains trample [needs: ref:iterated, timing, cost:loyalty, field:create_tokens.tokenAbilities, step:grant_effect, field:grant_effect.all, field:grant_effect.emblem, field:grant_effect.filter, field:grant_effect.modify]
+- **Garruk, Cursed Huntsman** (Legendary Planeswalker — Garruk): +0: Create two 2/2 black and green Wolf creature tokens and "When this token dies, put a loyalty counter on each Garruk you control." | −3: [targets: target creature] Destroy target creature, then draw a card | −6: You get an emblem with "Creatures you control get +3/+3 and have trample." [needs: ref:iterated, timing, cost:loyalty, field:create_tokens.tokenAbilities, step:create_emblem, field:create_emblem.emblem]
 - **Gilded Goose** (Creature — Bird): Keyword flying | Whenever Gilded Goose enters: Create a ?/? colorless Food artifact token | {1}{G}, {T}: Create a ?/? colorless Food artifact token | {T}, sacrifice a Food you control: add one mana of any color [needs: mana:variable, cost:sacrifice]
 - **Golgari Rot Farm** (Land): If Golgari Rot Farm would enter, it enters tapped | Whenever Golgari Rot Farm enters: Choose a land you control, then put the chosen object into your hand | {T}: add {B}{G} [needs: replacement:would_enter, step:choose, field:choose.count, field:choose.from, field:choose.saveAs, field:move_card_zone.from]
 - **Golgari Signet** (Artifact): {1}, {T}: add {B}{G} [implemented]
@@ -24,12 +24,12 @@ Reading guide: each card below shows the oracle text and what the structured JSO
 - **Honored Dreyleader** (Creature — Squirrel Warrior): Keyword trample | Whenever Honored Dreyleader enters: Put the number of other Squirrels or other Foods you control +1/+1 counters on Honored Dreyleader | Whenever an another Squirrel or another Food you control enters: Put a +1/+1 counter on Honored Dreyleader [needs: step:add_counters, quantity:count, field:add_counters.on, trigger:subject]
 - **Jungle Hollow** (Land): If Jungle Hollow would enter, it enters tapped | Whenever Jungle Hollow enters: Gain 1 life | {T}: add {B} and {G} [needs: replacement:would_enter, field:life_change.amount]
 - **Llanowar Wastes** (Land): {T}: add {C} | {T}: add {B} and {G} [needs: field:damage_target.source]
-- **Maelstrom Pulse** (Sorcery): [targets: target nonland permanent] Destroy target nonland permanent, then destroy each another permanent [needs: field:destroy_all.filter, field:destroy_all.sameNameAs]
+- **Maelstrom Pulse** (Sorcery): [targets: target nonland permanent] Destroy target nonland permanent, then destroy each another permanent with the same name as t1 [needs: filter:sameNameAs, field:destroy_all.filter]
 - **Maskwood Nexus** (Artifact): Creatures you control, creature spells you control, creature cards in your hand, creature cards in your graveyard, creature cards in your library, or creature cards in exile have changeling | {3}, {T}: Create a 2/2 blue Shapeshifter creature token with changeling [needs: static, field:create_tokens.tokenKeywords]
 - **Moldervine Reclamation** (Enchantment): Whenever a creature you control dies: Gain 1 life, then draw a card [needs: trigger:subject, field:life_change.amount]
 - **Moonstone Eulogist** (Creature — Bat Warlock): Keyword flying | Whenever a creature an opponent controls dies: Create a ?/? colorless Blood artifact token | Whenever an artifact you control is sacrificed: Put a +1/+1 counter on Moonstone Eulogist, then gain 1 life [needs: trigger:subject, trigger:sacrifice, step:add_counters, field:add_counters.on, field:life_change.amount]
 - **Ogre Slumlord** (Creature — Ogre Rogue): Whenever a nontoken another creature dies: Create a 1/1 black Rat creature token | Rats you control have deathtouch [needs: trigger:subject, static]
-- **Oran-Rief, the Vastwood** (Land): If Oran-Rief, the Vastwood would enter, it enters tapped | {T}: add {G} | {T}: For each green creature, put a +1/+1 counter on that object [needs: replacement:would_enter, ref:iterated, step:repeat_for_each, field:repeat_for_each.enteredThisTurn, field:repeat_for_each.over, field:repeat_for_each.steps, step:add_counters, field:add_counters.on]
+- **Oran-Rief, the Vastwood** (Land): If Oran-Rief, the Vastwood would enter, it enters tapped | {T}: add {G} | {T}: For each that entered this turn green creature, put a +1/+1 counter on that object [needs: replacement:would_enter, ref:iterated, filter:enteredThisTurn, step:repeat_for_each, field:repeat_for_each.over, field:repeat_for_each.steps, step:add_counters, field:add_counters.on]
 - **Plaguecrafter** (Creature — Human Shaman): Whenever Plaguecrafter enters: Each player sacrifices a creature or planeswalker, then each player discard a card [needs: field:sacrifice_permanent.filter, field:sacrifice_permanent.who, field:discard.who, predicate:not, predicate:step_done]
 - **Prosperous Innkeeper** (Creature — Halfling Citizen): Whenever Prosperous Innkeeper enters: Create a ?/? colorless Treasure artifact token | Whenever an another creature you control enters: Gain 1 life [needs: trigger:subject, field:life_change.amount]
 - **Putrefy** (Instant): [targets: target artifact or creature] Destroy target artifact or creature [needs: field:destroy_target.noRegenerate]
@@ -40,7 +40,7 @@ Reading guide: each card below shows the oracle text and what the structured JSO
 - **Squirrel Nest** (Enchantment — Aura): [targets: target land] | The enchanted creature has an ability [needs: keyword:enchant, static]
 - **Squirrel Sovereign** (Creature — Squirrel Noble): Other Squirrels you control get +1/+1 [needs: static]
 - **Swamp** (Basic Land — Swamp): {T}: add {B} [implemented]
-- **Swarmyard** (Land): {T}: add {C} | {T}: [targets: target Insect, Rat, Spider, or Squirrel] Target Insect, Rat, Spider, or Squirrel gains regeneration shield until end of turn [needs: step:grant_effect, field:grant_effect.modify]
+- **Swarmyard** (Land): {T}: add {C} | {T}: [targets: target Insect, Rat, Spider, or Squirrel] Regenerate target Insect, Rat, Spider, or Squirrel [needs: step:regenerate]
 - **Sword of the Squeak** (Artifact — Equipment): The equipped creature gets +X/+X, where X is the number of permanents with power 1 or permanents with toughness 1 you control | Whenever a Hamster, Mouse, Rat, or Squirrel you control enters: Attach Sword of the Squeak to that object | {2}: [targets: target creature you control] Attach Sword of the Squeak to target creature you control [needs: static, trigger:subject, step:attach, field:attach.to, field:attach.what]
 - **Talisman of Resilience** (Artifact): {T}: add {C} | {T}: add {B} and {G} [needs: field:damage_target.source]
 - **Temple of Malady** (Land): If Temple of Malady would enter, it enters tapped | Whenever Temple of Malady enters: Scry 1 | {T}: add {B} and {G} [needs: replacement:would_enter, step:scry]
@@ -64,11 +64,10 @@ Re-rendered plain English:
 
 ```
 Hazel of the Rootbloom [draft]
-  [a1] mana [needed: needs mana:variable, cost:life, cost:tapOther, step:add_mana, quantity:X, field:add_mana.produces]
+  [a1] mana [needed: needs mana:variable, cost:life, cost:tapOther]
     Oracle: {T}, Pay 2 life, Tap X untapped tokens you control: Add X mana in any combination of colors.
     Cost: {T}, pay 2 life, tap X untapped untapped token permanents you control
-    Effect: Add one mana of any color.
-    Mana: add one mana of any color
+    Mana: add X mana in any combination of colors
     X prompt: "Choose a value for X (the amount used in the cost)."
   [a2] triggered [needed: needs step:if_else, field:if_else.else, field:if_else.if, field:if_else.then, predicate:matches, step:copy, field:copy.count, field:copy.token]
     Oracle: At the beginning of your end step, create a token that's a copy of target token you control. If that token is a Squirrel, instead create two tokens that are copies of it.
@@ -83,7 +82,7 @@ Player prompts:
 - Hazel of the Rootbloom: choose what to tap: Choose X untapped untapped token permanents you control to tap.
 - Hazel of the Rootbloom: choose a target: Choose target token permanent you control.
 
-Implementation: needed (mana:variable, cost:life, cost:tapOther, step:add_mana, quantity:X, field:add_mana.produces, step:if_else, field:if_else.else, field:if_else.if, field:if_else.then, predicate:matches, step:copy, field:copy.count, field:copy.token)
+Implementation: needed (mana:variable, cost:life, cost:tapOther, step:if_else, field:if_else.else, field:if_else.if, field:if_else.then, predicate:matches, step:copy, field:copy.count, field:copy.token)
 
 ### Academy Manufactor
 
@@ -97,16 +96,16 @@ Re-rendered plain English:
 
 ```
 Academy Manufactor [draft]
-  [a1] replacement [needed: needs replacement:would_create_token]
+  [a1] replacement [needed: needs replacement:would_create_token, quantity:event_amount]
     Oracle: If you would create a Clue, Food, or Treasure token, instead create one of each.
-    Replacement: If a Clue, Food, or Treasure you control would create token, instead: create a ?/? colorless Clue artifact token, then create a ?/? colorless Food artifact token, then create a ?/? colorless Treasure artifact token
+    Replacement: If a Clue, Food, or Treasure you control would create token, instead: create that many ?/? colorless Clue artifact tokens, then create that many ?/? colorless Food artifact tokens, then create that many ?/? colorless Treasure artifact tokens
 ```
 
 Player prompts:
 
 - (none: no decisions)
 
-Implementation: needed (replacement:would_create_token)
+Implementation: needed (replacement:would_create_token, quantity:event_amount)
 
 ### Barren Moor
 
@@ -220,7 +219,7 @@ Beledros Witherbloom [draft]
   [a2] triggered [needed: needs field:create_tokens.tokenAbilities]
     Oracle: At the beginning of each upkeep, create a 1/1 black and green Pest creature token with "When this token dies, you gain 1 life."
     Trigger: At the beginning of each upkeep
-    Effect: Create a 1/1 black and green Pest creature token.
+    Effect: Create a 1/1 black and green Pest creature token and "When this token dies, you gain 1 life.".
   [a3] activated [needed: needs timing, cost:life, field:untap_target.all, field:untap_target.filter]
     Oracle: Pay 10 life: Untap all lands you control. Activate only once each turn.
     Cost: pay 10 life
@@ -288,7 +287,7 @@ Re-rendered plain English:
 Cache Grab [draft]
   [a1] spell_effect [needed: needs step:choose, field:choose.count, field:choose.from, field:choose.fromMilled, field:choose.saveAs, field:move_card_zone.from, predicate:step_done, predicate:all, predicate:matches]
     Oracle: Mill four cards. You may put a permanent card from among the cards milled this way into your hand. If you control a Squirrel or returned a Squirrel card to your hand this way, create a Food token. (To mill four cards, put the top four cards of your library into your graveyard. A Food token is an artifact with "{2}, {T}, Sacrifice this token: You gain 3 life.")
-    Effect: Mill 4 cards. Then, you may choose a permanent card in your graveyard. Then, IF you did (s2): put the chosen object into your hand. Then, IF you control a Squirrel or you did (s2) and the chosen object is a Squirrel: create a ?/? colorless Food artifact token.
+    Effect: Mill 4 cards. Then, you may choose a permanent card in your graveyard. Then, IF you did (s2): put the chosen object into your hand. Then, IF you control a Squirrel or you did (s3) and the chosen object is a Squirrel: create a ?/? colorless Food artifact token.
 ```
 
 Player prompts:
@@ -414,10 +413,10 @@ Re-rendered plain English:
 
 ```
 Chittering Witch [draft]
-  [a1] triggered [needed: needs quantity:players_count]
+  [a1] triggered [needed: needs quantity:opponents_count]
     Oracle: When this creature enters, create a number of 1/1 black Rat creature tokens equal to the number of opponents you have.
     Trigger: Whenever Chittering Witch enters
-    Effect: Create the number of opponents for which it is not true that that player's life total is less than 0 1/1 black Rat creature tokens.
+    Effect: Create the number of opponents you have 1/1 black Rat creature tokens.
   [a2] activated [needed: needs cost:sacrifice]
     Oracle: {1}{B}, Sacrifice a creature: Target creature gets -2/-2 until end of turn.
     Cost: {1}{B}, sacrifice a creature you control
@@ -430,7 +429,7 @@ Player prompts:
 - Chittering Witch: choose a target: Choose target creature.
 - Chittering Witch: choose what to sacrifice: Choose 1 creature you control to sacrifice.
 
-Implementation: needed (quantity:players_count, cost:sacrifice)
+Implementation: needed (quantity:opponents_count, cost:sacrifice)
 
 ### Chitterspitter
 
@@ -506,9 +505,9 @@ Re-rendered plain English:
 
 ```
 Decree of Pain [draft]
-  [a1] spell_effect [needed: needs field:destroy_all.filter, field:destroy_all.noRegenerate, quantity:event_amount, field:draw_cards.amountOf]
+  [a1] spell_effect [needed: needs quantity:step_result, field:destroy_all.filter, field:destroy_all.noRegenerate]
     Oracle: Destroy all creatures. They can't be regenerated. Draw a card for each creature destroyed this way.
-    Effect: Destroy each creature. Then, draw that many cards.
+    Effect: Destroy each creature. Then, draw the number affected this way (s1) cards.
   [a2] activated (from hand) [needed: needs zone:hand, cost:discard]
     Oracle: Cycling {3}{B}{B} ({3}{B}{B}, Discard this card: Draw a card.)
     Cost: {3}{B}{B}, discard Decree of Pain
@@ -524,7 +523,7 @@ Player prompts:
 
 - (none: no decisions)
 
-Implementation: needed (field:destroy_all.filter, field:destroy_all.noRegenerate, quantity:event_amount, field:draw_cards.amountOf, zone:hand, cost:discard, trigger:cycle, field:mass_pump.filter)
+Implementation: needed (quantity:step_result, field:destroy_all.filter, field:destroy_all.noRegenerate, zone:hand, cost:discard, trigger:cycle, field:mass_pump.filter)
 
 ### End-Raze Forerunners
 
@@ -661,10 +660,10 @@ Re-rendered plain English:
 
 ```
 Insatiable Frugivore [draft]
-  [a1] triggered [needed: needs field:move_card_zone.count, field:move_card_zone.filter, field:move_card_zone.from, step:if_else, field:if_else.if, field:if_else.then, predicate:step_done, step:repeat_for_each, field:repeat_for_each.repeatProcess]
+  [a1] triggered [needed: needs step:repeat_process, field:repeat_process.repeatIf, field:repeat_process.steps, field:move_card_zone.count, field:move_card_zone.filter, field:move_card_zone.from]
     Oracle: When this creature enters, create a Food token, then you may exile three cards from your graveyard. If you do, repeat this process.
     Trigger: Whenever Insatiable Frugivore enters
-    Effect: Create a ?/? colorless Food artifact token. Then, you may exile a card. Then, if you did (s2): repeat for each matching object.
+    Effect: Create a ?/? colorless Food artifact token, then exile a card; then repeat this process as long as you did (s2).
   [a2] activated [needed: needs cost:sacrifice, step:grant_effect, field:grant_effect.all, field:grant_effect.filter, field:grant_effect.modify]
     Oracle: {3}{B}, Sacrifice X Foods: Creatures you control get +X/+0 and gain menace until end of turn.
     Cost: {3}{B}, sacrifice X Foods you control
@@ -678,7 +677,7 @@ Player prompts:
 - Insatiable Frugivore: choose X: Choose a value for X (the amount used in the cost).
 - Insatiable Frugivore: choose what to sacrifice: Choose X Foods you control to sacrifice.
 
-Implementation: needed (field:move_card_zone.count, field:move_card_zone.filter, field:move_card_zone.from, step:if_else, field:if_else.if, field:if_else.then, predicate:step_done, step:repeat_for_each, field:repeat_for_each.repeatProcess, cost:sacrifice, step:grant_effect, field:grant_effect.all, field:grant_effect.filter, field:grant_effect.modify)
+Implementation: needed (step:repeat_process, field:repeat_process.repeatIf, field:repeat_process.steps, field:move_card_zone.count, field:move_card_zone.filter, field:move_card_zone.from, cost:sacrifice, step:grant_effect, field:grant_effect.all, field:grant_effect.filter, field:grant_effect.modify)
 
 ### Morbid Opportunist
 
@@ -772,7 +771,7 @@ Nested Shambler [draft]
   [a1] triggered [needed: needs quantity:stat, field:create_tokens.tokenTapped]
     Oracle: When this creature dies, create X tapped 1/1 green Squirrel creature tokens, where X is this creature's power.
     Trigger: Whenever Nested Shambler dies
-    Effect: Create Nested Shambler's power 1/1 green Squirrel creature tokens.
+    Effect: Create Nested Shambler's power 1/1 green Squirrel creature tokens tapped.
 ```
 
 Player prompts:
@@ -1266,7 +1265,7 @@ Woe Strider [draft]
     Effect: Scry 1.
   [a3] replacement [needed: needs replacement:would_enter]
     Oracle: This creature escapes with two +1/+1 counters on it.
-    Replacement: If Woe Strider would enter (only if it was cast from graveyard), modify it: {"counters":{"+1/+1":2}}
+    Replacement: If Woe Strider would enter (only if it was cast with escape), modify it: {"counters":{"+1/+1":2}}
 ```
 
 Player prompts:
@@ -1374,25 +1373,21 @@ Implementation: needed (trigger:multi_event, trigger:subject, field:life_change.
 | `replacement:would_enter` | 12 | Barren Moor; Bojuka Bog; Golgari Rot Farm; Haunted Mire; Jungle Hollow; Necroblossom Snarl; Oran-Rief, the Vastwood; Path of Ancestry; Temple of Malady; Tranquil Thicket; Woe Strider; Woodland Cemetery |
 | `field:add_counters.on` | 9 | Beastmaster Ascension; Chitterspitter; Gourmand's Talent; Honored Dreyleader; Moonstone Eulogist; Oran-Rief, the Vastwood; Ravenous Squirrel; Rootcast Apprenticeship; Scurry of Squirrels |
 | `step:add_counters` | 9 | Beastmaster Ascension; Chitterspitter; Gourmand's Talent; Honored Dreyleader; Moonstone Eulogist; Oran-Rief, the Vastwood; Ravenous Squirrel; Rootcast Apprenticeship; Scurry of Squirrels |
-| `predicate:step_done` | 7 | Cache Grab; Chitterspitter; Insatiable Frugivore; Necroblossom Snarl; Plaguecrafter; Saw in Half; Skyfisher Spider |
 | `step:copy` | 7 | Hazel of the Rootbloom; Chatterstorm; Plumb the Forbidden; Rootcast Apprenticeship; Saw in Half; Scurry of Squirrels; Second Harvest |
 | `field:copy.count` | 6 | Hazel of the Rootbloom; Chatterstorm; Plumb the Forbidden; Rootcast Apprenticeship; Saw in Half; Second Harvest |
 | `mana:variable` | 6 | Hazel of the Rootbloom; Arcane Signet; Command Tower; Exotic Orchard; Gilded Goose; Path of Ancestry |
+| `predicate:step_done` | 6 | Cache Grab; Chitterspitter; Necroblossom Snarl; Plaguecrafter; Saw in Half; Skyfisher Spider |
 | `timing` | 6 | Beledros Witherbloom; Garruk, Cursed Huntsman; Idol of Oblivion; Morbid Opportunist; Tainted Wood; Wolfwillow Haven |
 | `field:copy.token` | 5 | Hazel of the Rootbloom; Rootcast Apprenticeship; Saw in Half; Scurry of Squirrels; Second Harvest |
-| `field:grant_effect.modify` | 5 | Binding the Old Gods; End-Raze Forerunners; Garruk, Cursed Huntsman; Insatiable Frugivore; Swarmyard |
 | `field:life_change.lose` | 5 | Bastion of Remembrance; Nadier's Nightblade; Plumb the Forbidden; Poison-Tip Archer; Zulaport Cutthroat |
-| `step:grant_effect` | 5 | Binding the Old Gods; End-Raze Forerunners; Garruk, Cursed Huntsman; Insatiable Frugivore; Swarmyard |
-| `field:grant_effect.all` | 4 | Binding the Old Gods; End-Raze Forerunners; Garruk, Cursed Huntsman; Insatiable Frugivore |
-| `field:grant_effect.filter` | 4 | Binding the Old Gods; End-Raze Forerunners; Garruk, Cursed Huntsman; Insatiable Frugivore |
 | `field:life_change.who` | 4 | Bastion of Remembrance; Nadier's Nightblade; Poison-Tip Archer; Zulaport Cutthroat |
 | `field:move_card_zone.from` | 4 | Cache Grab; Golgari Rot Farm; Insatiable Frugivore; Skyfisher Spider |
 | `field:sacrifice_permanent.filter` | 4 | Chitterspitter; Plaguecrafter; Rootcast Apprenticeship; Skyfisher Spider |
 | `ref:iterated` | 4 | Garruk, Cursed Huntsman; Gourmand's Talent; Oran-Rief, the Vastwood; Second Harvest |
-| `step:repeat_for_each` | 4 | Gourmand's Talent; Insatiable Frugivore; Oran-Rief, the Vastwood; Second Harvest |
 | `cost:discard` | 3 | Barren Moor; Decree of Pain; Tranquil Thicket |
-| `field:if_else.if` | 3 | Hazel of the Rootbloom; Insatiable Frugivore; Tear Asunder |
-| `field:if_else.then` | 3 | Hazel of the Rootbloom; Insatiable Frugivore; Tear Asunder |
+| `field:grant_effect.all` | 3 | Binding the Old Gods; End-Raze Forerunners; Insatiable Frugivore |
+| `field:grant_effect.filter` | 3 | Binding the Old Gods; End-Raze Forerunners; Insatiable Frugivore |
+| `field:grant_effect.modify` | 3 | Binding the Old Gods; End-Raze Forerunners; Insatiable Frugivore |
 | `field:repeat_for_each.over` | 3 | Gourmand's Talent; Oran-Rief, the Vastwood; Second Harvest |
 | `field:repeat_for_each.steps` | 3 | Gourmand's Talent; Oran-Rief, the Vastwood; Second Harvest |
 | `field:search_library.count` | 3 | Binding the Old Gods; Evolving Wilds; Terramorphic Expanse |
@@ -1402,14 +1397,14 @@ Implementation: needed (trigger:multi_event, trigger:subject, field:life_change.
 | `field:search_library.to` | 3 | Binding the Old Gods; Evolving Wilds; Terramorphic Expanse |
 | `quantity:count` | 3 | Honored Dreyleader; Shamanic Revelation; Skyfisher Spider |
 | `step:choose` | 3 | Cache Grab; Golgari Rot Farm; Tireless Provisioner |
-| `step:if_else` | 3 | Hazel of the Rootbloom; Insatiable Frugivore; Tear Asunder |
+| `step:grant_effect` | 3 | Binding the Old Gods; End-Raze Forerunners; Insatiable Frugivore |
+| `step:repeat_for_each` | 3 | Gourmand's Talent; Oran-Rief, the Vastwood; Second Harvest |
 | `step:scry` | 3 | Path of Ancestry; Temple of Malady; Woe Strider |
 | `step:search_library` | 3 | Binding the Old Gods; Evolving Wilds; Terramorphic Expanse |
 | `zone:hand` | 3 | Barren Moor; Decree of Pain; Tranquil Thicket |
 | `zone:stack` | 3 | Chatterstorm; Plumb the Forbidden; Toski, Bearer of Secrets |
 | `cast_option:additional` | 2 | Deadly Dispute; Plumb the Forbidden |
 | `cost:life` | 2 | Hazel of the Rootbloom; Beledros Witherbloom |
-| `field:add_mana.produces` | 2 | Hazel of the Rootbloom; Wolfwillow Haven |
 | `field:attach.to` | 2 | Skullclamp; Sword of the Squeak |
 | `field:attach.what` | 2 | Skullclamp; Sword of the Squeak |
 | `field:choose.count` | 2 | Cache Grab; Golgari Rot Farm |
@@ -1420,6 +1415,8 @@ Implementation: needed (trigger:multi_event, trigger:subject, field:life_change.
 | `field:damage_target.source` | 2 | Llanowar Wastes; Talisman of Resilience |
 | `field:destroy_all.filter` | 2 | Decree of Pain; Maelstrom Pulse |
 | `field:if_else.else` | 2 | Hazel of the Rootbloom; Tear Asunder |
+| `field:if_else.if` | 2 | Hazel of the Rootbloom; Tear Asunder |
+| `field:if_else.then` | 2 | Hazel of the Rootbloom; Tear Asunder |
 | `field:mass_pump.filter` | 2 | Decree of Pain; Swarmyard Massacre |
 | `field:sacrifice_permanent.who` | 2 | Plaguecrafter; Rootcast Apprenticeship |
 | `keyword:enchant` | 2 | Squirrel Nest; Wolfwillow Haven |
@@ -1427,12 +1424,11 @@ Implementation: needed (trigger:multi_event, trigger:subject, field:life_change.
 | `modes:multiple` | 2 | Casualties of War; Rootcast Apprenticeship |
 | `predicate:matches` | 2 | Hazel of the Rootbloom; Cache Grab |
 | `predicate:not` | 2 | Necroblossom Snarl; Plaguecrafter |
-| `quantity:event_amount` | 2 | Chatterfang, Squirrel General; Decree of Pain |
+| `quantity:event_amount` | 2 | Academy Manufactor; Chatterfang, Squirrel General |
 | `quantity:math` | 2 | Chatterfang, Squirrel General; Swarmyard Massacre |
-| `quantity:X` | 2 | Hazel of the Rootbloom; Chatterfang, Squirrel General |
 | `replacement:would_create_token` | 2 | Academy Manufactor; Chatterfang, Squirrel General |
-| `step:add_mana` | 2 | Hazel of the Rootbloom; Wolfwillow Haven |
 | `step:attach` | 2 | Skullclamp; Sword of the Squeak |
+| `step:if_else` | 2 | Hazel of the Rootbloom; Tear Asunder |
 | `targets:multi` | 2 | Hazel's Brewmaster; Windgrace's Judgment |
 | `trigger:batch` | 2 | Morbid Opportunist; The Odd Acorn Gang |
 | `trigger:multi_event` | 2 | Hazel's Brewmaster; Zulaport Cutthroat |
@@ -1445,6 +1441,7 @@ Implementation: needed (trigger:multi_event, trigger:subject, field:life_change.
 | `cost:exileFrom` | 1 | Woe Strider |
 | `cost:loyalty` | 1 | Garruk, Cursed Huntsman |
 | `cost:tapOther` | 1 | Hazel of the Rootbloom |
+| `field:add_mana.produces` | 1 | Wolfwillow Haven |
 | `field:add_mana.who` | 1 | Wolfwillow Haven |
 | `field:choose.choice` | 1 | Tireless Provisioner |
 | `field:choose.fromMilled` | 1 | Cache Grab |
@@ -1458,25 +1455,25 @@ Implementation: needed (trigger:multi_event, trigger:subject, field:life_change.
 | `field:copy.setToughness` | 1 | Saw in Half |
 | `field:copy.tapped` | 1 | Scurry of Squirrels |
 | `field:copy.who` | 1 | Saw in Half |
+| `field:create_emblem.emblem` | 1 | Garruk, Cursed Huntsman |
 | `field:create_tokens.tokenTapped` | 1 | Nested Shambler |
 | `field:create_tokens.who` | 1 | Rootcast Apprenticeship |
 | `field:destroy_all.noRegenerate` | 1 | Decree of Pain |
-| `field:destroy_all.sameNameAs` | 1 | Maelstrom Pulse |
 | `field:destroy_target.noRegenerate` | 1 | Putrefy |
 | `field:destroy_target.reflexive` | 1 | Skyfisher Spider |
 | `field:discard.who` | 1 | Plaguecrafter |
-| `field:draw_cards.amountOf` | 1 | Decree of Pain |
 | `field:exile_target.linkExile` | 1 | Hazel's Brewmaster |
-| `field:grant_effect.emblem` | 1 | Garruk, Cursed Huntsman |
 | `field:move_card_zone.count` | 1 | Insatiable Frugivore |
 | `field:move_card_zone.filter` | 1 | Insatiable Frugivore |
 | `field:move_card_zone.what` | 1 | Bojuka Bog |
-| `field:repeat_for_each.enteredThisTurn` | 1 | Oran-Rief, the Vastwood |
-| `field:repeat_for_each.repeatProcess` | 1 | Insatiable Frugivore |
+| `field:repeat_process.repeatIf` | 1 | Insatiable Frugivore |
+| `field:repeat_process.steps` | 1 | Insatiable Frugivore |
 | `field:reveal.filter` | 1 | Necroblossom Snarl |
 | `field:untap_target.all` | 1 | Beledros Witherbloom |
 | `field:untap_target.filter` | 1 | Beledros Witherbloom |
+| `filter:enteredThisTurn` | 1 | Oran-Rief, the Vastwood |
 | `filter:notSubtypes` | 1 | Swarmyard Massacre |
+| `filter:sameNameAs` | 1 | Maelstrom Pulse |
 | `keyword:landwalk` | 1 | Chatterfang, Squirrel General |
 | `modes:repeatable` | 1 | Rootcast Apprenticeship |
 | `predicate:all` | 1 | Cache Grab |
@@ -1486,14 +1483,20 @@ Implementation: needed (trigger:multi_event, trigger:subject, field:life_change.
 | `predicate:stat` | 1 | Gourmand's Talent |
 | `predicate:turn_is` | 1 | Wolfwillow Haven |
 | `quantity:division` | 1 | Saw in Half |
-| `quantity:players_count` | 1 | Chittering Witch |
+| `quantity:opponents_count` | 1 | Chittering Witch |
 | `quantity:stat` | 1 | Nested Shambler |
+| `quantity:step_result` | 1 | Decree of Pain |
+| `quantity:X` | 1 | Chatterfang, Squirrel General |
 | `scripted:colors_lands_opponents_control_could_produce` | 1 | Exotic Orchard |
 | `scripted:mana_from_this_land_spent_on_creature_sharing_type_with_commander` | 1 | Path of Ancestry |
 | `scripted:myriad` | 1 | Scurry of Squirrels |
 | `scripted:storm` | 1 | Chatterstorm |
 | `static:addTypes` | 1 | Gourmand's Talent |
 | `static:mustAttack` | 1 | Toski, Bearer of Secrets |
+| `step:add_mana` | 1 | Wolfwillow Haven |
+| `step:create_emblem` | 1 | Garruk, Cursed Huntsman |
+| `step:regenerate` | 1 | Swarmyard |
+| `step:repeat_process` | 1 | Insatiable Frugivore |
 | `step:reveal` | 1 | Necroblossom Snarl |
 | `targets:per_opponent` | 1 | Windgrace's Judgment |
 | `trigger:chapters` | 1 | Binding the Old Gods |
