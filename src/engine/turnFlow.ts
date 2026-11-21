@@ -9,6 +9,7 @@ import { drawForSeat, drawMultipleForSeat } from "@/engine/effects";
 import { moveCardAcrossSeats } from "@/engine/entry";
 import { isBoardConditionMet, isRecognizedBoardCondition } from "@/engine/mana";
 import { applyPhasingStep } from "@/engine/phasing";
+import { clearPlayerLock, expireAttackBans } from "@/engine/lockdownEffects";
 import { parseSearchLibraryPutEffect } from "@/engine/oneShotEffects";
 import { emblemAsShimCard } from "@/engine/shared";
 import { agentTargetedTriggerKinds, agentTriggerTarget } from "@/engine/triggerFinders";
@@ -50,6 +51,8 @@ export function resolvePendingUpkeepDraws(session: GameSession): GameSession {
 export function untapForSeat(session: GameSession, seatId: string): GameSession {
   // Rule 502.1: the untap step's first turn-based action is phasing — this seat's permanents phase in/out BEFORE anything untaps.
   session = applyPhasingStep(session, seatId);
+  // "Until your next turn" lockdowns (Orzhov Advokist's attack bans, Perch Protection's player lock) end as this player's turn begins.
+  session = clearPlayerLock(expireAttackBans(session, seatId), seatId);
   const seat = session.seats.find((item) => item.id === seatId);
   // Rule 701.44b: a permanent with a stun counter removes one stun counter instead of untapping
   // this step — it stays tapped, but the counter comes off, so it untaps normally again once none
@@ -77,7 +80,7 @@ export function untapForSeat(session: GameSession, seatId: string): GameSession 
     // with its host) does not untap.
     if (card.phasedOut) return card;
     // "This creature doesn't untap during your untap step." / "Enchanted creature doesn't untap during its controller's untap step."
-    if (card.tapped && cantUntap(card, everyPermanent)) return { ...card, summoningSick: false, attacking: false, blocking: false };
+    if (card.tapped && cantUntap(card, everyPermanent, { controllerSeatId: seatId, monarchSeatId: session.monarchSeatId })) return { ...card, summoningSick: false, attacking: false, blocking: false };
     if (counterCount(card, "stun") > 0) {
       return opponentStunLockActive
         ? { ...card, summoningSick: false, attacking: false, blocking: false }
@@ -158,6 +161,7 @@ export function clearTemporaryBuffs(session: GameSession): GameSession {
           card.temporaryAbilitiesStripped ||
           card.temporaryAnimatedAsCreature ||
           card.temporaryGrantedKeywords ||
+          card.temporaryKeywordLosses ||
           card.temporaryOriginalTypeLine !== undefined ||
           card.temporaryCopyOriginal ||
           card.damagedPlayersThisTurn ||
@@ -174,6 +178,7 @@ export function clearTemporaryBuffs(session: GameSession): GameSession {
                 temporaryAbilitiesStripped: undefined,
                 temporaryAnimatedAsCreature: undefined,
                 temporaryGrantedKeywords: undefined,
+                temporaryKeywordLosses: undefined,
                 temporaryKeywordStamps: undefined,
                 temporaryStripStamp: undefined,
                 // The layer pass recomputes grantedKeywords on the next state check; dropping the temporary ones now keeps it right in between.

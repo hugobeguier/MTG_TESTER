@@ -28,6 +28,7 @@ import { zoneEffectTargetSpec } from "@/lib/targetSpecs";
 import { parseTargetedEffect } from "@/lib/targetedEffects";
 import { legalTargets, type TargetSpec } from "@/lib/targeting";
 import { phaseOutPermanent } from "@/engine/phasing";
+import { parseKeywordLossEffect, type KeywordLossEffect } from "@/lib/lockdown";
 import { abilityOracleText, hasCardType } from "@/lib/typeGrants";
 import { type GameSession, type ManaPool, type PlayerSeat, type VisibleCard } from "@/lib/types";
 import { parseZoneEffect, type ZoneEffect } from "@/lib/zoneEffects";
@@ -840,6 +841,8 @@ type GenericAbilityEffect =
   | { kind: "animate_enchantment" }
   | { kind: "trigger"; effect: TriggerEffect }
   | { kind: "phase_out" }
+  // "Permanents your opponents control lose hexproof and indestructible until end of turn." (Shadowspear): layer-6 keyword loss, stamped with a timestamp.
+  | { kind: "lose_keywords"; loss: KeywordLossEffect }
   // "{2}{C}: Exile enchanted creature." (Utter Insignificance): exiles whatever this Aura is attached to.
   | { kind: "exile_enchanted" }
   // Scavenging Ooze: "Exile target card from a graveyard. If it was a creature card, put a +1/+1 counter on this creature and you gain 1 life."
@@ -905,6 +908,8 @@ function parseEnchantmentAnimationEffect(effectText: string): boolean {
 // abilities outright), so unlike the modal/spell path this never substitutes X — a "target creature
 // gets -X/-X" activated ability is simply declined, the same "no guessing" behavior it always had.
 export function parseGenericAbilityEffect(effectText: string): GenericAbilityEffect | undefined {
+  const keywordLoss = parseKeywordLossEffect(effectText);
+  if (keywordLoss) return { kind: "lose_keywords", loss: keywordLoss };
   // "Untap all lands you control." (Beledros Witherbloom's "Pay 10 life: ...").
   if (/^untap all lands you control\.?(?:\s*activate only once each turn\.?)?$/i.test(effectText.trim())) return { kind: "untap_all_lands" };
   if (/^exile target card from a graveyard\.\s*if it was a creature card, put a \+1\/\+1 counter on this creature and you gain 1 life\.?$/i.test(effectText.trim())) {
@@ -977,6 +982,29 @@ export function applyEnchantmentAnimation(session: GameSession, casterSeatId: st
   };
 }
 
+// Shadowspear: every matching permanent gets an until-end-of-turn "loses [keyword]" entry stamped NOW, so a keyword granted after this resolves still sticks.
+// The state-based pass (stateBased.ts keywordLossesFor) turns the entries into lostKeywords; the turn change clears them.
+function applyKeywordLossUntilEndOfTurn(session: GameSession, casterSeatId: string, sourceCard: VisibleCard, effect: KeywordLossEffect): GameSession {
+  const { timestamp, session: stamped } = nextTimestamp(session);
+  const affected: string[] = [];
+  const seats = stamped.seats.map((seat) => {
+    const sameSide = seat.id === casterSeatId;
+    if ((effect.controller === "opponents" && sameSide) || (effect.controller === "you" && !sameSide)) return seat;
+    return {
+      ...seat,
+      board: {
+        ...seat.board,
+        battlefield: seat.board.battlefield.map((card) => {
+          if (card.phasedOut || (effect.type === "creature" && !hasCardType(card, "Creature"))) return card;
+          affected.push(card.name);
+          return { ...card, temporaryKeywordLosses: [...(card.temporaryKeywordLosses ?? []), ...effect.keywords.map((keyword) => ({ keyword, stamp: timestamp }))] };
+        })
+      }
+    };
+  });
+  return rulesEvent({ ...stamped, seats }, casterSeatId, `${sourceCard.name}: ${effect.type === "creature" ? "creatures" : "permanents"} (${affected.length}) lose ${effect.keywords.join(" and ")} until end of turn.`);
+}
+
 // "Enchanted/equipped creature phases out." (the Vanishing Aura). The permanent (and anything attached to it) is treated as though it does not exist
 // until it phases in at its controller's next untap step: see src/engine/phasing.ts for the full rules summary and the places that skip phasedOut.
 function applyPhaseOut(session: GameSession, _casterSeatId: string, sourceCard: VisibleCard): GameSession {
@@ -995,6 +1023,7 @@ export function genericAbilityEffectHasLegalTarget(session: GameSession, casterS
     const target = sourceCard.attachedToId ? findPermanentById(session, sourceCard.attachedToId) : undefined;
     return target !== undefined && !target.phasedOut;
   }
+  if (effect.kind === "lose_keywords") return true;
   if (effect.kind === "exile_enchanted") return sourceCard.attachedToId !== undefined && findPermanentById(session, sourceCard.attachedToId) !== undefined;
   if (effect.kind === "transform_self") return Boolean(sourceCard.faces && sourceCard.faces.length === 2);
   if (effect.kind === "untap_all_lands") return (session.seats.find((item) => item.id === casterSeatId)?.board.battlefield ?? []).some((card) => card.tapped && card.typeLine.includes("Land"));
@@ -1067,6 +1096,7 @@ export function applyGenericAbilityEffect(session: GameSession, casterSeatId: st
     return rulesEvent(untapped, casterSeatId, `${owner?.name ?? "A player"} untaps ${tappedLands.length} land${tappedLands.length === 1 ? "" : "s"} with ${sourceCard.name}.`);
   }
   if (effect.kind === "phase_out") return applyPhaseOut(session, casterSeatId, sourceCard);
+  if (effect.kind === "lose_keywords") return applyKeywordLossUntilEndOfTurn(session, casterSeatId, sourceCard, effect.loss);
   if (effect.kind === "exile_enchanted") {
     const holder = sourceCard.attachedToId ? session.seats.find((seat) => seat.board.battlefield.some((card) => card.id === sourceCard.attachedToId)) : undefined;
     const target = holder?.board.battlefield.find((card) => card.id === sourceCard.attachedToId);

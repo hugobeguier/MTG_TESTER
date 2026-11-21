@@ -14,7 +14,8 @@ export function hasKeyword(card: VisibleCard, keyword: string) {
   // timestamp-filtered by the state-based pass (stateBased.ts): grants from effects older than the strip
   // are gone from them, grants from later effects remain, so they are read as-is.
   if (card.phasedOut) return false;
-  return (!card.abilitiesStripped && hasKeywordText(card.oracleText, keyword)) || Boolean(card.grantedKeywords?.includes(keyword)) || Boolean(card.groupGrantedKeywords?.includes(keyword));
+  // "Loses [keyword]" (Archetype of Imagination, Shadowspear): only the printed text is cancelled; grants newer than the loss are already in the granted lists.
+  return (!card.abilitiesStripped && !card.lostKeywords?.includes(keyword) && hasKeywordText(card.oracleText, keyword)) || Boolean(card.grantedKeywords?.includes(keyword)) || Boolean(card.groupGrantedKeywords?.includes(keyword));
 }
 
 export function hasHaste(card: VisibleCard) {

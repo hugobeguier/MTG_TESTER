@@ -463,6 +463,8 @@ export interface CastChoices {
   modes?: number[];
   // "Choose one or more / one or both": the player pressed "Done choosing" after at least one mode.
   modesDone?: boolean;
+  // "Gift a ..." cast-time option (Perch Protection): the caster promised the gift, so the spell's "if the gift was promised" riders apply.
+  giftPromised?: boolean;
   targets: ChosenTarget[];
 }
 

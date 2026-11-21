@@ -63,7 +63,17 @@ export function bushidoAmount(card: TextCard): number {
 }
 
 // "This creature doesn't untap during your untap step." and "Enchanted creature doesn't untap during its controller's untap step."
-export function cantUntap(card: TextCard & { id: string }, battlefield: TextCard[]): boolean {
+// "...unless that player is the monarch" (Fall from Favor) needs to know who controls the permanent and who the monarch is: pass `ctx`.
+export function cantUntap(card: TextCard & { id: string }, battlefield: TextCard[], ctx?: { controllerSeatId?: string; monarchSeatId?: string }): boolean {
   if (ruleLines(card).some((line) => /^(?:this (?:creature|artifact|permanent)|[a-z',\- ]+) doesn'?t untap during your untap step$/.test(line))) return true;
-  return battlefield.some((other) => other.attachedToId === card.id && ruleLines(other).some((line) => /^enchanted (?:creature|permanent) doesn'?t untap during its controller'?s untap step$/.test(line)));
+  const monarchHere = Boolean(ctx?.controllerSeatId) && ctx?.controllerSeatId === ctx?.monarchSeatId;
+  return battlefield.some(
+    (other) =>
+      other.attachedToId === card.id &&
+      ruleLines(other).some((line) => {
+        if (/^enchanted (?:creature|permanent) doesn'?t untap during its controller'?s untap step$/.test(line)) return true;
+        // Fall from Favor: the lock is lifted while the controller is the monarch.
+        return /^enchanted (?:creature|permanent) doesn'?t untap during its controller'?s untap step unless that player is the monarch$/.test(line) && !monarchHere;
+      })
+  );
 }

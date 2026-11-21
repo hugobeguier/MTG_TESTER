@@ -139,6 +139,7 @@ import {
 } from "@/components/AppFlow";
 import { deterministicRuleWorkflow } from "@/lib/rulesAdvisor";
 import { decideWithGate } from "@/lib/moveLegality";
+import { attackBannedAgainst } from "@/engine/lockdownEffects";
 import { parseSearchLibraryEffectText, type SearchLibraryEffect } from "@/lib/activatedAbilities";
 import { loadCardCatalog, lookupCard } from "@/lib/cardCatalog";
 import { createDeckFromList } from "@/lib/deckParser";
@@ -953,6 +954,7 @@ function applyAttackDeclaration(
   const attackingCard = attacker.board.battlefield.find((card) => card.id === cardId);
   const target = resolveAttackTarget(session, targetId);
   if (!attackingCard || !target) return { session };
+  if (attackBannedAgainst(attacker, attackingCard, target.seat)) return { session };
 
   const tax = totalAttackTax(target.seat, Boolean(target.planeswalker));
   let working = session;

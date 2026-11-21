@@ -1071,7 +1071,7 @@ export function useStackResolution(ctx: GameContext) {
       const delayedBase: GameSession = delayedCasterDraws
         ? { ...tokenResolvedSession, pendingUpkeepDraws: [...(tokenResolvedSession.pendingUpkeepDraws ?? []), { seatId: action.actorSeatId, amount: delayedCasterDraws, sourceName: action.cardName }] }
         : tokenResolvedSession;
-      const combatPreventionSession = sourceCard ? applySpellDamagePrevention(delayedBase, action.actorSeatId, sourceCard, action.castChoices?.targets[0], action.manaSpentColors ?? []) : delayedBase;
+      const combatPreventionSession = sourceCard ? applySpellDamagePrevention(delayedBase, action.actorSeatId, sourceCard, action.castChoices?.targets[0], action.manaSpentColors ?? [], Boolean(action.castChoices?.giftPromised)) : delayedBase;
       const xCounterSession =
         sourceCard && destination === "battlefield" && action.chosenX && entersWithXCounters(sourceCard.oracleText)
           ? applyEntersWithXCounters(combatPreventionSession, action.actorSeatId, sourceCard.id, action.chosenX)

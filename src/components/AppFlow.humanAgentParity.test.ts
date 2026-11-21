@@ -129,7 +129,7 @@ describe("Master of Ceremonies: each opponent chooses money, friends or secrets"
 });
 
 describe("agents refuse spells the engine cannot resolve deterministically; humans are not blocked", () => {
-  const names = ["Promise of Loyalty", "Agadeem's Awakening // Agadeem, the Undercrypt"];
+  const names = ["Agadeem's Awakening // Agadeem, the Undercrypt"];
   it.each(names)("%s: matched by the refusal list, uncastable for an agent, castable for a human", (name) => {
     const spell = real(name, "sp", { zone: "hand" });
     if (name.startsWith("Agadeem")) {
@@ -199,11 +199,11 @@ describe("every human prompt kind has an agent answer (static guard)", () => {
 
 // --- ratchet: phase triggers in the shipped decks that still depend on the LLM rules advisor (agent AND human) ---
 // A new card whose "at the beginning of ..." text no deterministic handler owns appears as a new entry here and fails until it is handled or
-// consciously added. Entries that become handled can simply be deleted. Orzhov Advokist, Shadrix, The Ozolith and Reluctant Role Model are the
+// consciously added. Entries that become handled can simply be deleted. Shadrix, The Ozolith and Reluctant Role Model are the
 // ones with real choices (listed under "Human/agent parity gaps" in docs/agents/system.md).
 const KNOWN_LLM_ONLY_PHASE_TRIGGERS = new Set([
   "Estrid's Invocation|upkeep step", "Hulking Raptor|precombat main phase",
-  "Mystic Remora|upkeep step", "Orzhov Advokist|upkeep step", "Overlord of the Mistmoors|end step", "Reluctant Role Model|postcombat main phase",
+  "Mystic Remora|upkeep step", "Overlord of the Mistmoors|end step", "Reluctant Role Model|postcombat main phase",
   "Shadrix Silverquill|beginning of combat step", "The Ozolith|beginning of combat step"
 ]);
 function deckFiles(): string[] {

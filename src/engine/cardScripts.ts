@@ -6,7 +6,7 @@
 // "scripted_choice"). A human is always asked for a real choice; an agent gets a deterministic heuristic. Same import-cycle rules as triggers.ts:
 // function declarations only, no top-level calls of imported bindings.
 import { destroyCreatures, moveCardAcrossSeats, moveLibraryCardToDestination } from "@/engine/entry";
-import { applyCombatDamageToTarget, dealDamageToCreature } from "@/engine/damage";
+import { applyCombatDamageToTarget, dealDamageToCreature, hasHexproof, hasIndestructible } from "@/engine/damage";
 import { drawForSeat, transformPermanent } from "@/engine/effects";
 import { createTokensForSeat, parseCreateTokenSpecs, predefinedTokenSpec } from "@/engine/tokens";
 import type { PendingAction, TriggerEffect } from "@/engine/types";
@@ -642,7 +642,7 @@ export function applyDamagedWatchers(session: GameSession, seatId: string, damag
         candidates.push({ label: `${seat.name} (${seat.life} life)`, value: `p:${seat.id}` });
         for (const card of seat.board.battlefield) {
           if (card.phasedOut || !(hasCardType(card, "Creature") || hasCardType(card, "Planeswalker")) || isOfType(card, excluded)) continue;
-          if (seat.id !== holder.id && (card.oracleText.toLowerCase().includes("hexproof") || card.grantedKeywords?.includes("hexproof") || card.groupGrantedKeywords?.includes("hexproof"))) continue;
+          if (seat.id !== holder.id && hasHexproof(card)) continue;
           candidates.push({ label: `${card.name} — ${seat.id === holder.id ? "yours" : seat.name}`, value: `c:${seat.id}:${card.id}` });
         }
       }
@@ -741,7 +741,7 @@ export function findSpellTargetTriggers(session: GameSession, casterSeatId: stri
 
 function nonlandTargetsOf(session: GameSession, trigger: Trigger): Array<{ seatId: string; card: VisibleCard }> {
   const opponent = seatOf(session, String(params(trigger).opponentSeatId ?? ""));
-  return (opponent?.board.battlefield ?? []).filter((card) => !isLandCardLike(card) && !card.phasedOut && !card.oracleText.toLowerCase().includes("hexproof") && !card.groupGrantedKeywords?.includes("hexproof") && !card.grantedKeywords?.includes("hexproof")).map((card) => ({ seatId: opponent!.id, card }));
+  return (opponent?.board.battlefield ?? []).filter((card) => !isLandCardLike(card) && !card.phasedOut && !hasHexproof(card)).map((card) => ({ seatId: opponent!.id, card }));
 }
 
 function resolveDestroyNonland(session: GameSession, trigger: Trigger): GameSession {
@@ -750,7 +750,7 @@ function resolveDestroyNonland(session: GameSession, trigger: Trigger): GameSess
   const pool = nonlandTargetsOf(session, trigger);
   const target = pool.find((entry) => entry.card.id === targetId) ?? (targetId ? undefined : [...pool].sort((a, b) => worth(b.card) - worth(a.card))[0]);
   if (!target) return rulesEvent(session, trigger.controllerSeatId, `${trigger.sourceCardName}: no nonland permanent to destroy.`);
-  if (/\bindestructible\b/i.test(target.card.oracleText) || target.card.grantedKeywords?.includes("indestructible")) return rulesEvent(session, trigger.controllerSeatId, `${trigger.sourceCardName}: ${target.card.name} is indestructible.`);
+  if (hasIndestructible(target.card)) return rulesEvent(session, trigger.controllerSeatId, `${trigger.sourceCardName}: ${target.card.name} is indestructible.`);
   return destroyCreatures(session, [{ seatId: opponentId, cardId: target.card.id, message: `${target.card.name} is destroyed by ${trigger.sourceCardName}.` }], "Rules action");
 }
 

@@ -891,8 +891,6 @@ function hasResolvableAuraEnchantTarget(session: GameSession, casterSeatId: stri
 // Printed text of instants/sorceries the engine has NO deterministic resolution for (checked against every shipped deck). Kept in step with the
 // "Human/agent parity gaps" section of docs/agents/system.md and guarded by AppFlow.humanAgentParity.test.ts.
 export const AGENT_UNSUPPORTED_SPELL_TEXT: RegExp[] = [
-  // Promise of Loyalty: needs a per-creature "can't attack you" restriction that lasts while the vow counter stays.
-  /each player puts a vow counter on a creature they control and sacrifices the rest/i,
   // Agadeem's Awakening: any number of targets with pairwise-different mana values.
   /return from your graveyard to the battlefield any number of target creature cards that each have a different mana value/i
 ];

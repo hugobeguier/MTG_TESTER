@@ -12,6 +12,8 @@ import { attachedBasePowerToughness, attachedPowerToughnessBonus, attachmentComb
 import { computeDevotion, computeDevotionToColors, countMatchingPermanents, parseAllZonesCda, parseCharacteristicDefiningAbility, parseConditionalStaticBoosts, parseDevotionCda, parseDevotionNotCreature, parseGroupAnthemBoost, parseGroupKeywordGrant, parseGroupManaAbilityGrant, parseOwnGraveyardCda, parseSelfAnthemBoost, permanentMatchesQualifier } from "@/lib/characteristics";
 import { counterCount, effectivePower, effectiveToughness } from "@/lib/counters";
 import { shareSessionSeats } from "@/lib/structuralShare";
+import { abilitySources } from "@/lib/effectivePermanent";
+import { attachmentCantAttackController, parseGroupBaseSet, parseKeywordLossStatics } from "@/lib/lockdown";
 import { hasCardType, parseLandSubtypeGrants, parseOtherCreaturesGrant, parseTypeGrantEffects, typeGrantAppliesTo } from "@/lib/typeGrants";
 import type { GameEvent, GameSession, PlayerSeat, VisibleCard } from "@/lib/types";
 
@@ -64,6 +66,34 @@ export function winTheGame(session: GameSession, winnerSeatId: string, sourceNam
     `${winner.name} wins the game with ${sourceName}!`
   );
 }
+
+// Layer 6 "loses [keyword]": every static (Archetype of Imagination) and until-end-of-turn (Shadowspear's ability) loss acting on `card`, as the newest loss
+// timestamp per keyword. `cantGain` ("...can't have or gain flying") also kills grants made after the loss. A plain loss only removes what the permanent had
+// BEFORE it (printed text, earlier grants); a grant with a later timestamp survives.
+function keywordLossesFor(card: VisibleCard, seat: PlayerSeat, seats: PlayerSeat[]): Map<string, { ts: number; cantGain: boolean }> {
+  const losses = new Map<string, { ts: number; cantGain: boolean }>();
+  const add = (keyword: string, ts: number, cantGain: boolean) => {
+    const previous = losses.get(keyword);
+    losses.set(keyword, { ts: Math.max(previous?.ts ?? -1, ts), cantGain: Boolean(previous?.cantGain) || cantGain });
+  };
+  const isCreature = hasCardType(card, "Creature");
+  for (const sourceSeat of seats) {
+    for (const source of abilitySources(sourceSeat.board.battlefield)) {
+      for (const loss of parseKeywordLossStatics(source.oracleText)) {
+        if (loss.type === "creature" && !isCreature) continue;
+        const sameSide = sourceSeat.id === seat.id;
+        if ((loss.controller === "opponents" && sameSide) || (loss.controller === "you" && !sameSide)) continue;
+        for (const keyword of loss.keywords) add(keyword, source.permanentTimestamp ?? 0, loss.cantGain);
+      }
+    }
+  }
+  for (const loss of card.temporaryKeywordLosses ?? []) add(loss.keyword, loss.stamp, false);
+  return losses;
+}
+const keywordSurvivesLoss = (losses: Map<string, { ts: number; cantGain: boolean }>, keyword: string, grantTs: number) => {
+  const loss = losses.get(keyword);
+  return !loss || (!loss.cantGain && grantTs > loss.ts);
+};
 
 export function runStateBasedActionsPass(session: GameSession): { session: GameSession; changed: boolean } {
   let changed = false;
@@ -331,20 +361,27 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
           if (!hasCardType(card, "Creature") && !seatStarfieldAnimatesCard(seat, card)) {
             // Padeem, Consul of Innovation: "Artifacts you control have hexproof." applies to noncreature artifacts too (they skip the creature pass below).
             const groupKeywords = new Set<string>();
+            const groupKeywordTs = new Map<string, number>();
+            const nonCreatureLosses = keywordLossesFor(card, seat, next.seats);
             for (const sourceSeat of next.seats) {
               for (const grantSource of sourceSeat.board.battlefield.filter((source) => !source.phasedOut && !source.abilitiesStripped)) {
                 for (const grant of parseGroupKeywordGrant(grantSource.oracleText)) {
                   if (grant.controlledOnly && sourceSeat.id !== seat.id) continue;
                   if (grant.excludeSelf && grantSource.id === card.id) continue;
                   if (!permanentMatchesQualifier(card, grant.matcher)) continue;
-                  for (const keyword of grant.keywords) groupKeywords.add(keyword);
+                  for (const keyword of grant.keywords) {
+                    groupKeywords.add(keyword);
+                    groupKeywordTs.set(keyword, Math.max(groupKeywordTs.get(keyword) ?? 0, grantSource.permanentTimestamp ?? 0));
+                  }
                 }
               }
             }
-            const nextGroup = groupKeywords.size > 0 ? Array.from(groupKeywords).sort() : undefined;
-            if (sameList(nextGroup, card.groupGrantedKeywords)) return card;
+            const keptGroup = Array.from(groupKeywords).filter((keyword) => keywordSurvivesLoss(nonCreatureLosses, keyword, groupKeywordTs.get(keyword) ?? 0));
+            const nextGroup = keptGroup.length > 0 ? keptGroup.sort() : undefined;
+            const nextNonCreatureLost = nonCreatureLosses.size > 0 ? Array.from(nonCreatureLosses.keys()).sort() : undefined;
+            if (sameList(nextGroup, card.groupGrantedKeywords) && sameList(nextNonCreatureLost, card.lostKeywords)) return card;
             changed = true;
-            return { ...card, groupGrantedKeywords: nextGroup };
+            return { ...card, groupGrantedKeywords: nextGroup, lostKeywords: nextNonCreatureLost };
           }
 
           // Layer 7a: characteristic-defining abilities establish this creature's own base P/T
@@ -442,6 +479,7 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
           let losesAllAbilities = false;
           let cantAttackByAttachment = false;
           let cantBlockByAttachment = false;
+          const cantAttackSeatIds: string[] = [];
           for (const attachment of allAttachments) {
             if (attachment.attachedToId !== card.id) continue;
             const attachStamp = attachment.attachTimestamp ?? 0;
@@ -449,6 +487,7 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
             const combatBans = attachmentCombatBans(attachment.oracleText);
             if (combatBans.attack) cantAttackByAttachment = true;
             if (combatBans.block) cantBlockByAttachment = true;
+            if (attachmentCantAttackController(attachment.oracleText) && attachment.controllerSeatId) cantAttackSeatIds.push(attachment.controllerSeatId);
             const bonus = attachedPowerToughnessBonus(attachment.oracleText);
             if (bonus) {
               power += bonus.power;
@@ -584,6 +623,18 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
             }
           }
 
+          // Layer 7b + 6: "[Other] creatures you control [with +1/+1 counters on them] have base power and toughness N/M[, have flying]" (Sigarda's Summons,
+          // Graaz). The newest base-setting effect wins (setEffectCandidates), counters and pumps then add on top; the subtype half is granted in the type pass below.
+          for (const baseSource of abilitySources(seat.board.battlefield)) {
+            for (const set of parseGroupBaseSet(baseSource.oracleText)) {
+              if (set.excludeSelf && baseSource.id === card.id) continue;
+              if (set.requiresPlusCounter && counterCount(card, "+1/+1") <= 0) continue;
+              const baseTs = baseSource.permanentTimestamp ?? 0;
+              setEffectCandidates.push({ timestamp: baseTs, power: set.power, toughness: set.toughness });
+              for (const keyword of set.keywords) grantKeyword(keyword, baseTs);
+            }
+          }
+
           // Same shape as the keyword-grant scan just above, but for a granted ACTIVATED mana
           // ability (Insidious Roots' "Creature tokens you control have '{T}: Add one mana of any
           // color.'") — kept in its own field (grantedManaAbilityText) rather than merged into
@@ -659,7 +710,10 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
           // Layer 6 timestamp order: "loses all abilities" removes what the permanent has from effects with an EARLIER timestamp (its own printed
           // abilities are handled by abilitiesStripped itself); grants from a LATER effect survive.
           const survives = (ts: number) => !losesAllAbilities || ts > strippedAt;
-          const keptKeywords = Array.from(keywordSet).filter((keyword) => survives(keywordTs.get(keyword) ?? 0));
+          const keywordLosses = keywordLossesFor(card, seat, next.seats);
+          const keptKeywords = Array.from(keywordSet).filter((keyword) => survives(keywordTs.get(keyword) ?? 0) && keywordSurvivesLoss(keywordLosses, keyword, keywordTs.get(keyword) ?? 0));
+          const nextLostKeywords = keywordLosses.size > 0 ? Array.from(keywordLosses.keys()).sort() : undefined;
+          const nextCantAttackSeatIds = cantAttackSeatIds.length > 0 ? Array.from(new Set(cantAttackSeatIds)).sort() : undefined;
           const keptProtection = Array.from(protectionSet).filter((color) => survives(protectionTs.get(color) ?? 0));
           if (manaAbilityGrantText && !survives(manaAbilityGrantTs)) manaAbilityGrantText = undefined;
           const nextKeywords = keptKeywords.length > 0 ? keptKeywords.sort() : undefined;
@@ -674,6 +728,8 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
             nextPowerBonus === card.attachmentPowerBonus &&
             nextToughnessBonus === card.attachmentToughnessBonus &&
             sameList(nextKeywords, card.grantedKeywords) &&
+            sameList(nextLostKeywords, card.lostKeywords) &&
+            sameList(nextCantAttackSeatIds, card.attachmentCantAttackSeatIds) &&
             sameList(nextProtection, card.grantedProtectionColors) &&
             manaAbilityGrantText === card.grantedManaAbilityText &&
             cdaPower === card.cdaPower &&
@@ -692,6 +748,8 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
             attachmentPowerBonus: nextPowerBonus,
             attachmentToughnessBonus: nextToughnessBonus,
             grantedKeywords: nextKeywords,
+            lostKeywords: nextLostKeywords,
+            attachmentCantAttackSeatIds: nextCantAttackSeatIds,
             grantedProtectionColors: nextProtection,
             grantedManaAbilityText: manaAbilityGrantText,
             cdaPower,
@@ -754,6 +812,15 @@ export function runStateBasedActionsPass(session: GameSession): { session: GameS
               if (typeGrantAppliesTo(grant.granteeFilter, card)) grantedSet.add(grant.grantedType);
             }
             if (landSubtypeGrants.length > 0 && hasCardType(card, "Land")) for (const subtype of landSubtypeGrants) grantedSet.add(subtype);
+            // Sigarda's Summons / Graaz: "...and are Angels / Juggernauts in addition to their other types".
+            if (hasCardType(card, "Creature")) {
+              for (const baseSource of abilitySources(seat.board.battlefield)) {
+                for (const set of parseGroupBaseSet(baseSource.oracleText)) {
+                  if ((set.excludeSelf && baseSource.id === card.id) || (set.requiresPlusCounter && counterCount(card, "+1/+1") <= 0)) continue;
+                  for (const subtype of set.addedSubtypes) grantedSet.add(subtype);
+                }
+              }
+            }
             let grantedAbilityTexts: string[] = [];
             if (hasCardType(card, "Creature")) {
               for (const source of otherCreatureGrantSources) {

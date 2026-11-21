@@ -75,6 +75,8 @@ export function applyCombatDamageToTarget(
   damageKind: "combat" | "noncombat" = "combat"
 ): GameSession {
   if (amount <= 0) return session;
+  // Perch Protection: "until your next turn ... you gain protection from everything" -- damage to the player is prevented.
+  if (target.seat.lockedUntilSeatTurn && !target.planeswalker) return rulesEvent(session, target.seat.id, `${sourceName}'s damage to ${target.seat.name} is prevented (protection from everything).`);
   amount *= damageDoublingFactor(session, sourceControllerSeatId, target.seat.id);
   const prevention = applyDamagePrevention(
     session,

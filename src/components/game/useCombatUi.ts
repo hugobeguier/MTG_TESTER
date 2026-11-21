@@ -2,6 +2,7 @@
 // Part of the AppFlow() split: shared state arrives through `ctx` (see ./context.ts); handlers owned by other hooks are called through `lateFn` so every hook sees the current render's functions.
 import { type GameSession } from "@/lib/types";
 import { annihilatorAmount } from "@/lib/keywords";
+import { attackBannedAgainst } from "@/engine/lockdownEffects";
 import { applyMetalcraftAttackDebuff, assignBlockers, attackLockedOut, canAttack, hasVigilance, resolveAttackTarget, resolveHumanUnblockedDamage, totalAttackTax } from "@/engine/combat";
 import { attackTriggerManaHeuristicSplit, chooseManaSourcesForCost, payCostFromPool, spendManaSources } from "@/engine/mana";
 import { chooseAnnihilatorSacrifices, seatVerb } from "@/engine/abilities";
@@ -30,7 +31,9 @@ export function useCombatUi(ctx: GameContext) {
     const attackingCard = attacker.board.battlefield.find((card) => card.id === cardId && canAttack(card, attacker.board.battlefield) && !attackLockedOut(session, card));
     const target = resolveAttackTarget(session, targetId);
 
-    if (!attackingCard || !target) {
+    // "Can't attack you or planeswalkers you control" (Vow of Malice, Combat Calligrapher, vow counters, Orzhov Advokist).
+    const banned = Boolean(attackingCard && target && attackBannedAgainst(attacker, attackingCard, target.seat));
+    if (!attackingCard || !target || banned) {
       return {
         ...session,
         events: [phaseEvent(seatId, seatVerb(attacker, `${attacker.name} declares no attackers.`, "You declare no attackers.")), ...session.events]

@@ -877,6 +877,12 @@ export function useCasting(ctx: GameContext) {
     const doors = card ? roomDoorFaces(card) : undefined;
     if (!seat || !card || !doors) return;
     const lockedDoor = doors[faceIndex];
+    // A friend's faceIndex arrives over the wire: it must name a real, still-locked door, and unlocking is a sorcery-speed special action (own main phase, empty stack).
+    if (!lockedDoor || card.unlockedFaceIndices?.includes(faceIndex)) return;
+    if (pendingAction || activeSeatId !== seatId || !isMainPhase(session.phase)) {
+      addEvent(`${seat.name} can only unlock a door during a main phase on their own turn, with an empty stack.`, seatId, "Timing");
+      return;
+    }
     const shim = cardWithFaceManaCost(card, lockedDoor.manaCost);
     const totalCost = Math.max(0, manaValueFromManaCost(lockedDoor.manaCost) - unlockCostReduction(seat));
     // Prefer whatever's already floating in the human's pool, same pool-first-then-auto-tap

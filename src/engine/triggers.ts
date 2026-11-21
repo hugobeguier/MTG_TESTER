@@ -9,6 +9,7 @@ import { PHASE_SCRIPTS, resolveScriptedTrigger, rollD20, scriptedEffectFromText,
 import { applyCounterAccumulationEffect, applyDiscardEffect, applyDrainEffect, applyDrawXThenPutBack, applyGenericModalEffect, applyMassPumpEffect, applyMasterOfCeremonies, applyMill, applyPrimitiveAction, applyRemovalEffect, applyTargetedPumpEffect, applyZoneEffect, becomeTemporaryCopy, castTargetLegal, chooseCounterTarget, choosePlaguecrafterSacrifice, chooseReanimationTarget, chooseWorstHandCardToDiscard, deferHumanDiscard, drawForSeat, drawMultipleForSeat, genericManaAbilityCostShim, matchesEachPlayerSacrificeFilter, noLegalTargetEvent, parseCounterAccumulationTrigger, parseGenericModalEffect, parseTargetedPump, resolveAgentLibraryLookWorkflow, resolveDeferredChoice, resolveProliferate, resolveRevealExchangeTrigger, resolveSacrificeSelfThenSearch, resolveSearchLibraryPut, resolveWhereXBoardCount, strongestControlledCreature, transformPermanent } from "@/engine/effects";
 import { applyGraveyardReturn, destroyCreatures, moveCardAcrossSeats, moveLibraryCardToDestination } from "@/engine/entry";
 import { entersBattlefieldTapped } from "@/engine/lands";
+import { ADVOKIST_TEXT, applyAdvokistTrigger } from "@/engine/lockdownEffects";
 import { chooseManaSourcesForCost, isBoardConditionMet, isRecognizedBoardCondition, lifeGainedThisTurn, spendManaSources } from "@/engine/mana";
 import { capitalizeWord, hasKeyword, isBasicLandCard, isLandCard, numberWordToInt } from "@/engine/shared";
 import { checkStateBasedActions, winTheGame } from "@/engine/stateBased";
@@ -3223,6 +3224,7 @@ export function applyDeterministicPhaseTrigger(session: GameSession, seatId: str
   }
   // Master of Ceremonies, Keen Duelist, Parker Luck: the other players' / the aimed players' part of the trigger is a real decision (see
   // applyMasterOfCeremonies, resolveRevealExchangeTrigger): a human is asked, an agent decides deterministically.
+  if (ADVOKIST_TEXT.test(clauseText)) return applyAdvokistTrigger(session, seatId, sourceCard.name);
   if (/\beach opponent chooses money, friends, or secrets\b/i.test(clauseText)) {
     return applyMasterOfCeremonies(session, seatId, sourceCard, session.seats.filter((item) => item.id !== seatId && !item.hasLost).map((item) => item.id));
   }

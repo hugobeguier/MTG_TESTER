@@ -12,10 +12,12 @@
 import { useEffect, useRef, useState, type MutableRefObject } from "react";
 import { IntentQueue, dispatchIntent, type IntentEntry, type IntentEvent, type IntentRegistry } from "@/lib/multiplayer/intentDispatch";
 import { GUEST_INTENT_NAMES, INTENT_SPECS, checkIntentArgs, checkIntentWhen, type GuestIntentName, type IntentGameState, type IntentSpec } from "@/lib/multiplayer/intentSpecs";
+import { answerRefusal } from "@/lib/multiplayer/answerGuard";
 import { isLobbyIntentName } from "@/lib/multiplayer/lobby";
 import { seatForSlot } from "@/lib/multiplayer/seatMap";
 import { promptOwnersOf } from "@/lib/multiplayer/seatPrompts";
 import { attackLockedOut, canAttack, resolveAttackTarget } from "@/engine/combat";
+import { attackBannedAgainst } from "@/engine/lockdownEffects";
 import { parseLoyaltyAbilities } from "@/engine/abilities";
 import type { GameSession } from "@/lib/types";
 import type { GameContext, HandlerApi } from "./context";
@@ -173,6 +175,8 @@ export function guestRefusals(session: GameSession): Pick<IntentGameState, "togg
       if (!canAttack(attacker, battlefield) || attackLockedOut(session, attacker)) return `${attacker.name} cannot attack right now`;
       const target = resolveAttackTarget(session, targetId);
       if (!target || target.seat.id === seatId || target.seat.hasLost) return "that is not a legal attack target";
+      const attackerSeat = session.seats.find((item) => item.id === seatId);
+      if (attackerSeat && attackBannedAgainst(attackerSeat, attacker, target.seat)) return `${attacker.name} cannot attack that player`;
       return undefined;
     },
     loyaltyRefusal: (seatId, cardId, cost, text) => {
@@ -188,6 +192,20 @@ export function readIntentState(ctx: GameContext, paused = false): IntentGameSta
   const { choices, mana, session } = ctx;
   return {
     ...guestRefusals(session),
+    answerRefusal: (name, seatId, args) =>
+      answerRefusal(name, seatId, args, {
+        session,
+        slots: {
+          pendingRuleChoice: choices.pendingRuleChoice,
+          libraryLook: choices.libraryLook,
+          blockChoice: choices.blockChoice,
+          manaChoice: mana.manaChoice,
+          myriadTapChoice: choices.myriadTapChoice,
+          myriadSearch: choices.myriadSearch,
+          basicLandFetchSearch: choices.basicLandFetchSearch,
+          manualLibrarySearch: choices.manualLibrarySearch
+        }
+      }),
     gameStage: ctx.gameStage,
     activeSeatId: ctx.activeSeatId,
     prioritySeatId: ctx.prioritySeatId,

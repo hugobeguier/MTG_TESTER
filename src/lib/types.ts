@@ -1,4 +1,5 @@
 import type { DelayedPhaseTrigger } from "./phaseTriggers";
+import type { AttackBan } from "./lockdown";
 
 type SeatKind = "human" | "agent";
 
@@ -158,6 +159,10 @@ export interface PlayerSeat {
   floatingMana?: ManaPool;
   // Finale of Revelation (X >= 10): "you have no maximum hand size for the rest of the game".
   noMaximumHandSize?: boolean;
+  // Bans on ALL of this player's creatures attacking a given player ('creatures that player controls can't attack you ... until your next turn': Orzhov Advokist).
+  creatureAttackBans?: AttackBan[];
+  // Perch Protection: until the start of this seat's next turn the player has protection from everything (damage to them is prevented) and their life total can't change.
+  lockedUntilSeatTurn?: boolean;
   kind: SeatKind;
   // Multiplayer: a relay slot id like "guest-1" on a seat played by a remote friend. The seat stays kind "human" (no agentName); the HOST's own
   // human seat is the one without this marker (see lib/multiplayer/seatMap.ts).
@@ -304,6 +309,18 @@ export interface VisibleCard {
   // Read by canAttack/canBlock; not part of the creature's own abilities, so it survives "loses all abilities".
   attachmentCantAttack?: boolean;
   attachmentCantBlock?: boolean;
+  // Derived every state-based pass: seats this creature can't attack because of an attached Aura/Equipment ("Enchanted creature ... can't attack you
+  // or planeswalkers you control", Vow of Malice) -- the Aura's controller. Not a blanket ban, so it is not attachmentCantAttack.
+  attachmentCantAttackSeatIds?: string[];
+  // Stored per-creature attack bans from one-shot effects (Promise of Loyalty: "can't attack you or planeswalkers you control for as long as it has a vow
+  // counter on it"). See lib/lockdown.ts AttackBan.
+  attackBans?: AttackBan[];
+  // Keywords this permanent's PRINTED text no longer provides because a "loses [keyword]" effect applies (Archetype of Imagination, Shadowspear's
+  // until-end-of-turn ability). Derived every state-based pass; hasKeyword() reads it. Grants made after the loss (timestamp order) are NOT in this
+  // list: they are simply present in grantedKeywords.
+  lostKeywords?: string[];
+  // Until-end-of-turn "loses [keyword]" effects applied to this permanent, each with the layer timestamp it was applied at (cleared at the turn change).
+  temporaryKeywordLosses?: Array<{ keyword: string; stamp: number }>;
   // Additional card types granted by a static ability elsewhere (Secret Arcade-style "X you
   // control are Y in addition to their other types") — recomputed every state-based-action pass
   // from current board state, same pattern as grantedKeywords. Everything reading card.typeLine

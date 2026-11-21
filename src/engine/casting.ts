@@ -17,6 +17,7 @@ import { isAura } from "@/lib/attachments";
 import { permanentMatchesQualifier } from "@/lib/characteristics";
 import { parseDamagePrevention } from "@/lib/damagePrevention";
 import { libraryTopCastPermission } from "@/lib/libraryCasting";
+import { applySpellLockdownEffects } from "@/engine/lockdownEffects";
 import { etbEffectText, parseAdditionalDiscardCost, parseAdditionalSacrificeCost, type AdditionalSacrificeType } from "@/lib/oracleClauses";
 import { type ChosenTarget } from "@/lib/targeting";
 import { type CardFaceRecord, type GameSession, type ManaPool, type PlayerSeat, type VisibleCard } from "@/lib/types";
@@ -52,7 +53,9 @@ export function isNonAuraEnchantment(card: VisibleCard): boolean {
 // Arachnogenesis), Batwing Brume's color-conditional halves (read off the mana actually spent), and targeted/self shields on an instant or sorcery
 // ("prevent all combat damage that would be dealt to you this turn" + Inkshield's per-point tokens, "prevent the next N damage ... to target ...").
 // A creature's own enters-trigger goes through commonTriggerEffect's prevent_damage; a pumped target's "it" through applyTargetedPumpEffect.
-export function applySpellDamagePrevention(session: GameSession, seatId: string, sourceCard: VisibleCard, castTarget: ChosenTarget | undefined, manaSpentColors: string[]): GameSession {
+export function applySpellDamagePrevention(session: GameSession, seatId: string, sourceCard: VisibleCard, castTarget: ChosenTarget | undefined, manaSpentColors: string[], giftPromised = false): GameSession {
+  // Lockdown riders of the spell (Promise of Loyalty's vow counters, Perch Protection's phasing) resolve first, then the prevention text below.
+  session = applySpellLockdownEffects(session, seatId, sourceCard, giftPromised);
   const text = etbEffectText(sourceCard.oracleText);
   const brumeFog = /\bprevent all combat damage that would be dealt this turn if \{w\} was spent to cast this spell/i.test(text);
   const fogMatch = brumeFog ? (manaSpentColors.includes("W") ? ["", undefined] : null) : text.match(/\bprevent all combat damage that would be dealt this turn(?! if\b)(?: by non-([a-z]+) creatures)?\b/i);

@@ -2,6 +2,7 @@
 // legal, and what a one-on-one fight does once first strike, double strike, deathtouch and indestructible are applied.
 import { hasKeyword as keywordLineHas } from "./keywords";
 import { canBlockOnlyFliers, landwalkEvades } from "./combatRestrictions";
+import { evasionBlocksBlocker } from "./lockdown";
 import type { CardLike } from "./actionScoring";
 
 export function parseNum(value: string | undefined): number | undefined {
@@ -115,6 +116,11 @@ export function canLegallyBlock(attacker: CardLike, blocker: CardLike, defenderB
   const blockerTemporary = (blocker as { temporaryGrantedKeywords?: string[] }).temporaryGrantedKeywords;
   if (attackerTemporary?.includes("can't be blocked") || blockerTemporary?.includes("can't block") || blockerTemporary?.includes("can't block:" + attacker.id)) return false;
   if (hasMenace(attacker)) return false;
+  // Intimidate / fear / skulk, mirroring engine/combat.ts canBlock (needs the colors; a snapshot without them is read as "can't tell", not as blockable-by-nobody).
+  const attackerColors = (attacker as { colors?: string[] }).colors;
+  const blockerColors = (blocker as { colors?: string[] }).colors;
+  if (attackerColors && blockerColors && evasionBlocksBlocker({ colors: attackerColors, typeLine: attacker.typeLine ?? "" }, { colors: blockerColors, typeLine: blocker.typeLine ?? "" }, (keyword) => hasKeyword(attacker, keyword))) return false;
+  if (hasKeyword(attacker, "skulk") && Number.parseInt(blocker.power ?? "0", 10) > Number.parseInt(attacker.power ?? "0", 10)) return false;
   if (landwalkEvades(attacker as never, defenderBoard as never)) return false;
   if (canBlockOnlyFliers(blocker as never) && !hasFlying(attacker)) return false;
   return !hasFlying(attacker) || hasFlying(blocker) || hasReach(blocker);

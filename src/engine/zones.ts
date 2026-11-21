@@ -389,6 +389,10 @@ export function resetForZoneChange<T extends VisibleCard>(card: T, zone: Visible
     temporaryAbilitiesStripped: undefined,
     temporaryAnimatedAsCreature: undefined,
     temporaryGrantedKeywords: undefined,
+    temporaryKeywordLosses: undefined,
+    lostKeywords: undefined,
+    attackBans: undefined,
+    attachmentCantAttackSeatIds: undefined,
     grantedKeywords: undefined,
     grantedProtectionColors: undefined,
     grantedManaAbilityText: undefined,
@@ -988,7 +992,11 @@ function moveCardBetweenVisibleZonesCore(session: GameSession, seatId: string, c
     temporaryBaseToughness: undefined,
     temporaryAbilitiesStripped: undefined,
     temporaryAnimatedAsCreature: undefined,
-    temporaryGrantedKeywords: undefined
+    temporaryGrantedKeywords: undefined,
+    temporaryKeywordLosses: undefined,
+    lostKeywords: undefined,
+    attackBans: undefined,
+    attachmentCantAttackSeatIds: undefined
   };
 
   const seats = session.seats.map((seat) => {

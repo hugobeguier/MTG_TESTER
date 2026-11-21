@@ -38,7 +38,12 @@ export function dispatchIntent(registry: IntentRegistry, event: IntentEvent, sea
   if (!parsed.success) return { ok: false, reason: `bad arguments for ${event.name}` };
   const refusal = entry.check?.(seatId, ...parsed.data);
   if (refusal) return { ok: false, reason: refusal };
-  entry.call(seatId, ...parsed.data);
+  // A handler that throws on an odd (but schema-valid) argument must cost the sender that one action, not take down the host's intent queue.
+  try {
+    entry.call(seatId, ...parsed.data);
+  } catch {
+    return { ok: false, reason: `${event.name} failed on the host` };
+  }
   return { ok: true };
 }
 

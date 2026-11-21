@@ -338,6 +338,8 @@ export function useChoicePrompts(ctx: GameContext) {
         : choice.anyPermanent
           ? card.id !== choice.excludeCardId && matchesPermanentSacrificeFilter(card, choice.typeFilter)
           : hasCardType(card, "Creature") && card.id !== choice.excludeCardId && matchesSacrificeFilter(card, choice.typeFilter?.toLowerCase());
+    // A friend's pick arrives over the wire: it must be one the prompt offers (eligible, not already picked), not just any permanent they control.
+    if (!isEligible(chosenCard) || (choice.pickedIds ?? []).includes(cardId)) return;
     const pickedIds = [...(choice.pickedIds ?? []), cardId];
     const needed = choice.count - pickedIds.length;
     if (needed > 0) {
@@ -383,6 +385,8 @@ export function useChoicePrompts(ctx: GameContext) {
     const seat = session.seats.find((item) => item.id === seatId);
     const chosenCard = seat?.board.battlefield.find((item) => item.id === cardId);
     if (!seat || !chosenCard) return;
+    // A friend's pick arrives over the wire: it must satisfy the sacrifice's own filter (not, say, a Treasure token instead of the creature the effect demands).
+    if (!matchesEachPlayerSacrificeFilter(chosenCard, choice.typeFilter) || (choice.excludeTokensFromSourceId && chosenCard.token && chosenCard.tokenSourceCardId === choice.excludeTokensFromSourceId)) return;
     setPendingRuleChoice(undefined);
     // Braids, Arisen Nightmare: after the sacrifice, the opponents' halves follow (the controller's pick sets the shared type).
     if (choice.braids) {

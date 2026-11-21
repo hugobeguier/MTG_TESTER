@@ -120,6 +120,8 @@ const GRANTABLE_KEYWORDS = [
   "hexproof",
   "shroud",
   "haste",
+  "intimidate",
+  "fear",
   "ward"
 ];
 

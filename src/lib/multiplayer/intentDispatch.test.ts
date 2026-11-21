@@ -21,6 +21,7 @@ function setup(over: { inMulligan?: boolean; kept?: Record<string, boolean> } = 
     toggleTapRefusal: () => undefined,
     attackRefusal: () => undefined,
     loyaltyRefusal: () => undefined,
+    answerRefusal: () => undefined,
     phase: "untap step",
     owners: {},
     hasKept: (id) => Boolean(over.kept?.[id]),

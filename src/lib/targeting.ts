@@ -84,7 +84,7 @@ function cardHasKeyword(card: VisibleCard, keyword: string): boolean {
   // Layer 6: a creature that's lost all abilities has neither its printed keywords nor any granted
   // ones — same short-circuit as AppFlow.tsx's own hasKeyword.
   if (card.abilitiesStripped) return false;
-  return hasKeyword(card.oracleText, keyword) || Boolean(card.grantedKeywords?.includes(keyword));
+  return (!card.lostKeywords?.includes(keyword) && hasKeyword(card.oracleText, keyword)) || Boolean(card.grantedKeywords?.includes(keyword)) || Boolean(card.groupGrantedKeywords?.includes(keyword));
 }
 
 // Rule 601.2c/702.11c/702.12b: hexproof/shroud/protection all make a permanent an ILLEGAL target,

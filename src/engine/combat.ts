@@ -16,6 +16,8 @@ import { bushidoAmount, canBlockAdditionalCreature, canBlockOnlyFliers, landwalk
 import { effectivePower, effectiveToughness } from "@/lib/counters";
 import { hasKeyword as hasKeywordText, wardAmount as cardWardAmount } from "@/lib/keywords";
 import { effectiveAttackTaxAmount } from "@/lib/staticEffects";
+import { evasionBlocksBlocker, parseConditionalAttackRestriction } from "@/lib/lockdown";
+import { attackBannedAgainst } from "@/engine/lockdownEffects";
 import { hasCardType } from "@/lib/typeGrants";
 import { type GameSession, type InterpretedEffect, type PlayerSeat, type VisibleCard } from "@/lib/types";
 
@@ -258,13 +260,19 @@ function attackBlockRestrictionMet(card: VisibleCard, controllerBattlefield?: Vi
   return true;
 }
 
+// "Gadrak can't attack unless you control four or more artifacts.": evaluated whenever attacks are declared (and offered), against the controller's current board.
+function attackConditionMet(card: VisibleCard, controllerBattlefield?: VisibleCard[]): boolean {
+  if (card.abilitiesStripped || card.phasedOut || !controllerBattlefield) return true;
+  return parseConditionalAttackRestriction(card.oracleText).every((rule) => controllerBattlefield.filter((other) => !other.phasedOut && hasCardType(other, rule.type)).length >= rule.count);
+}
+
 // A creature that arrived after the first attacker was declared this combat can't be declared as an attacker (Utvara Hellkite + Dragon Tempest).
 export function attackLockedOut(session: GameSession, card: VisibleCard) {
   return Boolean(session.attackPool && session.attackPool.turn === session.turn && !session.attackPool.ids.includes(card.id));
 }
 
 export function canAttack(card: VisibleCard, controllerBattlefield?: VisibleCard[]) {
-  if (!attackBlockRestrictionMet(card, controllerBattlefield)) return false;
+  if (!attackBlockRestrictionMet(card, controllerBattlefield) || !attackConditionMet(card, controllerBattlefield)) return false;
   if (card.attachmentCantAttack) return false;
   return hasCardType(card, "Creature") && !card.tapped && !card.phasedOut && !isSummoningSick(card) && !card.attacking && !hasDefender(card);
 }
@@ -314,6 +322,9 @@ export function canBlock(card: VisibleCard, attacker?: VisibleCard, controllerBa
   if (attacker && landwalkEvades(attacker, controllerBattlefield)) return false;
   if (attacker && canBlockOnlyFliers(card) && !hasFlying(attacker)) return false;
   if (attacker && isProtectedFrom(attacker, card)) return false;
+  // Intimidate / fear (702.13, 702.36): blockable only by artifact creatures and/or creatures sharing a color (fear: black). Skulk (702.118): not by greater power.
+  if (attacker && evasionBlocksBlocker(attacker, card, (keyword) => hasKeyword(attacker, keyword))) return false;
+  if (attacker && hasKeyword(attacker, "skulk") && effectivePower(card) > effectivePower(attacker)) return false;
   // Rule 702.111b: menace requires two or more blockers — enforced where the blockers are assigned together (assignBlockers),
   // since a single creature is only illegal as the WHOLE block, not as one member of a gang block.
   return true;
@@ -482,6 +493,8 @@ export function legalAttackActions(seat: PlayerSeat, opponents: PlayerSeat[] = [
   const actions: LegalAgentAction[] = [];
   for (const card of attackers) {
     for (const opponent of opponents) {
+      // "Can't attack you or planeswalkers you control" (Vow of Malice, Combat Calligrapher, vow counters, Orzhov Advokist): no option against that player at all.
+      if (attackBannedAgainst(seat, card, opponent)) continue;
       const legalBlockers = opponent.board.battlefield.filter((blocker) => canBlock(blocker, card, opponent.board.battlefield));
       const tax = totalAttackTax(opponent, false);
       if (tax === 0 || chooseManaSourcesForCost(seat, genericCostShim(tax), tax, undefined, opponents).ok) {

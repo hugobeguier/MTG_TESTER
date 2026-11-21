@@ -6,6 +6,7 @@
 import { applyDrawThenLand, resolveScriptedChoice } from "@/engine/cardScripts";
 import { resolveCardAbilityChoice } from "@/engine/cardAbilities";
 import { manaValueFromManaCost } from "@/engine/costs";
+import { applyAdvokistChoice, applyVowChoice } from "@/engine/lockdownEffects";
 import { PROTECTION_COLOR_CODE, addDamageShieldsFromSpec, applyCombatDamageToTarget, dealDamageToCreature, hasFlying, hasHexproof, hasIndestructible, hasShroud, isProtectedFrom, playerCantLose, playerHasHexproof } from "@/engine/damage";
 import { applyDevour, applyGraveyardReturn, applyGraveyardReturnPicked, destroyCreatures, finishDevour, moveCardAcrossSeats, moveLibraryCardToDestination } from "@/engine/entry";
 import { chooseManaSourcesForCost, manaChoicesForCard, manaColorForBasicLand, normalizeManaColors, spendManaSources } from "@/engine/mana";
@@ -615,6 +616,8 @@ export function resolveDeferredChoice(session: GameSession, seatId: string, sour
     if (participants.length !== 2) return session;
     return applyRevealTopExchange(session, controllerId, sourceName, [participants[0], participants[1]]);
   }
+  if (resolver === "vow_choice") return applyVowChoice(session, seatId, value, String(data.casterSeatId ?? seatId), sourceName);
+  if (resolver === "advokist_choice") return value && value !== "none" ? applyAdvokistChoice(session, seatId, value, String(data.controllerSeatId ?? seatId), sourceName) : session;
   if (resolver === "ceremonies_choice") {
     const controllerId = String(data.controllerSeatId ?? "");
     const pick = value === "friends" || value === "secrets" ? value : "money";

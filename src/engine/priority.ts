@@ -136,6 +136,9 @@ function agentCardSnapshot(card: VisibleCard) {
     abilitiesStripped: card.abilitiesStripped ? true : undefined,
     cantAttack: card.attachmentCantAttack ? true : undefined,
     cantBlock: card.attachmentCantBlock ? true : undefined,
+    // Seats this creature may not attack (Vow of Malice, vow counters, Orzhov Advokist, Combat Calligrapher's ban on Inklings) -- the legal attack list already omits them.
+    cantAttackSeatIds: [...new Set([...(card.attachmentCantAttackSeatIds ?? []), ...(card.attackBans ?? []).filter((ban) => !ban.whileCounter || (card.counters ?? []).some((counter) => counter.kind === ban.whileCounter && counter.count > 0)).map((ban) => ban.againstSeatId)])].sort().join(",") || undefined,
+    lostKeywords: card.lostKeywords?.length ? card.lostKeywords : undefined,
     attacking: card.attacking,
     attackTargetId: card.attacking ? card.attackTargetId : undefined,
     blocking: card.blocking,

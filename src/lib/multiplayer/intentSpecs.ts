@@ -6,6 +6,7 @@
 // the acting seat, so a friend can only touch their own cards/life/library. Ids of cards are validated by the engine handlers themselves (they look the
 // card up in the acting seat's zones and no-op when it is not there).
 import { z, type ZodTypeAny } from "zod";
+import { TURN_PHASES } from "../priorityStops";
 
 const id = z.string().min(1).max(200);
 const seatId = id;
@@ -95,7 +96,7 @@ export const INTENT_SPECS = {
   // the friend's OWN priority-stop controls (same ones the host's table has; they change only the friend's seat settings)
   onToggleFullControl: { schema: none, when: "settings" },
   onStopNext: { schema: none, when: "settings" },
-  onTogglePhaseStop: { schema: tup(z.string().min(1).max(60), z.number().int().min(0).max(9)), when: "settings" },
+  onTogglePhaseStop: { schema: tup(z.enum(TURN_PHASES), z.number().int().min(0).max(9)), when: "settings" },
   onToggleStopOnStackResponse: { schema: none, when: "settings" },
   onToggleStopOnAttacked: { schema: none, when: "settings" },
   onToggleStopOnTargeted: { schema: none, when: "settings" },
@@ -203,6 +204,8 @@ export interface IntentGameState {
   toggleTapRefusal: (seatId: string, cardId: string, location: string) => string | undefined;
   attackRefusal: (seatId: string, cardId: string, targetId: string) => string | undefined;
   loyaltyRefusal: (seatId: string, cardId: string, cost: number, text: string) => string | undefined;
+  /** Checks a prompt ANSWER against the open prompt's offered options (lib/multiplayer/answerGuard.ts). Required: fail closed when missing. */
+  answerRefusal: (name: string, seatId: string, args: unknown[]) => string | undefined;
 }
 
 const OWNER_FOR: Partial<Record<IntentWhen, keyof PromptOwners>> = {
@@ -254,6 +257,9 @@ export function checkIntentArgs(name: string, seat: string, args: unknown[], sta
   // Board-aware rules checks. A guest can never UNTAP by toggling (only the untap step / untap effects / ability costs do), and an attack must be a legal one.
   // Fail closed: a state without the board checks (typed required, but checked at runtime too) refuses these intents.
   const verify = (check: ((...a: never[]) => string | undefined) | undefined, ...a: unknown[]) => (check ? (check as (...x: unknown[]) => string | undefined)(...a) : "the host cannot verify that action");
+  // Answers to an open prompt: the choice must be one the prompt offered (fail closed like the checks below).
+  const answered = state.answerRefusal ? state.answerRefusal(name, seat, args) : "the host cannot verify that answer";
+  if (answered) return answered;
   if (name === "onToggleTapCard") return verify(state.toggleTapRefusal, seat, args[1], args[2]);
   if (name === "onDeclareAttack") return verify(state.attackRefusal, seat, args[0], args[1]);
   if (name === "onActivateLoyalty") return verify(state.loyaltyRefusal, seat, args[1], args[2], args[3]);

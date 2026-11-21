@@ -33,7 +33,7 @@ const SAMPLE: Record<string, unknown[]> = {
 
 // A state in which `when` is satisfied for seat-b.
 function stateFor(when: IntentWhen): IntentGameState {
-  const base: IntentGameState = { gameStage: "playing", activeSeatId: S, prioritySeatId: S, hasPendingAction: false, phase: "declare attackers step", owners: {}, hasKept: () => false, battlefieldIds: () => ["bf1", "bf2"], toggleTapRefusal: () => undefined, attackRefusal: () => undefined, loyaltyRefusal: () => undefined };
+  const base: IntentGameState = { gameStage: "playing", activeSeatId: S, prioritySeatId: S, hasPendingAction: false, phase: "declare attackers step", owners: {}, hasKept: () => false, battlefieldIds: () => ["bf1", "bf2"], toggleTapRefusal: () => undefined, attackRefusal: () => undefined, loyaltyRefusal: () => undefined, answerRefusal: () => undefined };
   switch (when) {
     case "mulligan": return { ...base, gameStage: "mulligan" };
     case "priority": return { ...base, hasPendingAction: true };
