@@ -189,12 +189,21 @@ function selectManaSourcesForCost(seat: PlayerSeat, card: VisibleCard, totalCost
 
   for (const color of ["W", "U", "B", "R", "G"] as ColoredMana[]) {
     // A source that makes several mana of that colour ({T}: Add {G}{G}, The Great Henge) covers that many pips of it.
-    for (let needed = requirement.colors[color]; needed > 0; ) {
+    // (pool[color] already holds the {color} half of a two-colour source chosen for an earlier colour, see below)
+    for (let needed = requirement.colors[color] - pool[color]; needed > 0; ) {
       const source = cheapestFirst(sources, (candidate) => choicesFor(candidate).includes(color), color);
       if (!source) return { ok: false as const, sourceIds: [...chosen], reason: `missing ${color} mana` };
       chosen.add(source.id);
       tappedFor[source.id] = color;
       const produced = manaProducedBy(source, seat);
+      // A tap that makes two DIFFERENT colours at once ("{T}: Add {U}{R}", the bounce lands) covers one pip of each, never two pips of one colour:
+      // it used to be credited as {U}{U} (Izzet Boilerworks + a Mountain paid {X}{U}{U}). Its other colour goes to the pool for the later colours / generic.
+      const multi = fixedMultiColourTap(source);
+      if (multi) {
+        for (const symbol of multi) pool[symbol] += 1;
+        needed -= Math.max(1, multi.filter((symbol) => symbol === color).length);
+        continue;
+      }
       pool[color] += produced;
       needed -= Math.max(1, produced);
     }
@@ -404,6 +413,20 @@ export function summarizeAvailableMana(seat: PlayerSeat, allSeats?: PlayerSeat[]
 // separate, genuinely free "{T}: Add {C}.") is the motivating shape for costly; Arena of Glory's
 // "{T}: Add {R}." alongside "{R}, {T}, Exert this land: Add {R}{R}." is the motivating shape for why
 // AMOUNT needs the same split, not just color (see manaAmountFromAddClause's own comment).
+// The coloured symbols of a source whose plain {T} ability adds two or more DIFFERENT fixed colours at once ("{T}: Add {U}{R}." Izzet Boilerworks and the
+// other bounce lands), or undefined for every other source (single colour, a choice "{W} or {B}", filters, signets, any-colour...).
+function fixedMultiColourTap(card: VisibleCard): ManaColor[] | undefined {
+  const text = effectiveManaOracleText(card);
+  if (signetAbility(text) || scalingPaidManaAbility(text)) return undefined;
+  for (const clause of splitManaClausesByCost(text).free) {
+    const match = clause.match(/^\{t\}:\s*add\s+((?:\{[wubrg]\}){2,})\s*\.?\s*$/i);
+    if (!match) continue;
+    const symbols = [...match[1].matchAll(/\{([wubrg])\}/gi)].map((m) => m[1].toUpperCase() as ManaColor);
+    if (new Set(symbols).size >= 2) return symbols;
+  }
+  return undefined;
+}
+
 function splitManaClausesByCost(oracleText: string): { free: string[]; costly: string[] } {
   const clauses = oracleText.split("\n").map((line) => line.trim()).filter(Boolean);
   const free: string[] = [];

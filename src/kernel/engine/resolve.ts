@@ -9,7 +9,7 @@ import {
   abilitiesOf, alive, faceNames, printedAbilities, apnap, chars, defOf, drawCards, emit, label, LoopDetected, makeLki, moveObject, NeedAsk, nextPlayer, obj, opponentsOf,
   parseManaCost, player, randInt, Reject, tick, tryObj, Unsupported, isSummoningSick, type Run
 } from "./core";
-import { autoTapFor, addMana, manaAbilityActivatable, manaAbilityUsable, payManaAbilityCosts, payFromPool, phyrexianOptions, productionOfAbility, settleCost, totalPotentialMana } from "./mana";
+import { autoTapFor, addMana, withTapBonus, manaAbilityActivatable, manaAbilityUsable, payManaAbilityCosts, payFromPool, phyrexianOptions, productionOfAbility, settleCost, totalPotentialMana } from "./mana";
 import { evalPredicate, evalQuantity, matchesFilter, objectsMatching, resolveObjs, type QCtx } from "./query";
 import { addCounters, changeLife, decide, discardCard, runExec, sacrificeObject, startExec, type AskSpec } from "./steps";
 import { costCandidates, costCount, costNoun, costOptions, needsChoice, payChoiceCost, type ChoiceCost } from "./costs";
@@ -406,7 +406,8 @@ function advanceDraft(r: Run, d: Draft, answerIn?: Choice): { ask: AskSpec; stag
   // ---- improvise: tap artifacts to pay for generic mana (asked late, before the payment)
   if (d.kind === "spell" && !d.improviseDone) {
     d.improviseDone = true;
-    const gen = parseManaCost(spellManaString(r, d)).generic;
+    const gcost = parseManaCost(spellManaString(r, d));
+    const gen = gcost.generic + gcost.x * (d.x ?? 0); // an artifact pays for {1} of the whole generic cost, X included (CR 702.126a)
     const cands = hasImprovise(r, d.sourceId, d.grants) ? improviseCandidates(r, d.player) : [];
     if (cands.length && gen > 0) {
       const spec: AskSpec = { kind: "choose_cards", player: d.player, prompt: { title: `${name}: improvise`, instruction: `Choose any artifacts to tap; each pays for {1} (at most ${gen}).` }, options: cands.map((id) => ({ id, label: label(r, id) })), min: 0, max: Math.min(gen, cands.length) };
@@ -476,7 +477,7 @@ function payMana(r: Run, pid: PlayerId, rawCost: ReturnType<typeof parseManaCost
   const used = d.phyUsed ?? 0;
   const phy = d.phy?.slice(used, used + nPhy);
   d.phyUsed = used + nPhy;
-  const { cost, life } = settleCost(r, pid, rawCost, phy);
+  const { cost, life } = settleCost(r, pid, rawCost, phy, d.payWith);
   if (life > 0 && player(r, pid).life < life) throw new Reject("cannot_pay", "not enough life to pay the Phyrexian mana");
   if (payFromPool(r, pid, cost, x, ctx)) { if (life > 0) changeLife(r, undefined, pid, -life); return; }
   const allowTap = d.payWith !== undefined || d.autoPay !== false;
@@ -581,9 +582,11 @@ function commitDraft(r: Run, d: Draft, a: Ability | undefined): void {
     // improvise: each tapped artifact pays for {1} of the generic part
     if (d.improvised?.length) {
       for (const id of d.improvised) { const ao = tryObj(r, id); if (!ao || ao.tapped || ao.zone !== "battlefield") throw new Reject("cannot_pay", `${label(r, id)} cannot be tapped for improvise`); }
-      const n = Math.min(d.improvised.length, cost.generic);
+      const total = cost.generic + cost.x * (d.x ?? 0);
+      const n = Math.min(d.improvised.length, total);
       for (const id of d.improvised.slice(0, n)) { obj(r, id).tapped = true; emit(r, { type: "tap", id, player: pid, improvise: true }); }
-      cost.generic -= n; cost.mv -= n;
+      cost.mv -= Math.min(n, cost.generic);
+      cost.generic = total - n; cost.x = 0; // the X part is folded into the generic mana still to pay
     }
     src.castX = d.x;
     if (d.grants?.length) takeNextSpellGrants(r, pid); // the grants are used up when the spell is really cast (cancelling keeps them)
@@ -872,7 +875,7 @@ function activateMana(r: Run, pid: PlayerId, src: GameObject, ab: Ability, color
   }
   for (const [i, c] of costs.entries()) if (needsChoice(c)) payChoiceCost(r, c as ChoiceCost, choices[i], { player: pid, source: src.id, x: 0 });
   payManaAbilityCosts(r, src, ab, pid);
-  if (prod.props) addUnits(r, pid, colors as never, prod.props, src.id); else addMana(r, pid, colors as never, src.id);
+  if (prod.props) addUnits(r, pid, colors as never, prod.props, src.id); else addMana(r, pid, costs.some((c) => "tap" in c) ? withTapBonus(r, pid, colors as never) : (colors as never), src.id);
   if (ab.steps?.length) {
     const item: StackItem = { id: `m${r.s.nextId++}`, kind: "activated", sourceId: src.id, controller: pid, abilityId: ab.id, parts: [{ specs: [], steps: ab.steps, targets: {} }], x: 0 };
     const st = runExec(r, startExec(item));
@@ -1339,6 +1342,7 @@ function scanTriggers(r: Run): void {
       if (!o) continue;
       for (const ab of abilitiesOf(r, o)) {
         if (ab.kind !== "triggered" || !ab.trigger) continue;
+        if (ab.scripted?.handler === "tapped_for_colorless_mana") continue; // Forsaken Monument: not a stack trigger, mana.ts adds the extra {C} when the permanent is tapped for mana
         if (!(h.lki || (ab.zone ?? "battlefield") === o.zone || (ev.type === "cycle" && ab.zone === "hand" && o.id === ev.id))) continue;
         for (const tr of triggerAlternatives(ab.trigger)) {
           if (!SUPPORTED_TRIGGER_EVENTS.has(tr.event) || !names.includes(tr.event)) continue;
@@ -1357,8 +1361,10 @@ function scanTriggers(r: Run): void {
             ctx.eventObj = eid; ctx.eventPlayer = l.controller; ctx.lki = l;
           } else if (ev.type === "cast") {
             const who = ev.player as string;
-            if (subject === undefined) throw new Unsupported("trigger:cast_without_subject", `${label(r, h.id)}: cast trigger needs a subject`);
-            if (subject === "each_player") match = true;
+            // no subject: "Whenever an opponent casts their first spell each turn" names only WHO casts (trigger.whose), any spell counts
+            if (subject === undefined && !tr.whose) throw new Unsupported("trigger:cast_without_subject", `${label(r, h.id)}: cast trigger needs a subject or a "whose"`);
+            if (subject === undefined) match = tr.whose === "each" || (tr.whose === "yours") === (who === h.controller);
+            else if (subject === "each_player") match = true;
             else if (subject === "self") match = ev.id === h.id;
             else if (subject === "you") match = who === h.controller;
             else if (subject === "opponent" || subject === "each_opponent") match = who !== h.controller;

@@ -74,7 +74,7 @@ export function matchesFilter(r: Run, id: string, f: ObjectFilter, q: QCtx): boo
   if (f.supertypes && !lcAll(f.supertypes).every((t) => c.supertypes.includes(t))) return false;
   if (f.notSupertypes && lcAll(f.notSupertypes).some((t) => c.supertypes.includes(t))) return false;
   const colorName: Record<string, string> = { W: "white", U: "blue", B: "black", R: "red", G: "green" };
-  const hasColor = (x: string) => c.colors.some((k) => k === x || colorName[k] === x.toLowerCase() || k.toLowerCase() === x.toLowerCase());
+  const hasColor = (x: string) => x.toLowerCase() === "colorless" ? c.colors.length === 0 : c.colors.some((k) => k === x || colorName[k] === x.toLowerCase() || k.toLowerCase() === x.toLowerCase());
   if (f.colors && !f.colors.every(hasColor)) return false;
   if (f.notColors && f.notColors.some(hasColor)) return false;
   if (f.colored !== undefined && (c.colors.length > 0) !== f.colored) return false;
@@ -209,7 +209,10 @@ export function evalQuantity(r: Run, qy: Quantity, q: QCtx): number {
     }
     case "counters": {
       { const gone = typeof qy.on === "string" && /^(event_object|sacrificed)$/.test(qy.on) ? resolveObjs(r, qy.on, q)[0] : undefined; const l = gone ? r.s.lki[gone] : undefined; if (l && tryObj(r, gone!)?.zone !== "battlefield") return countersLeft(l.counters, qy.kind); }
-      if (["you", "opponent", "each_opponent", "each_player", "target_player", "controller_of_target", "owner_of_target", "that_player"].includes(qy.on as string)) throw new Unsupported("quantity:player_counters");
+      if (["you", "opponent", "each_opponent", "each_player", "target_player", "controller_of_target", "owner_of_target", "that_player"].includes(qy.on as string)) {
+        // counters on a player (experience): the total over the players the reference names
+        return resolvePlayers(r, qy.on as PlayerRef, q).reduce((n, pid) => n + (qy.kind === "any" ? Object.values(player(r, pid).counters ?? {}).reduce((a, b) => a + b, 0) : player(r, pid).counters?.[qy.kind] ?? 0), 0);
+      }
       const ids = resolveObjs(r, qy.on, q);
       const o = ids[0] ? tryObj(r, ids[0]) : undefined;
       if (!o) return 0;

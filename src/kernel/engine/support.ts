@@ -36,7 +36,7 @@ const COMBAT_TRIGGER_EVENTS = new Set(["attack", "block", "deals_damage", "deals
 export const SUPPORTED_TRIGGER_EVENTS = new Set(["etb", "dies", "cast", "begin_step", "cycle", "leaves", "becomes_target", "unspecified", ...COMBAT_TRIGGER_EVENTS, ...SIMPLE_TRIGGER_EVENTS]);
 const SUPPORTED_BEGIN_STEPS = new Set(["upkeep", "end_step", "draw", "beginning_of_combat", "declare_attackers", "declare_blockers", "end_of_combat", "precombat_main", "postcombat_main"]);
 /** Scripted markers the engine implements (resolve.ts). A scripted ability is otherwise reported as unsupported. */
-export const SCRIPTED_HANDLERS: ReadonlySet<string> = new Set(["roll_d20_result_is_X", "storm", "become_monarch", "crew", "can_be_your_commander", "next_spell_gains_keyword", "next_spell_this_turn_cant_be_countered", "improvise"]);
+export const SCRIPTED_HANDLERS: ReadonlySet<string> = new Set(["roll_d20_result_is_X", "storm", "become_monarch", "crew", "can_be_your_commander", "next_spell_gains_keyword", "next_spell_this_turn_cant_be_countered", "improvise", "tapped_for_colorless_mana"]);
 const PLAIN_COST = /^(\{(\d+|[WUBRGC])\})+$/;
 
 const add = (out: string[], v: string) => { if (!out.includes(v)) out.push(v); };
@@ -160,7 +160,9 @@ function checkStep(s: Step, out: string[]): void {
   checkFilter(s.filter, out);
   for (const k of ["target", "on", "source"]) {
     const v = s[k];
-    if (typeof v === "string" && !SUPPORTED_REFS.has(v) && !/^t\d+$/.test(v)) add(out, `ref:${v}`);
+    // "on: you" of add_counters / remove_counters names a PLAYER (experience counters), see steps.ts addPlayerCounters
+    const playerCounters = k === "on" && (s.kind === "add_counters" || s.kind === "remove_counters") && typeof v === "string" && ["you", "opponent", "each_opponent", "each_player", "that_player"].includes(v);
+    if (typeof v === "string" && !SUPPORTED_REFS.has(v) && !/^t\d+$/.test(v) && !playerCounters) add(out, `ref:${v}`);
   }
   if (s.condition) checkPredicate(s.condition.if, out);
   checkPredicate(s.if, out);
@@ -170,7 +172,7 @@ function checkStep(s: Step, out: string[]): void {
 // ---------------------------------------------------------------- statics (layers.ts) and replacements (replacements.ts)
 
 const PLAYER_AFFECTS = new Set(["you", "each_player", "each_opponent"]);
-const PLAYER_GRANTS = new Set(["hexproof", "can't lose the game", "no maximum hand size", "keep_unspent_red_mana_between_steps_and_phases"]);
+const PLAYER_GRANTS = new Set(["hexproof", "can't lose the game", "no maximum hand size", "keep_unspent_red_mana_between_steps_and_phases", "spend mana as though it were mana of any color"]);
 const isPlayerGrant = (g: string): boolean => PLAYER_GRANTS.has(g.toLowerCase()) || /^cast [\w ]+? spells as though they had flash$/i.test(g.replace(/_/g, " "));
 
 function checkStatic(a: Ability, out: string[]): void {
@@ -193,7 +195,7 @@ function checkStatic(a: Ability, out: string[]): void {
     else if ("setBasePT" in m) { checkQuantity(m.setBasePT.power, out); checkQuantity(m.setBasePT.toughness, out); }
     else if ("addTypes" in m || "setTypes" in m || "setColors" in m) { /* layers 4 / 5 */ }
     else if ("grant" in m) { if (!isPassive(m.grant) && m.grant.toLowerCase() !== "goaded") add(out, `static:grant:${m.grant}`); }
-    else if ("lose" in m) { if (m.lose.toLowerCase() !== "all abilities" && !isPassive(m.lose)) add(out, `static:lose:${m.lose}`); }
+    else if ("lose" in m) { if (m.lose.toLowerCase() !== "all abilities" && !isPassive(m.lose) && !["artifact", "creature", "enchantment", "land", "planeswalker", "battle"].includes(m.lose.toLowerCase())) add(out, `static:lose:${m.lose}`); }
     else if ("cant" in m) {
       if (m.cant !== "attack" && m.cant !== "block" && m.cant !== "be_blocked" && m.cant !== "be_countered") add(out, `static:cant:${m.cant}`);
       if (m.except) checkFilter(m.except, out);
@@ -290,7 +292,8 @@ export function abilityUnsupported(a: Ability): string[] {
     else { checkFilter(cr.per, out); checkQuantity(cr.amount, out); checkPredicate(cr.condition, out); }
   }
   // cycling / channel are activated abilities (the keyword is only a label); the costs and steps carry the rules
-  const kwn = String((a.keyword as { name?: string } | undefined)?.name ?? "").toLowerCase();
+  // (a granted ability may carry the keyword as a bare string: Aminatou, Veil Piercer grants "miracle" to the enchantments in hand)
+  const kwn = String(typeof a.keyword === "string" ? a.keyword : (a.keyword as { name?: string } | undefined)?.name ?? "").toLowerCase();
   const labelKw = a.kind === "activated" && ["crew", "cycling", "channel", "landcycling", "basic landcycling", "typecycling", "equip"].includes(kwn);
   if (a.keyword && !PASSIVE_KEYWORDS.has(kwn.replace(/_/g, " ")) && !labelKw && !(a.costReduction && kwn === "affinity") && !(a.kind === "triggered" && a.trigger && (a.trigger.event === "cycle" || ["living_weapon", "storm", "ward", "hideaway", "training", "mentor", "dethrone", "survival", "exploit", "myriad"].includes(kwn)))) add(out, `keyword:${kwn || "?"}`);
   if (a.zone && a.zone !== "battlefield" && a.kind !== "spell_effect" && !zoneSupported(a)) add(out, `zone:${a.zone}`);

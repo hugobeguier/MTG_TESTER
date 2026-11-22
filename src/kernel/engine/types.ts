@@ -123,6 +123,8 @@ export interface PlayerState {
   drewFromEmpty: boolean;
   colorIdentity: string[];
   commanderCasts: Record<ObjId, number>;
+  /** counters ON THE PLAYER (experience, poison...), by kind */
+  counters?: Record<string, number>;
 }
 
 export interface CastInfo {

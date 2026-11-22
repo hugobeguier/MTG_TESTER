@@ -137,6 +137,7 @@ import {
   withOpeningHand,
   type LegalAgentAction
 } from "@/components/AppFlow";
+import { skipsFirstTurnDraw } from "@/engine/turnFlow";
 import { deterministicRuleWorkflow } from "@/lib/rulesAdvisor";
 import { decideWithGate } from "@/lib/moveLegality";
 import { attackBannedAgainst } from "@/engine/lockdownEffects";
@@ -1161,7 +1162,7 @@ export async function playGame(session: GameSession, brains: Record<string, Brai
           }
           case "draw step": {
             const prev = session;
-            session = advanceSagaLoreCountersHeadless(drawForSeat(session, activeSeat.id, `${activeSeat.name} draws for turn.`), activeSeat.id);
+            session = advanceSagaLoreCountersHeadless(skipsFirstTurnDraw(session, activeSeat.id) ? session : drawForSeat(session, activeSeat.id, `${activeSeat.name} draws for turn.`), activeSeat.id);
             session = runStateBasedActionsPass(session).session;
             afterAction(prev, session, { seatId: activeSeat.id, turn: session.turn, phase, actionType: "phase:draw" });
             break;

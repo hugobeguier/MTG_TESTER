@@ -37,7 +37,8 @@ export function sqliteCardDb(file = path.resolve(process.cwd(), "data/cards.db")
       const raw = JSON.parse(row.raw) as { power?: string; toughness?: string; loyalty?: string; faces?: RawFace[] };
       const rawFaces = raw.faces ?? [];
       const front = rawFaces[0] ? faceOf(rawFaces[0]) : { ...parseLine(row.type_line), ...(row.mana_cost ? { manaCost: row.mana_cost } : {}) };
-      const info: CardInfo = { name: row.name, ...front, oracle: row.oracle_text, ...(num(raw.power) !== undefined && !rawFaces[0] ? { power: num(raw.power), toughness: num(raw.toughness) } : {}) };
+      const info: CardInfo = { name: row.name, ...front, oracle: row.oracle_text, // power and toughness separately: a "*"/4 card (Callaphe, Beloved of the Sea) has a printed toughness and no numeric power
+        ...(!rawFaces[0] && num(raw.power) !== undefined ? { power: num(raw.power) } : {}), ...(!rawFaces[0] && num(raw.toughness) !== undefined ? { toughness: num(raw.toughness) } : {}) };
       if (rawFaces.length >= 2) {
         info.faces = Object.fromEntries(rawFaces.map((f) => [f.name, faceOf(f)]));
         const back = faceOf(rawFaces[1]);

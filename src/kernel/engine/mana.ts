@@ -5,7 +5,8 @@ import type { Ability, ManaSpec } from "../schema";
 import { abilitiesOf, emit, moveObject, isSummoningSick, parseManaCost, player, poolTotal, Reject, Unsupported, type ParsedCost, type Run, chars } from "./core";
 import type { GameObject, ManaColor, ManaPool, ObjId, PlayerId } from "./types";
 import { MANA_COLORS } from "./types";
-import { effectivePool, takeMana, unitsOf, type SpendCtx } from "./manapool";
+import { addUnits, effectivePool, takeMana, unitFits, unitsOf, type SpendCtx } from "./manapool";
+import { objectsMatching } from "./query";
 
 /** What a mana ability yields. `props`: spending restrictions / lasting (ManaUnit fields) that make the mana special. `alternatives`: "{W}{W}, {W}{B}, or {B}{B}", the player picks one. */
 export type UnitProps = { restriction?: import("../schema").ObjectFilter; abilities?: import("../schema").ObjectFilter; keep?: boolean };
@@ -25,7 +26,12 @@ export function productionOf(r: Run, owner: PlayerId, spec: ManaSpec): Productio
     const id = player(r, owner).colorIdentity.filter((c): c is ManaColor => "WUBRG".includes(c)) as ManaColor[];
     return { choose: { count: spec.commanderIdentity, options: id.length ? id : (["C"] as ManaColor[]) } };
   }
-  if ("perCount" in spec) throw new Unsupported("mana:per_count");
+  if ("perCount" in spec) {
+    // "Add {B} for each Swamp you control" (Cabal Coffers, Crypt of Agadeem): the count is read when the ability is activated
+    const color = spec.color.replace(/[{}]/g, "") as ManaColor;
+    if (!(MANA_COLORS as readonly string[]).includes(color)) throw new Unsupported("mana:symbols", `cannot parse mana "${spec.color}"`);
+    return { fixed: Array.from({ length: objectsMatching(r, spec.perCount, { controller: owner }).length }, () => color), ...(propsOf(spec) ? { props: propsOf(spec) } : {}) };
+  }
   if ("chosenColor" in spec) throw new Unsupported("mana:chosen_color");
   throw new Unsupported("mana:conditional");
 }
@@ -52,6 +58,14 @@ export function productionOfAbility(r: Run, owner: PlayerId, a: Ability): Produc
 
 /** Mana abilities of an object (kind "mana"). */
 export const manaAbilities = (r: Run, o: GameObject): Ability[] => abilitiesOf(r, o).filter((a) => a.kind === "mana");
+
+/** Forsaken Monument: "Whenever you tap a permanent for {C}, add an additional {C}." One extra {C} per Monument the player controls when a mana ability that makes {C} is paid by tapping. */
+export function withTapBonus(r: Run, pid: PlayerId, colors: ManaColor[]): ManaColor[] {
+  if (!colors.includes("C")) return colors;
+  let extra = 0;
+  for (const id of r.s.battlefield) { const o = r.s.objects[id]; if (o && o.controller === pid && abilitiesOf(r, o).some((a) => a.scripted?.handler === "tapped_for_colorless_mana")) extra++; }
+  return extra ? [...colors, ...Array<ManaColor>(extra).fill("C")] : colors;
+}
 
 export function addMana(r: Run, pid: PlayerId, colors: ManaColor[], source?: ObjId): void {
   const p = player(r, pid);
@@ -91,6 +105,23 @@ export interface Need { generic: number; colored: Record<string, number> }
 
 const assertSettled = (need: ParsedCost): void => { if (need.hybrid?.length || need.phyrexian?.length) throw new Unsupported("cost:hybrid_or_phyrexian", "a hybrid / Phyrexian cost must be settled (mana.settleCost) before it is paid"); };
 
+/** "Players may spend mana as though it were mana of any color" (Mycosynth Lattice): a permanent anywhere on the battlefield grants it to every player. */
+export function anyColorSpendActive(r: Run): boolean {
+  return r.s.battlefield.some((id) => {
+    const o = r.s.objects[id];
+    return !!o && abilitiesOf(r, o).some((a) => a.kind === "static" && !!a.static?.modify?.some((m) => "grant" in m && String(m.grant).toLowerCase() === "spend mana as though it were mana of any color"));
+  });
+}
+
+/** Under that permission every colored symbol is paid by any mana; only {C} still needs colorless mana (CR 609.4b). */
+function relaxColors(r: Run, need: ParsedCost): ParsedCost {
+  if (!anyColorSpendActive(r)) return need;
+  const colored: Record<string, number> = {};
+  let generic = need.generic;
+  for (const [c, n] of Object.entries(need.colored)) { if (c === "C") colored[c] = n; else generic += n; }
+  return { ...need, generic, colored };
+}
+
 function covers(pool: ManaPool, need: ParsedCost, x: number): boolean {
   assertSettled(need);
   const work: ManaPool = { ...pool };
@@ -99,7 +130,8 @@ function covers(pool: ManaPool, need: ParsedCost, x: number): boolean {
 }
 
 /** Spend `need` from the player's pool (plain mana + units that fit `ctx`). Returns false (and spends nothing) if it cannot be covered. */
-export function payFromPool(r: Run, pid: PlayerId, need: ParsedCost, x: number, ctx?: SpendCtx): boolean {
+export function payFromPool(r: Run, pid: PlayerId, need0: ParsedCost, x: number, ctx?: SpendCtx): boolean {
+  const need = relaxColors(r, need0);
   const eff = effectivePool(r, pid, ctx);
   if (!covers(eff, need, x)) return false;
   for (const [c, n] of Object.entries(need.colored)) for (let i = 0; i < n; i++) takeMana(r, pid, c as ManaColor, ctx);
@@ -115,42 +147,104 @@ export function payFromPool(r: Run, pid: PlayerId, need: ParsedCost, x: number, 
 }
 
 /** Mana abilities auto-tap may use: plain production only (restricted / lasting mana and filter alternatives are activated by hand). */
-function autoTappable(r: Run, pid: PlayerId, a: Ability): boolean {
-  try { const pr = productionOfAbility(r, pid, a); return !pr.props && !("alternatives" in pr); } catch { return false; }
+function autoTappable(r: Run, pid: PlayerId, a: Ability, ctx?: SpendCtx): boolean {
+  try {
+    const pr = productionOfAbility(r, pid, a);
+    if ("alternatives" in pr) return false;
+    if (!pr.props) return true;
+    // restricted mana ("Spend this mana only to cast an Angel spell", Giada): usable by the automatic payment when it fits what is being paid for
+    const color = "fixed" in pr ? pr.fixed[0] : pr.choose.options[0];
+    return !!color && unitFits(r, pid, { color, ...pr.props }, ctx);
+  } catch { return false; }
 }
 
-/** Tap untapped mana sources (greedy, deterministic) until the pool covers the cost; returns false if impossible. */
-export function autoTapFor(r: Run, pid: PlayerId, need: ParsedCost, x: number, only?: ObjId[], exclude: ObjId[] = [], ctx?: SpendCtx): boolean {
-  const p = player(r, pid);
-  const sources = r.s.battlefield
+/** Generic-only mana cost of a "{2}, {T}: Add ..." ability (Signets, Cabal Coffers, Crypt of Agadeem), or undefined when the ability has any other cost. */
+function paidGenericCost(a: Ability): number | undefined {
+  const costs = a.costs ?? [];
+  const mana = costs.filter((c) => "mana" in c) as Array<{ mana: string }>;
+  if (mana.length !== 1 || costs.some((c) => !("tap" in c) && !("mana" in c))) return undefined;
+  try { const pc = parseManaCost(mana[0].mana); return Object.keys(pc.colored).length || pc.hybrid?.length || pc.phyrexian?.length || pc.x ? undefined : pc.generic; } catch { return undefined; }
+}
+
+/** Spend `n` mana from a simulated pool: colorless first, then colors the cost does not need, then anything. Returns the colors spent, or undefined if the pool has too little. */
+function deductGeneric(work: ManaPool, n: number, keep: Record<string, number>): ManaColor[] | undefined {
+  const spent: ManaColor[] = [];
+  const order = (surplusOnly: boolean): ManaColor[] => [...MANA_COLORS].filter((c) => (surplusOnly ? work[c] - (keep[c] ?? 0) > 0 : work[c] > 0)).sort((x, y) => (x === "C" ? -1 : y === "C" ? 1 : work[y] - work[x]));
+  while (spent.length < n) {
+    const c = order(true)[0] ?? order(false)[0];
+    if (!c) return undefined;
+    work[c]--; spent.push(c);
+  }
+  return spent;
+}
+
+/**
+ * Tap untapped mana sources (greedy, deterministic) until the pool covers the cost; returns false if impossible. Sources that need a mana
+ * payment of their own ("{1}, {T}: Add {U}{R}") are used last, and only when their output is larger than the generic cost they consume
+ * (the net gain): that cost is paid out of the mana made by the other sources.
+ */
+export function autoTapFor(r: Run, pid: PlayerId, need0: ParsedCost, x: number, only?: ObjId[], exclude: ObjId[] = [], ctx?: SpendCtx): boolean {
+  const need = relaxColors(r, need0);
+  type Src = { o: GameObject; a: Ability; pay?: number };
+  const sources: Src[] = r.s.battlefield
     .map((id) => r.s.objects[id])
     .filter((o) => o.controller === pid && (!only || only.includes(o.id)) && !exclude.includes(o.id))
-    .flatMap((o) => manaAbilities(r, o).filter((a) => manaAbilityUsable(r, o, a) && autoTappable(r, pid, a)).map((a) => ({ o, a })));
-  // single-option sources first so flexible sources stay available for the colors that need them
-  const flex = (s: { a: Ability }) => { const m = s.a.mana!.produces; return m.length === 1 && "colors" in m[0] ? 0 : 1; };
-  sources.sort((s1, s2) => flex(s1) - flex(s2) || Number(s1.o.id.slice(1)) - Number(s2.o.id.slice(1)));
+    .flatMap((o): Src[] => manaAbilities(r, o).flatMap((a): Src[] => {
+      if (manaAbilityUsable(r, o, a) && autoTappable(r, pid, a, ctx)) return [{ o, a }];
+      const pay = paidGenericCost(a);
+      if (pay === undefined || o.zone !== "battlefield" || ((a.costs ?? []).some((c) => "tap" in c) && (o.tapped || isSummoningSick(r, o))) || !autoTappable(r, pid, a, ctx)) return [];
+      try { const pr = productionOfAbility(r, pid, a); return "fixed" in pr && pr.fixed.length > pay || "choose" in pr && pr.choose.count > pay ? [{ o, a, pay }] : []; } catch { return []; }
+    }));
+  // single-option free sources first so flexible sources stay available for the colors that need them; paid sources last
+  const flex = (s: Src) => { if (s.pay !== undefined) return 2; const m = s.a.mana!.produces; return m.length === 1 && "colors" in m[0] ? 0 : 1; };
+  // a permanent with several mana abilities (a land that is also a Swamp: {B} and {C}{C}) is tapped for the one that wastes the least
+  const size = (s: Src): number => { try { const pr = productionOfAbility(r, pid, s.a); return "fixed" in pr ? pr.fixed.length : "choose" in pr ? pr.choose.count : Math.max(...pr.alternatives.map((x) => x.length)); } catch { return 0; } };
+  const best = new Map<ObjId, number>();
+  for (const s of sources) best.set(s.o.id, Math.max(best.get(s.o.id) ?? 0, size(s)));
+  const waste = (s: Src): number => (best.get(s.o.id) ?? 0) - size(s);
+  sources.sort((s1, s2) => flex(s1) - flex(s2) || waste(s1) - waste(s2) || Number(s1.o.id.slice(1)) - Number(s2.o.id.slice(1)));
   const used = new Set<ObjId>();
-  const tapSource = (s: { o: GameObject; a: Ability }, want?: ManaColor): ManaColor[] => {
-    used.add(s.o.id);
+  const colorsOf = (s: Src, want?: ManaColor): ManaColor[] => {
     const prod = productionOfAbility(r, pid, s.a);
-    const colors = "fixed" in prod ? prod.fixed : "choose" in prod ? Array.from({ length: prod.choose.count }, () => (want && prod.choose.options.includes(want) ? want : prod.choose.options[0])) : prod.alternatives[0];
-    return colors;
+    const base = "fixed" in prod ? prod.fixed : "choose" in prod ? Array.from({ length: prod.choose.count }, () => (want && prod.choose.options.includes(want) ? want : prod.choose.options[0])) : prod.alternatives[0];
+    return (s.a.costs ?? []).some((c) => "tap" in c) ? withTapBonus(r, pid, base) : base;
   };
-  const gained: Array<{ s: { o: GameObject; a: Ability }; colors: ManaColor[] }> = [];
-  const poolNow = () => { const w = effectivePool(r, pid, ctx); for (const g of gained) for (const c of g.colors) w[c]++; return w; };
+  const gained: Array<{ s: Src; colors: ManaColor[] }> = [];
+  /** the pool after every chosen source: free ones add mana, paid ones first spend their generic cost (undefined: not payable) */
+  const simulate = (list: typeof gained): ManaPool | undefined => {
+    const w = effectivePool(r, pid, ctx);
+    for (const g of list) if (g.s.pay === undefined) for (const c of g.colors) w[c]++;
+    for (const g of list) if (g.s.pay !== undefined) { if (!deductGeneric(w, g.s.pay, need.colored)) return undefined; for (const c of g.colors) w[c]++; }
+    return w;
+  };
+  const poolNow = (): ManaPool => simulate(gained)!;
+  const take = (pick: (z: Src) => boolean, want?: ManaColor): boolean => {
+    for (const z of sources) {
+      if (used.has(z.o.id) || !pick(z)) continue;
+      const cand = { s: z, colors: colorsOf(z, want) };
+      if (!cand.colors.length || !simulate([...gained, cand])) continue;
+      used.add(z.o.id); gained.push(cand);
+      return true;
+    }
+    return false;
+  };
   for (const [c, n] of Object.entries(need.colored)) {
     while (poolNow()[c as ManaColor] < n) {
-      const s = sources.find((z) => !used.has(z.o.id) && (() => { const pr = productionOfAbility(r, pid, z.a); return "fixed" in pr ? pr.fixed.includes(c as ManaColor) : "choose" in pr ? pr.choose.options.includes(c as ManaColor) : false; })());
-      if (!s) return false;
-      gained.push({ s, colors: tapSource(s, c as ManaColor) });
+      if (!take((z) => { const pr = productionOfAbility(r, pid, z.a); return "fixed" in pr ? pr.fixed.includes(c as ManaColor) : "choose" in pr ? pr.choose.options.includes(c as ManaColor) : false; }, c as ManaColor)) return false;
     }
   }
-  while (!covers(poolNow(), need, x)) {
-    const s = sources.find((z) => !used.has(z.o.id));
-    if (!s) return false;
-    gained.push({ s, colors: tapSource(s) });
+  while (!covers(poolNow(), need, x)) { if (!take(() => true)) return false; }
+  // commit: free sources first, then each paid source (its cost is spent from the pool before its mana is added)
+  for (const g of gained) if (g.s.pay === undefined) {
+    payManaAbilityCosts(r, g.s.o, g.s.a, pid);
+    const props = productionOfAbility(r, pid, g.s.a).props;
+    if (props) addUnits(r, pid, g.colors, props, g.s.o.id); else addMana(r, pid, g.colors, g.s.o.id);
   }
-  for (const g of gained) {
+  for (const g of gained) if (g.s.pay !== undefined) {
+    const eff = effectivePool(r, pid, ctx);
+    const spent = deductGeneric(eff, g.s.pay, need.colored);
+    if (!spent) return false;
+    for (const c of spent) takeMana(r, pid, c, ctx);
     payManaAbilityCosts(r, g.s.o, g.s.a, pid);
     addMana(r, pid, g.colors, g.s.o.id);
   }
@@ -172,14 +266,14 @@ export function totalPotentialMana(r: Run, pid: PlayerId): number {
  * alternative the player can produce (pool first, then untapped mana sources), the generic {2} alternative last; a Phyrexian symbol is paid
  * with mana when the player can produce one of its colors, otherwise with 2 life.
  */
-export function settleCost(r: Run, pid: PlayerId, cost: ParsedCost, phy?: Array<"mana" | "life">): { cost: ParsedCost; life: number } {
+export function settleCost(r: Run, pid: PlayerId, cost: ParsedCost, phy?: Array<"mana" | "life">, only?: ObjId[]): { cost: ParsedCost; life: number } {
   if (!cost.hybrid?.length && !cost.phyrexian?.length) return { cost, life: 0 };
   const p = player(r, pid);
   const avail: Record<string, number> = { ...p.manaPool };
   for (const [c, n] of Object.entries(cost.colored)) avail[c] = (avail[c] ?? 0) - n;
   for (const id of r.s.battlefield) {
     const o = r.s.objects[id];
-    if (o.controller !== pid) continue;
+    if (o.controller !== pid || (only && !only.includes(id))) continue; // with an explicit payWith list only those sources can make the mana
     for (const a of manaAbilities(r, o)) if (manaAbilityUsable(r, o, a)) {
       try { const pr = productionOfAbility(r, pid, a); const cs: ManaColor[] = "fixed" in pr ? pr.fixed.slice(0, 1) : "choose" in pr ? pr.choose.options : pr.alternatives.flat(); for (const c of new Set(cs)) avail[c] = (avail[c] ?? 0) + 1; } catch { /* not counted */ }
       break;

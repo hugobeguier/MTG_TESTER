@@ -21,3 +21,6 @@ advisor-log.jsonl
 *.tsbuildinfo
 *.stackdump
 .next-mp-test
+
+# Kernel observer output (npm run kernel:observe): generated diffs and reports, not repo content.
+data/observer/

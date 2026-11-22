@@ -120,8 +120,11 @@ function grantKeyword(c: Chars, name: string): void {
   const l = name.toLowerCase();
   if (!c.abilities.some((a) => a.kind === "keyword" && a.keyword?.name.toLowerCase() === l)) c.abilities = [...c.abilities, keywordAbility(l)];
 }
+/** "lose: creature" = "isn't a creature" (Athreos, Shroud-Veiled; Theros gods): a type change in layer 4, not an ability loss */
+const losesType = (what: string): boolean => CARD_TYPES.has(what.toLowerCase());
 function loseAbilities(c: Chars, what: string): void {
   const l = what.toLowerCase();
+  if (losesType(l)) { c.types = c.types.filter((t) => t !== l); return; }
   if (l === "all abilities" || l === "all") c.abilities = [];
   else c.abilities = c.abilities.filter((a) => !(a.kind === "keyword" && a.keyword?.name.toLowerCase() === l));
 }
@@ -134,6 +137,7 @@ const L = { types: 4, colors: 5, abilities: 6, cda: 7.1, base: 7.2, pump: 7.3 };
 function layerOf(m: Modify, spec: StaticSpec): number | null {
   if ("addTypes" in m || "setTypes" in m) return L.types;
   if ("setColors" in m) return L.colors;
+  if ("lose" in m && losesType(m.lose)) return L.types;
   if ("grant" in m || "lose" in m || "grantAbility" in m) return L.abilities;
   if ("setBasePT" in m) return spec.affects === "self" && !spec.while && (typeof m.setBasePT.power !== "number" || typeof m.setBasePT.toughness !== "number") ? L.cda : L.base;
   if ("pt" in m) return L.pump;

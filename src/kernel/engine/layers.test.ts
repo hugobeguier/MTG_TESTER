@@ -26,7 +26,7 @@ describe("support: statics and replacements the engine now runs", () => {
     expect(cardUnsupported(CARDS["Crucible of Fire"]).all).toEqual([]);
   });
   it("vocabulary still without an implementation reports the detail (never silently skipped)", () => {
-    expect(cardUnsupported(CARDS["Mycosynth Lattice"]).all).toContain("static:affects:each_player");
+    expect(cardUnsupported(CARDS["Mycosynth Lattice"]).all).toEqual([]); // "spend mana as though it were mana of any color" is a player grant the mana payment reads (mana.ts anyColorSpendActive)
     expect(cardUnsupported(CARDS["Optional Shield"]).all).toEqual([]); // optional replacements run since step 6
   });
 });

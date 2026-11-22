@@ -6,7 +6,7 @@ import { type SagaChapters, isSagaTransformChapter, parseGainsAbilityGrant, pars
 import { TURN_PHASES } from "@/lib/priorityStops";
 import { anyPhaseTrigger } from "@/lib/phaseTriggers";
 import { applyCounterDelta, applyLoreCounterEtb, moveCardBetweenVisibleZones, rulesEvent } from "@/engine/zones";
-import { applyEndStepEffects, clearTemporaryBuffs, effectiveMaxHandSize, hasExtraBeginningPhaseAura, nextSeatForTurn, phaseTriggeredCards, resolvePendingUpkeepDraws, untapForSeat } from "@/engine/turnFlow";
+import { applyEndStepEffects, clearTemporaryBuffs, effectiveMaxHandSize, hasExtraBeginningPhaseAura, nextSeatForTurn, phaseTriggeredCards, resolvePendingUpkeepDraws, skipsFirstTurnDraw, untapForSeat } from "@/engine/turnFlow";
 import { cannotPayMessage, chooseManaSourcesForCost, manaPoolTotal, payCostFromPool, selectedManaTotal, spendManaSources } from "@/engine/mana";
 import { chooseReadAheadChapter, loreCounterCount } from "@/engine/etb";
 import { cleanupCombat, forcedAttackers, resolveCombatDamage } from "@/engine/combat";
@@ -306,6 +306,8 @@ export function useTurnFlow(ctx: GameContext) {
       if (seat.board.battlefield.some((card) => !card.abilitiesStripped && /^skip your draw step\.?$/im.test(card.oracleText.replace(/\([^)]*\)/g, "")))) {
         return rulesEvent(advanceSagaLoreCounters(session, seatId), seatId, `${seat.name} skips their draw step.`);
       }
+      // CR 103.8: the starting player of a two-player game skips the draw of their first turn
+      if (skipsFirstTurnDraw(session, seatId)) return rulesEvent(advanceSagaLoreCounters(session, seatId), seatId, `${seat.name} skips their first draw (two-player game).`);
       const drawnSession = drawForSeat(session, seatId, seatVerb(seat, `${seat.name} draws for turn.`, "You draw for turn."));
       return advanceSagaLoreCounters(drawnSession, seatId);
     }

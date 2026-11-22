@@ -2,7 +2,7 @@
 // either completes, pushes more steps (expansion), or asks a decision; when it asks, the whole Exec is stored in the
 // pending decision and re-entered with the answer. A handler must not mutate before it asks.
 
-import type { ObjectFilter, Prompt, Step } from "../schema";
+import type { ObjectFilter, PlayerRef, Prompt, Step } from "../schema";
 import { promptForMay } from "../prompts";
 import {
   chars, drawCards, emit, label, moveObject, NeedAsk, newObject, obj, parseManaCost, player, shuffleInPlace, takeAnswer, tick, tryObj, Unsupported, Reject, type Run
@@ -361,11 +361,18 @@ const STEPS: Record<string, StepSpec> = {
   },
   add_counters: {
     fields: ["on", "counterKind", "amount", "counterPT"],
-    run: (r, ex, step) => { standardCounterPT(step); addCounters(r, resolveObjs(r, String(step.on ?? "self"), ex.env), String(step.counterKind), qty(r, ex.env, step)); return "done"; }
+    run: (r, ex, step) => {
+      standardCounterPT(step);
+      if (typeof step.on === "string" && PLAYER_COUNTER_TARGETS.has(step.on)) { addPlayerCounters(r, resolvePlayers(r, step.on as PlayerRef, ex.env), String(step.counterKind), qty(r, ex.env, step)); return "done"; }
+      addCounters(r, resolveObjs(r, String(step.on ?? "self"), ex.env), String(step.counterKind), qty(r, ex.env, step)); return "done";
+    }
   },
   remove_counters: {
     fields: ["on", "counterKind", "amount"],
-    run: (r, ex, step) => { addCounters(r, resolveObjs(r, String(step.on ?? "self"), ex.env), String(step.counterKind), -qty(r, ex.env, step)); return "done"; }
+    run: (r, ex, step) => {
+      if (typeof step.on === "string" && PLAYER_COUNTER_TARGETS.has(step.on)) { addPlayerCounters(r, resolvePlayers(r, step.on as PlayerRef, ex.env), String(step.counterKind), -qty(r, ex.env, step)); return "done"; }
+      addCounters(r, resolveObjs(r, String(step.on ?? "self"), ex.env), String(step.counterKind), -qty(r, ex.env, step)); return "done";
+    }
   },
   sacrifice_permanent: {
     fields: ["who", "amount", "filter", "target", "all"],
@@ -466,6 +473,18 @@ export function standardCounterPT(step: Step): void {
   if (!pt) return;
   const k = String(step.counterKind);
   if (!((k === "+1/+1" && pt[0] === 1 && pt[1] === 1) || (k === "-1/-1" && pt[0] === -1 && pt[1] === -1))) throw new Unsupported("field:add_counters.counterPT");
+}
+
+/** `on` values of add_counters / remove_counters that name a PLAYER (experience counters), not a permanent */
+export const PLAYER_COUNTER_TARGETS: ReadonlySet<string> = new Set(["you", "opponent", "each_opponent", "each_player", "that_player"]);
+
+export function addPlayerCounters(r: Run, pids: string[], kind: string, n: number): void {
+  for (const pid of pids) {
+    const p = player(r, pid);
+    const counters = (p.counters ??= {});
+    counters[kind] = Math.max(0, (counters[kind] ?? 0) + n);
+    emit(r, { type: "player_counters", player: pid, kind, amount: n });
+  }
 }
 
 export function addCounters(r: Run, ids: string[], kind: string, n: number): void {

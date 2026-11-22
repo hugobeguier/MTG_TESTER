@@ -36,6 +36,12 @@ import { parseZoneEffect, type ZoneEffect } from "@/lib/zoneEffects";
 // the very next upkeep step that begins, whoever's turn it is, not each scheduled seat's own next
 // upkeep. So this drains the WHOLE queue the first time any upkeep step is reached, rather than
 // filtering by the seat whose upkeep this is.
+// CR 103.8: in a TWO-player game the player who goes first skips the draw step of their first turn; with three or more players (Commander pods)
+// nobody skips. The session's turn counter counts every seat's turn, so turn 1 is the starting player's first turn.
+export function skipsFirstTurnDraw(session: GameSession, seatId: string): boolean {
+  return session.turn === 1 && session.seats.length === 2 && session.activePlayerId === seatId;
+}
+
 export function resolvePendingUpkeepDraws(session: GameSession): GameSession {
   const pending = session.pendingUpkeepDraws;
   if (!pending || pending.length === 0) return session;
