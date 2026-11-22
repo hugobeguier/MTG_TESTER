@@ -415,7 +415,7 @@ Mind's Eye [draft]
 
 Player prompts:
 
-- Mind's Eye: optional: Do you want to draw a card?
+- Mind's Eye: optional payment: Do you want to pay {1}? If you do, draw a card.
 
 Implementation: needed (trigger:draw, field:draw_cards.optionalCost, field:draw_cards.srcs)
 

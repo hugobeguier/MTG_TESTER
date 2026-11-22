@@ -27,8 +27,8 @@
             }
           ],
           "prompt": {
-            "title": "Mirrorworks: optional",
-            "instruction": "Do you want to copy that object?",
+            "title": "Mirrorworks: optional payment",
+            "instruction": "Do you want to pay {2}? If you do, create a token that's a copy of that artifact.",
             "source": {
               "card": "Mirrorworks",
               "ability": "a1"

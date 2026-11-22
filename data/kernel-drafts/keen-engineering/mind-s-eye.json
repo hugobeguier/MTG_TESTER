@@ -20,8 +20,8 @@
             }
           ],
           "prompt": {
-            "title": "Mind's Eye: optional",
-            "instruction": "Do you want to draw a card?",
+            "title": "Mind's Eye: optional payment",
+            "instruction": "Do you want to pay {1}? If you do, draw a card.",
             "source": {
               "card": "Mind's Eye",
               "ability": "a1"
@@ -42,7 +42,7 @@
     }
   ],
   "review": {
-    "status": "draft",
+    "status": "approved",
     "ignore": [
       {
         "lexeme": "may",

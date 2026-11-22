@@ -89,7 +89,7 @@
     }
   ],
   "review": {
-    "status": "draft",
+    "status": "approved",
     "ignore": [
       {
         "lexeme": "may",

@@ -13,7 +13,7 @@
 // loses its abilities later (613.6); an effect of layer 7 is dropped when its source no longer has the static ability.
 
 import type { Ability, Cost, ObjectFilter, Quantity, StaticSpec } from "../schema";
-import { baseChars, obj, printedAbilities, tryObj, Unsupported, type Chars, type Run } from "./core";
+import { baseChars, continueHooks, continuing, obj, printedAbilities, tryObj, Unsupported, type Chars, type Run } from "./core";
 import { evalPredicate, evalQuantity, matchesFilter, objectsMatching, resolveObjs } from "./query";
 import type { ContinuousEffect, GameObject, ObjId, PlayerId } from "./types";
 
@@ -34,6 +34,7 @@ export function getIndex(r: Run): Idx {
   const repls: ReplSrc[] = [];
   let l6 = false;
   const consider = (o: GameObject) => {
+    if (continuing(r)) continueHooks.continuous?.(r, o.id); // unsupported statics / replacements / triggers of this permanent: reported once, ignored
     for (const a of printedAbilities(r, o)) {
       if ((a.zone ?? "battlefield") !== o.zone) continue;
       if (a.kind === "static" && a.static) {

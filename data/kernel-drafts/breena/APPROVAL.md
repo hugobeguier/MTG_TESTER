@@ -1164,7 +1164,7 @@ Nihil Spellbomb [draft]
 Player prompts:
 
 - Nihil Spellbomb: choose a target: Choose target player.
-- Nihil Spellbomb: optional: Do you want to if ?: ?
+- Nihil Spellbomb: optional payment: Do you want to pay {B}? If you do, draw a card.
 
 Implementation: needed (cost:sacrifice, field:move_card_zone.who, trigger:leaves, trigger:zones, step:if_else, field:if_else.optionalCost, predicate:step_done)
 

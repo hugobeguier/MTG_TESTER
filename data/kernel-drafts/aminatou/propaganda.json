@@ -28,7 +28,7 @@
     }
   ],
   "review": {
-    "status": "draft",
+    "status": "approved",
     "ignore": [
       {
         "lexeme": "unless",

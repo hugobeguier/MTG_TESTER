@@ -8,6 +8,8 @@ import { compareIntent } from "./compare";
 import { classifyAction } from "./knownLegacy";
 import type { DraftLookup } from "./draftLookup";
 import { Aggregate } from "./report";
+import { UnresolvedDeduper, type UnresolvedRecord } from "../../lib/unresolvedLog";
+import { unresolvedRecordsOf } from "../unresolvedBridge";
 import type { Diff, ObserverMeta, StepOutcome } from "./types";
 
 export interface ObserverOptions {
@@ -21,6 +23,10 @@ export interface ObserverOptions {
   sink?: (diff: Diff) => void;
   aggregate?: Aggregate;
   lenient?: boolean;
+  /** run the kernel in continue mode (the live-game mode, see engine/unresolved.ts): unsupported things become `unresolved` events instead of refusals, delivered to `onUnresolved` */
+  onUnsupported?: "error" | "continue";
+  /** receives every kernel `unresolved` event as a sink record (engine "kernel"), once per game + card + clause + capability; exceptions are swallowed */
+  onUnresolved?: (record: UnresolvedRecord) => void;
   /** stop comparing after this many diffs in one game (keeps one pathological game from flooding the output) */
   maxDiffsPerGame?: number;
 }
@@ -38,6 +44,9 @@ export class KernelObserver {
   private seenGaps = new Set<string>();
   private seenNoDraft = new Set<string>();
   private diffCount = 0;
+  private readonly unresolvedDeduper = new UnresolvedDeduper();
+  /** every kernel unresolved record seen so far (continue mode) */
+  readonly unresolved: UnresolvedRecord[] = [];
   readonly outcomes: StepOutcome[] = [];
   /** keep outcomes in memory (tests); the CLI leaves it off */
   keepOutcomes = false;
@@ -94,7 +103,8 @@ export class KernelObserver {
   private process(s0: GameSession, s1: GameSession, meta: ObserverMeta, settled = false): void {
     if (this.opts.maxDiffsPerGame !== undefined && this.diffCount >= this.opts.maxDiffsPerGame) return;
     const index = this.actionIndex++;
-    const { outcome } = compareIntent(s0, s1, meta, { lookup: this.opts.lookup, ctx: this.ctx, game: this.opts.game, seed: this.opts.seed, decks: this.opts.decks, actionIndex: index, lenient: this.opts.lenient, settled });
+    const { outcome, run } = compareIntent(s0, s1, meta, { lookup: this.opts.lookup, ctx: this.ctx, game: this.opts.game, seed: this.opts.seed, decks: this.opts.decks, actionIndex: index, lenient: this.opts.lenient, onUnsupported: this.opts.onUnsupported, settled });
+    if (this.opts.onUnsupported === "continue" && run?.events.length) this.recordUnresolved(run.events, s0, meta);
     outcome.deck = this.opts.deckOfSeat?.[outcome.seat];
     const kept: Diff[] = [];
     for (const d of outcome.diffs) {
@@ -114,6 +124,21 @@ export class KernelObserver {
     this.aggregate.addOutcome(outcome);
     for (const d of kept) { this.diffCount += 1; this.aggregate.addDiff(d); this.safeSink(d); }
     if (this.keepOutcomes) this.outcomes.push(outcome);
+  }
+
+  /** kernel `unresolved` events of one observed action -> sink records (the observer plays seats that are all agents) */
+  private recordUnresolved(events: import("../engine/types").GameEvent[], s0: GameSession, meta: ObserverMeta): void {
+    try {
+      const decks = this.opts.decks ?? [];
+      const gameId = `observer-${this.opts.seed ?? 0}-${this.opts.game ?? 0}`;
+      const seatName = (id: string): string => s0.seats.find((s) => s.id === id)?.name ?? id;
+      void meta;
+      for (const rec of unresolvedRecordsOf(events, { gameId, decks, seatKindOf: () => "agent" }, this.unresolvedDeduper)) {
+        const withSeat = { ...rec, ...(rec.seat ? { seat: seatName(rec.seat) } : {}) };
+        this.unresolved.push(withSeat);
+        try { this.opts.onUnresolved?.(withSeat); } catch { /* ignore */ }
+      }
+    } catch { /* never reaches the caller */ }
   }
 
   private safeSink(d: Diff): void {

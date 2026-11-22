@@ -256,6 +256,8 @@ export type LogEntry = { type: string; player?: PlayerId; id?: ObjId; name?: str
 export interface Config {
   /** true: abilities the engine cannot run on a card that enters play are ignored with an `unsupported_ignored` event instead of an error */
   lenient: boolean;
+  /** what to do with a card / ability the engine cannot run: 'error' (default) refuses the action with code 'unsupported'; 'continue' (live-game mode) emits an `unresolved` event, skips only the unsupported step / clause and keeps playing (see unresolved.ts) */
+  onUnsupported?: "error" | "continue";
   skipFirstDraw: boolean;
   maxEventsPerPass: number;
   handSize: number;
@@ -329,6 +331,8 @@ export interface GameState {
   links?: Array<{ source: ObjId; sourceTs: number; object: ObjId; objectTs: number }>;
   /** per-opponent / per-spell commander bookkeeping (commander.ts) */
   commanderDamage?: Record<PlayerId, Record<ObjId, number>>;
+  /** continue mode: '<objectId>|<abilityId>|<capabilities>' of continuous abilities already reported as unresolved (report once per object; never shown in a player view) */
+  unresolvedSeen?: Record<string, 1>;
 }
 
 // ---------------------------------------------------------------- pending decisions

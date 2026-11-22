@@ -347,7 +347,7 @@ and is good enough for the vertical slice and for AI at human speed (a turn has 
   (`fastForward` while nobody can respond). Pace: reuse `agentPaceMs` (the legacy 900-1100 ms beats) so the human can follow.
 * **Human priority stops**: `priorityStops.ts` settings unchanged; the question "does a window apply to this human" = `canRespond()` plus the stop
   settings (`stopOnStackResponse`, phase stops, yields). `yieldPolicy.ts` is pure and reused.
-* Unsupported cards in an AI hand are simply absent from `legalActions` (probe filters `unsupported`), so the AI never attempts them.
+* Unsupported cards in an AI hand: in continue mode a cast of one succeeds (the unsupported parts are reported and skipped), so the probe no longer filters `unsupported`; an AI may still prefer fully supported plays (`cardUnsupported(def).ok`) as a tie-break, but never needs to avoid the rest.
 
 ---------------------------------------------------------------------------------------------------
 
@@ -367,8 +367,8 @@ and is good enough for the vertical slice and for AI at human speed (a turn has 
 
 ### 5.2 Readiness gates (per deck; `npm run kernel:readiness -- --deck X` writes READY.json or a blocking report)
 
-1. **0 unsupported cards**: `cardUnsupported(def).ok` for every card of the deck (support.ts), AND for every token/copy the deck's cards can make
-   (strict mode means an unsupported card is unplayable, which would silently weaken the deck). Today: Wretched Ranks 3, Tramplesaurus Rex 5,
+1. **Few unsupported cards**: `cardUnsupported(def).ok` for the cards of the deck (support.ts), AND for every token/copy the deck's cards can make
+   (continue mode plays an unsupported card but skips the unsupported part, which weakens the deck; the gate keeps that rare, and `npm run unresolved:report` ranks what is missing). Today: Wretched Ranks 3, Tramplesaurus Rex 5,
    Keen Engineering 7, Calling All Angels 7, Saheeli 9 (user's main deck: priority, after the first three), then the rest.
 2. **Observer agreement >= 98%** on >= 200 games of that deck (`npm run kernel:observe`, per-deck "kernel readiness" ratio in `report.md`), with 0
    `kernel_rejected_legal_action` diffs whose cause is a kernel bug (adapter gaps and legacy bugs are triaged out by the README's workflow).
@@ -387,22 +387,18 @@ only when the shadow env/toggle is on) posts `{s0, s1, intent, accepted}` after 
 loaded in the browser in shadow mode, the game never waits on it, failures are swallowed. Because the legacy UI path HAS a stack (unlike self-play) the
 comparison is "settled" (compare at the next player action), which `compare.ts` already does for casts.
 
-### 5.4 When the kernel returns `unsupported` mid-game (must never crash or freeze the game)
+### 5.4 When the kernel meets something it cannot run mid-game (never crashes, refuses or freezes the game: continue mode)
 
 Facts: `resolve` returns the original state on any error, and strict mode refuses a cast/land play of a card with any unsupported ability, so the
 common case happens BEFORE anything changes. Policy by case:
 
 | Case | What happens |
 |---|---|
-| Player/AI tries to cast, play or activate something unsupported | Nothing changed. UI toast: "<card>: <capability> is not implemented in the new engine yet". Card is marked `unplayable` (badge) in the derived session; AI never sees it (filtered from `legalActions`). Logged to `data/observer/live/unsupported.jsonl` with deck/card/capability. |
-| The gate guaranteed 0 unsupported in the deck, but a card arrives from outside the deck (stolen, copied, cascade/exile-cast, token made by an unsupported source) | Same as above (refused at cast). |
-| `unsupported` raised while resolving a stack item or trigger (ability granted at runtime, copy of an ability) so `passPriority` keeps failing = **stuck game** | The host retries ONCE on a clone with `state.config.lenient = true` (the engine then ignores that ability and emits `unsupported_ignored`); the log shows "<card>'s <ability> could not be run and was skipped" to ALL players; the game continues. If it still fails: `kernelDegraded` banner and the host gets a menu (below). |
-| `loop_detected`, any thrown exception inside `dispatch` | `dispatch` catches, keeps the previous state (it is immutable), marks the game degraded, shows the banner with "Retry / Skip this object / Switch to legacy". Never an uncaught exception into React. |
-
-"Switch to legacy" mid-game (host-only escape hatch, offered only in degraded state): convert kernel -> `GameSession` with the reverse adapter, run
-the legacy `checkStateBasedActions`, drop the stack to the graveyard/hand per rule (a spell on the stack that cannot be rebuilt is returned to its
-owner's hand, triggers are dropped with a log line), set `ctx.kernel = undefined`, continue on legacy. It is lossy, so it is a last resort, not the plan;
-the readiness gates exist to make it rare. Decision for the user (Q5): is a lossy mid-game switch acceptable, or should a degraded game just end ("abandon")?
+| Player/AI tries to cast, play or activate something the kernel cannot run | **Nothing is refused and the game never stops** (policy 2026-11-22, engine README "Unsupported things mid-game"). Live games run the kernel with `config.onUnsupported = "continue"`. The kernel emits an `unresolved` event naming the CARD, the ability / clause text and the missing capability, skips only the unsupported step / clause (the rest of the card resolves), and keeps playing. An unsupported COST is never silently free: that ability / cast option is not performed (nothing paid, nothing on the stack, the player keeps priority) and the event says so. Unsupported statics / triggers / replacements / keywords are ignored and reported once when the permanent enters. |
+| The gate guaranteed 0 unsupported in the deck, but a card arrives from outside the deck (stolen, copied, cascade/exile-cast, token made by an unsupported source) | Same as above: continue mode reports and skips, no special case. |
+| `unsupported` raised deep inside an action despite the per-step handling | Last resort inside `resolve`: the action changes nothing and the result carries one `unresolved` event (`effect: "not_performed"`). No error, no stuck game from the step / trigger / static paths. |
+| The log | The host passes each `resolve` result's FULL events to `UnresolvedBridge` (`src/kernel/unresolvedBridge.ts`), which writes `{card, clause, capability, engine: "kernel", turn, phase, seat}` to `data/observer/live-unresolved.jsonl` through the shared sink `src/lib/unresolvedLog.ts` (deduped per game + card + clause + capability). Players see the `unresolved` event's `message` in the game log (`eventsFor` keeps it public, and strips the card name only when the card sat in another player's hand / library). `npm run unresolved:report` lists kernel and legacy occurrences together with an engine column. |
+| `loop_detected`, any thrown exception inside `dispatch` | `dispatch` catches, keeps the previous state (it is immutable), marks the game degraded, shows the banner with "Retry / Skip this object". Never an uncaught exception into React. There is no switch to the legacy engine mid-game (one engine decides per game); a degraded game is retried or abandoned. |
 
 ### 5.5 Rollout stages and rollback
 
@@ -472,7 +468,7 @@ one turn in the browser and the observer comparison (`compareIntent` on the reco
 | Q2 | **The reverse adapter is the main hidden cost** (about 50 `VisibleCard` fields the table reads, derived P/T and keywords, tokens, faces, attachments). Gaps render wrong badges, not wrong rules. | Build it incrementally behind the round-trip test; accept visual gaps in slice 1; budget a full phase (phase 3). Re-evaluate moving the renderer to `PlayerView` only after the legacy path is gone. |
 | Q3 | **Timer numbers and scope**: memory says "~3 min, final 30 s after 2 min" (inconsistent), and per decision vs per turn was left open. | Per window, 3:00 total with the 30 s warning at 2:30, remote friend seats only, off for solo and the host seat. Please confirm; also confirm the defaults table in 3.5 (especially commander-zone "yes"). |
 | Q4 | **No `legalActions` in the kernel, and the probe clones state per candidate.** Performance with a large board and 4 seats is unknown. | Start with the probe (no kernel change); measure in phase 3; promote to `legal.ts` only if a turn costs > 100 ms. Ask the kernel agent to prioritise `legal.ts` and `objectViews` after their current work. |
-| Q5 | **Mid-game fallback**: lossy "switch to legacy" vs ending a degraded game. | Offer both: skip/ignore the broken ability first (lenient retry), then host-only "Switch to legacy" with a warning. Confirm you accept lossiness. |
+| Q5 | **Mid-game fallback**: DECIDED 2026-11-22: no switch to legacy and no ending the game. The kernel runs in continue mode (`config.onUnsupported = "continue"`): it logs what it could not resolve (event + `data/observer/live-unresolved.jsonl`) and keeps playing. | Implemented in the engine (see 5.4 table and the engine README); the host only has to feed `UnresolvedBridge`. |
 | Q6 | **Legacy features the kernel does not have**: mulligans, poison, emblems, initiative (kernel has it per memory notes? the adapter README says unmapped), phasing, Rooms, cumulative upkeep, sandbox/manual move tools, human manual tap/untap (`toggleTapManually`). | Gate by deck (cards needing them are `unsupported`); keep mulligans on legacy; sandbox tools come back later as host-only kernel debug tools; `onToggleTapCard` is not supported in kernel mode (taps only via mana abilities). Confirm the manual untap loss is fine. |
 | Q7 | **The 98% observer agreement gate measures the legacy engine too**: legacy bugs show up as kernel "disagreements" (e.g. the first-draw bug), and the stack-less self-play engine cannot test responses/counterspells. | Triage with the README categories (legacy bug is not a kernel failure); require the live shadow evidence (gate 4) from real stack-using games; keep a hand-written regression scenario list for counterspells/priority (`mistakeScenarios.ts` style). |
 | Q8 | **Parallel edits and ownership**: another agent edits `src/kernel/**` and legacy files now; this plan needs 3 kernel exports (`legal.ts`, `objectViews`, `defaults`) and moving `defaultAnswer` out of `observer/`. | Do not start phases 1 and 4 until the kernel agent's current batch is committed; define the export surface in one small contract PR first (types only). Keep every new production file under `src/kernel/play/` and `src/components/game/useKernel*` so there are no merge conflicts with legacy files. |
@@ -510,7 +506,7 @@ Success definition for "kernel is in the game": a flagged deck plays a full solo
 zero uncaught errors, the observer shadow numbers >= 98% on the same deck's legacy games, and the kill switch returns to legacy with no code change.
 
 ## User decisions (2026-11-22)
-- Unsupported card mid-game: do not crash or end the game. Write a log entry describing exactly what the kernel could not resolve (card, ability, missing capability, turn/phase) and keep playing; the user reviews the log later and the missing features get added. (Replaces the 'lossy switch to legacy' fallback.) Open: the unresolved part is skipped and shown in the event log; confirm players should see a notice.
+- Unsupported card mid-game: do not crash or end the game. Write a log entry describing exactly what the kernel could not resolve (card, ability, missing capability, turn/phase) and keep playing; the user reviews the log later and the missing features get added. (Replaces the 'lossy switch to legacy' fallback.) IMPLEMENTED (kernel `config.onUnsupported = "continue"`, `unresolved` events, `UnresolvedBridge`, 5.4): the unresolved part is skipped and shown in the game log to all players (the card name is withheld only for a card in another player's hand or library); the same occurrence is written to data/observer/live-unresolved.jsonl.
 - Timer: 3:00 per phase. At 2:30 (30 s left) a 30-second burning-rope animation (Hearthstone style) starts; on expiry it auto-passes to the next phase and the timer restarts. +15 s is added each time a spell is played or an effect is activated. Open: all human seats vs only remote friend seats; rope behaviour when +15 s pushes remaining time above 30 s (assumed: rope stops, restarts at 30 s left); per-decision auto defaults.
 - Only one engine decides per game (kernel or legacy), never both; the Rules Advisor AI is to be removed (pending a measurement of whether it ever changes a game).
 - Timer scope (user, 2026-11-22): the timer is shown only to the player whose turn it is, and it counts down ONLY while that player holds priority. While an opponent holds priority (thinking about a response) the timer is paused. It restarts per phase, +15 s per spell played or effect activated, rope animation in the last 30 s. Open: whether an opponent's response window has its own (longer) cap so nobody can stall indefinitely; AI seats have no timer.

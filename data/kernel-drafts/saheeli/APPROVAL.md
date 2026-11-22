@@ -689,7 +689,7 @@ Mirrorworks [draft]
 
 Player prompts:
 
-- Mirrorworks: optional: Do you want to copy that object?
+- Mirrorworks: optional payment: Do you want to pay {2}? If you do, create a token that's a copy of that artifact.
 
 Implementation: needed (trigger:subject, step:copy, field:copy.optionalCost, field:copy.srcs, field:copy.token)
 

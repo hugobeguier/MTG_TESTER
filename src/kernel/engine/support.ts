@@ -374,3 +374,24 @@ export function cardUnsupported(def: CardDef): CardSupport {
   const all = [...new Set([...abilities.flatMap((a) => a.needs), ...castOptions])];
   return { ok: all.length === 0, abilities, castOptions, all };
 }
+
+// ---------------------------------------------------------------- continue mode (unresolved.ts): frame vs step needs
+
+/**
+ * What an ability needs EXCEPT what its steps need: the trigger / static / replacement / cost / target / timing / zone / keyword / scripted
+ * "frame". A frame that is unsupported makes the whole ability unusable; unsupported steps inside a usable frame are skipped one by one.
+ */
+export function abilityFrameNeeds(a: Ability): string[] {
+  const bare: Ability = { ...a, steps: a.steps ? [] : undefined, modes: a.modes ? { ...a.modes, options: a.modes.options.map((o) => ({ ...o, steps: [] })) } : undefined };
+  return abilityUnsupported(bare);
+}
+
+/** What ONE step needs, not counting its nested then / else / steps (they are judged when they run) nor the abilities of tokens / emblems it creates (those report themselves). */
+export function stepNeedsShallow(s: Step): string[] {
+  const out: string[] = [];
+  const rest = { ...s } as Record<string, unknown>;
+  delete rest.then; delete rest.else; delete rest.steps; delete rest.tokenAbilities;
+  if (rest.emblem && typeof rest.emblem === "object") rest.emblem = { ...(rest.emblem as object), abilities: undefined };
+  checkStep(rest as unknown as Step, out);
+  return out;
+}

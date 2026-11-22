@@ -2,7 +2,7 @@
 // mana sources first). Mana abilities never use the stack.
 
 import type { Ability, ManaSpec } from "../schema";
-import { abilitiesOf, emit, moveObject, isSummoningSick, parseManaCost, player, poolTotal, Reject, Unsupported, type ParsedCost, type Run, chars } from "./core";
+import { abilitiesOf, continueHooks, continuing, emit, moveObject, isSummoningSick, parseManaCost, player, poolTotal, Reject, Unsupported, type ParsedCost, type Run, chars } from "./core";
 import type { GameObject, ManaColor, ManaPool, ObjId, PlayerId } from "./types";
 import { MANA_COLORS } from "./types";
 import { addUnits, effectivePool, takeMana, unitFits, unitsOf, type SpendCtx } from "./manapool";
@@ -75,7 +75,7 @@ export function productionOfAbility(r: Run, owner: PlayerId, a: Ability): Produc
 }
 
 /** Mana abilities of an object (kind "mana"). */
-export const manaAbilities = (r: Run, o: GameObject): Ability[] => abilitiesOf(r, o).filter((a) => a.kind === "mana");
+export const manaAbilities = (r: Run, o: GameObject): Ability[] => abilitiesOf(r, o).filter((a) => a.kind === "mana" && !(continuing(r) && continueHooks.unusable?.(a))); // continue mode: a mana ability the engine cannot run is never used by automatic payment (activating it by hand reports it)
 
 /** Forsaken Monument: "Whenever you tap a permanent for {C}, add an additional {C}." One extra {C} per Monument the player controls when a mana ability that makes {C} is paid by tapping. */
 export function withTapBonus(r: Run, pid: PlayerId, colors: ManaColor[]): ManaColor[] {

@@ -65,6 +65,8 @@ export interface Run {
   castingMiracle?: boolean;
   /** replacement effects currently applying (their nested steps must not re-apply them), as "<source>:<ability>" */
   activeRepl?: string[];
+  /** continue mode: `unresolved` events already emitted during this run (one per card + ability + capability + clause) */
+  unresolvedRun?: Set<string>;
 }
 
 export function emit(r: Run, e: { type: string; [k: string]: unknown }): GameEvent {
@@ -131,12 +133,36 @@ export function defOf(r: Run, o: GameObject): CardDef | undefined {
   if (!d) throw new Reject("unknown_card", `no card definition for "${o.cardName}"`);
   return d;
 }
-/** Printed abilities: card JSON, or a token's own abilities + keyword abilities. Zone-agnostic; see abilitiesOf for the effective list. */
-export function printedAbilities(r: Run, o: GameObject): Ability[] {
+/**
+ * Late-bound continue-mode hooks (set by resolve.ts; core.ts cannot import unresolved.ts without an import cycle). blocked(r, a): this ability's frame
+ * (trigger / static / replacement / targets ...) is unsupported, so it is left out of every read; optionBlocked: same for a cast option.
+ */
+export const continueHooks: {
+  blocked?: (r: Run, a: Ability) => boolean;
+  optionBlocked?: (r: Run, c: import("../schema").CastOption) => boolean;
+  /** any ability whose frame is unsupported (also activated / mana ones, which stay visible but are never used by automatic payment) */
+  unusable?: (a: Ability) => boolean;
+  /** the effects index was (re)built: report unsupported continuous abilities of this object once */
+  continuous?: (r: Run, id: ObjId) => void;
+  /** what ONE step needs that the engine lacks (memoized) and the report of a skipped step */
+  stepNeeds?: (s: import("../schema").Step) => string[];
+  stepSkipped?: (r: Run, source: ObjId, abilityId: string, step: import("../schema").Step, needs: string[]) => void;
+} = {};
+/** continue mode: unsupported things are reported (`unresolved` events) and skipped instead of refusing the action */
+export const continuing = (r: Run): boolean => r.s.config.onUnsupported === "continue";
+
+/** Printed abilities exactly as the card / token data lists them (continue mode: including the ones the engine cannot run). */
+export function rawPrintedAbilities(r: Run, o: GameObject): Ability[] {
   if (o.token || o.copyDef) return tokenAbilities((o.copyDef ?? o.token)!);
   const def = defOf(r, o)!;
   const cur = currentFace(def, o);
   return cur === undefined ? def.kernel.abilities : def.kernel.abilities.filter((a) => !a.face || a.face === cur);
+}
+/** Printed abilities: card JSON, or a token's own abilities + keyword abilities. Zone-agnostic; see abilitiesOf for the effective list. Continue mode leaves out the ones whose frame is unsupported. */
+export function printedAbilities(r: Run, o: GameObject): Ability[] {
+  const all = rawPrintedAbilities(r, o);
+  const blocked = continueHooks.blocked;
+  return blocked && continuing(r) ? all.filter((a) => !blocked(r, a)) : all;
 }
 
 // ---------------------------------------------------------------- faces (double-faced / modal / split cards)

@@ -522,6 +522,12 @@ export function stepNeedsPrompt(step: Step): boolean {
 }
 
 function promptForStep(name: string, step: Step, targets: Map<string, TargetSpec>): Prompt {
+  const optionalCost = step.optionalCost as Cost[] | undefined;
+  if (step.optional && optionalCost && optionalCost.length > 0) {
+    const cost = optionalCost.map(describeCost).join(" and ");
+    const doing = step.kind === "if_else" ? "the effect that follows happens" : describeStep({ ...step, optional: undefined, optionalCost: undefined }, targets);
+    return { title: `${name}: optional payment`, instruction: `Do you want to pay ${cost}? If you do, ${doing}.` };
+  }
   if (step.optional) return promptForMay(name, describeStep(step, targets));
   switch (step.kind) {
     case "choose": return { title: `${name}: choose`, instruction: `Choose ${describeStep(step, targets).replace(/^choose /, "")}.` };

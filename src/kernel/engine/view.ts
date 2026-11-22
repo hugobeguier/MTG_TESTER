@@ -23,7 +23,7 @@ export type PlayerViewState = Omit<PlayerState, "library" | "hand"> & {
 /** Another player's open decision: kind, prompt and bounds, never the options (they can name hidden cards). */
 export type HiddenPendingView = Omit<PendingView, "options"> & { options: []; optionCount: number; hidden: true };
 
-export type PlayerView = Omit<GameState, "players" | "objects" | "pending" | "seed" | "rngState" | "triggerQueue"> & {
+export type PlayerView = Omit<GameState, "players" | "objects" | "pending" | "seed" | "rngState" | "triggerQueue" | "unresolvedSeen"> & {
   viewer: PlayerId;
   players: PlayerViewState[];
   objects: Record<ObjId, GameObject>;
@@ -58,8 +58,8 @@ export function viewFor(state: GameState, viewer: PlayerId): PlayerView {
   }));
   const objects: Record<ObjId, GameObject> = {};
   for (const [id, o] of Object.entries(state.objects)) { const v = visibleObject(o, viewer, state); if (v) objects[id] = structuredClone(v); }
-  const { seed: _seed, rngState: _rng, players: _p, objects: _o, pending, triggerQueue, ...rest } = state;
-  void _seed; void _rng; void _p; void _o;
+  const { seed: _seed, rngState: _rng, players: _p, objects: _o, pending, triggerQueue, unresolvedSeen: _seen, ...rest } = state;
+  void _seed; void _rng; void _p; void _o; void _seen;
   return {
     ...structuredClone(rest),
     // the turn log names the card a player drew: only the drawer may keep that
@@ -78,6 +78,14 @@ export function eventsFor(state: GameState, viewer: PlayerId, events: GameEvent[
       case "looked_at":
         if (ev.player === viewer) out.push(ev);
         break;
+      case "unresolved": {
+        // public: the fact that something could not be resolved. Only when the card sat in somebody else's hand / library does the viewer not learn its name or text
+        const zone = ev.zone as Zone | undefined;
+        const owner = state.objects[ev.source as ObjId]?.owner;
+        if (zone && HIDDEN_ZONES.includes(zone) && owner !== viewer) out.push({ type: "unresolved", seq: ev.seq, hidden: true, effect: ev.effect, turn: ev.turn, phase: ev.phase, player: ev.player, message: "A card could not be fully resolved." } as GameEvent);
+        else out.push(ev);
+        break;
+      }
       case "draw":
         out.push(ev.player === viewer ? ev : { type: "draw", seq: ev.seq, player: ev.player, hidden: true } as GameEvent);
         break;

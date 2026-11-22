@@ -69,8 +69,8 @@
           ],
           "src": 0,
           "prompt": {
-            "title": "Nihil Spellbomb: optional",
-            "instruction": "Do you want to if ?: ?",
+            "title": "Nihil Spellbomb: optional payment",
+            "instruction": "Do you want to pay {B}? If you do, draw a card.",
             "source": {
               "card": "Nihil Spellbomb",
               "ability": "a2"

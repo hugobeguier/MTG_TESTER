@@ -680,7 +680,7 @@ Hellkite Charger [draft]
 
 Player prompts:
 
-- Hellkite Charger: optional: Do you want to untap the target?
+- Hellkite Charger: optional payment: Do you want to pay {5}{R}{R}? If you do, untap all attacking creatures and get an additional combat phase after this one.
 
 Implementation: needed (field:untap_target.all, field:untap_target.filter, field:untap_target.optionalCost, predicate:paid_additional_cost, step:extra_combat)
 

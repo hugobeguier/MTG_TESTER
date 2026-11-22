@@ -7,8 +7,9 @@ import { matchSimple, SIMPLE_EVENTS } from "./triggers6";
 import { promptForModes, promptForTarget, promptForX } from "../prompts";
 import {
   abilitiesOf, alive, faceNames, printedAbilities, apnap, chars, defOf, drawCards, emit, label, LoopDetected, makeLki, moveObject, NeedAsk, nextPlayer, obj, opponentsOf,
-  parseManaCost, player, randInt, Reject, tick, tryObj, Unsupported, isSummoningSick, type Run
+  parseManaCost, player, randInt, Reject, tick, tryObj, Unsupported, isSummoningSick, continuing, type Run
 } from "./core";
+import { emitUnresolved, reportAbilityNotPerformed, reportCast } from "./unresolved";
 import { autoTapFor, addMana, withTapBonus, manaAbilityActivatable, manaAbilityUsable, payManaAbilityCosts, payFromPool, phyrexianOptions, productionOfAbility, settleCost, totalPotentialMana } from "./mana";
 import { evalPredicate, evalQuantity, matchesFilter, objectsMatching, resolveObjs, type QCtx } from "./query";
 import { addCounters, changeLife, decide, discardCard, runExec, sacrificeObject, startExec, type AskSpec } from "./steps";
@@ -72,6 +73,13 @@ function runAction(state: GameState, action: Action, ctx: EngineContext, answers
       return { state: s, events: r.events.slice(delivered), pending: viewOf(s.pending) };
     }
     if (e instanceof Reject) return { state, events: [], error: e.toError() };
+    if (e instanceof Unsupported && state.config.onUnsupported === "continue") {
+      // last resort of continue mode (the per-step / per-ability handling missed it): the action is not performed, the state is untouched, the event says why
+      const q: Run = { s: structuredClone(state), events: [], defs: r.defs, db: r.db, scanned: 0 };
+      const sid = (action as { cardId?: string; sourceId?: string }).cardId ?? (action as { sourceId?: string }).sourceId;
+      emitUnresolved(q, { source: sid && tryObj(q, sid) ? sid : undefined, needs: e.all, effect: "not_performed", clause: `${action.type}: ${e.message}` });
+      return { state, events: q.events, pending: viewOf(state.pending) };
+    }
     if (e instanceof Unsupported) return { state, events: [], error: { code: "unsupported", message: e.message, capability: e.all } };
     if (e instanceof LoopDetected) {
       const s = structuredClone(state);
@@ -669,6 +677,7 @@ function inMainWithEmptyStack(r: Run, pid: PlayerId): boolean {
 }
 
 function assertSupported(r: Run, o: GameObject, only?: Ability): void {
+  if (continuing(r)) return; // continue mode never refuses: unresolved.ts reports what it cannot run and skips only that
   if (o.token) {
     const mine = only ? abilityUnsupported(only) : [];
     if (mine.length) throw new Unsupported(mine[0], `${o.token.name}: unsupported capability ${mine.join(", ")}`, mine);
@@ -706,6 +715,7 @@ function castSpell(r: Run, a: Extract<Action, { type: "castSpell" }>): void {
   if (c.types.includes("land")) throw new Reject("not_castable", "lands are played, not cast");
   if (playerCantCast(r, a.player)) throw new Reject("wrong_timing", `${a.player} can't cast spells right now`);
   assertSupported(r, o);
+  if (continuing(r)) reportCast(r, o.id); // the spell ability / cast options the engine cannot run: reported now, the spell is still cast
   // double-faced cards: a preset face is validated now; with several castable faces and none given, the draft asks and re-checks the timing for the chosen one
   const faces = castableFaces(def);
   if (a.face !== undefined) { if (!faces.includes(a.face)) throw new Reject("invalid_choice", `"${a.face}" is not a face of ${def.name} that can be cast (${faces.join(", ")})`); o.face = a.face; }
@@ -798,6 +808,7 @@ function activateAbility(r: Run, a: Extract<Action, { type: "activateAbility" }>
   if (!ab) throw new Reject("unknown_ability", `${label(r, src.id)} has no ability ${a.abilityId}`);
   if (ab.kind !== "activated" && ab.kind !== "mana") throw new Reject("cannot_activate", `${a.abilityId} is not an activated ability`);
   if ((ab.zone ?? "battlefield") !== src.zone) throw new Reject("cannot_activate", `${a.abilityId} can only be activated from ${ab.zone ?? "the battlefield"}, not from ${src.zone}`);
+  if (continuing(r) && reportAbilityNotPerformed(r, src.id, ab)) return; // an unsupported cost / target / timing / zone: the ability is NOT performed (nothing paid, nothing on the stack)
   assertSupported(r, src, ab);
   if (ab.kind === "mana") return activateMana(r, a.player, src, ab, a.color);
   if (ab.scripted?.handler === "crew") return activateCrew(r, a, src, ab);
@@ -1273,7 +1284,7 @@ function lkiMatches(f: ObjectFilter, l: Lki, q: QCtx, id: string): boolean {
 
 function queueTrigger(r: Run, src: ObjId, ab: Ability, controller: PlayerId, ctx: TriggerContext): void {
   const needs = abilityUnsupported(ab);
-  if (needs.length) {
+  if (needs.length && !continuing(r)) { // continue mode: a trigger with an unsupported frame never gets here (printedAbilities leaves it out); unsupported steps are skipped when it resolves
     if (r.s.config.lenient) { emit(r, { type: "unsupported_ignored", source: src, ability: ab.id, needs }); return; }
     throw new Unsupported(needs[0], `${label(r, src)}: triggered ability ${ab.id} needs ${needs.join(", ")}`, needs);
   }
@@ -1364,6 +1375,7 @@ function scanTriggers(r: Run): void {
         if (ab.scripted?.handler === "tapped_for_colorless_mana") continue; // Forsaken Monument: not a stack trigger, mana.ts adds the extra {C} when the permanent is tapped for mana
         if (!(h.lki || (ab.zone ?? "battlefield") === o.zone || (ev.type === "cycle" && ab.zone === "hand" && o.id === ev.id))) continue;
         for (const tr of triggerAlternatives(ab.trigger)) {
+          try {
           if (!SUPPORTED_TRIGGER_EVENTS.has(tr.event) || !names.includes(tr.event)) continue;
           if (r.s.config.mirrorHeadless?.skipTriggerEvents.includes(tr.event)) { emit(r, { type: "trigger_suppressed", source: h.id, event: tr.event }); continue; }
           const q: QCtx = { controller: h.controller, source: h.id };
@@ -1451,6 +1463,11 @@ function scanTriggers(r: Run): void {
             if (seen.has(key)) match = false; else seen.add(key);
           }
           if (match) queueTrigger(r, h.id, ab, h.controller, ctx);
+          } catch (e) {
+            // continue mode: a trigger the engine cannot evaluate (a subject / filter it does not know) is skipped and reported, the scan goes on
+            if (!(e instanceof Unsupported) || !continuing(r)) throw e;
+            emitUnresolved(r, { source: h.id, ability: ab, needs: e.all, effect: "ignored", clause: ab.text });
+          }
         }
       }
     }

@@ -7,7 +7,7 @@
 // predicates `kicked`, `paid_additional_cost` and `cast_with` read.
 
 import type { CastOption, Cost, Step } from "../schema";
-import { defOf, faceMeta, label, opponentsOf, type Run } from "./core";
+import { continueHooks, continuing, defOf, faceMeta, label, opponentsOf, type Run } from "./core";
 import { evalPredicate } from "./query";
 import { permissionOptions, permissionOwner } from "./durable";
 import type { CastInfo, Draft, GameObject, PlayerId } from "./types";
@@ -19,7 +19,10 @@ const BASE_KINDS = new Set(["alternative", "flashback", "escape", "cast_from_zon
 
 export function castOptionsOf(r: Run, o: GameObject, permSnap?: CastOption[]): CastOption[] {
   if (o.token) return [];
-  return [...(defOf(r, o)!.kernel.castOptions ?? []), ...(permSnap ?? permissionOptions(r, o))]; // + "you may cast it" permissions granted by permission_to_play
+  const all = [...(defOf(r, o)!.kernel.castOptions ?? []), ...(permSnap ?? permissionOptions(r, o))]; // + "you may cast it" permissions granted by permission_to_play
+  // continue mode: an option whose kind / cost / effect the engine cannot run is not offered (never silently free); reportCast says so
+  const blocked = continueHooks.optionBlocked;
+  return blocked && continuing(r) ? all.filter((c) => !blocked(r, c)) : all;
 }
 
 /** What a cast option needs that the engine lacks (reported through support.ts). */

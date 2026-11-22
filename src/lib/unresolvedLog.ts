@@ -4,6 +4,7 @@
 
 export const UNRESOLVED_ENGINES = ["legacy", "kernel"] as const;
 export type UnresolvedEngine = (typeof UNRESOLVED_ENGINES)[number];
+export const UNRESOLVED_EFFECTS = ["skipped", "not_performed", "ignored"] as const;
 export const UNRESOLVED_SEAT_KINDS = ["human", "agent"] as const;
 export const UNRESOLVED_LOG_RELATIVE_PATH = "data/observer/live-unresolved.jsonl";
 
@@ -19,6 +20,10 @@ export interface UnresolvedRecord {
   seatKind: "human" | "agent";
   at: string;
   gameId: string;
+  /** kernel records: the missing capability ("step:copy", "cost:unsupported", ...), the player (seat id) it happened for, and what the kernel did instead */
+  capability?: string;
+  seat?: string;
+  effect?: (typeof UNRESOLVED_EFFECTS)[number];
 }
 
 const MAX_NAME = 120;
@@ -51,11 +56,14 @@ export function validateUnresolvedPayload(input: unknown, now: () => string = ()
   if (turn === undefined) return undefined;
   const decks = Array.isArray(raw.decks) ? raw.decks.map((d) => cleanString(d, MAX_NAME)).filter((d): d is string => d !== undefined).slice(0, MAX_DECKS) : [];
   const providedAt = typeof raw.at === "string" && !Number.isNaN(Date.parse(raw.at)) ? new Date(raw.at).toISOString() : now();
-  return { cardName, clause, abilityKind, engine, decks, turn, phase, seatKind, at: providedAt, gameId };
+  const capability = cleanString(raw.capability, MAX_NAME);
+  const seat = cleanString(raw.seat, MAX_NAME);
+  const effect = (UNRESOLVED_EFFECTS as readonly unknown[]).includes(raw.effect) ? (raw.effect as (typeof UNRESOLVED_EFFECTS)[number]) : undefined;
+  return { cardName, clause, abilityKind, engine, decks, turn, phase, seatKind, at: providedAt, gameId, ...(capability ? { capability } : {}), ...(seat ? { seat } : {}), ...(effect ? { effect } : {}) };
 }
 
-export function unresolvedDedupeKey(record: Pick<UnresolvedRecord, "gameId" | "cardName" | "clause">): string {
-  return `${record.gameId}\u0001${record.cardName.toLowerCase()}\u0001${record.clause.toLowerCase()}`;
+export function unresolvedDedupeKey(record: Pick<UnresolvedRecord, "gameId" | "cardName" | "clause"> & { capability?: string }): string {
+  return `${record.gameId}\u0001${record.cardName.toLowerCase()}\u0001${record.clause.toLowerCase()}${record.capability ? `\u0001${record.capability.toLowerCase()}` : ""}`;
 }
 
 /** Remembers keys it has seen (bounded) so a retried clause is written once per game+card+clause. */
@@ -63,7 +71,7 @@ export class UnresolvedDeduper {
   private seen = new Set<string>();
   constructor(private readonly limit = 5000) {}
   /** True when the record is new (and is now remembered). */
-  admit(record: Pick<UnresolvedRecord, "gameId" | "cardName" | "clause">): boolean {
+  admit(record: Pick<UnresolvedRecord, "gameId" | "cardName" | "clause"> & { capability?: string }): boolean {
     const key = unresolvedDedupeKey(record);
     if (this.seen.has(key)) return false;
     if (this.seen.size >= this.limit) this.seen.clear();

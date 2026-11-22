@@ -5,7 +5,7 @@
 import type { ObjectFilter, PlayerRef, Prompt, Step } from "../schema";
 import { promptForMay } from "../prompts";
 import {
-  chars, drawCards, emit, label, moveObject, NeedAsk, newObject, obj, parseManaCost, player, shuffleInPlace, takeAnswer, tick, tryObj, Unsupported, Reject, type Run
+  chars, continueHooks, continuing, drawCards, emit, label, moveObject, NeedAsk, newObject, obj, parseManaCost, player, shuffleInPlace, takeAnswer, tick, tryObj, Unsupported, Reject, type Run
 } from "./core";
 import { evalPredicate, evalQuantity, matchesFilter, objectsMatching, resolveObjs, resolvePlayers, type QCtx } from "./query";
 import { applyReplacements, runAfter } from "./replacements";
@@ -669,6 +669,12 @@ export function runExec(r: Run, ex: Exec, answer?: Choice): StepStatus {
     const step = frame.steps[frame.i];
     const internal = INTERNAL[step.kind as string];
     let result: StepResult;
+    // continue mode (unresolved.ts): a step the engine cannot run is reported and skipped, the steps after it still run
+    if (!internal && continuing(r)) {
+      const needs = continueHooks.stepNeeds?.(step) ?? [];
+      if (needs.length) { continueHooks.stepSkipped?.(r, ex.env.source, ex.env.item.abilityId, step, needs); pendingAnswer = undefined; frame.i++; continue; }
+    }
+    try {
     if (internal) result = internal(r, ex, step, pendingAnswer);
     else {
       const spec = STEPS[step.kind];
@@ -699,6 +705,12 @@ export function runExec(r: Run, ex: Exec, answer?: Choice): StepStatus {
       }
       result = spec.run(r, ex, step, pendingAnswer);
       if (result === "done" && step.id) ex.env.done.push(step.id);
+    }
+    } catch (e) {
+      // continue mode: something this step needed turned out to be unsupported while running (a reference, predicate or field the static check could not see)
+      if (!(e instanceof Unsupported) || !continuing(r)) throw e;
+      continueHooks.stepSkipped?.(r, ex.env.source, ex.env.item.abilityId, step, e.all);
+      pendingAnswer = undefined; frame.i++; continue;
     }
     if (typeof result === "object" && "ask" in result) return { status: "ask", spec: result.ask };
     pendingAnswer = undefined;

@@ -160,6 +160,8 @@ export interface CompareOptions {
   mapped?: Mapped;
   /** run the kernel in lenient mode (unsupported abilities are ignored instead of refused) */
   lenient?: boolean;
+  /** run the kernel in continue mode (see engine/unresolved.ts): its `unresolved` events are in CompareResult.run.events */
+  onUnsupported?: "error" | "continue";
   /** s1 is the legacy state at the start of the NEXT action (its queued triggers were drained): phase / turn / active player are not compared */
   settled?: boolean;
 }
@@ -272,8 +274,8 @@ export function compareIntent(s0: GameSession, s1: GameSession, meta: ObserverMe
 
     // HARNESS GAP: the headless orchestrator has no aura-target choice, so a cast Aura goes straight to the graveyard ("for not being attached to anything"); the kernel attaches it. Not comparable.
     { const seen = new Set(s0.events.map((e) => e.id)); if (s1.events.some((e) => !seen.has(e.id) && /for not being attached to anything/.test(e.message))) return skipped("harness: aura left unattached (headless orchestrator has no Aura target choice)", []); }
-    const a0 = toKernelState(s0, { lookup: opts.lookup, seed: opts.seed, lenient: opts.lenient });
-    const a1 = toKernelState(s1, { lookup: opts.lookup, seed: opts.seed, lenient: opts.lenient });
+    const a0 = toKernelState(s0, { lookup: opts.lookup, seed: opts.seed, lenient: opts.lenient, onUnsupported: opts.onUnsupported });
+    const a1 = toKernelState(s1, { lookup: opts.lookup, seed: opts.seed, lenient: opts.lenient, onUnsupported: opts.onUnsupported });
     const gapDiffs = [...a0.gaps].map((g) => mk("adapter_gap", `legacy state carries unmapped data: ${g.field} (x${g.count})`, { field: g.field, cards: g.examples, context: { count: g.count } }));
 
     if (mapped.kind === "skip") {
