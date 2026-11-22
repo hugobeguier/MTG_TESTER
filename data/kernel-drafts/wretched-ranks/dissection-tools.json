@@ -9,10 +9,11 @@
         "event": "etb",
         "subject": "self"
       },
-      "scripted": {
-        "handler": "manifest_dread"
-      },
       "steps": [
+        {
+          "kind": "manifest_dread",
+          "who": "you"
+        },
         {
           "kind": "attach",
           "what": "self",
@@ -21,8 +22,8 @@
       ],
       "implementation": "needed",
       "needs": [
-        "scripted:manifest_dread",
         "ref:created",
+        "step:manifest_dread",
         "step:attach",
         "field:attach.to",
         "field:attach.what"

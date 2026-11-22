@@ -1,7 +1,8 @@
 // Aggregation + markdown report of an observer run. Memory-bounded: counters and a few examples per category, never the whole diff list.
 import type { Diff, StepOutcome } from "./types";
+import { KNOWN_LEGACY } from "./knownLegacy";
 
-export interface DeckStats { agree: number; disagree: number; skipped: number; skipReasons: Record<string, number> }
+export interface DeckStats { agree: number; disagree: number; skipped: number; skipReasons: Record<string, number>; /** disagreements explained by a documented legacy / harness bug (subset of disagree) */ known: number }
 
 export class Aggregate {
   games = 0;
@@ -14,6 +15,7 @@ export class Aggregate {
   readonly byCapability: Record<string, number> = {};
   readonly examples: Record<string, Diff[]> = {};
   readonly byRejectCode: Record<string, number> = {};
+  readonly byKnown: Record<string, number> = {};
   choiceDependent = 0;
   observerErrors = 0;
 
@@ -21,8 +23,9 @@ export class Aggregate {
     this.actions += 1;
     const i = (this.byIntent[o.intentType] ??= { agree: 0, disagree: 0, skipped: 0 });
     i[o.kind] += 1;
-    const d = (this.byDeck[o.deck ?? "?"] ??= { agree: 0, disagree: 0, skipped: 0, skipReasons: {} });
+    const d = (this.byDeck[o.deck ?? "?"] ??= { agree: 0, disagree: 0, skipped: 0, skipReasons: {}, known: 0 });
     d[o.kind] += 1;
+    if (o.knownLegacy) { d.known += 1; this.byKnown[o.knownLegacy] = (this.byKnown[o.knownLegacy] ?? 0) + 1; }
     if (o.kind === "skipped" && o.reason) d.skipReasons[o.reason] = (d.skipReasons[o.reason] ?? 0) + 1;
   }
 
@@ -51,12 +54,13 @@ export function renderReport(agg: Aggregate, meta: ReportMeta): string {
   const out: string[] = [];
   out.push(`# Kernel observer report`, "", `- started: ${meta.startedAt}`, `- games: ${meta.games} (base seed ${meta.seed ?? "none"}), decks: ${meta.decks.join(", ")}`, `- wall clock: ${(meta.wallClockMs / 1000).toFixed(1)}s, observed legacy actions: ${agg.actions}`, `- game terminations: ${Object.entries(meta.terminations).map(([k, v]) => `${k}=${v}`).join(", ") || "n/a"}${meta.crashed ? ` (crashed: ${meta.crashed})` : ""}`);
   if (meta.command) out.push(`- reproduce: \`${meta.command}\``);
-  const all = Object.values(agg.byDeck).reduce((a, d) => ({ agree: a.agree + d.agree, disagree: a.disagree + d.disagree, skipped: a.skipped + d.skipped }), { agree: 0, disagree: 0, skipped: 0 });
+  const all = Object.values(agg.byDeck).reduce((a, d) => ({ agree: a.agree + d.agree, disagree: a.disagree + d.disagree, skipped: a.skipped + d.skipped, known: a.known + d.known }), { agree: 0, disagree: 0, skipped: 0, known: 0 });
   const compared = all.agree + all.disagree;
-  out.push("", "## Headline", "", `- compared actions: ${compared} of ${agg.actions} (${pct(compared, agg.actions)}); skipped: ${all.skipped}`, `- kernel agrees with legacy on ${all.agree} of ${compared} compared actions: **${pct(all.agree, compared)} agreement**`, `- diffs written: ${Object.values(agg.byCategory).reduce((a, b) => a + b, 0)}; of the state mismatches / rejections, ${agg.choiceDependent} depend on a kernel decision answered by the default policy`);
+  out.push("", "## Headline", "", `- compared actions: ${compared} of ${agg.actions} (${pct(compared, agg.actions)}); skipped: ${all.skipped}`, `- kernel agrees with legacy on ${all.agree} of ${compared} compared actions: **${pct(all.agree, compared)} agreement**; ${all.known} of the disagreements are documented legacy / harness bugs, so **${pct(all.agree + all.known, compared)} agreement excluding known legacy bugs**`, `- diffs written: ${Object.values(agg.byCategory).reduce((a, b) => a + b, 0)}; of the state mismatches / rejections, ${agg.choiceDependent} depend on a kernel decision answered by the default policy`);
   out.push("", "## Diffs by category", "", table(["category", "count"], sortDesc(agg.byCategory).map(([k, v]) => [k, v])));
   out.push("", "## Per intent", "", table(["legacy action", "agree", "disagree", "skipped", "agreement"], Object.entries(agg.byIntent).sort((a, b) => (b[1].agree + b[1].disagree) - (a[1].agree + a[1].disagree)).map(([k, v]) => [k, v.agree, v.disagree, v.skipped, pct(v.agree, v.agree + v.disagree)])));
-  out.push("", "## Per deck: kernel readiness", "", "readiness = actions where kernel and legacy agree / actions that could be compared (skipped ones excluded; `coverage` = compared / all).", "", table(["deck", "agree", "disagree", "skipped", "readiness", "coverage", "top skip reasons"], Object.entries(agg.byDeck).map(([k, v]) => [k, v.agree, v.disagree, v.skipped, pct(v.agree, v.agree + v.disagree), pct(v.agree + v.disagree, v.agree + v.disagree + v.skipped), sortDesc(v.skipReasons).slice(0, 3).map(([r, n]) => `${r} (${n})`).join("; ")])));
+  out.push("", "## Per deck: kernel readiness", "", "readiness = actions where kernel and legacy agree / actions that could be compared (skipped ones excluded; `coverage` = compared / all).", "", table(["deck", "agree", "disagree", "of which known legacy", "skipped", "readiness", "readiness excl. known legacy", "coverage", "top skip reasons"], Object.entries(agg.byDeck).map(([k, v]) => [k, v.agree, v.disagree, v.known, v.skipped, pct(v.agree, v.agree + v.disagree), pct(v.agree + v.known, v.agree + v.disagree), pct(v.agree + v.disagree, v.agree + v.disagree + v.skipped), sortDesc(v.skipReasons).slice(0, 3).map(([r, n]) => `${r} (${n})`).join("; ")])));
+  if (Object.keys(agg.byKnown).length) out.push("", "## Known legacy / harness bugs hit (actions explained)", "", table(["id", "owner", "actions", "what the legacy engine / harness does wrong"], Object.entries(agg.byKnown).sort((a, b) => b[1] - a[1]).map(([k, n]) => { const r = KNOWN_LEGACY.find((x) => x.id === k); return [k, r?.owner ?? "?", n, r?.note ?? ""]; })));
   out.push("", "## Top 20 cards involved in diffs", "", table(["card", "diffs"], [...agg.byCard.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 20).map(([k, v]) => [k, v])));
   out.push("", "## Top mismatched fields", "", table(["field", "count"], sortDesc(agg.byField).slice(0, 20).map(([k, v]) => [k, v])));
   if (Object.keys(agg.byCapability).length) out.push("", "## Unsupported capabilities (kernel refused)", "", table(["capability", "count"], sortDesc(agg.byCapability).slice(0, 20).map(([k, v]) => [k, v])));

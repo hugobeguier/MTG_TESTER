@@ -1,6 +1,6 @@
 # Kernel draft approval: Keen Engineering
 
-67 unique cards: 42 simple (A), 25 complex (B). Validator: 67/67 pass. Cards with implementation "needed": 59. All drafts are `review.status: "draft"`; nothing was written to the DB.
+67 unique cards: 43 simple (A), 24 complex (B). Validator: 67/67 pass. Cards with implementation "needed": 59. All drafts are `review.status: "draft"`; nothing was written to the DB.
 
 Reading guide: each card below shows the oracle text and what the structured JSON says back in plain English. Approve if they match.
 
@@ -11,6 +11,7 @@ Reading guide: each card below shows the oracle text and what the structured JSO
 - **Broodstar** (Creature — Beast): Keyword affinity artifacts | Keyword flying | Broodstar has power and toughness each equal to the number of artifacts you control [needs: cost_reduction, static, static:setBasePT]
 - **Master of Etherium** (Artifact Creature — Vedalken Wizard): Master of Etherium has power and toughness each equal to the number of artifacts you control | Other artifact creatures you control get +1/+1 [needs: static, static:setBasePT]
 - **Master Transmuter** (Artifact Creature — Human Artificer): {U}, {T}, return an artifact you control to its owner's hand: You may choose an artifact card in your hand, then put the chosen object onto the battlefield [needs: cost:returnToHand, step:choose, field:choose.count, field:choose.from, field:choose.saveAs]
+- **Misleading Signpost** (Artifact): Keyword flash | Whenever Misleading Signpost enters, if it is the declare attackers step: [targets: target attacking creature] Reselect attack target | {T}: add {U} [needs: trigger:intervening_if, predicate:phase_is, step:reselect_attack_target]
 - **Research Thief** (Artifact Creature — Moonfolk Wizard): Keyword flash | Keyword flying | Whenever an artifact creature you control deals combat damage to a player: Draw a card [needs: trigger:subject]
 - **Thought Monitor** (Artifact Creature — Construct): Keyword affinity artifacts | Keyword flying | Whenever Thought Monitor enters: Draw 2 cards [needs: cost_reduction]
 - **Vedalken Archmage** (Creature — Vedalken Wizard): Whenever you cast an artifact spell: Draw a card [implemented]
@@ -85,42 +86,6 @@ Player prompts:
 - Kappa Cannoneer: pay or not: Do you want to pay {4}? If you don't, counter that object.
 
 Implementation: needed (scripted:improvise, keyword:improvise, trigger:becomes_target, step:counter_spell, step:unless_pay, trigger:subject, step:add_counters, field:add_counters.on, step:grant_effect, field:grant_effect.modify)
-
-### Misleading Signpost
-
-Type: Artifact
-
-Oracle text:
-
-> Flash
-> When this artifact enters during the declare attackers step, you may reselect which player or permanent target attacking creature is attacking. (It can't attack its controller or their permanents.)
-> {T}: Add {U}.
-
-Re-rendered plain English:
-
-```
-Misleading Signpost [draft]
-  [a1] keyword [implemented]
-    Oracle: Flash
-    Keyword: flash
-  [a2] triggered [needed: needs scripted:reselect_attack_target, trigger:intervening_if, predicate:phase_is]
-    Oracle: When this artifact enters during the declare attackers step, you may reselect which player or permanent target attacking creature is attacking. (It can't attack its controller or their permanents.)
-    Trigger: Whenever Misleading Signpost enters, if it is the declare attackers step
-    Target t1: target attacking creature  <- prompt: "Choose target attacking creature."
-    Scripted (engine-specific rule, not described by the fields above): reselect_attack_target
-    (optional: Do you want to use this ability?)
-  [a3] mana [implemented]
-    Oracle: {T}: Add {U}.
-    Cost: {T}
-    Mana: add {U}
-```
-
-Player prompts:
-
-- Misleading Signpost: choose a target: Choose target attacking creature.
-- Misleading Signpost: optional: Do you want to use this ability?
-
-Implementation: needed (scripted:reselect_attack_target, trigger:intervening_if, predicate:phase_is)
 
 ### Pull from Tomorrow
 
@@ -442,17 +407,17 @@ Re-rendered plain English:
 
 ```
 Mind's Eye [draft]
-  [a1] triggered [needed: needs trigger:draw, field:draw_cards.optionalCost, predicate:paid_additional_cost]
+  [a1] triggered [needed: needs trigger:draw, field:draw_cards.optionalCost, field:draw_cards.srcs]
     Oracle: Whenever an opponent draws a card, you may pay {1}. If you do, draw a card.
     Trigger: Whenever an opponent draws a card
-    Effect: IF {1} was paid: you may draw a card.
+    Effect: Draw a card.
 ```
 
 Player prompts:
 
 - Mind's Eye: optional: Do you want to draw a card?
 
-Implementation: needed (trigger:draw, field:draw_cards.optionalCost, predicate:paid_additional_cost)
+Implementation: needed (trigger:draw, field:draw_cards.optionalCost, field:draw_cards.srcs)
 
 ### Myr Battlesphere
 
@@ -471,17 +436,17 @@ Myr Battlesphere [draft]
     Oracle: When this creature enters, create four 1/1 colorless Myr artifact creature tokens.
     Trigger: Whenever Myr Battlesphere enters
     Effect: Create four 1/1 colorless Myr artifact creature tokens.
-  [a2] triggered [needed: needs step:choose, field:choose.count, field:choose.from, field:choose.saveAs, quantity:X, predicate:paid_additional_cost]
+  [a2] triggered [needed: needs quantity:step_result, step:choose, field:choose.anyNumber, field:choose.from, field:choose.saveAs]
     Oracle: Whenever this creature attacks, you may tap X untapped Myr you control. If you do, this creature gets +X/+0 until end of turn and deals X damage to the player or planeswalker it's attacking.
     Trigger: Whenever Myr Battlesphere attacks
-    Effect: You may choose X untapped Myrs you control. Then, tap the chosen object. Then, IF the additional cost (tap X untapped Myr) was paid: Myr Battlesphere gets +X/+0 until end of turn. Then, IF the additional cost (tap X untapped Myr) was paid: deal X damage to the player or planeswalker it's attacking.
+    Effect: Choose an untapped Myr you control. Then, tap the chosen object. Then, Myr Battlesphere gets +the number affected this way (pick)/+0 until end of turn. Then, deal the number affected this way (pick) damage to the player or planeswalker it's attacking.
 ```
 
 Player prompts:
 
-- Myr Battlesphere: optional: Do you want to choose X untapped Myrs you control?
+- Myr Battlesphere: tap Myr: Choose any number of untapped Myr you control to tap (X = how many).
 
-Implementation: needed (step:choose, field:choose.count, field:choose.from, field:choose.saveAs, quantity:X, predicate:paid_additional_cost)
+Implementation: needed (quantity:step_result, step:choose, field:choose.anyNumber, field:choose.from, field:choose.saveAs)
 
 ### Psychosis Crawler
 
@@ -833,7 +798,6 @@ Implementation: needed (replacement:would_enter, zone:hand, cost:discard)
 | `step:counter_spell` | 4 | Kappa Cannoneer; Counterspell; Launch Mishap; Negate |
 | `trigger:draw` | 4 | Thopter Fabricator; Mind's Eye; Psychosis Crawler; Scrawling Crawler |
 | `trigger:intervening_if` | 4 | Misleading Signpost; Thopter Spy Network; Mazemind Tome; Padeem, Consul of Innovation |
-| `field:choose.count` | 3 | Master Transmuter; Adaptive Omnitool; Myr Battlesphere |
 | `field:choose.from` | 3 | Master Transmuter; Adaptive Omnitool; Myr Battlesphere |
 | `field:choose.saveAs` | 3 | Master Transmuter; Adaptive Omnitool; Myr Battlesphere |
 | `keyword:crew` | 3 | Thopter Fabricator; Cultivator's Caravan; Skysovereign, Consul Flagship |
@@ -846,10 +810,9 @@ Implementation: needed (replacement:would_enter, zone:hand, cost:discard)
 | `field:add_counters.on` | 2 | Kappa Cannoneer; Steel Overseer |
 | `field:attach.to` | 2 | Adaptive Omnitool; Nettlecyst |
 | `field:attach.what` | 2 | Adaptive Omnitool; Nettlecyst |
+| `field:choose.count` | 2 | Master Transmuter; Adaptive Omnitool |
 | `field:destroy_all.filter` | 2 | Nevinyrral's Disk; Steel Hellkite |
 | `field:life_change.who` | 2 | Psychosis Crawler; Scrawling Crawler |
-| `predicate:paid_additional_cost` | 2 | Mind's Eye; Myr Battlesphere |
-| `quantity:X` | 2 | Pull from Tomorrow; Myr Battlesphere |
 | `static:mustAttack` | 2 | Darksteel Juggernaut; Graaz, Unstoppable Juggernaut |
 | `step:add_counters` | 2 | Kappa Cannoneer; Steel Overseer |
 | `step:attach` | 2 | Adaptive Omnitool; Nettlecyst |
@@ -861,8 +824,10 @@ Implementation: needed (replacement:would_enter, zone:hand, cost:discard)
 | `cost:returnToHand` | 1 | Master Transmuter |
 | `cost:x` | 1 | Steel Hellkite |
 | `field:add_mana.produces` | 1 | Forsaken Monument |
+| `field:choose.anyNumber` | 1 | Myr Battlesphere |
 | `field:choose.fromLooked` | 1 | Adaptive Omnitool |
 | `field:draw_cards.optionalCost` | 1 | Mind's Eye |
+| `field:draw_cards.srcs` | 1 | Mind's Eye |
 | `field:draw_cards.who` | 1 | Scrawling Crawler |
 | `field:exile_target.linkExile` | 1 | Duplicant |
 | `field:mass_bounce.filter` | 1 | Aetherize |
@@ -883,12 +848,13 @@ Implementation: needed (replacement:would_enter, zone:hand, cost:discard)
 | `predicate:phase_is` | 1 | Misleading Signpost |
 | `predicate:stat` | 1 | Mazemind Tome |
 | `predicate:step_done` | 1 | Mazemind Tome |
+| `quantity:step_result` | 1 | Myr Battlesphere |
+| `quantity:X` | 1 | Pull from Tomorrow |
 | `ref:created` | 1 | Nettlecyst |
 | `ref:iterated` | 1 | Steel Overseer |
 | `ref:linked_exile` | 1 | Duplicant |
 | `scripted:become_monarch` | 1 | Fall from Favor |
 | `scripted:improvise` | 1 | Kappa Cannoneer |
-| `scripted:reselect_attack_target` | 1 | Misleading Signpost |
 | `scripted:tapped_for_colorless_mana` | 1 | Forsaken Monument |
 | `static:addTypes` | 1 | Graaz, Unstoppable Juggernaut |
 | `static:attackTax` | 1 | Propaganda |
@@ -896,6 +862,7 @@ Implementation: needed (replacement:would_enter, zone:hand, cost:discard)
 | `step:add_mana` | 1 | Forsaken Monument |
 | `step:look_top` | 1 | Adaptive Omnitool |
 | `step:repeat_for_each` | 1 | Steel Overseer |
+| `step:reselect_attack_target` | 1 | Misleading Signpost |
 | `step:reveal` | 1 | Adaptive Omnitool |
 | `step:scry` | 1 | Mazemind Tome |
 | `timing` | 1 | Steel Hellkite |

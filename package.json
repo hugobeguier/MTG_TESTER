@@ -8,8 +8,6 @@
     "start": "next start",
     "lint": "next lint",
     "cards:import": "node scripts/import-commander-cards.mjs",
-    "cards:parse": "node scripts/parse-cards.mjs",
-    "cards:override": "node scripts/override-card.mjs",
     "xmage:ingest": "node scripts/ingest-xmage-cards.mjs",
     "bench:agents": "node scripts/agent-bench.mjs",
     "agent:mistakes": "vite-node -c vitest.config.ts scripts/agent-mistakes.ts --",
@@ -21,6 +19,8 @@
     "kernel:check-copies": "vite-node -c vitest.config.ts scripts/check-kernel-copies.ts",
     "kernel:observe": "vite-node -c vitest.config.ts scripts/kernel-observer.ts --",
     "kernel:observe-replay": "vite-node -c vitest.config.ts scripts/kernel-observe-replay.ts --",
+    "kernel:readiness": "vite-node -c vitest.config.ts scripts/kernel-readiness.ts --",
+    "unresolved:report": "vite-node -c vitest.config.ts scripts/unresolved-report.ts --",
     "kernel:overview": "vite-node -c vitest.config.ts scripts/gen-kernel-overview.ts",
     "audit:deck-cards": "vite-node -c vitest.config.ts scripts/deck-card-audit.ts",
     "audit:abilities": "vite-node -c vitest.config.ts scripts/ability-audit.ts --"

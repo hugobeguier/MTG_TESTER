@@ -5,13 +5,13 @@
 //   stack      pendingAction, stackActions, stackStore (useStackState: the single owner of stack/pending/passes/prioritySeatId/activeSeatId; its ref.current is always current), priority passes/stops, stackFeed, resolve-beat and ability-resolver refs, cast re-entrancy guard
 //   mana       manaPools, copyMana, manaContributions, restrictedManaBatches, manaChoice, lastCastManaContributors
 //   choices    pendingRuleChoice, libraryLook, block/myriad/basic-land prompts, mulligan state, pendingOrderedTriggerResume, per-card "already asked" refs
-//   agent      agentThinking/Reasoning, de-dupe refs, stated plans, rulesAdvisorPending
+//   agent      agentThinking/Reasoning, de-dupe refs, stated plans
 //   turn       per-turn refs (land plays, spells cast, ...), processed-batch refs for the trigger effects, token-art caches
 // GameContext = that + `late`: an object AppFlow() fills with every sub-hook's returned handlers AFTER all hooks ran. A hook calls a handler that
 // lives in another hook via lateFn(ctx, "name"): a thin forwarder resolved at call time, so cycles between hooks are fine and each call still lands
 // on the functions of the render the caller closed over (hooks run every render, ctx is rebuilt every render).
 import { type AgentReasoning, type CardImageUris, type GameSession, type ManaContribution, type ManaPool, type RestrictedManaBatch, type VisibleCard } from "@/lib/types";
-import { MAX_SESSION_EVENTS, loadRuleWorkflowCacheOnce } from "@/lib/agentRuntime";
+import { MAX_SESSION_EVENTS } from "@/lib/agentRuntime";
 import { type PendingAction, type PendingRuleChoice } from "@/engine/types";
 import { spellCardIdsOnStack } from "@/lib/stackedCards";
 import { type StackFeedEntry } from "@/components/ThreeGameTable";
@@ -37,7 +37,7 @@ import type { useChoicePrompts } from "./useChoicePrompts";
 import type { useAgentDriver } from "./useAgentDriver";
 import type { useGameActions } from "./useGameActions";
 import { hostHumanSeat } from "@/lib/multiplayer/seatMap";
-import type { useRulesAdvisor } from "./useRulesAdvisor";
+import type { useSpellWorkflows } from "./useSpellWorkflows";
 import type { useSpecialEffects } from "./useSpecialEffects";
 import type { useSeatYield } from "./useSeatYield";
 
@@ -55,7 +55,7 @@ export type HandlerApi = ReturnType<typeof useManaUi> &
   ReturnType<typeof useChoicePrompts> &
   ReturnType<typeof useAgentDriver> &
   ReturnType<typeof useGameActions> &
-  ReturnType<typeof useRulesAdvisor> &
+  ReturnType<typeof useSpellWorkflows> &
   ReturnType<typeof useSpecialEffects> &
   ReturnType<typeof useSeatYield>;
 type GameState = ReturnType<typeof useGameState>;
@@ -85,12 +85,6 @@ export function useGameState(initialSession: GameSession, options: { emptyNonHos
       // slower all game. Newest events come first, so dropping the tail only loses the oldest history.
       return next.events.length > MAX_SESSION_EVENTS ? { ...next, events: next.events.slice(0, MAX_SESSION_EVENTS) } : next;
     });
-  }, []);
-  // One-time load of whatever rule-workflow classifications persisted from earlier sessions —
-  // localStorage isn't available during SSR, so this has to happen client-side on mount rather than
-  // at module init time.
-  useEffect(() => {
-    loadRuleWorkflowCacheOnce();
   }, []);
   const stackStore = useStackState({ activeSeatId: initialSession.activePlayerId ?? initialSession.seats[1]?.id, prioritySeatId: initialSession.activePlayerId ?? initialSession.seats[1]?.id });
   const { setPending: setPendingAction, setPasses: setPriorityPasses, setPrioritySeatId, setActiveSeatId } = stackStore;
@@ -165,20 +159,6 @@ export function useGameState(initialSession: GameSession, options: { emptyNonHos
   // a freshly started game's action log suddenly containing a second "Created a 4-player Commander
   // session..." entry and every hand changing out from under the player mid-mulligan.
   const [gameStarting, setGameStarting] = useState(false);
-  // Count of consultRulesAdvisor calls currently awaiting their fetch (0 = none in flight). This is
-  // the general fix for a whole class of "trigger sometimes silently does nothing" bugs: the phase-
-  // advance timers below have always correctly waited on pendingAction/pendingRuleChoice/etc, but
-  // consultRulesAdvisor is a fire-and-forget async call that doesn't set any of those while its fetch
-  // is in flight — so a phase whose only trigger resolves purely through the Rules Advisor (rather
-  // than opening a pendingRuleChoice, like order_triggers/manual_review do) had nothing stopping the
-  // "nothing to do this phase, advance after 1100ms" timer from firing first and skipping straight
-  // past it, win or lose depending on how fast that particular round trip happened to be. Scry/
-  // surveil phase triggers were fixed by routing them around this fetch entirely (resolvePhaseScryOrSurveil),
-  // but that only helps the shapes this engine's deterministic layer already recognizes — anything
-  // that has to fall through to the Rules Advisor for a real answer is still exposed to this race.
-  // Needs to be real state (not a ref) so clearing it triggers the re-render that lets the guarded
-  // effects re-evaluate once the in-flight consult resolves.
-  const [rulesAdvisorPending, setRulesAdvisorPending] = useState(0);
   const autoValidatedDefaultDeck = useRef(false);
   const agentMainActions = useRef<Set<string>>(new Set());
   const agentDecisionRequests = useRef<Set<string>>(new Set());
@@ -318,7 +298,7 @@ export function useGameState(initialSession: GameSession, options: { emptyNonHos
     choices: { decisions, mulligans, setMulligans, keptHands, setKeptHands, keptHandsRef, mulliganReturnCardIds, setMulliganReturnCardIds, libraryLook, setLibraryLook, manualLibrarySearch, setManualLibrarySearch, pendingRuleChoice, setPendingRuleChoice, blockChoice, setBlockChoice, selectedBlockerIds, setSelectedBlockerIds, myriadSearch, setMyriadSearch, myriadTapChoice, setMyriadTapChoice, basicLandFetchSearch, setBasicLandFetchSearch, choiceMinimized, setChoiceMinimized, pendingOrderedTriggerResume, commanderZoneChoiceAsked, auraRetargetAsked },
     stack: { stackStore, pendingAction, setPendingAction, stackActions, priorityPasses, setPriorityPasses, priorityStopSettings, updatePriorityStopSettings, seatStops, setSeatStops, seatYields, setSeatYields, holdPriorityOnce, setHoldPriorityOnce, castDispatchInFlight, CAST_DISPATCH_STALE_MS, resolveBeatIds, resolveNowRef, abilityResolvers, abilityApiRef, stackFeed, setStackFeed },
     mana: { manaPools, setManaPools, copyMana, setCopyMana, manaContributions, setManaContributions, restrictedManaBatches, setRestrictedManaBatches, manaChoice, setManaChoice, lastCastManaContributors },
-    agent: { rulesAdvisorPending, setRulesAdvisorPending, agentMainActions, agentDecisionRequests, agentThinking, setAgentThinking, agentReasoning, setAgentReasoning, agentStatedPlans, agentCastAttempts, agentBannedCasts, agentDecisionInfo },
+    agent: { agentMainActions, agentDecisionRequests, agentThinking, setAgentThinking, agentReasoning, setAgentReasoning, agentStatedPlans, agentCastAttempts, agentBannedCasts, agentDecisionInfo },
     turn: { landPlaysThisTurn, spellsCastThisTurn, firstDrawThisTurn, loyaltyActivationsThisTurn, phaseTriggersChecked, cleanupDiscardChecked, cleanupRestrictedManaChecked, pendingEndTurnAfterDiscard, processedDeathBatchRef, processedEntryBatchRef, processedLeaveBatchRef, processedCombatDamageToPlayerBatchRef, processedGraveyardDepartureBatchRef, emblemWatchPrevious, tokenArtCache, tokenArtInFlight, tokenArtVersion, setTokenArtVersion, monarchDrawChecked, exileDamageChecked, lifeWatchRef, processedBlockBatchRef, processedAttackBatchRef },
   };
 }

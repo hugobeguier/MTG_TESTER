@@ -206,7 +206,7 @@ describe("living weapon (Bonehoard)", () => {
     t.ok({ type: "castSpell", player: "p1", cardId: bh });
     t.pass("p1", "p2"); // the Equipment resolves, its living-weapon trigger goes on the stack
     t.pass("p1", "p2");
-    const germ = t.state.battlefield.map((id) => t.obj(id)).find((o) => o.token?.name === "Germ")!;
+    const germ = t.state.battlefield.map((id) => t.obj(id)).find((o) => o.token?.name === "Phyrexian Germ")!;
     expect(germ).toBeDefined();
     expect(t.obj(bh).attachedTo).toBe(germ.id);
     const c = chr(t, germ.id);
@@ -219,7 +219,7 @@ describe("living weapon (Bonehoard)", () => {
     const bh = t.give("p1", "Bonehoard", "hand");
     t.ok({ type: "castSpell", player: "p1", cardId: bh });
     t.pass("p1", "p2"); t.pass("p1", "p2");
-    expect(t.state.battlefield.some((id) => t.obj(id).token?.name === "Germ")).toBe(false);
+    expect(t.state.battlefield.some((id) => t.obj(id).token?.name === "Phyrexian Germ")).toBe(false);
     expect(t.obj(bh).zone).toBe("battlefield");
     expect(t.obj(bh).attachedTo).toBeUndefined();
   });

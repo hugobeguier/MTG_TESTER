@@ -178,7 +178,7 @@ function untargetable(r: Run, id: ObjId, by: PlayerId): boolean {
 export function targetCandidates(r: Run, spec: TargetSpec, q: QCtx, selfSpell?: ObjId): string[] {
   const out: string[] = [];
   const f: ObjectFilter = spec.filter ?? {};
-  if (spec.what === "player" || spec.what === "any") for (const p of alive(r)) if (p.id === q.controller || !playerHas(r, p.id, "hexproof")) out.push(p.id);
+  if (spec.what === "player" || spec.what === "any") for (const p of alive(r)) { if (f.controller === "opponent" && p.id === q.controller) continue; /* "target opponent" */ if (f.controller === "you" && p.id !== q.controller) continue; if (p.id === q.controller || !playerHas(r, p.id, "hexproof")) out.push(p.id); }
   if (spec.what === "object" || spec.what === "any") {
     const zone = f.zone ?? ((f.types ?? []).includes("spell") ? "stack" : "battlefield");
     let ids = objectsMatching(r, { ...f, zone }, q);
@@ -315,6 +315,11 @@ function advanceDraft(r: Run, d: Draft, answerIn?: Choice): { ask: AskSpec; stag
     d.parts = a?.modes
       ? d.modeIds!.map((id) => { const o = a.modes!.options.find((x) => x.id === id)!; return { modeId: id, specs: o.targets ?? [], steps: o.steps, targets: {} } as Part; })
       : [{ specs: a?.targets ?? [], steps: a?.steps ?? [], targets: {} }];
+    // a spell whose text the draft split into several spell_effect abilities (Rishkar's Expertise, Shamanic Revelation): every one of them happens, in order, as a part of its own
+    if (d.kind === "spell" && a && !a.modes) {
+      const o = obj(r, d.sourceId);
+      for (const x of printedAbilities(r, o)) if (x.kind === "spell_effect" && x !== a && !x.modes && x.steps?.length && x.keyword?.name !== "enchant") d.parts.push({ specs: x.targets ?? [], steps: x.steps, targets: {} });
+    }
   }
 
   // ---- X (asked BEFORE the targets when a target slot depends on it: "up to X targets", "mana value X or less")
@@ -347,6 +352,8 @@ function advanceDraft(r: Run, d: Draft, answerIn?: Choice): { ask: AskSpec; stag
       // a conditional slot ("if this spell was kicked") exists only while its predicate holds when the spell is cast / the ability is put on the stack; the options chosen so far are known (castTags)
       if (spec.onlyIf && !evalPredicate(r, spec.onlyIf, { ...targetCtx(d), cast: d.cast ? { ...d.cast, paid: castTags(d, r) } : d.cast })) { part.targets[spec.id] = []; continue; }
       if (spec.id in part.targets) continue;
+      // a reflexive step ("When you do, return target ...") chooses its own target while it resolves, not now
+      if (part.steps.some((st) => st.reflexive && st.target === spec.id)) { part.targets[spec.id] = []; continue; }
       const q = targetCtx(d);
       const cands = targetCandidates(r, spec, q, d.objectId);
       if (spec.perOpponent) {
@@ -618,6 +625,13 @@ function commitDraft(r: Run, d: Draft, a: Ability | undefined): void {
     r.s.activations[k] = (r.s.activations[k] ?? 0) + 1;
   }
 
+  // "X is the greatest power among creatures you control as you cast this spell": quantities locked on cast are evaluated now and frozen into the steps
+  for (const part of d.parts ?? []) {
+    if (part.steps.some((st) => st.amountLockedOn === "cast" && st.amount !== undefined)) {
+      const q = targetCtx(d);
+      part.steps = part.steps.map((st) => (st.amountLockedOn === "cast" && st.amount !== undefined ? { ...st, amount: evalQuantity(r, st.amount as never, q) } : st));
+    }
+  }
   const item: StackItem = {
     id: `s${r.s.nextId++}`, kind: d.kind, sourceId: d.sourceId, objectId: d.objectId, controller: pid, abilityId: d.abilityId,
     parts: d.parts ?? [], x: d.x ?? 0, cast: d.cast, trigger: d.trigger,
@@ -1050,7 +1064,9 @@ function enterStep(r: Run, step: Phase, turnStart = false): void {
   if (step === "untap") {
     active.lastTurnStartTs = tick(r);
     active.landsPlayed = 0;
-    for (const id of r.s.battlefield) { const o = r.s.objects[id]; if (o.controller === active.id && o.tapped) { o.tapped = false; emit(r, { type: "untap", id }); } }
+    // Unwinding Clock: its controller's artifacts also untap during each OTHER player's untap step
+    for (const id of r.s.battlefield) { const o = r.s.objects[id]; if (o.controller !== active.id && o.tapped && chars(r, id).types.includes("artifact") && r.s.battlefield.some((cid) => r.s.objects[cid].controller === o.controller && abilitiesOf(r, r.s.objects[cid]).some((a) => a.scripted?.handler === "untap_during_each_other_players_untap_step"))) { o.tapped = false; emit(r, { type: "untap", id }); } }
+    for (const id of r.s.battlefield) { const o = r.s.objects[id]; if (o.controller === active.id && o.tapped && !chars(r, id).keywords.includes("doesn't untap during its controller's untap step")) { o.tapped = false; emit(r, { type: "untap", id }); } }
     void turnStart;
     enterStep(r, "upkeep"); return;
   }
@@ -1195,7 +1211,9 @@ function sba(r: Run): boolean {
         else o.commanderDeclined = true;
       }
     }
-    for (const id of [...r.s.battlefield]) {
+    // creatures that die TOGETHER all still see each other's replacement effects (Kalitas exiles what dies in the same combat as Kalitas): the holders of a replacement ability are checked last
+    const holdsReplacement = (id: ObjId): boolean => abilitiesOf(r, r.s.objects[id]).some((a) => a.kind === "replacement");
+    for (const id of [...r.s.battlefield].sort((a, b) => Number(holdsReplacement(a)) - Number(holdsReplacement(b)))) {
       const o = r.s.objects[id];
       if (!o || o.zone !== "battlefield") continue;
       const c = chars(r, id);
@@ -1342,10 +1360,12 @@ function scanTriggers(r: Run): void {
       if (!o) continue;
       for (const ab of abilitiesOf(r, o)) {
         if (ab.kind !== "triggered" || !ab.trigger) continue;
+        if (ab.scripted?.handler === "tapped_for_mana" && !ev.forMana) continue; // Treasure Nabber: only a tap made to pay a MANA ability counts
         if (ab.scripted?.handler === "tapped_for_colorless_mana") continue; // Forsaken Monument: not a stack trigger, mana.ts adds the extra {C} when the permanent is tapped for mana
         if (!(h.lki || (ab.zone ?? "battlefield") === o.zone || (ev.type === "cycle" && ab.zone === "hand" && o.id === ev.id))) continue;
         for (const tr of triggerAlternatives(ab.trigger)) {
           if (!SUPPORTED_TRIGGER_EVENTS.has(tr.event) || !names.includes(tr.event)) continue;
+          if (r.s.config.mirrorHeadless?.skipTriggerEvents.includes(tr.event)) { emit(r, { type: "trigger_suppressed", source: h.id, event: tr.event }); continue; }
           const q: QCtx = { controller: h.controller, source: h.id };
           const subject = tr.subject;
           let match = false;

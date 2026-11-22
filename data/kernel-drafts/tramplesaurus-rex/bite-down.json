@@ -32,9 +32,17 @@
           "id": "t2",
           "what": "object",
           "filter": {
-            "types": [
-              "creature",
-              "planeswalker"
+            "anyOf": [
+              {
+                "types": [
+                  "creature"
+                ]
+              },
+              {
+                "types": [
+                  "planeswalker"
+                ]
+              }
             ],
             "controller": "opponent"
           },

@@ -793,7 +793,11 @@ function otherUntappedLands(card: VisibleCard, seat: PlayerSeat): VisibleCard[] 
   return seat.board.battlefield.filter((other) => other.id !== card.id && !other.tapped && isLandCard(other));
 }
 
+// "{T}, Sacrifice a Food: Add one mana of any color." (Gilded Goose): the mana is paid for by sacrificing a Food the seat controls (a Food token or a Food artifact card).
+const FOOD_SACRIFICE_MANA = /{t}, sacrifice a food: add/i;
+function foodsOf(seat: PlayerSeat): VisibleCard[] { return seat.board.battlefield.filter((c) => /food/i.test(c.typeLine) && c.typeLine.toLowerCase().includes("artifact")); }
 function manaChoicesForCardRaw(card: VisibleCard, seat: PlayerSeat, allSeats?: PlayerSeat[]): ManaColor[] {
+  if (FOOD_SACRIFICE_MANA.test(effectiveManaOracleText(card))) return foodsOf(seat).length > 0 ? ["W", "U", "B", "R", "G"] : [];
   const tokenTap = tokenTapManaAbility(card);
   if (tokenTap) {
     // Needs at least one untapped token to tap, and the life (it cannot be paid down to a loss by an automatic payment).
@@ -1213,6 +1217,9 @@ function spendManaSourcesTapping(seat: PlayerSeat, sourceIds: string[], tappedFo
     const source = seat.board.battlefield.find((card) => card.id === id);
     const scalingPaid = source ? scalingPaidManaAbility(effectiveManaOracleText(source)) : undefined;
     if (!source || !scalingPaid) continue;
+    // Crypt of Agadeem-style sources also have a plain "{T}: Add {B}": when the paid ability would gain nothing (the case manaChoicesForCardRaw falls back on), only the source itself is tapped
+    const paidInUse = splitManaClausesByCost(effectiveManaOracleText(source)).free.length === 0 || (scalingPaidCount(scalingPaid, seat) - scalingPaid.generic >= 1 && otherUntappedLands(source, seat).length >= scalingPaid.generic);
+    if (!paidInUse) continue;
     for (const land of otherUntappedLands(source, seat).filter((candidate) => !sourceSet.has(candidate.id)).slice(0, scalingPaid.generic)) sourceSet.add(land.id);
   }
   // Hazel of the Rootbloom: the tokens it taps are tapped with it, and its "Pay 2 life" is charged.
@@ -1224,12 +1231,21 @@ function spendManaSourcesTapping(seat: PlayerSeat, sourceIds: string[], tappedFo
     tokenTapLife += tokenTap.life;
     for (const token of tokensTappableForMana(source, seat).filter((candidate) => !sourceSet.has(candidate.id))) sourceSet.add(token.id);
   }
+  // Gilded Goose: tapping it for mana sacrifices a Food (never charged before: the Goose just tapped)
+  const foodSet = new Set<string>();
+  for (const id of [...sourceIds]) {
+    const source = seat.board.battlefield.find((card) => card.id === id);
+    if (!source || !FOOD_SACRIFICE_MANA.test(effectiveManaOracleText(source))) continue;
+    const food = foodsOf(seat).find((f) => !sourceSet.has(f.id) && !foodSet.has(f.id));
+    if (food) foodSet.add(food.id);
+  }
   const kept: VisibleCard[] = [];
   const sacrificed: VisibleCard[] = [];
   let painDamage = 0;
   let lifeGain = 0;
   const tokenTapLifeCost = tokenTapLife;
   for (const card of seat.board.battlefield) {
+    if (foodSet.has(card.id)) { sacrificed.push(card); continue; }
     if (!sourceSet.has(card.id)) {
       kept.push(card);
       continue;

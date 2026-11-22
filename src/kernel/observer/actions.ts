@@ -13,7 +13,7 @@ import type { Hint } from "./hints";
 
 export type Mapped =
   | { kind: "playLand"; seat: string; legacyCardId: string; /** modal double-faced land: the face the legacy engine played (its name after the play) */ face?: string }
-  | { kind: "cast"; seat: string; legacyCardId: string; x?: number; payWith: string[]; commander: boolean }
+  | { kind: "cast"; seat: string; legacyCardId: string; x?: number; payWith: string[]; commander: boolean; /** cast from the graveyard (Gravecrawler, flashback): the card's graveyard cast option is chosen */ fromGraveyard?: boolean }
   | { kind: "attack"; seat: string; attackers: Array<{ legacyId: string; target: string }> }
   | { kind: "block"; seat: string; blocks: Array<{ blocker: string; attacker: string }> }
   /** turn-based phase actions: untap / draw / combat damage, run from the state of the PREVIOUS kernel step until `target` is reached */
@@ -161,8 +161,7 @@ export function mapObserverAction(meta: ObserverMeta, s0: GameSession, s1: GameS
     const x = hasX && meta.manaPayment ? Math.max(0, Math.floor((meta.manaPayment.totalCost - (card?.manaValue ?? 0)) / Math.max(1, xSymbols))) : undefined;
     const fromHand = !!owner?.board.hand.some((c) => c.id === meta.cardId);
     if (!fromHand && t === "cast_spell" && !owner?.board.graveyard?.some((c) => c.id === meta.cardId)) return { kind: "unmapped", seat, reason: "cast from a zone other than hand/graveyard/command" };
-    if (t === "cast_spell" && !fromHand) return { kind: "unmapped", seat, reason: "cast from graveyard (flashback / permission) needs cast options" };
-    return { kind: "cast", seat, legacyCardId: meta.cardId, ...(x !== undefined ? { x } : {}), payWith: meta.manaPayment?.sourceIds ?? [], commander: t === "cast_commander" };
+    return { kind: "cast", seat, legacyCardId: meta.cardId, ...(t === "cast_spell" && !fromHand ? { fromGraveyard: true } : {}), ...(x !== undefined ? { x } : {}), payWith: meta.manaPayment?.sourceIds ?? [], commander: t === "cast_commander" };
   }
   if (t === "attack") {
     // all creatures marked attacking in s1 (the group's last state)
@@ -334,7 +333,8 @@ export function runMapped(adapt: AdaptResult, m: Mapped, ctx: EngineContext, hin
         if (isMana) payWith.push(kid);
         else if (def?.types.includes("artifact") || state.objects[kid].token?.types.includes("artifact")) improvise.push(kid);
       }
-      const err = step({ type: "castSpell", player: m.seat, cardId: id, ...(m.x !== undefined ? { x: m.x } : {}), ...(payWith.length ? { payWith } : {}), ...(improvise.length ? { improvise } : {}), autoPay: true });
+      const gOpt = m.fromGraveyard ? ctx.cards(state.objects[id].cardName)?.kernel.castOptions?.find((c) => c.from === "graveyard")?.id : undefined;
+      const err = step({ type: "castSpell", player: m.seat, cardId: id, ...(gOpt ? { option: gOpt } : {}), ...(m.x !== undefined ? { x: m.x } : {}), ...(payWith.length ? { payWith } : {}), ...(improvise.length ? { improvise } : {}), autoPay: true });
       if (err) return out({ error: err, failedAction: actions[actions.length - 1] });
       // the cast may have opened decisions (modes, targets...): settle answers them, then resolves the stack
       const e2 = settle(m.seat);

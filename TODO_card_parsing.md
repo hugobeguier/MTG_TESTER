@@ -34,7 +34,7 @@ Audit (`npm run audit:deck-cards`, `bench/coverage/deck-card-audit.md`): 12 veri
 
 ## Phase 2 - Fix the known-bad rows first
 - [ ] 11 cards with no row: parse them.
-- [ ] 25 failed: retry, or hand-write via `scripts/override-card.mjs` (`manual_override`).
+- [ ] 25 failed: retry, or write the kernel draft by hand.
 - [ ] 42 declined: decide per card whether the new schema can express them; if yes, write them by hand.
 - [ ] Sphinx's Insight as the first test case end to end (draw 2, gain 2 only if cast in main phase).
 
@@ -60,7 +60,7 @@ Audit (`npm run audit:deck-cards`, `bench/coverage/deck-card-audit.md`): 12 veri
 - [ ] Define the kernel API: `resolve(gameState, action{card, player, phase, inResponseTo}) -> {outcome, newState}`.
 - [ ] Route one deck through the kernel using only the parsed data, then widen to the rest.
 
-- [ ] Retire the Rules Advisor AI (`src/components/game/useRulesAdvisor.ts`, `/api/rules/primitive-plan` and related): the kernel replaces it. Do this per deck after that deck's golden tests pass, not before, so nothing is left with no rules source. Remove its prompts and the live-Ollama planner fallback too.
+- [x] Retire the Rules Advisor AI (done 2026-11-22, see `docs/rules-advisor-removal.md`).
 
 ## Open questions
 - Should the 30k-card catalog stay on the old schema, or be migrated lazily (only when a card enters a deck)?

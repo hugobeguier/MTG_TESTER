@@ -8,7 +8,7 @@ import { hasHexproof, hasIndestructible, hasShroud, isProtectedFrom, playerHasHe
 import { applyGenericModalEffect, applyRemovalEffect, applySpellExtraEffect, applyTargetedPumpEffect, applyZoneEffect, castTargetLegal, chooseControlTarget, chooseCounterTarget, chooseCreatureCardsFromOwnGraveyard, chooseDamageTarget, chooseGraveyardExileTarget, choosePumpTarget, chooseReanimationTarget, chooseRegrowTarget, chooseRemovalTarget, genericCostShim, genericModalModeHasLegalTarget, greatestCreaturePower, noLegalTargetEvent, parseGenericModalEffect, parseTargetedPump, removalEffectHasLegalTarget, removalModeScore, removalModeViable, resolveDynamicAmount, resolvePreChosenBattlefieldTarget, strongestControlledCreature, substituteX, zoneEffectHasLegalTarget, type GenericModalEffect, type GenericModalMode, type PumpEffect } from "@/engine/effects";
 import { chooseAuraAttachTarget } from "@/engine/etb";
 import { chooseManaSourcesForCost } from "@/engine/mana";
-import { agentPlannedCastChoices, parseEtbZoneEffect, parseSimpleLifeChange } from "@/engine/oneShotEffects";
+import { parseEtbZoneEffect, parseSimpleLifeChange } from "@/engine/oneShotEffects";
 import { isLandCard } from "@/engine/shared";
 import { applyTargetedEffect, pickTargetedEffectTarget } from "@/engine/triggers";
 import { type CastChoices, type LabeledContinuation, type LabeledSlot, type PendingAction } from "@/engine/types";
@@ -634,7 +634,7 @@ function agentGenericModeTarget(session: GameSession, seatId: string, card: Visi
 // Anything this does not recognise returns undefined and keeps its resolution-time pick.
 export function agentCastTimeRemovalChoices(session: GameSession, seatId: string, card: VisibleCard, chosenX?: number): CastChoices | undefined {
   const structure = castStructure(card, chosenX);
-  if (!structure) return card.typeLine.includes("Instant") || card.typeLine.includes("Sorcery") ? agentPlannedCastChoices(session, seatId, card) : undefined;
+  if (!structure) return undefined;
   // An agent's counterspell keeps its own flow: it counters the spell it responds to (counterTargetId), nothing is recorded here.
   if (structure.kind === "counter") return undefined;
   // An agent's Aura names its creature as it is cast (the same deterministic choice resolution used to make).

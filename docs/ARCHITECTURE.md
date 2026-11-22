@@ -46,8 +46,7 @@ Most of the engine lives, unusually, inside one 34,000-line React component file
 7. **Resolution.** When everyone passed, `resolvePendingAction` -> `resolvePendingActionNow` applies the
    effect. Which code applies it depends on the card text: dedicated parsers (`parseRemovalEffect`,
    `parseZoneEffect`, `parseSpellExtraEffects`, `parseCreateTokenSpecs`, ...) -> `applyRemovalEffect`,
-   `applyZoneEffect`, `applySpellExtraEffect`, `createTokensForSeat`, ...; unknown text falls back to the
-   LLM-backed `consultRulesAdvisor` / `consultPrimitiveActionPlanner`.
+   `applyZoneEffect`, `applySpellExtraEffect`, `createTokensForSeat`, ...; unknown text is handled by `consultRulesAdvisor` (deterministic draw/scry/surveil/search workflows only) or, failing that, not at all (the kernel is meant to cover it; the LLM Rules Advisor was removed, see `docs/rules-advisor-removal.md`).
 8. **State-based actions + triggers.** Every session update goes through the `setSession` wrapper inside
    AppFlow, which runs `checkStateBasedActions` (-> `runStateBasedActionsPass`) first. Pure functions
    that notice "a creature died / a permanent entered / combat damage hit a player" cannot queue
@@ -75,7 +74,6 @@ Most of the engine lives, unusually, inside one 34,000-line React component file
 |---|---|
 | `app/` | Next.js App Router. `page.tsx` (the game), `decks/page.tsx` (deck library), `layout.tsx`, `globals.css`. |
 | `app/api/agents/` | `action` (agent move decision), `chat` (talk to an agent about a decision), `lessons` (saved human lessons), `warmup` (preload the Ollama model). |
-| `app/api/rules/` | LLM-backed rule helpers: `check` (Rules Advisor), `primitive-plan`, `static-effect`, `parse-card`, `override-card`, `advisor-log` (diagnostic sink). |
 | `app/api/cards`, `decks`, `saves`, `session`, `ollama` | Card search/status/token art, deck build + library, save/load games, session bootstrap, Ollama health. |
 | `src/components/` | The React UI **and** (in `AppFlow.tsx`) most of the game engine. Plus ~75 `AppFlow.*.test.ts` regression tests. |
 | `src/lib/` | Parsers, AI scoring, persistence, and small rules helpers. Mostly pure functions. `src/lib/selfplay/` is the headless simulator. |
@@ -121,7 +119,7 @@ Most of the engine lives, unusually, inside one 34,000-line React component file
 | `phaseTriggers.ts`, `triggerWatchers.ts` | Phase-trigger registry ("at the beginning of ..."); who an "enters/dies" watcher watches. |
 | `targeting.ts`, `targetSpecs.ts` | `legalTargets` / `targetsStillLegal` (the shared TargetSpec model). |
 | `graveyardCasting.ts`, `graveyardAbilities.ts`, `libraryCasting.ts`, `altCosts.ts`, `cycling.ts`, `undercity.ts` | Cast-from-elsewhere permissions, alt costs, cycling, the Undercity dungeon for initiative. |
-| `primitiveActionPlan.ts`, `rulesAdvisor.ts`, `xmageGrounding.ts`, `xmageBridge.ts` | LLM fallbacks (section 7) and the XMage lookup/bridge stubs. |
+| `primitiveActionPlan.ts`, `rulesAdvisor.ts`, `xmageGrounding.ts`, `xmageBridge.ts` | the shared primitive-step schema, deterministic spell workflows (`deterministicRuleWorkflow`) and the XMage lookup/bridge stubs. |
 
 **AI decision-making**
 
@@ -144,7 +142,6 @@ action), `anomalies.ts`, `mistakes.ts` + `mistakeScenarios.ts` (wasteful-play de
 | Script | `npm run` | Purpose |
 |---|---|---|
 | `import-commander-cards.mjs` | `cards:import` | Build `data/commander-cards.json` from Scryfall data. |
-| `parse-cards.mjs`, `override-card.mjs` | `cards:parse`, `cards:override` | Bulk LLM card parse into `parsed_cards`; manual correction. Needs dev server. |
 | `ingest-xmage-cards.mjs` | `xmage:ingest` | Index XMage Java card files into the `xmage_cards` table. |
 | `self-play.ts` | `selfplay` | Headless games, rules-integrity audit after every action. |
 | `agent-mistakes.ts` | `agent:mistakes` | Self-play + wasteful-play report to `bench/mistakes/`. |
@@ -433,23 +430,14 @@ in the new module, `export { fn } from "@/engine/..."` (or import and re-export)
 * **Deterministic-first**: house pattern. Every card-text shape has a hand-written parser that returns
   structured data or `undefined` ("decline rather than guess"). Only if all decline does the LLM get a
   turn.
-* **Rules Advisor** (`src/lib/rulesAdvisor.ts`, `/api/rules/check`, `consultRulesAdvisor`): LLM
-  translates an unrecognised card text + event into a `RuleWorkflow` (a short list of steps like draw,
-  scry, search), which `applyRuleWorkflow` executes. Results are cached per card/event
-  (`ruleWorkflowCacheKey`, localStorage `mtg-rule-workflow-cache-v3`, plus `prewarmRuleWorkflowCache`).
-  `shouldConsultRulesAdvisor` is a keyword pre-gate; if it says no, the planner below is used instead.
-* **Primitive action planner** (`src/lib/primitiveActionPlan.ts`, `consultPrimitiveActionPlanner`,
-  `applyPrimitiveActionPlan`): last-resort LLM translator into primitive steps (draw, destroy, sacrifice,
-  move zone). Broader than the Rules Advisor.
-* **Static effect interpreter** (`/api/rules/static-effect`, `consultStaticEffectInterpreter`): LLM reads
-  an unrecognised static ability (e.g. attack restrictions) and returns an `InterpretedEffect`.
+* **Spell workflows** (`src/lib/rulesAdvisor.ts` `deterministicRuleWorkflow`, `useSpellWorkflows.ts` `consultRulesAdvisor`): deterministic classifier that turns draw/scry/surveil/search card text + event into a `RuleWorkflow`, which `applyRuleWorkflow` executes. `shouldConsultRulesAdvisor` is a keyword pre-gate. (The names are legacy: the LLM Rules Advisor, planner and static-effect interpreter were removed, see `docs/rules-advisor-removal.md`.)
+* **Primitive step schema** (`src/lib/primitiveActionPlan.ts`, `applyPrimitiveActionPlan`): flat step vocabulary shared by the legacy step executor, `parsed_cards` and the kernel capability checks. No LLM produces it any more.
 * **XMage reference corpus**: `data/xmage-source/` holds the Java card implementations from the XMage
   project; `scripts/ingest-xmage-cards.mjs` indexes them into the `xmage_cards` table
   (`src/lib/cardDb.ts`); `src/lib/xmageGrounding.ts` looks up a card's XMage code so the LLM fallbacks are
-  shown a reference implementation. Static reference only - nothing runs XMage. (`xmageBridge.ts` /
+  shown a reference implementation (the LLM fallbacks are gone; the corpus is only a static reference now). Static reference only - nothing runs XMage. (`xmageBridge.ts` /
   `session.xmage` describe an optional external bridge, see `docs/xmage-bridge.md`; it is a stub.)
-* **parsed_cards**: SQLite cache of offline LLM card parses (`scripts/parse-cards.mjs`,
-  `cardParser.ts`); `override-card` writes protected `manual_override` rows.
+* **parsed_cards**: SQLite table of earlier offline LLM card parses (`cardParser.ts` schema, `cardDb.ts`); kept as read-only data for the kernel, nothing writes it any more.
 * **abilityAudit** (`src/components/abilityAudit.ts`, `npm run audit:abilities`): strict per-card
   report of which engine subsystem handles each activated ability / granted ability / ward cost, flagging
   "unmodelled" ones. Triggered abilities are not yet covered.

@@ -5,6 +5,7 @@ import type { GameSession } from "../../lib/types";
 import type { EngineContext } from "../engine/types";
 import { createEngine } from "../engine";
 import { compareIntent } from "./compare";
+import { classifyAction } from "./knownLegacy";
 import type { DraftLookup } from "./draftLookup";
 import { Aggregate } from "./report";
 import type { Diff, ObserverMeta, StepOutcome } from "./types";
@@ -102,6 +103,14 @@ export class KernelObserver {
       kept.push(d);
     }
     outcome.diffs = kept;
+    // what the legacy engine said happened during this action (its event log delta, oldest first): the first thing to read when classifying a diff
+    if (kept.length && kept.some((d) => d.category.startsWith("state_mismatch") || d.category === "kernel_rejected_legal_action")) {
+      const seen = new Set(s0.events.map((e) => e.id));
+      const delta = s1.events.filter((e) => !seen.has(e.id)).map((e) => e.message.slice(0, 220)).reverse().slice(-14);
+      const boards = Object.fromEntries(s0.seats.map((st) => [st.id, st.board.battlefield.map((c) => c.name)]));
+      kept[0].context = { ...(kept[0].context ?? {}), ...(delta.length ? { legacyLog: delta } : {}), boardBefore: boards };
+    }
+    if (outcome.kind === "disagree") { const rule = classifyAction(kept); if (rule) { outcome.knownLegacy = rule.id; for (const d of kept) d.knownLegacy = rule.id; } }
     this.aggregate.addOutcome(outcome);
     for (const d of kept) { this.diffCount += 1; this.aggregate.addDiff(d); this.safeSink(d); }
     if (this.keepOutcomes) this.outcomes.push(outcome);

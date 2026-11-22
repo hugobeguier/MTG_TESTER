@@ -62,4 +62,36 @@ describe("Crypt of Agadeem: {2}, {T}: Add {B} for each black creature card in yo
     expect(manaChoicesForCard(crypt, s, [s]).join("")).toBe("B");
     expect(manaProducedBy(crypt, s)).toBe(1);
   });
+  it("tapped for its plain {T}: Add {B} (paid ability not worth it), it taps ONLY itself, not two other lands", () => {
+    const crypt = real("Crypt of Agadeem", "cr");
+    const lands = [real("Swamp", "s1"), real("Swamp", "s2")];
+    const s = seat("a", [crypt, ...lands], { board: { hand: [], battlefield: [crypt, ...lands], graveyard: [dead("g1", ["B"])] } });
+    const spent = spendManaSources(s, ["cr"]);
+    expect(spent.board.battlefield.filter((c) => c.tapped).map((c) => c.id)).toEqual(["cr"]);
+  });
+  it("tapped for the paid ability (enough black creature cards), it also taps the two lands that pay its {2}", () => {
+    const crypt = real("Crypt of Agadeem", "cr");
+    const lands = [real("Swamp", "s1"), real("Swamp", "s2"), real("Swamp", "s3")];
+    const gy = [dead("g1", ["B"]), dead("g2", ["B"]), dead("g3", ["B"]), dead("g4", ["B"])];
+    const s = seat("a", [crypt, ...lands], { board: { hand: [], battlefield: [crypt, ...lands], graveyard: gy } });
+    const spent = spendManaSources(s, ["cr"]);
+    expect(spent.board.battlefield.filter((c) => c.tapped)).toHaveLength(3);
+  });
+});
+
+describe("Gilded Goose: {T}, Sacrifice a Food: Add one mana of any color.", () => {
+  const food = (id: string) => real("Forest", id, { name: "Food Token", typeLine: "Artifact — Food", token: true, oracleText: "{2}, {T}, Sacrifice this artifact: You gain 3 life." });
+  it("makes no mana without a Food to sacrifice", () => {
+    const goose = real("Gilded Goose", "gg");
+    const s = seat("a", [goose]);
+    expect(manaChoicesForCard(goose, s, [s])).toEqual([]);
+  });
+  it("with a Food it makes mana, and paying with it actually sacrifices the Food (it used to just tap the Goose)", () => {
+    const goose = real("Gilded Goose", "gg");
+    const s = seat("a", [goose, food("f1")]);
+    expect(manaChoicesForCard(goose, s, [s]).length).toBe(5);
+    const spent = spendManaSources(s, ["gg"]);
+    expect(spent.board.battlefield.map((c) => c.id)).toEqual(["gg"]);
+    expect(spent.board.battlefield[0].tapped).toBe(true);
+  });
 });

@@ -14,7 +14,7 @@
 
 import type { Ability, Cost, ObjectFilter, Quantity, StaticSpec } from "../schema";
 import { baseChars, obj, printedAbilities, tryObj, Unsupported, type Chars, type Run } from "./core";
-import { evalPredicate, evalQuantity, matchesFilter, objectsMatching } from "./query";
+import { evalPredicate, evalQuantity, matchesFilter, objectsMatching, resolveObjs } from "./query";
 import type { ContinuousEffect, GameObject, ObjId, PlayerId } from "./types";
 
 export interface StaticSrc { id: ObjId; ability: Ability; spec: StaticSpec; ts: number; controller: PlayerId }
@@ -135,7 +135,7 @@ const L = { types: 4, colors: 5, abilities: 6, cda: 7.1, base: 7.2, pump: 7.3 };
 
 /** Which layer one StaticSpec modifier belongs to (null = not a characteristic: handled by other queries). */
 function layerOf(m: Modify, spec: StaticSpec): number | null {
-  if ("addTypes" in m || "setTypes" in m) return L.types;
+  if ("addTypes" in m || "setTypes" in m || "copySubtypesOf" in m) return L.types;
   if ("setColors" in m) return L.colors;
   if ("lose" in m && losesType(m.lose)) return L.types;
   if ("grant" in m || "lose" in m || "grantAbility" in m) return L.abilities;
@@ -148,6 +148,11 @@ function applyModify(r: Run, s: StaticSrc, m: Modify, c: Chars): void {
   const q = qctx(s);
   if ("addTypes" in m) m.addTypes.forEach((t) => addType(c, t));
   else if ("setTypes" in m) setTypes(c, m.setTypes);
+  else if ("copySubtypesOf" in m) {
+    // Duplicant: the creature types of the LAST card exiled with it replace its own ("It's still a Shapeshifter": that type stays)
+    const from = resolveObjs(r, String(m.copySubtypesOf), q).map((id) => tryObj(r, id)).filter((x): x is GameObject => !!x).pop();
+    if (from) { const keep = c.subtypes.filter((t) => t.toLowerCase() === "shapeshifter"); c.subtypes = [...keep]; for (const t of baseChars(r, from).subtypes) if (!c.subtypes.includes(t)) c.subtypes.push(t); }
+  }
   else if ("setColors" in m) c.colors = [...m.setColors];
   else if ("grant" in m) grantKeyword(c, m.grant);
   else if ("grantAbility" in m) { const ga = m.grantAbility as Ability; const gid = `ga:${s.id}:${ga.id ?? "x"}`; if (!c.abilities.some((x) => x.id === gid)) c.abilities = [...c.abilities, { ...ga, id: gid }]; }

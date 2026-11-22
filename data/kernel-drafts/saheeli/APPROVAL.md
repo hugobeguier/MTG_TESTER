@@ -681,17 +681,17 @@ Re-rendered plain English:
 
 ```
 Mirrorworks [draft]
-  [a1] triggered [needed: needs trigger:subject, step:copy, field:copy.optionalCost, field:copy.token, predicate:paid_additional_cost]
+  [a1] triggered [needed: needs trigger:subject, step:copy, field:copy.optionalCost, field:copy.srcs, field:copy.token]
     Oracle: Whenever another nontoken artifact you control enters, you may pay {2}. If you do, create a token that's a copy of that artifact.
     Trigger: Whenever a nontoken another artifact you control enters
-    Effect: IF {2} was paid: you may copy that object.
+    Effect: Copy that object.
 ```
 
 Player prompts:
 
 - Mirrorworks: optional: Do you want to copy that object?
 
-Implementation: needed (trigger:subject, step:copy, field:copy.optionalCost, field:copy.token, predicate:paid_additional_cost)
+Implementation: needed (trigger:subject, step:copy, field:copy.optionalCost, field:copy.srcs, field:copy.token)
 
 Questions for you:
 
@@ -749,17 +749,17 @@ Myr Battlesphere [draft]
     Oracle: When this creature enters, create four 1/1 colorless Myr artifact creature tokens.
     Trigger: Whenever Myr Battlesphere enters
     Effect: Create four 1/1 colorless Myr artifact creature tokens.
-  [a2] triggered [needed: needs step:choose, field:choose.count, field:choose.from, field:choose.saveAs, quantity:X, predicate:paid_additional_cost]
+  [a2] triggered [needed: needs quantity:step_result, step:choose, field:choose.anyNumber, field:choose.from, field:choose.saveAs]
     Oracle: Whenever this creature attacks, you may tap X untapped Myr you control. If you do, this creature gets +X/+0 until end of turn and deals X damage to the player or planeswalker it's attacking.
     Trigger: Whenever Myr Battlesphere attacks
-    Effect: You may choose X untapped Myrs you control. Then, tap the chosen object. Then, IF the additional cost (tap X untapped Myr) was paid: Myr Battlesphere gets +X/+0 until end of turn. Then, IF the additional cost (tap X untapped Myr) was paid: deal X damage to the player or planeswalker it's attacking.
+    Effect: Choose an untapped Myr you control. Then, tap the chosen object. Then, Myr Battlesphere gets +the number affected this way (pick)/+0 until end of turn. Then, deal the number affected this way (pick) damage to the player or planeswalker it's attacking.
 ```
 
 Player prompts:
 
-- Myr Battlesphere: optional: Do you want to choose X untapped Myrs you control?
+- Myr Battlesphere: tap Myr: Choose any number of untapped Myr you control to tap (X = how many).
 
-Implementation: needed (step:choose, field:choose.count, field:choose.from, field:choose.saveAs, quantity:X, predicate:paid_additional_cost)
+Implementation: needed (quantity:step_result, step:choose, field:choose.anyNumber, field:choose.from, field:choose.saveAs)
 
 ### Padeem, Consul of Innovation
 
@@ -1479,13 +1479,13 @@ Questions for you:
 | `cost_reduction` | 5 | Ancient Stone Idol; Blasphemous Act; Emry, Lurker of the Loch; Reality Heist; Thought Monitor |
 | `field:choose.from` | 5 | Brudiclad, Telchor Engineer; Izzet Boilerworks; Myr Battlesphere; Reality Heist; Saheeli's Directive |
 | `field:choose.saveAs` | 5 | Brudiclad, Telchor Engineer; Izzet Boilerworks; Myr Battlesphere; Reality Heist; Saheeli's Directive |
-| `quantity:X` | 5 | Delete; Finale of Revelation; Myr Battlesphere; Pull from Tomorrow; Saheeli's Directive |
 | `step:choose` | 5 | Brudiclad, Telchor Engineer; Izzet Boilerworks; Myr Battlesphere; Reality Heist; Saheeli's Directive |
 | `cost:loyalty` | 4 | Saheeli, the Gifted; Daretti, Scrap Savant; Saheeli, Sublime Artificer; Tezzeret, Artifice Master |
-| `field:choose.count` | 4 | Brudiclad, Telchor Engineer; Izzet Boilerworks; Myr Battlesphere; Reality Heist |
 | `field:copy.token` | 4 | Saheeli, the Gifted; Mimic Vat; Mirrorworks; Saheeli's Artistry |
 | `predicate:step_done` | 4 | Brudiclad, Telchor Engineer; Daretti, Scrap Savant; Frostboil Snarl; Mimic Vat |
+| `quantity:X` | 4 | Delete; Finale of Revelation; Pull from Tomorrow; Saheeli's Directive |
 | `cost:sacrifice` | 3 | Buried Ruin; Hedron Archive; Idol of Oblivion |
+| `field:choose.count` | 3 | Brudiclad, Telchor Engineer; Izzet Boilerworks; Reality Heist |
 | `field:if_else.if` | 3 | Chaos Warp; Finale of Revelation; Tezzeret, Artifice Master |
 | `field:if_else.then` | 3 | Chaos Warp; Finale of Revelation; Tezzeret, Artifice Master |
 | `step:if_else` | 3 | Chaos Warp; Finale of Revelation; Tezzeret, Artifice Master |
@@ -1494,6 +1494,7 @@ Questions for you:
 | `cost:tapOther` | 2 | Shimmer Dragon; Whirler Rogue |
 | `field:attach.to` | 2 | Skullclamp; Swiftfoot Boots |
 | `field:attach.what` | 2 | Skullclamp; Swiftfoot Boots |
+| `field:choose.anyNumber` | 2 | Myr Battlesphere; Saheeli's Directive |
 | `field:choose.fromLooked` | 2 | Reality Heist; Saheeli's Directive |
 | `field:copy.exceptAddTypes` | 2 | Saheeli, Sublime Artificer; Saheeli's Artistry |
 | `field:copy.exileAt` | 2 | Saheeli, the Gifted; Mimic Vat |
@@ -1512,7 +1513,6 @@ Questions for you:
 | `filter:isCommander` | 2 | Loyal Apprentice; Loyal Drake |
 | `keyword:improvise` | 2 | Reverse Engineer; Saheeli's Directive |
 | `predicate:not` | 2 | Frostboil Snarl; Thopter Assembly |
-| `predicate:paid_additional_cost` | 2 | Mirrorworks; Myr Battlesphere |
 | `scripted:can_be_your_commander` | 2 | Saheeli, the Gifted; Daretti, Scrap Savant |
 | `scripted:improvise` | 2 | Reverse Engineer; Saheeli's Directive |
 | `scripted:next_spell_gains_keyword` | 2 | Saheeli, the Gifted; Archway of Innovation |
@@ -1527,7 +1527,6 @@ Questions for you:
 | `duration:until_end_of_your_next_turn` | 1 | Treasure Nabber |
 | `field:add_counters.on` | 1 | Mind Unbound |
 | `field:add_mana.produces` | 1 | Forsaken Monument |
-| `field:choose.anyNumber` | 1 | Saheeli's Directive |
 | `field:choose.upTo` | 1 | Reality Heist |
 | `field:copy.all` | 1 | Brudiclad, Telchor Engineer |
 | `field:copy.becomes` | 1 | Brudiclad, Telchor Engineer |
@@ -1535,6 +1534,7 @@ Questions for you:
 | `field:copy.excludeChosen` | 1 | Brudiclad, Telchor Engineer |
 | `field:copy.filter` | 1 | Brudiclad, Telchor Engineer |
 | `field:copy.optionalCost` | 1 | Mirrorworks |
+| `field:copy.srcs` | 1 | Mirrorworks |
 | `field:create_tokens.who` | 1 | Swan Song |
 | `field:damage_target.who` | 1 | Delete |
 | `field:destroy_all.filter` | 1 | Steel Hellkite |
@@ -1568,6 +1568,7 @@ Questions for you:
 | `quantity:counters` | 1 | Mind Unbound |
 | `quantity:event_amount` | 1 | Daretti, Scrap Savant |
 | `quantity:math` | 1 | Crackle with Power |
+| `quantity:step_result` | 1 | Myr Battlesphere |
 | `ref:created` | 1 | Loyal Apprentice |
 | `ref:linked_exile` | 1 | Mimic Vat |
 | `scripted:copy_spell_or_ability_when_mana_spent` | 1 | Sunken Palace |

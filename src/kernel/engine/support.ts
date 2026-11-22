@@ -17,7 +17,7 @@ import { SIMPLE_TRIGGER_EVENTS } from "./triggers6";
 
 const PASSIVE_KEYWORDS = new Set([
   "flying", "haste", "vigilance", "trample", "first strike", "double strike", "deathtouch", "lifelink", "reach", "menace",
-  "indestructible", "hexproof", "flash", "defender", "shroud", "fear", "intimidate", "unblockable", "skulk", "shadow", "landwalk", "changeling", "saga",
+  "indestructible", "hexproof", "flash", "defender", "shroud", "fear", "intimidate", "unblockable", "skulk", "shadow", "can't be blocked by more than one creature", "doesn't untap during its controller's untap step", "landwalk", "changeling", "saga",
   // "enchant <filter>": the Aura's target is the spell's own target (resolve.ts attaches it on resolution, SBA 704.5m)
   "enchant",
   // label-only keywords: the faces / rules they name are modelled by the abilities themselves
@@ -36,7 +36,7 @@ const COMBAT_TRIGGER_EVENTS = new Set(["attack", "block", "deals_damage", "deals
 export const SUPPORTED_TRIGGER_EVENTS = new Set(["etb", "dies", "cast", "begin_step", "cycle", "leaves", "becomes_target", "unspecified", ...COMBAT_TRIGGER_EVENTS, ...SIMPLE_TRIGGER_EVENTS]);
 const SUPPORTED_BEGIN_STEPS = new Set(["upkeep", "end_step", "draw", "beginning_of_combat", "declare_attackers", "declare_blockers", "end_of_combat", "precombat_main", "postcombat_main"]);
 /** Scripted markers the engine implements (resolve.ts). A scripted ability is otherwise reported as unsupported. */
-export const SCRIPTED_HANDLERS: ReadonlySet<string> = new Set(["roll_d20_result_is_X", "storm", "become_monarch", "crew", "can_be_your_commander", "next_spell_gains_keyword", "next_spell_this_turn_cant_be_countered", "improvise", "tapped_for_colorless_mana"]);
+export const SCRIPTED_HANDLERS: ReadonlySet<string> = new Set(["roll_d20_result_is_X", "storm", "become_monarch", "crew", "can_be_your_commander", "next_spell_gains_keyword", "next_spell_this_turn_cant_be_countered", "improvise", "tapped_for_colorless_mana", "mana_colors_an_opponent_land_could_produce", "tapped_for_mana", "untap_during_each_other_players_untap_step"]);
 const PLAIN_COST = /^(\{(\d+|[WUBRGC])\})+$/;
 
 const add = (out: string[], v: string) => { if (!out.includes(v)) out.push(v); };
@@ -101,6 +101,7 @@ function checkStep(s: Step, out: string[]): void {
   }
   if (s.kind === "add_counters" && s.counterPT) { const k = String(s.counterKind), pt = s.counterPT as number[]; if (!((k === "+1/+1" && pt[0] === 1 && pt[1] === 1) || (k === "-1/-1" && pt[0] === -1 && pt[1] === -1))) add(out, "field:add_counters.counterPT"); }
   if (s.unlessPay && !unlessPaySupported(s.unlessPay as unknown as UnlessPay)) add(out, "step:unless_pay");
+  if (s.optionalCost && !unlessPaySupported({ payer: "you", cost: s.optionalCost as never })) add(out, "step:optional_cost");
   if (s.kind === "choose") {
     if (s.choice !== undefined && !CHOOSE_CHOICES.includes(s.choice)) add(out, `field:choose.choice=${s.choice}`);
     if (s.choice === undefined && !s.from && !s.fromLooked && !s.fromRevealed && !s.fromMilled) add(out, "field:choose.from");
@@ -138,6 +139,7 @@ function checkStep(s: Step, out: string[]): void {
     if (s.appliesTo && s.appliesTo !== "next_spell_cast") add(out, "field:grant_effect.appliesTo");
     if (s.appliesTo === "next_spell_cast") for (const m of (s.modify ?? []) as Array<Record<string, unknown>>) if (!(typeof m.grant === "string" || m.cant === "be_countered")) add(out, "field:grant_effect.modify");
   }
+  if (s.kind === "grant_effect" && (s.target || s.filter)) for (const m of (s.modify ?? []) as Array<Record<string, unknown>>) if (m.cant !== undefined && m.cant !== "be_blocked") add(out, `field:grant_effect.modify.cant=${String(m.cant)}`);
   if (s.kind === "permission_to_play") {
     const ref = (s.what ?? s.target) as string | undefined;
     if (!ref) add(out, "field:permission_to_play.what");
@@ -146,12 +148,11 @@ function checkStep(s: Step, out: string[]): void {
     const sp = (s.produces ?? []) as Array<Record<string, unknown>>;
     if (!sp.length || sp.some((x) => !(typeof x.anyColor === "number" || x.anyColorAmount !== undefined || typeof x.chosenColor === "number" || (typeof x.colors === "string" && /^(\{[WUBRGC]\})+$/.test(x.colors))))) add(out, "field:add_mana.produces");
   }
-  // "amount fixed as you cast it": X is already fixed at cast time; any other quantity would have to be evaluated then (not modelled)
-  if (s.amountLockedOn && ["amount", "power", "toughness"].some((k) => s[k] !== undefined && JSON.stringify(s[k]).replace(/"ref":"X"/g, "").includes('"ref"'))) add(out, "field:amountLockedOn");
+  // amountLockedOn "cast": resolve.ts evaluates the quantity when the spell is cast and freezes it into the steps
   if (s.duration !== undefined && s.duration !== "until_end_of_turn") {
     const d = s.duration;
     const playerGrant = s.kind === "grant_effect" && !s.target && !s.filter;
-    const ok = (s.kind === "exile_target" && d === "while_source_on_battlefield") || (s.kind === "permission_to_play" && d === "instant" && ((s.what ?? s.target) === "linked_exile")) || ((s.kind === "permission_to_play" || s.kind === "gain_control") && typeof d === "string" && SUPPORTED_DURABLE_DURATIONS.has(d))
+    const ok = (s.kind === "exile_target" && d === "while_source_on_battlefield") || (s.kind === "permission_to_play" && d === "instant") || ((s.kind === "permission_to_play" || s.kind === "gain_control") && typeof d === "string" && SUPPORTED_DURABLE_DURATIONS.has(d))
       || (playerGrant && typeof d === "string" && (SUPPORTED_DURABLE_DURATIONS.has(d) || d === "instant"))
       || (playerGrant && typeof d === "object" && "until" in d && String(d.until) === "unspecified");
     if (!ok) add(out, `duration:${typeof d === "string" ? d : Object.keys(d)[0]}`);
@@ -193,7 +194,7 @@ function checkStatic(a: Ability, out: string[]): void {
     if ("grantAbility" in m) { abilityUnsupported(m.grantAbility as Ability).forEach((n) => add(out, n)); continue; }
     if ("pt" in m) { checkQuantity(m.pt.power, out); checkQuantity(m.pt.toughness, out); }
     else if ("setBasePT" in m) { checkQuantity(m.setBasePT.power, out); checkQuantity(m.setBasePT.toughness, out); }
-    else if ("addTypes" in m || "setTypes" in m || "setColors" in m) { /* layers 4 / 5 */ }
+    else if ("addTypes" in m || "setTypes" in m || "setColors" in m || "copySubtypesOf" in m) { /* layers 4 / 5 */ }
     else if ("grant" in m) { if (!isPassive(m.grant) && m.grant.toLowerCase() !== "goaded") add(out, `static:grant:${m.grant}`); }
     else if ("lose" in m) { if (m.lose.toLowerCase() !== "all abilities" && !isPassive(m.lose) && !["artifact", "creature", "enchantment", "land", "planeswalker", "battle"].includes(m.lose.toLowerCase())) add(out, `static:lose:${m.lose}`); }
     else if ("cant" in m) {
@@ -295,12 +296,13 @@ export function abilityUnsupported(a: Ability): string[] {
   // (a granted ability may carry the keyword as a bare string: Aminatou, Veil Piercer grants "miracle" to the enchantments in hand)
   const kwn = String(typeof a.keyword === "string" ? a.keyword : (a.keyword as { name?: string } | undefined)?.name ?? "").toLowerCase();
   const labelKw = a.kind === "activated" && ["crew", "cycling", "channel", "landcycling", "basic landcycling", "typecycling", "equip"].includes(kwn);
-  if (a.keyword && !PASSIVE_KEYWORDS.has(kwn.replace(/_/g, " ")) && !labelKw && !(a.costReduction && kwn === "affinity") && !(a.kind === "triggered" && a.trigger && (a.trigger.event === "cycle" || ["living_weapon", "storm", "ward", "hideaway", "training", "mentor", "dethrone", "survival", "exploit", "myriad"].includes(kwn)))) add(out, `keyword:${kwn || "?"}`);
+  if (a.keyword && !PASSIVE_KEYWORDS.has(kwn.replace(/_/g, " ")) && !labelKw && !(a.costReduction && kwn === "affinity") && !(a.kind === "triggered" && a.trigger && (a.trigger.event === "cycle" || ["living_weapon", "storm", "ward", "hideaway", "training", "mentor", "dethrone", "survival", "exploit", "myriad", "gift"].includes(kwn)))) add(out, `keyword:${kwn || "?"}`);
   if (a.zone && a.zone !== "battlefield" && a.kind !== "spell_effect" && !zoneSupported(a)) add(out, `zone:${a.zone}`);
   // several specs = alternatives ("Add {W} or {B}"); the engine runs them when each is a single fixed mana symbol
   // several specs = alternatives; each must be fixed symbols ("Add {W} or {B}", "Add {W}{W}, {W}{B}, or {B}{B}")
   if (a.mana && a.mana.produces.length > 1 && !a.mana.produces.every((m) => "colors" in m && /^({[WUBRGC]})+$/.test(m.colors))) add(out, "mana:multiple_specs");
   if (a.mana?.produces.some((m) => "anyColorAmount" in m)) add(out, "mana:variable_amount");
+  for (const m of a.mana?.produces ?? []) if ("conditional" in m) { checkPredicate(m.conditional.if, out); if (m.conditional.then.length !== 1 || m.conditional.else.length !== 1 || [...m.conditional.then, ...m.conditional.else].some((x) => "conditional" in x)) add(out, "mana:conditional"); }
   if (a.modes?.repeatRestriction) add(out, "modes:repeat_restriction");
   if (a.modes?.distinctTargets) add(out, "modes:distinct_targets");
   const t = a.timing;

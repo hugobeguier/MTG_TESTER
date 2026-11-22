@@ -21,21 +21,11 @@
           "kind": "copy",
           "target": "event_object",
           "token": true,
-          "optional": true,
           "optionalCost": [
             {
               "mana": "{2}"
             }
           ],
-          "src": 0,
-          "condition": {
-            "when": "on_resolution",
-            "if": {
-              "check": "paid_additional_cost",
-              "option": "{2}"
-            },
-            "src": 1
-          },
           "prompt": {
             "title": "Mirrorworks: optional",
             "instruction": "Do you want to copy that object?",
@@ -43,7 +33,11 @@
               "card": "Mirrorworks",
               "ability": "a1"
             }
-          }
+          },
+          "srcs": [
+            0,
+            1
+          ]
         }
       ],
       "implementation": "needed",
@@ -51,12 +45,22 @@
         "trigger:subject",
         "step:copy",
         "field:copy.optionalCost",
-        "field:copy.token",
-        "predicate:paid_additional_cost"
+        "field:copy.srcs",
+        "field:copy.token"
       ]
     }
   ],
   "review": {
-    "status": "draft"
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "may",
+        "reason": "the may is the step optionalCost (asked whether to pay {2})"
+      },
+      {
+        "lexeme": "if",
+        "reason": "the copy happens only if the optionalCost was paid"
+      }
+    ]
   }
 }

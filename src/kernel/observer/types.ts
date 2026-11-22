@@ -20,6 +20,8 @@ export interface DiffIntent {
 
 export interface Diff {
   category: DiffCategory;
+  /** rule id of knownLegacy.ts when this diff is a documented legacy / harness bug */
+  knownLegacy?: string;
   /** index of the game inside a batch run (0 for single games) */
   game: number;
   /** replay seed of the batch game ("--seed S" + game index); with the same decks it reproduces this diff */
@@ -56,6 +58,8 @@ export interface Diff {
 /** One observed unit: an intent the observer compared (or skipped), for the readiness statistics. */
 export interface StepOutcome {
   kind: "agree" | "disagree" | "skipped";
+  /** set when every diff of this (disagreeing) action is a documented legacy / harness bug (knownLegacy.ts): the rule id */
+  knownLegacy?: string;
   intentType: string;
   /** why a step was skipped (legacy housekeeping, no_draft, unmapped...) */
   reason?: string;

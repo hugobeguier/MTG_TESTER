@@ -31,7 +31,7 @@ code needs. Bodies were moved verbatim; each hook starts with a preamble that de
   respondWithCard, resolvePendingAction(+Now).  `game/useTriggerResolution.ts` - trigger prompts/resolution.
 * `game/useCasting.ts` - playCard + cast prompts, loyalty, commander, graveyard/exile casting.  `game/useAbilities.ts` - activated abilities, equip.
 * `game/useChoicePrompts.ts` - answers to every pendingRuleChoice kind, library-look windows.  `game/useSpecialEffects.ts` - Myriad Landscape, basic-land fetch, Lim-Dul's Vault.
-* `game/useAgentDriver.ts` - requestAgentDecision, decide*/apply* for agent seats.  `game/useRulesAdvisor.ts` - Rules Advisor / static-effect interpreter bridges.
+* `game/useAgentDriver.ts` - requestAgentDecision, decide*/apply* for agent seats.  `game/useSpellWorkflows.ts` - deterministic draw/scry/surveil/search spell workflows and the attack-tax reader.
 * `game/useGameEffects.ts` - ALL the useEffect blocks, original relative order (triggers, SBA detection, phase timers, agent scheduling).
 
 GameContext shape: `{ session, setSession, humanSeat, mode, activeSeatId, ...(flat core); stack: {stackStore, pendingAction, stackActions, priority*, stackFeed, resolve/ability refs};

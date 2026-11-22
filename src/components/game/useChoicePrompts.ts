@@ -751,7 +751,7 @@ export function useChoicePrompts(ctx: GameContext) {
       return;
     }
 
-    addEvent(`Rules choice reviewed for ${choice.sourceCardName}.`, choice.controllerSeatId, "Rules advisor");
+    addEvent(`Rules choice reviewed for ${choice.sourceCardName}.`, choice.controllerSeatId, "Rules");
     setPendingRuleChoice(undefined);
   }
 
@@ -780,7 +780,7 @@ export function useChoicePrompts(ctx: GameContext) {
   function resolveOrderedPhaseTriggers(seatId: string, triggers: Array<{ sourceCardId: string; sourceCardName: string; text: string }>) {
     const seat = session.seats.find((item) => item.id === seatId);
     if (!seat) return;
-    addEvent(`${seat.name} orders ${session.phase} triggers: ${triggers.map((trigger) => trigger.sourceCardName).join(" -> ")}.`, seatId, "Rules advisor");
+    addEvent(`${seat.name} orders ${session.phase} triggers: ${triggers.map((trigger) => trigger.sourceCardName).join(" -> ")}.`, seatId, "Rules");
     continueOrderedPhaseTriggers(seatId, triggers);
   }
 
@@ -940,7 +940,7 @@ export function useChoicePrompts(ctx: GameContext) {
       return;
     }
     if (pendingRuleChoice) {
-      addEvent(`No rule choice was made for ${ruleChoiceLabel(pendingRuleChoice)}.`, pendingRuleChoice.controllerSeatId, "Rules advisor");
+      addEvent(`No rule choice was made for ${ruleChoiceLabel(pendingRuleChoice)}.`, pendingRuleChoice.controllerSeatId, "Rules");
       // Don't let a cancelled discard-to-hand-size choice leave a stale "end the turn once this
       // resolves" flag armed for whatever the NEXT discard_to_hand_size choice turns out to be
       // (e.g. a real cleanup-step one on a future turn).
@@ -972,7 +972,7 @@ export function useChoicePrompts(ctx: GameContext) {
     // untapped battlefield sources instead, same as the agent path, and tap them on resolution.
     const payment = chooseManaSourcesForCost(seat, card, choice.miracleCost, undefined, session.seats);
     if (!payment.ok) {
-      addEvent(cannotPayMessage(seat, card, selectedManaTotal(seat, payment.sourceIds), choice.miracleCost, payment.reason), seat.id, "Rules advisor");
+      addEvent(cannotPayMessage(seat, card, selectedManaTotal(seat, payment.sourceIds), choice.miracleCost, payment.reason), seat.id, "Rules");
       setPendingRuleChoice(undefined);
       return;
     }
@@ -997,7 +997,7 @@ export function useChoicePrompts(ctx: GameContext) {
   function declineMiracleOffer() {
     const choice = pendingRuleChoice;
     if (choice?.kind === "miracle_offer") {
-      addEvent(`${session.seats.find((seat) => seat.id === choice.controllerSeatId)?.name ?? "Player"} declines to cast ${choice.sourceCardName} for its miracle cost.`, choice.controllerSeatId, "Rules advisor");
+      addEvent(`${session.seats.find((seat) => seat.id === choice.controllerSeatId)?.name ?? "Player"} declines to cast ${choice.sourceCardName} for its miracle cost.`, choice.controllerSeatId, "Rules");
     }
     setPendingRuleChoice(undefined);
   }

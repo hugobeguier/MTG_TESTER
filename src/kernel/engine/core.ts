@@ -218,6 +218,7 @@ const lc = (a: string[] | undefined) => (a ?? []).map((x) => x.toLowerCase());
 
 /** Characteristics before any continuous effect (copiable values; layers.ts applies everything else). */
 export function baseChars(r: Run, o: GameObject): Chars {
+  if (o.faceDown && o.zone === "battlefield") return { name: "", types: ["creature"], subtypes: [], supertypes: [], colors: [], mv: 0, power: 2, toughness: 2, keywords: [], abilities: [] };
   if (o.token || o.copyDef) {
     const t = (o.copyDef ?? o.token)!;
     return { name: t.name, types: lc(t.types), subtypes: [...t.subtypes], supertypes: lc(t.supertypes), colors: [...t.colors], mv: parseManaCost(t.manaCost).mv, power: t.power, toughness: t.toughness, keywords: lc(t.keywords), abilities: tokenAbilities(t) };
@@ -257,7 +258,7 @@ export function zoneList(r: Run, owner: PlayerId, zone: Zone): ObjId[] {
   return player(r, owner)[zone as "library" | "hand" | "graveyard" | "exile" | "command"];
 }
 
-export interface MoveOpts { /** battlefield only: enters showing this face ("transformed") */ face?: string; position?: "top" | "bottom"; controller?: PlayerId; tapped?: boolean; /** enters with these counters (battlefield only) */ counters?: Record<string, number> }
+export interface MoveOpts { /** battlefield only: enters face down (manifest): a 2/2 colorless creature with no name or abilities */ faceDown?: boolean; /** battlefield only: enters showing this face ("transformed") */ face?: string; position?: "top" | "bottom"; controller?: PlayerId; tapped?: boolean; /** enters with these counters (battlefield only) */ counters?: Record<string, number> }
 
 /** The one function that changes an object's zone. Replacement effects (enters tapped, would die, ...) apply first; emits zone_change plus etb / dies / leaves. */
 export function moveObject(r: Run, id: ObjId, to: Zone, opts: MoveOpts = {}): GameObject | undefined {
@@ -301,6 +302,7 @@ export function moveObject(r: Run, id: ObjId, to: Zone, opts: MoveOpts = {}): Ga
   if (to !== "battlefield" && to !== "stack") o.face = undefined; // a card in any other zone shows its front face
   if (from === "battlefield" && to === "battlefield") o.face = undefined;
   if (to === "battlefield" && opts.face) o.face = opts.face;
+  if (to === "battlefield" && opts.faceDown) o.faceDown = true;
   if (!(from === "stack" && to === "battlefield")) o.cast = undefined;
   o.timestamp = tick(r);
   if (to === "battlefield") {

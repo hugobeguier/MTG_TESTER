@@ -11,7 +11,7 @@ Reading guide: each card below shows the oracle text and what the structured JSO
 - **Birds of Paradise** (Creature — Bird): Keyword flying | {T}: add one mana of any color [needs: mana:variable]
 - **Carnage Tyrant** (Creature — Dinosaur): Carnage Tyrant can't be countered | Keyword trample | Keyword hexproof [needs: static, zone:stack]
 - **Curious Altisaur** (Creature — Dinosaur): Keyword vigilance | Keyword reach | Whenever a Dinosaur you control deals combat damage to a player: Draw a card [needs: trigger:subject]
-- **Dungrove Elder** (Creature — Treefolk): Keyword hexproof | Dungrove Elder gets +X/+X, where X is the number of Forests you control [needs: static]
+- **Dungrove Elder** (Creature — Treefolk): Keyword hexproof | Dungrove Elder has power and toughness each equal to the number of Forests you control [needs: static, static:setBasePT]
 - **Ezuri's Predation** (Sorcery): Create the number of creatures an opponent controls 4/4 green Phyrexian Beast creature tokens, then each of the tokens just created fights a different creature an opponent controls, the pairing chosen by you [needs: ref:created, quantity:count, step:fight_pairs, field:fight_pairs.against, field:fight_pairs.fighters, field:fight_pairs.pairing]
 - **Gigantosaurus** (Creature — Dinosaur):  [implemented]
 - **Hulking Raptor** (Creature — Dinosaur): Whenever Hulking Raptor becomes the target of a spell or ability: Counter that object | At the beginning of your first main phase: Add {G}{G} [needs: trigger:becomes_target, step:counter_spell, step:unless_pay, trigger:begin_step:precombat_main, step:add_mana, field:add_mana.produces]
@@ -28,7 +28,7 @@ Reading guide: each card below shows the oracle text and what the structured JSO
 - **Scavenger Grounds** (Land — Desert): {T}: add {C} | {2}, {T}, sacrifice a Desert you control: Exile all cards from each player's graveyard [needs: cost:sacrifice, field:move_card_zone.all, field:move_card_zone.from, field:move_card_zone.who]
 - **War Room** (Land): {T}: add {C} | {3}, {T}, pay life equal to the number of colors in your commanders' color identity: Draw a card [needs: cost:life]
 - **Beast Within** (Instant): [targets: target permanent] Destroy target permanent, then create a 3/3 green Beast creature token [needs: field:create_tokens.who]
-- **Bite Down** (Instant): [targets: target creature you control; target creature planeswalker an opponent controls] Target creature you control deals t1's power damage to target creature planeswalker an opponent controls [needs: quantity:stat, field:damage_target.source]
+- **Bite Down** (Instant): [targets: target creature you control; target creature or planeswalker an opponent controls] Target creature you control deals t1's power damage to target creature or planeswalker an opponent controls [needs: quantity:stat, field:damage_target.source]
 - **Challenger Troll** (Creature — Troll): Creatures with power 4 or greater you control can't be blocked by more than one creature [needs: static]
 - **Elemental Bond** (Enchantment): Whenever a creature with power 3 or greater you control enters: Draw a card [needs: trigger:subject]
 - **Elvish Mystic** (Creature — Elf Druid): {T}: add {G} [implemented]
@@ -973,6 +973,7 @@ Implementation: needed (replacement:would_enter, zone:hand, cost:discard)
 | `ref:created` | 2 | Ezuri's Predation; Tangleweave Armor |
 | `ref:iterated` | 2 | Unnatural Growth; Goreclaw, Terror of Qal Sisma |
 | `replacement:would_enter` | 2 | Mosswort Bridge; Tranquil Thicket |
+| `static:setBasePT` | 2 | Dungrove Elder; Kenrith's Transformation |
 | `step:attach` | 2 | Tangleweave Armor; Swiftfoot Boots |
 | `step:if_else` | 2 | Scavenging Ooze; Ram Through |
 | `step:look_top` | 2 | Loot, Exuberant Explorer; Mosswort Bridge |
@@ -1023,7 +1024,6 @@ Implementation: needed (replacement:would_enter, zone:hand, cost:discard)
 | `replacement:duration` | 1 | Arachnogenesis |
 | `replacement:would_deal_damage` | 1 | Arachnogenesis |
 | `static:extraLandDrops` | 1 | Loot, Exuberant Explorer |
-| `static:setBasePT` | 1 | Kenrith's Transformation |
 | `static:setColors` | 1 | Kenrith's Transformation |
 | `step:add_mana` | 1 | Hulking Raptor |
 | `step:counter_spell` | 1 | Hulking Raptor |

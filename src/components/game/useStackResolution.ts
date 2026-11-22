@@ -54,6 +54,7 @@ export function useStackResolution(ctx: GameContext) {
   const clearManaContributions = lateFn(ctx, "clearManaContributions");
   const consultRulesAdvisor = lateFn(ctx, "consultRulesAdvisor");
   const consultStaticEffectInterpreter = lateFn(ctx, "consultStaticEffectInterpreter");
+  const reportUnresolved = lateFn(ctx, "reportUnresolved");
   const humanActionBlockedByChoice = lateFn(ctx, "humanActionBlockedByChoice");
   const openCastPrompt = lateFn(ctx, "openCastPrompt");
   const payCastingCost = lateFn(ctx, "payCastingCost");
@@ -929,6 +930,8 @@ export function useStackResolution(ctx: GameContext) {
       | undefined;
     let capturedAdvisorCall: { event: "spell_resolved_to_battlefield" | "spell_resolved_to_graveyard"; seatId: string; sourceCard: VisibleCard; castTargets?: ChosenTarget[] } | undefined;
     let capturedStaticInterpreterCall: { seatId: string; card: VisibleCard } | undefined;
+    // Reported to the event log ("Couldn't resolve: ...") for every clause no deterministic parser took, whether or not the advisor consult below runs.
+    let capturedUnresolvedCall: { event: string; seatId: string; card: VisibleCard } | undefined;
     // Mana a resolving spell adds (Mana Geyser) — mana pools live in this component's React state, not
     // in the session the updater below returns, so it's captured here and added after the updater runs.
     let capturedSpellMana: { color: ManaColor; amount: number; note?: string } | undefined;
@@ -1482,13 +1485,13 @@ export function useStackResolution(ctx: GameContext) {
           grantsExtraTurn(sourceCard.oracleText);
         // "Scry 2, then draw two cards." (Read the Bones): the draw and life clauses are handled above, but the scry itself is the advisor's workflow.
         const scryThenDraw = /^\s*scry \w+,? then draw\b/i.test(etbEffectText(sourceCard.oracleText));
+        capturedUnresolvedCall = { event: destination === "battlefield" ? "spell_resolved_to_battlefield" : "spell_resolved_to_graveyard", seatId: action.actorSeatId, card: sourceCard };
         if (!ownEtbAlreadyHandled || scryThenDraw) {
           capturedAdvisorCall = {
             event: destination === "battlefield" ? "spell_resolved_to_battlefield" : "spell_resolved_to_graveyard",
             seatId: action.actorSeatId,
             sourceCard,
-            // Targets named as an advisor-planned spell was cast (see agentPlannedCastChoices).
-            castTargets: castStruct === undefined ? action.castChoices?.targets : undefined
+                        castTargets: castStruct === undefined ? action.castChoices?.targets : undefined
           };
         }
         if (destination === "battlefield") {
@@ -1592,6 +1595,7 @@ export function useStackResolution(ctx: GameContext) {
         const advisorCall = capturedAdvisorCall;
         void consultRulesAdvisor(advisorCall.event, advisorCall.seatId, advisorCall.sourceCard, advisorCall.castTargets);
       }
+      if (capturedUnresolvedCall) reportUnresolved(capturedUnresolvedCall.event, capturedUnresolvedCall.seatId, capturedUnresolvedCall.card);
       if (capturedStaticInterpreterCall) {
         const staticCall = capturedStaticInterpreterCall;
         void consultStaticEffectInterpreter(staticCall.seatId, staticCall.card);

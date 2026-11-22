@@ -9,7 +9,7 @@ import { evaluateOpeningHand } from "@/lib/mulliganHeuristics";
 import { isLandCard } from "@/engine/shared";
 import { makeCommonTrigger, phaseEvent } from "@/engine/triggers";
 import { rollForStartingSeat } from "@/engine/turnFlow";
-import { prewarmRuleWorkflowCache, warmUpAgentModel } from "@/lib/agentRuntime";
+import { warmUpAgentModel } from "@/lib/agentRuntime";
 import { seatVerb } from "@/engine/abilities";
 import { hostStatusStore } from "@/lib/multiplayer/hostStatusStore";
 import { lobbyBlockers } from "@/lib/multiplayer/lobby";
@@ -160,7 +160,6 @@ export function useGameSetup(ctx: GameContext) {
     // seat's full deck (not just the human's) since the cache is shared board-wide — any seat
     // encountering a card benefits every other seat's later encounter of the same card too.
     const agentResolved = await resolveAgentMulligansWithLLM(openingSeats);
-    void prewarmRuleWorkflowCache(openingSeats);
     const nextSession: GameSession = {
       ...session,
       status: "ready",

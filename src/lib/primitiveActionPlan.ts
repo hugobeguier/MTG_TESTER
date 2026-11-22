@@ -1,24 +1,9 @@
-// Translates a card's oracle text into a sequence of primitive game actions (draw N cards,
-// destroy target X, sacrifice a permanent, ...) when none of this codebase's deterministic
-// per-effect parsers recognize the wording — the fallback-of-last-resort for the exact bug class
-// this session kept finding for lands: a real, printed effect that no hand-written regex matches,
-// silently doing nothing instead of erroring. Modeled directly on rulesAdvisor.ts's own shape
-// (deterministic-first — there is none here, this module is LLM-only by design — then an
-// Ollama call with JSON-schema-constrained decoding and a Zod validation pass), reusing its
-// infrastructure (ollamaFetch, OLLAMA_TIMEOUT_MS) rather than duplicating it.
-//
-// Deliberately a FLAT schema, one level deep, rather than a 1:1 mirror of AppFlow.tsx's own nested
-// PrimitiveAction union (RemovalEffect/ZoneEffect nested inside a step nested inside an array) —
-// the same lesson rulesAdvisor.ts's own schema already encodes (ollama.ts:95-103's comment on why a
-// required field a small model can't reliably satisfy stalls generation): the flatter and shallower
-// the JSON schema handed to a 7B local model, the more reliably it actually produces valid output.
-// AppFlow.tsx's mapPrimitiveActionStep is the (equally deterministic, fully tested) translation from
-// this flat wire shape to the richer internal PrimitiveAction union.
+// The flat step schema (PrimitiveActionStep) shared by the legacy deterministic step executor (src/engine/oneShotEffects.ts
+// applyPrimitiveActionPlan / mapPrimitiveActionStep), the parsed_cards table (cardParser.ts) and the kernel capability checks
+// (src/kernel/capabilities.ts). It used to be the wire format of an LLM planner (the Rules Advisor, removed -- see
+// docs/rules-advisor-removal.md); the LLM prompt, JSON schema and Ollama call are gone, only the schema and its grounding filters remain.
 
 import { z } from "zod";
-import { ollamaFetch, OLLAMA_TIMEOUT_MS, OLLAMA_KEEP_ALIVE, OLLAMA_NUM_CTX } from "./ollama";
-import { getXMageCardByName } from "./cardDb";
-import { xmageReferenceBlurb } from "./xmageGrounding";
 
 // Lenient string-enum coercion for any field a small model might wrap in stray punctuation or
 // case — same defensive pattern as rulesAdvisor.ts's DestinationSchema (rulesAdvisor.ts:6-17),
@@ -218,12 +203,12 @@ export const PrimitiveActionPlanSchema = z.object({
   // engine has no primitive for — stack manipulation, replacement effects, static buffs, an
   // interactive search) — the explicit "don't guess" output, mirroring manual_review's role in
   // RuleWorkflowSchema. steps is expected empty when true, but not enforced here (a model that
-  // sets both is treated as declined; see requestPrimitiveActionPlan's caller).
+  // sets both is treated as declined).
   declined: z.boolean().default(false),
   // True when the oracle text says "you may" before this effect — a real player decision, not a
   // forced action. The engine already has full "may" support for the deterministic trigger path
   // (TriggerEffect.optional -> a real accept/decline prompt, resolveAgentRuleChoice's accept-by-
-  // default heuristic for agents); this flag is what lets consultPrimitiveActionPlanner route into
+  // default heuristic for agents); this flag lets a plan route into
   // that exact same mechanism instead of always applying the plan immediately.
   optional: z.boolean().default(false),
   // A simple board-state "if X"/"only if X" requirement gating the whole effect (e.g. "if you
@@ -238,157 +223,3 @@ export const PrimitiveActionPlanSchema = z.object({
 });
 
 export type PrimitiveActionPlan = z.infer<typeof PrimitiveActionPlanSchema>;
-
-export interface PrimitiveActionPlanInput {
-  cardName: string;
-  oracleText: string;
-  actorName: string;
-  battlefieldSummary: string[];
-  handSummary: string[];
-  graveyardSummary: string[];
-}
-
-const SYSTEM_PROMPT = `You are an MTG card-effect translator. Return JSON only. Do not change game state.
-Translate the given card's effect text into a sequence of PRIMITIVE actions from this fixed vocabulary — do not invent a kind outside this list:
-- destroy_target { targetType }: destroy one target permanent of targetType.
-- destroy_all { targetType }: destroy every permanent of targetType (a board wipe).
-- exile_target { targetType }: exile one target permanent of targetType.
-- bounce_target { targetType }: return one target permanent of targetType to its owner's hand.
-- reanimate { regrowTargetType, anyGraveyard }: return a card of regrowTargetType from a graveyard to the battlefield (anyGraveyard=true if it can be any player's graveyard, false if only the caster's).
-- mill { amount, millScope }: puts amount cards from the top of a library into its owner's graveyard. millScope: you (default, the caster's own library), target_player (one chosen opponent's library), each_opponent (every opponent's library), each_player (everyone's library including the caster's).
-- draw_cards { amount }: the caster draws amount cards.
-- life_change { lifeDelta }: the CASTER'S OWN life total changes by lifeDelta (positive = gain, negative = lose). Only use this for a one-sided effect with no other player involved — if the text also changes an opponent's life in the same breath (drain), emit ONLY "drain" below for that effect, NEVER life_change too. drain already includes the caster's gain; a separate life_change step for that same gain double-counts it and is always wrong.
-- drain { amount, drainScope }: ONE step that both makes the caster gain amount life AND makes drainScope lose amount life — this single step is the complete translation of "target player loses N life and you gain N life" (or "...you gain that much life"). Do not add a second step (life_change or anything else) for the same sentence; drain already moves the caster's life for you. drainScope: target_player (one target opponent) or each_opponent (every opponent at once). ("each opponent loses N, you gain life equal to the total" needs a summed amount this vocabulary can't compute — decline that one instead of guessing a number.)
-- damage_target { amount, damageTargetType }: deals amount damage to one target. damageTargetType: creature (default), player (a player directly, not a creature), any (creature, player, or planeswalker — "any target"/"target creature or player"). Never use this for damage to EVERY creature/player at once — there's no primitive for a mass-damage sweeper; decline that instead.
-- discard { amount, discardScope }: makes discardScope discard amount cards, its own unrestricted choice of which ones. discardScope: you (the caster discards), target_player (default, one target opponent), each_opponent (every opponent), each_player (everyone including the caster). Only use this for a plain "discards N cards" effect — if the caster (not the discarding player) gets to pick which specific card, or there's a type restriction on which card ("discards a noncreature card," reveal-hand-then-choose like Duress), decline instead; this primitive can't express that choice.
-- tap_target { targetType }: taps one target permanent of targetType. untap_target { targetType }: untaps one target permanent of targetType. Only for "tap/untap target X" as the spell/ability's OWN effect — never use these for an activated ability's OWN cost (e.g. "{T}: ..." on the source itself, or "{2}, T: ...") — that's a cost, not a step, and is handled elsewhere.
-- pump_target { power, toughness }: one target creature gets +power/+toughness (or negative) until end of turn.
-- mass_pump { power, toughness, massPumpScope }: every creature in massPumpScope (all/controlled/opponents) gets +power/+toughness until end of turn.
-- mass_bounce {}: return every creature on the battlefield to its owner's hand.
-- create_tokens { tokenCount, tokenName, tokenPower, tokenToughness, tokenColors, tokenTypeLine }: create tokenCount tokens.
-- put_counters_on_self { counterKind, amount }: put amount counters of counterKind on the source card itself.
-- sacrifice_permanent { sacrificeScope }: the caster sacrifices a permanent (self = the source card itself, creature_you_control/permanent_you_control = caster's choice among that type).
-- move_card_zone { moveFrom, moveTo, moveFilter, moveCount }: move moveCount cards from moveFrom (hand/graveyard) to moveTo (hand/graveyard/exile/library_top).
-
-Never emit a "search_library" step — that primitive doesn't exist yet; if a card's ONLY effect is a library search, set declined=true instead of approximating it with move_card_zone or anything else.
-If the effect has a leading "if <condition>"/"only if <condition>" clause describing a simple board-state requirement (e.g. "if you control a commander", "if you control three or more artifacts", "if you control an Angel or a Demon"), put that clause verbatim (starting from "if"/"only if") in the condition field and still translate the REST of the effect into steps normally — a leading condition clause by itself is not a reason to decline. Leave condition ("") when there is none.
-If the effect doesn't map cleanly onto the primitive vocabulary at all (stack manipulation, replacement effects, static/continuous buffs, counterspells, an interactive search), OR its condition depends on something other than current board state (what happened earlier this resolution, an amount only computable at resolution time, etc.), set declined=true and steps=[] rather than guessing — a wrong action is worse than no action.
-Set optional=true if the oracle text says "you may" before this effect (a real choice the controller gets to make, not something that just happens) — false for anything mandatory. This is independent of declined/steps: still translate the effect into steps normally either way, optional only marks whether the player gets asked first.
-The oracleText given has already been scoped to the relevant clause for this event — do not infer or recall other abilities the card might have from training data; translate based solely on the given text.`;
-
-// Ollama's structured-output `format` wants a plain JSON-schema object, not a zod schema — this is
-// that schema for a single PrimitiveActionStep, hand-kept in sync with PrimitiveActionStepSchema
-// above. Exported so cardParser.ts (which embeds an array of these per ability) doesn't hand-copy it.
-export const PRIMITIVE_ACTION_STEP_JSON_SCHEMA = {
-  type: "object",
-  properties: {
-    kind: { type: "string" },
-    targetType: { type: "string" },
-    regrowTargetType: { type: "string" },
-    anyGraveyard: { type: "boolean" },
-    amount: { type: "number" },
-    millScope: { type: "string" },
-    lifeDelta: { type: "number" },
-    drainScope: { type: "string" },
-    damageTargetType: { type: "string" },
-    discardScope: { type: "string" },
-    power: { type: "number" },
-    toughness: { type: "number" },
-    massPumpScope: { type: "string" },
-    tokenCount: { type: "number" },
-    tokenName: { type: "string" },
-    tokenPower: { type: "number" },
-    tokenToughness: { type: "number" },
-    tokenColors: { type: "array", items: { type: "string" } },
-    tokenTypeLine: { type: "string" },
-    counterKind: { type: "string" },
-    sacrificeScope: { type: "string" },
-    moveFrom: { type: "string" },
-    moveTo: { type: "string" },
-    moveFilter: { type: "string" },
-    moveCount: { type: "number" }
-  },
-  // "amount" added to required alongside "kind" for the same reason cardParser.ts's ability-level
-  // schema requires triggerEvent: prose alone ("mill { amount }", "drain { amount, drainScope }")
-  // wasn't enough — reproduced live, a drain step came back with drainScope set but amount missing
-  // (and unrelated fields like power/counterKind/moveCount filled in instead), which silently
-  // dropped the whole step in mapPrimitiveActionStep since amount is what it checks for. Harmless
-  // for kinds that don't use amount (destroy_target, pump_target, ...) — those already got ignored
-  // fields from the model routinely (see the same drain repro above) and mapPrimitiveActionStep
-  // only ever reads the fields each kind actually declares.
-  required: ["kind", "amount"]
-} as const;
-
-export async function requestPrimitiveActionPlan(input: PrimitiveActionPlanInput, baseUrl = process.env.OLLAMA_BASE_URL ?? "http://localhost:11434") {
-  const model = process.env.OLLAMA_RULES_MODEL ?? process.env.OLLAMA_MODEL ?? "qwen2.5:7b-instruct-q5_K_M";
-  // mtg-commander-engine-spec.md Phase 3a: unlike cardParser.ts's offline bulk parser (which only
-  // pays for a grounded retry when the plain attempt actually declined, since it runs over ~30k
-  // cards where most never need it), this is the LIVE, per-event fallback — a second full Ollama
-  // round-trip here would add real latency to an actual game in progress. So the lookup happens
-  // BEFORE the one call this function makes, included proactively when available, rather than
-  // reactively after a decline. getXMageCardByName returns undefined for a card XMage hasn't
-  // implemented, in which case this is a no-op exactly like before this existed.
-  const xmageCard = getXMageCardByName(input.cardName);
-  const userContent = JSON.stringify({
-    cardName: input.cardName,
-    oracleText: input.oracleText,
-    actorName: input.actorName,
-    battlefield: input.battlefieldSummary,
-    hand: input.handSummary,
-    graveyard: input.graveyardSummary
-  });
-  const response = await ollamaFetch(
-    `${baseUrl}/api/chat`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        model,
-        stream: false,
-        keep_alive: OLLAMA_KEEP_ALIVE,
-        options: { num_ctx: OLLAMA_NUM_CTX },
-        format: {
-          type: "object",
-          properties: {
-            summary: { type: "string" },
-            declined: { type: "boolean" },
-            optional: { type: "boolean" },
-            condition: { type: "string" },
-            steps: {
-              type: "array",
-              items: PRIMITIVE_ACTION_STEP_JSON_SCHEMA
-            }
-          },
-          // optional/condition in required for the same reason amount is required on the step schema
-          // above — marking a field required in the schema itself is what actually gets the model to
-          // reliably set it (condition="" when there is none) rather than default-omitting it.
-          required: ["summary", "declined", "optional", "condition", "steps"]
-        },
-        messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: xmageCard ? `${userContent}\n\n${xmageReferenceBlurb(xmageCard)}` : userContent }
-        ]
-      })
-    },
-    OLLAMA_TIMEOUT_MS
-  );
-
-  if (!response.ok) {
-    throw new Error(`Ollama primitive-plan request failed with HTTP ${response.status}.`);
-  }
-
-  const body = await response.json();
-  const content = body.message?.content;
-  if (typeof content !== "string") {
-    throw new Error("Ollama response did not include message.content.");
-  }
-
-  const plan = PrimitiveActionPlanSchema.parse(JSON.parse(content));
-  // mtg-commander-engine-spec.md Phase 3a observability: true whenever a reference was found and
-  // included in the prompt above, regardless of what the model then did with it — this function
-  // (unlike cardParser.ts's requestCardParse) includes grounding proactively rather than after a
-  // decline, so "was grounding used" here just means "was xmageCard found," not "did the plan
-  // change as a result." Surfaced through /api/rules/primitive-plan so AppFlow.tsx's event log can
-  // show it live.
-  return { source: "ollama" as const, plan: { ...plan, steps: filterGroundedSteps(plan.steps, input.oracleText) }, usedXMageGrounding: Boolean(xmageCard) };
-}

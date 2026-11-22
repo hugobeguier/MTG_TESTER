@@ -10,7 +10,8 @@ import { autoTapFor, payFromPool, totalPotentialMana } from "./mana";
 import { changeLife, decide, type AskSpec, type StepResult } from "./steps";
 import type { Choice, Env, PlayerId } from "./types";
 
-export interface UnlessPay { payer: string; cost: Cost[]; x?: unknown; prompt?: Prompt }
+/** `inverse`: "you may pay <cost>; if you do, <step>" (the step runs only when paid) instead of "<step> unless <payer> pays" */
+export interface UnlessPay { payer: string; cost: Cost[]; x?: unknown; prompt?: Prompt; inverse?: boolean }
 
 export function unlessPaySupported(u: UnlessPay): boolean {
   return u.cost.length > 0 && u.cost.every((c) => ("mana" in c && !/[\/P]/.test(c.mana.replace(/\{X\}/g, ""))) || ("life" in c && typeof c.life === "number") || ("discard" in c && c.discard !== "self"));
@@ -43,15 +44,15 @@ export function unlessHandler(r: Run, env: Env, step: Step, answer: Choice | und
   const u = step.pay as UnlessPay;
   const inner = step.inner as Step;
   const payer = resolvePlayers(r, u.payer as never, env)[0];
-  if (!payer || !canPay(r, payer, u, env)) return { push: [inner] };
+  if (!payer || !canPay(r, payer, u, env)) return u.inverse ? "done" : { push: [inner] };
   const spec: AskSpec = {
     kind: "pay_unless", player: payer,
-    prompt: u.prompt ?? { title: `${label(r, env.source)}: pay or not`, instruction: "Do you want to pay? If you don't, the effect happens." },
+    prompt: u.prompt ?? { title: `${label(r, env.source)}: pay or not`, instruction: u.inverse ? "Do you want to pay? If you do, the effect happens." : "Do you want to pay? If you don't, the effect happens." },
     options: [{ id: "yes", label: "Pay" }, { id: "no", label: "Don't pay" }], min: 1, max: 1
   };
   const d = decide(spec, answer);
   if ("ask" in d) return d;
-  if (!d.yes) return { push: [inner] };
+  if (!d.yes) return u.inverse ? "done" : { push: [inner] };
   const { cost, x } = manaNeeded(r, u, env);
   if (cost.mv + cost.x * x > 0 || cost.x > 0) {
     if (!(payFromPool(r, payer, cost, x) || (autoTapFor(r, payer, cost, x) && payFromPool(r, payer, cost, x)))) throw new Reject("cannot_pay", "cannot pay");
@@ -59,8 +60,8 @@ export function unlessHandler(r: Run, env: Env, step: Step, answer: Choice | und
   const life = lifeNeeded(u);
   if (life > 0) changeLife(r, env, payer, -life);
   const dc = discardCost(u);
-  if (dc) return { push: [{ kind: "__unless_discard" as never, player: payer, cost: dc, prompt: u.prompt } as Step] };
-  return "done";
+  if (dc) return { push: [{ kind: "__unless_discard" as never, player: payer, cost: dc, prompt: u.prompt } as Step, ...(u.inverse ? [inner] : [])] };
+  return u.inverse ? { push: [inner] } : "done";
 }
 
 /** The card(s) discarded as the payment of an "unless ... discards" cost: asked when there is a real choice. */

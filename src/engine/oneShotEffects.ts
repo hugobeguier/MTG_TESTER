@@ -2,7 +2,6 @@
 // emblems, each-player-sacrifice, punisher choices, Living Death, surveil/hideaway helpers.
 // Extracted verbatim from components/AppFlow.tsx; AppFlow.tsx re-exports the previously public symbols.
 
-import { primitiveActionPlanCache, ruleWorkflowCacheKey } from "@/lib/agentRuntime";
 import { chooseNonlandPermanentToSacrifice } from "@/engine/abilities";
 import { agentPumpTarget, agentRemovalEffectTarget, agentZoneEffectTargets } from "@/engine/castTargets";
 import { applyPrimitiveAction, castTargetLegal, choosePlaguecrafterSacrifice, chooseWorstHandCardToDiscard, matchesEachPlayerSacrificeFilter, type MassPumpEffect, type PrimitiveAction } from "@/engine/effects";
@@ -270,30 +269,6 @@ function planActionNeedsTarget(action: PrimitiveAction): boolean {
   if (action.kind === "pump_target") return true;
   if (action.kind === "zone") return zoneEffectTargetSpec(action.effect) !== undefined;
   return action.kind === "removal" && ["damage", "destroy", "exile", "bounce", "grant_keywords"].includes(action.effect.kind);
-}
-
-// An agent's spell the deterministic parsers do not understand is resolved from a Rules Advisor (LLM) plan: text -> steps, which carry no target
-// ids (the deterministic appliers pick those). The plan is fetched asynchronously, so only when this card text's plan is already cached (a
-// repeat cast, or a card whose plan was fetched earlier this session) can its targets be named at cast time; they are recorded in castChoices
-// and handed to the same steps on resolution (applyPrimitiveActionPlan's castTargets), which re-check them. First-ever cast: unchanged.
-export function agentPlannedCastChoices(session: GameSession, seatId: string, card: VisibleCard): CastChoices | undefined {
-  if (!/\btargets?\b/i.test(card.oracleText)) return undefined;
-  const cached = primitiveActionPlanCache.get(ruleWorkflowCacheKey("spell_resolved_to_graveyard", card.oracleText));
-  if (!cached || cached.plan.declined || cached.plan.optional || cached.plan.condition) return undefined;
-  const targets: ChosenTarget[] = [];
-  for (const step of cached.plan.steps) {
-    const action = mapPrimitiveActionStep(step);
-    if (!action || !planActionNeedsTarget(action)) continue;
-    const target =
-      action.kind === "removal" ? (action.effect.kind === "modal" ? undefined : agentRemovalEffectTarget(session, seatId, card, action.effect, action.chosenX, false)) :
-      action.kind === "zone" ? agentZoneEffectTargets(session, seatId, card, action.effect)?.[0] :
-      action.kind === "pump_target" ? agentPumpTarget(session, seatId, card, action.effect) :
-      undefined;
-    // One unnamed target would shift the rest out of step with the steps that consume them: keep the resolution-time pick instead.
-    if (!target) return undefined;
-    targets.push(target);
-  }
-  return targets.length > 0 ? { targets } : undefined;
 }
 
 export function applyPrimitiveActionPlan(session: GameSession, seatId: string, sourceCard: VisibleCard, steps: PrimitiveActionStep[], castTargets?: ChosenTarget[]): GameSession {

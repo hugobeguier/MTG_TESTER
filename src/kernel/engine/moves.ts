@@ -17,7 +17,7 @@ import { decide, type AskSpec, type StepResult, type StepSpec } from "./steps";
 import type { Env, ObjId, PlayerId } from "./types";
 import { isObjId } from "./types";
 
-export const MOVE_FIELDS = ["target", "moveTo", "moveFrom", "from", "position", "tapped", "what", "who", "filter", "ordered", "order", "all", "moveCount", "saveAs", "shuffle", "withCounters", "underControlOf", "faceDown", "faceUp", "linkExile", "transformed", "excludeLatest"];
+export const MOVE_FIELDS = ["target", "moveTo", "moveFrom", "from", "position", "tapped", "what", "who", "filter", "ordered", "order", "all", "moveCount", "saveAs", "shuffle", "withCounters", "underControlOf", "faceDown", "faceUp", "linkExile", "transformed", "excludeLatest", "reflexive"];
 /** `what` values the engine understands besides a saved-choice name. */
 export const MOVE_WHAT_KINDS = ["choose", "all", "top_of_library", "rest_of_looked_cards", "looked_cards", "rest_of_revealed_cards", "revealed_cards", "chosen", "found"];
 export const isMoveWhatSupported = (w: string): boolean => MOVE_WHAT_KINDS.includes(w) || /^graveyard_of_t\d+$/.test(w);
@@ -73,6 +73,11 @@ export const moveStep: StepSpec = {
     const env = ex.env;
     const to = step.moveTo as Zone | undefined;
     if (!to || !(ZONES as readonly string[]).includes(to)) throw new Unsupported(`field:move_card_zone.moveTo=${String(to)}`);
+    if (step.reflexive && typeof step.target === "string") {
+      // "When you do, return target creature card ...": the reflexive trigger chooses its target NOW (after the earlier steps were done), not when the ability was put on the stack
+      const spec = env.item.parts.flatMap((p) => p.specs).find((sp) => sp.id === step.target);
+      if (spec) return { push: [{ ...step, target: undefined, reflexive: undefined, what: "choose", filter: spec.filter, moveFrom: spec.filter?.zone, who: "you" } as Step] };
+    }
     if (step.what === "choose") {
       // "return a creature card from your graveyard": the player picks one matching the filter, then it moves
       const key = "__move_choice";

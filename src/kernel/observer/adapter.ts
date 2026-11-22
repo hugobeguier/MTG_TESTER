@@ -35,6 +35,8 @@ export interface AdaptOptions {
   skipFirstDraw?: boolean;
   /** run the kernel with lenient abilities (default false: strict, so unsupported abilities show up as capabilities) */
   lenient?: boolean;
+  /** default false: the kernel mirrors the hook-driven triggers the headless legacy harness never runs (cast triggers, combat damage to a player, the monarch steal); true runs them */
+  strictHooks?: boolean;
 }
 
 export interface AdapterGap { field: string; count: number; examples: string[] }
@@ -173,7 +175,7 @@ export function toKernelState(session: GameSession, opts: AdaptOptions): AdaptRe
   }));
   const state: GameState = {
     version: 1,
-    config: { lenient: !!opts.lenient, skipFirstDraw: opts.skipFirstDraw ?? seats.length === 2, maxEventsPerPass: 5000, handSize: 7 },
+    config: { lenient: !!opts.lenient, skipFirstDraw: opts.skipFirstDraw ?? seats.length === 2, maxEventsPerPass: 5000, handSize: 7, ...(opts.strictHooks ? {} : { mirrorHeadless: { skipTriggerEvents: ["cast", "attack", "deals_combat_damage_to_player"], noMonarchSteal: true, noAttackTax: true } }) },
     seed: opts.seed ?? 1, rngState: opts.seed ?? 1, nextId: 1, clock: 1, decisionSeq: 0, players, objects: {}, battlefield: [], stack: [],
     turn: { number: session.turn, active: activeId, phase }, priority: activeId, passes: [], effects: [], lki: {}, turnLog: [], activations: {},
     triggerQueue: [], priorityAfter: null, pending: null, gameOver: null, combat: null, extraCombats: 0

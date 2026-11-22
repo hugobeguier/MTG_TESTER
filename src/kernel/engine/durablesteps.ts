@@ -16,7 +16,7 @@ export const permissionStep: StepSpec = {
     if (!ref) throw new Unsupported("field:permission_to_play.what", "permission_to_play needs a card reference");
     const dur = step.duration;
     // hideaway and friends: "you may play the exiled card" is decided as the ability resolves (queued: resolve.ts runCastNow)
-    const now = ref === "linked_exile" && (dur === undefined || dur === "instant");
+    const now = (ref === "linked_exile" && dur === undefined) || dur === "instant"; // "you may cast it as part of this resolution" (Rishkar's Expertise, hideaway)
     if (!now && dur !== undefined && (typeof dur !== "string" || !SUPPORTED_DURABLE_DURATIONS.has(dur))) throw new Unsupported(`duration:${typeof dur === "string" ? dur : Object.keys(dur)[0]}`);
     const owner = resolvePlayers(r, step.who ?? "you", env)[0];
     const allow = (step.allow as Array<"land" | "spell"> | undefined) ?? ["land", "spell"];

@@ -137,6 +137,11 @@ export function etbEffectText(oracleText: string): string {
     .join(" ");
 }
 
+// The same clauses etbEffectText joins, one per entry (used to name the specific clause the engine could not apply).
+export function etbEffectClauses(oracleText: string): string[] {
+  return etbClauses(oracleText).filter((clause) => !isEntersWatcherClause(clause) && !/^when [^,]+ enters, if the gift was promised, destroy\b/i.test(clause));
+}
+
 // Saga chapters ("I — ...", "II, III — ...", "Read ahead") resolve through the saga system as lore counters are added, never
 // on entering (the Elder Dragon War dealt its chapter I damage and made its chapter III Dragon the moment it was cast).
 function isSagaChapterClause(clause: string): boolean {

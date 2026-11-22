@@ -139,8 +139,10 @@ export const chooseStep: StepSpec = {
     const optionalCount = !!(step.upTo || step.anyNumber);
     const max = step.anyNumber ? cands.length : Math.min(count, cands.length);
     const min = optionalCount ? 0 : max;
-    if (cands.length === 0 || max === 0) { saveList(r, env, key, []); return "done"; }
-    if (min === max && max === cands.length) { saveList(r, env, key, cands); return "done"; } // nothing to choose
+    // a step with an id different from its saveAs also leaves "how many were chosen" as its numeric result ({ref: step_result})
+    const count_ = (ids: string[]) => { saveList(r, env, key, ids); if (step.id && step.id !== key) setResult(env, step.id, ids.length); };
+    if (cands.length === 0 || max === 0) { count_([]); return "done"; }
+    if (min === max && max === cands.length) { count_(cands); return "done"; } // nothing to choose
     const spec: AskSpec = {
       kind: "choose_cards", player: chooser,
       prompt: title ?? fallbackPrompt(r, env, "choose", `Choose ${optionalCount ? "up to " : ""}${max} ${max === 1 ? "card" : "cards"}.`),
@@ -148,7 +150,7 @@ export const chooseStep: StepSpec = {
     };
     const d = decide(spec, answer);
     if ("ask" in d) return d;
-    saveList(r, env, key, d.ids);
+    count_(d.ids);
     emit(r, { type: "cards_chosen", player: chooser, count: d.ids.length });
     return "done";
   }

@@ -776,7 +776,7 @@ setSession(() => drawnSession);
     if (choice.kind === "optional_primitive_plan") {
       setPendingRuleChoice(undefined);
       setSession((current) => applyPrimitiveActionPlan(current, choice.controllerSeatId, choice.sourceCard, choice.steps));
-      addEvent(`${choice.sourceCardName}: ${choice.prompt.replace(/ Do you want to\?$/, "")}.`, choice.controllerSeatId, "Rules advisor (primitive plan)");
+      addEvent(`${choice.sourceCardName}: ${choice.prompt.replace(/ Do you want to\?$/, "")}.`, choice.controllerSeatId, "Rules");
     }
   }
 
@@ -791,7 +791,7 @@ setSession(() => drawnSession);
     if (choice.kind === "optional_primitive_plan") {
       setPendingRuleChoice(undefined);
       const seatName = session.seats.find((seat) => seat.id === choice.controllerSeatId)?.name ?? "Player";
-      addEvent(`${seatName} declines ${choice.sourceCardName}'s optional effect.`, choice.controllerSeatId, "Rules advisor (primitive plan)");
+      addEvent(`${seatName} declines ${choice.sourceCardName}'s optional effect.`, choice.controllerSeatId, "Rules");
     }
   }
 

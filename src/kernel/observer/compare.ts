@@ -51,7 +51,7 @@ export interface Snapshot {
 }
 
 const sorted = (a: string[]): string[] => [...a].sort();
-const nameOf = (s: GameState, id: string): string => { const o = s.objects[id]; return o ? o.token?.name ?? o.cardName : id; };
+const nameOf = (s: GameState, id: string): string => { const o = s.objects[id]; return o ? (o.faceDown && o.zone === "battlefield" ? "Manifested Creature" : o.token?.name ?? o.cardName) : id; };
 
 /** Normalised view of a kernel state (see the header for the rules). `lookup` is needed for chars(). */
 export function snapshotKernel(state: GameState, lookup: DraftLookup, ctx?: { legacyPending?: boolean }): Snapshot {
@@ -96,7 +96,7 @@ export function snapshotLegacy(session: GameSession, adapt: AdaptResult, lookup:
     for (const c of seat.board.battlefield) if (/\bcreature\b/i.test(c.typeLine.split("—")[0]) || c.animatedAsCreature) pt.push(`${nameOf(adapt.state, adapt.toKernel.get(c.id) ?? "")}|${effectivePower(c)}/${effectiveToughness(c)}`);
     snap.players[seat.id].pt = sorted(pt);
     snap.players[seat.id].commanderDamage = Object.values(seat.commanderDamage ?? {}).reduce((a, b) => a + b, 0);
-    snap.players[seat.id].damage = sorted(seat.board.battlefield.filter((c) => (c.damage ?? 0) > 0).map((c) => `${c.name}|${c.damage}`));
+    snap.players[seat.id].damage = sorted(seat.board.battlefield.filter((c) => (c.damage ?? 0) > 0).map((c) => `${nameOf(adapt.state, adapt.toKernel.get(c.id) ?? "")}|${c.damage}`));
   }
   return snap;
 }
@@ -120,9 +120,16 @@ export function diffSnapshots(legacy: Snapshot, kernel: Snapshot, skip: Readonly
   if (legacy.turn !== kernel.turn) add("turn", legacy.turn, kernel.turn, []);
   if (legacy.active !== kernel.active) add("active_player", legacy.active, kernel.active, []);
   if (legacy.phase !== kernel.phase) add("phase", legacy.phase, kernel.phase, []);
+  // a player left the game (800.4a): the legacy engine sweeps their cards and the rest of the final position is not meaningful; only life / loss / game over are judged
+  const ended = Object.values(legacy.players).some((p) => p.hasLost);
   for (const id of Object.keys(legacy.players)) {
     const l = legacy.players[id], k = kernel.players[id];
     if (!k) { add("players", id, null, []); continue; }
+    if (ended) {
+      if (l.life !== k.life) add("life", l.life, k.life, [], id);
+      if (l.hasLost !== k.hasLost) add("has_lost", l.hasLost, k.hasLost, [], id);
+      continue;
+    }
     if (l.life !== k.life) add("life", l.life, k.life, [], id);
     if (l.hasLost !== k.hasLost) add("has_lost", l.hasLost, k.hasLost, [], id);
     if (l.library !== k.library) add("zone:library_count", l.library, k.library, [], id);
@@ -132,9 +139,9 @@ export function diffSnapshots(legacy: Snapshot, kernel: Snapshot, skip: Readonly
       if (d.onlyA.length || d.onlyB.length) add(f === "hand" || f === "graveyard" || f === "exile" || f === "command" || f === "battlefield" ? `zone:${f}` : f, { only: d.onlyA }, { only: d.onlyB }, [...new Set([...d.onlyA, ...d.onlyB].map((x) => x.split("|")[0]))], id);
     }
   }
-  { const d = multisetDiff(legacy.stack, kernel.stack); if (d.onlyA.length || d.onlyB.length) add("stack", d.onlyA, d.onlyB, [...d.onlyA, ...d.onlyB]); }
-  { const d = multisetDiff(legacy.combat, kernel.combat); if (d.onlyA.length || d.onlyB.length) add("combat", { only: d.onlyA }, { only: d.onlyB }, [...d.onlyA, ...d.onlyB].map((x) => x.split(">")[0])); }
-  if (legacy.monarch !== kernel.monarch) add("monarch", legacy.monarch, kernel.monarch, []);
+  if (!ended) { const d = multisetDiff(legacy.stack, kernel.stack); if (d.onlyA.length || d.onlyB.length) add("stack", d.onlyA, d.onlyB, [...d.onlyA, ...d.onlyB]); }
+  if (!ended) { const d = multisetDiff(legacy.combat, kernel.combat); if (d.onlyA.length || d.onlyB.length) add("combat", { only: d.onlyA }, { only: d.onlyB }, [...d.onlyA, ...d.onlyB].map((x) => x.split(">")[0])); }
+  if (!ended && legacy.monarch !== kernel.monarch) add("monarch", legacy.monarch, kernel.monarch, []);
   if (legacy.pending !== kernel.pending) add("pending", legacy.pending, kernel.pending, []);
   if (legacy.gameOver !== kernel.gameOver) add("game_over", legacy.gameOver, kernel.gameOver, []);
   return out;
@@ -181,7 +188,7 @@ const cardNameOf = (s: GameSession, id: string | undefined): string | undefined 
 function involvedCards(m: Mapped, s0: GameSession, s1: GameSession, meta: ObserverMeta): string[] {
   const names: string[] = [];
   // tokens are not cards: they never have a draft and carry their rules in the token definition
-  const add = (id: string | undefined) => { const c = cardOf(s0, id) ?? cardOf(s1, id); if (c && !c.token) names.push(c.name); };
+  const add = (id: string | undefined) => { const c = cardOf(s0, id) ?? cardOf(s1, id); if (c && !c.token && !c.faceDownCardName && c.name !== "Manifested Creature") names.push(c.name); }; // a face-down (manifested) permanent has no card definition of its own
   switch (m.kind) {
     case "playLand": add(m.legacyCardId); break;
     case "cast": add(m.legacyCardId); m.payWith.forEach(add); break;
@@ -263,6 +270,8 @@ export function compareIntent(s0: GameSession, s1: GameSession, meta: ObserverMe
     if (mapped.kind === "unmapped") return skipped("unmapped", [mk("unmapped_action", mapped.reason)]);
     if (mapped.kind === "pass") return skipped("no legacy state change");
 
+    // HARNESS GAP: the headless orchestrator has no aura-target choice, so a cast Aura goes straight to the graveyard ("for not being attached to anything"); the kernel attaches it. Not comparable.
+    { const seen = new Set(s0.events.map((e) => e.id)); if (s1.events.some((e) => !seen.has(e.id) && /for not being attached to anything/.test(e.message))) return skipped("harness: aura left unattached (headless orchestrator has no Aura target choice)", []); }
     const a0 = toKernelState(s0, { lookup: opts.lookup, seed: opts.seed, lenient: opts.lenient });
     const a1 = toKernelState(s1, { lookup: opts.lookup, seed: opts.seed, lenient: opts.lenient });
     const gapDiffs = [...a0.gaps].map((g) => mk("adapter_gap", `legacy state carries unmapped data: ${g.field} (x${g.count})`, { field: g.field, cards: g.examples, context: { count: g.count } }));

@@ -6,7 +6,7 @@ import { abilitiesOf, emit, moveObject, isSummoningSick, parseManaCost, player, 
 import type { GameObject, ManaColor, ManaPool, ObjId, PlayerId } from "./types";
 import { MANA_COLORS } from "./types";
 import { addUnits, effectivePool, takeMana, unitFits, unitsOf, type SpendCtx } from "./manapool";
-import { objectsMatching } from "./query";
+import { evalPredicate, objectsMatching } from "./query";
 
 /** What a mana ability yields. `props`: spending restrictions / lasting (ManaUnit fields) that make the mana special. `alternatives`: "{W}{W}, {W}{B}, or {B}{B}", the player picks one. */
 export type UnitProps = { restriction?: import("../schema").ObjectFilter; abilities?: import("../schema").ObjectFilter; keep?: boolean };
@@ -33,6 +33,12 @@ export function productionOf(r: Run, owner: PlayerId, spec: ManaSpec): Productio
     return { fixed: Array.from({ length: objectsMatching(r, spec.perCount, { controller: owner }).length }, () => color), ...(propsOf(spec) ? { props: propsOf(spec) } : {}) };
   }
   if ("chosenColor" in spec) throw new Unsupported("mana:chosen_color");
+  if ("conditional" in spec) {
+    // "Add one mana of any color. If you control a creature with power 4 or greater, add two mana of that color instead" (Ilysian Caryatid): the branch is read when the mana is made
+    const branch = evalPredicate(r, spec.conditional.if, { controller: owner }) ? spec.conditional.then : spec.conditional.else;
+    if (branch.length !== 1) throw new Unsupported("mana:conditional");
+    return productionOf(r, owner, branch[0]);
+  }
   throw new Unsupported("mana:conditional");
 }
 
@@ -41,6 +47,18 @@ export function productionOf(r: Run, owner: PlayerId, spec: ManaSpec): Productio
  * filter cost): each must be one fixed mana of one color, and the player chooses which one when activating.
  */
 export function productionOfAbility(r: Run, owner: PlayerId, a: Ability): Production {
+  if (a.scripted?.handler === "mana_colors_an_opponent_land_could_produce") {
+    // Fellwar Stone: one mana of a color that a land an opponent controls could produce (basic land types and the mana abilities of their lands)
+    const found = new Set<ManaColor>();
+    const basic: Record<string, ManaColor> = { plains: "W", island: "U", swamp: "B", mountain: "R", forest: "G" };
+    for (const id of r.s.battlefield) {
+      const o = r.s.objects[id];
+      if (!o || o.controller === owner || !chars(r, id).types.includes("land")) continue;
+      for (const t of chars(r, id).subtypes) if (basic[t.toLowerCase()]) found.add(basic[t.toLowerCase()]);
+      for (const ab of manaAbilities(r, o)) { try { const p = productionOfAbility(r, o.controller, ab); if ("fixed" in p) p.fixed.forEach((c) => c !== "C" && found.add(c)); else if ("choose" in p) p.choose.options.forEach((c) => c !== "C" && found.add(c)); else p.alternatives.flat().forEach((c) => c !== "C" && found.add(c)); } catch { /* an ability the engine cannot read produces nothing here */ } }
+    }
+    return found.size ? { choose: { count: 1, options: [...found] } } : { fixed: [] };
+  }
   const specs = a.mana!.produces;
   if (specs.length === 1) return productionOf(r, owner, specs[0]);
   const options: ManaColor[] = [];
@@ -93,7 +111,7 @@ export function manaAbilityActivatable(r: Run, o: GameObject, a: Ability): boole
 
 /** Pays the tap / sacrifice-self costs of a mana ability (Treasure: {T}, Sacrifice). The mana itself is added by the caller. */
 export function payManaAbilityCosts(r: Run, o: GameObject, a: Ability, pid: PlayerId): void {
-  for (const c of a.costs ?? []) if ("tap" in c) { o.tapped = true; emit(r, { type: "tap", id: o.id, player: pid }); }
+  for (const c of a.costs ?? []) if ("tap" in c) { o.tapped = true; emit(r, { type: "tap", id: o.id, player: pid, forMana: true }); }
   if ((a.costs ?? []).some((c) => "sacrifice" in c && c.sacrifice === "self")) {
     r.s.turnLog.push({ type: "sacrifice", id: o.id, player: pid, ts: r.s.clock });
     emit(r, { type: "sacrificed", id: o.id, player: pid });

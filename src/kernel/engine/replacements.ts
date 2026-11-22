@@ -193,11 +193,16 @@ function num(cur: number, v: unknown, what: string): number {
   throw new Unsupported(`replacement:modify.${what}`);
 }
 
-function modifyEvent(ev: ReplEvent, set: Record<string, unknown>): ReplEvent {
+function modifyEvent(ev: ReplEvent, set: Record<string, unknown>, ctx?: { r: Run; c: Cand }): ReplEvent {
   const e = structuredClone(ev) as ReplEvent;
   for (const [k, v] of Object.entries(set)) {
     if (e.kind === "enter" && k === "tapped") e.tapped = !!v;
-    else if (e.kind === "enter" && k === "counters" && v && typeof v === "object") for (const [ck, n] of Object.entries(v as Record<string, number>)) e.counters[ck] = (e.counters[ck] ?? 0) + n;
+    else if (e.kind === "enter" && k === "counters" && v && typeof v === "object" && ctx && typeof (v as { kind?: unknown }).kind === "string" && "amount" in v) {
+      // {kind, amount: Quantity}: "enters with a +1/+1 counter for each Zombie card in your graveyard" (Diregraf Colossus)
+      const n = evalQuantity(ctx.r, (v as { amount: never }).amount, q(ctx.c, {}));
+      const ck = (v as unknown as { kind: string }).kind;
+      if (n > 0) e.counters[ck] = (e.counters[ck] ?? 0) + n;
+    } else if (e.kind === "enter" && k === "counters" && v && typeof v === "object") for (const [ck, n] of Object.entries(v as Record<string, number>)) e.counters[ck] = (e.counters[ck] ?? 0) + n;
     else if (e.kind === "tokens" && k === "count") for (const g of e.groups) g.count = Math.max(0, num(g.count, v, k));
     else if (e.kind === "tokens" && k === "tapped") for (const g of e.groups) g.tapped = !!v;
     else if ((e.kind === "gain_life" || e.kind === "lose_life" || e.kind === "damage" || e.kind === "counters") && k === "amount") e.amount = Math.max(0, num(e.amount, v, k));
@@ -223,7 +228,7 @@ function stepGroups(r: Run, c: Cand, steps: Step[], amount: number, tapped: bool
 function applyPure(r: Run, ev: ReplEvent, c: Cand): ReplEvent {
   const res = c.spec.result;
   if (res.mode === "prevent") return { ...structuredClone(ev), cancelled: true } as ReplEvent;
-  if (res.mode === "modify") return modifyEvent(ev, res.set);
+  if (res.mode === "modify") return modifyEvent(ev, res.set, { r, c });
   const e = structuredClone(ev) as ReplEvent;
   if (e.kind === "tokens") {
     if (res.mode === "also") {
@@ -336,7 +341,7 @@ function applyUnlessPay(r: Run, ev: ReplEvent, c: Cand): ReplEvent {
     changeLife(r, undefined, who, -life); // paid as it enters: the event is unchanged
     return ev;
   }
-  return modifyEvent(ev, rest);
+  return modifyEvent(ev, rest, { r, c });
 }
 
 // ---------------------------------------------------------------- choosing the order

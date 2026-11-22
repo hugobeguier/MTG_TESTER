@@ -16,7 +16,7 @@
         {
           "kind": "create_tokens",
           "tokenCount": 1,
-          "tokenName": "Germ",
+          "tokenName": "Phyrexian Germ",
           "tokenPower": 0,
           "tokenToughness": 0,
           "tokenColors": [

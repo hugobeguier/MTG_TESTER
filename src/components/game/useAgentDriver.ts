@@ -627,12 +627,12 @@ export function useAgentDriver(ctx: GameContext) {
         chosenIds.add(card.id);
       }
       if (chosen.length === 0) {
-        addEvent(`${seat.name} searches their library for ${choice.allowedCardFilter && !/^cards?( matching the source effect)?$/i.test(choice.allowedCardFilter) ? `a ${choice.allowedCardFilter} card` : "a card"} (${choice.sourceCardName}) but finds nothing to reveal, then shuffles.`, seat.id, "Rules advisor");
+        addEvent(`${seat.name} searches their library for ${choice.allowedCardFilter && !/^cards?( matching the source effect)?$/i.test(choice.allowedCardFilter) ? `a ${choice.allowedCardFilter} card` : "a card"} (${choice.sourceCardName}) but finds nothing to reveal, then shuffles.`, seat.id, "Rules");
         setSession((current) => ({ ...current, seats: current.seats.map((item) => (item.id === seat.id ? { ...item, library: shuffleCards(item.library ?? []) } : item)) }));
         setPendingRuleChoice(undefined);
         return;
       }
-      addEvent(`${seat.name} chooses ${chosen.map((card) => card.name).join(", ")} for ${choice.sourceCardName}.`, seat.id, "Rules advisor");
+      addEvent(`${seat.name} chooses ${chosen.map((card) => card.name).join(", ")} for ${choice.sourceCardName}.`, seat.id, "Rules");
       completeRuleChoice(choice, chosen.map((card) => card.id));
       return;
     }
@@ -664,13 +664,13 @@ export function useAgentDriver(ctx: GameContext) {
         const lifeCost = choice.trigger.effect.amount;
         const opponentHasCreature = session.seats.some((other) => other.id !== seat.id && !other.hasLost && other.board.battlefield.some((card) => card.typeLine.includes("Creature")));
         if (seat.life - lifeCost < 10 || !opponentHasCreature) {
-          addEvent(`${seat.name} declines ${choice.sourceCardName}'s optional effect (not worth ${lifeCost} life right now).`, seat.id, "Rules advisor");
+          addEvent(`${seat.name} declines ${choice.sourceCardName}'s optional effect (not worth ${lifeCost} life right now).`, seat.id, "Rules");
           setPendingRuleChoice(undefined);
           finishTriggerResolution(choice.trigger, choice.remainingStack, false);
           return;
         }
       }
-      addEvent(`${seat.name} chooses to do ${choice.sourceCardName}'s optional effect.`, seat.id, "Rules advisor");
+      addEvent(`${seat.name} chooses to do ${choice.sourceCardName}'s optional effect.`, seat.id, "Rules");
       setPendingRuleChoice(undefined);
       finishTriggerResolution(choice.trigger, choice.remainingStack, true);
       return;
@@ -680,7 +680,7 @@ export function useAgentDriver(ctx: GameContext) {
       // path's equivalent "you may" choice.
       setPendingRuleChoice(undefined);
       setSession((current) => applyPrimitiveActionPlan(current, choice.controllerSeatId, choice.sourceCard, choice.steps));
-      addEvent(`${seat.name}: ${choice.prompt.replace(/ Do you want to\?$/, "")}.`, seat.id, "Rules advisor (primitive plan)");
+      addEvent(`${seat.name}: ${choice.prompt.replace(/ Do you want to\?$/, "")}.`, seat.id, "Rules");
       return;
     }
     if (choice.kind === "discard_to_hand_size") {
@@ -751,20 +751,20 @@ export function useAgentDriver(ctx: GameContext) {
                 at: new Date().toISOString(),
                 seatId: seat.id,
                 message: `${seat.name} pays ${source.name}'s cumulative upkeep for ${cost} mana and adds an age counter.`,
-                detail: "Rules advisor"
+                detail: "Rules"
               },
               ...current.events
             ]
           }));
         } else {
-          addEvent(`${seat.name} can't pay ${source.name}'s cumulative upkeep and sacrifices it.`, seat.id, "Rules advisor");
+          addEvent(`${seat.name} can't pay ${source.name}'s cumulative upkeep and sacrifices it.`, seat.id, "Rules");
           setSession((current) => moveCardBetweenVisibleZones(current, seat.id, source.id, "graveyard"));
         }
         setPendingRuleChoice(undefined);
         return;
       }
     }
-    addEvent(`${seat.name} passes manual review for ${choice.sourceCardName}.`, seat.id, "Rules advisor");
+    addEvent(`${seat.name} passes manual review for ${choice.sourceCardName}.`, seat.id, "Rules");
     setPendingRuleChoice(undefined);
   }
 

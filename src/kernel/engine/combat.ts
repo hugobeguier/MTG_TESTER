@@ -126,7 +126,7 @@ export function declareAttackers(r: Run, a: DeclareAttackers): number {
     if (!defs.includes(at.defender)) throw new Reject("illegal_attack", `${label(r, at.defender)} cannot be attacked by ${a.player}`);
     const why = attackProblem(r, at.id, a.player, at.defender) ?? goadProblem(r, at.id, a.player, at.defender, defs);
     if (why) throw new Reject("illegal_attack", why);
-    for (const x of restrictionsOf(r, at.id)) if (x.kind === "attackTax" && covers(r, x.protects, x.source, at.defender)) addCost(tax, parseManaCost(x.cost));
+    if (!r.s.config.mirrorHeadless?.noAttackTax) for (const x of restrictionsOf(r, at.id)) if (x.kind === "attackTax" && covers(r, x.protects, x.source, at.defender)) addCost(tax, parseManaCost(x.cost));
   }
   // requirements: every creature that must attack and could attack something does
   for (const id of legalAttackers(r, a.player)) {
@@ -236,6 +236,7 @@ export function declareBlockers(r: Run, a: DeclareBlockers): boolean {
     for (const x of restrictionsOf(r, b.blocker)) if (x.kind === "blockTax") addCost(tax, parseManaCost(x.cost));
   }
   for (const [atk, bl] of per) if (hasKw(r, atk, "menace") && bl.length < 2) throw new Reject("illegal_block", `${label(r, atk)} has menace: it must be blocked by two or more creatures`);
+  for (const [atk, bl] of per) if (hasKw(r, atk, "can't be blocked by more than one creature") && bl.length > 1) throw new Reject("illegal_block", `${label(r, atk)} can't be blocked by more than one creature`);
   payTax(r, a.player, tax, a, "block");
   const batch = bumpBatch(r);
   for (const b of a.blocks) {

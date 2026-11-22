@@ -207,7 +207,7 @@ export interface InterpretedEffect {
   appliesTo: "controller" | "planeswalkers" | "both";
   sourceCardId: string;
   sourceCardName: string;
-  interpretedBy: "deterministic" | "ollama";
+  interpretedBy: "deterministic";
 }
 
 export interface DamageShield {
@@ -572,6 +572,9 @@ export interface GameSession {
   // are both pure functions with no access to the trigger-queueing machinery either. Reproduced live
   // as Avenger of Zendikar returned via Virtue of Persistence never creating its Plant tokens.
   pendingEntries?: Array<{ seatId: string; card: VisibleCard }>;
+  // "Couldn't resolve" occurrences (src/engine/unresolved.ts): effect clauses the legacy engine could not apply. Dev/observer record; the player-facing line is the event log entry (detail "Unresolved").
+  // posted: set once the host client has sent it to the dev disk log.
+  unresolvedEffects?: UnresolvedEffectRecord[];
   // Same idea again, for "whenever a creature you control deals combat damage to a player, ..."
   // (Toski, Bearer of Secrets, ...) — applyCombatDamageToTarget (called from both the unblocked and
   // the blocked-with-trample paths) is also a pure function with no access to the trigger-queueing
@@ -754,4 +757,19 @@ export interface AgentAction {
   // AgentReasoning.deliberation for where this ends up surfaced.
   deliberation?: string;
   fallbackAction: "pass_priority" | "end_turn";
+}
+
+export interface UnresolvedEffectRecord {
+  key: string;
+  cardName: string;
+  clause: string;
+  abilityKind: string;
+  engine: "legacy" | "kernel";
+  decks: string[];
+  turn: number;
+  phase: string;
+  seatKind: "human" | "agent";
+  at: string;
+  gameId: string;
+  posted?: boolean;
 }

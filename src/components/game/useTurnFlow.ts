@@ -535,7 +535,7 @@ export function useTurnFlow(ctx: GameContext) {
           at: new Date().toISOString(),
           seatId: seat.id,
           message: `${seat.name} pays ${source.name}'s cumulative upkeep for ${cost} mana and adds an age counter.`,
-          detail: "Rules advisor"
+          detail: "Rules"
         },
         ...current.events
       ]

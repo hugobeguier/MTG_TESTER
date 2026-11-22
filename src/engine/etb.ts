@@ -543,7 +543,7 @@ export function applySagaEntryLoreCounterHeadless(session: GameSession, seatId: 
   return sagaLoreStepHeadless(session, seatId, saga, chapters, 1, 1);
 }
 
-// Each Saga the seat controls that is still short of its last chapter gains a counter (after the draw step).
+// Each Saga the seat controls that is still short of its last chapter gains a counter (as the precombat main phase begins, 714.3b).
 export function advanceSagaLoreCountersHeadless(session: GameSession, seatId: string): GameSession {
   const seat = session.seats.find((item) => item.id === seatId);
   if (!seat) return session;

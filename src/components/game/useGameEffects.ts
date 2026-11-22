@@ -38,7 +38,7 @@ export function useGameEffects(ctx: GameContext) {
   const { mode, session, setSession, activeSeatId, prioritySeatId, setPrioritySeatId, gameStage: liveGameStage, configs, autoValidatedDefaultDeck, humanSeat } = ctx;
   // Paused for a disconnected friend (multiplayer): every effect below treats the game as "not playing", so nothing advances until they are back.
   const gameStage = ctx.mpPausedFor.length > 0 ? ("paused" as const) : liveGameStage;
-  const { rulesAdvisorPending, agentDecisionRequests } = ctx.agent;
+  const { agentDecisionRequests } = ctx.agent;
   const { libraryLook, manualLibrarySearch, pendingRuleChoice, setPendingRuleChoice, blockChoice, setBlockChoice, basicLandFetchSearch, pendingOrderedTriggerResume, commanderZoneChoiceAsked, auraRetargetAsked } = ctx.choices;
   const { manaPools, restrictedManaBatches } = ctx.mana;
   const { pendingAction, stackActions, priorityPasses, priorityStopSettings, holdPriorityOnce } = ctx.stack;
@@ -1101,8 +1101,7 @@ export function useGameEffects(ctx: GameContext) {
       pendingRuleChoice ||
       manualLibrarySearch ||
       blockChoice ||
-      basicLandFetchSearch ||
-      rulesAdvisorPending > 0
+      basicLandFetchSearch
     )
       return;
     if (session.phase === "declare blockers step") {
@@ -1172,7 +1171,7 @@ export function useGameEffects(ctx: GameContext) {
       }
     }, agentPaceMs(1100));
     return () => window.clearTimeout(timer);
-  }, [mode, gameStage, pendingAction, libraryLook, pendingRuleChoice, manualLibrarySearch, blockChoice, basicLandFetchSearch, rulesAdvisorPending, activeSeatId, session.phase, session.turn, session.seats]);
+  }, [mode, gameStage, pendingAction, libraryLook, pendingRuleChoice, manualLibrarySearch, blockChoice, basicLandFetchSearch, activeSeatId, session.phase, session.turn, session.seats]);
 
   // Human turn auto-advance: chains the human's own turn from stop to stop (per priorityStopSettings'
   // phase grid) instead of requiring a manual Advance Phase click for every one of TURN_PHASES' 12
@@ -1189,7 +1188,6 @@ export function useGameEffects(ctx: GameContext) {
       manualLibrarySearch ||
       blockChoice ||
       basicLandFetchSearch ||
-      rulesAdvisorPending > 0 ||
       session.phase === "declare blockers step"
     )
       return;
@@ -1230,7 +1228,6 @@ export function useGameEffects(ctx: GameContext) {
     manualLibrarySearch,
     blockChoice,
     basicLandFetchSearch,
-    rulesAdvisorPending,
     activeSeatId,
     session.phase,
     session.turn,
@@ -1242,11 +1239,11 @@ export function useGameEffects(ctx: GameContext) {
   // Miracle (CR 702.94a): a seat's first card drawn this turn (drawForSeat stamps drawnThisTurn.miracleCandidateId, on any player's turn) is offered
   // once the whole draw effect, a Brainstorm put-back, and anything else mid-resolution are done - the next time a player would receive priority.
   useEffect(() => {
-    if (mode !== "game" || gameStage !== "playing" || pendingAction || pendingRuleChoice || libraryLook || manualLibrarySearch || blockChoice || basicLandFetchSearch || rulesAdvisorPending) return;
+    if (mode !== "game" || gameStage !== "playing" || pendingAction || pendingRuleChoice || libraryLook || manualLibrarySearch || blockChoice || basicLandFetchSearch) return;
     if ((session.pendingDeaths?.length ?? 0) > 0) return;
     if (!session.seats.some((seat) => seat.drawnThisTurn?.miracleCandidateId !== undefined)) return;
     offerPendingMiracle();
-  }, [mode, gameStage, pendingAction, pendingRuleChoice, libraryLook, manualLibrarySearch, blockChoice, basicLandFetchSearch, rulesAdvisorPending, session.seats, session.pendingDeaths]);
+  }, [mode, gameStage, pendingAction, pendingRuleChoice, libraryLook, manualLibrarySearch, blockChoice, basicLandFetchSearch, session.seats, session.pendingDeaths]);
 
   useEffect(() => {
     if (mode !== "game" || gameStage !== "playing" || !pendingRuleChoice) return;

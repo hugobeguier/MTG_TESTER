@@ -21,6 +21,7 @@ import { unlessDiscardHandler, unlessHandler, unlessPaySupported, type UnlessPay
 import { addMana } from "./mana";
 import { cantBeCountered } from "./layers";
 import { attachStep } from "./attach";
+import { checkCounterAnswer, counterSpec } from "./counters7";
 import { copyStep } from "./copy";
 import { transformStep } from "./faces";
 import { delayedStep, grantToPlayers, permissionStep } from "./durablesteps";
@@ -34,7 +35,7 @@ export interface AskSpec { kind: DecisionKind; player: PlayerId; prompt: Prompt;
 export type StepResult = "done" | { ask: AskSpec } | { push: Step[] };
 export type StepStatus = { status: "done" } | { status: "ask"; spec: AskSpec };
 
-export const META_FIELDS = ["kind", "id", "src", "srcs", "prompt", "optional", "condition", "__asked", "unlessPay", "amountLockedOn"];
+export const META_FIELDS = ["kind", "id", "src", "srcs", "prompt", "optional", "condition", "__asked", "unlessPay", "amountLockedOn", "optionalCost"];
 
 /** Validate an answer against the spec computed from the current state. */
 export function decide(spec: AskSpec, answer: Choice | undefined): { ask: AskSpec } | { ids: string[]; number?: number; yes?: boolean } {
@@ -83,11 +84,12 @@ export function dealDamage(r: Run, env: Env | undefined, source: string | undefi
   if (!isObjId(target)) {
     emit(r, { type: "damage", source, target, amount, combat, batch: r.batch });
     dealt = amount;
+    if (combat && source) r.s.turnLog.push({ type: "combat_damage_to_player", player: target, id: source, amount, ts: r.s.clock });
     if (combat && source && isCommanderObj(r, source)) addCommanderDamage(r, target, source, amount);
     changeLife(r, env, target, -amount);
     // the monarchy: combat damage to the monarch by a creature makes that creature's controller the monarch
     const srcObj = source ? tryObj(r, source) : undefined;
-    if (combat && r.s.monarch === target && srcObj && srcObj.controller !== target && chars(r, srcObj.id).types.includes("creature")) { r.s.monarch = srcObj.controller; emit(r, { type: "monarch_changed", player: srcObj.controller }); }
+    if (combat && !r.s.config.mirrorHeadless?.noMonarchSteal && r.s.monarch === target && srcObj && srcObj.controller !== target && chars(r, srcObj.id).types.includes("creature")) { r.s.monarch = srcObj.controller; emit(r, { type: "monarch_changed", player: srcObj.controller }); }
   } else {
     const o = tryObj(r, target);
     if (o && o.zone === "battlefield") {
@@ -196,7 +198,7 @@ const STEPS: Record<string, StepSpec> = {
   life_change: {
     fields: ["lifeDelta", "amount", "who", "lose"],
     run: (r, ex, step) => {
-      const raw = step.lifeDelta !== undefined ? Number(step.lifeDelta) : qty(r, ex.env, step, "amount", 0);
+      const raw = step.lifeDelta !== undefined ? evalQuantity(r, step.lifeDelta as never, ex.env) : qty(r, ex.env, step, "amount", 0);
       const delta = step.lose ? -Math.abs(raw) : raw;
       let lost = 0;
       for (const p of players(r, ex.env, step)) { const before = player(r, p).life; changeLife(r, ex.env, p, delta); if (delta < 0) lost += Math.max(0, before - player(r, p).life); }
@@ -215,16 +217,35 @@ const STEPS: Record<string, StepSpec> = {
     }
   },
   damage_target: {
-    fields: ["amount", "target", "who", "source", "all", "filter"],
+    fields: ["amount", "target", "who", "source", "all", "filter", "excessTo", "divided", "damageTargetType"],
     run: (r, ex, step) => {
       const env = ex.env;
       const amount = qty(r, env, step);
       const src = step.source ? refs(r, env, step, "source")[0] : env.source;
       let targets: string[];
       if (step.all) targets = objectsMatching(r, (step.filter ?? {}) as ObjectFilter, env);
+      else if (step.damageTargetType !== undefined) {
+        // "deals X damage to the player or planeswalker it's attacking" (Myr Battlesphere): the defender of the source attacker
+        if (step.damageTargetType !== "attacked_player_or_planeswalker") throw new Unsupported(`field:damage_target.damageTargetType=${String(step.damageTargetType)}`);
+        const at = src ? r.s.combat?.attackers.find((a) => a.id === src) : undefined;
+        targets = at ? [at.defender] : [];
+      }
       else if (step.target) targets = refs(r, env, step);
       else targets = players(r, env, step);
-      for (const t of targets) dealDamage(r, env, src, t, amount);
+      if (step.divided && targets.length > 1 && amount > 0) return { push: [{ kind: "__divide_damage" as never, targets, amount, source: src, prompt: step.prompt } as Step] };
+      for (const t of targets) {
+        if (step.excessTo === undefined) { dealDamage(r, env, src, t, amount); continue; }
+        if (step.excessTo !== "controller_of_target") throw new Unsupported(`field:damage_target.excessTo=${String(step.excessTo)}`);
+        // "excess damage is dealt to that creature's controller instead": lethal damage (1 from a deathtouch source) goes to the creature, the rest to its controller
+        const o = tryObj(r, t);
+        if (!o || o.zone !== "battlefield") continue;
+        const srcLive = src ? tryObj(r, src) : undefined;
+        const dt = !!srcLive && srcLive.zone === "battlefield" && chars(r, srcLive.id).keywords.includes("deathtouch");
+        const lethal = dt ? 1 : Math.max(0, (chars(r, t).toughness ?? 0) - o.damage);
+        const owner = o.controller;
+        dealDamage(r, env, src, t, Math.min(amount, lethal));
+        if (amount > lethal) dealDamage(r, env, src, owner, amount - lethal);
+      }
       return "done";
     }
   },
@@ -321,7 +342,7 @@ const STEPS: Record<string, StepSpec> = {
       if (!step.target && !step.filter) { grantToPlayers(r, ex.env, step); return "done"; }
       requireEot(step);
       // mass form ("creatures you control gain indestructible until end of turn"): the filter picks the permanents, `who` is only whose perspective it is
-      const mods = (step.modify ?? []) as Array<Record<string, unknown>>;
+      const mods = ((step.modify ?? []) as Array<Record<string, unknown>>).map((m) => (m.cant === "be_blocked" && Object.keys(m).length === 1 ? { grant: "unblockable" } : m)); // "it can't be blocked this turn" = unblockable for the turn
       const GRANTABLE = ["grant", "lose", "setBasePT", "addTypes", "setColors"];
       for (const m of mods) if (Object.keys(m).length !== 1 || !GRANTABLE.includes(Object.keys(m)[0])) throw new Unsupported(`field:grant_effect.modify.${Object.keys(m)[0]}`);
       const granted = step.target ? refs(r, ex.env, step) : objectsMatching(r, step.filter as ObjectFilter, ex.env);
@@ -375,7 +396,7 @@ const STEPS: Record<string, StepSpec> = {
     }
   },
   sacrifice_permanent: {
-    fields: ["who", "amount", "filter", "target", "all"],
+    fields: ["who", "amount", "filter", "target", "all", "greatestPower"],
     run: (r, ex, step) => {
       const env = ex.env;
       if (step.all) { // "each player sacrifices all ...": every matching permanent each listed player controls
@@ -383,11 +404,13 @@ const STEPS: Record<string, StepSpec> = {
         return "done";
       }
       if (step.target) {
-        if (step.target !== "self") throw new Unsupported(`field:sacrifice_permanent.target=${String(step.target)}`);
-        for (const id of refs(r, env, step)) sacrificeObject(r, id);
+        // an explicit object ("chosen": Disciple of Bolas): sacrifice it, later steps read what it was as `sacrificed` (last-known information)
+        const ids = refs(r, env, step);
+        for (const id of ids) sacrificeObject(r, id);
+        if (step.target !== "self") env.sacrificed = ids;
         return "done";
       }
-      return { push: players(r, env, step).map((p) => ({ kind: "__sacrifice" as never, player: p, n: qty(r, env, step), filter: step.filter, prompt: step.prompt }) as Step) };
+      return { push: players(r, env, step).map((p) => ({ kind: "__sacrifice" as never, player: p, n: qty(r, env, step), filter: step.filter, greatestPower: step.greatestPower, prompt: step.prompt }) as Step) };
     }
   },
   attach: attachStep,
@@ -571,7 +594,11 @@ const INTERNAL: Record<string, Handler> = {
   __sacrifice: (r, ex, step, answer) => {
     const pid = String(step.player);
     const f = { ...(step.filter as ObjectFilter | undefined), controller: undefined } as ObjectFilter;
-    const mine = r.s.battlefield.filter((id) => r.s.objects[id].controller === pid && matchesFilter(r, id, f, { ...ex.env, controller: pid }));
+    let mine = r.s.battlefield.filter((id) => r.s.objects[id].controller === pid && matchesFilter(r, id, f, { ...ex.env, controller: pid }));
+    if (step.greatestPower) { // "a creature with the greatest power among creatures they control": only the tied-highest ones may be chosen
+      const top = Math.max(...mine.map((id) => chars(r, id).power ?? 0));
+      mine = mine.filter((id) => (chars(r, id).power ?? 0) === top);
+    }
     const n = Math.min(Number(step.n), mine.length);
     if (n <= 0) return "done";
     if (n === mine.length) { for (const id of [...mine]) sacrificeObject(r, id); return "done"; }
@@ -579,6 +606,23 @@ const INTERNAL: Record<string, Handler> = {
     const d = decide(spec, answer);
     if ("ask" in d) return d;
     for (const id of d.ids) sacrificeObject(r, id);
+    return "done";
+  },
+  // damage divided as the controller chooses among the targets (each gets at least 1 when the amount allows): reuses the assign_counters decision (answer = choice.assign)
+  __divide_damage: (r, ex, step, answer) => {
+    const live = (step.targets as string[]).filter((t) => (isObjId(t) ? tryObj(r, t)?.zone === "battlefield" : true));
+    const amount = Number(step.amount);
+    if (live.length === 0) return "done";
+    const src = step.source as string | undefined;
+    let split: Record<string, number>;
+    if (live.length === 1) split = { [live[0]]: amount };
+    else {
+      const spec = counterSpec(r, ex.env.controller, (step.prompt as Prompt | undefined) ?? fallbackPrompt(r, ex.env, "damage", `Divide ${amount} damage among the targets.`), Object.fromEntries(live.map((t) => [t, amount])), amount, amount, (id) => (isObjId(id) ? label(r, id) : `player ${id}`));
+      if (!answer) return { ask: spec };
+      split = checkCounterAnswer(spec, answer);
+      if (amount >= live.length && live.some((t) => !(split[t] > 0))) throw new Reject("invalid_choice", "each target must be assigned at least 1 damage");
+    }
+    for (const t of live) if (split[t] > 0) dealDamage(r, ex.env, src, t, split[t]);
     return "done";
   },
   __scry: (r, ex, step, answer) => {
@@ -630,10 +674,17 @@ export function runExec(r: Run, ex: Exec, answer?: Choice): StepStatus {
       const spec = STEPS[step.kind];
       if (!spec) throw new Unsupported(`step:${step.kind}`);
       if (step.unlessPay && !unlessPaySupported(step.unlessPay as unknown as UnlessPay)) throw new Unsupported("step:unless_pay");
+      if (step.optionalCost && !unlessPaySupported({ payer: "you", cost: step.optionalCost as never })) throw new Unsupported("step:optional_cost");
       for (const k of Object.keys(step)) if (!META_FIELDS.includes(k) && !spec.fields.includes(k)) throw new Unsupported(`field:${step.kind}.${k}`);
       if (step.condition && !pendingAnswer && !evalPredicate(r, step.condition.if, ex.env)) { frame.i++; continue; }
       // "you may reveal a <filter> card from your hand": with nothing to reveal the step is skipped (and does not count as done)
       if (step.kind === "reveal" && step.filter && !pendingAnswer && !objectsMatching(r, step.filter as ObjectFilter, ex.env).length) { frame.i++; continue; }
+      if (step.optionalCost) {
+        // "you may pay {1}. If you do, <step>": the unless-pay machinery, inverted (the step runs only when the payment is made)
+        const inner = { ...step, optionalCost: undefined } as Step;
+        frame.steps = [...frame.steps]; frame.steps[frame.i] = { kind: "__unless" as never, inner, pay: { payer: "you", cost: step.optionalCost, inverse: true } } as Step;
+        continue;
+      }
       if (step.optional && !(step as Step & { __asked?: boolean }).__asked) {
         const inner = { ...step, optional: false, condition: undefined, __asked: true } as Step;
         const asker = step.kind === "search_library" ? resolvePlayers(r, step.who ?? "you", ex.env)[0] : undefined; // "its controller MAY search": they decide

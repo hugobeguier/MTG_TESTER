@@ -1,6 +1,6 @@
 # Kernel draft approval: Wretched Ranks
 
-68 unique cards: 41 simple (A), 27 complex (B). Validator: 68/68 pass. Cards with implementation "needed": 60. All drafts are `review.status: "draft"`; nothing was written to the DB.
+68 unique cards: 42 simple (A), 26 complex (B). Validator: 68/68 pass. Cards with implementation "needed": 60. All drafts are `review.status: "draft"`; nothing was written to the DB.
 
 Reading guide: each card below shows the oracle text and what the structured JSON says back in plain English. Approve if they match.
 
@@ -19,6 +19,7 @@ Reading guide: each card below shows the oracle text and what the structured JSO
 - **Death Baron** (Creature — Zombie Wizard): Skeletons or other Zombies you control get +1/+1 and have deathtouch [needs: static]
 - **Diregraf Colossus** (Creature — Zombie Giant): If Diregraf Colossus would enter, modify it: {"counters":{"kind":"+1/+1","amount":{"ref":"count","of":{"subtypes":["Zombie"],"zone":"graveyard","owner":"you"}}}} | Whenever you cast a Zombie spell: Create a 2/2 black Zombie creature token tapped [needs: replacement:would_enter, field:create_tokens.tokenTapped]
 - **Disciple of Griselbrand** (Creature — Human Cleric): {1}, sacrifice a creature you control: Gain the sacrificed permanent's toughness life [needs: ref:sacrificed, cost:sacrifice, quantity:stat, field:life_change.amount]
+- **Dissection Tools** (Artifact — Equipment): Whenever Dissection Tools enters: Manifest dread, then attach Dissection Tools to the token just created | The equipped creature gets +2/+2 and has deathtouch and has lifelink | sacrifice a creature you control: [targets: target creature you control] Attach Dissection Tools to target creature you control [needs: ref:created, step:manifest_dread, step:attach, field:attach.to, field:attach.what, static, cost:sacrifice]
 - **Fleshbag Marauder** (Creature — Zombie Warrior): Whenever Fleshbag Marauder enters: Each player sacrifices a creature [needs: field:sacrifice_permanent.filter, field:sacrifice_permanent.who]
 - **Geier Reach Sanitarium** (Legendary Land): {T}: add {C} | {2}, {T}: Each player draws a card, then each player discard a card [needs: field:draw_cards.who, field:discard.who]
 - **Go for the Throat** (Instant): [targets: target nonartifact creature] Destroy target nonartifact creature [implemented]
@@ -419,10 +420,10 @@ Re-rendered plain English:
 
 ```
 Disciple of Bolas [draft]
-  [a1] triggered [needed: needs step:choose, field:choose.count, field:choose.from, field:choose.saveAs, quantity:stat, field:life_change.amount]
+  [a1] triggered [needed: needs ref:sacrificed, step:choose, field:choose.count, field:choose.from, field:choose.saveAs, quantity:stat, field:life_change.amount]
     Oracle: When this creature enters, sacrifice another creature. You gain X life and draw X cards, where X is that creature's power.
     Trigger: Whenever Disciple of Bolas enters
-    Effect: Choose an another creature you control. Then, sacrifice a permanent. Then, gain the chosen object's power life. Then, draw the chosen object's power cards.
+    Effect: Choose an another creature you control. Then, sacrifice a permanent. Then, gain the sacrificed permanent's power life. Then, draw the sacrificed permanent's power cards.
 ```
 
 Player prompts:
@@ -430,45 +431,7 @@ Player prompts:
 - Disciple of Bolas: choose: Choose an another creature you control.
 - Disciple of Bolas: sacrifice: Choose a permanent to sacrifice.
 
-Implementation: needed (step:choose, field:choose.count, field:choose.from, field:choose.saveAs, quantity:stat, field:life_change.amount)
-
-### Dissection Tools
-
-Type: Artifact — Equipment
-
-Oracle text:
-
-> When this Equipment enters, manifest dread, then attach this Equipment to that creature.
-> Equipped creature gets +2/+2 and has deathtouch and lifelink.
-> Equip—Sacrifice a creature.
-
-Re-rendered plain English:
-
-```
-Dissection Tools [draft]
-  [a1] triggered [needed: needs scripted:manifest_dread, ref:created, step:attach, field:attach.to, field:attach.what]
-    Oracle: When this Equipment enters, manifest dread, then attach this Equipment to that creature.
-    Trigger: Whenever Dissection Tools enters
-    Effect: Attach Dissection Tools to the token just created.
-    Scripted (engine-specific rule, not described by the fields above): manifest_dread
-  [a2] static [needed: needs static]
-    Oracle: Equipped creature gets +2/+2 and has deathtouch and lifelink.
-    Static: The equipped creature gets +2/+2 and has deathtouch and has lifelink
-  [a3] activated [needed: needs cost:sacrifice, step:attach, field:attach.to, field:attach.what]
-    Oracle: Equip—Sacrifice a creature.
-    Cost: sacrifice a creature you control
-    Timing: sorcery
-    Target t1: target creature you control  <- prompt: "Choose target creature you control."
-    Effect: Attach Dissection Tools to target creature you control.
-    Keyword: equip
-```
-
-Player prompts:
-
-- Dissection Tools: choose a target: Choose target creature you control.
-- Dissection Tools: choose what to sacrifice: Choose 1 creature you control to sacrifice.
-
-Implementation: needed (scripted:manifest_dread, ref:created, step:attach, field:attach.to, field:attach.what, static, cost:sacrifice)
+Implementation: needed (ref:sacrificed, step:choose, field:choose.count, field:choose.from, field:choose.saveAs, quantity:stat, field:life_change.amount)
 
 ### Endless Ranks of the Dead
 
@@ -841,6 +804,7 @@ Implementation: needed (replacement:would_enter, trigger:intervening_if, predica
 | `mana:variable` | 3 | Arcane Signet; Commander's Sphere; Patchwork Banner |
 | `quantity:stat` | 3 | Ghoulcaller Gisa; Disciple of Bolas; Disciple of Griselbrand |
 | `ref:created` | 3 | Bonehoard; Dissection Tools; Lashwrithe |
+| `ref:sacrificed` | 3 | Ghoulcaller Gisa; Disciple of Bolas; Disciple of Griselbrand |
 | `step:add_counters` | 3 | Carrion Feeder; Champion of the Perished; Kalitas, Traitor of Ghet |
 | `step:choose` | 3 | Cemetery Tampering; Disciple of Bolas; Patchwork Banner |
 | `trigger:intervening_if` | 3 | Crown of Gondor; Oversold Cemetery; Witch's Cottage |
@@ -856,7 +820,6 @@ Implementation: needed (replacement:would_enter, trigger:intervening_if, predica
 | `field:permission_to_play.what` | 2 | Cemetery Tampering; Zul Ashur, Lich Lord |
 | `field:permission_to_play.zone` | 2 | Cemetery Tampering; Zul Ashur, Lich Lord |
 | `quantity:math` | 2 | Endless Ranks of the Dead; Mutilate |
-| `ref:sacrificed` | 2 | Ghoulcaller Gisa; Disciple of Griselbrand |
 | `step:permission_to_play` | 2 | Cemetery Tampering; Zul Ashur, Lich Lord |
 | `cast_option` | 1 | Gravecrawler |
 | `cast_option:cast_from_zone` | 1 | Gravecrawler |
@@ -896,11 +859,11 @@ Implementation: needed (replacement:would_enter, trigger:intervening_if, predica
 | `ref:linked_exile` | 1 | Cemetery Tampering |
 | `replacement:would_die` | 1 | Kalitas, Traitor of Ghet |
 | `scripted:become_monarch` | 1 | Crown of Gondor |
-| `scripted:manifest_dread` | 1 | Dissection Tools |
 | `static:setBasePT` | 1 | Soulless One |
 | `step:counter_spell` | 1 | Zul Ashur, Lich Lord |
 | `step:grant_effect` | 1 | Lord of the Accursed |
 | `step:look_top` | 1 | Cemetery Tampering |
+| `step:manifest_dread` | 1 | Dissection Tools |
 | `step:repeat_for_each` | 1 | Lord of the Accursed |
 | `step:surveil` | 1 | Umbral Collar Zealot |
 | `step:unless_pay` | 1 | Zul Ashur, Lich Lord |

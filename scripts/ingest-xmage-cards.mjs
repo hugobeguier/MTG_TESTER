@@ -5,7 +5,7 @@
 // guesses one, so the ingested index can't be wrong about what it actually found). Opens
 // data/cards.db directly with better-sqlite3 rather than importing src/lib/cardDb.ts — same
 // "plain scripts talk to SQLite directly, don't cross the .mjs/.ts boundary" convention
-// scripts/parse-cards.mjs already uses.
+// (the removed scripts/parse-cards.mjs used).
 //
 // Usage:
 //   node scripts/ingest-xmage-cards.mjs           # clone (first run) or pull (later runs), then index

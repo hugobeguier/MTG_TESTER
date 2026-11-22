@@ -7,6 +7,7 @@ import { addDurable } from "./durable";
 import { addLink } from "./links";
 import { evalQuantity, objectsMatching, resolveObjs, resolvePlayers } from "./query";
 import { addRegenShield } from "./regen";
+import { defenderOptions } from "./combat";
 import { setResult } from "./saved";
 import { recordMilled, revealUntilRun } from "./reveal7";
 import { checkCounterAnswer, counterSpec } from "./counters7";
@@ -156,6 +157,47 @@ export function steps7(base: Record<string, StepSpec>): void {
     }
   };
 
+  // manifest dread: look at the top two cards, put one onto the battlefield face down as a 2/2 creature, the other into the graveyard (701.62)
+  STEPS7.manifest_dread = { fields: ["who"], run: (r, ex, step) => ({ push: players(r, ex.env, step).map((p) => ({ kind: "__manifest_dread" as never, player: p, prompt: step.prompt }) as Step) }) };
+  INTERNAL7.__manifest_dread = (r, ex, step, answer) => {
+    const pid = String(step.player);
+    const top = player(r, pid).library.slice(0, 2);
+    if (top.length === 0) return "done";
+    let pick = top[0];
+    if (top.length > 1) {
+      emit(r, { type: "looked_at", player: pid, owner: pid, ids: [...top], names: top.map((id) => label(r, id)) });
+      const spec: AskSpec = { kind: "choose_cards", player: pid, prompt: (step.prompt as Prompt | undefined) ?? fallbackPromptOf(r, ex.env, "manifest", "Choose a card to manifest face down; the other goes to your graveyard."), options: cardOptions(r, top), min: 1, max: 1 };
+      const d = decide(spec, answer);
+      if ("ask" in d) return d;
+      pick = d.ids[0];
+    }
+    ex.env.created = [];
+    for (const id of top) if (id !== pick) moveObject(r, id, "graveyard");
+    const m = moveObject(r, pick, "battlefield", { controller: pid, faceDown: true });
+    if (m && m.zone === "battlefield") ex.env.created.push(m.id);
+    return "done";
+  };
+  // "reselect which player or permanent target attacking creature is attacking" (Misleading Signpost): the controller picks any legal defender for that attacker
+  STEPS7.reselect_attack_target = { fields: ["target"], run: (r, ex, step) => {
+    const at = refs(r, ex.env, step).map((id) => r.s.combat?.attackers.find((a) => a.id === id)).find((a) => !!a);
+    if (!at) return "done";
+    const atk = tryObj(r, at.id);
+    if (!atk) return "done";
+    const opts = defenderOptions(r, atk.controller);
+    if (opts.length < 2) return "done";
+    return { push: [{ kind: "__reselect_attack" as never, attacker: at.id, opts, prompt: step.prompt } as Step] };
+  } };
+  INTERNAL7.__reselect_attack = (r, ex, step, answer) => {
+    const at = r.s.combat?.attackers.find((a) => a.id === step.attacker);
+    if (!at) return "done";
+    const opts = step.opts as string[];
+    const spec: AskSpec = { kind: "choose_option", player: ex.env.controller, prompt: (step.prompt as Prompt | undefined) ?? fallbackPromptOf(r, ex.env, "reselect", `Choose which player or permanent ${label(r, at.id)} is attacking.`), options: opts.map((o) => ({ id: o, label: label(r, o) })), min: 1, max: 1 };
+    const d = decide(spec, answer);
+    if ("ask" in d) return d;
+    at.defender = d.ids[0];
+    emit(r, { type: "attack_target_changed", id: at.id, defender: at.defender });
+    return "done";
+  };
   INTERNAL7.__counters_pick = (r, ex, step, answer) => {
     const on = String(step.on);
     const o = tryObj(r, on);

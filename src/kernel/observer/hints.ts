@@ -43,18 +43,59 @@ export function legacyHint(s0: GameSession, s1: GameSession, a0: AdaptResult): H
    * Did the legacy result move / change this object relative to where the KERNEL has it when it asks? (Not relative to S0: a land that
    * entered during the action is already on the battlefield in the kernel, and staying there is "unchanged".)
    */
-  const changed = (id: string, state: GameState): boolean => {
-    if (!id.startsWith("#")) return playerChanged(s0, s1, id);
+  // rank: 3 moved / died, 2 counters or damage changed, 1 only tapped (a mana source tapped to PAY for the spell is not the chosen target), -1 unchanged
+  const rank = (id: string, state: GameState): number => {
+    if (!id.startsWith("#")) return playerChanged(s0, s1, id) ? 3 : -1;
     const o = state.objects[id], legacy = a0.toLegacy.get(id);
-    if (!o || !legacy) return false;
+    if (!o || !legacy) return -1;
     const after = locate(s1, legacy);
-    if (!after) return o.zone === "battlefield" && !!o.token;
-    if (after.zone !== o.zone || after.seat.id !== o.controller) return true;
-    if (o.zone !== "battlefield") return false;
+    if (!after) return o.zone === "battlefield" && !!o.token ? 3 : -1;
+    if (after.zone !== o.zone || after.seat.id !== o.controller) return 3;
+    if (o.zone !== "battlefield") return -1;
     const kc = JSON.stringify(Object.entries(o.counters).filter(([, n]) => n > 0).sort());
-    return !!after.card.tapped !== o.tapped || counterKey(after.card) !== kc || (after.card.damage ?? 0) !== o.damage;
+    if (counterKey(after.card) !== kc || (after.card.damage ?? 0) !== o.damage) return 2;
+    return !!after.card.tapped !== o.tapped ? 1 : -1;
   };
-  return (p, state) => {
+  const changed = (id: string, state: GameState): boolean => rank(id, state) >= 0;
+  // the legacy combat log says how it divided an attacker's damage: "A trades combat damage with B and C (3 to B, 0 to C, 5 to A)"
+  const seen0 = new Set(s0.events.map((e) => e.id));
+  const logs = s1.events.filter((e) => !seen0.has(e.id)).map((e) => e.message);
+  const norm = (n: string): string => n.replace(/ Token$/i, "").trim().toLowerCase();
+  const dealt = (attacker: string): Record<string, number> | undefined => {
+    const line = logs.find((m) => m.includes(" trades combat damage with ") && norm(m.split(" trades combat damage with ")[0]) === norm(attacker));
+    if (!line) return undefined;
+    const out: Record<string, number> = {};
+    for (const m of line.slice(line.lastIndexOf("(")).matchAll(/(\d+) to ([^,)]+)/g)) out[norm(m[2])] = (out[norm(m[2])] ?? 0) + Number(m[1]);
+    return out;
+  };
+  return (p, state, actor) => {
+    if (p.kind === "assign_damage" && p.amounts) {
+      const atk = state.combat?.attackers.find((a) => a.blockers.some((b) => p.amounts!.lethal[b.id] !== undefined));
+      const atkObj = atk ? state.objects[atk.id] : undefined;
+      const d = atkObj ? dealt(atkObj.token?.name ?? atkObj.cardName) : undefined;
+      if (d) {
+        const assign: Record<string, number> = {};
+        for (const id of Object.keys(p.amounts.lethal)) { const o = state.objects[id]; const n = d[norm(o?.token?.name ?? o?.cardName ?? "")]; if (n) assign[id] = n; }
+        if (Object.values(assign).reduce((a, b) => a + b, 0) === p.amounts.total) return { assign };
+      }
+      return undefined;
+    }
+    if (p.kind === "pay_unless") {
+      // "discard two cards unless you discard an artifact card" (Thirst for Knowledge): paid when the legacy engine discarded exactly one non-spell card from the actor's hand
+      // (the discarded cards may have been drawn during this very action, so compare the graveyards, not the old hand)
+      const had = new Set((s0.seats.find((x) => x.id === actor)?.board.graveyard ?? []).map((c) => c.id));
+      const gone = (s1.seats.find((x) => x.id === actor)?.board.graveyard ?? []).filter((c) => !had.has(c.id) && !/instant|sorcery/i.test(c.typeLine));
+      if (gone.length === 1 && /artifact/i.test(gone[0].typeLine)) return { yes: true };
+      if (gone.length >= 2) return { yes: false };
+      // "you may pay {2}" (Mirrorworks): the legacy log says "<name> pays {2} for <card>"
+      if (logs.some((m) => / pays \{\d+\} for /.test(m))) return { yes: true };
+      return undefined;
+    }
+    if (p.kind === "choose_cards" && /manifest/i.test(p.prompt?.title ?? "")) {
+      // manifest dread: the legacy engine sent one card to the graveyard and put the other onto the battlefield (face down)
+      const pick = p.options.map((o) => o.id).find((id) => { const l = a0.toLegacy.get(id); const after = l ? locate(s1, l) : undefined; return after?.zone === "battlefield"; });
+      return pick ? { ids: [pick] } : undefined;
+    }
     // "<Commander>: command zone?" (the replacement offered when a commander would go to the graveyard / exile): did the legacy engine put it there?
     if (p.kind === "choose_yes_no" && /command zone?s*$/i.test(p.prompt?.title ?? "")) {
       const name = (p.prompt?.title ?? "").replace(/:s*command zone?s*$/i, "");
@@ -62,7 +103,9 @@ export function legacyHint(s0: GameSession, s1: GameSession, a0: AdaptResult): H
       return { yes: inCommandZone };
     }
     if (p.kind !== "choose_targets" && p.kind !== "cast_target_player" && p.kind !== "choose_cards") return undefined;
-    const hit = p.options.map((o) => o.id).filter((id) => changed(id, state));
+    const all = p.options.map((o) => o.id).filter((id) => changed(id, state));
+    const best = Math.max(-1, ...all.map((id) => rank(id, state)));
+    const hit = all.filter((id) => rank(id, state) === best);
     if (hit.length < Math.max(1, p.min)) return undefined;
     return { ids: hit.slice(0, Math.max(1, p.max)) };
   };

@@ -2,7 +2,6 @@
 // notes, pending-action summaries and agent card/seat snapshots, shouldConsultRulesAdvisor.
 // Extracted verbatim from components/AppFlow.tsx; AppFlow.tsx re-exports the previously public symbols.
 
-import { cachedRuleSummariesForCard } from "@/lib/agentRuntime";
 import { castModeLabels, hasResolvableTarget } from "@/engine/castTargets";
 import { applyChosenFaceToCard, canCastAtInstantSpeed, seatHasFlashGrant, spellCastLockedOut } from "@/engine/casting";
 import { describeKeywords } from "@/engine/combat";
@@ -117,7 +116,6 @@ function agentSeatSnapshot(seat: PlayerSeat, includeHand: boolean) {
 }
 
 function agentCardSnapshot(card: VisibleCard) {
-  const ruledEffectSummaries = cachedRuleSummariesForCard(card.oracleText);
   return {
     id: card.id,
     name: card.name,
@@ -150,13 +148,6 @@ function agentCardSnapshot(card: VisibleCard) {
     faces: card.faces?.map((face) => ({ name: face.name, typeLine: face.typeLine, manaCost: face.manaCost, oracleText: face.oracleText })),
     unlockedFaceIndices: card.unlockedFaceIndices,
     interpretedEffects: card.interpretedEffects,
-    // Plain-English summaries the rules advisor already worked out for this exact card text — from
-    // an earlier real consultation, this game or (via ruleWorkflowCache's localStorage persistence)
-    // an earlier one — so the agent's own decision-making gets a digest of what an ability actually
-    // does alongside the raw oracleText above, instead of having to re-derive it from scratch every
-    // single time purely from the raw text. Empty for a card nobody's triggered/cast yet; the very
-    // first real encounter of any given card still has to be read cold, same as before this existed.
-    ruledEffects: ruledEffectSummaries.length > 0 ? ruledEffectSummaries : undefined,
     attachedToId: card.attachedToId,
     grantedKeywords: card.grantedKeywords,
     grantedProtectionColors: card.grantedProtectionColors,

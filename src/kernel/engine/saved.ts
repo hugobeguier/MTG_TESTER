@@ -22,7 +22,10 @@ export function saveList(r: Run, env: SavedEnv, key: string, ids: string[]): voi
 export function setResult(env: SavedEnv, stepId: string | undefined, n: number): void { if (stepId) env.chosen[stepId] = [String(n)]; }
 export function resultOf(env: SavedEnv, stepId: string): number | undefined {
   const v = env.chosen[stepId]?.[0];
-  return v !== undefined && /^-?\d+$/.test(v) ? Number(v) : undefined;
+  if (v !== undefined && /^-?\d+$/.test(v)) return Number(v);
+  // a choose-from-cards step that saved a list under its id: its result is how many cards were chosen ("tap X untapped Myr")
+  const list = env.chosen[stepId];
+  return list && list.every((x) => isObjId(x)) ? list.length : undefined;
 }
 
 /** Saved object ids that are still the same object (same timestamp); player ids and numbers pass through. */

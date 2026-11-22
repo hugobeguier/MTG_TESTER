@@ -30,7 +30,9 @@ async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const games = Number(args.games ?? 5);
   const baseSeed = args.seed !== undefined && args.seed !== true ? Number(args.seed) : 1;
-  const decks = String(args.decks ?? "Meren,Saheeli").split(",").map((d) => d.trim()).filter(Boolean);
+  // ";" separates the names when any name contains a comma ("Breena, the Demagogue"); otherwise ","
+  const decksArg = String(args.decks ?? "Meren,Saheeli");
+  const decks = decksArg.split(decksArg.includes(";") ? ";" : ",").map((d) => d.trim()).filter(Boolean);
   if (decks.length < 2) throw new Error("--decks needs at least two deck names");
   const timeoutMs = Number(args["timeout-ms"] ?? 120000);
   const firstSeatArg = args["first-seat"] !== undefined && args["first-seat"] !== true ? Number(args["first-seat"]) : undefined;
@@ -48,6 +50,7 @@ async function main(): Promise<void> {
   const aggregate = new Aggregate();
   const terminations: Record<string, number> = {};
   let crashed = 0;
+  const legacyUnresolved: Array<import("../src/lib/types").UnresolvedEffectRecord> = [];
   const t0 = Date.now();
   console.log(`kernel observer: ${games} game(s), decks ${decks.join(" | ")}, base seed ${baseSeed}, drafts ${lookup.draftCount()} -> ${outDir}`);
 
@@ -56,7 +59,7 @@ async function main(): Promise<void> {
     const a = decks[g % decks.length], b = decks[(g + 1) % decks.length];
     const seed = baseSeed + g;
     const firstSeat = firstSeatArg ?? g % 2;
-    const repro = `npm run kernel:observe -- --games 1 --seed ${seed} --decks ${a},${b} --first-seat ${firstSeat}${lenient ? " --lenient" : ""}`;
+    const repro = `npm run kernel:observe -- --games 1 --seed ${seed} --decks "${a};${b}" --first-seat ${firstSeat}${lenient ? " --lenient" : ""}`;
     const restore = seedRuntime(seed);
     const started = Date.now();
     let reason = "crash";
@@ -74,6 +77,7 @@ async function main(): Promise<void> {
       observer.finish();
       reason = result.terminationReason;
       turns = result.turns;
+      for (const u of result.session.unresolvedEffects ?? []) legacyUnresolved.push(u);
     } catch (error) {
       crashed++;
       console.error(`game ${g} crashed in the legacy engine/orchestrator: ${error instanceof Error ? error.message : error}`);
@@ -85,10 +89,16 @@ async function main(): Promise<void> {
     console.log(`game ${i + 1}/${games} [${a} vs ${b}] seed ${seed}: ${reason}, ${turns} turns, ${gameDiffs} diffs, ${((Date.now() - started) / 1000).toFixed(1)}s`);
   }
 
-  const report = renderReport(aggregate, { startedAt: new Date(t0).toISOString(), games, seed: baseSeed, decks, wallClockMs: Date.now() - t0, terminations, crashed, command: `npm run kernel:observe -- --games ${games} --seed ${baseSeed} --decks ${decks.join(",")}` });
+  const report = renderReport(aggregate, { startedAt: new Date(t0).toISOString(), games, seed: baseSeed, decks, wallClockMs: Date.now() - t0, terminations, crashed, command: `npm run kernel:observe -- --games ${games} --seed ${baseSeed} --decks "${decks.join(";")}"` });
   writeFileSync(path.join(outDir, "report.md"), report);
   writeFileSync(path.join(outDir, "summary.json"), JSON.stringify({ byCategory: aggregate.byCategory, byDeck: aggregate.byDeck, byIntent: aggregate.byIntent, byField: aggregate.byField, byCapability: aggregate.byCapability, actions: aggregate.actions }, null, 2));
-  console.log(`\nreport: ${path.join(outDir, "report.md")}\ndiffs:  ${diffsFile}`);
+  // Legacy engine "Couldn't resolve" clauses seen in these games (engine/unresolved.ts); the jsonl also feeds `npm run unresolved:report -- <file>`.
+  writeFileSync(path.join(outDir, "legacy-unresolved.jsonl"), legacyUnresolved.map((u) => JSON.stringify(u)).join("\n") + (legacyUnresolved.length ? "\n" : ""));
+  const unresolvedByCard = new Map<string, number>();
+  for (const u of legacyUnresolved) unresolvedByCard.set(`${u.cardName} - ${u.clause}`, (unresolvedByCard.get(`${u.cardName} - ${u.clause}`) ?? 0) + 1);
+  console.log("\nlegacy unresolved effects by card");
+  console.table([...unresolvedByCard.entries()].sort((x, y) => y[1] - x[1]).slice(0, 25).map(([card, times]) => ({ card, times })));
+  console.log(`\nreport:${path.join(outDir, "report.md")}\ndiffs:  ${diffsFile}`);
   console.log(report.split("\n").slice(0, 14).join("\n"));
 }
 

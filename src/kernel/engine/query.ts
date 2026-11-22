@@ -37,7 +37,7 @@ export interface QCtx {
 export const SUPPORTED_FILTER_KEYS: ReadonlySet<string> = new Set([
   "types", "notTypes", "subtypes", "supertypes", "notSupertypes", "colors", "notColors", "controller", "owner", "zone", "colored",
   "another", "token", "tapped", "hasCounter", "mv", "power", "toughness", "named", "with", "anyOf", "notSubtypes", "without", "isCommander",
-  "attacking", "blocking", "attackingYou", "attackingOpponent", "chosenType", "hasBasicLandType", "enteredThisTurn", "chosenColor", "sameNameAs", "sharesCreatureTypeWith", "sameName"
+  "attacking", "blocking", "attackingYou", "attackingOpponent", "chosenType", "hasBasicLandType", "enteredThisTurn", "chosenColor", "sameNameAs", "sharesCreatureTypeWith", "sameName", "controllerDealtDamageBy"
 ]);
 
 export function cmp(a: number, c: Cmp, r: Run, q: QCtx): boolean {
@@ -78,6 +78,11 @@ export function matchesFilter(r: Run, id: string, f: ObjectFilter, q: QCtx): boo
   if (f.colors && !f.colors.every(hasColor)) return false;
   if (f.notColors && f.notColors.some(hasColor)) return false;
   if (f.colored !== undefined && (c.colors.length > 0) !== f.colored) return false;
+  // "whose controller was dealt combat damage by this creature this turn" (Steel Hellkite): turnLog records combat damage dealt to players
+  if (f.controllerDealtDamageBy !== undefined) {
+    if (f.controllerDealtDamageBy !== "self") throw new Unsupported("filter:controllerDealtDamageBy=" + String(f.controllerDealtDamageBy));
+    if (!r.s.turnLog.some((e) => e.type === "combat_damage_to_player" && e.player === o.controller && e.id === q.source)) return false;
+  }
   if (f.controller === "you" && o.controller !== q.controller) return false;
   if (f.controller === "opponent" && o.controller === q.controller) return false;
   if (f.owner === "you" && o.owner !== q.controller) return false;
@@ -338,6 +343,7 @@ export function evalPredicate(r: Run, p: Predicate, q: QCtx): boolean {
       const ids = resolveObjs(r, p.of, q);
       if (!ids[0] || !tryObj(r, ids[0])) return false;
       { const m = /^([a-z]+)_counters$/.exec(p.stat); if (m) return cmp(tryObj(r, ids[0])!.counters[m[1]] ?? 0, p.cmp, r, q); }
+      if (p.stat === "monarch_exists") return cmp(r.s.monarch !== undefined ? 1 : 0, p.cmp, r, q); // "if there is no monarch" (Crown of Gondor)
       if (p.stat === "controller_is_monarch") return cmp(r.s.monarch !== undefined && r.s.monarch === tryObj(r, ids[0])!.controller ? 1 : 0, p.cmp, r, q);
       if (p.stat === "power" || p.stat === "toughness" || p.stat === "mana_value") return cmp(evalQuantity(r, { ref: "stat", of: p.of, stat: p.stat }, q), p.cmp, r, q);
       throw new Unsupported(`predicate:stat.${p.stat}`);

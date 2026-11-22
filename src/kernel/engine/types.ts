@@ -259,6 +259,8 @@ export interface Config {
   skipFirstDraw: boolean;
   maxEventsPerPass: number;
   handSize: number;
+  /** observer only: mirror what a HEADLESS legacy game does not run (the self-play orchestrator has no React hooks): triggers of these events are never put on the stack, and combat damage does not move the monarchy */
+  mirrorHeadless?: { skipTriggerEvents: string[]; noMonarchSteal?: boolean; /** the headless legacy harness never builds interpretedEffects, so a Propaganda-style attack tax is not charged */ noAttackTax?: boolean };
 }
 
 // ---------------------------------------------------------------- combat

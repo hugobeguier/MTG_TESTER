@@ -57,7 +57,7 @@ function stubSeat(): PlayerSeat {
   // Three artifacts (metalcraft: Mox Opal) and a Dragon (Mox Jasper): the audit asks "does the engine model this ability", and a gated mana ability
   // only shows its colors once its "Activate only if" condition holds.
   const stubPermanent = (id: string, name: string, typeLine: string) => ({ id, name, typeLine, oracleText: "", manaValue: 2, colors: [], role: "permanent", zone: "battlefield" }) as unknown as VisibleCard;
-  const permanents = [stubPermanent("sa1", "Trinket One", "Artifact"), stubPermanent("sa2", "Trinket Two", "Artifact"), stubPermanent("sa3", "Trinket Three", "Artifact"), stubPermanent("sd1", "Stub Dragon", "Creature — Dragon")];
+  const permanents = [stubPermanent("sa1", "Trinket One", "Artifact"), stubPermanent("sa2", "Trinket Two", "Artifact"), stubPermanent("sa3", "Trinket Three", "Artifact"), stubPermanent("sd1", "Stub Dragon", "Creature — Dragon"), stubPermanent("sf1", "Stub Food", "Artifact — Food")]; // the Food makes Gilded Goose's "Sacrifice a Food" mana available
   lands.push(...permanents);
   return {
     id: "audit",

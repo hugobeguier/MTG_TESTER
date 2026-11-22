@@ -25,7 +25,9 @@ export const NEW_STEP_KINDS = [
   // pairing pass: each of several created objects fights a different object from a pool, pairing chosen by the controller
   "fight_pairs",
   // cleanup pass: Will-of-the-council voting, exchange life totals, regenerate, "repeat this process", emblems
-  "vote", "exchange_life", "regenerate", "repeat_process", "create_emblem"
+  "vote", "exchange_life", "regenerate", "repeat_process", "create_emblem",
+  // round 2: manifest dread (face-down 2/2 from the top two cards)
+  "manifest_dread", "reselect_attack_target"
 ] as const;
 
 export const STEP_KINDS = [...EXISTING_STEP_KINDS, ...NEW_STEP_KINDS] as const;

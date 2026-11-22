@@ -14,21 +14,11 @@
           "kind": "draw_cards",
           "amount": 1,
           "who": "you",
-          "optional": true,
           "optionalCost": [
             {
               "mana": "{1}"
             }
           ],
-          "src": 0,
-          "condition": {
-            "when": "on_resolution",
-            "if": {
-              "check": "paid_additional_cost",
-              "option": "{1}"
-            },
-            "src": 1
-          },
           "prompt": {
             "title": "Mind's Eye: optional",
             "instruction": "Do you want to draw a card?",
@@ -36,18 +26,32 @@
               "card": "Mind's Eye",
               "ability": "a1"
             }
-          }
+          },
+          "srcs": [
+            0,
+            1
+          ]
         }
       ],
       "implementation": "needed",
       "needs": [
         "trigger:draw",
         "field:draw_cards.optionalCost",
-        "predicate:paid_additional_cost"
+        "field:draw_cards.srcs"
       ]
     }
   ],
   "review": {
-    "status": "draft"
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "may",
+        "reason": "the may is the step optionalCost (the player is asked whether to pay {1})"
+      },
+      {
+        "lexeme": "if",
+        "reason": "the draw runs only if the optionalCost was paid"
+      }
+    ]
   }
 }

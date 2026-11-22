@@ -248,7 +248,7 @@ export interface StackFeedEntry {
 const STACK_FEED_RESOLVED_VISIBLE_MS = 7000;
 const STACK_FEED_MAX_RESULT_LINES = 4;
 // Bookkeeping lines that say what was put on the stack or who passed, not what the item did.
-const STACK_FEED_NOISE = /\bpassed priority\b|\bcasts?\b|\bonto the stack\b|\btriggered abilit|^Rules advisor/i;
+const STACK_FEED_NOISE = /\bpassed priority\b|\bcasts?\b|\bonto the stack\b|\btriggered abilit/i;
 
 // The lines produced while an item resolved, oldest first, without bookkeeping noise.
 function stackFeedResultLines(events: GameSession["events"], startEventId: string | undefined): string[] {
@@ -256,7 +256,7 @@ function stackFeedResultLines(events: GameSession["events"], startEventId: strin
   for (let index = 0; index < events.length && index < 60; index += 1) {
     const event = events[index];
     if (startEventId !== undefined && event.id === startEventId) break;
-    if (event.detail === "Mana" || event.detail === "Phase change" || event.detail === "Timing" || event.detail === "Rules advisor") continue;
+    if (event.detail === "Mana" || event.detail === "Phase change" || event.detail === "Timing" || event.detail === "Rules") continue;
     if (STACK_FEED_NOISE.test(event.message)) continue;
     lines.push(event.message);
   }
@@ -952,12 +952,12 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
   // real board-state change (casts, land plays, trigger resolutions, zone/life/counter changes,
   // combat) is already logged with detail "Stack"/"Trigger"/"Rules action" via addEvent's many call
   // sites in AppFlow.tsx; this excludes only the noisiest bookkeeping categories (per-land-tap mana
-  // logging, raw LLM rules-advisor commentary, and the redundant "passes to X" phase-change ticker
+  // logging, rules-engine bookkeeping, and the redundant "passes to X" phase-change ticker
   // already shown live in the top-left HUD) rather than requiring a second, separate logging system.
   // Unlike Agent Activity's last-8 slice, this keeps the full session.events history so it reads as
   // a complete record of the game so far, not just a rolling ticker.
   const actionLogEvents = props.session.events.filter(
-    (event) => event.detail !== "Mana" && event.detail !== "Rules advisor" && event.detail !== "Phase change"
+    (event) => event.detail !== "Mana" && event.detail !== "Rules" && event.detail !== "Phase change"
   );
   const prioritySeat = props.session.seats.find((seat) => seat.id === props.prioritySeatId);
   const humanHasPriority = props.prioritySeatId === human.id;

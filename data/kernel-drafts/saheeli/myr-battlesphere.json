@@ -43,19 +43,17 @@
             "controller": "you",
             "tapped": false
           },
-          "count": {
-            "ref": "X"
-          },
-          "saveAs": "chosen",
-          "optional": true,
           "prompt": {
-            "title": "Myr Battlesphere: optional",
-            "instruction": "Do you want to choose X untapped Myrs you control?",
+            "title": "Myr Battlesphere: tap Myr",
+            "instruction": "Choose any number of untapped Myr you control to tap (X = how many).",
             "source": {
               "card": "Myr Battlesphere",
               "ability": "a2"
             }
-          }
+          },
+          "id": "pick",
+          "anyNumber": true,
+          "saveAs": "chosen"
         },
         {
           "kind": "tap_target",
@@ -65,45 +63,42 @@
           "kind": "pump_target",
           "target": "self",
           "power": {
-            "ref": "X"
+            "ref": "step_result",
+            "step": "pick"
           },
           "toughness": 0,
-          "duration": "until_end_of_turn",
-          "condition": {
-            "when": "on_resolution",
-            "if": {
-              "check": "paid_additional_cost",
-              "option": "tap X untapped Myr"
-            }
-          }
+          "duration": "until_end_of_turn"
         },
         {
           "kind": "damage_target",
           "amount": {
-            "ref": "X"
+            "ref": "step_result",
+            "step": "pick"
           },
-          "damageTargetType": "attacked_player_or_planeswalker",
-          "condition": {
-            "when": "on_resolution",
-            "if": {
-              "check": "paid_additional_cost",
-              "option": "tap X untapped Myr"
-            }
-          }
+          "damageTargetType": "attacked_player_or_planeswalker"
         }
       ],
       "implementation": "needed",
       "needs": [
+        "quantity:step_result",
         "step:choose",
-        "field:choose.count",
+        "field:choose.anyNumber",
         "field:choose.from",
-        "field:choose.saveAs",
-        "quantity:X",
-        "predicate:paid_additional_cost"
+        "field:choose.saveAs"
       ]
     }
   ],
   "review": {
-    "status": "draft"
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "may",
+        "reason": "the may is the choose step: any number of Myr, including none (anyNumber)"
+      },
+      {
+        "lexeme": "if",
+        "reason": "with 0 Myr tapped (X=0) the pump and damage do nothing; X is the number tapped (step_result)"
+      }
+    ]
   }
 }

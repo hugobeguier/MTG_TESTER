@@ -156,6 +156,7 @@ import type { GameSession, PlayerSeat, VisibleCard } from "@/lib/types";
 import { auditAfterAction, createAuditState, SelfPlayStrictViolationError, type AuditMeta, type AuditState, type AuditViolation } from "./audit";
 import { createAnomalyState, scanForAnomalies, type Anomaly, type AnomalyState } from "./anomalies";
 import type { Brain } from "./brains";
+import { reportUnresolvedForCard } from "@/engine/unresolved";
 
 type TurnPhase = (typeof TURN_PHASES)[number];
 
@@ -625,6 +626,9 @@ export function resolveBareSpellEffect(session: GameSession, casterSeatId: strin
     working = applyGenericModalEffect(working, casterSeatId, sourceCard, genericModalEffect);
     matched = true;
   }
+
+  // Same "never fail silently" log as the live game (engine/unresolved.ts); the observer counts session.unresolvedEffects.
+  working = reportUnresolvedForCard(working, casterSeatId, sourceCard, "spell_resolved_to_graveyard");
 
   return { session: working, matched };
 }
@@ -1162,13 +1166,15 @@ export async function playGame(session: GameSession, brains: Record<string, Brai
           }
           case "draw step": {
             const prev = session;
-            session = advanceSagaLoreCountersHeadless(skipsFirstTurnDraw(session, activeSeat.id) ? session : drawForSeat(session, activeSeat.id, `${activeSeat.name} draws for turn.`), activeSeat.id);
+            session = skipsFirstTurnDraw(session, activeSeat.id) ? session : drawForSeat(session, activeSeat.id, `${activeSeat.name} draws for turn.`);
             session = runStateBasedActionsPass(session).session;
             afterAction(prev, session, { seatId: activeSeat.id, turn: session.turn, phase, actionType: "phase:draw" });
             break;
           }
           case "precombat main phase":
           case "postcombat main phase": {
+            // 714.3b: a Saga gets its lore counter as the PRECOMBAT main phase begins (it used to get it in the draw step)
+            if (phase === "precombat main phase") session = runStateBasedActionsPass(advanceSagaLoreCountersHeadless(session, activeSeat.id)).session;
             session = await runMainPhase(session, activeSeat.id, brains[activeSeat.id], landPlaysThisTurn, recordDecision, afterAction, recordSpellCoverage, (event) => gateEvents.push(event));
             session = drainDeathTriggers(session);
             break;
