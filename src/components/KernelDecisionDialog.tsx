@@ -1,38 +1,54 @@
 "use client";
-// One generic dialog for every decision the kernel asks the human (TableState.decision): pick N of the listed options (targets, discards, modes, colours,
-// creature types, ordering), yes / no, a number (X), and the three "split an amount" kinds (damage, mana, counters). It offers only what the kernel listed and
-// answers through onAnswer(decisionId, choice) with the id it was RENDERED for; give it key={decision.id} so a new decision starts with a clean state.
-// (Clicking highlighted cards on the board for targets is a later refinement: object options show their card art here.)
-import { useState } from "react";
+// One dialog for every decision the kernel asks the human (TableState.decision), driven by the pure view-model in game/kernelDecisionView.ts:
+// pick N of the listed options (targets, discards, modes, colours, creature types, search results; with card art and a filter for long lists), yes / no
+// (with the cost for "unless you pay"), a number (X with the most you can afford), ordering (up / down), and the three "split an amount" kinds (damage, mana, counters).
+// It offers only what the kernel listed and answers through onAnswer(decisionId, choice) with the id it was RENDERED for; give it key={decision.id}.
+// Keyboard: Enter confirms when the answer is valid, Escape cancels when the kernel allows it.
+// Targets and picks of permanents / players / hand cards are normally clicked on the board (KernelBoardPick); this dialog is the list fallback and the home of everything else.
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Choice } from "@/kernel/engine/types";
 import type { DecisionOptionView, DecisionView } from "@/kernel/integration/tableState";
+import {
+  canConfirm, classifyDecision, clampNumber, confirmLabel, defaultDamageSplit, initialOrder, moveItem, numberChoice, numberHint, orderChoice, pickChoice,
+  selectionHint, setSplit, splitChoice, splitModel, splitSum, splitValid, toggleSelection, undoLast
+} from "./game/kernelDecisionView";
 
 export interface KernelDecisionDialogProps {
   decision: DecisionView;
   onAnswer: (decisionId: string, choice: Choice) => void;
+  /** art of the card the question comes from (the controller looks it up by prompt.source.card) */
+  sourceArt?: string;
+  /** go back to clicking on the board (offered only for decisions that can be clicked there) */
+  onBoard?: () => void;
 }
 
 const S = {
   backdrop: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 },
-  box: { background: "#1c1b22", color: "#eee", border: "1px solid #6b6a7a", borderRadius: 10, padding: 16, maxWidth: 760, width: "100%", maxHeight: "86vh", overflow: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.6)" },
-  title: { margin: "0 0 4px", fontSize: 18 },
-  hint: { margin: "0 0 12px", opacity: 0.8, fontSize: 14 },
+  box: { background: "#1c1b22", color: "#eee", border: "1px solid #6b6a7a", borderRadius: 10, padding: 16, maxWidth: 780, width: "100%", maxHeight: "86vh", overflow: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.6)" },
+  head: { display: "flex", gap: 12, alignItems: "flex-start", marginBottom: 8 },
+  tag: { fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, color: "#e8c04a" },
+  title: { margin: "2px 0 4px", fontSize: 18 },
+  hint: { margin: "0 0 10px", opacity: 0.8, fontSize: 14 },
   grid: { display: "flex", flexWrap: "wrap", gap: 8, margin: "8px 0 12px" },
   opt: { display: "flex", flexDirection: "column", alignItems: "center", gap: 4, padding: 6, minWidth: 96, maxWidth: 150, background: "#2a2933", color: "#eee", border: "2px solid #44434f", borderRadius: 8, cursor: "pointer", font: "inherit" },
-  optOn: { borderColor: "#e8c04a", background: "#3b3624" },
+  optOn: { borderColor: "#5fd08a", background: "#1f3a2b" },
   img: { width: 96, borderRadius: 6 },
-  row: { display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" },
+  row: { display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap", alignItems: "center" },
   btn: { padding: "6px 14px", borderRadius: 6, border: "1px solid #6b6a7a", background: "#34333f", color: "#eee", cursor: "pointer", font: "inherit" },
   primary: { background: "#7a5cd6", borderColor: "#9a80f0" },
-  num: { width: 70, padding: 4, font: "inherit" }
+  num: { width: 70, padding: 4, font: "inherit" },
+  orderRow: { display: "flex", alignItems: "center", gap: 8, padding: "4px 8px", background: "#2a2933", border: "1px solid #44434f", borderRadius: 8, marginBottom: 6 }
 } as const;
+
+const COLOR_TINT: Record<string, string> = { W: "#f4efc9", U: "#7fb4ff", B: "#b9a8c9", R: "#ff8f7a", G: "#8fd49a", C: "#cfcfcf" };
 
 function art(o: DecisionOptionView): string | undefined { return o.card?.imageUris?.small ?? o.card?.imageUris?.normal; }
 
 function OptionButton({ o, order, on, onClick }: { o: DecisionOptionView; order?: number; on: boolean; onClick: () => void }) {
   const src = art(o);
+  const tint = !src && /^[WUBRGC]$/.test(o.id) ? COLOR_TINT[o.id] : undefined;
   return (
-    <button type="button" style={{ ...S.opt, ...(on ? S.optOn : {}) }} onClick={onClick} aria-pressed={on} title={o.card?.oracleText || o.label}>
+    <button type="button" style={{ ...S.opt, ...(on ? S.optOn : {}), ...(tint ? { color: tint } : {}) }} onClick={onClick} aria-pressed={on} title={o.card?.oracleText || o.label}>
       {src ? <img src={src} alt={o.card?.name ?? o.label} style={S.img} /> : null}
       <span>{o.label}</span>
       {order !== undefined ? <strong aria-label="order">#{order + 1}</strong> : null}
@@ -40,87 +56,153 @@ function OptionButton({ o, order, on, onClick }: { o: DecisionOptionView; order?
   );
 }
 
-/** numbers keyed by id: damage recipients, mana colours, counter kinds */
-function Split({ decision, onAnswer }: KernelDecisionDialogProps) {
-  const ids = decision.kind === "assign_damage" ? Object.keys(decision.amounts?.lethal ?? {}).length ? Object.keys(decision.amounts!.lethal) : decision.options.map((o) => o.id)
-    : decision.kind === "assign_mana" ? decision.mana?.colors ?? [] : Object.keys(decision.counters?.available ?? {});
-  const [vals, setVals] = useState<Record<string, number>>({});
-  const sum = ids.reduce((n, id) => n + (vals[id] ?? 0), 0);
-  const total = decision.kind === "assign_damage" ? decision.amounts?.total : decision.kind === "assign_mana" ? decision.mana?.total : undefined;
-  const ok = total !== undefined ? sum === total : sum >= (decision.counters?.min ?? decision.min) && sum <= (decision.counters?.max ?? decision.max);
+function Split({ decision, onAnswer }: { decision: DecisionView; onAnswer: KernelDecisionDialogProps["onAnswer"] }) {
+  const m = useMemo(() => splitModel(decision), [decision]);
+  const [vals, setVals] = useState<Record<string, number>>(() => (decision.kind === "assign_damage" ? defaultDamageSplit(m, decision.amounts?.lethal ?? {}) : {}));
+  const sum = splitSum(m, vals);
+  const ok = splitValid(m, vals);
   const label = (id: string) => decision.options.find((o) => o.id === id)?.label ?? id;
+  const range = m.total !== undefined ? `${sum} of ${m.total}` : `${sum} (between ${m.min} and ${m.max})`;
   return (
     <>
       <div style={S.grid}>
-        {ids.map((id) => (
+        {m.ids.map((id) => (
           <label key={id} style={{ ...S.opt, cursor: "default" }}>
             <span>{label(id)}{decision.amounts?.lethal[id] ? ` (lethal ${decision.amounts.lethal[id]})` : ""}</span>
-            <input type="number" min={0} max={decision.counters?.available[id] ?? total ?? 99} value={vals[id] ?? 0} style={S.num} onChange={(e) => setVals({ ...vals, [id]: Math.max(0, Math.floor(Number(e.target.value) || 0)) })} />
+            <span style={S.row}>
+              <button type="button" style={S.btn} aria-label={`less ${label(id)}`} onClick={() => setVals(setSplit(m, vals, id, (vals[id] ?? 0) - 1))}>-</button>
+              <input type="number" min={0} max={m.caps[id]} value={vals[id] ?? 0} style={S.num} onChange={(e) => setVals(setSplit(m, vals, id, Number(e.target.value)))} />
+              <button type="button" style={S.btn} aria-label={`more ${label(id)}`} onClick={() => setVals(setSplit(m, vals, id, (vals[id] ?? 0) + 1))}>+</button>
+            </span>
           </label>
         ))}
       </div>
-      <p style={S.hint}>Assigned {sum}{total !== undefined ? ` of ${total}` : ` (between ${decision.counters?.min ?? decision.min} and ${decision.counters?.max ?? decision.max})`}</p>
+      <p style={S.hint}>Assigned {range}</p>
       <div style={S.row}>
-        <button type="button" style={{ ...S.btn, ...S.primary }} disabled={!ok} onClick={() => onAnswer(decision.id, { assign: Object.fromEntries(ids.filter((id) => (vals[id] ?? 0) > 0).map((id) => [id, vals[id]])) })}>Confirm</button>
+        <button type="button" style={{ ...S.btn, ...S.primary }} disabled={!ok} onClick={() => onAnswer(decision.id, splitChoice(m, vals))}>Confirm</button>
       </div>
     </>
   );
 }
 
-export function KernelDecisionDialog({ decision, onAnswer }: KernelDecisionDialogProps) {
-  const [picked, setPicked] = useState<string[]>([]);
-  const [num, setNum] = useState<number>(Math.max(0, decision.min));
-  const header = (
+function Order({ decision, onAnswer }: { decision: DecisionView; onAnswer: KernelDecisionDialogProps["onAnswer"] }) {
+  const [order, setOrder] = useState<string[]>(() => initialOrder(decision));
+  const byId = new Map(decision.options.map((o) => [o.id, o]));
+  const first = decision.max <= 1;
+  return (
     <>
-      <h3 style={S.title}>{decision.title}</h3>
-      {decision.instruction ? <p style={S.hint}>{decision.instruction}</p> : null}
+      <p style={S.hint}>{first ? "Pick which one to apply first." : "Put them in the order you want, first at the top."}</p>
+      <div>
+        {order.map((id, i) => {
+          const o = byId.get(id)!;
+          return (
+            <div key={id} style={S.orderRow}>
+              <strong>{i + 1}.</strong>
+              {art(o) ? <img src={art(o)} alt="" style={{ width: 36, borderRadius: 4 }} /> : null}
+              <span style={{ flex: 1 }}>{o.label}</span>
+              {first ? <button type="button" style={{ ...S.btn, ...(i === 0 ? S.primary : {}) }} onClick={() => setOrder([id, ...order.filter((x) => x !== id)])}>{i === 0 ? "First" : "Make first"}</button> : (
+                <>
+                  <button type="button" style={S.btn} disabled={i === 0} aria-label={`move ${o.label} up`} onClick={() => setOrder(moveItem(order, i, i - 1))}>Up</button>
+                  <button type="button" style={S.btn} disabled={i === order.length - 1} aria-label={`move ${o.label} down`} onClick={() => setOrder(moveItem(order, i, i + 1))}>Down</button>
+                </>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <div style={S.row}><button type="button" style={{ ...S.btn, ...S.primary }} onClick={() => onAnswer(decision.id, orderChoice(decision, order))}>Confirm</button></div>
     </>
   );
+}
+
+export function KernelDecisionDialog({ decision, onAnswer, sourceArt, onBoard }: KernelDecisionDialogProps) {
+  const cls = classifyDecision(decision);
+  const [picked, setPicked] = useState<string[]>([]);
+  const [num, setNum] = useState<number>(Math.max(0, decision.min));
+  const [filter, setFilter] = useState("");
+  const answerRef = useRef<() => void>(() => undefined);
+
   const cancel = decision.cancellable ? <button type="button" style={S.btn} onClick={() => onAnswer(decision.id, { cancel: true })}>Cancel</button> : null;
-  let body: React.ReactNode;
-  if (decision.kind === "assign_damage" || decision.kind === "assign_mana" || decision.kind === "assign_counters") {
-    body = <Split decision={decision} onAnswer={onAnswer} />;
-  } else if (decision.numeric) {
-    body = (
-      <>
-        <div style={S.grid}><input type="number" aria-label="number" min={decision.min} max={decision.max} value={num} style={S.num} onChange={(e) => setNum(Math.min(decision.max, Math.max(decision.min, Math.floor(Number(e.target.value) || 0))))} /> <span style={S.hint}>({decision.min} to {decision.max})</span></div>
-        <div style={S.row}>{cancel}<button type="button" style={{ ...S.btn, ...S.primary }} onClick={() => onAnswer(decision.id, { number: num })}>Confirm</button></div>
-      </>
-    );
-  } else if (decision.kind === "choose_yes_no" || decision.kind === "pay_unless") {
-    body = (
-      <div style={S.row}>
-        {cancel}
-        <button type="button" style={S.btn} onClick={() => onAnswer(decision.id, { yes: false })}>{decision.kind === "pay_unless" ? "Don't pay" : "No"}</button>
-        <button type="button" style={{ ...S.btn, ...S.primary }} onClick={() => onAnswer(decision.id, { yes: true })}>{decision.kind === "pay_unless" ? "Pay" : "Yes"}</button>
-      </div>
-    );
-  } else {
-    const ordering = decision.kind === "order_triggers" || decision.kind === "order_replacements";
-    const toggle = (id: string) => {
-      if (decision.repeatable) { setPicked(picked.length < decision.max ? [...picked, id] : picked); return; }
-      if (picked.includes(id)) setPicked(picked.filter((x) => x !== id));
-      else setPicked(decision.max === 1 ? [id] : picked.length < decision.max ? [...picked, id] : picked);
+
+  // Enter confirms, Escape cancels (when the kernel lets the player)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (e.key === "Escape" && decision.cancellable) { e.preventDefault(); onAnswer(decision.id, { cancel: true }); }
+      else if (e.key === "Enter" && t?.tagName !== "BUTTON") { e.preventDefault(); answerRef.current(); }
     };
-    const ready = picked.length >= decision.min && picked.length <= decision.max;
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [decision.id, decision.cancellable, onAnswer]);
+
+  let body: React.ReactNode;
+  answerRef.current = () => undefined;
+  if (cls.layout === "split") {
+    body = <Split decision={decision} onAnswer={onAnswer} />;
+  } else if (cls.layout === "order") {
+    body = <Order decision={decision} onAnswer={onAnswer} />;
+  } else if (cls.layout === "number") {
+    answerRef.current = () => onAnswer(decision.id, numberChoice(decision, num));
     body = (
       <>
         <div style={S.grid}>
-          {decision.options.map((o) => (
-            <OptionButton key={o.id} o={o} on={picked.includes(o.id)} order={ordering || decision.max > 1 ? (picked.includes(o.id) ? picked.indexOf(o.id) : undefined) : undefined} onClick={() => toggle(o.id)} />
-          ))}
+          <button type="button" style={S.btn} aria-label="less" onClick={() => setNum(clampNumber(decision, num - 1))}>-</button>
+          <input type="number" aria-label="number" min={decision.min} max={decision.max} value={num} style={S.num} onChange={(e) => setNum(clampNumber(decision, Number(e.target.value)))} />
+          <button type="button" style={S.btn} aria-label="more" onClick={() => setNum(clampNumber(decision, num + 1))}>+</button>
+          {decision.max > decision.min ? <input type="range" aria-label="slider" min={decision.min} max={decision.max} value={num} onChange={(e) => setNum(clampNumber(decision, Number(e.target.value)))} /> : null}
+          <span style={S.hint}>{numberHint(decision)}</span>
         </div>
-        <p style={S.hint}>Selected {picked.length} (choose {decision.min === decision.max ? decision.min : `${decision.min} to ${decision.max}`}){decision.repeatable && picked.length ? <button type="button" style={{ ...S.btn, marginLeft: 8 }} onClick={() => setPicked(picked.slice(0, -1))}>Undo last</button> : null}</p>
+        <div style={S.row}>{cancel}<button type="button" style={{ ...S.btn, ...S.primary }} onClick={() => onAnswer(decision.id, numberChoice(decision, num))}>Confirm</button></div>
+      </>
+    );
+  } else if (cls.layout === "yes_no") {
+    const pay = decision.kind === "pay_unless";
+    body = (
+      <div style={S.row}>
+        {cancel}
+        <button type="button" style={S.btn} onClick={() => onAnswer(decision.id, { yes: false })}>{pay ? "Don't pay" : "No"}</button>
+        <button type="button" style={{ ...S.btn, ...S.primary }} onClick={() => onAnswer(decision.id, { yes: true })}>{pay ? "Pay" : "Yes"}</button>
+      </div>
+    );
+  } else {
+    const ordering = decision.max > 1;
+    const shown = filter.trim() ? decision.options.filter((o) => (o.label + " " + (o.card?.typeLine ?? "") + " " + (o.card?.oracleText ?? "")).toLowerCase().includes(filter.trim().toLowerCase())) : decision.options;
+    const ready = canConfirm(decision, picked);
+    answerRef.current = () => { if (ready) onAnswer(decision.id, pickChoice(picked)); };
+    body = (
+      <>
+        {decision.options.length > 8 ? <input type="search" aria-label="filter" placeholder="Filter by name, type or text" value={filter} onChange={(e) => setFilter(e.target.value)} style={{ ...S.num, width: "100%", marginBottom: 6 }} /> : null}
+        <div style={S.grid}>
+          {shown.map((o) => (
+            <OptionButton key={o.id} o={o} on={picked.includes(o.id)} order={ordering && picked.includes(o.id) ? picked.indexOf(o.id) : undefined} onClick={() => setPicked(toggleSelection(decision, picked, o.id))} />
+          ))}
+          {shown.length === 0 ? <em style={S.hint}>{decision.options.length ? "No option matches the filter." : "Nothing to choose from."}</em> : null}
+        </div>
+        <p style={S.hint}>
+          {selectionHint(decision, picked)}
+          {decision.repeatable && picked.length ? <button type="button" style={{ ...S.btn, marginLeft: 8 }} onClick={() => setPicked(undoLast(picked))}>Undo last</button> : null}
+        </p>
         <div style={S.row}>
+          {onBoard ? <button type="button" style={S.btn} onClick={onBoard}>Pick on the board</button> : null}
           {cancel}
-          <button type="button" style={{ ...S.btn, ...S.primary }} disabled={!ready} onClick={() => onAnswer(decision.id, { ids: picked })}>{decision.min === 0 && picked.length === 0 ? "None" : "Confirm"}</button>
+          <button type="button" style={{ ...S.btn, ...S.primary }} disabled={!ready} onClick={() => onAnswer(decision.id, pickChoice(picked))}>{confirmLabel(decision, picked)}</button>
         </div>
       </>
     );
   }
   return (
     <div style={S.backdrop} role="dialog" aria-modal="true" aria-label={decision.title} data-decision-id={decision.id}>
-      <div style={S.box}>{header}{body}</div>
+      <div style={S.box}>
+        <div style={S.head}>
+          {sourceArt ? <img src={sourceArt} alt={decision.source?.card ?? ""} style={{ width: 84, borderRadius: 6 }} /> : null}
+          <div>
+            <div style={S.tag}>{decision.source?.card ? `${decision.source.card} - ${cls.label}` : cls.label}</div>
+            <h3 style={S.title}>{decision.title}</h3>
+            {decision.instruction ? <p style={S.hint}>{decision.instruction}</p> : null}
+          </div>
+        </div>
+        {body}
+      </div>
     </div>
   );
 }

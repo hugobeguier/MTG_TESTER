@@ -6,7 +6,9 @@
 //   - startDriver(): paces step() with timers (the hook useKernelDriver owns its lifetime); never loops forever (per-turn cap, stall guard)
 // A rejected action never changes anything (KernelSession.dispatch returns the old state); the controller turns the refusal into a log note.
 import type { KernelSession, DispatchResult } from "@/kernel/integration/kernelSession";
-import type { TableState } from "@/kernel/integration/tableState";
+import type { DecisionView, TableState } from "@/kernel/integration/tableState";
+import type { KernelBoardPick } from "@/components/ThreeGameTable";
+import { boardPickModel, canConfirm, castHint, classifyDecision, confirmLabel, pickChoice, selectionHint, toggleSelection } from "./kernelDecisionView";
 import { legalActions, type LegalAction } from "@/kernel/engine/legal";
 import type { Action, Choice, GameState, ObjId, PlayerId } from "@/kernel/engine/types";
 import type { GameEvent as LogLine, GameSession, VisibleCard } from "@/lib/types";
@@ -495,6 +497,84 @@ export class KernelGameController {
     for (const a of this.options()) if (a.objectId && (a.kind === "castSpell" || a.kind === "playLand") && a.zone === "hand") out.add(this.ks.legacyIdOf(a.objectId) ?? a.objectId);
     return out;
   }
+  /** hand cards that glow (castable / playable now) and, for the others, the reason shown in their tooltip; empty unless the human may act */
+  handHints(): { castable: string[]; reasons: Record<string, string> } {
+    if (this.hintCache?.ver === this.ks.version) return this.hintCache.hints;
+    const s = this.ks.state;
+    const holds = s.priority === this.human && !s.pending && !s.combat?.expect;
+    const playable = this.playableCardIds();
+    const hand = this.table().session.seats.find((x) => x.id === this.human)?.board.hand ?? [];
+    const hints = { castable: [] as string[], reasons: {} as Record<string, string> };
+    for (const c of hand) {
+      const h = castHint(c.id, { playable, holdsPriority: holds, isLand: /\bland\b/i.test(c.typeLine), stackEmpty: !s.stack.length, mainPhase: /main/i.test(String(s.turn.phase ?? "")), activeTurn: s.turn.active === this.human });
+      if (h.castable) hints.castable.push(c.id); else if (h.reason && holds) hints.reasons[c.id] = h.reason;
+    }
+    this.hintCache = { ver: this.ks.version, hints };
+    return hints;
+  }
+  private hintCache?: { ver: number; hints: { castable: string[]; reasons: Record<string, string> } };
+
+  // ---- click-to-pick for the open decision (targets, discards, sacrifices ...): the selection lives here so the board and the dialog share one truth
+  private pickSel?: { id: string; ids: string[]; list: boolean };
+  private selFor(d: DecisionView): { id: string; ids: string[]; list: boolean } {
+    if (this.pickSel?.id !== d.id) this.pickSel = { id: d.id, ids: [], list: false };
+    return this.pickSel;
+  }
+  /** the current board pick (undefined when the decision is not board-clickable, or the player asked for the list) */
+  boardPick(): KernelBoardPick | undefined {
+    const d = this.table().decision;
+    if (!d || !classifyDecision(d).board) return undefined;
+    const sel = this.selFor(d);
+    if (sel.list) return undefined;
+    const m = boardPickModel(d);
+    const chosen = new Set(sel.ids);
+    const cardOf = (opt: string) => Object.keys(m.cardOptions).find((k) => m.cardOptions[k] === opt);
+    return {
+      title: d.source?.card ?? d.title,
+      instruction: d.source?.card ? `${d.title}${d.instruction ? ": " + d.instruction : ""}` : d.instruction,
+      legalCardIds: Object.keys(m.cardOptions), legalSeatIds: Object.keys(m.seatOptions),
+      selectedCardIds: Object.values(m.cardOptions).filter((o) => chosen.has(o)).map((o) => cardOf(o)!).filter(Boolean),
+      selectedSeatIds: Object.keys(m.seatOptions).filter((k) => chosen.has(m.seatOptions[k])),
+      summary: selectionHint(d, sel.ids), canConfirm: canConfirm(d, sel.ids), confirmLabel: confirmLabel(d, sel.ids),
+      onToggleCard: (cardId) => { const o = m.cardOptions[cardId]; if (o) this.togglePick(d.id, o); },
+      onToggleSeat: (seatId) => { const o = m.seatOptions[seatId]; if (o) this.togglePick(d.id, o); },
+      onConfirm: () => this.confirmPick(d.id),
+      ...(d.cancellable ? { onCancel: () => { this.answer(d.id, { cancel: true }); } } : {}),
+      onList: () => this.showList(d.id, true)
+    };
+  }
+  /** art of the card a decision comes from (looked up by the name in the card JSON's prompt.source: the stack, then the board, then the hand) */
+  decisionSourceArt(): string | undefined {
+    const d = this.table().decision;
+    const name = d?.source?.card;
+    if (!name) return undefined;
+    const t = this.table();
+    const stackCards = [t.pendingAction, ...t.stackActions].map((a) => (a && "sourceCard" in a ? a.sourceCard : undefined));
+    const cards = [...stackCards, ...t.session.seats.flatMap((s) => [...s.board.battlefield, ...s.board.hand, ...(s.board.graveyard ?? [])])];
+    const c = cards.find((x) => x && x.name === name);
+    return c?.imageUris?.small ?? c?.imageUris?.normal;
+  }
+  togglePick = (decisionId: string, optionId: string): void => {
+    const d = this.table().decision;
+    if (!d || d.id !== decisionId) return;
+    const sel = this.selFor(d);
+    sel.ids = toggleSelection(d, sel.ids, optionId);
+    this.bump();
+  };
+  confirmPick = (decisionId: string): boolean => {
+    const d = this.table().decision;
+    if (!d || d.id !== decisionId) return false;
+    const sel = this.selFor(d);
+    if (!canConfirm(d, sel.ids)) return false;
+    return this.answer(decisionId, pickChoice(sel.ids));
+  };
+  showList = (decisionId: string, list: boolean): void => {
+    const d = this.table().decision;
+    if (!d || d.id !== decisionId) return;
+    this.selFor(d).list = list;
+    this.bump();
+  };
+
   /** run one listed action by its stable id (a stale id is a quiet no-op) */
   doOption = (id: string): boolean => {
     const a = this.legalNow().find((x) => x.id === id);

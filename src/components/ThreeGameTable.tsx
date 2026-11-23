@@ -61,6 +61,25 @@ const CREATURE_TYPES = [
   "Advisor","Aetherborn","Alien","Ally","Angel","Antelope","Ape","Archer","Archon","Armadillo","Artificer","Assassin","Assembly-Worker","Astartes","Atog","Aurochs","Avatar","Azra","Badger","Barbarian","Bard","Basilisk","Bat","Bear","Beast","Beaver","Beeble","Beholder","Berserker","Bird","Bison","Boar","Bringer","Brushwagg","C'tan","Camel","Capybara","Carrier","Cat","Centaur","Child","Chimera","Citizen","Cleric","Clown","Cockatrice","Construct","Coward","Coyote","Crab","Crocodile","Custodes","Cyberman","Cyclops","Dalek","Dauthi","Demigod","Demon","Detective","Devil","Dinosaur","Djinn","Doctor","Dog","Dragon","Drake","Dreadnought","Drix","Drone","Druid","Dryad","Dwarf","Echidna","Efreet","Elder","Eldrazi","Elemental","Elephant","Elf","Elk","Employee","Eye","Faerie","Fish","Flagbearer","Fox","Fractal","Frog","Fungus","Gamer","Gamma","Gargoyle","Giant","Giraffe","Gith","Glimmer","Gnoll","Gnome","Goat","Goblin","God","Golem","Gorgon","Gremlin","Griffin","Guest","Hag","Halfling","Hamster","Harpy","Hedgehog","Hellion","Hero","Hippo","Hippogriff","Homarid","Homunculus","Horror","Horse","Human","Hydra","Hyena","Illusion","Imp","Incarnation","Inhuman","Inkling","Inquisitor","Insect","Jackal","Jellyfish","Juggernaut","Kangaroo","Kavu","Kirin","Kithkin","Knight","Kobold","Kor","Kraken","Kree","Lamia","Lammasu","Leech","Lemur","Leviathan","Lhurgoyf","Licid","Lizard","Lobster","Lord","Manticore","Masticore","Mercenary","Merfolk","Metathran","Minion","Minotaur","Mite","Mole","Monger","Mongoose","Monk","Monkey","Moogle","Moonfolk","Mount","Mouse","Mutant","Myr","Mystic","Nautilus","Necron","Nephilim","Nightmare","Nightstalker","Ninja","Noble","Noggle","Nomad","Nymph","Octopus","Ogre","Ooze","Orc","Orgg","Otter","Ouphe","Ox","Oyster","Pangolin","Peasant","Pegasus","Performer","Pest","Phelddagrif","Phoenix","Phyrexian","Pilot","Pirate","Plant","Platypus","Porcupine","Possum","Praetor","Primarch","Processor","Qu","Rabbit","Raccoon","Ranger","Rat","Rebel","Rhino","Rigger","Robot","Rogue","Sable","Salamander","Samurai","Sand","Saproling","Satyr","Scarecrow","Scientist","Scorpion","Scout","Seal","Serpent","Shade","Shaman","Shapeshifter","Shark","Sheep","Shi'ar","Siege","Siren","Skeleton","Skrull","Skunk","Slith","Sliver","Sloth","Slug","Snail","Snake","Soldier","Soltari","Sorcerer","Spawn","Specter","Spellshaper","Sphinx","Spider","Spike","Spirit","Sponge","Spy","Squid","Squirrel","Starfish","Surrakar","Survivor","Symbiote","Synth","Thalakos","Thopter","Thrull","Tiefling","Treefolk","Trilobite","Troll","Turtle","Tyranid","Unicorn","Utrom","Vampire","Varmint","Vedalken","Villain","Volver","Wall","Walrus","Warlock","Warrior","Weasel","Weird","Werewolf","Whale","Wizard","Wolf","Wolverine","Wombat","Worm","Wraith","Wurm","Yeti","Zombie","Zubera"
 ] as const;
 
+/** Kernel mode: click-to-pick state for the open decision (see src/components/game/kernelDecisionView.ts); every callback is the controller's. */
+export interface KernelBoardPick {
+  title: string;
+  instruction: string;
+  legalCardIds: string[];
+  legalSeatIds: string[];
+  selectedCardIds: string[];
+  selectedSeatIds: string[];
+  summary: string;
+  canConfirm: boolean;
+  confirmLabel: string;
+  onToggleCard: (cardId: string) => void;
+  onToggleSeat: (seatId: string) => void;
+  onConfirm: () => void;
+  onCancel?: () => void;
+  /** switch to the dialog's list for the same decision */
+  onList?: () => void;
+}
+
 interface ThreeGameTableProps {
   session: GameSession;
   prioritySeatId?: string;
@@ -227,6 +246,11 @@ interface ThreeGameTableProps {
   holdPriorityOnce?: boolean;
   /** Kernel mode: the engine's own turn number (every player's turn counts, like the log), shown as is; and the stack dock clears the moment the stack is empty. */
   kernelTurnNumber?: number;
+  /** Kernel mode: an open target / card pick answered by clicking the highlighted permanents, players and hand cards (ids are the table's card / seat ids). Absent = legacy behaviour. */
+  kernelPick?: KernelBoardPick;
+  /** Kernel mode: hand card ids that can be cast / played right now (a glow) and the reason shown on the others */
+  kernelCastableIds?: string[];
+  kernelHandReasons?: Record<string, string>;
   // Recently resolving/resolved stack items (newest first) with their "result" derived from the events produced while they resolved — the
   // stack shows what each item DID, so the game reads without the log.
   stackFeed?: StackFeedEntry[];
@@ -996,6 +1020,8 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
   // render instead of only when the actual legal-target set changes.
   const boardTargetingKey = boardTargetingChoice ? `${boardTargetingChoice.kind}:${boardTargetingChoice.cards.map((entry) => entry.card.id).join(",")}` : "";
 
+  const kernelPickKey = props.kernelPick ? `${props.kernelPick.legalCardIds.join(",")}|${props.kernelPick.legalSeatIds.join(",")}|${props.kernelPick.selectedCardIds.join(",")}|${props.kernelPick.selectedSeatIds.join(",")}` : "";
+
   propsRef.current = props;
 
   useEffect(() => {
@@ -1213,6 +1239,12 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
       // the card inspector underneath. Cancel is a separate explicit button (see the targeting
       // banner in the JSX below), not a click-elsewhere gesture, since the camera pan/orbit already
       // uses empty-space drags.
+      const kpick = propsRef.current.kernelPick;
+      if (kpick) {
+        if (data?.kind === "card" && data.card && kpick.legalCardIds.includes(data.card.id)) kpick.onToggleCard(data.card.id);
+        else if (data?.kind === "player" && data.seatId && kpick.legalSeatIds.includes(data.seatId)) kpick.onToggleSeat(data.seatId);
+        return;
+      }
       const targeting = asBoardTargetingChoice(propsRef.current.ruleChoice);
       if (targeting) {
         if (data?.kind === "card" && data.card) {
@@ -1275,6 +1307,13 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
       const hit = raycastCard(event);
       const data = hit?.object.userData as Partial<InteractionUserData> | undefined;
 
+      const kpick = propsRef.current.kernelPick;
+      if (kpick) {
+        hoveredCardRef.current = undefined;
+        const legal = (data?.kind === "card" && !!data.card && kpick.legalCardIds.includes(data.card.id)) || (data?.kind === "player" && !!data.seatId && kpick.legalSeatIds.includes(data.seatId));
+        renderer.domElement.style.cursor = legal ? "crosshair" : "not-allowed";
+        return;
+      }
       const targeting = asBoardTargetingChoice(propsRef.current.ruleChoice);
       if (targeting) {
         hoveredCardRef.current = undefined;
@@ -1483,6 +1522,31 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
     const group = targetHighlightGroupRef.current;
     if (!group) return;
     while (group.children.length > 0) group.remove(group.children[0]);
+    const kpick = props.kernelPick;
+    if (kpick) {
+      // Kernel pick: gold ring = can be picked, green filled ring = picked; players get a larger ring around their life plate.
+      const legal = new Set(kpick.legalCardIds);
+      const chosen = new Set(kpick.selectedCardIds);
+      const legalSeats = new Set(kpick.legalSeatIds);
+      const chosenSeats = new Set(kpick.selectedSeatIds);
+      for (const mesh of cardMeshesRef.current) {
+        const data = mesh.userData as Partial<InteractionUserData>;
+        const isCard = data.kind === "card" && !!data.card && legal.has(data.card.id);
+        const isSeat = data.kind === "player" && !!data.seatId && legalSeats.has(data.seatId);
+        if (!isCard && !isSeat) continue;
+        const picked = isCard ? chosen.has((data as CardUserData).card.id) : chosenSeats.has((data as PlayerUserData).seatId);
+        const big = isSeat ? 0.55 : 0;
+        const ring = new THREE.Mesh(
+          new THREE.RingGeometry(0.42 + big, 0.5 + big + (picked ? 0.08 : 0), 32),
+          new THREE.MeshBasicMaterial({ color: picked ? "#5fd08a" : "#f4c95d", transparent: true, opacity: picked ? 1 : 0.9, side: THREE.DoubleSide, depthWrite: false })
+        );
+        ring.rotation.x = -Math.PI / 2;
+        ring.position.copy((mesh as THREE.Mesh).position);
+        ring.position.y += 0.02;
+        group.add(ring);
+      }
+      return;
+    }
     if (!boardTargetingChoice) return;
     const legalCardIds = new Set(boardTargetingChoice.cards.map((entry) => entry.card.id));
     for (const mesh of cardMeshesRef.current) {
@@ -1497,7 +1561,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
       ring.position.y += 0.02;
       group.add(ring);
     }
-  }, [tableRenderKey, boardTargetingKey]);
+  }, [tableRenderKey, boardTargetingKey, kernelPickKey]);
 
   // Stack arrows: for each stack item (top four) that has recorded targets, one arrow per target from the item's source to the target on the
   // board. A spell's source is its caster's life plate; an ability's is the permanent it came from. One target = one arrow, "X targets" = X
@@ -1901,7 +1965,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
             {actionLogEvents.length === 0 ? (
               <p>No actions yet this game.</p>
             ) : (
-              actionLogEvents.map((event) => <p key={event.id}>{event.message}</p>)
+              actionLogEvents.map((event) => <p key={event.id} className={event.detail === "Unresolved" || event.message.startsWith("Couldn't resolve") ? "log-unresolved" : event.detail === "Rules" ? "log-refused" : undefined}>{event.message}</p>)
             )}
           </div>
         </aside>
@@ -2330,6 +2394,18 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
         />
       ) : null}
       </div>
+      {props.kernelPick ? (
+        <div className="targeting-banner kernel-pick-banner" role="status" aria-live="polite" data-testid="kernel-pick-banner">
+          <span>{props.kernelPick.title}</span>
+          {props.kernelPick.instruction ? <strong>{props.kernelPick.instruction}</strong> : null}
+          <p>{props.kernelPick.summary}</p>
+          <div className="kernel-pick-actions">
+            <button type="button" disabled={!props.kernelPick.canConfirm} onClick={props.kernelPick.onConfirm}>{props.kernelPick.confirmLabel}</button>
+            {props.kernelPick.onCancel ? <button type="button" onClick={props.kernelPick.onCancel}>Cancel</button> : null}
+            {props.kernelPick.onList ? <button type="button" onClick={props.kernelPick.onList}>Show list</button> : null}
+          </div>
+        </div>
+      ) : null}
       {boardTargetingChoice ? (
         // choose_creature_on_battlefield, choose_aura_attach_target, and a battlefield-zone
         // choose_effect_target are answered by clicking a highlighted card directly on the board
@@ -2499,10 +2575,14 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
           <div className="three-hand-row" onDragOver={onHandDragOver} onDrop={onHandDrop}>
             {human.board.hand.map((card) => (
               <article
-                className={`three-hand-card ${props.selectedCardId === card.id || props.mulliganReturnCardIds?.includes(card.id) ? "selected" : ""} ${draggingHandCardId === card.id ? "dragging" : ""}`}
-                draggable={props.gameStage === "playing" && !props.guestReadOnly}
+                className={`three-hand-card ${props.selectedCardId === card.id || props.mulliganReturnCardIds?.includes(card.id) ? "selected" : ""} ${draggingHandCardId === card.id ? "dragging" : ""}${props.kernelCastableIds?.includes(card.id) ? " kernel-castable" : ""}${props.kernelPick?.legalCardIds.includes(card.id) ? " kernel-pick-legal" : ""}${props.kernelPick?.selectedCardIds.includes(card.id) ? " kernel-pick-chosen" : ""}`}
+                draggable={props.gameStage === "playing" && !props.guestReadOnly && !props.kernelPick}
                 key={card.id}
                 onClick={() => {
+                  if (props.kernelPick) {
+                    if (props.kernelPick.legalCardIds.includes(card.id)) props.kernelPick.onToggleCard(card.id);
+                    return;
+                  }
                   if (props.gameStage === "mulligan" && mulliganRequired > 0) {
                     props.onToggleMulliganReturnCard?.(card);
                     return;
@@ -2517,7 +2597,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
                 onDragEnd={onCardDragEnd}
                 onMouseEnter={() => setHoverPreviewCard(card)}
                 onMouseLeave={() => setHoverPreviewCard((current) => (current?.id === card.id ? undefined : current))}
-                title={`${card.name}\n${card.typeLine}\n${card.oracleText}`}
+                title={`${card.name}\n${card.typeLine}\n${card.oracleText}${props.kernelHandReasons?.[card.id] ? `\n\n${props.kernelHandReasons[card.id]}` : ""}`}
               >
                 {card.imageUris?.normal ? <img src={card.imageUris.normal} alt="" draggable={false} /> : <FallbackHandCard card={card} />}
                 <span className="sr-only">{card.name}</span>

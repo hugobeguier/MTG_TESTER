@@ -19,6 +19,8 @@ export interface DecisionView {
   player: PlayerId;
   title: string;
   instruction: string;
+  /** the card / ability the question comes from (the card JSON's prompt.source), for the dialog header */
+  source?: { card?: string; ability?: string };
   options: DecisionOptionView[];
   min: number;
   max: number;
@@ -96,7 +98,7 @@ export function decisionView(state: GameState, viewer: PlayerId, env: ToSessionE
   });
   return {
     decision: {
-      id: p.id, kind: p.kind, player: p.player, title, instruction: p.prompt?.instruction ?? "", options, min: p.min, max: p.max, cancellable: p.cancellable,
+      id: p.id, kind: p.kind, player: p.player, title, instruction: p.prompt?.instruction ?? "", ...(p.prompt?.source ? { source: p.prompt.source } : {}), options, min: p.min, max: p.max, cancellable: p.cancellable,
       ...(p.repeatable ? { repeatable: true } : {}), ...(p.numeric ? { numeric: true } : {}), ...(p.amounts ? { amounts: p.amounts } : {}), ...(p.mana ? { mana: p.mana } : {}), ...(p.counters ? { counters: p.counters } : {})
     }
   };

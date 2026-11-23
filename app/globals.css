@@ -2765,3 +2765,23 @@ ol {
   z-index: 3;
 }
 .visual-card.is-compact .summoning-sick-badge { bottom: 4px; height: 20px; left: 4px; padding: 2px; width: 20px; }
+
+/* Kernel mode: castable hand cards glow, hand cards that can be picked for a decision, and the click-to-pick banner's buttons */
+.three-hand-card.kernel-castable {
+  border-color: #5fd08a;
+  box-shadow: 0 0 0 2px rgba(95, 208, 138, 0.55), 0 0 14px rgba(95, 208, 138, 0.45);
+}
+.three-hand-card.kernel-pick-legal {
+  border-color: #f4c95d;
+  box-shadow: 0 0 0 2px rgba(244, 201, 93, 0.6), 0 0 14px rgba(244, 201, 93, 0.5);
+}
+.three-hand-card.kernel-pick-chosen {
+  border-color: #5fd08a;
+  box-shadow: 0 0 0 3px rgba(95, 208, 138, 0.9);
+  transform: translateY(-8px);
+}
+.kernel-pick-banner p { margin: 0; font-size: 0.85rem; opacity: 0.85; }
+.kernel-pick-actions { display: flex; gap: 0.5rem; justify-content: center; }
+.kernel-pick-actions button:disabled { opacity: 0.45; cursor: not-allowed; }
+.activity-feed p.log-unresolved { color: #ffb86b; border-left: 3px solid #ff9a3c; padding-left: 0.4rem; }
+.activity-feed p.log-refused { color: #ff8f8f; }
