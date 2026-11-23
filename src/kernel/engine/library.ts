@@ -3,14 +3,14 @@
 // Only imported by steps.ts.
 
 import type { ObjectFilter, Step } from "../schema";
-import { emit, label, moveObject, player, shuffleInPlace, tryObj, Unsupported, type Run } from "./core";
+import { chars, emit, label, moveObject, player, shuffleInPlace, tryObj, Unsupported, type Run } from "./core";
 import { evalQuantity, matchesFilter, resolveObjs, resolvePlayers } from "./query";
 import { saveList, saveLooked, setResult } from "./saved";
-import { decide, type AskSpec, type StepSpec } from "./steps";
+import { decide, type AskSpec, type StepResult, type StepSpec } from "./steps";
 import { fallbackPrompt } from "./choose";
-import type { ObjId, PlayerId } from "./types";
+import type { Env, ObjId, PlayerId } from "./types";
 
-export const SEARCH_FIELDS = ["who", "filter", "count", "upTo", "anyNumber", "min", "reveal", "to", "shuffle", "tapped", "position", "saveAs"];
+export const SEARCH_FIELDS = ["who", "filter", "count", "upTo", "anyNumber", "min", "reveal", "to", "shuffle", "tapped", "position", "saveAs", "totalManaValueAtMost", "distinctNames", "excludeNamed", "sharesLandType"];
 export const SEARCH_DESTINATIONS = ["hand", "battlefield", "library", "graveyard", "revealed"];
 export const LOOK_FIELDS = ["amount", "who", "reveal"];
 export const REVEAL_FIELDS = ["what", "target", "who", "saveAs"];
@@ -31,6 +31,7 @@ export const searchStep: StepSpec = {
     const to = String(step.to ?? "hand");
     if (!SEARCH_DESTINATIONS.includes(to)) throw new Unsupported(`field:search_library.to=${to}`);
     const filter = (step.filter ?? {}) as ObjectFilter;
+    if (step.totalManaValueAtMost !== undefined || step.distinctNames || step.excludeNamed !== undefined || step.sharesLandType) return { push: [{ kind: "__search_pick", base: step, picked: [] } as unknown as Step] };
     const cands = owners.flatMap((p) => player(r, p).library).filter((id) => matchesFilter(r, id, { ...filter, zone: undefined, owner: undefined }, { ...env, controller: searcher }));
     const count = step.count === "any" || step.anyNumber ? cands.length : step.count === undefined ? 1 : evalQuantity(r, step.count as never, env);
     const max = Math.min(count, cands.length);
@@ -49,6 +50,45 @@ export const searchStep: StepSpec = {
       if ("ask" in d) return d;
       found = d.ids;
     }
+    return finishSearch(r, env, step, searcher, owners, found);
+  }
+};
+
+/**
+ * A search whose chosen cards must fit TOGETHER ("total mana value 6 or less", "different names", "not named X", "share a land type"):
+ * the cards are picked one at a time, each question listing only the cards that still fit with the ones already picked.
+ */
+export const searchPickStep = (r: Run, ex: { env: Env }, step: Step, answer: import("./types").Choice | undefined): StepResult => {
+  const env = ex.env, base = step.base as Step, picked = step.picked as ObjId[];
+  const searcher = resolvePlayers(r, base.who ?? "you", env)[0];
+  const filter = (base.filter ?? {}) as ObjectFilter;
+  const limit = base.count === "any" || base.anyNumber ? Infinity : base.count === undefined ? 1 : evalQuantity(r, base.count as never, env);
+  const mvOf = (id: ObjId) => chars(r, id).mv;
+  const subtypesOf = (id: ObjId) => chars(r, id).subtypes.map((x) => x.toLowerCase());
+  const fits = (id: ObjId): boolean => {
+    if (picked.includes(id)) return false;
+    if (base.excludeNamed !== undefined && chars(r, id).name.toLowerCase() === String(base.excludeNamed).toLowerCase()) return false;
+    if (base.distinctNames && picked.some((p) => chars(r, p).name === chars(r, id).name)) return false;
+    if (base.totalManaValueAtMost !== undefined && picked.reduce((n, p) => n + mvOf(p), mvOf(id)) > evalQuantity(r, base.totalManaValueAtMost as never, env)) return false;
+    if (base.sharesLandType && picked.length && !picked.every((p) => subtypesOf(p).some((t) => subtypesOf(id).includes(t)))) return false;
+    return true;
+  };
+  const cands = picked.length >= limit ? [] : player(r, searcher).library.filter((id) => matchesFilter(r, id, { ...filter, zone: undefined, owner: undefined }, { ...env, controller: searcher }) && fits(id));
+  if (!cands.length) return finishSearch(r, env, base, searcher, [searcher], picked);
+  const spec: AskSpec = {
+    kind: "choose_cards", player: searcher,
+    prompt: base.prompt ?? fallbackPrompt(r, env, "search", "Search the library: choose a card (or none to stop)."),
+    options: cands.map((id) => ({ id, label: label(r, id) })), min: 0, max: 1
+  };
+  const d = decide(spec, answer);
+  if ("ask" in d) return d;
+  if (!d.ids.length) return finishSearch(r, env, base, searcher, [searcher], picked);
+  return { push: [{ kind: "__search_pick", base, picked: [...picked, d.ids[0]] } as unknown as Step] };
+};
+
+function finishSearch(r: Run, env: Env, step: Step, searcher: PlayerId, owners: PlayerId[], found: ObjId[]): "done" {
+  {
+    const to = String(step.to ?? "hand");
     emit(r, { type: "library_searched", player: searcher, owner: owners[0], found: found.length });
     if (step.reveal) revealCards(r, searcher, found, env.source);
     if (to === "library" && step.shuffle) for (const p of owners) { shuffleInPlace(r, player(r, p).library); emit(r, { type: "shuffle", player: p }); }
@@ -61,7 +101,7 @@ export const searchStep: StepSpec = {
     setResult(env, step.id, found.length);
     return "done";
   }
-};
+}
 
 export const lookTopStep: StepSpec = {
   fields: LOOK_FIELDS,

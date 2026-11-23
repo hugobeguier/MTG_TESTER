@@ -27,7 +27,9 @@ export const NEW_STEP_KINDS = [
   // cleanup pass: Will-of-the-council voting, exchange life totals, regenerate, "repeat this process", emblems
   "vote", "exchange_life", "regenerate", "repeat_process", "create_emblem",
   // round 2: manifest dread (face-down 2/2 from the top two cards)
-  "manifest_dread", "reselect_attack_target"
+  "manifest_dread", "reselect_attack_target",
+  // step 9: morph (turn a face-down permanent face up), prepared (the prepared state ends when its spell copy is cast)
+  "turn_face_up", "unprepare"
 ] as const;
 
 export const STEP_KINDS = [...EXISTING_STEP_KINDS, ...NEW_STEP_KINDS] as const;

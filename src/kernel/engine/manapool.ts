@@ -8,7 +8,7 @@
 // Units empty with the pool at the end of every step / phase unless `keep`; `keep` units die at cleanup.
 
 import type { ObjectFilter, Step } from "../schema";
-import { chars, emit, player, tryObj, type Run } from "./core";
+import { emit, player, tryObj, type Run } from "./core";
 import { matchesFilter } from "./query";
 import type { ManaColor, ManaPool, ObjId, PlayerId, QueuedTrigger } from "./types";
 import { MANA_COLORS } from "./types";
@@ -19,6 +19,8 @@ export interface ManaUnit {
   abilities?: ObjectFilter;
   keep?: boolean;
   rider?: Step[];
+  /** the rider only triggers when the spell paid for matches this filter (Path of Ancestry: a creature spell that shares a type with your commander) */
+  riderIf?: ObjectFilter;
   source?: ObjId;
 }
 
@@ -28,7 +30,7 @@ export interface SpendCtx {
   abilitySource?: ObjId;
   spent: ManaColor[];
   /** riders of the units spent (queued by `flushRiders`) */
-  riders?: Array<{ steps: Step[]; source?: ObjId }>;
+  riders?: Array<{ steps: Step[]; source?: ObjId; riderIf?: ObjectFilter }>;
 }
 
 export const unitsOf = (r: Run, pid: PlayerId): ManaUnit[] => (player(r, pid).manaUnits ??= []);
@@ -69,22 +71,23 @@ export function takeMana(r: Run, pid: PlayerId, color: ManaColor, ctx: SpendCtx 
   const p = player(r, pid);
   const units = unitsOf(r, pid);
   // restricted units first, then lasting ones, then any unrestricted unit, then the plain pool
-  const rank = (u: ManaUnit) => (u.restriction || u.abilities ? 0 : u.keep ? 1 : 2);
+  const rank = (u: ManaUnit) => (u.restriction || u.abilities || u.rider ? 0 : u.keep ? 1 : 2);
   const idx = units.map((u, i) => ({ u, i })).filter((x) => x.u.color === color && unitFits(r, pid, x.u, ctx)).sort((a, b) => rank(a.u) - rank(b.u) || a.i - b.i)[0];
   if (idx && rank(idx.u) < 2) {
     units.splice(idx.i, 1);
     ctx?.spent.push(color);
-    if (idx.u.rider) (ctx!.riders ??= []).push({ steps: idx.u.rider, source: idx.u.source });
+    if (idx.u.rider) (ctx!.riders ??= []).push({ steps: idx.u.rider, source: idx.u.source, ...(idx.u.riderIf ? { riderIf: idx.u.riderIf } : {}) });
     return true;
   }
   if (p.manaPool[color] > 0) { p.manaPool[color]--; ctx?.spent.push(color); return true; }
-  if (idx) { units.splice(idx.i, 1); ctx?.spent.push(color); if (idx.u.rider) (ctx!.riders ??= []).push({ steps: idx.u.rider, source: idx.u.source }); return true; }
+  if (idx) { units.splice(idx.i, 1); ctx?.spent.push(color); if (idx.u.rider) (ctx!.riders ??= []).push({ steps: idx.u.rider, source: idx.u.source, ...(idx.u.riderIf ? { riderIf: idx.u.riderIf } : {}) }); return true; }
   return false;
 }
 
 /** Queue the riders of mana spent on a spell as triggered abilities (they go on the stack above the spell). */
 export function flushRiders(r: Run, pid: PlayerId, ctx: SpendCtx): void {
   for (const rd of ctx.riders ?? []) {
+    if (rd.riderIf && !(ctx.spell && matchesFilter(r, ctx.spell, rd.riderIf, { controller: pid, source: rd.source ?? ctx.spell }))) continue;
     const q: QueuedTrigger = {
       id: `rd${r.s.nextId++}`, sourceId: rd.source ?? ctx.spell ?? "", abilityId: "__rider", controller: pid,
       ctx: { eventObj: ctx.spell }, label: "mana rider", delayed: { steps: rd.steps, targets: {} }
@@ -107,4 +110,3 @@ import { playerHas } from "./layers";
 const keepsRed = (r: Run, pid: PlayerId): boolean => playerHas(r, pid, "keep_unspent_red_mana_between_steps_and_phases");
 
 export const poolSize = (r: Run, pid: PlayerId): number => MANA_COLORS.reduce((n, c) => n + player(r, pid).manaPool[c], 0) + unitsOf(r, pid).length;
-void chars;

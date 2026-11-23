@@ -107,7 +107,8 @@ export const moveStep: StepSpec = {
     if (to === "battlefield") {
       const zoneForm = !step.target && !!(step.what === "all" || step.what === "top_of_library" || step.moveFrom || step.from);
       if (step.underControlOf === "owner") controller = "" as PlayerId;
-      else if (!zoneForm && step.who) controller = resolvePlayers(r, step.who, env)[0] ?? env.controller;
+      else if (typeof step.what === "string" && step.what in env.chosen && step.who && resolvePlayers(r, step.who, env).length > 1) controller = "" as PlayerId;
+      else if (!zoneForm && step.who) { const ws = resolvePlayers(r, step.who, env); controller = ws.length > 1 ? ("" as PlayerId) : ws[0] ?? env.controller; } // "each player puts all cards they exiled this way onto the battlefield": each card enters under its owner's control (Living Death)
     }
     const counters = step.withCounters ? { [(step.withCounters as { kind: string }).kind]: evalQuantity(r, (step.withCounters as { count: never }).count, env) } : undefined;
 

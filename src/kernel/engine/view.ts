@@ -18,6 +18,8 @@ export type PlayerViewState = Omit<PlayerState, "library" | "hand"> & {
   /** libraries are never listed, not even for their owner (the order is unknown to everyone) */
   library: [];
   libraryCount: number;
+  /** the top card of the library when its owner may look at it any time (Korlessa, Thundermane Dragon): visible to the owner only */
+  topCard?: ObjId;
 };
 
 /** Another player's open decision: kind, prompt and bounds, never the options (they can name hidden cards). */
@@ -34,7 +36,8 @@ export type PlayerView = Omit<GameState, "players" | "objects" | "pending" | "se
 const HIDDEN_ZONES: Zone[] = ["hand", "library"];
 
 function visibleObject(o: GameObject, viewer: PlayerId, st: GameState): GameObject | undefined {
-  if (o.zone === "library") return undefined;
+  // "You may look at the top card of your library any time": its owner sees that one card (nobody else, and nothing below it)
+  if (o.zone === "library") return o.owner === viewer && st.topLookers?.includes(viewer) && st.players.find((p) => p.id === viewer)?.library[0] === o.id ? o : undefined;
   if (o.zone === "hand") return o.owner === viewer ? o : undefined;
   if (o.faceDown && o.owner !== viewer && o.controller !== viewer) {
     // a face-down card is anonymous to everybody but its owner / controller (its zone and state are public)
@@ -54,7 +57,8 @@ export function pendingFor(p: Pending | PendingView | null | undefined, viewer: 
 
 export function viewFor(state: GameState, viewer: PlayerId): PlayerView {
   const players: PlayerViewState[] = state.players.map((p) => ({
-    ...p, hand: p.id === viewer ? [...p.hand] : [], handCount: p.hand.length, library: [], libraryCount: p.library.length
+    ...p, hand: p.id === viewer ? [...p.hand] : [], handCount: p.hand.length, library: [], libraryCount: p.library.length,
+    ...(p.id === viewer && state.topLookers?.includes(viewer) && p.library[0] ? { topCard: p.library[0] } : {})
   }));
   const objects: Record<ObjId, GameObject> = {};
   for (const [id, o] of Object.entries(state.objects)) { const v = visibleObject(o, viewer, state); if (v) objects[id] = structuredClone(v); }

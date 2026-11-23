@@ -11,11 +11,11 @@ import type { GameEvent, Lki, ObjId, PlayerId, TriggerContext } from "./types";
 /** engine event type -> trigger event name */
 export const SIMPLE_EVENTS: Record<string, string> = {
   draw: "draw", life_gain: "gain_life", life_loss: "lose_life", tap: "tap", sacrificed: "sacrifice", counter_added: "counter_put",
-  discard: "discard", mill: "mill", token_created: "token_created"
+  discard: "discard", mill: "mill", token_created: "token_created", crime: "commit_crime", exploited: "exploit"
 };
 export const SIMPLE_TRIGGER_EVENTS: ReadonlySet<string> = new Set(Object.values(SIMPLE_EVENTS));
-const PLAYER_EVENTS = new Set(["draw", "gain_life", "lose_life", "discard", "mill"]);
-const LOG_TYPE: Record<string, string> = { draw: "draw", gain_life: "gain_life", lose_life: "lose_life", discard: "discard", mill: "mill", sacrifice: "sacrifice", token_created: "token_created" };
+const PLAYER_EVENTS = new Set(["draw", "gain_life", "lose_life", "discard", "mill", "commit_crime"]);
+const LOG_TYPE: Record<string, string> = { draw: "draw", gain_life: "gain_life", lose_life: "lose_life", discard: "discard", mill: "mill", sacrifice: "sacrifice", token_created: "token_created", commit_crime: "crime" };
 
 function lkiOk(f: ObjectFilter, l: Lki, q: QCtx, id: string): boolean {
   const lc = (a: string[]) => a.map((x) => x.toLowerCase());

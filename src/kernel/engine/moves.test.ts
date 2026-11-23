@@ -132,8 +132,8 @@ describe("zone forms", () => {
   });
 
   it("a `what` the engine does not model is refused statically", () => {
-    const bad = sorcery("Bad Move 2", "{U}", [S({ kind: "move_card_zone", what: "exiled_this_way", moveTo: "hand" })]);
-    expect(cardUnsupported(bad).all).toContain("field:move_card_zone.what=exiled_this_way");
+    const bad = sorcery("Bad Move 2", "{U}", [S({ kind: "move_card_zone", what: "creature_type", moveTo: "hand" })]);
+    expect(cardUnsupported(bad).all).toContain("field:move_card_zone.what=creature_type");
   });
 
   it("the step result is the number of cards moved (step_result)", () => {

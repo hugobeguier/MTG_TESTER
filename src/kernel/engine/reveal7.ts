@@ -4,7 +4,7 @@
 // A mill remembers the cards it milled (`chosen.__milled`) for `fromMilled`.
 
 import type { ObjectFilter, Step } from "../schema";
-import { emit, player, tryObj, Unsupported, type Run } from "./core";
+import { player, tryObj, type Run } from "./core";
 import { evalQuantity, matchesFilter, resolvePlayers } from "./query";
 import { saveLooked, setResult } from "./saved";
 import { revealCards } from "./library";
@@ -43,4 +43,4 @@ export function recordMilled(env: Env, ids: ObjId[]): void { env.chosen[MILLED_K
 
 export const milledLive = (r: Run, env: Env): ObjId[] => (env.chosen[MILLED_KEY] ?? []).filter((id) => tryObj(r, id)?.zone === "graveyard");
 
-void emit; void Unsupported;
+// (a top-level `void emit; void Unsupported;` here read core's bindings while core.ts was still initialising in the browser bundle: a TDZ crash)

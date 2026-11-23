@@ -50,6 +50,10 @@ export const delayedStep: StepSpec = {
       targets.__c = (env.chosen[env.lastChosen ?? "chosen"] ?? []).filter((id) => id.startsWith("#")); // the chosen cards themselves (they may have moved since: the delayed effect follows them)
       steps = JSON.parse(JSON.stringify(steps).replace(/"(target|what)":"chosen"/g, '"$1":"__c"'));
     }
+    if (JSON.stringify(steps).includes('"enchanted"')) { // "that creature" of an Aura (Animate Dead): the delayed effect follows the creature it enchanted when it was created, the Aura itself is gone by then
+      targets.__e = resolveObjs(r, "enchanted", env);
+      steps = JSON.parse(JSON.stringify(steps).replace(/"(target|what)":"enchanted"/g, '"$1":"__e"'));
+    }
     const base = { source: env.source, controller: env.controller, steps, targets, ctx, label: `${label(r, env.source)}: delayed trigger` };
     if (at.event === "begin_step") {
       if (!at.step || at.next === false) throw new Unsupported("field:create_delayed_trigger.at");
@@ -57,6 +61,9 @@ export const delayedStep: StepSpec = {
     } else if (at.event === "dies") {
       const ids = resolveObjs(r, at.subject, env);
       addDelayed(r, { ...base, at: { event: "dies", ids }, expires: expiryFor(r, (dur as "until_end_of_turn" | undefined) ?? "until_end_of_turn", env.controller) });
+    } else if (at.event === "leaves") {
+      // "when this leaves the battlefield, ..." (Animate Dead): the nested steps read the source through its last-known information
+      addDelayed(r, { ...base, at: { event: "leaves", ids: resolveObjs(r, at.subject, env) } });
     } else throw new Unsupported(`field:create_delayed_trigger.at=${at.event}`);
     return "done";
   }

@@ -54,9 +54,6 @@
           "count": 1
         }
       ],
-      "scripted": {
-        "handler": "cards_share_a_land_type"
-      },
       "steps": [
         {
           "kind": "search_library",
@@ -82,17 +79,18 @@
               "card": "Myriad Landscape",
               "ability": "a3"
             }
-          }
+          },
+          "sharesLandType": true
         }
       ],
       "implementation": "needed",
       "needs": [
-        "scripted:cards_share_a_land_type",
         "cost:sacrifice",
         "step:search_library",
         "field:search_library.count",
         "field:search_library.filter",
         "field:search_library.min",
+        "field:search_library.sharesLandType",
         "field:search_library.shuffle",
         "field:search_library.tapped",
         "field:search_library.to",

@@ -9,6 +9,7 @@
 // among them freely (trample: it may assign to the defender once every blocker got lethal damage; deathtouch makes 1 lethal).
 // That choice is a pending decision (`assign_damage`) for the attacker's controller; every other case is assigned automatically.
 
+import { protectedFrom } from "./protection";
 import type { ObjectFilter } from "../schema";
 import { attackerEntry, chars, defenderPlayer, emit, isSummoningSick, label, obj, parseManaCost, player, Reject, tick, tryObj, alive, type ParsedCost, type Run } from "./core";
 import { goadersOf, restrictionsOf } from "./layers";
@@ -153,6 +154,7 @@ function evasionProblem(r: Run, attacker: ObjId, blocker: ObjId, defendingPlayer
   const ac = chars(r, attacker), bc = chars(r, blocker);
   const bad = (why: string) => `${label(r, blocker)} can't block ${label(r, attacker)}: ${why}`;
   if (ac.keywords.includes("unblockable")) return bad("it can't be blocked");
+  if (protectedFrom(r, attacker, blocker)) return bad("protection");
   if (ac.keywords.includes("flying") && !bc.keywords.includes("flying") && !bc.keywords.includes("reach")) return bad("flying");
   if (ac.keywords.includes("fear") && !bc.types.includes("artifact") && !colorsOf(r, blocker).includes("B")) return bad("fear");
   if (ac.keywords.includes("intimidate") && !bc.types.includes("artifact") && !colorsOf(r, attacker).some((x) => colorsOf(r, blocker).includes(x))) return bad("intimidate");

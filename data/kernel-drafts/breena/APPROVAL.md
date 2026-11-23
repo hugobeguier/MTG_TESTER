@@ -173,18 +173,17 @@ Myriad Landscape [draft]
     Oracle: {T}: Add {C}.
     Cost: {T}
     Mana: add {C}
-  [a3] activated [needed: needs scripted:cards_share_a_land_type, cost:sacrifice, step:search_library, field:search_library.count, field:search_library.filter, field:search_library.min, field:search_library.shuffle, field:search_library.tapped, field:search_library.to, field:search_library.upTo]
+  [a3] activated [needed: needs cost:sacrifice, step:search_library, field:search_library.count, field:search_library.filter, field:search_library.min, field:search_library.sharesLandType, field:search_library.shuffle, field:search_library.tapped, field:search_library.to, field:search_library.upTo]
     Oracle: {2}, {T}, Sacrifice this land: Search your library for up to two basic land cards that share a land type, put them onto the battlefield tapped, then shuffle.
     Cost: {2}, {T}, sacrifice Myriad Landscape
     Effect: Search your library for a basic land, put it onto the battlefield, then shuffle.
-    Scripted (engine-specific rule, not described by the fields above): cards_share_a_land_type
 ```
 
 Player prompts:
 
 - Myriad Landscape: search: Choose a basic land from the library.
 
-Implementation: needed (replacement:would_enter, scripted:cards_share_a_land_type, cost:sacrifice, step:search_library, field:search_library.count, field:search_library.filter, field:search_library.min, field:search_library.shuffle, field:search_library.tapped, field:search_library.to, field:search_library.upTo)
+Implementation: needed (replacement:would_enter, cost:sacrifice, step:search_library, field:search_library.count, field:search_library.filter, field:search_library.min, field:search_library.sharesLandType, field:search_library.shuffle, field:search_library.tapped, field:search_library.to, field:search_library.upTo)
 
 ### Secluded Steppe
 
@@ -1948,6 +1947,7 @@ Implementation: needed (static, static:attackTax)
 | `field:sacrifice_permanent.who` | 1 | Promise of Loyalty |
 | `field:search_library.min` | 1 | Myriad Landscape |
 | `field:search_library.position` | 1 | Scheming Symmetry |
+| `field:search_library.sharesLandType` | 1 | Myriad Landscape |
 | `field:vote.candidates` | 1 | Council's Judgment |
 | `field:vote.tie` | 1 | Council's Judgment |
 | `field:vote.voters` | 1 | Council's Judgment |
@@ -1965,7 +1965,6 @@ Implementation: needed (static, static:attackTax)
 | `quantity:opponents_count` | 1 | Vault of Champions |
 | `quantity:players_count` | 1 | Breena, the Demagogue |
 | `quantity:stat` | 1 | Swords to Plowshares |
-| `scripted:cards_share_a_land_type` | 1 | Myriad Landscape |
 | `scripted:colors_lands_opponents_control_could_produce` | 1 | Exotic Orchard |
 | `static:addTypes` | 1 | Sigarda's Summons |
 | `static:blockTax` | 1 | Archangel of Tithes |

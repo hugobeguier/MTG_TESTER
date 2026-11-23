@@ -519,10 +519,10 @@ Animate Dead [draft]
     Oracle: Enchant creature card in a graveyard
     Target t1: target creature card in a graveyard  <- prompt: "Choose target creature card in a graveyard."
     Keyword: enchant
-  [a2] triggered [needed: needs trigger:intervening_if, predicate:source_state, step:rewrite_enchant, step:attach, field:attach.to, field:attach.what, step:create_delayed_trigger, field:create_delayed_trigger.steps, field:create_delayed_trigger.trigger, field:sacrifice_permanent.who]
+  [a2] triggered [needed: needs ref:created, trigger:intervening_if, predicate:source_state, step:rewrite_enchant, step:attach, field:attach.to, field:attach.what, step:create_delayed_trigger, field:create_delayed_trigger.steps, field:create_delayed_trigger.trigger, field:sacrifice_permanent.who]
     Oracle: When this Aura enters, if it's on the battlefield, it loses "enchant creature card in a graveyard" and gains "enchant creature put onto the battlefield with this Aura." Return enchanted creature card to the battlefield under your control and attach this Aura to it. When this Aura leaves the battlefield, that creature's controller sacrifices it.
     Trigger: Whenever Animate Dead enters, if Animate Dead is on battlefield
-    Effect: Rewrite this Aura's enchant restriction. Then, return the enchanted creature from the graveyard to the battlefield. Then, attach Animate Dead to that object. Then, create a delayed trigger.
+    Effect: Rewrite this Aura's enchant restriction. Then, return the enchanted creature from the graveyard to the battlefield. Then, attach Animate Dead to the token just created. Then, create a delayed trigger.
   [a3] static [needed: needs static]
     Oracle: Enchanted creature gets -1/-0.
     Static: The enchanted creature gets -1/+0
@@ -533,7 +533,7 @@ Player prompts:
 - Animate Dead: choose a target: Choose target creature card in a graveyard.
 - Animate Dead: sacrifice: Choose a permanent to sacrifice.
 
-Implementation: needed (keyword:enchant, trigger:intervening_if, predicate:source_state, step:rewrite_enchant, step:attach, field:attach.to, field:attach.what, step:create_delayed_trigger, field:create_delayed_trigger.steps, field:create_delayed_trigger.trigger, field:sacrifice_permanent.who, static)
+Implementation: needed (keyword:enchant, ref:created, trigger:intervening_if, predicate:source_state, step:rewrite_enchant, step:attach, field:attach.to, field:attach.what, step:create_delayed_trigger, field:create_delayed_trigger.steps, field:create_delayed_trigger.trigger, field:sacrifice_permanent.who, static)
 
 ### Braids, Arisen Nightmare
 
@@ -1413,22 +1413,24 @@ Path of Ancestry [draft]
   [a1] replacement [needed: needs replacement:would_enter]
     Oracle: This land enters tapped.
     Replacement: If Path of Ancestry would enter, it enters tapped
-  [a2] mana [needed: needs mana:variable]
+  [a2] mana [needed: needs scripted:mana_spent_on_creature_sharing_type_with_commander, mana:variable, step:scry]
     Oracle: {T}: Add one mana of any color in your commander's color identity.
     Cost: {T}
+    Effect: Scry 1.
+    Scripted (engine-specific rule, not described by the fields above): mana_spent_on_creature_sharing_type_with_commander
     Mana: add one mana of any color in your commander's color identity
-  [a3] triggered [needed: needs scripted:mana_from_this_land_spent_on_creature_sharing_type_with_commander, step:scry]
+  [a3] triggered [needed: needs scripted:mana_rider_text, step:scry]
     Oracle: When that mana is spent to cast a creature spell that shares a creature type with your commander, scry 1. (Look at the top card of your library. You may put that card on the bottom.)
     Trigger: Whenever you cast a creature spell
     Effect: Scry 1.
-    Scripted (engine-specific rule, not described by the fields above): mana_from_this_land_spent_on_creature_sharing_type_with_commander
+    Scripted (engine-specific rule, not described by the fields above): mana_rider_text
 ```
 
 Player prompts:
 
 - (none: no decisions)
 
-Implementation: needed (replacement:would_enter, mana:variable, scripted:mana_from_this_land_spent_on_creature_sharing_type_with_commander, step:scry)
+Implementation: needed (replacement:would_enter, scripted:mana_spent_on_creature_sharing_type_with_commander, mana:variable, step:scry, scripted:mana_rider_text)
 
 ### Exotic Orchard
 
@@ -1501,18 +1503,17 @@ Myriad Landscape [draft]
     Oracle: {T}: Add {C}.
     Cost: {T}
     Mana: add {C}
-  [a3] activated [needed: needs scripted:cards_share_a_land_type, cost:sacrifice, step:search_library, field:search_library.count, field:search_library.filter, field:search_library.min, field:search_library.shuffle, field:search_library.tapped, field:search_library.to, field:search_library.upTo]
+  [a3] activated [needed: needs cost:sacrifice, step:search_library, field:search_library.count, field:search_library.filter, field:search_library.min, field:search_library.sharesLandType, field:search_library.shuffle, field:search_library.tapped, field:search_library.to, field:search_library.upTo]
     Oracle: {2}, {T}, Sacrifice this land: Search your library for up to two basic land cards that share a land type, put them onto the battlefield tapped, then shuffle.
     Cost: {2}, {T}, sacrifice Myriad Landscape
     Effect: Search your library for a basic land, put it onto the battlefield, then shuffle.
-    Scripted (engine-specific rule, not described by the fields above): cards_share_a_land_type
 ```
 
 Player prompts:
 
 - Myriad Landscape: search: Choose a basic land from the library.
 
-Implementation: needed (replacement:would_enter, scripted:cards_share_a_land_type, cost:sacrifice, step:search_library, field:search_library.count, field:search_library.filter, field:search_library.min, field:search_library.shuffle, field:search_library.tapped, field:search_library.to, field:search_library.upTo)
+Implementation: needed (replacement:would_enter, cost:sacrifice, step:search_library, field:search_library.count, field:search_library.filter, field:search_library.min, field:search_library.sharesLandType, field:search_library.shuffle, field:search_library.tapped, field:search_library.to, field:search_library.upTo)
 
 ## Kernel to-do: missing capabilities across this deck
 
@@ -1610,6 +1611,7 @@ Implementation: needed (replacement:would_enter, scripted:cards_share_a_land_typ
 | `field:sacrifice_permanent.sharesCardTypeWith` | 1 | Braids, Arisen Nightmare |
 | `field:search_library.min` | 1 | Myriad Landscape |
 | `field:search_library.reveal` | 1 | Fauna Shaman |
+| `field:search_library.sharesLandType` | 1 | Myriad Landscape |
 | `field:search_library.totalManaValueAtMost` | 1 | Protean Hulk |
 | `field:search_library.who` | 1 | Boseiju, Who Endures |
 | `filter:isCommander` | 1 | Command Beacon |
@@ -1621,13 +1623,14 @@ Implementation: needed (replacement:would_enter, scripted:cards_share_a_land_typ
 | `quantity:count_this_turn` | 1 | Spymaster's Vault |
 | `quantity:devotion` | 1 | Gray Merchant of Asphodel |
 | `quantity:players_count` | 1 | Braids, Arisen Nightmare |
+| `ref:created` | 1 | Animate Dead |
 | `replacement:damage_qualifiers` | 1 | Spore Frog |
 | `replacement:duration` | 1 | Spore Frog |
 | `replacement:would_be_put_into_zone` | 1 | Dauthi Voidwalker |
 | `replacement:would_deal_damage` | 1 | Spore Frog |
-| `scripted:cards_share_a_land_type` | 1 | Myriad Landscape |
 | `scripted:colors_lands_opponents_control_could_produce` | 1 | Exotic Orchard |
-| `scripted:mana_from_this_land_spent_on_creature_sharing_type_with_commander` | 1 | Path of Ancestry |
+| `scripted:mana_rider_text` | 1 | Path of Ancestry |
+| `scripted:mana_spent_on_creature_sharing_type_with_commander` | 1 | Path of Ancestry |
 | `scripted:station` | 1 | Susur Secundi, Void Altar |
 | `scripted:types_lands_you_control_could_produce` | 1 | Reflecting Pool |
 | `step:connive` | 1 | Spymaster's Vault |

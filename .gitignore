@@ -24,3 +24,6 @@ advisor-log.jsonl
 
 # Kernel observer output (npm run kernel:observe): generated diffs and reports, not repo content.
 data/observer/
+
+# Card packs for the kernel engine in the browser (npm run kernel:bundle-drafts): generated from data/kernel-drafts + data/cards.db.
+public/kernel-packs/

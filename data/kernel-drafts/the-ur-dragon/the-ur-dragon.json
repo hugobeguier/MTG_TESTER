@@ -85,9 +85,7 @@
         {
           "kind": "move_card_zone",
           "who": "you",
-          "moveFrom": "hand",
           "moveTo": "battlefield",
-          "moveCount": 1,
           "optional": true,
           "filter": {
             "zone": "hand",
@@ -104,7 +102,9 @@
               "card": "The Ur-Dragon",
               "ability": "a3"
             }
-          }
+          },
+          "what": "choose",
+          "from": "hand"
         }
       ],
       "implementation": "needed",
@@ -112,7 +112,9 @@
         "trigger:batch",
         "trigger:subject",
         "quantity:event_amount",
-        "field:move_card_zone.filter"
+        "field:move_card_zone.filter",
+        "field:move_card_zone.from",
+        "field:move_card_zone.what"
       ]
     }
   ],

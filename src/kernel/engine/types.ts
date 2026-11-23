@@ -84,6 +84,10 @@ export interface GameObject {
   chosen?: { color?: string; mode?: string; type?: string; cardType?: string; landType?: string; name?: string };
   /** exiled / put onto the battlefield face down: only the owner may know what it is (viewFor hides the name from everyone else) */
   faceDown?: boolean;
+  /** prepared (Secrets of Strixhaven): while true the permanent can cast a copy of its other face's spell (core.preparedAbility) */
+  prepared?: boolean;
+  /** an Aura that enchants a card that is not on the battlefield (Animate Dead: "enchant creature card in a graveyard"): that card, until the aura's ETB rewrites it (SBA 704.5m skips it) */
+  auraTarget?: ObjId;
   /** dealt damage by a deathtouch source this turn: destroyed by state-based actions (704.5h), cleared with the damage */
   dtHit?: boolean;
   /** flashback & co.: if this spell would leave the stack it is exiled instead (cleared whenever the object changes zone) */
@@ -96,6 +100,8 @@ export interface GameObject {
   copyDef?: TokenDef;
   /** the copy effect ends at the cleanup step of this turn ("until end of turn") */
   copyUntilEot?: boolean;
+  /** abilities it had on the battlefield that something else gave it (undying from Mikaeus): its dies / leaves triggers use them; cleared on the next zone change */
+  leftWith?: import("../schema").Ability[];
   /** the "next spell" grants this spell was cast with (improvise, affinity for artifacts, cant:be_countered) */
   castGrants?: string[];
   /** regeneration shields (regen.ts): cleared at cleanup */
@@ -160,7 +166,7 @@ export interface TriggerContext {
   x?: number;
 }
 
-export interface Lki { controller: PlayerId; owner: PlayerId; name: string; types: string[]; subtypes: string[]; colors: string[]; mv: number; power?: number; toughness?: number; token: boolean; counters?: Record<string, number> }
+export interface Lki { controller: PlayerId; owner: PlayerId; name: string; types: string[]; subtypes: string[]; colors: string[]; mv: number; power?: number; toughness?: number; token: boolean; counters?: Record<string, number>; /** what it was attached to (Animate Dead's leave trigger) */ attachedTo?: ObjId }
 
 export interface StackItem {
   id: string;
@@ -242,7 +248,7 @@ export interface DelayedTrigger {
   id: string;
   source: ObjId;
   controller: PlayerId;
-  at: { event: "begin_step"; step: Phase; whose: "yours" | "opponents" | "each" } | { event: "dies"; ids: ObjId[] };
+  at: { event: "begin_step"; step: Phase; whose: "yours" | "opponents" | "each" } | { event: "dies"; ids: ObjId[] } | { event: "leaves"; ids: ObjId[] };
   steps: Step[];
   /** the targets of the ability that created it ("t1" keeps meaning the same object) */
   targets: Record<string, string[]>;
@@ -262,6 +268,8 @@ export interface Config {
   maxEventsPerPass: number;
   handSize: number;
   /** observer only: mirror what a HEADLESS legacy game does not run (the self-play orchestrator has no React hooks): triggers of these events are never put on the stack, and combat damage does not move the monarchy */
+  /** a lone survivor who "can't win the game" (Herald of Eternal Dawn's opponents): "draw" (default: simulations record a draw, nobody can ever win) or "continue" (the real rule 104.3: the game simply goes on) */
+  loneSurvivorCannotWin?: "draw" | "continue";
   mirrorHeadless?: { skipTriggerEvents: string[]; noMonarchSteal?: boolean; /** the headless legacy harness never builds interpretedEffects, so a Propaganda-style attack tax is not charged */ noAttackTax?: boolean };
 }
 
@@ -298,6 +306,8 @@ export interface GameState {
   players: PlayerState[];
   objects: Record<ObjId, GameObject>;
   battlefield: ObjId[];
+  /** permanents that are phased out (phasing.ts): not in `battlefield`, still zone "battlefield"; `indirectOf` = phased out with the permanent it is attached to */
+  phased?: Array<{ id: ObjId; indirectOf?: ObjId }>;
   stack: StackItem[];
   turn: { number: number; active: PlayerId; phase: Phase };
   /** null while nobody holds priority (untap/cleanup, a pending decision, game over) */
@@ -307,6 +317,10 @@ export interface GameState {
   effects: ContinuousEffect[];
   /** last-known information of permanents that left the battlefield during the current resolution ("its controller", "its power") */
   lki: Record<ObjId, Lki>;
+  /** players who may look at their own top card of library any time (Korlessa, Thundermane Dragon): view.ts shows it to them */
+  topLookers?: PlayerId[];
+  /** "choose one that hasn't been chosen this turn": "source:ability" -> the modes it chose in that turn */
+  modeMemory?: Record<string, { turn: number; ids: string[] }>;
   turnLog: LogEntry[];
   /** "<objectId>:<abilityId>" -> count this turn / this game ("g:" prefix) */
   activations: Record<string, number>;

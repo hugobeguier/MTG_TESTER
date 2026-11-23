@@ -354,6 +354,41 @@ function buildScoringContext(session: GameSession, seatId: string, purpose: stri
 
 // --- playGame ---------------------------------------------------------------------------------------
 
+export interface StallDiagnostic {
+  reason: "max-actions" | "identical-state";
+  actions: number;
+  turn: number;
+  phase: string;
+  repeatedActionType?: string;
+  /** the last actions applied, oldest first */
+  lastActions: string[];
+}
+
+class StallError extends Error {
+  constructor(readonly diagnostic: StallDiagnostic) { super(`self-play stalled (${diagnostic.reason}) at turn ${diagnostic.turn} ${diagnostic.phase}`); this.name = "StallError"; }
+}
+
+/** cheap fingerprint of everything an action normally changes; an unchanged one across hundreds of actions means a loop */
+export function stallFingerprint(s: GameSession): string {
+  return `${s.turn}|${s.phase}|${s.activePlayerId}|${s.stackSpellCardIds?.length ?? 0}|` + s.seats.map((x) => `${x.life}:${x.library?.length ?? 0}:${x.board.hand.length}:${(x.board.graveyard?.length ?? 0)}:${x.board.battlefield.length}:${x.board.battlefield.filter((c) => c.tapped).length}:${x.board.exile?.length ?? 0}`).join(",");
+}
+
+/** Counts applied actions and consecutive identical-fingerprint actions; throws StallError past the limits. */
+export function createStallGuard(maxActions: number, maxIdentical: number) {
+  let actions = 0, identical = 0, last = "";
+  const recent: string[] = [];
+  return (next: GameSession, meta: AuditMeta): void => {
+    actions += 1;
+    const fp = stallFingerprint(next);
+    identical = fp === last ? identical + 1 : 0;
+    last = fp;
+    recent.push(`${meta.seatId}:${meta.actionType}${meta.actionLabel ? ` ${meta.actionLabel}` : ""}`);
+    if (recent.length > 12) recent.shift();
+    const reason = actions > maxActions ? "max-actions" : identical >= maxIdentical ? "identical-state" : undefined;
+    if (reason) throw new StallError({ reason, actions, turn: next.turn, phase: next.phase, repeatedActionType: meta.actionType, lastActions: [...recent] });
+  };
+}
+
 export interface SelfPlayOptions {
   // Per-seat cap, matching GameSession.turn's own per-seat counting convention (see the milestone 1
   // smoke test's identical comment) — default comfortably over-provisioned for a real (attacking,
@@ -362,6 +397,10 @@ export interface SelfPlayOptions {
   timeoutMs?: number;
   strict?: boolean;
   verbose?: boolean;
+  /** loop guard: more applied actions than this in one game ends it as "stalled" (default 20000) */
+  maxActions?: number;
+  /** loop guard: this many consecutive applied actions that leave the game fingerprint (turn/phase/life/zone sizes/tapped count) unchanged end it as "stalled" (default 400) */
+  maxIdenticalActions?: number;
   // Optional observer called after every applied action with the same (prev, next, meta) the audit sees — used by the mistake
   // detector (mistakes.ts); never affects play.
   onAction?: (prev: GameSession, next: GameSession, meta: AuditMeta) => void;
@@ -384,7 +423,9 @@ export interface PlayGameResult {
   winnerSeatId?: string;
   turns: number;
   decisionCounts: DecisionCounts;
-  terminationReason: "win" | "turn-cap" | "timeout" | "crash";
+  terminationReason: "win" | "turn-cap" | "timeout" | "crash" | "stalled";
+  /** set when terminationReason is "stalled": why the loop guard fired, plus the last actions and the turn/phase */
+  stallDiagnostic?: StallDiagnostic;
   violations: AuditViolation[];
   wallClockMs: number;
   // How many bare instant/sorcery resolutions resolveBareSpellEffect actually recognized vs. let
@@ -1123,7 +1164,9 @@ export async function playGame(session: GameSession, brains: Record<string, Brai
     }
   }
 
+  const stallGuard = createStallGuard(opts.maxActions ?? 20000, opts.maxIdenticalActions ?? 400);
   function afterAction(prev: GameSession, next: GameSession, meta: AuditMeta) {
+    stallGuard(next, meta);
     auditAfterAction(auditState, next, meta, opts.strict ?? false);
     scanForAnomalies(anomalyState, prev, next, meta);
     opts.onAction?.(prev, next, meta);
@@ -1237,13 +1280,15 @@ export async function playGame(session: GameSession, brains: Record<string, Brai
     // the session to dump for debugging — that's a deliberate stop, not an unexpected engine crash,
     // so it's rethrown rather than folded into the "crash" termination reason below.
     if (error instanceof SelfPlayStrictViolationError) throw error;
-    terminationReason = "crash";
+    const stalled = error instanceof StallError ? error : undefined;
+    terminationReason = stalled ? "stalled" : "crash";
     return {
       session,
       winnerSeatId: session.winnerSeatId,
       turns: internalTurns,
       decisionCounts,
       terminationReason,
+      ...(stalled ? { stallDiagnostic: stalled.diagnostic } : {}),
       violations: auditState.violations,
       wallClockMs: Date.now() - startedAt,
       spellEffectCoverage,

@@ -281,7 +281,7 @@ Oracle text:
 Re-rendered plain English:
 
 ```
-Darksteel Juggernaut [draft]
+Darksteel Juggernaut [approved]
   [a1] keyword [implemented]
     Oracle: Indestructible
     Keyword: indestructible
@@ -397,7 +397,7 @@ Oracle text:
 Re-rendered plain English:
 
 ```
-Forsaken Monument [draft]
+Forsaken Monument [approved]
   [a1] static [needed: needs static]
     Oracle: Colorless creatures you control get +2/+2.
     Static: Colorless creatures you control get +2/+2
@@ -744,7 +744,7 @@ Oracle text:
 Re-rendered plain English:
 
 ```
-Myr Battlesphere [draft]
+Myr Battlesphere [approved]
   [a1] triggered [implemented]
     Oracle: When this creature enters, create four 1/1 colorless Myr artifact creature tokens.
     Trigger: Whenever Myr Battlesphere enters
@@ -773,7 +773,7 @@ Oracle text:
 Re-rendered plain English:
 
 ```
-Padeem, Consul of Innovation [draft]
+Padeem, Consul of Innovation [approved]
   [a1] static [needed: needs static]
     Oracle: Artifacts you control have hexproof. (They can't be the targets of spells or abilities your opponents control.)
     Static: Artifacts you control have hexproof
@@ -800,7 +800,7 @@ Oracle text:
 Re-rendered plain English:
 
 ```
-Pull from Tomorrow [draft]
+Pull from Tomorrow [approved]
   [a1] spell_effect [needed: needs quantity:X]
     Oracle: Draw X cards, then discard a card.
     Effect: Draw X cards. Then, discard a card.
@@ -986,7 +986,7 @@ Oracle text:
 Re-rendered plain English:
 
 ```
-Shimmer Dragon [draft]
+Shimmer Dragon [approved]
   [a1] keyword [implemented]
     Oracle: Flying
     Keyword: flying
@@ -1089,7 +1089,7 @@ Oracle text:
 Re-rendered plain English:
 
 ```
-Steel Hellkite [draft]
+Steel Hellkite [approved]
   [a1] keyword [implemented]
     Oracle: Flying
     Keyword: flying
@@ -1307,7 +1307,7 @@ Oracle text:
 Re-rendered plain English:
 
 ```
-Thirst for Knowledge [draft]
+Thirst for Knowledge [approved]
   [a1] spell_effect [needed: needs step:unless_pay]
     Oracle: Draw three cards. Then discard two cards unless you discard an artifact card.
     Effect: Draw 3 cards. Then, discard 2 cards unless you discard an artifact card in your hand.
@@ -1360,7 +1360,7 @@ Oracle text:
 Re-rendered plain English:
 
 ```
-Thopter Spy Network [draft]
+Thopter Spy Network [approved]
   [a1] triggered [needed: needs trigger:intervening_if, field:create_tokens.tokenKeywords]
     Oracle: At the beginning of your upkeep, if you control an artifact, create a 1/1 colorless Thopter artifact creature token with flying.
     Trigger: At the beginning of your upkeep, if you control an artifact

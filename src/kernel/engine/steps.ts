@@ -2,10 +2,12 @@
 // either completes, pushes more steps (expansion), or asks a decision; when it asks, the whole Exec is stored in the
 // pending decision and re-entered with the answer. A handler must not mutate before it asks.
 
+import { protectedFrom } from "./protection";
+import { phaseOut } from "./phasing";
 import type { ObjectFilter, PlayerRef, Prompt, Step } from "../schema";
 import { promptForMay } from "../prompts";
 import {
-  chars, continueHooks, continuing, drawCards, emit, label, moveObject, NeedAsk, newObject, obj, parseManaCost, player, shuffleInPlace, takeAnswer, tick, tryObj, Unsupported, Reject, type Run
+  abilitiesOf, chars, continueHooks, continuing, drawCards, emit, label, moveObject, NeedAsk, newObject, obj, parseManaCost, player, shuffleInPlace, takeAnswer, tick, tryObj, Unsupported, Reject, type Run
 } from "./core";
 import { evalPredicate, evalQuantity, matchesFilter, objectsMatching, resolveObjs, resolvePlayers, type QCtx } from "./query";
 import { applyReplacements, runAfter } from "./replacements";
@@ -15,11 +17,11 @@ import type { ContinuousEffect } from "./types";
 import { isObjId } from "./types";
 import { chooseStep } from "./choose";
 import { moveStep } from "./moves";
-import { lookTopStep, revealStep, searchStep } from "./library";
+import { lookTopStep, revealStep, searchPickStep, searchStep } from "./library";
 import { repeatStep } from "./repeat";
 import { unlessDiscardHandler, unlessHandler, unlessPaySupported, type UnlessPay } from "./unlesspay";
 import { addMana } from "./mana";
-import { cantBeCountered } from "./layers";
+import { cantBeCountered, invalidateIndex } from "./layers";
 import { attachStep } from "./attach";
 import { checkCounterAnswer, counterSpec } from "./counters7";
 import { copyStep } from "./copy";
@@ -35,7 +37,7 @@ export interface AskSpec { kind: DecisionKind; player: PlayerId; prompt: Prompt;
 export type StepResult = "done" | { ask: AskSpec } | { push: Step[] };
 export type StepStatus = { status: "done" } | { status: "ask"; spec: AskSpec };
 
-export const META_FIELDS = ["kind", "id", "src", "srcs", "prompt", "optional", "condition", "__asked", "unlessPay", "amountLockedOn", "optionalCost"];
+export const META_FIELDS = ["kind", "id", "src", "srcs", "prompt", "optional", "condition", "__asked", "unlessPay", "amountLockedOn", "optionalCost", "reflexive"];
 
 /** Validate an answer against the spec computed from the current state. */
 export function decide(spec: AskSpec, answer: Choice | undefined): { ask: AskSpec } | { ids: string[]; number?: number; yes?: boolean } {
@@ -78,6 +80,7 @@ export function dealDamage(r: Run, env: Env | undefined, source: string | undefi
   const ev = applyReplacements(r, { kind: "damage", source, target, amount, combat });
   if (ev.cancelled || ev.kind !== "damage" || ev.amount <= 0) { emit(r, { type: "damage_prevented", source, target, amount }); runAfter(r, ev); return 0; }
   amount = ev.amount;
+  if (isObjId(target) && protectedFrom(r, target, source)) { emit(r, { type: "damage_prevented", source, target, amount }); return 0; } // protection (protection.ts)
   let dealt = 0;
   const srcLive = source ? tryObj(r, source) : undefined;
   const deathtouch = !!srcLive && srcLive.zone === "battlefield" && chars(r, srcLive.id).keywords.includes("deathtouch");
@@ -217,7 +220,7 @@ const STEPS: Record<string, StepSpec> = {
     }
   },
   damage_target: {
-    fields: ["amount", "target", "who", "source", "all", "filter", "excessTo", "divided", "damageTargetType"],
+    fields: ["amount", "target", "who", "source", "all", "filter", "excessTo", "divided", "damageTargetType", "excludeWho"],
     run: (r, ex, step) => {
       const env = ex.env;
       const amount = qty(r, env, step);
@@ -232,6 +235,8 @@ const STEPS: Record<string, StepSpec> = {
       }
       else if (step.target) targets = refs(r, env, step);
       else targets = players(r, env, step);
+      // "to each OTHER opponent" (Parapet Thrasher): the scope minus excludeWho
+      if (step.excludeWho) { const out = resolvePlayers(r, step.excludeWho as never, env); targets = targets.filter((t) => !out.includes(t)); }
       if (step.divided && targets.length > 1 && amount > 0) return { push: [{ kind: "__divide_damage" as never, targets, amount, source: src, prompt: step.prompt } as Step] };
       for (const t of targets) {
         if (step.excessTo === undefined) { dealDamage(r, env, src, t, amount); continue; }
@@ -273,7 +278,7 @@ const STEPS: Record<string, StepSpec> = {
     fields: ["target", "who", "tapped", "anyGraveyard"], // anyGraveyard: only the target spec differs (any player's graveyard)
     run: (r, ex, step) => {
       const ctl = resolvePlayers(r, step.who ?? "you", ex.env)[0];
-      for (const t of refs(r, ex.env, step)) { const o = tryObj(r, t); if (o && o.zone === "graveyard") { moveObject(r, t, "battlefield", { controller: ctl, tapped: !!step.tapped }); emit(r, { type: "reanimated", id: t }); } }
+      for (const t of refs(r, ex.env, step)) { const o = tryObj(r, t); if (o && o.zone === "graveyard") { moveObject(r, t, "battlefield", { controller: ctl, tapped: !!step.tapped }); emit(r, { type: "reanimated", id: t }); (ex.env.created ??= []).push(t); } }
       return "done";
     }
   },
@@ -335,8 +340,10 @@ const STEPS: Record<string, StepSpec> = {
     }
   },
   grant_effect: {
-    fields: ["target", "modify", "duration", "who", "filter", "replacement", "all"],
+    fields: ["target", "modify", "duration", "who", "filter", "replacement", "all", "phaseOut", "prepared"],
     run: (r, ex, step) => {
+      if (step.prepared) { for (const id of refs(r, ex.env, step)) { const o = tryObj(r, id); if (o && o.zone === "battlefield") { o.prepared = true; invalidateIndex(r); emit(r, { type: "prepared", id }); } } return "done"; } // "this creature becomes prepared"
+      if (step.phaseOut) { for (const id of refs(r, ex.env, step)) phaseOut(r, id); return "done"; } // "enchanted creature phases out" (Vanishing, phasing.ts)
       if (step.all && !step.filter && !step.target) throw new Unsupported("field:grant_effect.all", "an unfiltered mass grant");
       // player-scoped form: a replacement shield / a player flag for a while (durable.ts)
       if (!step.target && !step.filter) { grantToPlayers(r, ex.env, step); return "done"; }
@@ -356,12 +363,34 @@ const STEPS: Record<string, StepSpec> = {
       return "done";
     }
   },
+  // Exploit (CR 702.110): "you may sacrifice a creature" (the optional wrapper asks first); the keyword's second ability triggers on the `exploited` event
+  exploit: {
+    fields: ["amount"],
+    run: () => ({ push: [
+      { kind: "choose", who: "you", from: { types: ["creature"], controller: "you" }, min: 1, max: 1, saveAs: "__exploit" } as unknown as Step,
+      { kind: "__exploit_done" } as unknown as Step
+    ] })
+  },
+  // Animate Dead: the Aura's "enchant" text is rewritten as it enters (it now enchants the creature put onto the battlefield with it); the reanimate / attach steps after it do the work
+  rewrite_enchant: { fields: [], run: () => "done" },
+  unprepare: {
+    fields: ["target"],
+    run: (r, ex, step) => { for (const id of refs(r, ex.env, step)) { const o = tryObj(r, id); if (o) { o.prepared = undefined; invalidateIndex(r); } } return "done"; }
+  },
+  // morph: turn a face-down permanent face up (CR 702.37e; modelled as an ability that uses the stack)
+  turn_face_up: {
+    fields: ["target"],
+    run: (r, ex, step) => {
+      for (const id of refs(r, ex.env, step)) { const o = tryObj(r, id); if (o?.faceDown && o.zone === "battlefield") { o.faceDown = undefined; invalidateIndex(r); emit(r, { type: "turned_face_up", id, player: o.controller }); } }
+      return "done";
+    }
+  },
   extra_combat: {
     fields: [],
     run: (r) => { r.s.extraCombats++; emit(r, { type: "extra_combat_added" }); return "done"; }
   },
   create_tokens: {
-    fields: ["tokenCount", "tokenName", "tokenPower", "tokenToughness", "tokenColors", "tokenTypeLine", "tokenKeywords", "tokenTapped", "who", "tokenAbilities"],
+    fields: ["tokenCount", "tokenName", "tokenPower", "tokenToughness", "tokenColors", "tokenTypeLine", "tokenKeywords", "tokenTapped", "who", "tokenAbilities", "tokenAttacking", "attackTarget"],
     run: (r, ex, step) => {
       const env = ex.env;
       const def = tokenDefFromStep(r, env, step);
@@ -372,6 +401,11 @@ const STEPS: Record<string, StepSpec> = {
         const ev = applyReplacements(r, { kind: "tokens", player: pid, groups: n > 0 ? [{ def, count: n, tapped: !!step.tokenTapped }] : [] });
         if (!ev.cancelled && ev.kind === "tokens") for (const g of ev.groups) for (let i = 0; i < g.count; i++) createToken(r, pid, g.def, !!g.tapped, env.created);
         runAfter(r, ev);
+      }
+      if (step.tokenAttacking && r.s.combat) {
+        // "tapped and attacking that player" (Soaring Lightbringer): enters attacking (never declared: no attack triggers); only the defending player of the triggering attack is modelled
+        if (step.attackTarget !== "that_player" || !env.eventPlayer) throw new Unsupported("field:create_tokens.attackTarget");
+        for (const id of env.created) { const o = tryObj(r, id); if (o && o.zone === "battlefield") r.s.combat.attackers.push({ id, ts: o.timestamp, defender: env.eventPlayer, blockers: [], blocked: false }); }
       }
       return "done";
     }
@@ -396,7 +430,7 @@ const STEPS: Record<string, StepSpec> = {
     }
   },
   sacrifice_permanent: {
-    fields: ["who", "amount", "filter", "target", "all", "greatestPower"],
+    fields: ["who", "amount", "filter", "target", "all", "greatestPower", "costPerCounter"],
     run: (r, ex, step) => {
       const env = ex.env;
       if (step.all) { // "each player sacrifices all ...": every matching permanent each listed player controls
@@ -448,9 +482,14 @@ const STEPS: Record<string, StepSpec> = {
       return "done";
     }
   },
-  shuffle: { fields: ["who"], run: (r, ex, step) => { for (const p of players(r, ex.env, step)) { shuffleInPlace(r, player(r, p).library); emit(r, { type: "shuffle", player: p }); } return "done"; } },
+  shuffle: { fields: ["who", "target"], run: (r, ex, step) => {
+    if (step.target) { // "shuffle this card into its owner's library" (Scavenger Regent // Exude Toxin): the card goes into the library first
+      for (const id of refs(r, ex.env, step)) { const o = tryObj(r, id); if (!o || o.zone === "library") continue; moveObject(r, id, "library", { position: "top" }); shuffleInPlace(r, player(r, o.owner).library); emit(r, { type: "shuffle", player: o.owner }); }
+      return "done";
+    }
+    for (const p of players(r, ex.env, step)) { shuffleInPlace(r, player(r, p).library); emit(r, { type: "shuffle", player: p }); } return "done"; } },
   scry: { fields: ["amount", "who"], run: (r, ex, step) => ({ push: players(r, ex.env, step).map((p) => ({ kind: "__scry" as never, player: p, n: qty(r, ex.env, step), prompt: step.prompt, to: "bottom" }) as Step) }) },
-  surveil: { fields: ["amount", "who"], run: (r, ex, step) => ({ push: players(r, ex.env, step).map((p) => ({ kind: "__scry" as never, player: p, n: qty(r, ex.env, step), prompt: step.prompt, to: "graveyard" }) as Step) }) },
+  surveil: { fields: ["amount", "who"], run: (r, ex, step) => ({ push: players(r, ex.env, step).map((p) => ({ kind: "__scry" as never, player: p, n: qty(r, ex.env, step) + surveilExtra(r, p), prompt: step.prompt, to: "graveyard" }) as Step) }) },
   connive: {
     fields: ["on", "amount"],
     run: (r, ex, step) => {
@@ -531,6 +570,13 @@ export function addCounters(r: Run, ids: string[], kind: string, n: number): voi
   }
 }
 
+/** Enhanced Surveillance: "you may look at an additional two cards each time you surveil" (summed over the player's permanents with that marker). */
+function surveilExtra(r: Run, pid: PlayerId): number {
+  let n = 0;
+  for (const id of r.s.battlefield) { const o = r.s.objects[id]; if (o?.controller !== pid) continue; for (const a of abilitiesOf(r, o)) if (a.scripted?.handler === "surveil_additional_cards") n += Number((a.scripted.params as { extra?: number } | undefined)?.extra ?? 0); }
+  return n;
+}
+
 export function sacrificeObject(r: Run, id: ObjId): void {
   const o = tryObj(r, id);
   if (!o || o.zone !== "battlefield") return;
@@ -556,6 +602,12 @@ const INTERNAL: Record<string, Handler> = {
     for (const id of (step.clear as string[] | undefined) ?? []) ex.env.done = ex.env.done.filter((d) => d !== id);
     ex.env.iterated = step.object as string | undefined;
     ex.env.thatPlayer = step.player as PlayerId | undefined;
+    return "done";
+  },
+  __search_pick: (r, ex, step, answer) => searchPickStep(r, ex, step, answer),
+  __exploit_done: (r, ex) => {
+    const ids = (ex.env.chosen.__exploit ?? []).filter((id) => tryObj(r, id)?.zone === "battlefield");
+    for (const id of ids) { sacrificeObject(r, id); emit(r, { type: "exploited", id: ex.env.source, sacrificed: id, player: ex.env.controller }); }
     return "done";
   },
   __unless: (r, ex, step, answer) => unlessHandler(r, ex.env, step, answer),
@@ -687,7 +739,7 @@ export function runExec(r: Run, ex: Exec, answer?: Choice): StepStatus {
       if (step.kind === "reveal" && step.filter && !pendingAnswer && !objectsMatching(r, step.filter as ObjectFilter, ex.env).length) { frame.i++; continue; }
       if (step.optionalCost) {
         // "you may pay {1}. If you do, <step>": the unless-pay machinery, inverted (the step runs only when the payment is made)
-        const inner = { ...step, optionalCost: undefined } as Step;
+        const inner = { ...step, optionalCost: undefined, optional: false } as Step; // paying IS the choice: no second question
         frame.steps = [...frame.steps]; frame.steps[frame.i] = { kind: "__unless" as never, inner, pay: { payer: "you", cost: step.optionalCost, inverse: true } } as Step;
         continue;
       }
@@ -699,9 +751,23 @@ export function runExec(r: Run, ex: Exec, answer?: Choice): StepStatus {
         continue;
       }
       if (step.unlessPay) {
-        const inner = { ...step, unlessPay: undefined } as Step;
-        frame.steps = [...frame.steps]; frame.steps[frame.i] = { kind: "__unless" as never, inner, pay: step.unlessPay } as Step;
+        const inner = { ...step, unlessPay: undefined } as Step; delete inner.costPerCounter;
+        let pay = step.unlessPay as unknown as { cost: Array<{ mana?: string }> };
+        if (step.costPerCounter) { // cumulative upkeep: the cost is paid once per counter of that kind on the source
+          const n = tryObj(r, ex.env.source)?.counters[String(step.costPerCounter)] ?? 0;
+          pay = { ...pay, cost: pay.cost.map((c) => (c.mana ? { ...c, mana: c.mana.repeat(Math.max(n, 1)) } : c)) };
+        }
+        frame.steps = [...frame.steps]; frame.steps[frame.i] = { kind: "__unless" as never, inner, pay } as Step;
         continue;
+      }
+      if (step.reflexive && typeof step.target === "string" && !["move_card_zone", "copy"].includes(step.kind)) {
+        // "When you do, destroy target nonland permanent" (Skyfisher Spider): the reflexive trigger picks its target NOW, after the earlier steps ran
+        const tspec = ex.env.item.parts.flatMap((pp) => pp.specs).find((sp) => sp.id === step.target);
+        if (tspec) {
+          const pick = { kind: "choose", who: "you", from: tspec.filter ?? {}, min: 1, max: 1, saveAs: "chosen" } as unknown as Step;
+          frame.steps = [...frame.steps]; frame.steps.splice(frame.i, 1, pick, { ...step, target: "chosen", reflexive: undefined } as Step);
+          continue;
+        }
       }
       result = spec.run(r, ex, step, pendingAnswer);
       if (result === "done" && step.id) ex.env.done.push(step.id);

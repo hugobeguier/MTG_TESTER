@@ -6,9 +6,11 @@
 // The options really paid are remembered on the cast (`CastInfo.paid`: the option ids AND their kinds), which is what the
 // predicates `kicked`, `paid_additional_cost` and `cast_with` read.
 
-import type { CastOption, Cost, Step } from "../schema";
-import { continueHooks, continuing, defOf, faceMeta, label, opponentsOf, type Run } from "./core";
-import { evalPredicate } from "./query";
+import type { Ability, CastOption, Cost, Step } from "../schema";
+import { getIndex } from "./layers";
+import { isTopCard, topPerms } from "./topcast";
+import { abilitiesOf, continueHooks, continuing, defOf, faceMeta, label, opponentsOf, type Run } from "./core";
+import { evalPredicate, matchesFilter } from "./query";
 import { permissionOptions, permissionOwner } from "./durable";
 import type { CastInfo, Draft, GameObject, PlayerId } from "./types";
 
@@ -19,10 +21,78 @@ const BASE_KINDS = new Set(["alternative", "flashback", "escape", "cast_from_zon
 
 export function castOptionsOf(r: Run, o: GameObject, permSnap?: CastOption[]): CastOption[] {
   if (o.token) return [];
-  const all = [...(defOf(r, o)!.kernel.castOptions ?? []), ...(permSnap ?? permissionOptions(r, o))]; // + "you may cast it" permissions granted by permission_to_play
+  const all = [...(defOf(r, o)!.kernel.castOptions ?? []), ...grantedMiracle(r, o), ...grantedTop(r, o), ...grantedFree(r, o), ...grantedMorph(r, o), ...(permSnap ?? permissionOptions(r, o))]; // + "you may cast it" permissions granted by permission_to_play
   // continue mode: an option whose kind / cost / effect the engine cannot run is not offered (never silently free); reportCast says so
   const blocked = continueHooks.optionBlocked;
   return blocked && continuing(r) ? all.filter((c) => !blocked(r, c)) : all;
+}
+
+/**
+ * Miracle given by a static ability to cards in hand (Aminatou, Veil Piercer: "Each enchantment card in your hand has miracle. Its miracle cost is
+ * equal to its mana cost reduced by {4}"): a synthesised miracle option, reduced from the card's own mana cost.
+ */
+function grantedMiracle(r: Run, o: GameObject): CastOption[] {
+  if (o.zone !== "hand" && !(o.zone === "stack" && r.castingMiracle)) return []; // while being cast (it is on the stack by then) only the miracle cast itself asks
+  const out: CastOption[] = [];
+  for (const st of getIndex(r).statics) {
+    for (const m of st.spec.modify) {
+      const ga = (m as { grantAbility?: Ability }).grantAbility;
+      const kw = ga && (typeof ga.keyword === "string" ? ga.keyword : ga.keyword?.name);
+      if (!ga || ga.kind !== "cast_option" || kw !== "miracle") continue;
+      const aff = st.spec.affects;
+      if (typeof aff !== "object" || !matchesFilter(r, o.id, o.zone === "stack" ? { ...aff, zone: "stack" } : aff, { controller: st.controller, source: st.id })) continue;
+      const own = faceMeta(defOf(r, o)!, o).manaCost ?? "";
+      const cut = Number(/(\d+)/.exec(String((ga as { reduceBy?: string }).reduceBy ?? "{0}"))?.[1] ?? 0);
+      const generic = [...own.matchAll(/\{(\d+)\}/g)].reduce((a, x) => a + Number(x[1]), 0);
+      const rest = own.replace(/\{\d+\}/g, "");
+      const left = Math.max(0, generic - cut);
+      out.push({ id: "miracle", kind: "miracle", from: "hand", cost: [{ mana: (left > 0 ? `{${left}}` : "") + rest } as Cost], replacesManaCost: true, when: { event: "drawn", firstThisTurn: true } as never, optional: false });
+    }
+  }
+  return out;
+}
+
+/** "You may cast X spells from the top of your library": a cast_from_zone option for the top card of its owner's library (topcast.ts). The haste rider rides on the option id. */
+export function grantedTop(r: Run, o: GameObject): CastOption[] {
+  if (o.zone !== "library" || !isTopCard(r, o.id)) return [];
+  const out: CastOption[] = [];
+  const types = faceMeta(defOf(r, o)!, o).types;
+  for (const pm of topPerms(r, o.owner)) {
+    if (types.includes("land")) continue; // lands are played, not cast (resolve.playLand)
+    if (!matchesFilter(r, o.id, { ...pm.filter, zone: "library" } as never, { controller: o.owner, source: o.id })) continue;
+    const id = pm.haste ? "top-library-haste" : "top-library";
+    if (!out.some((c) => c.id === id)) out.push({ id, kind: "cast_from_zone", from: "library", cost: [], replacesManaCost: false, optional: false });
+  }
+  return out;
+}
+
+/**
+ * Free casts given by a permanent's scripted ability: Omniscience ("cast spells from your hand without paying their mana costs") and
+ * One with the Multiverse ("once during each of your turns, cast a spell from your hand or the top of your library without paying its mana
+ * cost": spent through `activations["t:<permanent>:freecast"]`, see resolve.commitDraft). An alternative option with no cost.
+ */
+/** Morph {cost} (CR 702.37): cast the card face down for {3} as a 2/2 colorless creature spell (resolve.ts enters it face down; core.faceDownAbilities turns it up). */
+export function grantedMorph(r: Run, o: GameObject): CastOption[] {
+  if (o.zone !== "hand" || o.token) return [];
+  const d = defOf(r, o)!;
+  const has = d.kernel.abilities.some((a) => a.kind === "keyword" && a.keyword?.name.toLowerCase() === "morph");
+  return has ? [{ id: "morph", kind: "alternative", from: "hand", cost: [{ mana: "{3}" } as Cost], replacesManaCost: true, optional: false } as CastOption] : [];
+}
+
+export function grantedFree(r: Run, o: GameObject): CastOption[] {
+  if (o.zone !== "hand" && !(o.zone === "library" && isTopCard(r, o.id))) return [];
+  const out: CastOption[] = [];
+  for (const id of r.s.battlefield) {
+    const p = r.s.objects[id];
+    if (!p || p.controller !== o.owner) continue;
+    for (const a of abilitiesOf(r, p)) {
+      const h = a.scripted?.handler;
+      if (h === "cast_without_paying_mana_cost" && o.zone === "hand") { const sp = String((a.scripted?.params as { spells?: string } | undefined)?.spells ?? ""); if (!sp || faceMeta(defOf(r, o)!, o).subtypes?.some((x) => x.toLowerCase() === sp.toLowerCase())) out.push({ id: "free-hand:" + id, kind: "alternative", from: "hand", cost: [], replacesManaCost: true, optional: false } as CastOption); } // Dracogenesis: Dragon spells
+      else if (h === "free_cast_from_hand" && o.zone === "hand") out.push({ id: "free-hand:" + id, kind: "alternative", from: "hand", cost: [], replacesManaCost: true, optional: false } as CastOption);
+      else if (h === "free_cast_once_per_turn" && r.s.turn.active === o.owner && !r.s.activations[`t:${id}:freecast`] && !out.some((c) => c.id.startsWith("freecast1:"))) out.push({ id: "freecast1:" + id, kind: "alternative", from: o.zone, cost: [], replacesManaCost: true, optional: false } as CastOption);
+    }
+  }
+  return out;
 }
 
 /** What a cast option needs that the engine lacks (reported through support.ts). */

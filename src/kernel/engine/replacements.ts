@@ -114,10 +114,21 @@ function damageRecipientMatches(r: Run, c: Cand, ev: Extract<ReplEvent, { kind: 
   return who === undefined || (who === "you" ? ev.target === c.controller : ev.target !== c.controller);
 }
 
+/** The condition of a replacement is judged AFTER its subject matched (Woe Strider's "escapes with" must not be asked about every land that enters); "was cast with X" of something not cast is simply false. */
+function conditionHolds(r: Run, c: Cand): boolean {
+  if (!c.spec.condition) return true;
+  try { return evalPredicate(r, c.spec.condition, q(c)); }
+  catch (e) { if (e instanceof Unsupported && /^predicate:(cast_with|kicked|paid_additional_cost)$/.test(e.capability)) return false; throw e; }
+}
+
 function applies(r: Run, c: Cand, ev: ReplEvent): boolean {
   const spec = c.spec;
   if (spec.duration) throw new Unsupported(`replacement:${spec.event}.duration`);
-  if (spec.condition && !evalPredicate(r, spec.condition, q(c))) return false;
+  return appliesShape(r, c, ev) && conditionHolds(r, c);
+}
+
+function appliesShape(r: Run, c: Cand, ev: ReplEvent): boolean {
+  const spec = c.spec;
   switch (ev.kind) {
     case "enter": return objectSubject(r, c, ev.id);
     case "tokens": {
@@ -203,6 +214,13 @@ function modifyEvent(ev: ReplEvent, set: Record<string, unknown>, ctx?: { r: Run
       const ck = (v as unknown as { kind: string }).kind;
       if (n > 0) e.counters[ck] = (e.counters[ck] ?? 0) + n;
     } else if (e.kind === "enter" && k === "counters" && v && typeof v === "object") for (const [ck, n] of Object.entries(v as Record<string, number>)) e.counters[ck] = (e.counters[ck] ?? 0) + n;
+    else if (e.kind === "enter" && k === "additionalCounters" && v && typeof v === "object" && ctx) {
+      // {kind, amount | count, per?: Quantity}: "enters with an additional +1/+1 counter [for each Angel you already control]" (Giada, Metallic Mimic); counted before the entering object exists
+      const spec = v as { kind: string; amount?: unknown; count?: unknown; per?: unknown };
+      const base = evalQuantity(ctx.r, (spec.amount ?? spec.count ?? 1) as never, q(ctx.c, {}));
+      const n = spec.per === undefined ? base : base * evalQuantity(ctx.r, spec.per as never, q(ctx.c, {}));
+      if (n > 0) e.counters[spec.kind] = (e.counters[spec.kind] ?? 0) + n;
+    }
     else if (e.kind === "tokens" && k === "count") for (const g of e.groups) g.count = Math.max(0, num(g.count, v, k));
     else if (e.kind === "tokens" && k === "tapped") for (const g of e.groups) g.tapped = !!v;
     else if ((e.kind === "gain_life" || e.kind === "lose_life" || e.kind === "damage" || e.kind === "counters") && k === "amount") e.amount = Math.max(0, num(e.amount, v, k));

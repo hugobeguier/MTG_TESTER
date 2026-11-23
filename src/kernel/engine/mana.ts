@@ -9,7 +9,12 @@ import { addUnits, effectivePool, takeMana, unitFits, unitsOf, type SpendCtx } f
 import { evalPredicate, objectsMatching } from "./query";
 
 /** What a mana ability yields. `props`: spending restrictions / lasting (ManaUnit fields) that make the mana special. `alternatives`: "{W}{W}, {W}{B}, or {B}{B}", the player picks one. */
-export type UnitProps = { restriction?: import("../schema").ObjectFilter; abilities?: import("../schema").ObjectFilter; keep?: boolean };
+export type UnitProps = { restriction?: import("../schema").ObjectFilter; abilities?: import("../schema").ObjectFilter; keep?: boolean; rider?: import("../schema").Step[]; riderIf?: import("../schema").ObjectFilter };
+/** mana abilities whose `steps` are a RIDER of the mana produced (run when it is spent on a spell), not an effect of the ability itself */
+export const RIDER_HANDLERS: Record<string, import("../schema").ObjectFilter | undefined> = {
+  mana_spent_on_creature_sharing_type_with_commander: { types: ["creature"], sharesCreatureTypeWith: "commander" } as never,
+  copy_spell_or_ability_when_mana_spent: undefined
+};
 export type Production = ({ fixed: ManaColor[] } | { choose: { count: number; options: ManaColor[] } } | { alternatives: ManaColor[][] }) & { props?: UnitProps };
 const propsOf = (spec: { restriction?: import("../schema").ObjectFilter; abilitiesOf?: import("../schema").ObjectFilter }): UnitProps | undefined => (spec.restriction || spec.abilitiesOf ? { ...(spec.restriction ? { restriction: spec.restriction } : {}), ...(spec.abilitiesOf ? { abilities: spec.abilitiesOf } : {}) } : undefined);
 
@@ -46,16 +51,28 @@ export function productionOf(r: Run, owner: PlayerId, spec: ManaSpec): Productio
  * What a whole mana ability produces. Several specs are ALTERNATIVES ("{T}: Add {W} or {B}": dual lands, pain lands, Signets without the
  * filter cost): each must be one fixed mana of one color, and the player chooses which one when activating.
  */
+const COULD_PRODUCE: ReadonlySet<string> = new Set(["mana_colors_an_opponent_land_could_produce", "colors_lands_opponents_control_could_produce", "types_lands_you_control_could_produce"]);
 export function productionOfAbility(r: Run, owner: PlayerId, a: Ability): Production {
-  if (a.scripted?.handler === "mana_colors_an_opponent_land_could_produce") {
-    // Fellwar Stone: one mana of a color that a land an opponent controls could produce (basic land types and the mana abilities of their lands)
+  const h = a.scripted?.handler;
+  if (h && h in RIDER_HANDLERS && a.steps?.length) {
+    const base = productionOfAbility(r, owner, { ...a, scripted: undefined, steps: undefined });
+    return { ...base, props: { ...(base.props ?? {}), rider: a.steps, ...(RIDER_HANDLERS[h] ? { riderIf: RIDER_HANDLERS[h] } : {}) } };
+  }
+  const hnd = a.scripted?.handler;
+  if (hnd && COULD_PRODUCE.has(hnd)) {
+    // Fellwar Stone / Exotic Orchard: a color that a land an OPPONENT controls could produce; Reflecting Pool: a color OR {C} that a land YOU control could produce
+    // (basic land types and the mana abilities of those lands; abilities that themselves look at what lands could produce are ignored, 106.7)
+    const mine = hnd === "types_lands_you_control_could_produce";
     const found = new Set<ManaColor>();
     const basic: Record<string, ManaColor> = { plains: "W", island: "U", swamp: "B", mountain: "R", forest: "G" };
     for (const id of r.s.battlefield) {
       const o = r.s.objects[id];
-      if (!o || o.controller === owner || !chars(r, id).types.includes("land")) continue;
+      if (!o || (mine ? o.controller !== owner : o.controller === owner) || !chars(r, id).types.includes("land")) continue;
       for (const t of chars(r, id).subtypes) if (basic[t.toLowerCase()]) found.add(basic[t.toLowerCase()]);
-      for (const ab of manaAbilities(r, o)) { try { const p = productionOfAbility(r, o.controller, ab); if ("fixed" in p) p.fixed.forEach((c) => c !== "C" && found.add(c)); else if ("choose" in p) p.choose.options.forEach((c) => c !== "C" && found.add(c)); else p.alternatives.flat().forEach((c) => c !== "C" && found.add(c)); } catch { /* an ability the engine cannot read produces nothing here */ } }
+      for (const ab of manaAbilities(r, o)) {
+        if (ab.scripted?.handler && COULD_PRODUCE.has(ab.scripted.handler)) continue;
+        try { const p = productionOfAbility(r, o.controller, ab); const add = (c: ManaColor) => { if (c !== "C" || mine) found.add(c); }; if ("fixed" in p) p.fixed.forEach(add); else if ("choose" in p) p.choose.options.forEach(add); else p.alternatives.flat().forEach(add); } catch { /* an ability the engine cannot read produces nothing here */ }
+      }
     }
     return found.size ? { choose: { count: 1, options: [...found] } } : { fixed: [] };
   }

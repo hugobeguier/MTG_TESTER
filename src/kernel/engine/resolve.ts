@@ -1,6 +1,8 @@
 // resolve(state, action, ctx) -> { state, events, pending?, error? }: the engine entry point.
 // Pure and deterministic: the input state is cloned, never mutated; on any error the ORIGINAL state is returned.
 
+import { protectedFrom } from "./protection";
+import { phaseInFor } from "./phasing";
 import type { Ability, Cost, ObjectFilter, Prompt, TargetSpec } from "../schema";
 import { withCardDb } from "./carddb";
 import { matchSimple, SIMPLE_EVENTS } from "./triggers6";
@@ -25,9 +27,10 @@ import { addUnits, emptyPools, flushRiders, type SpendCtx } from "./manapool";
 import { clearRegenShields, regenerates } from "./regen";
 import { ofOpponent, opponentIds, slotUsesX, targetBounds, totalMax } from "./targets7";
 import { addDurable, expiryFor, consumePermission, expireDurable, hasFlag, permissionIdOf, permissionOptions, permissionsFor, delayeds } from "./durable";
+import { isTopCard, refreshTopLookers, topPerms } from "./topcast";
 import { flashGrantCovers, playerCantCast, playerHas } from "./layers";
 import { castableFaces } from "./faces";
-import { addedSteps, baseChoices, castTags, mandatoryExtras, optionalExtras, optionLabel, selectedOptions, spellExtraCosts, spellManaString } from "./castopts";
+import { addedSteps, baseChoices, castTags, grantedFree, grantedMorph, grantedTop, mandatoryExtras, optionalExtras, optionLabel, selectedOptions, spellExtraCosts, spellManaString } from "./castopts";
 import type {
   Action, CastInfo, Choice, Draft, EngineContext, Exec, GameEvent, GameObject, GameState, Lki, ObjId, Part, Pending, PendingView, PlayerId,
   QueuedTrigger, ResolveResult, StackItem, TriggerContext
@@ -62,6 +65,7 @@ function runAction(state: GameState, action: Action, ctx: EngineContext, answers
   r.s.decisionSeq += answers.length; // decision ids stay unique across the questions of one replayed action
   try {
     dispatch(r, action);
+    refreshTopLookers(r);
     return { state: r.s, events: r.events.slice(delivered), pending: viewOf(r.s.pending) };
   } catch (e) {
     if (e instanceof NeedAsk) {
@@ -178,9 +182,9 @@ function setPending(r: Run, spec: AskSpec, ctx: Pending["ctx"], cancellable = fa
 
 function targetCtx(draft: Draft): QCtx { return { controller: draft.player, source: draft.sourceId, x: draft.x, cast: draft.cast }; }
 
-function untargetable(r: Run, id: ObjId, by: PlayerId): boolean {
+function untargetable(r: Run, id: ObjId, by: PlayerId, source?: ObjId): boolean {
   const c = chars(r, id);
-  return c.keywords.includes("shroud") || (c.keywords.includes("hexproof") && obj(r, id).controller !== by);
+  return protectedFrom(r, id, source) || c.keywords.includes("shroud") || (c.keywords.includes("hexproof") && obj(r, id).controller !== by);
 }
 
 export function targetCandidates(r: Run, spec: TargetSpec, q: QCtx, selfSpell?: ObjId): string[] {
@@ -191,7 +195,7 @@ export function targetCandidates(r: Run, spec: TargetSpec, q: QCtx, selfSpell?: 
     const zone = f.zone ?? ((f.types ?? []).includes("spell") ? "stack" : "battlefield");
     let ids = objectsMatching(r, { ...f, zone }, q);
     if (spec.what === "any") ids = ids.filter((id) => ["creature", "planeswalker"].some((t) => chars(r, id).types.includes(t)));
-    out.unshift(...ids.filter((id) => id !== selfSpell && (zone !== "battlefield" || !untargetable(r, id, q.controller))));
+    out.unshift(...ids.filter((id) => id !== selfSpell && (zone !== "battlefield" || !untargetable(r, id, q.controller, q.source))));
   }
   return out;
 }
@@ -220,6 +224,20 @@ function featuresOk(r: Run, specs: TargetSpec[], draft: Draft): boolean {
 }
 
 // ================================================================ draft (cast / activate / trigger placement)
+
+/** Mode memory of "choose one that hasn't been chosen this turn": ability key -> turn and mode ids (GameState.modeMemory). */
+function modesSpent(r: Run, d: Draft): string[] {
+  const m = abilityOfDraft(r, d)?.modes;
+  if (!m?.repeatRestriction) return [];
+  const e = r.s.modeMemory?.[`${d.sourceId}:${d.abilityId}`];
+  return e && e.turn === r.s.turn.number ? e.ids : [];
+}
+function rememberModes(r: Run, d: Draft): void {
+  if (!abilityOfDraft(r, d)?.modes?.repeatRestriction || !d.modeIds) return;
+  const key = `${d.sourceId}:${d.abilityId}`;
+  const mem = (r.s.modeMemory ??= {});
+  mem[key] = { turn: r.s.turn.number, ids: [...modesSpent(r, d), ...d.modeIds] };
+}
 
 function abilityOfDraft(r: Run, d: Draft): Ability | undefined {
   const src = tryObj(r, d.sourceId);
@@ -307,7 +325,9 @@ function advanceDraft(r: Run, d: Draft, answerIn?: Choice): { ask: AskSpec; stag
   // ---- modes
   if (a?.modes && !d.modeIds) {
     const m = a.modes;
-    const feasible = m.options.filter((o) => featuresOk(r, o.targets ?? [], d));
+    // "choose one that hasn't been chosen this turn" (Parapet Thrasher): the modes this source already chose this turn are not offered
+    const spent = modesSpent(r, d);
+    const feasible = m.options.filter((o) => !spent.includes(o.id) && featuresOk(r, o.targets ?? [], d));
     const repeatable = m.repeatable === true || m.distinct === false;
     if (feasible.length < m.choose.min && !(repeatable && feasible.length > 0)) throw new Reject("illegal_target", "no legal combination of modes (not enough legal targets)");
     const spec: AskSpec = {
@@ -318,6 +338,7 @@ function advanceDraft(r: Run, d: Draft, answerIn?: Choice): { ask: AskSpec; stag
     if ("ask" in dec) return { ask: dec.ask, stage: "modes" };
     answerLeft = undefined;
     d.modeIds = dec.ids;
+    rememberModes(r, d);
   }
   if (!d.parts) {
     d.parts = a?.modes
@@ -363,7 +384,9 @@ function advanceDraft(r: Run, d: Draft, answerIn?: Choice): { ask: AskSpec; stag
       // a reflexive step ("When you do, return target ...") chooses its own target while it resolves, not now
       if (part.steps.some((st) => st.reflexive && st.target === spec.id)) { part.targets[spec.id] = []; continue; }
       const q = targetCtx(d);
-      const cands = targetCandidates(r, spec, q, d.objectId);
+      let cands = targetCandidates(r, spec, q, d.objectId);
+      // "each mode must target a different player" (Shadrix Silverquill): what an earlier mode targets is not offered again
+      if (a?.modes?.distinctTargets) { const taken = d.parts.flatMap((x) => Object.values(x.targets).flat()); cands = cands.filter((c) => !taken.includes(c)); }
       if (spec.perOpponent) {
         // "for each opponent, up to one target ...": one question per opponent (in turn order), each limited to that opponent's candidates
         const acc = ((d.perOpp ??= {})[spec.id] ??= { done: [], picked: [] });
@@ -612,6 +635,7 @@ function commitDraft(r: Run, d: Draft, a: Ability | undefined): void {
     if (d.origin?.zone === "command") player(r, pid).commanderCasts[src.id] = (player(r, pid).commanderCasts[src.id] ?? 0) + 1;
     const chosen = selectedOptions(r, d);
     if (chosen.some((c) => c.afterResolution === "exile")) src.exileInstead = true;
+    for (const c of chosen) if (c.id.startsWith("freecast1:")) r.s.activations[`t:${c.id.slice(10)}:freecast`] = 1; // One with the Multiverse: once per turn
     if (d.cast) { d.cast.paid = castTags(d, r); src.cast = structuredClone(d.cast); }
     for (const id of d.castChosen ?? []) { const pid2 = permissionIdOf(id); if (pid2) consumePermission(r, pid2); } // a permission is used up when you cast with it
     const extraSteps = addedSteps(r, d);
@@ -649,6 +673,7 @@ function commitDraft(r: Run, d: Draft, a: Ability | undefined): void {
   if (spend) flushRiders(r, pid, spend);
   r.s.passes = [];
   for (const part of item.parts) for (const ids of Object.values(part.targets)) for (const tid of ids) if (isObjId(tid)) emit(r, { type: "becomes_target", id: tid, by: item.objectId ?? item.id, player: pid });
+  commitCrime(r, item, pid);
   if (d.kind === "triggered") {
     r.s.triggerQueue = r.s.triggerQueue.filter((t) => t.id !== d.triggerId);
     emit(r, { type: "trigger_on_stack", source: d.sourceId, ability: d.abilityId, controller: pid });
@@ -723,7 +748,7 @@ function castSpell(r: Run, a: Extract<Action, { type: "castSpell" }>): void {
   if (!deferTiming) checkSpellTiming(r, o, a.player, from);
   const spellAbility = printedAbilities(r, o).find((x) => x.kind === "spell_effect");
 
-  const permSnap = permissionOptions(r, o); // read BEFORE the card moves: a permission names the object as it is now
+  const permSnap = [...permissionOptions(r, o), ...grantedTop(r, o), ...grantedFree(r, o), ...grantedMorph(r, o)]; // read BEFORE the card moves: a permission names the object as it is now (a top-of-library permission needs it still on top)
   const index = (p[from as "hand" | "command"] as ObjId[]).indexOf(o.id);
   const faceChosen = a.face !== undefined || faces.length <= 1;
   (p[from as "hand" | "command"] as ObjId[]).splice(index, 1);
@@ -779,7 +804,9 @@ function preapply(r: Run, d: Draft, a: { modes?: string[]; targets?: Record<stri
     const spec: AskSpec = { kind: "choose_modes", player: d.player, prompt: { title: "", instruction: "" }, options: m.options.map((o) => ({ id: o.id, label: o.text })), min: m.choose.min, max: m.choose.max, repeatable };
     const dec = decide(spec, { ids: a.modes });
     if ("ask" in dec) return;
+    if (dec.ids.some((id) => modesSpent(r, d).includes(id))) throw new Reject("invalid_choice", "that mode was already chosen this turn");
     d.modeIds = dec.ids;
+    rememberModes(r, d);
     d.parts = dec.ids.map((id) => { const o = m.options.find((x) => x.id === id)!; return { modeId: id, specs: o.targets ?? [], steps: o.steps, targets: {} } as Part; });
   } else if (a.modes) throw new Reject("invalid_choice", "this ability has no modes");
   if (a.targets) {
@@ -901,7 +928,7 @@ function activateMana(r: Run, pid: PlayerId, src: GameObject, ab: Ability, color
   for (const [i, c] of costs.entries()) if (needsChoice(c)) payChoiceCost(r, c as ChoiceCost, choices[i], { player: pid, source: src.id, x: 0 });
   payManaAbilityCosts(r, src, ab, pid);
   if (prod.props) addUnits(r, pid, colors as never, prod.props, src.id); else addMana(r, pid, costs.some((c) => "tap" in c) ? withTapBonus(r, pid, colors as never) : (colors as never), src.id);
-  if (ab.steps?.length) {
+  if (ab.steps?.length && !prod.props?.rider) {
     const item: StackItem = { id: `m${r.s.nextId++}`, kind: "activated", sourceId: src.id, controller: pid, abilityId: ab.id, parts: [{ specs: [], steps: ab.steps, targets: {} }], x: 0 };
     const st = runExec(r, startExec(item));
     if (st.status === "ask") throw new Unsupported("mana:decision_in_mana_ability");
@@ -915,7 +942,8 @@ function playLand(r: Run, a: Extract<Action, { type: "playLand" }>): void {
   const landPerm = permissionsFor(r, o, a.player).find((d) => d.permission!.allow.includes("land"));
   if (o.owner !== a.player && !landPerm) throw new Reject("not_owner", `${a.player} does not own ${label(r, o.id)}`);
   const p = player(r, a.player);
-  if (!landPerm && (o.zone !== "hand" || !p.hand.includes(o.id))) throw new Reject("not_in_zone", `${label(r, o.id)} is not in ${a.player}'s hand`);
+  const topLand = !landPerm && o.zone === "library" && o.owner === a.player && isTopCard(r, o.id) && topPerms(r, a.player).some((x) => x.lands); // One with the Multiverse
+  if (!landPerm && !topLand && (o.zone !== "hand" || !p.hand.includes(o.id))) throw new Reject("not_in_zone", `${label(r, o.id)} is not in ${a.player}'s hand`);
   if (a.face !== undefined) { if (!faceNames(defOf(r, o)!).includes(a.face)) throw new Reject("invalid_choice", `"${a.face}" is not a face of ${label(r, o.id)}`); o.face = a.face; }
   if (!chars(r, o.id).types.includes("land")) throw new Reject("not_castable", `${label(r, o.id)} is not a land`);
   if (!r.ignoreTiming && !inMainWithEmptyStack(r, a.player)) throw new Reject("wrong_timing", "lands can only be played during your main phase with an empty stack");
@@ -1003,10 +1031,13 @@ function resolveTop(r: Run): void {
     if (permanent) {
       const aura = c.subtypes.some((s) => s.toLowerCase() === "aura");
       const host = aura ? item.parts.flatMap((p) => Object.values(p.targets).flat()).find((x) => isObjId(x)) : undefined;
-      const moved = moveObject(r, src!.id, "battlefield", { controller: item.controller });
+      const moved = moveObject(r, src!.id, "battlefield", { controller: item.controller, ...((item.cast?.paid ?? []).includes("morph") ? { faceDown: true } : {}) }); // morph: cast face down
       const h = host ? r.s.objects[host] : undefined;
+      if (moved && h && h.zone === "graveyard") { moved.auraTarget = h.id; moved.attachedTo = h.id; moved.attachedToTs = h.timestamp; } // Animate Dead: enchants a card in a graveyard until its ETB trigger resolves
       if (moved && h && h.zone === "battlefield") { moved.attachedTo = h.id; moved.attachedToTs = h.timestamp; emit(r, { type: "attached", id: moved.id, to: h.id }); }
       emit(r, { type: "spell_resolved", id: src!.id, player: item.controller });
+      // cast from the top of the library by Thundermane Dragon: it gains haste until end of turn
+      if (moved && moved.zone === "battlefield" && (item.cast?.paid ?? []).includes("top-library-haste")) r.s.effects.push({ id: `e${r.s.nextId++}`, timestamp: tick(r), objectId: moved.id, objectTimestamp: moved.timestamp, grant: "haste", until: "end_of_turn" });
       // evoke: when the permanent enters, a trigger sacrifices it
       if (moved && moved.zone === "battlefield" && (item.cast?.paid ?? []).includes("evoke")) {
         r.s.triggerQueue.push({ id: `q${r.s.nextId++}`, sourceId: moved.id, abilityId: "__evoke", controller: item.controller, ctx: {}, label: `${label(r, moved.id)}: evoke sacrifice`, delayed: { steps: [{ kind: "sacrifice_permanent", target: "self" } as Step], targets: {} } });
@@ -1014,6 +1045,7 @@ function resolveTop(r: Run): void {
       finish(r); return;
     }
   }
+  if (ab?.scripted?.handler === "win_the_game" && !playerHas(r, item.controller, "can't win the game") && !r.s.gameOver) { r.s.gameOver = { winner: item.controller, reason: `${label(r, item.sourceId)}: you win the game` }; emit(r, { type: "game_over", ...r.s.gameOver }); }
   if (ab?.scripted?.handler === "become_monarch") { r.s.monarch = item.controller; emit(r, { type: "monarch_changed", player: item.controller }); }
   if (ab?.scripted?.handler === "roll_d20_result_is_X") {
     // "roll a d20. ... a number equal to the result": the roll uses the seeded RNG in the state (replayable) and becomes X for the steps
@@ -1075,6 +1107,7 @@ function enterStep(r: Run, step: Phase, turnStart = false): void {
   if (step === "untap") {
     active.lastTurnStartTs = tick(r);
     active.landsPlayed = 0;
+    phaseInFor(r, active.id); // phasing happens before untapping
     // Unwinding Clock: its controller's artifacts also untap during each OTHER player's untap step
     for (const id of r.s.battlefield) { const o = r.s.objects[id]; if (o.controller !== active.id && o.tapped && chars(r, id).types.includes("artifact") && r.s.battlefield.some((cid) => r.s.objects[cid].controller === o.controller && abilitiesOf(r, r.s.objects[cid]).some((a) => a.scripted?.handler === "untap_during_each_other_players_untap_step"))) { o.tapped = false; emit(r, { type: "untap", id }); } }
     for (const id of r.s.battlefield) { const o = r.s.objects[id]; if (o.controller === active.id && o.tapped && !chars(r, id).keywords.includes("doesn't untap during its controller's untap step")) { o.tapped = false; emit(r, { type: "untap", id }); } }
@@ -1228,7 +1261,7 @@ function sba(r: Run): boolean {
       const o = r.s.objects[id];
       if (!o || o.zone !== "battlefield") continue;
       const c = chars(r, id);
-      if (c.subtypes.some((s) => s.toLowerCase() === "aura") && !hostOf(r, o)) { moveObject(r, id, "graveyard"); emit(r, { type: "sba_aura_unattached", id }); changed = true; continue; }
+      if (c.subtypes.some((s) => s.toLowerCase() === "aura") && !hostOf(r, o) && !(o.auraTarget && r.s.objects[o.auraTarget]?.zone === "graveyard")) { moveObject(r, id, "graveyard"); emit(r, { type: "sba_aura_unattached", id }); changed = true; continue; }
       if (unattachIllegal(r, o)) changed = true; // equipment whose host is gone or is no longer a creature (704.5n)
       if (c.types.includes("planeswalker") && (o.counters.loyalty ?? 0) <= 0) { moveObject(r, id, "graveyard"); emit(r, { type: "sba_zero_loyalty", id }); changed = true; continue; }
       if (c.subtypes.some((s) => s.toLowerCase() === "saga") && sagaDone(r, o)) { sacrificeObject(r, id); emit(r, { type: "sba_saga_done", id }); changed = true; continue; } // 714.4: the final chapter ability has left the stack
@@ -1241,8 +1274,10 @@ function sba(r: Run): boolean {
     any = true;
   }
   const left = alive(r);
+  // 104.3: a lone survivor who "can't win the game" (the opponents of Herald of Eternal Dawn) does not win. Nobody can ever win then, so the game is recorded as a draw (a real game would never end)
   if (!r.s.gameOver && left.length <= 1 && r.s.players.length > 1) {
-    r.s.gameOver = left.length === 1 ? { winner: left[0].id, reason: "last player standing" } : { draw: true, reason: "all players lost simultaneously" };
+    if (left.length === 1 && playerHas(r, left[0].id, "can't win the game") && r.s.config.loneSurvivorCannotWin === "continue") return any; // the real rule: the game goes on
+    r.s.gameOver = left.length === 1 && !playerHas(r, left[0].id, "can't win the game") ? { winner: left[0].id, reason: "last player standing" } : left.length === 1 ? { draw: true, reason: "the last player cannot win the game" } : { draw: true, reason: "all players lost simultaneously" };
     emit(r, { type: "game_over", ...r.s.gameOver });
   }
   return any;
@@ -1304,6 +1339,7 @@ function triggerAlternatives(tr: TriggerSpec): TriggerSpec[] {
 function triggerNames(ev: GameEvent & Record<string, unknown>): string[] {
   if (SIMPLE_EVENTS[ev.type]) return [SIMPLE_EVENTS[ev.type]];
   if (ev.type === "damage") return ["deals_damage", "dealt_damage", ...(ev.combat && !isObjId(ev.target as string) ? ["deals_combat_damage_to_player"] : [])];
+  if (ev.type === "zone_change") return ["unspecified"]; // only a trigger that names the zone it goes to (toZone) reads it
   return [ev.type];
 }
 
@@ -1341,7 +1377,19 @@ function matchCombat(r: Run, tr: TriggerSpec, h: { id: ObjId; controller: Player
   return { eventObj: ev.source as string | undefined, eventPlayer: isObjId(target) ? tryObj(r, target)?.controller : target, amount: ev.amount as number };
 }
 
-const SCANNED_EVENTS = new Set(["etb", "dies", "cast", "begin_step", "attack", "block", "damage", "cycle", "leaves", "becomes_target", ...Object.keys(SIMPLE_EVENTS)]);
+/** 700.13: targeting an opponent, anything an opponent controls, or a card in an opponent's graveyard is committing a crime (once per spell / ability, however many targets). */
+function commitCrime(r: Run, item: StackItem, pid: PlayerId): void {
+  const hit = item.parts.some((part) => Object.values(part.targets).some((ids) => ids.some((t) => {
+    if (!isObjId(t)) return t !== pid;
+    const o = tryObj(r, t);
+    return !!o && (o.zone === "graveyard" ? o.owner !== pid : o.zone !== "stack" ? o.controller !== pid : o.controller !== pid);
+  })));
+  if (!hit) return;
+  emit(r, { type: "crime", player: pid });
+  r.s.turnLog.push({ type: "crime", player: pid, ts: r.s.clock });
+}
+
+const SCANNED_EVENTS = new Set(["etb", "dies", "cast", "begin_step", "attack", "block", "damage", "cycle", "leaves", "becomes_target", "zone_change", ...Object.keys(SIMPLE_EVENTS)]);
 
 function scanTriggers(r: Run): void {
   const scanWindow = r.scanned;
@@ -1372,6 +1420,7 @@ function scanTriggers(r: Run): void {
       for (const ab of abilitiesOf(r, o)) {
         if (ab.kind !== "triggered" || !ab.trigger) continue;
         if (ab.scripted?.handler === "tapped_for_mana" && !ev.forMana) continue; // Treasure Nabber: only a tap made to pay a MANA ability counts
+        if (ab.scripted?.handler === "mana_rider_text") continue; // Path of Ancestry: the rider belongs to the mana (manapool.ts), not to a cast trigger
         if (ab.scripted?.handler === "tapped_for_colorless_mana") continue; // Forsaken Monument: not a stack trigger, mana.ts adds the extra {C} when the permanent is tapped for mana
         if (!(h.lki || (ab.zone ?? "battlefield") === o.zone || (ev.type === "cycle" && ab.zone === "hand" && o.id === ev.id))) continue;
         for (const tr of triggerAlternatives(ab.trigger)) {
@@ -1417,6 +1466,12 @@ function scanTriggers(r: Run): void {
             if (tr.toZone && tr.toZone !== ev.to) continue;
             match = subject === undefined || subject === "self" ? eid === h.id : subject === "enchanted" || subject === "equipped" ? obj(r, h.id).attachedTo === eid : typeof subject === "object" && lkiMatches(subject as ObjectFilter, l, q, eid); // enchanted / equipped: still attached when it left (SBA unattach runs after the trigger scan)
             ctx.eventObj = eid; ctx.eventPlayer = l.controller; ctx.lki = l;
+          } else if (ev.type === "zone_change") {
+            // "a creature card is put into a graveyard from anywhere other than the battlefield" (Syr Konrad): a trigger that names the zone it goes to
+            if (!tr.toZone || tr.event !== "unspecified" || tr.toZone !== ev.to || (tr.notFromZone && tr.notFromZone === ev.from) || (tr.fromZone && tr.fromZone !== ev.from)) continue;
+            const eid = ev.id as string;
+            match = typeof subject === "object" && !!tryObj(r, eid) && matchesFilter(r, eid, subject as ObjectFilter, q);
+            ctx.eventObj = eid; ctx.eventPlayer = ev.owner as string;
           } else if (ev.type === "becomes_target") {
             const tid = ev.id as string;
             if (subject === undefined || subject === "self") match = tid === h.id && !(ab.keyword?.name.toLowerCase() === "ward" && ev.player === h.controller); // ward: only spells / abilities an opponent controls
@@ -1497,7 +1552,7 @@ function fireDelayed(r: Run, ev: GameEvent & Record<string, unknown>, idx: numbe
     let due = false;
     if (dt.at.event === "begin_step") {
       if (ev.type === "begin_step" && ev.step === dt.at.step) due = dt.at.whose === "each" || (dt.at.whose === "yours") === (ev.player === dt.controller);
-    } else if (ev.type === "dies" && dt.at.ids.includes(ev.id as string)) due = true;
+    } else if ((ev.type === "dies" || ev.type === "leaves") && dt.at.event === ev.type && dt.at.ids.includes(ev.id as string)) due = true;
     if (!due) continue;
     r.s.delayedTriggers = delayeds(r).filter((x) => x.id !== dt.id);
     r.s.triggerQueue.push({ id: `q${r.s.nextId++}`, sourceId: dt.source, abilityId: "delayed", controller: dt.controller, ctx: structuredClone(dt.ctx), label: dt.label, delayed: { steps: dt.steps, targets: dt.targets } });

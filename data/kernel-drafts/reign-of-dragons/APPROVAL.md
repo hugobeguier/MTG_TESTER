@@ -643,17 +643,17 @@ Hellkite Charger [draft]
   [a2] keyword [implemented]
     Oracle: Haste
     Keyword: haste
-  [a3] triggered [needed: needs field:untap_target.all, field:untap_target.filter, field:untap_target.optionalCost, predicate:paid_additional_cost, step:extra_combat]
+  [a3] triggered [needed: needs field:untap_target.all, field:untap_target.filter, field:untap_target.optionalCost, step:extra_combat, predicate:step_done]
     Oracle: Whenever this creature attacks, you may pay {5}{R}{R}. If you do, untap all attacking creatures and after this phase, there is an additional combat phase.
     Trigger: Whenever Hellkite Charger attacks
-    Effect: IF {5}{R}{R} was paid: you may untap the target. Then, IF {5}{R}{R} was paid: there is an additional combat phase after this one.
+    Effect: IF you control an attacking creature: you may untap the target. Then, IF you did (s1): there is an additional combat phase after this one.
 ```
 
 Player prompts:
 
 - Hellkite Charger: optional: Do you want to untap the target?
 
-Implementation: needed (field:untap_target.all, field:untap_target.filter, field:untap_target.optionalCost, predicate:paid_additional_cost, step:extra_combat)
+Implementation: needed (field:untap_target.all, field:untap_target.filter, field:untap_target.optionalCost, step:extra_combat, predicate:step_done)
 
 ### Magda, the Hoardmaster
 
@@ -1371,13 +1371,13 @@ Implementation: needed (replacement:would_create_token, quantity:event_amount, f
 | `trigger:intervening_if` | 5 | Dragonmaster Outcast; Nogi, Draco-Zealot; Outpost Siege; Scourge of the Throne; Skyline Despot |
 | `cost:sacrifice` | 4 | Commander's Sphere; Haven of the Spirit Dragon; Magda, the Hoardmaster; Orb of Dragonkind |
 | `predicate:matches` | 4 | Breaching Dragonstorm; Carnelian Orb of Dragonkind; Chaos Warp; Thundermane Dragon |
-| `predicate:paid_additional_cost` | 4 | Hazoret's Monument; Hellkite Charger; Leyline Tyrant; Sarkhan, Dragon Ascendant |
 | `quantity:X` | 4 | Leyline Tyrant; Magmaquake; Shivan Devastator; The Elder Dragon War |
 | `step:choose` | 4 | Orb of Dragonkind; Outpost Siege; Sarkhan, Dragon Ascendant; Spinerock Knoll |
 | `field:choose.count` | 3 | Orb of Dragonkind; Sarkhan, Dragon Ascendant; Spinerock Knoll |
 | `field:choose.from` | 3 | Orb of Dragonkind; Sarkhan, Dragon Ascendant; Spinerock Knoll |
 | `field:choose.saveAs` | 3 | Orb of Dragonkind; Sarkhan, Dragon Ascendant; Spinerock Knoll |
 | `modes` | 3 | Abrade; Atsushi, the Blazing Sky; Parapet Thrasher |
+| `predicate:paid_additional_cost` | 3 | Hazoret's Monument; Leyline Tyrant; Sarkhan, Dragon Ascendant |
 | `quantity:count` | 3 | Dragon Tempest; Mana Geyser; Scourge of Valkas |
 | `step:copy` | 3 | Cursed Mirror; Goldlust Triad; Stormscale Scion |
 | `timing` | 3 | Bonders' Enclave; Sarkhan the Masterless; Temple of the False God |
@@ -1397,6 +1397,7 @@ Implementation: needed (replacement:would_create_token, quantity:event_amount, f
 | `field:untap_target.filter` | 2 | Hellkite Charger; Scourge of the Throne |
 | `filter:notSubtypes` | 2 | Breath Weapon; Desolation of Smaug |
 | `mana:restriction` | 2 | Haven of the Spirit Dragon; Orb of Dragonkind |
+| `predicate:step_done` | 2 | Hellkite Charger; The Misty Mountains Cold |
 | `quantity:stat` | 2 | Chandra's Ignition; Warstorm Surge |
 | `step:add_mana` | 2 | Desolation of Smaug; Mana Geyser |
 | `step:attach` | 2 | Basilisk Collar; Swiftfoot Boots |
@@ -1465,7 +1466,6 @@ Implementation: needed (replacement:would_create_token, quantity:event_amount, f
 | `predicate:chosen_is` | 1 | Outpost Siege |
 | `predicate:most_life` | 1 | Scourge of the Throne |
 | `predicate:stat` | 1 | Skyline Despot |
-| `predicate:step_done` | 1 | The Misty Mountains Cold |
 | `quantity:count_this_turn` | 1 | Gadrak, the Crown-Scourge |
 | `quantity:event_amount` | 1 | Draconic Visitor |
 | `quantity:math` | 1 | Dragonhawk, Fate's Tempest |

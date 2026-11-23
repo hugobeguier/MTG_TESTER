@@ -37,7 +37,18 @@
       },
       "implementation": "needed",
       "needs": [
-        "mana:variable"
+        "scripted:mana_spent_on_creature_sharing_type_with_commander",
+        "mana:variable",
+        "step:scry"
+      ],
+      "scripted": {
+        "handler": "mana_spent_on_creature_sharing_type_with_commander"
+      },
+      "steps": [
+        {
+          "kind": "scry",
+          "amount": 1
+        }
       ]
     },
     {
@@ -53,18 +64,18 @@
         },
         "whose": "yours"
       },
-      "scripted": {
-        "handler": "mana_from_this_land_spent_on_creature_sharing_type_with_commander"
-      },
       "steps": [
         {
           "kind": "scry",
           "amount": 1
         }
       ],
+      "scripted": {
+        "handler": "mana_rider_text"
+      },
       "implementation": "needed",
       "needs": [
-        "scripted:mana_from_this_land_spent_on_creature_sharing_type_with_commander",
+        "scripted:mana_rider_text",
         "step:scry"
       ]
     }

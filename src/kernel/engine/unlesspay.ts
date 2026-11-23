@@ -14,7 +14,7 @@ import type { Choice, Env, PlayerId } from "./types";
 export interface UnlessPay { payer: string; cost: Cost[]; x?: unknown; prompt?: Prompt; inverse?: boolean }
 
 export function unlessPaySupported(u: UnlessPay): boolean {
-  return u.cost.length > 0 && u.cost.every((c) => ("mana" in c && !/[\/P]/.test(c.mana.replace(/\{X\}/g, ""))) || ("life" in c && typeof c.life === "number") || ("discard" in c && c.discard !== "self"));
+  return u.cost.length > 0 && u.cost.every((c) => ("mana" in c && !/[\/P]/.test(c.mana.replace(/\{X\}/g, ""))) || ("life" in c && typeof c.life === "number") || ("discard" in c && c.discard !== "self") || ("sacrifice" in c && c.sacrifice !== "self") || ("tapOther" in c) || ("returnToHand" in c && c.returnToHand !== "self"));
 }
 
 function manaNeeded(r: Run, u: UnlessPay, env: Env): { cost: ReturnType<typeof parseManaCost>; x: number } {
@@ -30,7 +30,8 @@ function manaNeeded(r: Run, u: UnlessPay, env: Env): { cost: ReturnType<typeof p
 
 function lifeNeeded(u: UnlessPay): number { return u.cost.reduce((n, c) => n + ("life" in c ? Number(c.life) : 0), 0); }
 
-const discardCost = (u: UnlessPay): Extract<Cost, { discard: unknown }> | undefined => u.cost.find((c): c is Extract<Cost, { discard: unknown }> => "discard" in c);
+/** the choice cost of an "unless" payment: discard / sacrifice / tap / return a card or permanent of the payer's choice */
+const discardCost = (u: UnlessPay): Extract<Cost, { discard: unknown }> | undefined => u.cost.find((c): c is Extract<Cost, { discard: unknown }> => "discard" in c || "sacrifice" in c || "tapOther" in c || "returnToHand" in c);
 
 function canPay(r: Run, payer: PlayerId, u: UnlessPay, env: Env): boolean {
   const dc = discardCost(u);

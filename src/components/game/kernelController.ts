@@ -1,0 +1,444 @@
+// KernelGameController: everything the UI does to ONE kernel game, as a plain class (no React) so it is testable headless.
+//   - owns the KernelSession (the only truth), the human's seat, and the table-side bits the kernel does not have (log notes, attack / block picks)
+//   - table(): the TableState the 3D table renders (session + stack + decision), with stable object identity until something changes
+//   - the intent API: the same `on*` callback names ThreeGameTable already takes (tableProps()); intents with no kernel meaning are inert and leave a log note
+//   - step(): ONE action for whoever the engine waits for when that is not a human decision: AI seats (kernelAi.ts) and the human's automatic passes
+//   - startDriver(): paces step() with timers (the hook useKernelDriver owns its lifetime); never loops forever (per-turn cap, stall guard)
+// A rejected action never changes anything (KernelSession.dispatch returns the old state); the controller turns the refusal into a log note.
+import type { KernelSession, DispatchResult } from "@/kernel/integration/kernelSession";
+import type { TableState } from "@/kernel/integration/tableState";
+import type { LegalAction } from "@/kernel/engine/legal";
+import type { Action, Choice, ObjId, PlayerId } from "@/kernel/engine/types";
+import type { GameEvent as LogLine, GameSession, VisibleCard } from "@/lib/types";
+import { chooseAiAction, type AiMemory } from "./kernelAi";
+
+const MAIN = ["precombat_main", "postcombat_main"];
+/** the driver never takes more than this many automatic actions in one turn (a loop guard, not a rule) */
+export const MAX_AUTO_ACTIONS_PER_TURN = 150;
+
+export interface AttackerOption { id: string; name: string; defenders: Array<{ id: string; label: string }>; mustAttack: boolean }
+export interface BlockerOption { id: string; name: string; attackers: Array<{ id: string; name: string }> }
+export type Declaration =
+  | { kind: "attackers"; attackers: AttackerOption[]; picks: Record<string, string> }
+  | { kind: "blockers"; blockers: BlockerOption[]; picks: Record<string, string> };
+
+export interface ControllerOptions {
+  human: PlayerId;
+  /** pace(baseMs) -> real ms (agentPaceMs in the app, 0 in tests) */
+  pace?: (baseMs: number) => number;
+}
+
+type Timer = ReturnType<typeof setTimeout>;
+type CardRef = { id: string; name: string };
+
+export class KernelGameController {
+  readonly ks: KernelSession;
+  readonly human: PlayerId;
+  private readonly pace: (ms: number) => number;
+  private listeners = new Set<() => void>();
+  private ver = 0;
+  private notes: LogLine[] = [];
+  private noteSeq = 0;
+  /** table-side selection state (the legacy AppFlow keeps these in React state) */
+  selectedCardId: string | undefined;
+  inspectedCard: VisibleCard | undefined;
+  selectHandCard = (card: VisibleCard): void => { this.selectedCardId = this.selectedCardId === card.id ? undefined : card.id; this.bump(); };
+  inspectCard = (card: VisibleCard): void => { this.inspectedCard = card; this.bump(); };
+  closeInspect = (): void => { this.inspectedCard = undefined; this.bump(); };
+  private attackPicks: Record<string, string> = {};
+  private blockPicks: Record<string, string> = {};
+  private toKernel = new Map<string, ObjId>();
+  private tableCache?: { ver: number; table: TableState };
+  private mergedCache?: { base: GameSession; notes: LogLine[]; session: GameSession };
+  private declCache?: { ver: number; picks: string; decl: Declaration | undefined };
+  private autoTurn = { turn: -1, count: 0 };
+  private memory: AiMemory = { banned: new Set() };
+  private memoryTurn = -1;
+  private failures = 0;
+  private stalledAt = -1;
+  private timer?: Timer;
+  private running = false;
+
+  constructor(ks: KernelSession, o: ControllerOptions) {
+    this.ks = ks;
+    this.human = o.human;
+    this.pace = o.pace ?? ((ms) => ms);
+    for (const id of Object.keys(ks.state.objects)) { const legacy = ks.legacyIdOf(id); if (legacy) this.toKernel.set(legacy, id); }
+  }
+
+  // ------------------------------------------------------------------ subscription (useSyncExternalStore)
+
+  subscribe = (fn: () => void): (() => void) => { this.listeners.add(fn); return () => { this.listeners.delete(fn); }; };
+  getVersion = (): number => this.ver;
+  private bump(): void {
+    this.ver++;
+    for (const l of [...this.listeners]) { try { l(); } catch { /* a broken subscriber must not break the game */ } }
+  }
+
+  // ------------------------------------------------------------------ reading
+
+  /** the kernel id of a card id the table sent (legacy id after a hand-off, the kernel id itself for objects made during the game) */
+  kid(cardId: string): ObjId { return this.toKernel.get(cardId) ?? cardId; }
+
+  private nameOf(id: string): string {
+    const o = this.ks.state.objects[id];
+    if (o) return o.token?.name ?? o.cardName;
+    return this.ks.state.players.find((p) => p.id === id)?.name ?? id;
+  }
+
+  /** what the table renders; the same object until the game or the notes change */
+  table(): TableState {
+    if (this.tableCache?.ver === this.ver) return this.tableCache.table;
+    const ts = this.ks.tableState(this.human);
+    let session = ts.session;
+    if (this.notes.length) {
+      const m = this.mergedCache;
+      if (m && m.base === ts.session && m.notes === this.notes) session = m.session;
+      else { session = { ...ts.session, events: [...this.notes, ...ts.session.events] }; this.mergedCache = { base: ts.session, notes: this.notes, session }; }
+    }
+    if (this.positions.size) session = this.withPositions(session);
+    const table = session === ts.session ? ts : { ...ts, session };
+    this.tableCache = { ver: this.ver, table };
+    return table;
+  }
+
+  /** where the player dragged battlefield cards (purely visual: the kernel has no positions); cards keep their object identity unless they were moved */
+  private positions = new Map<string, { x: number; z: number }>();
+  private withPositions(session: GameSession): GameSession {
+    let changed = false;
+    const seats = session.seats.map((seat) => {
+      if (!seat.board.battlefield.some((c) => this.positions.has(c.id))) return seat;
+      changed = true;
+      return { ...seat, board: { ...seat.board, battlefield: seat.board.battlefield.map((c) => (this.positions.has(c.id) ? { ...c, battlefieldPosition: this.positions.get(c.id) } : c)) } };
+    });
+    return changed ? { ...session, seats } : session;
+  }
+  moveBattlefieldCard = (_seatId: string, cardId: string, position: { x: number; z: number }): void => {
+    this.positions.set(cardId, position);
+    this.bump();
+  };
+
+  /** the log line shown in the table's event log (newest first); also used by the intents that cannot run */
+  note(message: string, detail = "Kernel"): void {
+    this.notes = [{ id: `kernel-note-${this.noteSeq++}`, at: "", seatId: this.human, message, detail }, ...this.notes].slice(0, 40);
+    this.bump();
+  }
+
+  /** the seat the engine waits for when it is an AI seat (drives the "thinking" badge) */
+  thinkingSeat(): string | undefined {
+    const a = this.ks.actor;
+    return a && a !== this.human ? a : undefined;
+  }
+
+  /** the human's open attack / block declaration with the picks made so far (undefined when none is awaited) */
+  declaration(): Declaration | undefined {
+    const key = JSON.stringify([this.attackPicks, this.blockPicks]);
+    if (this.declCache && this.declCache.ver === this.ks.version && this.declCache.picks === key) return this.declCache.decl;
+    let decl: Declaration | undefined;
+    const ex = this.ks.state.combat?.expect;
+    if (ex && !this.ks.state.pending && (ex.kind === "attackers" ? ex.player === this.human : ex.players.includes(this.human))) {
+      const entry = this.ks.legal(this.human).find((a) => a.kind === "declareAttackers" || a.kind === "declareBlockers");
+      if (entry?.kind === "declareAttackers") {
+        decl = { kind: "attackers", picks: { ...this.attackPicks }, attackers: (entry.attackers ?? []).map((a) => ({ id: a.id, name: this.nameOf(a.id), mustAttack: !!entry.mustAttack?.includes(a.id), defenders: a.defenders.map((d) => ({ id: d, label: d.startsWith("#") ? this.nameOf(d) : this.nameOf(d) })) })) };
+      } else if (entry?.kind === "declareBlockers") {
+        decl = { kind: "blockers", picks: { ...this.blockPicks }, blockers: (entry.blockers ?? []).filter((b) => b.attackers.length).map((b) => ({ id: b.id, name: this.nameOf(b.id), attackers: b.attackers.map((x) => ({ id: x, name: this.nameOf(x) })) })) };
+      }
+    }
+    this.declCache = { ver: this.ks.version, picks: key, decl };
+    return decl;
+  }
+
+  // ------------------------------------------------------------------ acting
+
+  /** dispatch for the human; a refusal becomes a log note (a stale answer is silent). Returns true when the engine accepted it. */
+  private act(action: Action): boolean {
+    const before = this.ks.version;
+    const res: DispatchResult = this.ks.dispatch(this.human, action);
+    if (res.ok || this.ks.version !== before) { this.attackPicks = {}; this.blockPicks = {}; this.failures = 0; this.bump(); return res.ok; }
+    if (!res.stale) this.note(`Can't do that: ${res.error?.message ?? "the engine refused"}.`, "Rules");
+    else this.bump();
+    return false;
+  }
+
+  private legalFor(kind: LegalAction["kind"], objectId: ObjId): LegalAction[] {
+    return this.ks.legal(this.human).filter((a) => a.kind === kind && a.objectId === objectId);
+  }
+
+  /** answer the open decision; `decisionId` is the id the dialog was rendered for (a late click on an older dialog is ignored) */
+  answer = (decisionId: string, choice: Choice): boolean => {
+    const res = this.ks.decide(this.human, decisionId, choice);
+    if (!res.ok && !res.stale) this.note(`That choice was refused: ${res.error?.message ?? "invalid"}.`, "Rules");
+    else this.bump();
+    return res.ok;
+  };
+
+  playCard = (seatId: string, cardId: string, _pos?: unknown, _zone?: string): void => {
+    if (seatId !== this.human) return this.inert("play a card for another seat");
+    const id = this.kid(cardId);
+    const lands = this.legalFor("playLand", id);
+    const casts = this.legalFor("castSpell", id);
+    const pick = lands[0] ?? casts.find((a) => !a.option || a.option === "normal") ?? casts[0];
+    if (pick?.action) { this.act(pick.action); return; }
+    // not listed: ask the engine directly so the player gets its reason ("wrong timing", "cannot pay", ...)
+    const o = this.ks.state.objects[id];
+    const isLand = !!o && !!this.ks.ctx.cards(o.cardName)?.types.includes("land");
+    this.act(isLand ? { type: "playLand", player: this.human, cardId: id } : { type: "castSpell", player: this.human, cardId: id, autoPay: true });
+  };
+
+  playCardFace = (seatId: string, cardId: string, faceIndex: number): void => {
+    if (seatId !== this.human) return this.inert("play a card for another seat");
+    const id = this.kid(cardId);
+    const options = [...this.legalFor("playLand", id), ...this.legalFor("castSpell", id)].filter((a) => a.face);
+    const pick = options[faceIndex] ?? options[0];
+    if (pick?.action) this.act(pick.action); else this.playCard(seatId, cardId);
+  };
+
+  castCommander = (seatId: string): void => {
+    if (seatId !== this.human) return this.inert("cast a commander for another seat");
+    const cmd = this.ks.legal(this.human).find((a) => a.kind === "castSpell" && a.zone === "command" && a.action);
+    if (cmd?.action) { this.act(cmd.action); return; }
+    const id = this.ks.state.players.find((p) => p.id === this.human)?.command[0];
+    if (id) this.act({ type: "castSpell", player: this.human, cardId: id, autoPay: true }); else this.note("There is no commander in the command zone.", "Rules");
+  };
+
+  /** cast from exile / graveyard (flashback, permissions): the kernel lists those casts itself */
+  castFromZone = (seatId: string, cardId: string): void => {
+    if (seatId !== this.human) return this.inert("cast for another seat");
+    const id = this.kid(cardId);
+    const pick = this.legalFor("castSpell", id).find((a) => a.action);
+    if (pick?.action) this.act(pick.action); else this.note(`${this.nameOf(id)} can't be cast from there right now.`, "Rules");
+  };
+
+  tapForMana = (seatId: string, cardId: string): void => {
+    if (seatId !== this.human) return this.inert("tap another seat's permanent");
+    const id = this.kid(cardId);
+    const pick = this.legalFor("activateAbility", id).find((a) => a.isMana && a.action);
+    if (pick?.action) this.act(pick.action); else this.note(`${this.nameOf(id)} has no mana ability you can use right now.`, "Rules");
+  };
+
+  /** every legacy "activate ..." callback lands here: the kernel lists the abilities by id, the table only knows an index */
+  activateAbility = (seatId: string, cardId: string, abilityIndex = 0): void => {
+    if (seatId !== this.human) return this.inert("activate another seat's ability");
+    const id = this.kid(cardId);
+    const list = this.legalFor("activateAbility", id).filter((a) => !a.isMana && a.action);
+    const pick = list.length === 1 ? list[0] : list[abilityIndex] ?? list[0];
+    if (pick?.action) this.act(pick.action); else this.note(`${this.nameOf(id)}: no ability can be activated right now.`, "Rules");
+  };
+
+  activateLoyalty = (seatId: string, cardId: string, _cost: number, text: string): void => {
+    if (seatId !== this.human) return this.inert("activate another seat's ability");
+    const id = this.kid(cardId);
+    const list = this.legalFor("activateAbility", id).filter((a) => !a.isMana && a.action);
+    const pick = list.find((a) => text && a.label.toLowerCase().includes(text.toLowerCase().slice(0, 24))) ?? list[0];
+    if (pick?.action) this.act(pick.action); else this.note(`${this.nameOf(id)}: no loyalty ability can be activated right now.`, "Rules");
+  };
+
+  passPriority = (): void => {
+    if (this.ks.actor !== this.human || this.ks.state.pending || this.ks.state.combat?.expect) { this.note("You can't pass priority right now.", "Rules"); return; }
+    this.act({ type: "passPriority", player: this.human });
+  };
+
+  /** "next phase": the active player's shortcut (nobody else gets priority); with a declaration open it means "no attack" */
+  advanceTurn = (): void => {
+    const s = this.ks.state;
+    if (s.pending) { this.note("Answer the open question first.", "Rules"); return; }
+    if (s.turn.active === this.human && !s.stack.length) { this.act({ type: "advancePhase", player: this.human }); return; }
+    this.passPriority();
+  };
+
+  /** hurry to the end of the human's turn: stops at a question, a declaration, or when the turn passes to somebody else */
+  endTurn = (): void => {
+    const turn = this.ks.state.turn.number;
+    for (let i = 0; i < 40; i++) {
+      const s = this.ks.state;
+      if (s.gameOver || s.pending || s.turn.number !== turn || this.ks.actor !== this.human) break;
+      if (s.turn.active !== this.human) break;
+      const ok = s.stack.length ? this.act({ type: "passPriority", player: this.human }) : this.act({ type: "advancePhase", player: this.human });
+      if (!ok) break;
+    }
+  };
+
+  // ---- combat declarations
+
+  /** one attacker at a time (the legacy table's callback); sent together by confirmAttackers() */
+  declareAttack = (cardId: string, targetId: string): void => {
+    const id = this.kid(cardId);
+    if (!this.declaration() || this.declaration()?.kind !== "attackers") { this.note("You are not declaring attackers now.", "Rules"); return; }
+    this.attackPicks = { ...this.attackPicks, [id]: this.kid(targetId) };
+    this.bump();
+  };
+  toggleAttacker = (id: string, defender?: string): void => {
+    const d = this.declaration();
+    if (d?.kind !== "attackers") return;
+    const next = { ...this.attackPicks };
+    if (id in next && defender === undefined) delete next[id];
+    else next[id] = defender ?? d.attackers.find((a) => a.id === id)?.defenders[0]?.id ?? "";
+    if (!next[id]) delete next[id];
+    this.attackPicks = next;
+    this.bump();
+  };
+  attackWithAll = (): void => {
+    const d = this.declaration();
+    if (d?.kind !== "attackers") return;
+    const next: Record<string, string> = {};
+    for (const a of d.attackers) { const players = a.defenders.filter((x) => !x.id.startsWith("#")); const def = (players[0] ?? a.defenders[0])?.id; if (def) next[a.id] = def; }
+    this.attackPicks = next;
+    this.bump();
+  };
+  confirmAttackers = (): boolean => {
+    const d = this.declaration();
+    if (d?.kind !== "attackers") return false;
+    const must = d.attackers.filter((a) => a.mustAttack && !(a.id in this.attackPicks)).map((a) => a.id);
+    const picks = { ...this.attackPicks };
+    for (const id of must) { const a = d.attackers.find((x) => x.id === id); if (a?.defenders[0]) picks[id] = a.defenders[0].id; }
+    return this.act({ type: "declareAttackers", player: this.human, attackers: Object.entries(picks).map(([id, defender]) => ({ id, defender })), autoPay: true });
+  };
+  noAttack = (): boolean => { this.attackPicks = {}; return this.confirmAttackers() || this.act({ type: "declareAttackers", player: this.human, attackers: [] }); };
+
+  /** one blocker -> one attacker (or none) */
+  setBlock = (blockerId: string, attackerId: string | undefined): void => {
+    const next = { ...this.blockPicks };
+    if (attackerId) next[blockerId] = attackerId; else delete next[blockerId];
+    this.blockPicks = next;
+    this.bump();
+  };
+  toggleBlocker = (cardId: string): void => {
+    const d = this.declaration();
+    if (d?.kind !== "blockers") return;
+    const id = this.kid(cardId);
+    const b = d.blockers.find((x) => x.id === id);
+    if (!b) return;
+    const cur = this.blockPicks[id];
+    const i = b.attackers.findIndex((a) => a.id === cur);
+    this.setBlock(id, i + 1 < b.attackers.length ? b.attackers[i + 1].id : undefined);
+  };
+  confirmBlockers = (): boolean => this.declaration()?.kind === "blockers" && this.act({ type: "declareBlockers", player: this.human, blocks: Object.entries(this.blockPicks).map(([blocker, attacker]) => ({ blocker, attacker })), autoPay: true });
+  passBlocks = (): boolean => { this.blockPicks = {}; return this.declaration()?.kind === "blockers" && this.act({ type: "declareBlockers", player: this.human, blocks: [], autoPay: true }); };
+
+  // ---- everything the kernel has no meaning for
+
+  private inert(what: string): void { this.note(`Not available in kernel mode yet: ${what}.`, "Kernel"); }
+  private inertFn = (what: string) => (): void => this.inert(what);
+
+  /** Props for ThreeGameTable: the intent API of the legacy table, mapped on the kernel. Stable identity (built once). */
+  private props?: Record<string, unknown>;
+  tableProps(): Record<string, unknown> {
+    if (this.props) return this.props;
+    const inert = this.inertFn;
+    const noop = (): void => undefined;
+    this.props = {
+      testTools: false,
+      onSelectHandCard: this.selectHandCard, onInspectCard: this.inspectCard, onCloseInspectCard: this.closeInspect,
+      onPlayCard: this.playCard, onPlayCardFace: this.playCardFace, onCastCommander: this.castCommander,
+      onCastFromExile: this.castFromZone, onCastFromGraveyard: this.castFromZone,
+      onTapForMana: this.tapForMana,
+      onActivateSacrificeAbility: this.activateAbility, onActivateTapAbility: this.activateAbility, onActivateSelfUntap: this.activateAbility,
+      onActivateGenericMana: this.activateAbility, onActivateEquip: (s: string, c: string) => this.activateAbility(s, c, 0),
+      onActivateManlandAnimation: (s: string, c: string) => this.activateAbility(s, c, 0),
+      onActivateScriptedAbility: (s: string, c: string) => this.activateAbility(s, c, 0),
+      onActivateGraveyardAbility: (s: string, c: string) => this.activateAbility(s, c, 0),
+      onActivateLoyalty: this.activateLoyalty,
+      onPassPriority: this.passPriority, onAdvanceTurn: this.advanceTurn, onEndTurn: this.endTurn,
+      onDeclareAttack: this.declareAttack, onToggleBlocker: this.toggleBlocker, onConfirmBlockers: this.confirmBlockers, onPassBlocks: this.passBlocks,
+      // the legacy "respond" flow does not exist: the kernel gives the human priority and the table's pass button answers it
+      onRespond: this.passPriority, onRespondWithSelectedCard: inert("respond with the selected card (cast it from your hand while you have priority)"),
+      onResolvePendingTrigger: this.passPriority,
+      onDrawCard: inert("draw a card"), onShuffleLibrary: inert("shuffle the library"), onOpenLibrarySearch: inert("search the library"),
+      onMoveCardToGraveyard: inert("move a card to the graveyard"), onMoveCardToExile: inert("move a card to exile"), onMoveCardToHand: inert("move a card to hand"),
+      onChangeCounter: inert("change counters"), onChangeLife: inert("change life"), onToggleTapCard: (seatId: string, cardId: string) => this.tapForMana(seatId, cardId), // the "T" key: taps for mana through the card's mana ability (no manual untap in the kernel)
+      onCycleCard: inert("cycling"), onUnlockRoomDoor: inert("unlock a room door"),
+      onPayCumulativeUpkeep: inert("cumulative upkeep"), onSacrificeRuleSource: inert("sacrifice a rule source"),
+      onResolveMyriadLandscape: inert("myriad landscape"), onResolveBasicLandFetch: inert("basic land fetch"),
+      // dragging a card on the board or toggling priority-stop settings has no kernel meaning yet and must not spam the log
+      onMoveBattlefieldCard: this.moveBattlefieldCard, onTogglePhaseStop: noop, onToggleStopOnStackResponse: noop, onToggleStopOnAttacked: noop, onToggleStopOnTargeted: noop,
+      onToggleStopOnChoicePrompt: noop, onToggleFullControl: inert("full control (priority stops)"), onToggleYield: inert("yield"), onStopNext: inert("stop next")
+    };
+    return this.props;
+  }
+
+  // ------------------------------------------------------------------ AI + automatic passes
+
+  /** is anything left for the driver to do right now? (false = the engine waits for a human click or the game is over) */
+  needsStep(): boolean {
+    const s = this.ks.state;
+    if (s.gameOver || this.ks.degraded || this.stalledAt === this.ks.version) return false;
+    const actor = this.ks.actor;
+    if (!actor) return false;
+    if (actor !== this.human) return true;
+    return this.humanAutoAction() !== undefined;
+  }
+
+  /** the human has priority and nothing the slice asks them about: pass / advance for them (they can still act during the pace delay) */
+  private humanAutoAction(): Action | undefined {
+    const s = this.ks.state;
+    if (s.pending || s.combat?.expect || s.priority !== this.human) return undefined;
+    if (s.stack.length) return { type: "passPriority", player: this.human };
+    if (s.turn.active !== this.human) return { type: "passPriority", player: this.human };
+    if (MAIN.includes(s.turn.phase)) return undefined; // the human's own main phases: they decide
+    return { type: "advancePhase", player: this.human };
+  }
+
+  /** One automatic action (an AI seat's choice, or the human's automatic pass). Returns false when it did nothing. Never throws. */
+  step(): boolean {
+    try {
+      const s = this.ks.state;
+      if (s.gameOver || this.ks.degraded) return false;
+      const actor = this.ks.actor;
+      if (!actor) return false;
+      if (this.autoTurn.turn !== s.turn.number) { this.autoTurn = { turn: s.turn.number, count: 0 }; }
+      if (this.memoryTurn !== s.turn.number) { this.memory = { banned: new Set() }; this.memoryTurn = s.turn.number; }
+      let action: Action | undefined;
+      if (actor === this.human) action = this.humanAutoAction();
+      else {
+        const acts = this.ks.legal(actor);
+        action = chooseAiAction(acts, s, this.ks.ctx, actor, this.memory);
+        if (!action) { this.stall(`${this.nameOf(actor)} has no legal action`); return false; }
+        if (this.autoTurn.count >= MAX_AUTO_ACTIONS_PER_TURN) action = fallbackPass(s, actor);
+      }
+      if (!action) return false;
+      this.autoTurn.count++;
+      const before = this.ks.version;
+      const res = this.ks.dispatch(actor, action);
+      if (res.ok || this.ks.version !== before) { this.failures = 0; this.bump(); return true; }
+      // refused: never retry the same thing; fall back to the least committal move, and give up loudly after three refusals in a row
+      this.failures++;
+      const key = actionKey(action);
+      if (action.type === "castSpell" || action.type === "playLand" || action.type === "activateAbility") for (const a of this.ks.legal(actor)) if (a.action && actionKey(a.action) === key) this.memory.banned.add(a.id);
+      if (this.failures >= 3) { this.stall(`${this.nameOf(actor)}'s action was refused (${res.error?.message ?? "unknown"})`); return false; }
+      const fb = this.ks.legal(actor)[0]?.kind === "answerDecision" ? undefined : fallbackPass(this.ks.state, actor);
+      if (fb && actionKey(fb) !== key) { const r2 = this.ks.dispatch(actor, fb); if (r2.ok) { this.bump(); return true; } }
+      this.bump();
+      return true;
+    } catch (e) {
+      this.stall(`driver error: ${e instanceof Error ? e.message : String(e)}`);
+      return false;
+    }
+  }
+
+  private stall(why: string): void {
+    this.stalledAt = this.ks.version;
+    this.note(`The kernel game is waiting: ${why}.`, "Kernel");
+  }
+
+  /** Pace step() with timers until stopped. Re-arms itself whenever the game changes (a human click, an AI action). Returns the stop function. */
+  startDriver(setT: (fn: () => void, ms: number) => Timer = setTimeout, clearT: (t: Timer) => void = clearTimeout): () => void {
+    if (this.running) return () => undefined;
+    this.running = true;
+    const arm = (): void => {
+      if (!this.running || this.timer !== undefined || !this.needsStep()) return;
+      const human = this.ks.actor === this.human;
+      this.timer = setT(() => { this.timer = undefined; this.step(); arm(); }, this.pace(human ? 900 : 700));
+    };
+    const unsub = this.subscribe(arm);
+    arm();
+    return () => { this.running = false; unsub(); if (this.timer !== undefined) clearT(this.timer); this.timer = undefined; };
+  }
+}
+
+function fallbackPass(s: { turn: { active: string }; stack: unknown[] }, seat: PlayerId): Action {
+  return s.turn.active === seat && !s.stack.length ? { type: "advancePhase", player: seat } : { type: "passPriority", player: seat };
+}
+
+function actionKey(a: Action): string { return JSON.stringify(a); }
+
+export type { CardRef };

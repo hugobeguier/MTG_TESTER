@@ -16,6 +16,7 @@ import { lobbyBlockers } from "@/lib/multiplayer/lobby";
 import { assignSlots, isRemoteSeat } from "@/lib/multiplayer/seatMap";
 import { isLastToKeep, mulliganReturnRequired } from "@/lib/multiplayer/mulliganGate";
 import { type GameContext, lateFn } from "./context";
+import { kernelHandoffSession } from "./kernelHandoff";
 
 export function useGameSetup(ctx: GameContext) {
   const { mode, setMode, session, setSession, activeSeatId, setActiveSeatId, prioritySeatId, setPrioritySeatId, selectedHandCardId, setSelectedHandCardId, inspectedCard, setInspectedCard, gameStage, setGameStage, setGameOverDismissed, setSetupMessage, configs, setConfigs, defaultDecksApplied, setSavedGames, gameStarting, setGameStarting, humanSeat, baseSeats } = ctx;
@@ -236,7 +237,7 @@ export function useGameSetup(ctx: GameContext) {
   function currentCleanSaveStopStatus() {
     return isCleanSaveStop({
       mode,
-      gameStage,
+      gameStage: gameStage === "kernel" ? "mulligan" : gameStage, // a kernel game is never saved (no Save button), and is never a clean stop
       sessionStatus: session.status,
       hasPendingAction: Boolean(pendingAction),
       stackActionCount: stackActions.length,
@@ -264,7 +265,7 @@ export function useGameSetup(ctx: GameContext) {
       savedAt: new Date().toISOString(),
       session,
       ...stackStore.snapshot(),
-      gameStage,
+      gameStage: gameStage === "kernel" ? "playing" : gameStage,
       holdPriorityOnce,
       mulligans,
       keptHands,
@@ -502,6 +503,13 @@ export function useGameSetup(ctx: GameContext) {
     // Every seat has now kept a hand (agents resolved their mulligans up front in startGame; this seat is the last human to confirm) - this is the
     // correct moment to roll for who plays first, rather than defaulting to a fixed seat.
     const { winnerId: firstSeatId, rolls } = rollForStartingSeat(session.seats);
+    // Dev flag ?engine=kernel (useKernelGame): offer the finished opening position to the kernel. Flag absent = undefined = nothing below changes.
+    let kernelNotice: string | undefined;
+    if (ctx.kernelStartRef.current) {
+      const outcome = ctx.kernelStartRef.current(kernelHandoffSession(session, seatId, keepSize, returnIds, firstSeatId));
+      if (outcome.ok) { setGameStage("kernel"); return; }
+      kernelNotice = outcome.reason;
+    }
     setGameStage("playing");
     setActiveSeatId(firstSeatId);
     setPrioritySeatId(firstSeatId); // the active player starts with priority
@@ -539,6 +547,7 @@ export function useGameSetup(ctx: GameContext) {
         started
       );
     });
+    if (kernelNotice) window.setTimeout(() => addEvent(kernelNotice, humanSeat.id, "Kernel engine"), 50);
     // ...and the host is asked about each one in their opening hand (its hand is already trimmed unless it is the seat that kept last).
     const hostHand = humanSeat.id === seatId ? humanSeat.board.hand.filter((card) => !returnIds.includes(card.id)) : humanSeat.board.hand;
     const humanLeylines = openingHandBattlefieldCards({ ...humanSeat, board: { ...humanSeat.board, hand: hostHand } });

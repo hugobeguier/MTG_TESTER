@@ -206,7 +206,7 @@ export function readIntentState(ctx: GameContext, paused = false): IntentGameSta
           manualLibrarySearch: choices.manualLibrarySearch
         }
       }),
-    gameStage: ctx.gameStage,
+    gameStage: ctx.gameStage === "kernel" ? "playing" : ctx.gameStage,
     activeSeatId: ctx.activeSeatId,
     prioritySeatId: ctx.prioritySeatId,
     hasPendingAction: Boolean(ctx.stack.pendingAction),

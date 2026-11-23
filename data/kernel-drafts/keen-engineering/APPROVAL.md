@@ -65,7 +65,7 @@ Oracle text:
 Re-rendered plain English:
 
 ```
-Kappa Cannoneer [draft]
+Kappa Cannoneer [approved]
   [a1] keyword [needed: needs scripted:improvise, keyword:improvise]
     Oracle: Improvise (Your artifacts can help cast this spell. Each artifact you tap after you're done activating mana abilities pays for {1}.)
     Scripted (engine-specific rule, not described by the fields above): improvise
@@ -98,7 +98,7 @@ Oracle text:
 Re-rendered plain English:
 
 ```
-Pull from Tomorrow [draft]
+Pull from Tomorrow [approved]
   [a1] spell_effect [needed: needs quantity:X]
     Oracle: Draw X cards, then discard a card.
     Effect: Draw X cards. Then, discard a card.
@@ -123,7 +123,7 @@ Oracle text:
 Re-rendered plain English:
 
 ```
-Shimmer Dragon [draft]
+Shimmer Dragon [approved]
   [a1] keyword [implemented]
     Oracle: Flying
     Keyword: flying
@@ -155,7 +155,7 @@ Oracle text:
 Re-rendered plain English:
 
 ```
-Thopter Fabricator [draft]
+Thopter Fabricator [approved]
   [a1] keyword [implemented]
     Oracle: Flying
     Keyword: flying
@@ -188,7 +188,7 @@ Oracle text:
 Re-rendered plain English:
 
 ```
-Thopter Spy Network [draft]
+Thopter Spy Network [approved]
   [a1] triggered [needed: needs trigger:intervening_if, field:create_tokens.tokenKeywords]
     Oracle: At the beginning of your upkeep, if you control an artifact, create a 1/1 colorless Thopter artifact creature token with flying.
     Trigger: At the beginning of your upkeep, if you control an artifact
@@ -217,7 +217,7 @@ Oracle text:
 Re-rendered plain English:
 
 ```
-Cultivator's Caravan [draft]
+Cultivator's Caravan [approved]
   [a1] mana [needed: needs mana:variable]
     Oracle: {T}: Add one mana of any color.
     Cost: {T}
@@ -248,7 +248,7 @@ Oracle text:
 Re-rendered plain English:
 
 ```
-Darksteel Juggernaut [draft]
+Darksteel Juggernaut [approved]
   [a1] keyword [implemented]
     Oracle: Indestructible
     Keyword: indestructible
@@ -278,7 +278,7 @@ Oracle text:
 Re-rendered plain English:
 
 ```
-Duplicant [draft]
+Duplicant [approved]
   [a1] triggered [needed: needs field:exile_target.linkExile]
     Oracle: Imprint — When this creature enters, you may exile target nontoken creature.
     Trigger: Whenever Duplicant enters
@@ -309,7 +309,7 @@ Oracle text:
 Re-rendered plain English:
 
 ```
-Forsaken Monument [draft]
+Forsaken Monument [approved]
   [a1] static [needed: needs static]
     Oracle: Colorless creatures you control get +2/+2.
     Static: Colorless creatures you control get +2/+2
@@ -343,7 +343,7 @@ Oracle text:
 Re-rendered plain English:
 
 ```
-Graaz, Unstoppable Juggernaut [draft]
+Graaz, Unstoppable Juggernaut [approved]
   [a1] static [needed: needs static, static:mustAttack]
     Oracle: Juggernauts you control attack each combat if able.
     Static: Juggernauts you control attack each combat if able
@@ -374,7 +374,7 @@ Oracle text:
 Re-rendered plain English:
 
 ```
-Mazemind Tome [draft]
+Mazemind Tome [approved]
   [a1] activated [needed: needs cost:counters, step:scry]
     Oracle: {T}, Put a page counter on this artifact: Scry 1. (Look at the top card of your library. You may put that card on the bottom.)
     Cost: {T}, put a page counter on Mazemind Tome
@@ -406,7 +406,7 @@ Oracle text:
 Re-rendered plain English:
 
 ```
-Mind's Eye [draft]
+Mind's Eye [approved]
   [a1] triggered [needed: needs trigger:draw, field:draw_cards.optionalCost, field:draw_cards.srcs]
     Oracle: Whenever an opponent draws a card, you may pay {1}. If you do, draw a card.
     Trigger: Whenever an opponent draws a card
@@ -431,7 +431,7 @@ Oracle text:
 Re-rendered plain English:
 
 ```
-Myr Battlesphere [draft]
+Myr Battlesphere [approved]
   [a1] triggered [implemented]
     Oracle: When this creature enters, create four 1/1 colorless Myr artifact creature tokens.
     Trigger: Whenever Myr Battlesphere enters
@@ -460,7 +460,7 @@ Oracle text:
 Re-rendered plain English:
 
 ```
-Psychosis Crawler [draft]
+Psychosis Crawler [approved]
   [a1] static [needed: needs static, static:setBasePT]
     Oracle: Psychosis Crawler's power and toughness are each equal to the number of cards in your hand.
     Static: Psychosis Crawler has power and toughness each equal to the number of cards in your hand
@@ -489,7 +489,7 @@ Oracle text:
 Re-rendered plain English:
 
 ```
-Skysovereign, Consul Flagship [draft]
+Skysovereign, Consul Flagship [approved]
   [a1] keyword [implemented]
     Oracle: Flying
     Keyword: flying
@@ -524,7 +524,7 @@ Oracle text:
 Re-rendered plain English:
 
 ```
-Steel Hellkite [draft]
+Steel Hellkite [approved]
   [a1] keyword [implemented]
     Oracle: Flying
     Keyword: flying
@@ -559,7 +559,7 @@ Oracle text:
 Re-rendered plain English:
 
 ```
-Fall from Favor [draft]
+Fall from Favor [approved]
   [a1] spell_effect [needed: needs keyword:enchant]
     Oracle: Enchant creature
     Target t1: target creature  <- prompt: "Choose target creature."
@@ -592,7 +592,7 @@ Oracle text:
 Re-rendered plain English:
 
 ```
-Padeem, Consul of Innovation [draft]
+Padeem, Consul of Innovation [approved]
   [a1] static [needed: needs static]
     Oracle: Artifacts you control have hexproof. (They can't be the targets of spells or abilities your opponents control.)
     Static: Artifacts you control have hexproof
@@ -619,7 +619,7 @@ Oracle text:
 Re-rendered plain English:
 
 ```
-Propaganda [draft]
+Propaganda [approved]
   [a1] static [needed: needs static, static:attackTax]
     Oracle: Creatures can't attack you unless their controller pays {2} for each creature they control that's attacking you.
     Static: Creatures can't attack you unless their controller pays {2} for each creature they control that's attacking you
@@ -642,7 +642,7 @@ Oracle text:
 Re-rendered plain English:
 
 ```
-Thirst for Knowledge [draft]
+Thirst for Knowledge [approved]
   [a1] spell_effect [needed: needs step:unless_pay]
     Oracle: Draw three cards. Then discard two cards unless you discard an artifact card.
     Effect: Draw 3 cards. Then, discard 2 cards unless you discard an artifact card in your hand.
@@ -666,7 +666,7 @@ Oracle text:
 Re-rendered plain English:
 
 ```
-Myr Retriever [draft]
+Myr Retriever [approved]
   [a1] triggered [implemented]
     Oracle: When this creature dies, return another target artifact card from your graveyard to your hand.
     Trigger: Whenever Myr Retriever dies
@@ -693,7 +693,7 @@ Oracle text:
 Re-rendered plain English:
 
 ```
-Soul-Guide Lantern [draft]
+Soul-Guide Lantern [approved]
   [a1] triggered [implemented]
     Oracle: When this artifact enters, exile target card from a graveyard.
     Trigger: Whenever Soul-Guide Lantern enters
@@ -728,7 +728,7 @@ Oracle text:
 Re-rendered plain English:
 
 ```
-Lonely Sandbar [draft]
+Lonely Sandbar [approved]
   [a1] replacement [needed: needs replacement:would_enter]
     Oracle: This land enters tapped.
     Replacement: If Lonely Sandbar would enter, it enters tapped
@@ -762,7 +762,7 @@ Oracle text:
 Re-rendered plain English:
 
 ```
-Remote Isle [draft]
+Remote Isle [approved]
   [a1] replacement [needed: needs replacement:would_enter]
     Oracle: This land enters tapped.
     Replacement: If Remote Isle would enter, it enters tapped

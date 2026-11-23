@@ -61,7 +61,7 @@
         {
           "kind": "attach",
           "what": "self",
-          "to": "event_object"
+          "to": "created"
         },
         {
           "kind": "create_delayed_trigger",
@@ -88,6 +88,7 @@
       ],
       "implementation": "needed",
       "needs": [
+        "ref:created",
         "trigger:intervening_if",
         "predicate:source_state",
         "step:rewrite_enchant",

@@ -5,10 +5,11 @@
 //   evoke: the card is cast with the evoke option (an alternative cost); when the permanent enters, a sacrifice trigger is queued.
 
 import type { Step } from "../schema";
-import { defOf, tryObj, type Run } from "./core";
+import { castOptionsOf } from "./castopts";
+import { tryObj, type Run } from "./core";
 import type { ObjId, PlayerId, QueuedTrigger } from "./types";
 
-export const miracleOption = (r: Run, id: ObjId) => { const o = tryObj(r, id); return o && !o.token ? defOf(r, o)?.kernel.castOptions?.find((c) => c.kind === "miracle") : undefined; };
+export const miracleOption = (r: Run, id: ObjId) => { const o = tryObj(r, id); return o && !o.token ? castOptionsOf(r, o).find((c) => c.kind === "miracle") : undefined; }; // printed, or granted by a static ability (Aminatou)
 
 /** Called by drawCards right after `id` was drawn by `pid`; `drawsBefore` = cards that player had drawn this turn before this one. */
 export function maybeQueueMiracle(r: Run, pid: PlayerId, id: ObjId, drawsBefore: number): void {

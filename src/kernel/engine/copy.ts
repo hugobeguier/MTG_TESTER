@@ -19,7 +19,7 @@ import { applyReplacements, runAfter } from "./replacements";
 import { createToken, type StepSpec } from "./steps";
 import type { GameObject, ObjId, PlayerId, StackItem, TokenDef } from "./types";
 
-export const COPY_FIELDS = ["what", "target", "count", "token", "controller", "notLegendary", "gainKeywords", "exceptAddTypes", "exileAt", "reflexive", "who", "of", "duration", "exceptGrant", "asEnters", "addAbility", "all", "filter", "becomes", "excludeChosen"];
+export const COPY_FIELDS = ["what", "target", "count", "token", "controller", "notLegendary", "gainKeywords", "exceptAddTypes", "exileAt", "reflexive", "who", "of", "duration", "exceptGrant", "asEnters", "addAbility", "all", "filter", "becomes", "excludeChosen", "chooseNewTargets", "chooseOne"];
 
 /** The copiable values of an object as a token definition (exceptions are applied by the caller). */
 export function copiableDef(r: Run, o: GameObject): TokenDef {

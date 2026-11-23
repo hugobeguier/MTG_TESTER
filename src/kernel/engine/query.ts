@@ -96,7 +96,7 @@ export function matchesFilter(r: Run, id: string, f: ObjectFilter, q: QCtx): boo
   if (f.enteredThisTurn !== undefined && r.s.turnLog.some((e) => e.type === "etb" && e.id === id) !== f.enteredThisTurn) return false;
   if (f.chosenColor) { const col = q.source ? tryObj(r, q.source)?.chosen?.color : undefined; const key = col ? ({ white: "W", blue: "U", black: "B", red: "R", green: "G" } as Record<string, string>)[col.toLowerCase()] ?? col.toUpperCase() : undefined; if (!key || !c.colors.some((x) => x === key || x.toLowerCase() === (col ?? "").toLowerCase())) return false; }
   if (f.sameNameAs) { const ref = resolveObjs(r, f.sameNameAs as string, q)[0]; const rn = ref ? (r.s.lki[ref]?.name ?? (tryObj(r, ref) ? chars(r, ref).name : undefined)) : undefined; if (!rn || rn !== c.name) return false; }
-  if (f.sharesCreatureTypeWith) { const ref = resolveObjs(r, f.sharesCreatureTypeWith as string, q)[0]; const rs = ref ? (r.s.lki[ref]?.subtypes ?? (tryObj(r, ref) ? chars(r, ref).subtypes : [])) : []; if (!c.subtypes.some((x) => rs.includes(x))) return false; }
+  if (f.sharesCreatureTypeWith) { const rs = resolveObjs(r, f.sharesCreatureTypeWith as string, q).flatMap((ref) => r.s.lki[ref]?.subtypes ?? (tryObj(r, ref) ? chars(r, ref).subtypes : [])); if (!c.subtypes.some((x) => rs.includes(x))) return false; }
   if (f.named && c.name.toLowerCase() !== f.named.toLowerCase()) return false;
   if (f.mv && !cmp(c.mv, f.mv, r, q)) return false;
   if (f.power && (c.power === undefined || !cmp(c.power, f.power, r, q))) return false;
@@ -165,11 +165,12 @@ export function resolvePlayers(r: Run, ref: PlayerRef | undefined, q: QCtx): Pla
 
 export function resolveObjs(r: Run, ref: string | undefined, q: QCtx): string[] {
   if (!ref) return [];
-  if (/^(t\d+|__c)$/.test(ref)) return q.targets?.[ref] ?? [];
+  if (/^(t\d+|__c|__e)$/.test(ref)) return q.targets?.[ref] ?? [];
   switch (ref) {
     case "self": return q.source ? [q.source] : [];
+    case "commander": return Object.values(r.s.objects).filter((o) => o.isCommander && o.owner === q.controller).map((o) => o.id);
     case "enchanted":
-    case "equipped": { const so = q.source ? tryObj(r, q.source) : undefined; const h = so && hostOf(r, so); return h ? [h.id] : []; }
+    case "equipped": { const so = q.source ? tryObj(r, q.source) : undefined; const h = so && hostOf(r, so); if (h) return [h.id]; const bound = so?.auraTarget ?? (q.source ? r.s.lki[q.source]?.attachedTo : undefined); return bound && tryObj(r, bound) ? [bound] : []; }
     case "chosen": return savedObjs(r, { ...q, chosen: q.chosen ?? {} }, "chosen");
     case "sacrificed": return q.sacrificed ?? [];
     case "looked_cards":
@@ -228,6 +229,7 @@ export function evalQuantity(r: Run, qy: Quantity, q: QCtx): number {
     case "event_amount": return q.amount ?? 0;
     case "life_total": return player(r, resolvePlayers(r, qy.who, q)[0]).life;
     case "starting_life": return 40;
+    case "life_gained_this_turn": { const who = resolvePlayers(r, qy.who, q); return r.s.turnLog.filter((e) => e.type === "gain_life" && e.player !== undefined && who.includes(e.player)).reduce((a, e) => a + (e.amount ?? 0), 0); }
     case "count_this_turn": return countLog(r, qy.event, q, qy.filter, qy.actor).length;
     case "greatest":
     case "sum": {
@@ -364,6 +366,14 @@ export function evalPredicate(r: Run, p: Predicate, q: QCtx): boolean {
       return v !== undefined && v.toLowerCase() === p.value.toLowerCase();
     }
     case "step_done": return (q.done ?? []).includes(p.step);
+    case "name_matches": {
+      // "has the same name as another creature you control or a creature card in your graveyard" (Guardian Project): the object itself never counts as its own match
+      const subj = resolveObjs(r, p.obj, q)[0];
+      if (!subj) return false;
+      const nm = tryObj(r, subj) ? chars(r, subj).name : r.s.lki[subj]?.name;
+      if (!nm) return false;
+      return p.among.some((f) => objectsMatching(r, f, q).some((id) => id !== subj && chars(r, id).name === nm));
+    }
     case "most_life": { const ps = resolvePlayers(r, p.who, q); const max = Math.max(...alive(r).map((x) => x.life)); return ps.every((id) => player(r, id).life === max); }
     default: throw new Unsupported(`predicate:${(p as { check: string }).check}`);
   }

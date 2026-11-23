@@ -61,7 +61,7 @@ The Ur-Dragon [draft]
   [a2] keyword [implemented]
     Oracle: Flying
     Keyword: flying
-  [a3] triggered [needed: needs trigger:batch, trigger:subject, quantity:event_amount, field:move_card_zone.filter]
+  [a3] triggered [needed: needs trigger:batch, trigger:subject, quantity:event_amount, field:move_card_zone.filter, field:move_card_zone.from, field:move_card_zone.what]
     Oracle: Whenever one or more Dragons you control attack, draw that many cards, then you may put a permanent card from your hand onto the battlefield.
     Trigger: Whenever one or more Dragons you control attack
     Effect: Draw that many cards. Then, you may put a card onto the battlefield.
@@ -71,7 +71,7 @@ Player prompts:
 
 - The Ur-Dragon: optional: Do you want to put a card onto the battlefield?
 
-Implementation: needed (static, trigger:batch, trigger:subject, quantity:event_amount, field:move_card_zone.filter)
+Implementation: needed (static, trigger:batch, trigger:subject, quantity:event_amount, field:move_card_zone.filter, field:move_card_zone.from, field:move_card_zone.what)
 
 Questions for you:
 
@@ -1642,22 +1642,24 @@ Path of Ancestry [draft]
   [a1] replacement [needed: needs replacement:would_enter]
     Oracle: This land enters tapped.
     Replacement: If Path of Ancestry would enter, it enters tapped
-  [a2] mana [needed: needs mana:variable]
+  [a2] mana [needed: needs scripted:mana_spent_on_creature_sharing_type_with_commander, mana:variable, step:scry]
     Oracle: {T}: Add one mana of any color in your commander's color identity.
     Cost: {T}
+    Effect: Scry 1.
+    Scripted (engine-specific rule, not described by the fields above): mana_spent_on_creature_sharing_type_with_commander
     Mana: add one mana of any color in your commander's color identity
-  [a3] triggered [needed: needs scripted:mana_from_this_land_spent_on_creature_sharing_type_with_commander, step:scry]
+  [a3] triggered [needed: needs scripted:mana_rider_text, step:scry]
     Oracle: When that mana is spent to cast a creature spell that shares a creature type with your commander, scry 1. (Look at the top card of your library. You may put that card on the bottom.)
     Trigger: Whenever you cast a creature spell
     Effect: Scry 1.
-    Scripted (engine-specific rule, not described by the fields above): mana_from_this_land_spent_on_creature_sharing_type_with_commander
+    Scripted (engine-specific rule, not described by the fields above): mana_rider_text
 ```
 
 Player prompts:
 
 - (none: no decisions)
 
-Implementation: needed (replacement:would_enter, mana:variable, scripted:mana_from_this_land_spent_on_creature_sharing_type_with_commander, step:scry)
+Implementation: needed (replacement:would_enter, scripted:mana_spent_on_creature_sharing_type_with_commander, mana:variable, step:scry, scripted:mana_rider_text)
 
 Questions for you:
 
@@ -1738,18 +1740,17 @@ Myriad Landscape [draft]
     Oracle: {T}: Add {C}.
     Cost: {T}
     Mana: add {C}
-  [a3] activated [needed: needs scripted:cards_share_a_land_type, cost:sacrifice, step:search_library, field:search_library.count, field:search_library.filter, field:search_library.min, field:search_library.shuffle, field:search_library.tapped, field:search_library.to, field:search_library.upTo]
+  [a3] activated [needed: needs cost:sacrifice, step:search_library, field:search_library.count, field:search_library.filter, field:search_library.min, field:search_library.sharesLandType, field:search_library.shuffle, field:search_library.tapped, field:search_library.to, field:search_library.upTo]
     Oracle: {2}, {T}, Sacrifice this land: Search your library for up to two basic land cards that share a land type, put them onto the battlefield tapped, then shuffle.
     Cost: {2}, {T}, sacrifice Myriad Landscape
     Effect: Search your library for a basic land, put it onto the battlefield, then shuffle.
-    Scripted (engine-specific rule, not described by the fields above): cards_share_a_land_type
 ```
 
 Player prompts:
 
 - Myriad Landscape: search: Choose a basic land from the library.
 
-Implementation: needed (replacement:would_enter, scripted:cards_share_a_land_type, cost:sacrifice, step:search_library, field:search_library.count, field:search_library.filter, field:search_library.min, field:search_library.shuffle, field:search_library.tapped, field:search_library.to, field:search_library.upTo)
+Implementation: needed (replacement:would_enter, cost:sacrifice, step:search_library, field:search_library.count, field:search_library.filter, field:search_library.min, field:search_library.sharesLandType, field:search_library.shuffle, field:search_library.tapped, field:search_library.to, field:search_library.upTo)
 
 Questions for you:
 
@@ -2065,17 +2066,17 @@ Hellkite Charger [draft]
   [a2] keyword [implemented]
     Oracle: Haste
     Keyword: haste
-  [a3] triggered [needed: needs field:untap_target.all, field:untap_target.filter, field:untap_target.optionalCost, predicate:paid_additional_cost, step:extra_combat]
+  [a3] triggered [needed: needs field:untap_target.all, field:untap_target.filter, field:untap_target.optionalCost, step:extra_combat, predicate:step_done]
     Oracle: Whenever this creature attacks, you may pay {5}{R}{R}. If you do, untap all attacking creatures and after this phase, there is an additional combat phase.
     Trigger: Whenever Hellkite Charger attacks
-    Effect: IF {5}{R}{R} was paid: you may untap the target. Then, IF {5}{R}{R} was paid: there is an additional combat phase after this one.
+    Effect: IF you control an attacking creature: you may untap the target. Then, IF you did (s1): there is an additional combat phase after this one.
 ```
 
 Player prompts:
 
 - Hellkite Charger: optional: Do you want to untap the target?
 
-Implementation: needed (field:untap_target.all, field:untap_target.filter, field:untap_target.optionalCost, predicate:paid_additional_cost, step:extra_combat)
+Implementation: needed (field:untap_target.all, field:untap_target.filter, field:untap_target.optionalCost, step:extra_combat, predicate:step_done)
 
 Questions for you:
 
@@ -2204,13 +2205,13 @@ Implementation: needed (timing)
 | `field:choose.remember` | 5 | Urza's Incubator; Morophon, the Boundless; Herald's Horn; Roaming Throne; Three Tree City |
 | `field:choose.what` | 5 | Urza's Incubator; Morophon, the Boundless; Herald's Horn; Roaming Throne; Three Tree City |
 | `field:create_tokens.tokenKeywords` | 5 | Rith, Liberated Primeval; Ancient Gold Dragon; Sarkhan Unbroken; Lathliss, Dragon Queen; Utvara Hellkite |
+| `field:move_card_zone.what` | 5 | The Ur-Dragon; Ureni of the Unwritten; Zurgo and Ojutai; Orb of Dragonkind; Bojuka Bog |
 | `quantity:event_amount` | 5 | The Ur-Dragon; Balefire Dragon; Old Gnawbone; Ramos, Dragon Engine; Wrathful Red Dragon |
 | `quantity:X` | 5 | Ancient Copper Dragon; Ancient Silver Dragon; Ancient Gold Dragon; Ancient Brass Dragon; Crucible of the Spirit Dragon |
 | `step:add_mana` | 5 | Savage Ventmaw; Klauth, Unrivaled Ancient; Sarkhan Unbroken; Crucible of the Spirit Dragon; Three Tree City |
 | `cost:sacrifice` | 4 | Myriad Landscape; Evolving Wilds; Terramorphic Expanse; Orb of Dragonkind |
 | `field:choose.fromLooked` | 4 | Ureni of the Unwritten; Herald's Horn; Zurgo and Ojutai; Orb of Dragonkind |
 | `field:mass_pump.filter` | 4 | Silumgar, the Drifting Death; Bladewing the Risen; Scavenger Regent // Exude Toxin; Lathliss, Dragon Queen |
-| `field:move_card_zone.what` | 4 | Ureni of the Unwritten; Zurgo and Ojutai; Orb of Dragonkind; Bojuka Bog |
 | `field:search_library.tapped` | 4 | Farseek; Myriad Landscape; Evolving Wilds; Terramorphic Expanse |
 | `filter:chosenType` | 4 | Urza's Incubator; Morophon, the Boundless; Herald's Horn; Three Tree City |
 | `scripted:roll_d20_result_is_X` | 4 | Ancient Copper Dragon; Ancient Silver Dragon; Ancient Gold Dragon; Ancient Brass Dragon |
@@ -2235,6 +2236,7 @@ Implementation: needed (timing)
 | `field:untap_target.filter` | 2 | Hellkite Charger; Scourge of the Throne |
 | `mana:restriction` | 2 | Rivaz of the Claw; Orb of Dragonkind |
 | `predicate:matches` | 2 | Herald's Horn; Carnelian Orb of Dragonkind |
+| `predicate:step_done` | 2 | Scion of the Ur-Dragon; Hellkite Charger |
 | `quantity:stat` | 2 | Terror of the Peaks; Thrakkus the Butcher |
 | `static:addTypes` | 2 | Roaming Throne; Yavimaya, Cradle of Growth |
 | `step:extra_combat` | 2 | Hellkite Charger; Scourge of the Throne |
@@ -2263,11 +2265,13 @@ Implementation: needed (timing)
 | `field:grant_effect.exceptName` | 1 | Sarkhan, Soul Aflame |
 | `field:mass_pump.who` | 1 | Silumgar, the Drifting Death |
 | `field:move_card_zone.filter` | 1 | The Ur-Dragon |
+| `field:move_card_zone.from` | 1 | The Ur-Dragon |
 | `field:reanimate.amount` | 1 | Ancient Brass Dragon |
 | `field:reanimate.reflexive` | 1 | Ancient Brass Dragon |
 | `field:search_library.anyNumber` | 1 | Sarkhan Unbroken |
 | `field:search_library.distinctNames` | 1 | Tiamat |
 | `field:search_library.excludeNamed` | 1 | Tiamat |
+| `field:search_library.sharesLandType` | 1 | Myriad Landscape |
 | `field:search_library.who` | 1 | Boseiju, Who Endures |
 | `field:untap_target.optionalCost` | 1 | Hellkite Charger |
 | `filter:chosenColor` | 1 | Three Tree City |
@@ -2276,16 +2280,13 @@ Implementation: needed (timing)
 | `modes` | 1 | Crux of Fate |
 | `predicate:cast_from` | 1 | Rivaz of the Claw |
 | `predicate:most_life` | 1 | Scourge of the Throne |
-| `predicate:paid_additional_cost` | 1 | Hellkite Charger |
 | `predicate:stat` | 1 | Tiamat |
-| `predicate:step_done` | 1 | Scion of the Ur-Dragon |
 | `predicate:turn_is` | 1 | Rivaz of the Claw |
 | `quantity:math` | 1 | Scavenger Regent // Exude Toxin |
 | `quantity:sum` | 1 | Klauth, Unrivaled Ancient |
 | `replacement:damage_qualifiers` | 1 | Twinflame Tyrant |
 | `replacement:would_deal_damage` | 1 | Twinflame Tyrant |
 | `scripted:additional_cost_life_when_targeting_this` | 1 | Terror of the Peaks |
-| `scripted:cards_share_a_land_type` | 1 | Myriad Landscape |
 | `scripted:cast_from_graveyard_permission` | 1 | Rivaz of the Claw |
 | `scripted:cast_from_top_of_library_permission` | 1 | Korlessa, Scale Singer |
 | `scripted:cast_without_paying_mana_cost` | 1 | Dracogenesis |
@@ -2297,7 +2298,8 @@ Implementation: needed (timing)
 | `scripted:excess_damage_dealt_to_opponent_creature_or_planeswalker` | 1 | Rith, Liberated Primeval |
 | `scripted:exert_and_haste_if_spent_on_creature_spell` | 1 | Arena of Glory |
 | `scripted:look_at_top_card_any_time` | 1 | Korlessa, Scale Singer |
-| `scripted:mana_from_this_land_spent_on_creature_sharing_type_with_commander` | 1 | Path of Ancestry |
+| `scripted:mana_rider_text` | 1 | Path of Ancestry |
+| `scripted:mana_spent_on_creature_sharing_type_with_commander` | 1 | Path of Ancestry |
 | `scripted:next_spell_this_turn_cant_be_countered` | 1 | Mistrise Village |
 | `scripted:one_counter_per_color_on_distinct_dragons_win_if_five` | 1 | Call the Spirit Dragons |
 | `scripted:triggers_additional_time` | 1 | Roaming Throne |

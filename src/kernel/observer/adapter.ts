@@ -11,7 +11,7 @@ import type { GameSession, PlayerSeat, VisibleCard } from "../../lib/types";
 import type { Ability } from "../schema";
 import type { Attacker, ContinuousEffect, GameObject, GameState, ObjId, PlayerState, TokenDef } from "../engine/types";
 import type { DraftLookup } from "./draftLookup";
-import { parseTypeLine } from "./draftLookup";
+import { parseTypeLine } from "./typeLine";
 
 export const LEGACY_TO_KERNEL_PHASE: Record<string, GameState["turn"]["phase"]> = {
   "untap step": "untap",

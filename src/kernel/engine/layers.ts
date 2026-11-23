@@ -12,6 +12,7 @@
 // Dependencies (613.8) are approximated by that fixed order: effects of layers 4-6 keep applying even if their source
 // loses its abilities later (613.6); an effect of layer 7 is dropped when its source no longer has the static ability.
 
+import { withKeywordExtras } from "./keywords8";
 import type { Ability, Cost, ObjectFilter, Quantity, StaticSpec } from "../schema";
 import { baseChars, continueHooks, continuing, obj, printedAbilities, tryObj, Unsupported, type Chars, type Run } from "./core";
 import { evalPredicate, evalQuantity, matchesFilter, objectsMatching, resolveObjs } from "./query";
@@ -119,7 +120,7 @@ function setTypes(c: Chars, names: string[]): void {
 const keywordAbility = (name: string): Ability => ({ id: "g:" + name, kind: "keyword", text: name, keyword: { name } });
 function grantKeyword(c: Chars, name: string): void {
   const l = name.toLowerCase();
-  if (!c.abilities.some((a) => a.kind === "keyword" && a.keyword?.name.toLowerCase() === l)) c.abilities = [...c.abilities, keywordAbility(l)];
+  if (!c.abilities.some((a) => a.kind === "keyword" && a.keyword?.name.toLowerCase() === l)) c.abilities = withKeywordExtras([...c.abilities, keywordAbility(l)]);
 }
 /** "lose: creature" = "isn't a creature" (Athreos, Shroud-Veiled; Theros gods): a type change in layer 4, not an ability loss */
 const losesType = (what: string): boolean => CARD_TYPES.has(what.toLowerCase());
@@ -127,7 +128,7 @@ function loseAbilities(c: Chars, what: string): void {
   const l = what.toLowerCase();
   if (losesType(l)) { c.types = c.types.filter((t) => t !== l); return; }
   if (l === "all abilities" || l === "all") c.abilities = [];
-  else c.abilities = c.abilities.filter((a) => !(a.kind === "keyword" && a.keyword?.name.toLowerCase() === l));
+  else c.abilities = c.abilities.filter((a) => !(a.kind === "keyword" && a.keyword?.name.toLowerCase() === l) && a.id !== "kw:" + l);
 }
 
 interface Item { layer: number; ts: number; seq: number; run: () => void }
@@ -136,7 +137,7 @@ const L = { types: 4, colors: 5, abilities: 6, cda: 7.1, base: 7.2, pump: 7.3 };
 
 /** Which layer one StaticSpec modifier belongs to (null = not a characteristic: handled by other queries). */
 function layerOf(m: Modify, spec: StaticSpec): number | null {
-  if ("addTypes" in m || "setTypes" in m || "copySubtypesOf" in m) return L.types;
+  if ("addTypes" in m || "setTypes" in m || "copySubtypesOf" in m || "addChosenType" in m) return L.types;
   if ("setColors" in m) return L.colors;
   if ("lose" in m && losesType(m.lose)) return L.types;
   if ("grant" in m || "lose" in m || "grantAbility" in m) return L.abilities;
@@ -148,6 +149,7 @@ function layerOf(m: Modify, spec: StaticSpec): number | null {
 function applyModify(r: Run, s: StaticSrc, m: Modify, c: Chars): void {
   const q = qctx(s);
   if ("addTypes" in m) m.addTypes.forEach((t) => addType(c, t));
+  else if ("addChosenType" in m) { const ch = tryObj(r, s.id)?.chosen?.type; if (ch) addType(c, ch); } // Metallic Mimic: the type its controller chose as it entered
   else if ("setTypes" in m) setTypes(c, m.setTypes);
   else if ("copySubtypesOf" in m) {
     // Duplicant: the creature types of the LAST card exiled with it replace its own ("It's still a Shapeshifter": that type stays)
@@ -193,7 +195,7 @@ function landTypeAbilities(c: Chars): Ability[] {
 function applyLayers(r: Run, o: GameObject, c: Chars, idx: Idx, effects: ContinuousEffect[]): void {
   let n = 0;
   const seq = () => n++;
-  const memo = new Map<StaticSrc, boolean>();
+  const memo = (r.epoch?.whiles ?? new Map()) as Map<StaticSrc, boolean>;
   const items: Item[] = [];
   for (const s of idx.statics) {
     for (const m of s.spec.modify) {
@@ -224,7 +226,22 @@ function applyCounters(c: Chars, o: GameObject): void {
   if (c.toughness !== undefined) c.toughness += d;
 }
 
+/** Run fn with a shared characteristics memo: no state changes may happen inside (pure reads), so a nested chars() of the same object is computed once. */
+export function withCharsEpoch<T>(r: Run, fn: () => T): T {
+  if (r.epoch) return fn();
+  r.epoch = { chars: new Map(), whiles: new Map() };
+  try { return fn(); } finally { r.epoch = undefined; }
+}
+
 export function computeChars(r: Run, id: ObjId): Chars {
+  if (!r.epoch) return withCharsEpoch(r, () => computeChars0(r, id));
+  const hit = r.epoch.chars.get(id);
+  if (hit && !r.busy?.has(id)) return hit;
+  const c = computeChars0(r, id);
+  if (!r.busy?.has(id)) r.epoch.chars.set(id, c);
+  return c;
+}
+function computeChars0(r: Run, id: ObjId): Chars {
   const busy = (r.busy ??= new Map());
   const partial = busy.get(id);
   if (partial) return partial;
@@ -260,7 +277,7 @@ export function restrictionsOf(r: Run, id: ObjId): Restriction[] {
     for (const m of mods) {
       if ("cant" in m) out.push({ kind: "cant", what: m.cant, except: m.except, protects: m.protects, source: s.id });
       else if ("mustAttack" in m) out.push({ kind: "mustAttack", source: s.id });
-      else if ("attackTax" in m) out.push({ kind: "attackTax", cost: m.attackTax.cost, protects: m.attackTax.protects, source: s.id });
+      else if ("attackTax" in m) out.push({ kind: "attackTax", cost: m.attackTax.cost === "{X}" && s.ability.scripted?.params && "x" in (s.ability.scripted.params as object) ? `{${evalQuantity(r, (s.ability.scripted.params as { x: never }).x, qctx(s))}}` : m.attackTax.cost, /* Sphere of Safety: {X} with X from the scripted params, read now */ protects: m.attackTax.protects, source: s.id });
       else if ("blockTax" in m) out.push({ kind: "blockTax", cost: m.blockTax.cost, source: s.id });
       else if ("evasion" in m) out.push({ kind: "evasion", source: s.id, cantBeBlockedBy: m.evasion.cantBeBlockedBy, unlessDefenderControls: m.evasion.unlessDefenderControls });
     }
@@ -354,6 +371,8 @@ const COLOR_WORDS: Record<string, string> = { white: "W", blue: "U", black: "B",
  * <colors / types> spells as though they had flash"). True when `pid` has such a grant that covers the spell `spellId`.
  */
 export function flashGrantCovers(r: Run, pid: PlayerId, spellId: ObjId): boolean {
+  // Heliod, the Radiant Dawn (back face): "you may cast spells as though they had flash" (scripted marker)
+  for (const id of r.s.battlefield) { const o = r.s.objects[id]; if (o && o.controller === pid && printedAbilities(r, o).some((x) => x.scripted?.handler === "cast_spells_as_though_flash")) return true; }
   const memo = new Map<StaticSrc, boolean>();
   const c = computeChars(r, spellId);
   for (const s of getIndex(r).statics) {

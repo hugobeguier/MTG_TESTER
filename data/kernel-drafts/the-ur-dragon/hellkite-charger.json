@@ -39,21 +39,12 @@
             ],
             "attacking": true
           },
-          "optional": true,
           "optionalCost": [
             {
               "mana": "{5}{R}{R}"
             }
           ],
           "src": 0,
-          "condition": {
-            "when": "on_resolution",
-            "if": {
-              "check": "paid_additional_cost",
-              "option": "{5}{R}{R}"
-            },
-            "src": 1
-          },
           "prompt": {
             "title": "Hellkite Charger: optional",
             "instruction": "Do you want to untap the target?",
@@ -61,6 +52,22 @@
               "card": "Hellkite Charger",
               "ability": "a3"
             }
+          },
+          "id": "s1",
+          "optional": true,
+          "condition": {
+            "when": "on_resolution",
+            "if": {
+              "check": "controls",
+              "filter": {
+                "types": [
+                  "creature"
+                ],
+                "controller": "you",
+                "attacking": true
+              }
+            },
+            "src": 1
           }
         },
         {
@@ -69,8 +76,8 @@
           "condition": {
             "when": "on_resolution",
             "if": {
-              "check": "paid_additional_cost",
-              "option": "{5}{R}{R}"
+              "check": "step_done",
+              "step": "s1"
             },
             "src": 1
           }
@@ -81,8 +88,8 @@
         "field:untap_target.all",
         "field:untap_target.filter",
         "field:untap_target.optionalCost",
-        "predicate:paid_additional_cost",
-        "step:extra_combat"
+        "step:extra_combat",
+        "predicate:step_done"
       ]
     }
   ],

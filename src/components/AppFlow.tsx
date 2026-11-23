@@ -43,6 +43,8 @@ import { useGameEffects } from "./game/useGameEffects";
 import { useSeatYield } from "./game/useSeatYield";
 import { hostHumanSeat } from "@/lib/multiplayer/seatMap";
 import { useMpHost } from "./game/useMpHost";
+import { useKernelGame } from "./game/useKernelGame";
+import { KernelGameTable } from "./KernelGameTable";
 import { MpPauseBanner } from "./MpPauseBanner";
 import { SandboxToggle } from "./SandboxToggle";
 import { pendingActionRequiredPasses, resolutionPromptNote, withPendingActionSourceCard } from "@/engine/priority";
@@ -94,6 +96,7 @@ export function AppFlow({ initialSession, ollama, multiplayerHost = false }: { i
   // All useEffect blocks (original relative order), after every handler hook.
   useGameEffects(ctx);
   useMpHost(ctx, { enabled: multiplayerHost }); // read-only publisher for /mp/host; no-op otherwise
+  const kernel = useKernelGame(ctx, { enabled: !multiplayerHost }); // dev flag ?engine=kernel (see game/useKernelGame.ts); inert without it
 
   // A priority window is offered whenever untapped lands could cover the cost, not only once mana
   // is already floating (see canReceivePriorityForPendingAction) — this must accept the same
@@ -199,6 +202,8 @@ export function AppFlow({ initialSession, ollama, multiplayerHost = false }: { i
     );
   }
 
+  if (gameStage === "kernel" && kernel.controller) return <KernelGameTable controller={kernel.controller} onBack={() => setMode("setup")} />;
+
   // The host's screen shows only the prompts addressed to the HOST's seat (a friend's prompts live in their own snapshot).
   const hostPrompts = promptSlotsForSeat({ pendingRuleChoice, libraryLook, blockChoice, manaChoice, myriadTapChoice, myriadSearch, basicLandFetchSearch, manualLibrarySearch }, humanSeat.id);
   return (
@@ -230,7 +235,7 @@ export function AppFlow({ initialSession, ollama, multiplayerHost = false }: { i
         priorityPasses={priorityPasses}
         choiceMinimized={choiceMinimized}
         onSetChoiceMinimized={setChoiceMinimized}
-        gameStage={gameStage}
+        gameStage={gameStage === "kernel" ? "playing" : gameStage}
         humanMulligans={mulligans[humanSeat.id] ?? 0}
         mulliganReturnCardIds={mulliganReturnCardIds[humanSeat.id] ?? []}
         mulliganKept={Boolean(keptHands[humanSeat.id])}

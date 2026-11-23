@@ -807,18 +807,17 @@ Myriad Landscape [draft]
     Oracle: {T}: Add {C}.
     Cost: {T}
     Mana: add {C}
-  [a3] activated [needed: needs scripted:cards_share_a_land_type, cost:sacrifice, step:search_library, field:search_library.count, field:search_library.filter, field:search_library.min, field:search_library.shuffle, field:search_library.tapped, field:search_library.to, field:search_library.upTo]
+  [a3] activated [needed: needs cost:sacrifice, step:search_library, field:search_library.count, field:search_library.filter, field:search_library.min, field:search_library.sharesLandType, field:search_library.shuffle, field:search_library.tapped, field:search_library.to, field:search_library.upTo]
     Oracle: {2}, {T}, Sacrifice this land: Search your library for up to two basic land cards that share a land type, put them onto the battlefield tapped, then shuffle.
     Cost: {2}, {T}, sacrifice Myriad Landscape
     Effect: Search your library for a basic land, put it onto the battlefield, then shuffle.
-    Scripted (engine-specific rule, not described by the fields above): cards_share_a_land_type
 ```
 
 Player prompts:
 
 - Myriad Landscape: search: Choose a basic land from the library.
 
-Implementation: needed (replacement:would_enter, scripted:cards_share_a_land_type, cost:sacrifice, step:search_library, field:search_library.count, field:search_library.filter, field:search_library.min, field:search_library.shuffle, field:search_library.tapped, field:search_library.to, field:search_library.upTo)
+Implementation: needed (replacement:would_enter, cost:sacrifice, step:search_library, field:search_library.count, field:search_library.filter, field:search_library.min, field:search_library.sharesLandType, field:search_library.shuffle, field:search_library.tapped, field:search_library.to, field:search_library.upTo)
 
 ### Mystic Remora
 
@@ -1056,7 +1055,7 @@ Oracle text:
 Re-rendered plain English:
 
 ```
-Propaganda [draft]
+Propaganda [approved]
   [a1] static [needed: needs static, static:attackTax]
     Oracle: Creatures can't attack you unless their controller pays {2} for each creature they control that's attacking you.
     Static: Creatures can't attack you unless their controller pays {2} for each creature they control that's attacking you
@@ -1759,6 +1758,7 @@ Questions for you:
 | `field:search_library.min` | 1 | Myriad Landscape |
 | `field:search_library.position` | 1 | Moon-Blessed Cleric |
 | `field:search_library.reflexive` | 1 | Obscura Storefront |
+| `field:search_library.sharesLandType` | 1 | Myriad Landscape |
 | `field:shuffle.who` | 1 | Portent |
 | `predicate:matches` | 1 | Mind's Dilation |
 | `predicate:step_done` | 1 | Obscura Storefront |
@@ -1772,7 +1772,6 @@ Questions for you:
 | `scripted:additional_beginning_phase` | 1 | Shadow of the Second Sun |
 | `scripted:attack_tax_per_enchantment` | 1 | Sphere of Safety |
 | `scripted:can_be_your_commander` | 1 | Aminatou, the Fateshifter |
-| `scripted:cards_share_a_land_type` | 1 | Myriad Landscape |
 | `scripted:cast_enchantment_paying_life` | 1 | Demon of Fate's Design |
 | `scripted:cast_spells_as_though_flash` | 1 | Heliod, the Radiant Dawn |
 | `scripted:copy_spell_or_ability_when_mana_spent` | 1 | Sunken Palace |

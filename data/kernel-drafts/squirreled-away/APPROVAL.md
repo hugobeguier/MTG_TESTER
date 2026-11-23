@@ -796,22 +796,24 @@ Path of Ancestry [draft]
   [a1] replacement [needed: needs replacement:would_enter]
     Oracle: This land enters tapped.
     Replacement: If Path of Ancestry would enter, it enters tapped
-  [a2] mana [needed: needs mana:variable]
+  [a2] mana [needed: needs scripted:mana_spent_on_creature_sharing_type_with_commander, mana:variable, step:scry]
     Oracle: {T}: Add one mana of any color in your commander's color identity.
     Cost: {T}
+    Effect: Scry 1.
+    Scripted (engine-specific rule, not described by the fields above): mana_spent_on_creature_sharing_type_with_commander
     Mana: add one mana of any color in your commander's color identity
-  [a3] triggered [needed: needs scripted:mana_from_this_land_spent_on_creature_sharing_type_with_commander, step:scry]
+  [a3] triggered [needed: needs scripted:mana_rider_text, step:scry]
     Oracle: When that mana is spent to cast a creature spell that shares a creature type with your commander, scry 1. (Look at the top card of your library. You may put that card on the bottom.)
     Trigger: Whenever you cast a creature spell
     Effect: Scry 1.
-    Scripted (engine-specific rule, not described by the fields above): mana_from_this_land_spent_on_creature_sharing_type_with_commander
+    Scripted (engine-specific rule, not described by the fields above): mana_rider_text
 ```
 
 Player prompts:
 
 - (none: no decisions)
 
-Implementation: needed (replacement:would_enter, mana:variable, scripted:mana_from_this_land_spent_on_creature_sharing_type_with_commander, step:scry)
+Implementation: needed (replacement:would_enter, scripted:mana_spent_on_creature_sharing_type_with_commander, mana:variable, step:scry, scripted:mana_rider_text)
 
 ### Plumb the Forbidden
 
@@ -1488,7 +1490,8 @@ Implementation: needed (trigger:multi_event, trigger:subject, field:life_change.
 | `quantity:step_result` | 1 | Decree of Pain |
 | `quantity:X` | 1 | Chatterfang, Squirrel General |
 | `scripted:colors_lands_opponents_control_could_produce` | 1 | Exotic Orchard |
-| `scripted:mana_from_this_land_spent_on_creature_sharing_type_with_commander` | 1 | Path of Ancestry |
+| `scripted:mana_rider_text` | 1 | Path of Ancestry |
+| `scripted:mana_spent_on_creature_sharing_type_with_commander` | 1 | Path of Ancestry |
 | `scripted:myriad` | 1 | Scurry of Squirrels |
 | `scripted:storm` | 1 | Chatterstorm |
 | `static:addTypes` | 1 | Gourmand's Talent |

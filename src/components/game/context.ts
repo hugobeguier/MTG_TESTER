@@ -42,7 +42,7 @@ import type { useSpecialEffects } from "./useSpecialEffects";
 import type { useSeatYield } from "./useSeatYield";
 
 export type FlowMode = "setup" | "game";
-export type GameStage = "mulligan" | "playing";
+export type GameStage = "mulligan" | "playing" | "kernel"; // "kernel": handed to the kernel engine (useKernelGame); every legacy effect idles because they all wait for "playing"
 
 export type HandlerApi = ReturnType<typeof useManaUi> &
   ReturnType<typeof useGameSetup> &
@@ -107,6 +107,8 @@ export function useGameState(initialSession: GameSession, options: { emptyNonHos
   const [sandboxMode, setSandboxMode] = useState(!options.emptyNonHostSeats);
   const [inspectedCard, setInspectedCard] = useState<VisibleCard | undefined>();
   const [gameStage, setGameStage] = useState<GameStage>("mulligan");
+  // Dev flag ?engine=kernel: useKernelGame registers the hand-off here and useGameSetup calls it once the mulligans end. Undefined (flag absent) = pure legacy.
+  const kernelStartRef = useRef<((finished: GameSession) => { ok: true } | { ok: false; reason: string }) | undefined>(undefined);
   const [gameOverDismissed, setGameOverDismissed] = useState(false);
   const [mulligans, setMulligans] = useState<Record<string, number>>({});
   const [keptHands, setKeptHands] = useState<Record<string, boolean>>({});
@@ -294,7 +296,7 @@ export function useGameState(initialSession: GameSession, options: { emptyNonHos
   // The situation and scored options of each agent's latest decision (see requestAgentDecision), attached to its reasoning for the 🧠 chat.
   const agentDecisionInfo = useRef<Record<string, Pick<AgentReasoning, "situation" | "options" | "chosenId" | "turn" | "phase">>>({});
   return {
-    sandboxMode, setSandboxMode, manualUntapAllowed: Boolean(options.emptyNonHostSeats) && sandboxMode, mpPausedFor, setMpPausedFor, mode, setMode, session, setSession, activeSeatId, setActiveSeatId, prioritySeatId, setPrioritySeatId, tableSession, selectedHandCardId, setSelectedHandCardId, inspectedCard, setInspectedCard, gameStage, setGameStage, gameOverDismissed, setGameOverDismissed, latestSessionRef, setupMessage, setSetupMessage, configs, setConfigs, deckLibrary, defaultDecksApplied, savedGames, setSavedGames, gameStarting, setGameStarting, autoValidatedDefaultDeck, humanSeat, selectedHandCard, baseSeats,
+    sandboxMode, setSandboxMode, manualUntapAllowed: Boolean(options.emptyNonHostSeats) && sandboxMode, mpPausedFor, setMpPausedFor, mode, setMode, session, setSession, activeSeatId, setActiveSeatId, prioritySeatId, setPrioritySeatId, tableSession, selectedHandCardId, setSelectedHandCardId, inspectedCard, setInspectedCard, gameStage, setGameStage, kernelStartRef, gameOverDismissed, setGameOverDismissed, latestSessionRef, setupMessage, setSetupMessage, configs, setConfigs, deckLibrary, defaultDecksApplied, savedGames, setSavedGames, gameStarting, setGameStarting, autoValidatedDefaultDeck, humanSeat, selectedHandCard, baseSeats,
     choices: { decisions, mulligans, setMulligans, keptHands, setKeptHands, keptHandsRef, mulliganReturnCardIds, setMulliganReturnCardIds, libraryLook, setLibraryLook, manualLibrarySearch, setManualLibrarySearch, pendingRuleChoice, setPendingRuleChoice, blockChoice, setBlockChoice, selectedBlockerIds, setSelectedBlockerIds, myriadSearch, setMyriadSearch, myriadTapChoice, setMyriadTapChoice, basicLandFetchSearch, setBasicLandFetchSearch, choiceMinimized, setChoiceMinimized, pendingOrderedTriggerResume, commanderZoneChoiceAsked, auraRetargetAsked },
     stack: { stackStore, pendingAction, setPendingAction, stackActions, priorityPasses, setPriorityPasses, priorityStopSettings, updatePriorityStopSettings, seatStops, setSeatStops, seatYields, setSeatYields, holdPriorityOnce, setHoldPriorityOnce, castDispatchInFlight, CAST_DISPATCH_STALE_MS, resolveBeatIds, resolveNowRef, abilityResolvers, abilityApiRef, stackFeed, setStackFeed },
     mana: { manaPools, setManaPools, copyMana, setCopyMana, manaContributions, setManaContributions, restrictedManaBatches, setRestrictedManaBatches, manaChoice, setManaChoice, lastCastManaContributors },

@@ -1,6 +1,7 @@
 // Working context + primitives shared by the whole engine: errors, events, RNG, zones, effective characteristics.
 // `resolve` clones the input state into a Run, mutates the clone freely, and returns it; the caller's state is never touched.
 
+import { withKeywordExtras } from "./keywords8";
 import type { Ability, Zone } from "../schema";
 import type {
   Attacker, Choice, CardDef, CardLookup, EngineError, ErrorCode, GameEvent, GameObject, GameState, Lki, ManaPool, ObjId, PlayerId, PlayerState, TokenDef
@@ -10,6 +11,7 @@ import { computeChars, invalidateIndex, layerSixActive } from "./layers";
 import { applyReplacements, runAfter } from "./replacements";
 import { releaseUnexiled } from "./durable";
 import { askCommandZone } from "./commander";
+import { offerDredge } from "./dredge";
 import { maybeQueueMiracle } from "./miracle";
 
 export class Unsupported extends Error {
@@ -55,6 +57,8 @@ export interface Run {
   idx?: import("./layers").Idx;
   /** objects whose characteristics are being computed right now (layers.ts): reads see the partial result */
   busy?: Map<ObjId, Chars>;
+  /** memo of finished characteristics + `while` results, alive only during one outermost computeChars / withCharsEpoch (no state changes inside, layers.ts) */
+  epoch?: { chars: Map<ObjId, Chars>; whiles: Map<unknown, boolean> };
   /** delayed triggers created during this run -> number of events emitted before (those cannot fire them) */
   dtBorn?: Record<string, number>;
   /** a cast / land play that happens DURING the resolution of an ability ("you may play the exiled card"): timing restrictions are ignored (608.2g) */
@@ -156,11 +160,23 @@ export function rawPrintedAbilities(r: Run, o: GameObject): Ability[] {
   if (o.token || o.copyDef) return tokenAbilities((o.copyDef ?? o.token)!);
   const def = defOf(r, o)!;
   const cur = currentFace(def, o);
-  return cur === undefined ? def.kernel.abilities : def.kernel.abilities.filter((a) => !a.face || a.face === cur);
+  return withKeywordExtras(cur === undefined ? def.kernel.abilities : def.kernel.abilities.filter((a) => !a.face || a.face === cur));
 }
 /** Printed abilities: card JSON, or a token's own abilities + keyword abilities. Zone-agnostic; see abilitiesOf for the effective list. Continue mode leaves out the ones whose frame is unsupported. */
+/** "While it's prepared, you may cast a copy of its spell": modelled as an activated ability costing the other face's mana cost whose steps are that face's spell effect (it is not a spell: no cast triggers, cannot be countered as a spell). */
+function preparedAbility(r: Run, o: GameObject): Ability[] {
+  if (!o.prepared || o.zone !== "battlefield" || o.token || o.copyDef) return [];
+  const def = defOf(r, o)!;
+  const names = faceNames(def);
+  const other = names[1];
+  const spell = other ? def.kernel.abilities.find((a) => a.face === other && a.kind === "spell_effect") : undefined;
+  if (!other || !spell) return [];
+  const cost = def.faces?.[other]?.manaCost;
+  const sorcery = (def.faces?.[other]?.types ?? []).includes("sorcery");
+  return [{ id: "kw:prepared", kind: "activated", text: `Cast a copy of ${other}.`, costs: cost ? [{ mana: cost }] : [], targets: spell.targets, steps: [...(spell.steps ?? []), { kind: "unprepare", target: "self" }], ...(sorcery ? { timing: { speed: "sorcery" } } : {}) } as unknown as Ability];
+}
 export function printedAbilities(r: Run, o: GameObject): Ability[] {
-  const all = rawPrintedAbilities(r, o);
+  const all = [...rawPrintedAbilities(r, o), ...preparedAbility(r, o)];
   const blocked = continueHooks.blocked;
   return blocked && continuing(r) ? all.filter((a) => !blocked(r, a)) : all;
 }
@@ -186,12 +202,24 @@ export function faceMeta(def: CardDef, o: GameObject): { manaCost?: string; type
   return def.faces?.[cur] ?? def;
 }
 export function tokenAbilities(t: TokenDef): Ability[] {
+  return withKeywordExtras(tokenAbilitiesRaw(t));
+}
+function tokenAbilitiesRaw(t: TokenDef): Ability[] {
   const kw = t.keywords.map((k): Ability => ({ id: "k:" + k.toLowerCase(), kind: "keyword", text: k, keyword: { name: k.toLowerCase() } }));
   return [...kw, ...(t.abilities ?? [])];
 }
 /** Effective abilities: on the battlefield what layer 6 leaves (a stripped permanent has none), elsewhere the printed ones. */
+/** a face-down permanent has no abilities of its own, only the special action of turning a morph creature face up (modelled as an activated ability) */
+function faceDownAbilities(r: Run, o: GameObject): Ability[] {
+  if (o.token || o.copyDef) return [];
+  const mk = rawPrintedAbilities(r, o).find((a) => a.kind === "keyword" && a.keyword?.name.toLowerCase() === "morph");
+  const cost = typeof mk?.keyword?.param === "string" ? mk.keyword.param : undefined;
+  return cost ? [{ id: "kw:unmorph", kind: "activated", text: `Turn this creature face up (morph ${cost}).`, costs: [{ mana: cost }], steps: [{ kind: "turn_face_up", target: "self" }] } as unknown as Ability] : [];
+}
 export function abilitiesOf(r: Run, o: GameObject): Ability[] {
+  if (o.faceDown && o.zone === "battlefield") return baseChars(r, o).abilities;
   if (o.zone === "battlefield" && layerSixActive(r)) return chars(r, o.id).abilities;
+  if (o.leftWith && (o.zone === "graveyard" || o.zone === "exile")) return [...printedAbilities(r, o), ...o.leftWith];
   return printedAbilities(r, o);
 }
 
@@ -244,7 +272,7 @@ const lc = (a: string[] | undefined) => (a ?? []).map((x) => x.toLowerCase());
 
 /** Characteristics before any continuous effect (copiable values; layers.ts applies everything else). */
 export function baseChars(r: Run, o: GameObject): Chars {
-  if (o.faceDown && o.zone === "battlefield") return { name: "", types: ["creature"], subtypes: [], supertypes: [], colors: [], mv: 0, power: 2, toughness: 2, keywords: [], abilities: [] };
+  if (o.faceDown && o.zone === "battlefield") return { name: "", types: ["creature"], subtypes: [], supertypes: [], colors: [], mv: 0, power: 2, toughness: 2, keywords: [], abilities: faceDownAbilities(r, o) };
   if (o.token || o.copyDef) {
     const t = (o.copyDef ?? o.token)!;
     return { name: t.name, types: lc(t.types), subtypes: [...t.subtypes], supertypes: lc(t.supertypes), colors: [...t.colors], mv: parseManaCost(t.manaCost).mv, power: t.power, toughness: t.toughness, keywords: lc(t.keywords), abilities: tokenAbilities(t) };
@@ -273,7 +301,7 @@ export function isSummoningSick(r: Run, o: GameObject): boolean {
 
 export function makeLki(r: Run, o: GameObject): Lki {
   const c = chars(r, o.id);
-  return { controller: o.controller, owner: o.owner, name: c.name, types: c.types, subtypes: c.subtypes, colors: c.colors, mv: c.mv, power: c.power, toughness: c.toughness, token: !!o.token, counters: { ...o.counters } };
+  return { controller: o.controller, owner: o.owner, name: c.name, types: c.types, subtypes: c.subtypes, colors: c.colors, mv: c.mv, power: c.power, toughness: c.toughness, token: !!o.token, counters: { ...o.counters }, ...(o.attachedTo ? { attachedTo: o.attachedTo } : {}) };
 }
 
 // ---------------------------------------------------------------- zones
@@ -320,10 +348,13 @@ export function moveObject(r: Run, id: ObjId, to: Zone, opts: MoveOpts = {}): Ga
   if (from === "battlefield") r.s.battlefield = r.s.battlefield.filter((x) => x !== id);
   else if (from !== "stack") { const l = zoneList(r, o.owner, from); const i = l.indexOf(id); if (i >= 0) l.splice(i, 1); }
   if (lki) r.s.lki[id] = lki;
+  // abilities a static effect had GIVEN it (Mikaeus: undying) are part of its last-known information: its dies / leaves triggers still use them
+  o.leftWith = from === "battlefield" && !o.token ? chars(r, id).abilities.filter((a) => a.id.startsWith("g:") || a.id.startsWith("ga:") || a.id.startsWith("kw:")) : undefined;
+  if (o.leftWith && !o.leftWith.length) o.leftWith = undefined;
   if (from === "battlefield") { o.tapped = false; o.counters = {}; o.damage = 0; o.dtHit = undefined; o.controller = o.owner; o.attachedTo = undefined; o.attachedToTs = undefined; o.copyDef = undefined; o.copyUntilEot = undefined; r.s.effects = r.s.effects.filter((e) => e.objectId !== id); }
   o.zone = to;
   o.exileInstead = undefined;
-  o.faceDown = undefined;
+  o.faceDown = undefined; o.prepared = undefined; o.auraTarget = undefined;
   o.commanderDeclined = undefined;
   if (to !== "battlefield" && to !== "stack") o.face = undefined; // a card in any other zone shows its front face
   if (from === "battlefield" && to === "battlefield") o.face = undefined;
@@ -380,6 +411,7 @@ export function drawCards(r: Run, pid: PlayerId, n: number): ObjId[] {
   const p = player(r, pid);
   const drawn: ObjId[] = [];
   for (let i = 0; i < n; i++) {
+    if (offerDredge(r, pid)) continue; // dredge (dredge.ts)
     const ev = applyReplacements(r, { kind: "draw", player: pid });
     if (ev.cancelled) { runAfter(r, ev); continue; } // replaced or prevented: no card, and not a failed draw either
     const drawsBefore = r.s.turnLog.filter((e) => e.type === "draw" && e.player === pid).length;

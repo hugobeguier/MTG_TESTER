@@ -7,6 +7,8 @@ import path from "node:path";
 // jsx: "automatic" lets tests server-render components (tsconfig has jsx: preserve for Next, which Vitest would otherwise treat as classic React.createElement).
 export default defineConfig({
   esbuild: { jsx: "automatic" },
+  // the kernel suites read data/cards.db and the card drafts in several workers at once: a cold start can exceed the 5 s default
+  test: { testTimeout: 20000 },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src")
