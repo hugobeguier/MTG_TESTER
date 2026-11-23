@@ -40,6 +40,7 @@ import { parseGraveyardReturnAbility } from "@/lib/graveyardAbilities";
 import { parseManlandAnimation } from "@/lib/activatedAbilities";
 import { abilityOracleText } from "@/lib/typeGrants";
 import { scriptedAbilitiesFor } from "@/engine/cardAbilities";
+import { painDamageForTap } from "@/engine/mana";
 import { hasKeyword as hasOracleKeyword } from "@/lib/keywords";
 import { cardMatchesTypeFilter, isBasicLandFetchAbility } from "@/lib/oracleClauses";
 import { DEFAULT_STOP_SETTINGS, stopKey, TURN_PHASES, type PriorityStopSettings } from "@/lib/priorityStops";
@@ -113,6 +114,8 @@ interface ThreeGameTableProps {
   manaChoice?: {
     cardName: string;
     choices: ManaColor[];
+    /** a note under a choice's button ("1 damage to you": pain lands, Talismans); the legacy table fills it from the card, the kernel controller passes its own */
+    hints?: Partial<Record<string, string>>;
   };
   myriadTapChoice?: {
     cardName: string;
@@ -2299,7 +2302,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
         </button>
       ) : null}
       <div {...choiceLayerProps}>
-      {props.manaChoice ? <ManaChoiceModal choice={props.manaChoice} onChoose={props.onChooseMana} onClose={props.onCancelManaChoice} /> : null}
+      {props.manaChoice ? <ManaChoiceModal choice={withPainHints(props.manaChoice, props.session)} onChoose={props.onChooseMana} onClose={props.onCancelManaChoice} /> : null}
       {props.myriadTapChoice ? (
         <MyriadTapChoiceModal
           choice={props.myriadTapChoice}
@@ -2966,12 +2969,25 @@ function CardInspector({
   );
 }
 
+/** Pain lands and Talismans: the coloured choices say they cost life (the free {C} does not). Looks the card up by name on the table. */
+function withPainHints(choice: NonNullable<ThreeGameTableProps["manaChoice"]>, session: GameSession): NonNullable<ThreeGameTableProps["manaChoice"]> {
+  if (choice.hints) return choice;
+  const card = session.seats.flatMap((seat) => seat.board.battlefield).find((item) => item.name === choice.cardName);
+  if (!card) return choice;
+  const hints: Record<string, string> = {};
+  for (const color of choice.choices) {
+    const damage = painDamageForTap(card, color);
+    if (damage > 0) hints[color] = `${damage} damage to you`;
+  }
+  return Object.keys(hints).length ? { ...choice, hints } : choice;
+}
+
 function ManaChoiceModal({
   choice,
   onChoose,
   onClose
 }: {
-  choice: { cardName: string; choices: ManaColor[] };
+  choice: { cardName: string; choices: ManaColor[]; hints?: Partial<Record<string, string>> };
   onChoose?: (color: ManaColor) => void;
   onClose?: () => void;
 }) {
@@ -2989,6 +3005,7 @@ function ManaChoiceModal({
           {choice.choices.map((color) => (
             <button className={`mana-choice-button mana-${color.toLowerCase()}`} type="button" key={color} onClick={() => onChoose?.(color)}>
               {color}
+              {choice.hints?.[color] ? <small style={{ display: "block", fontSize: "0.7em", opacity: 0.85 }}>{choice.hints[color]}</small> : null}
             </button>
           ))}
         </div>

@@ -9,7 +9,7 @@
 // Mana tapped into the pool that is still fully there (a contribution record and the colour is still floating) is removed from the pool when the tap is undone.
 // Pure functions only: no React, no session access beyond the card handed in.
 import type { GameSession, ManaColor, ManaPool, VisibleCard } from "@/lib/types";
-import { addManaToPool, effectiveManaOracleText, payCostFromPool, signetAbility, tapVisibleCard } from "@/engine/mana";
+import { addManaToPool, effectiveManaOracleText, isSacrificeManaSource, lifeGainForTap, manaAbilityCounterRemovalKind, painDamageForTap, payCostFromPool, signetAbility, tapVisibleCard, tokenTapManaAbility } from "@/engine/mana";
 import { genericCostShim } from "@/engine/effects";
 
 export type ManaContribution = { cardId: string; color: ManaColor; amount: number };
@@ -68,26 +68,53 @@ export type ManualToggleResult = {
 
 /**
  * The manual "toggle tap" (the T key / click on a battlefield permanent that has nothing better to do): THE function the UI calls. Manually TAPPING an untapped
- * permanent is always allowed (costs like "tap two untapped artifacts", convoke, crew, summoning-sick creatures). Manually UNTAPPING a tapped one is NEVER allowed
- * (a land that entered tapped, one tapped for mana, a creature that paid {T}): it only untaps in its controller's untap step or through a real effect.
+ * permanent is always allowed (costs like "tap two untapped artifacts", convoke, crew, summoning-sick creatures). Manually UNTAPPING is a TAKE-BACK of a mana tap
+ * only (see untapForManaDecision): tapped for mana, that mana still floating in full, nothing cast / activated / paid since (every such event marks the source
+ * `tapUsed` and drops its contribution). Everything else only untaps in the untap step or through a real effect.
  * The one exception is Sandbox mode (`sandbox`: the multiplayer host's explicit test tools), where the toggle is free for any seat.
  */
-export function toggleTapManually(session: GameSession, seatId: string, cardId: string, _contributions: readonly ManaContribution[], _pool: ManaPool, sandbox = false): ManualToggleResult {
+export function toggleTapManually(session: GameSession, seatId: string, cardId: string, contributions: readonly ManaContribution[], pool: ManaPool, sandbox = false): ManualToggleResult {
   const seat = session.seats.find((item) => item.id === seatId);
   const card = seat?.board.battlefield.find((item) => item.id === cardId);
   if (!seat || !card) return { session };
-  if (card.tapped && !sandbox) return { session, refused: untapRefusalMessage(card.name) };
+  let removeFromPool: ManualToggleResult["removeFromPool"];
+  if (card.tapped && !sandbox) {
+    const decision = untapForManaDecision(card, contributions, pool);
+    if (!decision.ok) return { session, refused: decision.reason };
+    removeFromPool = decision.removeFromPool;
+  }
   const next: GameSession = {
     ...session,
     seats: session.seats.map((item) =>
       item.id !== seatId ? item : { ...item, board: { ...item.board, battlefield: item.board.battlefield.map((permanent) => (permanent.id === cardId ? { ...permanent, tapped: !permanent.tapped, tapUsed: false } : permanent)) } }
     )
   };
-  return { session: next };
+  return { session: next, ...(removeFromPool ? { removeFromPool } : {}) };
+}
+
+/**
+ * The take-back rule for a human's tapped permanent (pure; the caller passes the seat's unspent-mana records and floating pool). Allowed only when ALL hold:
+ *  - the permanent was tapped for mana by the manual mana tap (a contribution record exists: lands that entered tapped, attackers, {T} ability costs, "tap an
+ *    untapped artifact" costs and pain / life-gain / sacrifice / counter-removal mana abilities never get one),
+ *  - it is not marked used (its mana was not spent, no spell or ability was put on the stack since, the phase did not end),
+ *  - the mana it made is still floating in full (retracted exactly: its own colour and amount).
+ */
+export function untapForManaDecision(card: VisibleCard, contributions: readonly ManaContribution[], pool: ManaPool): ManualUntapDecision {
+  if (!card.tapped) return { ok: true };
+  if (card.tapUsed) return { ok: false, reason: `${card.name} can't be untapped: that mana was already spent (or a spell or ability was cast since).` };
+  const contribution = contributions.find((item) => item.cardId === card.id);
+  if (!contribution) return { ok: false, reason: untapRefusalMessage(card.name) };
+  if (pool[contribution.color] < contribution.amount) return { ok: false, reason: `${card.name} can't be untapped: that mana was already spent.` };
+  return { ok: true, removeFromPool: { color: contribution.color, amount: contribution.amount } };
+}
+
+/** Is tapping `card` for `color` a PURE mana tap that can be taken back? Pain / life gain / sacrifice (Treasure, Gilded Goose) / counter removal have side effects that stay. */
+export function isRetractableManaTap(card: VisibleCard, color: ManaColor): boolean {
+  return painDamageForTap(card, color) <= 0 && lifeGainForTap(card) <= 0 && !isSacrificeManaSource(card) && manaAbilityCounterRemovalKind(card.oracleText) === undefined && tokenTapManaAbility(card) === undefined;
 }
 
 export function untapRefusalMessage(cardName: string): string {
-  return `${cardName} is tapped: it only untaps in your untap step or through a card effect.`;
+  return `${cardName} can't be untapped: it was not tapped for mana this turn (it entered tapped, attacked, or was tapped for an ability or cost), so it only untaps in your untap step or through a card effect.`;
 }
 
 export type SignetTapResult =

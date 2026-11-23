@@ -13,7 +13,7 @@ import {
   , untapObject, morphCostOf, newObject, targetHooks
 } from "./core";
 import { emitUnresolved, reportAbilityNotPerformed, reportCast } from "./unresolved";
-import { autoTapFor, addMana, withTapBonus, manaAbilityActivatable, manaAbilityUsable, payManaAbilityCosts, payFromPool, phyrexianOptions, productionOfAbility, settleCost, totalPotentialMana } from "./mana";
+import { autoTapFor, manaHooks, addMana, withTapBonus, manaAbilityActivatable, manaAbilityUsable, payManaAbilityCosts, payFromPool, phyrexianOptions, productionOfAbility, settleCost, totalPotentialMana } from "./mana";
 import { evalPredicate, evalQuantity, matchesFilter, objectsMatching, resolveObjs, type QCtx } from "./query";
 import { addCounters, changeLife, decide, discardCard, runExec, sacrificeObject, startExec, type AskSpec } from "./steps";
 import { costCandidates, costCount, costNoun, costOptions, needsChoice, payChoiceCost, type ChoiceCost } from "./costs";
@@ -25,7 +25,7 @@ import { unattachIllegal } from "./attach";
 import { affinityReduction, hasImprovise, improviseCandidates, peekNextSpellGrants, takeNextSpellGrants } from "./castgrants";
 import { askCommandZone, overCommanderLimit } from "./commander";
 import { checkCounterAnswer, counterCandidates, counterCount, counterSpec } from "./counters7";
-import { addUnits, emptyPools, flushRiders, type SpendCtx } from "./manapool";
+import { addUnits, emptyPools, flushRiders, poolSize as manaPoolSize, type SpendCtx } from "./manapool";
 import { clearRegenShields, regenerates } from "./regen";
 import { ofOpponent, opponentIds, slotUsesX, targetBounds, totalMax } from "./targets7";
 import { addDurable, expiryFor, consumePermission, expireDurable, hasFlag, permissionIdOf, permissionOptions, permissionsFor, delayeds } from "./durable";
@@ -119,6 +119,7 @@ function dispatch(r: Run, a: Action): void {
   if (!p) throw new Reject("unknown_object", `unknown player ${a.player}`);
   if (p.hasLost) throw new Reject("game_over", `${a.player} has lost the game`);
   if (a.type === "answerDecision") return answer(r, a);
+  if (a.type !== "activateAbility" && a.type !== "untapForMana") clearManaTaps(r); // anything but a mana tap (or its take-back) closes every take-back window
   if (r.s.pending) throw new Reject("decision_pending", `decision ${r.s.pending.id} for ${r.s.pending.player} must be answered first`);
   if (a.type === "declareAttackers") return doDeclareAttackers(r, a);
   if (a.type === "declareBlockers") return doDeclareBlockers(r, a);
@@ -132,6 +133,7 @@ function dispatch(r: Run, a: Action): void {
   switch (a.type) {
     case "castSpell": return castSpell(r, a);
     case "activateAbility": return activateAbility(r, a);
+    case "untapForMana": return untapForMana(r, a);
     case "playLand": return playLand(r, a);
     case "passPriority": return passPriority(r, a.player, !!a.fastForward);
     case "advancePhase": return advancePhase(r, a.player);
@@ -862,6 +864,7 @@ function activateAbility(r: Run, a: Extract<Action, { type: "activateAbility" }>
   if (continuing(r) && reportAbilityNotPerformed(r, src.id, ab)) return; // an unsupported cost / target / timing / zone: the ability is NOT performed (nothing paid, nothing on the stack)
   assertSupported(r, src, ab);
   if (ab.kind === "mana") return activateMana(r, a.player, src, ab, a.color);
+  clearManaTaps(r); // a real ability: the take-back window of every earlier tap is over
   if (ab.scripted?.handler === "crew") return activateCrew(r, a, src, ab);
   const loyalty = (ab.costs ?? []).some((c) => "loyalty" in c);
   // Overwhelming Splendor: the enchanted player can't activate abilities that aren't mana abilities or loyalty abilities
@@ -898,6 +901,14 @@ function activateCrew(r: Run, a: Extract<Action, { type: "activateAbility" }>, s
   emit(r, { type: "crewed", id: src.id, by: dec.ids });
   startDraft(r, { kind: "activated", player: a.player, sourceId: src.id, abilityId: ab.id, payWith: a.payWith, autoPay: a.autoPay }, true);
 }
+
+/** The steps of a mana ability (pain: "deals 1 damage to you") run right away, never on the stack (605.3b). */
+function runManaSteps(r: Run, pid: PlayerId, src: GameObject, ab: Ability): void {
+  const item: StackItem = { id: `m${r.s.nextId++}`, kind: "activated", sourceId: src.id, controller: pid, abilityId: ab.id, parts: [{ specs: [], steps: ab.steps ?? [], targets: {} }], x: 0 };
+  const st = runExec(r, startExec(item));
+  if (st.status === "ask") throw new Unsupported("mana:decision_in_mana_ability");
+}
+manaHooks.runSteps = runManaSteps;
 
 function activateMana(r: Run, pid: PlayerId, src: GameObject, ab: Ability, color?: string, answer?: Choice, savedChoices?: Record<number, ObjId[]>): void {
   if (!manaAbilityActivatable(r, src, ab)) throw new Reject("cannot_activate", `${label(r, src.id)} cannot produce mana right now (tapped or summoning sick)`);
@@ -953,15 +964,46 @@ function activateMana(r: Run, pid: PlayerId, src: GameObject, ab: Ability, color
     if (life > 0) changeLife(r, undefined, pid, -life);
   }
   for (const [i, c] of costs.entries()) if (needsChoice(c)) payChoiceCost(r, c as ChoiceCost, choices[i], { player: pid, source: src.id, x: 0 });
+  const tapBefore = { pool: manaPoolSize(r, pid), queue: r.s.triggerQueue.length, stack: r.s.stack.length };
   payManaAbilityCosts(r, src, ab, pid);
+  const addedColors = prod.props ? colors : costs.some((c) => "tap" in c) ? withTapBonus(r, pid, colors as never) : colors;
   if (prod.props) addUnits(r, pid, colors as never, prod.props, src.id); else addMana(r, pid, costs.some((c) => "tap" in c) ? withTapBonus(r, pid, colors as never) : (colors as never), src.id);
-  if (ab.steps?.length && !prod.props?.rider) {
-    const item: StackItem = { id: `m${r.s.nextId++}`, kind: "activated", sourceId: src.id, controller: pid, abilityId: ab.id, parts: [{ specs: [], steps: ab.steps, targets: {} }], x: 0 };
-    const st = runExec(r, startExec(item));
-    if (st.status === "ask") throw new Unsupported("mana:decision_in_mana_ability");
-  }
+  if (ab.steps?.length && !prod.props?.rider) runManaSteps(r, pid, src, ab);
+  // Only a PURE tap can be taken back: the cost is just {T}, no rider / steps (pain, life, counters), no sacrifice or mana cost, nothing triggered, and the pool grew by exactly this mana.
+  const pure = costs.length === 1 && "tap" in costs[0] && !ab.steps?.length && !prod.props && !ab.scripted?.handler && manaPoolSize(r, pid) - tapBefore.pool === addedColors.length && r.s.triggerQueue.length === tapBefore.queue && r.s.stack.length === tapBefore.stack;
+  const me = player(r, pid);
+  if (pure) (me.manaTaps ??= []).push({ source: src.id, colors: [...addedColors] as never }); else me.manaTaps = [];
   if (!r.s.pending) finish(r, /* keep priority */ pid);
 }
+
+/** Why `permanentId` cannot be untapped for mana right now (undefined: it can). Pure over the run: also used by legalActions. */
+export function untapForManaProblem(r: Run, a: Extract<Action, { type: "untapForMana" }>): { code: "unknown_object" | "not_owner" | "cannot_untap"; message: string } | undefined {
+  const o = tryObj(r, a.permanentId);
+  if (!o || o.zone !== "battlefield") return { code: "unknown_object", message: `${a.permanentId} is not on the battlefield` };
+  if (o.controller !== a.player) return { code: "not_owner", message: `${a.player} does not control ${label(r, o.id)}` };
+  if (!o.tapped) return { code: "cannot_untap", message: `${label(r, o.id)} is not tapped` };
+  const p = player(r, a.player);
+  const tap = (p.manaTaps ?? []).find((t) => t.source === o.id);
+  if (!tap) return { code: "cannot_untap", message: `${label(r, o.id)} was not tapped for mana just now (it entered tapped, was tapped for a cost or an effect, its mana was spent, or something was cast or activated since)` };
+  const need: Record<string, number> = {};
+  for (const c of tap.colors) need[c] = (need[c] ?? 0) + 1;
+  for (const [c, n] of Object.entries(need)) if ((p.manaPool as Record<string, number>)[c] < n) return { code: "cannot_untap", message: `the mana ${label(r, o.id)} made is no longer in your pool` };
+  return undefined;
+}
+
+function untapForMana(r: Run, a: Extract<Action, { type: "untapForMana" }>): void {
+  const bad = untapForManaProblem(r, a);
+  if (bad) throw new Reject(bad.code, bad.message);
+  const o = obj(r, a.permanentId);
+  const p = player(r, a.player);
+  const tap = p.manaTaps!.find((t) => t.source === o.id)!;
+  for (const c of tap.colors) p.manaPool[c as keyof typeof p.manaPool]--;
+  p.manaTaps = p.manaTaps!.filter((t) => t !== tap);
+  o.tapped = false;
+  emit(r, { type: "mana_tap_retracted", player: a.player, id: o.id, colors: tap.colors });
+}
+
+function clearManaTaps(r: Run): void { for (const p of r.s.players) if (p.manaTaps?.length) p.manaTaps = []; }
 
 function playLand(r: Run, a: Extract<Action, { type: "playLand" }>): void {
   const o = r.s.objects[a.cardId];

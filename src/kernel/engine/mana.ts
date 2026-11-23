@@ -92,6 +92,15 @@ export function productionOfAbility(r: Run, owner: PlayerId, a: Ability): Produc
   return { alternatives: alts, ...(prods[0].props ? { props: prods[0].props } : {}) };
 }
 
+/**
+ * Registered by resolve.ts: runs the steps of a mana ability ("This land deals 1 damage to you." on pain lands and Talismans) after its mana was added. Activating
+ * the ability by hand does this in resolve.ts; automatic payment (autoTapFor) goes through here so a paid-for-with-pain tap hurts exactly like a manual one.
+ */
+export const manaHooks: { runSteps?: (r: Run, pid: PlayerId, src: GameObject, a: Ability) => void } = {};
+
+/** A mana ability that costs its controller something (damage / life) when used: automatic payment prefers every free source before one of these. */
+export const manaAbilityHurts = (a: Ability): boolean => !!a.steps?.some((s) => s.kind === "damage_target" || s.kind === "life_change") && !a.scripted?.handler;
+
 /** Mana abilities of an object (kind "mana"). */
 export const manaAbilities = (r: Run, o: GameObject): Ability[] => abilitiesOf(r, o).filter((a) => a.kind === "mana" && !(continuing(r) && continueHooks.unusable?.(a))); // continue mode: a mana ability the engine cannot run is never used by automatic payment (activating it by hand reports it)
 
@@ -238,7 +247,7 @@ export function autoTapFor(r: Run, pid: PlayerId, need0: ParsedCost, x: number, 
   const best = new Map<ObjId, number>();
   for (const s of sources) best.set(s.o.id, Math.max(best.get(s.o.id) ?? 0, size(s)));
   const waste = (s: Src): number => (best.get(s.o.id) ?? 0) - size(s);
-  sources.sort((s1, s2) => flex(s1) - flex(s2) || waste(s1) - waste(s2) || Number(s1.o.id.slice(1)) - Number(s2.o.id.slice(1)));
+  sources.sort((s1, s2) => Number(manaAbilityHurts(s1.a)) - Number(manaAbilityHurts(s2.a)) || flex(s1) - flex(s2) || waste(s1) - waste(s2) || Number(s1.o.id.slice(1)) - Number(s2.o.id.slice(1)));
   const used = new Set<ObjId>();
   const colorsOf = (s: Src, want?: ManaColor): ManaColor[] => {
     const prod = productionOfAbility(r, pid, s.a);
@@ -275,6 +284,7 @@ export function autoTapFor(r: Run, pid: PlayerId, need0: ParsedCost, x: number, 
     payManaAbilityCosts(r, g.s.o, g.s.a, pid);
     const props = productionOfAbility(r, pid, g.s.a).props;
     if (props) addUnits(r, pid, g.colors, props, g.s.o.id); else addMana(r, pid, g.colors, g.s.o.id);
+    if (g.s.a.steps?.length && !props?.rider) manaHooks.runSteps?.(r, pid, g.s.o, g.s.a);
   }
   for (const g of gained) if (g.s.pay !== undefined) {
     const eff = effectivePool(r, pid, ctx);

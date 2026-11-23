@@ -19,7 +19,9 @@ import { promptOwnersOf } from "@/lib/multiplayer/seatPrompts";
 import { attackLockedOut, canAttack, resolveAttackTarget } from "@/engine/combat";
 import { attackBannedAgainst } from "@/engine/lockdownEffects";
 import { parseLoyaltyAbilities } from "@/engine/abilities";
-import type { GameSession } from "@/lib/types";
+import type { GameSession, ManaPool } from "@/lib/types";
+import { emptyManaPool } from "@/engine/mana";
+import { untapForManaDecision, type ManaContribution } from "@/engine/tapUsed";
 import type { GameContext, HandlerApi } from "./context";
 
 /** What the registry needs from the host: the (late-bound) handlers and a read of the game state the `when` checks look at. */
@@ -152,20 +154,24 @@ export type IntentAcks = Record<string, { seq: number; error?: string }>;
 
 /**
  * Board-aware refusals for the guest intents that would otherwise trust their arguments. Pure over a session.
- *  - toggle tap: a guest may only TAP an untapped permanent of their own battlefield. Untapping a tapped one is refused outright (the untap step, untap
- *    effects and ability costs are the only legal ways), and the command zone has nothing to tap.
+ *  - toggle tap: a guest may TAP an untapped permanent of their own battlefield, or take back their own mana tap whose mana is still unspent (the same rule as the
+ *    host: untapForManaDecision). Any other untap is refused (the untap step and untap effects are the only legal ways); the command zone has nothing to tap.
  *  - attack: own untapped non-sick non-defender creature that has not attacked yet, aimed at ANOTHER seat that is still in the game or at a planeswalker that
  *    seat controls (the engine's declareAttack would also accept your own seat or planeswalker as a target).
  *  - loyalty: cost and text must be one of the planeswalker's printed loyalty abilities (the handler applies `cost` to the loyalty counters as given).
  */
-export function guestRefusals(session: GameSession): Pick<IntentGameState, "toggleTapRefusal" | "attackRefusal" | "loyaltyRefusal"> {
+export function guestRefusals(session: GameSession, mana?: { contributions: Record<string, ManaContribution[]>; pools: Record<string, ManaPool> }): Pick<IntentGameState, "toggleTapRefusal" | "attackRefusal" | "loyaltyRefusal"> {
   const bf = (seatId: string) => session.seats.find((seat) => seat.id === seatId)?.board.battlefield ?? [];
   return {
     toggleTapRefusal: (seatId, cardId, location) => {
       if (location !== "battlefield") return "that card is not a permanent you can tap";
       const card = bf(seatId).find((item) => item.id === cardId);
       if (!card) return "that is not one of your permanents";
-      if (card.tapped) return "a tapped permanent only untaps in your untap step or through the rules";
+      // A tapped permanent may only be a take-back of the guest's OWN unspent mana tap (engine/tapUsed.ts untapForManaDecision); without the mana records, fail closed.
+      if (card.tapped) {
+        const decision = untapForManaDecision(card, mana?.contributions[seatId] ?? [], mana?.pools[seatId] ?? emptyManaPool());
+        return decision.ok ? undefined : decision.reason;
+      }
       return undefined;
     },
     attackRefusal: (seatId, cardId, targetId) => {
@@ -191,7 +197,7 @@ export function guestRefusals(session: GameSession): Pick<IntentGameState, "togg
 export function readIntentState(ctx: GameContext, paused = false): IntentGameState {
   const { choices, mana, session } = ctx;
   return {
-    ...guestRefusals(session),
+    ...guestRefusals(session, { contributions: mana.manaContributions, pools: mana.manaPools }),
     answerRefusal: (name, seatId, args) =>
       answerRefusal(name, seatId, args, {
         session,

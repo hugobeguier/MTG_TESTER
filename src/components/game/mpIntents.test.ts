@@ -193,6 +193,29 @@ describe("a friend can never untap by toggling, and may only tap their own untap
       expect(calls, id).toEqual([]);
     }
   });
+  describe("taking back their OWN unspent mana tap", () => {
+    const pool = (over: Record<string, number> = {}) => ({ W: 0, U: 0, B: 0, R: 0, G: 0, C: 0, ...over });
+    const withMana = (contributions: Array<{ cardId: string; color: "G"; amount: number }>, g: number, session = board()): IntentGameState => ({ ...stateFor("act"), ...guestRefusals(session, { contributions: { [S]: contributions }, pools: { [S]: pool({ G: g }) } }) });
+    const untap = (id: string, state: IntentGameState, seat = S) => run("onToggleTapCard", [seat, id, "battlefield"], state);
+    it("is allowed while the mana is still in the pool", () => {
+      const { result, calls } = untap("tappedland", withMana([{ cardId: "tappedland", color: "G", amount: 1 }], 1));
+      expect(result.ok).toBe(true);
+      expect(calls).toHaveLength(1);
+    });
+    it("is refused after the mana was spent (replaying the toggle), after the record is gone, and for a permanent not tapped for mana", () => {
+      expect(untap("tappedland", withMana([{ cardId: "tappedland", color: "G", amount: 1 }], 0)).result.ok).toBe(false); // pool spent
+      expect(untap("tappedland", withMana([], 1)).result.ok).toBe(false); // record dropped by a cast / ability / phase change
+      expect(untap("tappedcreature", withMana([{ cardId: "tappedland", color: "G", amount: 1 }], 1)).result.ok).toBe(false); // tapped for another reason
+      const used = board();
+      (used.seats[0].board.battlefield.find((c) => c.id === "tappedland") as { tapUsed?: boolean }).tapUsed = true;
+      expect(untap("tappedland", withMana([{ cardId: "tappedland", color: "G", amount: 1 }], 1, used)).result.ok).toBe(false);
+    });
+    it("never reaches an opponent's permanent, even with a matching record for it", () => {
+      const state = withMana([{ cardId: "oppland", color: "G", amount: 1 }], 1);
+      expect(untap("oppland", state).result.ok).toBe(false);
+      expect(untap("oppland", state, "seat-a").result.ok).toBe(false); // the seat arg must be the guest's own
+    });
+  });
   it("refuses unknown ids, the command zone, and another seat's seat id", () => {
     expect(toggle("nope").result.ok).toBe(false);
     expect(toggle("cmdr", "command").result.ok).toBe(false);

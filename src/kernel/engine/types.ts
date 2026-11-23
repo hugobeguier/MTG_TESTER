@@ -126,6 +126,8 @@ export interface PlayerState {
   manaPool: ManaPool;
   /** mana with a spending restriction / rider / duration (manapool.ts); plain mana is in manaPool */
   manaUnits?: import("./manapool").ManaUnit[];
+  /** pure mana taps whose mana is still unspent and nothing was cast / activated / decided since (what `untapForMana` may take back); cleared by every other action and when the pool empties */
+  manaTaps?: Array<{ source: ObjId; colors: ManaColor[] }>;
   landsPlayed: number;
   /** clock value when this player's most recent turn began (summoning sickness) */
   lastTurnStartTs: number;
@@ -511,6 +513,8 @@ export type Action =
       /** double-faced cards: the face to cast (modal double-faced / split) */
       face?: string }
   | { type: "activateAbility"; player: PlayerId; sourceId: ObjId; abilityId: string; targets?: Record<string, string[]>; x?: number; color?: string; payWith?: ObjId[]; autoPay?: boolean; phyrexian?: Array<"mana" | "life"> }
+  /** take back your own mana tap (the Arena misclick undo): the permanent untaps and exactly the mana it made leaves the pool, as long as that mana is unspent and nothing was cast / activated / decided since */
+  | { type: "untapForMana"; player: PlayerId; permanentId: ObjId }
   | { type: "playLand"; player: PlayerId; cardId: ObjId; /** modal double-faced lands: which face to play */ face?: string }
   | { type: "passPriority"; player: PlayerId; fastForward?: boolean }
   | { type: "answerDecision"; player: PlayerId; decisionId: string; choice: Choice }
@@ -539,7 +543,7 @@ export interface GameEvent extends EventBase { seq: number }
 export type ErrorCode =
   | "game_over" | "decision_pending" | "no_decision" | "wrong_decision" | "not_your_priority" | "not_your_decision"
   | "wrong_timing" | "not_in_zone" | "not_owner" | "unknown_object" | "unknown_card" | "unknown_ability"
-  | "illegal_target" | "invalid_choice" | "cannot_pay" | "cannot_activate" | "unsupported" | "loop_detected"
+  | "illegal_target" | "invalid_choice" | "cannot_pay" | "cannot_activate" | "cannot_untap" | "unsupported" | "loop_detected"
   | "not_castable" | "stack_not_empty" | "land_limit"
   // combat
   | "declaration_pending" | "not_declaring" | "not_your_declaration" | "illegal_attack" | "illegal_block" | "attack_requirement";

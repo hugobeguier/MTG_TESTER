@@ -19,14 +19,14 @@ import { baseChoices } from "./castopts";
 import { permissionsFor } from "./durable";
 import { attackProblem, blockProblem, defenderOptions, legalAttackers } from "./combat";
 import { goadersOf, hostOf, mustAttack, restrictionsOf } from "./layers";
-import { resolve } from "./resolve";
+import { resolve, untapForManaProblem } from "./resolve";
 import type { Action, Choice, DecisionKind, EngineContext, GameState, ObjId, PendingView, PlayerId } from "./types";
 import { isObjId } from "./types";
 
 export interface LegalAction {
   /** stable id: "<kind>:<object>[:<ability|face|option>]" (the same action keeps the same id from one call to the next) */
   id: string;
-  kind: "playLand" | "castSpell" | "activateAbility" | "turnFaceUp" | "castPrepared" | "passPriority" | "declareAttackers" | "declareBlockers" | "answerDecision";
+  kind: "playLand" | "castSpell" | "activateAbility" | "untapForMana" | "turnFaceUp" | "castPrepared" | "passPriority" | "declareAttackers" | "declareBlockers" | "answerDecision";
   player: PlayerId;
   label: string;
   /** a ready action for `resolve` (casts / activations use autoPay; declarations and answers have their own fields below) */
@@ -110,6 +110,8 @@ function choicesOf(p: PendingView): Choice[] {
 export interface LegalOptions {
   /** also list mana abilities (default true) */
   mana?: boolean;
+  /** also list `untapForMana` (taking back a mana tap). Off by default: it is a UI convenience, never a move for the AI, the stops logic or random play */
+  untap?: boolean;
 }
 
 /** Everything `player` may start now. Empty for a player who has lost, a finished game, or when somebody else holds priority / owes a declaration or decision. */
@@ -214,6 +216,12 @@ export function legalActions(state: GameState, player: PlayerId, ctx: EngineCont
     }
   }
 
+  if (opts.untap) {
+    for (const t of me.manaTaps ?? []) {
+      const action: Action = { type: "untapForMana", player, permanentId: t.source };
+      if (!untapForManaProblem(r, action as Extract<Action, { type: "untapForMana" }>)) add({ id: `untapForMana:${t.source}`, kind: "untapForMana", player, objectId: t.source, zone: "battlefield", label: `Untap ${cardName(r, t.source)} (take back its mana)`, action });
+    }
+  }
   add({ id: "passPriority", kind: "passPriority", player, label: state.stack.length ? "Pass (let the top of the stack resolve)" : "Pass priority", action: { type: "passPriority", player } });
   return out;
 }

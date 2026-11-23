@@ -71,6 +71,7 @@ export function effectivePool(r: Run, pid: PlayerId, ctx?: SpendCtx): ManaPool {
 /** Take `n` mana of `color` for a payment: units first (restricted / lasting mana would otherwise be wasted), then the plain pool. */
 export function takeMana(r: Run, pid: PlayerId, color: ManaColor, ctx: SpendCtx | undefined): boolean {
   const p = player(r, pid);
+  p.manaTaps = []; // spending mana ends the take-back window of every tap before it
   const units = unitsOf(r, pid);
   // restricted units first, then lasting ones, then any unrestricted unit, then the plain pool
   const rank = (u: ManaUnit) => (u.restriction || u.abilities || u.rider ? 0 : u.keep ? 1 : 2);
@@ -105,6 +106,7 @@ export function emptyPools(r: Run, all: boolean): void {
     const keepRed = !all && keepsRed(r, p.id) ? p.manaPool.R : 0;
     p.manaPool = { W: 0, U: 0, B: 0, R: keepRed, G: 0, C: 0 };
     p.manaUnits = (p.manaUnits ?? []).filter((u) => u.keep && !all);
+    p.manaTaps = [];
   }
 }
 

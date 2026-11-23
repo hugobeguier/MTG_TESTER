@@ -20,6 +20,30 @@ import { toggleYield, type SeatYield } from "@/engine/yieldPolicy";
 /** the driver never takes more than this many automatic actions in one turn (a loop guard, not a rule) */
 export const MAX_AUTO_ACTIONS_PER_TURN = 150;
 
+/** One way to tap a permanent for mana: the button key (a colour, or a whole alternative like WB), its cost note, and the action that does it */
+export interface ManaWay { key: string; hint?: string; action: Action }
+
+/**
+ * The ways to tap a permanent for mana, read from the ability texts of its legal mana abilities ("{T}: Add {W} or {U}. This artifact deals 1 damage to you."):
+ * one way per listed alternative (the action carries the chosen colour), each noting the damage / life loss it costs. Any-colour mana is ONE way (the engine asks the colour).
+ */
+export function manaWays(entries: LegalAction[]): ManaWay[] {
+  const out: ManaWay[] = [];
+  for (const entry of entries) {
+    if (!entry.action || entry.action.type !== "activateAbility") continue;
+    const text = entry.label.slice(entry.label.indexOf(": ") + 2);
+    const hurt = text.match(/deals? (\d+) damage to you|you lose (\d+) life/i);
+    const hint = hurt ? `${hurt[1] ?? hurt[2]} damage to you` : undefined;
+    const clause = text.match(/\badd\s+([^.]*)\./i)?.[1] ?? "";
+    const alts = clause.split(/\s+or\s+|,\s*(?:or\s+)?/).map((alt) => alt.match(/\{[^}]+\}/g) ?? []).filter((symbols) => symbols.length > 0);
+    const strip = (symbols: string[]) => symbols.map((x) => x.replace(/[{}]/g, "")).join("");
+    if (alts.length > 1) for (const alt of alts) out.push({ key: strip(alt), ...(hint ? { hint } : {}), action: { ...entry.action, color: strip(alt) } });
+    else out.push({ key: alts.length === 1 ? strip(alts[0]) : "Any", ...(hint ? { hint } : {}), action: entry.action });
+  }
+  const seen = new Set<string>();
+  return out.filter((way) => (seen.has(way.key) ? false : (seen.add(way.key), true)));
+}
+
 export interface AttackerOption { id: string; name: string; defenders: Array<{ id: string; label: string }>; mustAttack: boolean }
 export interface BlockerOption { id: string; name: string; attackers: Array<{ id: string; name: string }> }
 export type Declaration =
@@ -50,7 +74,11 @@ export class KernelGameController {
   selectedCardId: string | undefined;
   inspectedCard: VisibleCard | undefined;
   selectHandCard = (card: VisibleCard): void => { this.selectedCardId = this.selectedCardId === card.id ? undefined : card.id; this.bump(); };
-  inspectCard = (card: VisibleCard): void => { this.inspectedCard = card; this.bump(); };
+  inspectCard = (card: VisibleCard): void => {
+    // clicking my own permanent that I just tapped for mana (mana unspent, nothing cast since) takes the tap back, like in the legacy table
+    if (this.canUntapForMana(card.id)) { this.untapForMana(this.human, card.id); return; }
+    this.inspectedCard = card; this.bump();
+  };
   closeInspect = (): void => { this.inspectedCard = undefined; this.bump(); };
   private attackPicks: Record<string, string> = {};
   /** attacker (kernel id) -> its blockers (kernel ids) in the order they were tapped: that order is the damage-assignment order, as in the legacy modal */
@@ -243,11 +271,44 @@ export class KernelGameController {
     if (pick?.action) this.act(pick.action); else this.note(`${this.nameOf(id)} can't be cast from there right now.`, "Rules");
   };
 
+  /** the open "which mana?" chooser of a permanent with several mana ways (a Talisman: {C}, or {W}/{U} and 1 damage); undefined when none is open */
+  private manaPick: { cardName: string; options: ManaWay[] } | undefined;
+  manaChoice(): { cardName: string; choices: never[]; hints: Record<string, string> } | undefined {
+    const pick = this.manaPick;
+    return pick ? { cardName: pick.cardName, choices: pick.options.map((o) => o.key) as never[], hints: Object.fromEntries(pick.options.filter((o) => o.hint).map((o) => [o.key, o.hint!])) } : undefined;
+  }
+  chooseMana = (key: string): void => {
+    const way = this.manaPick?.options.find((o) => o.key === key);
+    this.manaPick = undefined;
+    if (way) this.act(way.action); else this.bump();
+  };
+  cancelManaChoice = (): void => { this.manaPick = undefined; this.bump(); };
+
+  /** can the human take back the mana tap of this permanent right now? (the kernel's own legality: unspent, nothing cast or activated since, pure mana tap) */
+  canUntapForMana(cardId: string): boolean {
+    const id = this.kid(cardId);
+    return this.ks.legal(this.human, { untap: true }).some((a) => a.kind === "untapForMana" && a.objectId === id);
+  }
+
+  /** the take-back: the kernel decides; a refusal becomes a "Rules" log note saying why */
+  untapForMana = (seatId: string, cardId: string): void => {
+    if (seatId !== this.human) return this.inert("untap another seat's permanent");
+    this.act({ type: "untapForMana", player: this.human, permanentId: this.kid(cardId) });
+  };
+
+  /** the "T" key: an untapped permanent is tapped for mana; a tapped one is untapped when that is a legal take-back (otherwise the kernel's reason is logged) */
+  toggleTap = (seatId: string, cardId: string): void => {
+    if (seatId !== this.human) return this.inert("tap another seat's permanent");
+    if (this.ks.state.objects[this.kid(cardId)]?.tapped) this.untapForMana(seatId, cardId); else this.tapForMana(seatId, cardId);
+  };
+
   tapForMana = (seatId: string, cardId: string): void => {
     if (seatId !== this.human) return this.inert("tap another seat's permanent");
     const id = this.kid(cardId);
-    const pick = this.legalFor("activateAbility", id).find((a) => a.isMana && a.action);
-    if (pick?.action) this.act(pick.action); else this.note(`${this.nameOf(id)} has no mana ability you can use right now.`, "Rules");
+    const ways = manaWays(this.legalFor("activateAbility", id).filter((a) => a.isMana && a.action));
+    // exactly one way: just do it; several (the free {C} and a damaging coloured ability, two colours): the player chooses, with the cost shown
+    if (ways.length > 1) { this.manaPick = { cardName: this.nameOf(id), options: ways }; this.bump(); return; }
+    if (ways[0]) this.act(ways[0].action); else this.note(`${this.nameOf(id)} has no mana ability you can use right now.`, "Rules");
   };
 
   /** every legacy "activate ..." callback lands here: the kernel lists the abilities by id, the table only knows an index */
@@ -443,7 +504,7 @@ export class KernelGameController {
       onSelectHandCard: this.selectHandCard, onInspectCard: this.inspectCard, onCloseInspectCard: this.closeInspect,
       onPlayCard: this.playCard, onPlayCardFace: this.playCardFace, onCastCommander: this.castCommander,
       onCastFromExile: this.castFromZone, onCastFromGraveyard: this.castFromZone,
-      onTapForMana: this.tapForMana,
+      onTapForMana: this.tapForMana, onChooseMana: this.chooseMana, onCancelManaChoice: this.cancelManaChoice,
       onActivateSacrificeAbility: this.activateAbility, onActivateTapAbility: this.activateAbility, onActivateSelfUntap: this.activateAbility,
       onActivateGenericMana: this.activateAbility, onActivateEquip: (s: string, c: string) => this.activateAbility(s, c, 0),
       onActivateManlandAnimation: (s: string, c: string) => this.activateAbility(s, c, 0),
@@ -457,7 +518,7 @@ export class KernelGameController {
       onResolvePendingTrigger: this.passPriority,
       onDrawCard: inert("draw a card"), onShuffleLibrary: inert("shuffle the library"), onOpenLibrarySearch: inert("search the library"),
       onMoveCardToGraveyard: inert("move a card to the graveyard"), onMoveCardToExile: inert("move a card to exile"), onMoveCardToHand: inert("move a card to hand"),
-      onChangeCounter: inert("change counters"), onChangeLife: inert("change life"), onToggleTapCard: (seatId: string, cardId: string) => this.tapForMana(seatId, cardId), // the "T" key: taps for mana through the card's mana ability (no manual untap in the kernel)
+      onChangeCounter: inert("change counters"), onChangeLife: inert("change life"), onToggleTapCard: this.toggleTap, // the "T" key: taps for mana through the card's mana ability, or takes back an unspent mana tap
       onCycleCard: inert("cycling"), onUnlockRoomDoor: inert("unlock a room door"),
       onPayCumulativeUpkeep: inert("cumulative upkeep"), onSacrificeRuleSource: inert("sacrifice a rule source"),
       onResolveMyriadLandscape: inert("myriad landscape"), onResolveBasicLandFetch: inert("basic land fetch"),

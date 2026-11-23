@@ -1,12 +1,13 @@
 // Mana UI handlers: floating-pool bookkeeping (add/spend/clear per seat, restricted and copy mana, contributions) and tapping permanents for mana (lands, signets, mana choices), plus card inspection.
 // Part of the AppFlow() split: shared state arrives through `ctx` (see ./context.ts); handlers owned by other hooks are called through `lateFn` so every hook sees the current render's functions.
+import { useEffect, useRef } from "react";
 import { type ManaColor, type ManaPool, type PlayerSeat, type RestrictedManaBatch, type VisibleCard } from "@/lib/types";
 import { abilityOracleText } from "@/lib/typeGrants";
 import { addManaToPool, addPools, chooseManaSourcesForCost, effectiveManaOracleText, emptyManaPool, isAvailableManaSource, isSacrificeManaSource, manaAbilityCounterRemovalKind, manaChoicesForCard, manaPoolTotal, manaProducedBy, lifeGainForTap, tokenTapManaAbility, painDamageForTap, payCostFromPool, restrictedBatchUsable, signetAbility, spendManaSources, tapVisibleCard } from "@/engine/mana";
 import { basicLandFetchCostRequiresTap, isBasicLandFetchAbility } from "@/lib/oracleClauses";
 import { genericCostShim } from "@/engine/effects";
 import { isSimpleManaSourcePermanent } from "@/engine/simpleManaSource";
-import { markPermanentsUsed, tapPaidSignet, toggleTapManually } from "@/engine/tapUsed";
+import { markPermanentsUsed, tapPaidSignet, isRetractableManaTap, toggleTapManually, untapForManaDecision } from "@/engine/tapUsed";
 import { isEquipment } from "@/lib/attachments";
 import { parseGenericSacrificeAbilities, parseGenericTapAbilities } from "@/lib/activatedAbilities";
 import { type GameContext, lateFn } from "./context";
@@ -16,6 +17,16 @@ export function useManaUi(ctx: GameContext) {
   const { setMyriadTapChoice } = ctx.choices;
   const { manaPools, setManaPools, setCopyMana, manaContributions, setManaContributions, restrictedManaBatches, setRestrictedManaBatches, manaChoice, setManaChoice } = ctx.mana;
   const addEvent = lateFn(ctx, "addEvent");
+
+  // Anything put on the stack (a spell, an ability, a pending cast/targeting step) ends the take-back window of every mana tap before it: the tapped sources are marked
+  // used and keep their mana in the pool, but can no longer be untapped by hand (rule: "as long as a spell or ability hasn't been cast").
+  const stackSignature = `${ctx.stack.stackActions.length}|${ctx.stack.pendingAction ? 1 : 0}`;
+  const lastStackSignature = useRef(stackSignature);
+  useEffect(() => {
+    if (lastStackSignature.current === stackSignature) return;
+    lastStackSignature.current = stackSignature;
+    for (const seat of session.seats) if ((manaContributions[seat.id] ?? []).length > 0) clearManaContributions(seat.id);
+  });
 
   function poolForSeat(seatId: string) {
     return manaPools[seatId] ?? emptyManaPool();
@@ -156,6 +167,11 @@ export function useManaUi(ctx: GameContext) {
       }
       return;
     }
+    // Clicking a land / rock I just tapped for mana, whose mana is still floating untouched, takes the tap back (the rule lives in engine/tapUsed.ts).
+    if (ownerSeat?.id === humanSeat.id && liveCard.tapped && untapForManaDecision(liveCard, manaContributions[ownerSeat.id] ?? [], poolForSeat(ownerSeat.id)).ok) {
+      toggleTapCard(humanSeat.id, liveCard.id, "battlefield");
+      return;
+    }
     if (ownerSeat?.id === humanSeat.id && isSimpleManaSourcePermanent(liveCard, humanSeat, session.seats)) {
       toggleTapCard(humanSeat.id, liveCard.id, "battlefield");
       return;
@@ -168,7 +184,11 @@ export function useManaUi(ctx: GameContext) {
   function clickPermanentForSeat(seatId: string, cardId: string) {
     const seat = session.seats.find((item) => item.id === seatId);
     const card = seat?.board.battlefield.find((item) => item.id === cardId);
-    if (!seat || seat.kind !== "human" || !card || card.tapped) return;
+    if (!seat || seat.kind !== "human" || !card) return;
+    if (card.tapped) {
+      if (untapForManaDecision(card, manaContributions[seatId] ?? [], poolForSeat(seatId)).ok) toggleTapCard(seatId, cardId, "battlefield");
+      return;
+    }
     if (card.name === "Myriad Landscape" || isSimpleManaSourcePermanent(card, seat, session.seats)) toggleTapCard(seatId, cardId, "battlefield");
   }
 
@@ -306,7 +326,7 @@ export function useManaUi(ctx: GameContext) {
     // The {N} was spent out of the pool: the sources that made that mana (and this signet) are USED and can't be untapped and replayed (that was +1 mana per untap of Viridescent Bog).
     if (signet.generic > 0) clearManaContributions(seatId);
     setManaPools((current) => ({ ...current, [seatId]: tapped.pool }));
-    for (const symbol of signet.symbols) addManaContribution(seatId, cardId, symbol, 1);
+    // No contribution record for a signet: a multi-colour tap is not retractable.
     setSession((current) => (signet.generic > 0 ? markPermanentsUsed(tapVisibleCard(current, seatId, cardId, "battlefield"), seatId, [cardId]) : tapVisibleCard(current, seatId, cardId, "battlefield")));
     addEvent(`${seat.name} pays {${signet.generic}} and taps ${card.name} for ${signet.symbols.map((symbol) => "{" + symbol + "}").join("")}.`, seatId, "Mana");
     setInspectedCard((current) => (current?.id === cardId ? { ...current, tapped: true } : current));
@@ -339,7 +359,8 @@ export function useManaUi(ctx: GameContext) {
       const pool = current[seatId] ?? emptyManaPool();
       return { ...current, [seatId]: addManaToPool(pool, color, amount) };
     });
-    addManaContribution(seatId, cardId, color, amount);
+    // Only a PURE mana tap can be taken back (engine/tapUsed.ts untapForManaDecision): pain / life gain / Treasure-style sacrifice / counter removal are side effects that cannot be undone.
+    if (location === "battlefield" && isRetractableManaTap(card, color)) addManaContribution(seatId, cardId, color, amount);
     addEvent(`${seat.name} taps ${card.name} for ${amount > 1 ? amount : ""}${color}.`, seatId, "Mana");
     setInspectedCard((current) => (current?.id === cardId ? { ...current, tapped: true } : current));
     setManaChoice(undefined);

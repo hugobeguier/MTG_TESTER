@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { bear, by, onBoard, real, seat, session } from "@/components/AppFlow.batch3Abilities.test";
 import { addManaToPool, chooseManaSourcesForCost, emptyManaPool, isAvailableManaSource, spendManaSources } from "@/engine/mana";
 import { untapForSeat } from "@/engine/turnFlow";
-import { canManuallyUntap, markPermanentsUsed, tapPaidSignet, toggleTapManually, untapRefusalMessage } from "@/engine/tapUsed";
+import { isRetractableManaTap, canManuallyUntap, markPermanentsUsed, tapPaidSignet, toggleTapManually, untapRefusalMessage } from "@/engine/tapUsed";
 
 const spell = (cost: number, manaCost: string) => real("Swamp", "spell", { manaValue: cost, manaCost, typeLine: "Sorcery" });
 
@@ -46,7 +46,7 @@ describe("Viridescent Bog: {1}, {T}: Add {B}{G}. really pays its {1}", () => {
     expect(toggleTapManually(s, "a", "sw", [], noPool).refused).toBeTruthy();
   });
 });
-describe("manual untap is never allowed outside Sandbox mode", () => {
+describe("manual untap is only a take-back of unspent mana outside Sandbox mode", () => {
   const pool = addManaToPool(emptyManaPool(), "B", 1);
   const cardOf = (s: ReturnType<typeof session>, id: string) => onBoard(s, id);
   it("a land that ENTERED tapped (a tapland: no tapUsed, no mana record) cannot be untapped by hand", () => {
@@ -57,11 +57,46 @@ describe("manual untap is never allowed outside Sandbox mode", () => {
       expect(cardOf(toggled.session, "tl")?.tapped).toBe(true);
     }
   });
-  it("a land tapped for mana, even with its mana still floating, stays tapped", () => {
+  it("a land tapped for mana whose mana is still floating CAN be untapped (take-back), and the mana comes out of the pool", () => {
     const s = session([seat("a", [real("Swamp", "sw", { tapped: true })])]);
     const toggled = toggleTapManually(s, "a", "sw", [{ cardId: "sw", color: "B", amount: 1 }], pool);
-    expect(toggled.refused).toBeTruthy();
-    expect(cardOf(toggled.session, "sw")?.tapped).toBe(true);
+    expect(toggled.refused).toBeUndefined();
+    expect(toggled.removeFromPool).toEqual({ color: "B", amount: 1 });
+    expect(cardOf(toggled.session, "sw")?.tapped).toBe(false);
+  });
+  it("refused with a reason once that mana was spent (the contribution is gone / the pool is short / the source is marked used)", () => {
+    const s = session([seat("a", [real("Swamp", "sw", { tapped: true })])]);
+    expect(toggleTapManually(s, "a", "sw", [], pool).refused).toBe(untapRefusalMessage("Swamp")); // no record: not tapped for mana (entered tapped / ability)
+    expect(toggleTapManually(s, "a", "sw", [{ cardId: "sw", color: "B", amount: 1 }], emptyManaPool()).refused).toMatch(/already spent/);
+    const used = markPermanentsUsed(s, "a", ["sw"]);
+    expect(toggleTapManually(used, "a", "sw", [{ cardId: "sw", color: "B", amount: 1 }], pool).refused).toMatch(/already spent/);
+  });
+  it("Sol Ring takes both {C} back; two lands tapped then one untapped retracts only that land's mana", () => {
+    const ring = session([seat("a", [real("Sol Ring", "ring", { tapped: true })])]);
+    const poolC = addManaToPool(emptyManaPool(), "C", 2);
+    expect(toggleTapManually(ring, "a", "ring", [{ cardId: "ring", color: "C", amount: 2 }], poolC).removeFromPool).toEqual({ color: "C", amount: 2 });
+    const two = session([seat("a", [real("Swamp", "s1", { tapped: true }), real("Swamp", "s2", { tapped: true })])]);
+    const contributions = [{ cardId: "s1", color: "B" as const, amount: 1 }, { cardId: "s2", color: "B" as const, amount: 1 }];
+    const poolBB = addManaToPool(addManaToPool(emptyManaPool(), "B", 1), "B", 1);
+    expect(toggleTapManually(two, "a", "s1", contributions, poolBB).removeFromPool).toEqual({ color: "B", amount: 1 });
+  });
+  it("a creature (mana dork) tapped for mana can be taken back too", () => {
+    const s = session([seat("a", [real("Llanowar Elves", "elf", { tapped: true })])]);
+    expect(toggleTapManually(s, "a", "elf", [{ cardId: "elf", color: "G", amount: 1 }], addManaToPool(emptyManaPool(), "G", 1)).refused).toBeUndefined();
+  });
+  it("only a PURE mana tap leaves a take-back record: pain colour, Talisman colour and sacrifice mana do not; {C} on a Talisman or painland does", () => {
+    for (const name of ["Caves of Koilos", "Talisman of Progress"]) {
+      const card = real(name, "x");
+      expect(isRetractableManaTap(card, "C"), name + " C").toBe(true);
+      expect(isRetractableManaTap(card, name.startsWith("Caves") ? "W" : "U"), name + " coloured").toBe(false);
+    }
+    expect(isRetractableManaTap(real("Sol Ring", "r"), "C")).toBe(true);
+    expect(isRetractableManaTap(real("Swamp", "sw"), "B")).toBe(true);
+    expect(isRetractableManaTap(real("Swamp", "tr", { typeLine: "Artifact - Treasure", oracleText: "{T}, Sacrifice this artifact: Add one mana of any color." }), "B")).toBe(false);
+  });
+  it("an opponent's permanent: the toggle is keyed by seat, so seat b's land is not reachable through seat a", () => {
+    const s = session([seat("a", []), seat("b", [real("Swamp", "bsw", { tapped: true })])]);
+    expect(toggleTapManually(s, "a", "bsw", [{ cardId: "bsw", color: "B", amount: 1 }], pool).session).toBe(s);
   });
   it("used lands and creatures stay tapped", () => {
     const s = markPermanentsUsed(session([seat("a", [real("Swamp", "sw", { tapped: true }), bear("b2", { tapped: true, tapUsed: true }), bear("b1", { tapped: true })])]), "a", ["sw"]);
