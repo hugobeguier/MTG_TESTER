@@ -47,6 +47,7 @@ import { VisualCard } from "./VisualCard";
 import { hostHumanSeat } from "@/lib/multiplayer/seatMap";
 import { isMyStopColumn } from "@/lib/multiplayer/seatStops";
 import { describeKeyEvent, priorityShortcut } from "@/lib/yieldShortcuts";
+import { TurnIndicator } from "@/components/TurnIndicator";
 import { PHASE_ANIM_MS, nextPhaseTween, phaseProgress, type PhaseTween } from "@/components/phaseAnim";
 import { battlefieldPreviewCard, isLeftAlt } from "@/components/boardPreview";
 
@@ -246,6 +247,9 @@ interface ThreeGameTableProps {
   holdPriorityOnce?: boolean;
   /** Kernel mode: the engine's own turn number (every player's turn counts, like the log), shown as is; and the stack dock clears the moment the stack is empty. */
   kernelTurnNumber?: number;
+  /** Kernel mode: the engine's raw step id (tells the first-strike damage step apart) and who owes a decision / declaration, for the turn indicator. */
+  kernelStepId?: string;
+  kernelWaiting?: { seatId: string; kind: "choice" | "attackers" | "blockers" };
   /** Kernel mode: an open target / card pick answered by clicking the highlighted permanents, players and hand cards (ids are the table's card / seat ids). Absent = legacy behaviour. */
   kernelPick?: KernelBoardPick;
   /** Kernel mode: hand card ids that can be cast / played right now (a glow) and the reason shown on the others */
@@ -1830,10 +1834,18 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
         {/* session.turn increments once per individual player's turn (a 4-player round spans
             turns 1-4), not once per round — divide it back down to the round number players
             actually mean by "turn N". */}
-        <span>Turn {props.kernelTurnNumber ?? Math.max(1, Math.ceil(props.session.turn / Math.max(1, props.session.seats.length)))}</span>
-        <strong>{activeName}</strong>
-        <small>{props.session.phase}</small>
-        <small>Priority: {prioritySeat?.name ?? "None"}</small>
+        <TurnIndicator
+          seats={props.session.seats}
+          humanSeatId={human.id}
+          activeSeatId={props.session.activePlayerId}
+          prioritySeatId={props.prioritySeatId}
+          phase={props.kernelStepId ?? props.session.phase}
+          turnNumber={props.kernelTurnNumber ?? Math.max(1, Math.ceil(props.session.turn / Math.max(1, props.session.seats.length)))}
+          stackSize={(props.pendingAction && props.pendingAction.type !== "phase" ? 1 : 0) + (props.stackActions?.length ?? 0)}
+          pendingDecisionSeatId={props.kernelWaiting?.seatId}
+          pendingKind={props.kernelWaiting?.kind}
+          gameOver={props.session.status === "complete"}
+        />
       </div>
       <div className="three-hud top-right">
         <button
