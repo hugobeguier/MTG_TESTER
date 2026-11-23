@@ -19,6 +19,7 @@ export function sqliteCardDb(file = path.resolve(process.cwd(), "data/cards.db")
   const db = new Database(file, { readonly: true, fileMustExist: true });
   let types: string[] | undefined, names: string[] | undefined;
   const byName = db.prepare("SELECT name, type_line, mana_cost, colors, oracle_text, raw FROM cards WHERE lower(name) = lower(?) OR lower(name) LIKE lower(?) || ' // %' LIMIT 1");
+  const infoCache = new Map<string, CardInfo | undefined>(); // the SQL lookup scans the table: ~100 ms a card, and a library search asks for every card
   return {
     creatureTypes() {
       if (!types) {
@@ -32,6 +33,14 @@ export function sqliteCardDb(file = path.resolve(process.cwd(), "data/cards.db")
     },
     cardNames() { return (names ??= (db.prepare("SELECT name FROM cards").all() as Array<{ name: string }>).map((r) => r.name).sort()); },
     card(name): CardInfo | undefined {
+      if (infoCache.has(name)) return infoCache.get(name);
+      const info = cardUncached(name);
+      infoCache.set(name, info);
+      return info;
+    }
+  };
+  function cardUncached(name: string): CardInfo | undefined {
+    {
       const row = byName.get(name, name) as { name: string; type_line: string; mana_cost: string | null; colors: string; oracle_text: string; raw: string } | undefined;
       if (!row) return undefined;
       const raw = JSON.parse(row.raw) as { power?: string; toughness?: string; loyalty?: string; faces?: RawFace[] };
@@ -49,7 +58,7 @@ export function sqliteCardDb(file = path.resolve(process.cwd(), "data/cards.db")
       }
       return info;
     }
-  };
+  }
 }
 
 // ---- real cards for tests: the draft JSON + the printed data from data/cards.db (no hand-written metadata per card)

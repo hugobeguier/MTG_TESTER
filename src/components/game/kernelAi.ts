@@ -5,6 +5,8 @@
 //   castable spell (never targets only its own side), then pass / advance.
 import { defaultAnswer } from "@/kernel/observer/actions";
 import { effectiveView, type LegalAction } from "@/kernel/engine/legal";
+import { chooseDecision, planMain } from "@/kernel/ai/plan";
+import type { ScriptEntry } from "@/kernel/ai/simulate";
 import type { Action, Choice, EngineContext, GameState, PlayerId } from "@/kernel/engine/types";
 
 const MAIN = ["precombat_main", "postcombat_main"];
@@ -14,12 +16,24 @@ export interface AiMemory {
   banned: Set<string>;
   /** stack item ids this seat already answered with a response (at most one response per stack item: no response loops) */
   responded?: Set<string>;
+  /** answers planned with the action just chosen (X, modes, targets, life payments), consumed by the decisions it opens */
+  script?: ScriptEntry[];
+  /** how often each action id was chosen this turn (an ability is not used more than twice a turn) */
+  usage?: Record<string, number>;
 }
 
-function answerFor(a: LegalAction, state: GameState, seat: PlayerId): Action | undefined {
+function answerFor(a: LegalAction, state: GameState, ctx: EngineContext, seat: PlayerId, memory: AiMemory): Action | undefined {
   const p = a.pending;
   if (!p) return undefined;
-  let choice: Choice | undefined = defaultAnswer(p, state, seat);
+  // 1. the answer planned together with the action that opened this decision (X, modes, targets, optional costs / life payments)
+  const head = memory.script?.[0];
+  if (head && head.kind === p.kind) { memory.script!.shift(); return { type: "answerDecision", player: seat, decisionId: p.id, choice: head.choice }; }
+  memory.script = undefined;
+  // 2. everything else the seat owns is decided by lookahead (targets, sacrifices, "may", "unless", picks); the commander replacement is always accepted
+  if (/command zone/i.test(`${p.prompt?.title ?? ""} ${p.prompt?.instruction ?? ""}`) && p.kind === "choose_yes_no") return { type: "answerDecision", player: seat, decisionId: p.id, choice: { yes: true } };
+  let choice: Choice | undefined;
+  try { choice = chooseDecision(p, state, ctx, seat); } catch { choice = undefined; }
+  if (!choice) choice = defaultAnswer(p, state, seat);
   if (!choice && p.kind === "assign_mana" && p.mana) choice = { assign: { [p.mana.colors[0]]: p.mana.total } };
   if (!choice && p.kind === "assign_counters" && p.counters) {
     const first = Object.keys(p.counters.available)[0];
@@ -78,7 +92,8 @@ function blockDeclaration(a: LegalAction, state: GameState, ctx: EngineContext, 
 export function chooseAiAction(acts: LegalAction[], state: GameState, ctx: EngineContext, seat: PlayerId, memory: AiMemory = { banned: new Set() }): Action | undefined {
   if (!acts.length) return undefined;
   const first = acts[0];
-  if (first.kind === "answerDecision") return answerFor(first, state, seat);
+  if (first.kind === "answerDecision") return answerFor(first, state, ctx, seat, memory);
+  memory.script = undefined;
   if (first.kind === "declareAttackers") return attackDeclaration(first, state, ctx, seat);
   if (first.kind === "declareBlockers") return blockDeclaration(first, state, ctx, seat);
 
@@ -90,16 +105,9 @@ export function chooseAiAction(acts: LegalAction[], state: GameState, ctx: Engin
   if (mine && emptyStack && MAIN.includes(state.turn.phase)) {
     const land = acts.find((a) => a.kind === "playLand" && a.action && !memory.banned.has(a.id));
     if (land) return land.action;
-    const casts = acts
-      .filter((a) => a.kind === "castSpell" && a.action && !memory.banned.has(a.id))
-      .filter((a) => {
-        // targeted spells only when some legal target belongs to the other side (the default answer prefers opponents)
-        if (a.asks !== "choose_targets" || !a.targetOptions) return true;
-        return a.targetOptions.some((t) => (t.startsWith("#") ? state.objects[t]?.controller !== seat : t !== seat));
-      })
-      .map((a) => ({ a, mv: a.objectId ? Number(view(state, ctx, a.objectId)?.manaValue ?? 0) : 0 }))
-      .sort((x, y) => y.mv - x.mv);
-    if (casts.length) return casts[0].a.action;
+    // lookahead: simulate each cast / activation (with its X, modes, targets, optional costs) and take the one that improves the position most; a no-op is never chosen
+    const plan = planMain(acts, state, ctx, seat, memory.banned, (memory.usage ??= {}));
+    if (plan) { memory.script = plan.script; memory.usage![plan.id] = (memory.usage![plan.id] ?? 0) + 1; return plan.action; }
   }
   if (mine && emptyStack) return { type: "advancePhase", player: seat };
   return acts.find((a) => a.kind === "passPriority")?.action ?? { type: "passPriority", player: seat };
