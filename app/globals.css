@@ -2849,6 +2849,12 @@ ol {
 @media (max-width: 640px) { .kernel-head { flex-direction: column; } .kernel-preview { width: min(340px, 60vw); } }
 .kernel-chip { align-items: center; display: inline-flex; gap: 0.4rem; }
 .kernel-dialog:focus { outline: none; }
+/* Esc / "Hide choice": the dialog stays mounted (picks survive) but is not displayed; the board-pick banner is hidden the same way. The pill is the legacy
+   .choice-minimize-toggle, fixed at the top centre (above the dialog backdrop) in both states. */
+.card-inspector-backdrop.kernel-layer.is-hidden { display: none; }
+.kernel-choice-hidden .kernel-pick-banner { display: none; }
+.choice-minimize-toggle.kernel-choice-toggle { position: fixed; z-index: 61; }
+.kernel-esc-hint { display: flex; align-items: center; gap: 0.5rem; }
 .kernel-order-list { display: grid; gap: 0.4rem; }
 .kernel-split-row { grid-template-columns: auto; justify-items: center; }
 .mana-choice-button.selected { box-shadow: 0 0 0 3px var(--text); }

@@ -3,7 +3,7 @@
 // pick N of the listed options (targets, discards, modes, colours, creature types, search results; with card art and a filter for long lists), yes / no
 // (with the cost for "unless you pay"), a number (X with the most you can afford), ordering (up / down), and the three "split an amount" kinds (damage, mana, counters).
 // It offers only what the kernel listed and answers through onAnswer(decisionId, choice) with the id it was RENDERED for; give it key={decision.id}.
-// Keyboard: Enter confirms when the answer is valid, Escape cancels when the kernel allows it.
+// Keyboard: Enter confirms when the answer is valid, Escape hides / shows the window (never answers; Cancel is a button).
 // Targets and picks of permanents / players / hand cards are normally clicked on the board (KernelBoardPick); this dialog is the list fallback and the home of everything else.
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Choice } from "@/kernel/engine/types";
@@ -13,7 +13,7 @@ import {
   selectionHint, setSplit, splitChoice, splitModel, splitSum, splitValid, toggleSelection, undoLast
 } from "./game/kernelDecisionView";
 import { pileDestination } from "./game/kernelCardInfo";
-import { escapeCancels } from "./game/kernelPlacement";
+import { hideHint, keyAnswers } from "./game/kernelDialogVisibility";
 import { PlacementBody } from "./KernelPlacementBody";
 import { CardChip, CardFull, CardPreviewPanel, CardTile, useCardPreview, type CardPreviewApi } from "./KernelCardView";
 
@@ -24,6 +24,9 @@ export interface KernelDecisionDialogProps {
   sourceArt?: string;
   /** go back to clicking on the board (offered only for decisions that can be clicked there) */
   onBoard?: () => void;
+  /** Esc / the Hide button parked the window: it stays mounted (picks, order, typed X survive) but is not displayed, so the table can be inspected */
+  hidden?: boolean;
+  onHide?: () => void;
 }
 
 /** how wide the card tiles are: bigger when there are few cards or they are the cards in a library (scry, surveil, look at the top) */
@@ -148,7 +151,7 @@ function Piles({ decision, picked, dest, api, width, onToggle }: { decision: Dec
   return <div className="kernel-piles">{pile("Stays on top (first is the top card)", topFirst, true)}{pile(destLabel, moved, false)}</div>;
 }
 
-export function KernelDecisionDialog({ decision, onAnswer, sourceArt, onBoard }: KernelDecisionDialogProps) {
+export function KernelDecisionDialog({ decision, onAnswer, sourceArt, onBoard, hidden = false, onHide }: KernelDecisionDialogProps) {
   const cls = classifyDecision(decision);
   const api = useCardPreview();
   const pile = pileDestination(decision);
@@ -161,17 +164,16 @@ export function KernelDecisionDialog({ decision, onAnswer, sourceArt, onBoard }:
 
   const cancel = decision.cancellable ? <button type="button" onClick={() => onAnswer(decision.id, { cancel: true })}>Cancel</button> : null;
 
-  // Enter confirms, Escape cancels (when the kernel lets the player)
+  // Enter confirms (only while the window is showing). Escape never answers or cancels: it hides / shows the window (handled in KernelGameTable); Cancel is the button.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
-      if (e.key === "Escape" && !escapeCancels(decision)) e.preventDefault(); // a rules-required placement (scry / surveil / order) cannot be cancelled
-      else if (e.key === "Escape" && decision.cancellable) { e.preventDefault(); onAnswer(decision.id, { cancel: true }); }
-      else if (e.key === "Enter" && t?.tagName !== "BUTTON") { e.preventDefault(); answerRef.current(); }
+      if (keyAnswers(e.key, hidden) && t?.tagName !== "BUTTON") { e.preventDefault(); answerRef.current(); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [decision, onAnswer]);
+  }, [hidden]);
+  useEffect(() => { if (!hidden) boxRef.current?.focus({ preventScroll: true }); }, [hidden]); // back from a peek: keyboard focus returns to the window
 
   let body: React.ReactNode;
   answerRef.current = () => undefined;
@@ -232,7 +234,7 @@ export function KernelDecisionDialog({ decision, onAnswer, sourceArt, onBoard }:
     );
   }
   return (
-    <div className="card-inspector-backdrop kernel-layer" role="dialog" aria-modal="true" aria-label={decision.title} data-decision-id={decision.id}>
+    <div className={`card-inspector-backdrop kernel-layer${hidden ? " is-hidden" : ""}`} role="dialog" aria-modal={!hidden} aria-hidden={hidden} aria-label={decision.title} data-decision-id={decision.id} hidden={hidden}>
       <article className="library-look-modal kernel-dialog" ref={boxRef} tabIndex={-1}>
         <header className="kernel-head">
           {decision.sourceCard ? (
@@ -246,6 +248,9 @@ export function KernelDecisionDialog({ decision, onAnswer, sourceArt, onBoard }:
           </div>
         </header>
         {body}
+        <p className="kernel-hint kernel-esc-hint">
+          {hideHint}{onHide ? <button type="button" className="kernel-small" onClick={onHide}>Hide</button> : null}
+        </p>
       </article>
       <CardPreviewPanel api={api} />
     </div>
