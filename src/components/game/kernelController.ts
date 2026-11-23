@@ -7,12 +7,14 @@
 // A rejected action never changes anything (KernelSession.dispatch returns the old state); the controller turns the refusal into a log note.
 import type { KernelSession, DispatchResult } from "@/kernel/integration/kernelSession";
 import type { TableState } from "@/kernel/integration/tableState";
-import type { LegalAction } from "@/kernel/engine/legal";
-import type { Action, Choice, ObjId, PlayerId } from "@/kernel/engine/types";
+import { legalActions, type LegalAction } from "@/kernel/engine/legal";
+import type { Action, Choice, GameState, ObjId, PlayerId } from "@/kernel/engine/types";
 import type { GameEvent as LogLine, GameSession, VisibleCard } from "@/lib/types";
 import { chooseAiAction, type AiMemory } from "./kernelAi";
+import { evaluateWindow, hasResponse, type WindowVerdict } from "./kernelStops";
+import { DEFAULT_STOP_SETTINGS, stopKey, type PriorityStopSettings } from "@/lib/priorityStops";
+import { toggleYield, type SeatYield } from "@/engine/yieldPolicy";
 
-const MAIN = ["precombat_main", "postcombat_main"];
 /** the driver never takes more than this many automatic actions in one turn (a loop guard, not a rule) */
 export const MAX_AUTO_ACTIONS_PER_TURN = 150;
 
@@ -26,6 +28,9 @@ export interface ControllerOptions {
   human: PlayerId;
   /** pace(baseMs) -> real ms (agentPaceMs in the app, 0 in tests) */
   pace?: (baseMs: number) => number;
+  /** the human's priority-stop settings (default: the legacy defaults) and where changes are saved (the app passes localStorage; tests pass nothing) */
+  stops?: PriorityStopSettings;
+  saveStops?: (settings: PriorityStopSettings) => void;
 }
 
 type Timer = ReturnType<typeof setTimeout>;
@@ -58,11 +63,19 @@ export class KernelGameController {
   private stalledAt = -1;
   private timer?: Timer;
   private running = false;
+  /** priority stops (phase 6): the settings, the running yield, and "Stop Next" (armed at a game version; it opens the first window after that version) */
+  private stopSettings: PriorityStopSettings;
+  private saveStops?: (settings: PriorityStopSettings) => void;
+  private yielding?: SeatYield;
+  private holdArmedAt?: number;
+  private legalCache?: { ver: number; list: LegalAction[] };
 
   constructor(ks: KernelSession, o: ControllerOptions) {
     this.ks = ks;
     this.human = o.human;
     this.pace = o.pace ?? ((ms) => ms);
+    this.stopSettings = { ...(o.stops ?? DEFAULT_STOP_SETTINGS), fullControl: false };
+    this.saveStops = o.saveStops;
     for (const id of Object.keys(ks.state.objects)) { const legacy = ks.legacyIdOf(id); if (legacy) this.toKernel.set(legacy, id); }
   }
 
@@ -137,7 +150,7 @@ export class KernelGameController {
     let decl: Declaration | undefined;
     const ex = this.ks.state.combat?.expect;
     if (ex && !this.ks.state.pending && (ex.kind === "attackers" ? ex.player === this.human : ex.players.includes(this.human))) {
-      const entry = this.ks.legal(this.human).find((a) => a.kind === "declareAttackers" || a.kind === "declareBlockers");
+      const entry = this.legalNow().find((a) => a.kind === "declareAttackers" || a.kind === "declareBlockers");
       if (entry?.kind === "declareAttackers") {
         decl = { kind: "attackers", picks: { ...this.attackPicks }, attackers: (entry.attackers ?? []).map((a) => ({ id: a.id, name: this.nameOf(a.id), mustAttack: !!entry.mustAttack?.includes(a.id), defenders: a.defenders.map((d) => ({ id: d, label: d.startsWith("#") ? this.nameOf(d) : this.nameOf(d) })) })) };
       } else if (entry?.kind === "declareBlockers") {
@@ -153,6 +166,7 @@ export class KernelGameController {
   /** dispatch for the human; a refusal becomes a log note (a stale answer is silent). Returns true when the engine accepted it. */
   private act(action: Action): boolean {
     const before = this.ks.version;
+    this.consumeHold();
     const res: DispatchResult = this.ks.dispatch(this.human, action);
     if (res.ok || this.ks.version !== before) { this.attackPicks = {}; this.blockPicks = {}; this.failures = 0; this.bump(); return res.ok; }
     if (!res.stale) this.note(`Can't do that: ${res.error?.message ?? "the engine refused"}.`, "Rules");
@@ -161,7 +175,7 @@ export class KernelGameController {
   }
 
   private legalFor(kind: LegalAction["kind"], objectId: ObjId): LegalAction[] {
-    return this.ks.legal(this.human).filter((a) => a.kind === kind && a.objectId === objectId);
+    return this.legalNow().filter((a) => a.kind === kind && a.objectId === objectId);
   }
 
   /** answer the open decision; `decisionId` is the id the dialog was rendered for (a late click on an older dialog is ignored) */
@@ -195,7 +209,7 @@ export class KernelGameController {
 
   castCommander = (seatId: string): void => {
     if (seatId !== this.human) return this.inert("cast a commander for another seat");
-    const cmd = this.ks.legal(this.human).find((a) => a.kind === "castSpell" && a.zone === "command" && a.action);
+    const cmd = this.legalNow().find((a) => a.kind === "castSpell" && a.zone === "command" && a.action);
     if (cmd?.action) { this.act(cmd.action); return; }
     const id = this.ks.state.players.find((p) => p.id === this.human)?.command[0];
     if (id) this.act({ type: "castSpell", player: this.human, cardId: id, autoPay: true }); else this.note("There is no commander in the command zone.", "Rules");
@@ -231,6 +245,12 @@ export class KernelGameController {
     const list = this.legalFor("activateAbility", id).filter((a) => !a.isMana && a.action);
     const pick = list.find((a) => text && a.label.toLowerCase().includes(text.toLowerCase().slice(0, 24))) ?? list[0];
     if (pick?.action) this.act(pick.action); else this.note(`${this.nameOf(id)}: no loyalty ability can be activated right now.`, "Rules");
+  };
+
+  /** "Respond Selected": cast / play the selected hand card (the kernel refuses it with a reason when the timing is wrong) */
+  respondWithSelected = (): void => {
+    if (!this.selectedCardId) { this.note("Select a card in your hand first.", "Rules"); return; }
+    this.playCard(this.human, this.selectedCardId);
   };
 
   passPriority = (): void => {
@@ -325,7 +345,6 @@ export class KernelGameController {
   tableProps(): Record<string, unknown> {
     if (this.props) return this.props;
     const inert = this.inertFn;
-    const noop = (): void => undefined;
     this.props = {
       testTools: false,
       onSelectHandCard: this.selectHandCard, onInspectCard: this.inspectCard, onCloseInspectCard: this.closeInspect,
@@ -340,8 +359,8 @@ export class KernelGameController {
       onActivateLoyalty: this.activateLoyalty,
       onPassPriority: this.passPriority, onAdvanceTurn: this.advanceTurn, onEndTurn: this.endTurn,
       onDeclareAttack: this.declareAttack, onToggleBlocker: this.toggleBlocker, onConfirmBlockers: this.confirmBlockers, onPassBlocks: this.passBlocks,
-      // the legacy "respond" flow does not exist: the kernel gives the human priority and the table's pass button answers it
-      onRespond: this.passPriority, onRespondWithSelectedCard: inert("respond with the selected card (cast it from your hand while you have priority)"),
+      // no separate "respond" flow: while the human holds priority they cast / activate directly, and Pass answers the window
+      onRespond: this.passPriority, onRespondWithSelectedCard: this.respondWithSelected,
       onResolvePendingTrigger: this.passPriority,
       onDrawCard: inert("draw a card"), onShuffleLibrary: inert("shuffle the library"), onOpenLibrarySearch: inert("search the library"),
       onMoveCardToGraveyard: inert("move a card to the graveyard"), onMoveCardToExile: inert("move a card to exile"), onMoveCardToHand: inert("move a card to hand"),
@@ -349,9 +368,9 @@ export class KernelGameController {
       onCycleCard: inert("cycling"), onUnlockRoomDoor: inert("unlock a room door"),
       onPayCumulativeUpkeep: inert("cumulative upkeep"), onSacrificeRuleSource: inert("sacrifice a rule source"),
       onResolveMyriadLandscape: inert("myriad landscape"), onResolveBasicLandFetch: inert("basic land fetch"),
-      // dragging a card on the board or toggling priority-stop settings has no kernel meaning yet and must not spam the log
-      onMoveBattlefieldCard: this.moveBattlefieldCard, onTogglePhaseStop: noop, onToggleStopOnStackResponse: noop, onToggleStopOnAttacked: noop, onToggleStopOnTargeted: noop,
-      onToggleStopOnChoicePrompt: noop, onToggleFullControl: inert("full control (priority stops)"), onToggleYield: inert("yield"), onStopNext: inert("stop next")
+      // dragging a card on the board is purely visual; the stop settings, Full Control, Yield and Stop Next are the controller's own (kernelStops.ts)
+      onMoveBattlefieldCard: this.moveBattlefieldCard, onTogglePhaseStop: this.togglePhaseStop, onToggleStopOnStackResponse: this.toggleStopOnStackResponse, onToggleStopOnAttacked: this.toggleStopOnAttacked, onToggleStopOnTargeted: this.toggleStopOnTargeted,
+      onToggleStopOnChoicePrompt: this.toggleStopOnChoicePrompt, onToggleFullControl: this.toggleFullControl, onToggleYield: this.toggleYieldIntent, onStopNext: this.stopNext
     };
     return this.props;
   }
@@ -372,10 +391,120 @@ export class KernelGameController {
   private humanAutoAction(): Action | undefined {
     const s = this.ks.state;
     if (s.pending || s.combat?.expect || s.priority !== this.human) return undefined;
-    if (s.stack.length) return { type: "passPriority", player: this.human };
-    if (s.turn.active !== this.human) return { type: "passPriority", player: this.human };
-    if (MAIN.includes(s.turn.phase)) return undefined; // the human's own main phases: they decide
+    const v = this.windowVerdict();
+    if (v.stop) return undefined; // a stop: the human decides (pass / respond / continue)
+    if (s.stack.length || s.turn.active !== this.human) return { type: "passPriority", player: this.human };
     return { type: "advancePhase", player: this.human };
+  }
+
+  // ------------------------------------------------------------------ priority stops (phase 6)
+
+  /** the human's legal actions now (the kernel probes every candidate, so this is cached per game version) */
+  legalNow(): LegalAction[] {
+    if (this.legalCache?.ver !== this.ks.version) this.legalCache = { ver: this.ks.version, list: this.ks.legal(this.human) };
+    return this.legalCache.list;
+  }
+
+  private holdActive(): boolean { return this.holdArmedAt !== undefined && this.ks.version > this.holdArmedAt; }
+  private consumeHold(): void { if (this.holdActive()) this.holdArmedAt = undefined; }
+
+  private verdictCache?: { ver: number; key: string; v: WindowVerdict };
+  /** stop or pass for the human's current window; clears a yield that no longer holds (with a log note). Cached per game version + settings. */
+  private windowVerdict(): WindowVerdict {
+    const key = JSON.stringify([this.stopSettings, this.yielding, this.holdActive()]);
+    if (this.verdictCache?.ver === this.ks.version && this.verdictCache.key === key) return this.verdictCache.v;
+    const v = evaluateWindow({ state: this.ks.state, human: this.human, legal: this.legalNow(), settings: this.stopSettings, yielding: this.yielding, holdOnce: this.holdActive() });
+    if (v.yieldEnded) { this.yielding = undefined; this.note(`Yield ended: ${v.yieldEnded}.`, "Priority"); }
+    this.verdictCache = { ver: this.ks.version, key: JSON.stringify([this.stopSettings, this.yielding, this.holdActive()]), v };
+    return v;
+  }
+
+  private aheadCache?: { ver: number; key: string; stop: boolean };
+  /**
+   * An AI active player with an empty stack normally just advances the step (nobody else gets priority). When the human WOULD be stopped in this step
+   * (a ticked stop with a response, Full Control, Stop Next), the AI passes priority instead so the human gets the window.
+   */
+  private humanWindowAhead(): boolean {
+    const key = JSON.stringify([this.stopSettings, this.yielding, this.holdActive()]);
+    if (this.aheadCache?.ver === this.ks.version && this.aheadCache.key === key) return this.aheadCache.stop;
+    const s = this.ks.state;
+    const probe: GameState = { ...s, priority: this.human, passes: [] };
+    let stop = false;
+    try {
+      const v = evaluateWindow({ state: probe, human: this.human, legal: legalActions(probe, this.human, this.ks.ctx), settings: this.stopSettings, yielding: this.yielding, holdOnce: this.holdActive() });
+      stop = v.stop;
+    } catch { stop = false; }
+    this.aheadCache = { ver: this.ks.version, key, stop };
+    return stop;
+  }
+
+  /** why the human is being asked right now (undefined when not waiting at a priority window); the UI may show it */
+  stopReason(): string | undefined {
+    const s = this.ks.state;
+    if (s.pending || s.combat?.expect || s.priority !== this.human) return undefined;
+    const v = this.windowVerdict();
+    return v.stop ? v.reason : undefined;
+  }
+
+  stops(): PriorityStopSettings { return this.stopSettings; }
+  isYielding(): boolean { return this.yielding !== undefined; }
+  isHoldArmed(): boolean { return this.holdArmedAt !== undefined; }
+  private setStops(next: PriorityStopSettings): void {
+    this.stopSettings = next;
+    try { this.saveStops?.({ ...next, fullControl: false }); } catch { /* storage problems never reach the game */ }
+    this.bump();
+  }
+  togglePhaseStop = (phase: string, seatIndex: number): void => {
+    const key = stopKey(phase, seatIndex);
+    const stops = { ...this.stopSettings.phaseStops };
+    if (stops[key]) delete stops[key]; else stops[key] = true;
+    this.setStops({ ...this.stopSettings, phaseStops: stops });
+  };
+  toggleStopOnStackResponse = (): void => this.setStops({ ...this.stopSettings, stopOnStackResponse: !this.stopSettings.stopOnStackResponse });
+  toggleStopOnAttacked = (): void => this.setStops({ ...this.stopSettings, stopOnAttacked: !this.stopSettings.stopOnAttacked });
+  toggleStopOnTargeted = (): void => this.setStops({ ...this.stopSettings, stopOnTargeted: !this.stopSettings.stopOnTargeted });
+  toggleStopOnChoicePrompt = (): void => this.setStops({ ...this.stopSettings, stopOnChoicePrompt: this.stopSettings.stopOnChoicePrompt === false });
+  /** Full Control: every window of the human's own turn opens and every window with a real response opens on others' turns; it also cancels a yield */
+  toggleFullControl = (): void => {
+    const fullControl = !this.stopSettings.fullControl;
+    if (fullControl) this.yielding = undefined;
+    this.stopSettings = { ...this.stopSettings, fullControl };
+    this.note(fullControl ? "Full Control on: every priority window opens." : "Full Control off.", "Priority");
+  };
+  /** "Yield to end of turn": no stops until the end step of this turn, except being targeted / attacked / full control / stop next */
+  toggleYieldIntent = (): void => {
+    const s = this.ks.state;
+    const next = toggleYield(this.yielding ? { [this.human]: this.yielding } : {}, this.human, s.turn.number, s.turn.active)[this.human];
+    this.yielding = next;
+    this.note(next ? "Yielding until the end of this turn." : "Yield cancelled.", "Priority");
+  };
+  /** "Stop Next": the very next priority window opens, whatever the settings */
+  stopNext = (): void => { this.holdArmedAt = this.ks.version; this.note("Stop Next: you will be asked at the next priority window.", "Priority"); };
+
+  // ------------------------------------------------------------------ what the human may do now (the options panel)
+
+  /** the actions worth a button: casts (every way of casting), non-mana abilities, morph / prepared; land drops. Empty unless the human holds priority. */
+  options(): LegalAction[] {
+    const s = this.ks.state;
+    if (s.pending || s.combat?.expect || s.priority !== this.human) return [];
+    return this.legalNow().filter((a) => !!a.action && !a.isMana && (a.kind === "castSpell" || a.kind === "activateAbility" || a.kind === "turnFaceUp" || a.kind === "castPrepared" || a.kind === "playLand"));
+  }
+  /** hand card ids (legacy ids when they had one) that can be played right now, for highlighting */
+  playableCardIds(): Set<string> {
+    const out = new Set<string>();
+    for (const a of this.options()) if (a.objectId && (a.kind === "castSpell" || a.kind === "playLand") && a.zone === "hand") out.add(this.ks.legacyIdOf(a.objectId) ?? a.objectId);
+    return out;
+  }
+  /** run one listed action by its stable id (a stale id is a quiet no-op) */
+  doOption = (id: string): boolean => {
+    const a = this.legalNow().find((x) => x.id === id);
+    if (!a?.action) { this.bump(); return false; }
+    return this.act(a.action);
+  };
+  /** does the human have a response right now (instant, flash, ability)? */
+  canRespondNow(): boolean {
+    const s = this.ks.state;
+    return s.priority === this.human && hasResponse(this.legalNow(), s.turn.active === this.human && !s.stack.length);
   }
 
   /** One automatic action (an AI seat's choice, or the human's automatic pass). Returns false when it did nothing. Never throws. */
@@ -394,6 +523,7 @@ export class KernelGameController {
         action = chooseAiAction(acts, s, this.ks.ctx, actor, this.memory);
         if (!action) { this.stall(`${this.nameOf(actor)} has no legal action`); return false; }
         if (this.autoTurn.count >= MAX_AUTO_ACTIONS_PER_TURN) action = fallbackPass(s, actor);
+        else if (action.type === "advancePhase" && !s.stack.length && !s.combat?.expect && this.humanWindowAhead()) action = { type: "passPriority", player: actor };
       }
       if (!action) return false;
       this.autoTurn.count++;

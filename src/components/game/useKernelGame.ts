@@ -7,7 +7,8 @@
 import "@/kernel/engine/resolve"; // FIRST: the engine modules import each other in a cycle that only initialises when resolve.ts is entered first
 import { useEffect, useState } from "react";
 import type { GameSession } from "@/lib/types";
-import { agentPaceMs } from "@/lib/agentRuntime";
+import { agentPaceMs, loadPriorityStopSettings, savePriorityStopSettings } from "@/lib/agentRuntime";
+import type { PriorityStopSettings } from "@/lib/priorityStops";
 import { kernelEngineWanted } from "@/lib/kernelFlag";
 import { postUnresolved } from "@/lib/unresolvedLog";
 import { KernelSession } from "@/kernel/integration/kernelSession";
@@ -19,7 +20,7 @@ import { kernelReadiness, loadedKernelPacks, preloadKernelPacks, type Readiness 
 export type KernelStarter = (finished: GameSession) => Readiness;
 
 /** Build the controller for a finished legacy opening position (pure of React: tests call it too). */
-export function startKernelGame(finished: GameSession, o: { seed?: number; sink?: Parameters<typeof KernelSession.fromLegacyHandoff>[1]["sink"]; pace?: (ms: number) => number } = {}): { ok: true; controller: KernelGameController } | { ok: false; reason: string } {
+export function startKernelGame(finished: GameSession, o: { seed?: number; sink?: Parameters<typeof KernelSession.fromLegacyHandoff>[1]["sink"]; pace?: (ms: number) => number; stops?: PriorityStopSettings; saveStops?: (s: PriorityStopSettings) => void } = {}): { ok: true; controller: KernelGameController } | { ok: false; reason: string } {
   const packs = loadedKernelPacks();
   const gate = kernelReadiness(finished, packs);
   if (!gate.ok || !packs) return gate.ok ? { ok: false, reason: "kernel packs are not loaded" } : gate;
@@ -35,7 +36,7 @@ export function startKernelGame(finished: GameSession, o: { seed?: number; sink?
       now: () => new Date().toISOString(),
       ...(o.sink ? { sink: o.sink } : {})
     });
-    return { ok: true, controller: new KernelGameController(ks, { human: human.id, pace: o.pace }) };
+    return { ok: true, controller: new KernelGameController(ks, { human: human.id, pace: o.pace, stops: o.stops, saveStops: o.saveStops }) };
   } catch (e) {
     return { ok: false, reason: `Kernel engine requested, but the hand-off failed (${e instanceof Error ? e.message : String(e)}); playing on the legacy engine.` };
   }
@@ -50,7 +51,7 @@ export function useKernelGame(ctx: GameContext, opts: { enabled: boolean }): { c
     if (!wanted) { kernelStartRef.current = undefined; return; }
     void preloadKernelPacks();
     kernelStartRef.current = (finished: GameSession): Readiness => {
-      const r = startKernelGame(finished, { sink: postUnresolved, pace: agentPaceMs });
+      const r = startKernelGame(finished, { sink: postUnresolved, pace: agentPaceMs, stops: loadPriorityStopSettings(), saveStops: savePriorityStopSettings });
       if (!r.ok) return r;
       setController(r.controller);
       return { ok: true };

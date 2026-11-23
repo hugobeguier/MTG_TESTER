@@ -7,6 +7,7 @@ import { useKernelDriver } from "./game/useKernelGame";
 import { ThreeGameTable } from "./ThreeGameTable";
 import { GameOverDialog } from "./GameOverDialog";
 import { KernelDecisionDialog } from "./KernelDecisionDialog";
+import { KernelPriorityPanel } from "./KernelPriorityPanel";
 
 const bar = { position: "fixed", left: "50%", bottom: 150, transform: "translateX(-50%)", zIndex: 50, background: "#1c1b22ee", color: "#eee", border: "1px solid #6b6a7a", borderRadius: 10, padding: "10px 14px", maxWidth: "min(900px, 94vw)", display: "flex", flexDirection: "column", gap: 8 } as const;
 const btn = { padding: "5px 12px", borderRadius: 6, border: "1px solid #6b6a7a", background: "#34333f", color: "#eee", cursor: "pointer", font: "inherit" } as const;
@@ -87,11 +88,16 @@ export function KernelGameTable({ controller, onBack }: { controller: KernelGame
         manaPool={table.manaPools[human] as never}
         agentThinking={thinking ? { [thinking]: true } : undefined}
         gameStage="playing"
+        priorityStopSettings={controller.stops()}
+        yielding={controller.isYielding()}
+        holdPriorityOnce={controller.isHoldArmed()}
+        kernelTurnNumber={table.session.turn}
         selectedCardId={controller.selectedCardId}
         inspectedCard={controller.inspectedCard}
         {...(controller.tableProps() as object)}
       />
       <KernelDeclarationBar controller={controller} />
+      {table.decision ? null : <KernelPriorityPanel controller={controller} />}
       {table.decision ? <KernelDecisionDialog key={table.decision.id} decision={table.decision} onAnswer={controller.answer} /> : null}
     </main>
   );

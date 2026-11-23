@@ -12,6 +12,8 @@ const MAIN = ["precombat_main", "postcombat_main"];
 export interface AiMemory {
   /** action ids that were refused this turn (never tried again) */
   banned: Set<string>;
+  /** stack item ids this seat already answered with a response (at most one response per stack item: no response loops) */
+  responded?: Set<string>;
 }
 
 function answerFor(a: LegalAction, state: GameState, seat: PlayerId): Action | undefined {
@@ -80,6 +82,9 @@ export function chooseAiAction(acts: LegalAction[], state: GameState, ctx: Engin
   if (first.kind === "declareAttackers") return attackDeclaration(first, state, ctx, seat);
   if (first.kind === "declareBlockers") return blockDeclaration(first, state, ctx, seat);
 
+  const counter = counterResponse(acts, state, ctx, seat, memory);
+  if (counter) return counter;
+
   const mine = state.turn.active === seat;
   const emptyStack = state.stack.length === 0;
   if (mine && emptyStack && MAIN.includes(state.turn.phase)) {
@@ -98,4 +103,23 @@ export function chooseAiAction(acts: LegalAction[], state: GameState, ctx: Engin
   }
   if (mine && emptyStack) return { type: "advancePhase", player: seat };
   return acts.find((a) => a.kind === "passPriority")?.action ?? { type: "passPriority", player: seat };
+}
+
+/**
+ * Responses (kept deliberately small and safe): when an OPPONENT's spell is the top of the stack and this seat holds a castable counterspell, cast it once
+ * for that stack item (memory.responded caps it at one response per item, so a counter war cannot loop); anything else passes.
+ */
+function counterResponse(acts: LegalAction[], state: GameState, ctx: EngineContext, seat: PlayerId, memory: AiMemory): Action | undefined {
+  const top = state.stack[state.stack.length - 1];
+  if (!top || top.controller === seat || top.kind !== "spell" || !top.objectId) return undefined;
+  const responded = (memory.responded ??= new Set());
+  if (responded.has(top.id)) return undefined;
+  const pick = acts.find((a) => {
+    if (a.kind !== "castSpell" || !a.action || a.zone !== "hand" || !a.objectId || memory.banned.has(a.id)) return false;
+    if (!a.targetOptions?.includes(top.objectId!)) return false;
+    return !!view(state, ctx, a.objectId)?.abilities.some((x) => /\bcounter target (?:\w+ )*spell\b/i.test(x.text));
+  });
+  if (!pick) return undefined;
+  responded.add(top.id);
+  return pick.action;
 }

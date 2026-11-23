@@ -66,11 +66,15 @@ export function packKit(packs: readonly CardPack[]): PackKit {
     for (const t of p.creatureTypes) types.add(t);
   }
   const names = [...cards.keys()].sort();
+  // a card the legacy side knows by its front face only ("Stensian Sanguinist") resolves to the pack's "Front // Back" entry
+  const front = new Map<string, string>();
+  for (const n of names) { const f = n.split(" / ")[0].split(" // ")[0]; if (f !== n && !cards.has(f) && !front.has(f)) front.set(f, n); }
+  const real = (name: string): string => (cards.has(name) ? name : front.get(name) ?? name);
   const creatureTypes = [...types].sort();
   return {
-    lookup: (name) => cards.get(name),
-    db: { creatureTypes: () => creatureTypes, cardNames: () => names, card: (name) => info.get(name) },
-    display: (name) => display.get(name),
+    lookup: (name) => cards.get(real(name)),
+    db: { creatureTypes: () => creatureTypes, cardNames: () => names, card: (name) => info.get(real(name)) },
+    display: (name) => display.get(real(name)),
     deck: (name) => decks.get(name),
     names
   };

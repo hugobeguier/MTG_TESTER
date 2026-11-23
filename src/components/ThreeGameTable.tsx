@@ -225,6 +225,8 @@ interface ThreeGameTableProps {
   onToggleYield?: () => void;
   yielding?: boolean;
   holdPriorityOnce?: boolean;
+  /** Kernel mode: the engine's own turn number (every player's turn counts, like the log), shown as is; and the stack dock clears the moment the stack is empty. */
+  kernelTurnNumber?: number;
   // Recently resolving/resolved stack items (newest first) with their "result" derived from the events produced while they resolved — the
   // stack shows what each item DID, so the game reads without the log.
   stackFeed?: StackFeedEntry[];
@@ -923,6 +925,11 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
       }
       setDisplayedAction(props.pendingAction);
       setDisplayedStack(props.stackActions ?? []);
+      return;
+    }
+    if (props.kernelTurnNumber !== undefined) {
+      setDisplayedAction(undefined);
+      setDisplayedStack([]);
       return;
     }
     if (displayedAction && stackHudHideTimer.current === undefined) {
@@ -1759,7 +1766,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
         {/* session.turn increments once per individual player's turn (a 4-player round spans
             turns 1-4), not once per round — divide it back down to the round number players
             actually mean by "turn N". */}
-        <span>Turn {Math.max(1, Math.ceil(props.session.turn / Math.max(1, props.session.seats.length)))}</span>
+        <span>Turn {props.kernelTurnNumber ?? Math.max(1, Math.ceil(props.session.turn / Math.max(1, props.session.seats.length)))}</span>
         <strong>{activeName}</strong>
         <small>{props.session.phase}</small>
         <small>Priority: {prioritySeat?.name ?? "None"}</small>
