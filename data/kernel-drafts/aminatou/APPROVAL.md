@@ -777,7 +777,7 @@ Mind's Dilation [draft]
   [a1] triggered [needed: needs ref:linked_exile, trigger:nth, field:move_card_zone.linkExile, field:move_card_zone.what, field:move_card_zone.who, step:permission_to_play, field:permission_to_play.what, field:permission_to_play.withoutPaying, field:permission_to_play.zone, predicate:matches]
     Oracle: Whenever an opponent casts their first spell each turn, that player exiles the top card of their library. If it's a nonland card, you may cast it without paying its mana cost.
     Trigger: Whenever an opponent casts their first spell each turn
-    Effect: Exile a card. Then, IF the card exiled with Mind's Dilation is a nonland permanent: you may you may play linked_exile without paying its mana cost.
+    Effect: Exile a card. Then, IF the card exiled with Mind's Dilation is a nonland permanent: you may cast or play the card exiled with Mind's Dilation without paying its mana cost.
 ```
 
 Player prompts:

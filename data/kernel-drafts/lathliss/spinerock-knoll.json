@@ -148,7 +148,7 @@
           },
           "prompt": {
             "title": "Spinerock Knoll: optional",
-            "instruction": "Do you want to you may play linked_exile without paying its mana cost?",
+            "instruction": "Do you want to cast or play the card exiled with Spinerock Knoll without paying its mana cost?",
             "source": {
               "card": "Spinerock Knoll",
               "ability": "a4"

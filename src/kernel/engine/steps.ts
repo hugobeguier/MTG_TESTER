@@ -28,7 +28,7 @@ import { attachStep } from "./attach";
 import { checkCounterAnswer, counterSpec } from "./counters7";
 import { copyStep } from "./copy";
 import { transformStep } from "./faces";
-import { delayedStep, grantToPlayers, permissionStep } from "./durablesteps";
+import { delayedStep, grantToPlayers, isDurablePermission, permissionStep } from "./durablesteps";
 import { saveList, setResult } from "./saved";
 import { regenerates } from "./regen";
 import { addCommanderDamage, isCommanderObj } from "./commander";
@@ -818,7 +818,7 @@ export function runExec(r: Run, ex: Exec, answer?: Choice): StepStatus {
         frame.steps = [...frame.steps]; frame.steps[frame.i] = { kind: "__unless" as never, inner, pay: { payer: "you", cost: step.optionalCost, inverse: true } } as Step;
         continue;
       }
-      if (step.optional && step.repeatCount === undefined && step.sharesCardTypeWith === undefined && !(step as Step & { __asked?: boolean }).__asked) { // "as many times as you choose" asks on every round instead (steps7 __repeat_ask)
+      if (step.optional && step.repeatCount === undefined && step.sharesCardTypeWith === undefined && !(step as Step & { __asked?: boolean }).__asked && !isDurablePermission(step)) { // a durable permission ("until end of turn" / for as long as it stays exiled) is always granted: the player decides when (and whether) to cast, not up front // "as many times as you choose" asks on every round instead (steps7 __repeat_ask)
         const inner = { ...step, optional: false, condition: undefined, __asked: true } as Step;
         const asker = step.kind === "search_library" || (step.kind === "choose" && step.who) ? resolvePlayers(r, step.who ?? "you", ex.env)[0] : undefined; // "its controller MAY search" / "each player MAY choose a creature": they decide
         const may: Step = { kind: "__may" as never, inner, asker, prompt: step.prompt ?? promptForMay(label(r, ex.env.source), String(step.kind).replace(/_/g, " ")) } as Step;

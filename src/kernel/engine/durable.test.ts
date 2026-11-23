@@ -203,9 +203,8 @@ describe("permission_to_play", () => {
     let res = t.ok({ type: "activateAbility", player: "p1", sourceId: emry, abilityId: "a3" });
     res = t.answer(res, { ids: [ring] });
     t.pass("p1", "p2");
-    // optional: "you may cast that card this turn"
-    expect(t.state.pending!.kind).toBe("choose_yes_no");
-    res = t.answer({ ...res, pending: t.state.pending ?? undefined } as never, { yes: true });
+    // "you may cast that card this turn": granted without a question, the player decides when to cast it
+    expect(t.state.pending ?? undefined).toBeUndefined();
     expect(t.state.durableEffects).toHaveLength(1);
     // the opponent cannot use it
     t.state = { ...t.state, priority: "p2" };
@@ -225,12 +224,11 @@ describe("permission_to_play", () => {
     let res = t.ok({ type: "activateAbility", player: "p1", sourceId: emry, abilityId: "a3" });
     res = t.answer(res, { ids: [ring] });
     t.pass("p1", "p2");
-    t.answer({ pending: t.state.pending } as never, { yes: true });
     expect(t.do({ type: "castSpell", player: "p1", cardId: ring }).error?.code).toBe("cannot_pay");
     expect(t.obj(ring).zone).toBe("graveyard");
   });
 
-  it("declining the optional step grants nothing", () => {
+  it("a durable permission asks nothing up front: not casting leaves the card alone", () => {
     const t = world();
     const emry = t.give("p1", "Emry, Lurker of the Loch", "battlefield");
     const ring = t.give("p1", "Sol Ring", "graveyard");
@@ -238,9 +236,9 @@ describe("permission_to_play", () => {
     let res = t.ok({ type: "activateAbility", player: "p1", sourceId: emry, abilityId: "a3" });
     res = t.answer(res, { ids: [ring] });
     t.pass("p1", "p2");
-    t.answer({ pending: t.state.pending } as never, { yes: false });
-    expect(t.state.durableEffects ?? []).toHaveLength(0);
-    expect(t.do({ type: "castSpell", player: "p1", cardId: ring }).error?.code).toBe("not_in_zone");
+    expect(t.state.pending ?? undefined).toBeUndefined(); // no up-front question; not casting it is simply leaving the card where it is
+    expect(t.state.durableEffects).toHaveLength(1);
+    expect(t.obj(ring).zone).toBe("graveyard");
   });
 
   it("'this turn' ends at cleanup", () => {
@@ -252,7 +250,6 @@ describe("permission_to_play", () => {
     let res = t.ok({ type: "activateAbility", player: "p1", sourceId: emry, abilityId: "a3" });
     res = t.answer(res, { ids: [ring] });
     t.pass("p1", "p2");
-    t.answer({ pending: t.state.pending } as never, { yes: true });
     expect(t.state.durableEffects).toHaveLength(1);
     advanceTo(t, 2, "upkeep");
     expect(t.state.durableEffects ?? []).toHaveLength(0);
@@ -287,7 +284,6 @@ describe("permission_to_play", () => {
     let res = t.ok({ type: "activateAbility", player: "p1", sourceId: emry, abilityId: "a3" });
     res = t.answer(res, { ids: [ring] });
     t.pass("p1", "p2");
-    t.answer({ pending: t.state.pending } as never, { yes: true });
     // exile it and bring it back to the graveyard through the engine's own mover
     const s = structuredClone(t.state);
     s.objects[ring].timestamp += 100; // a zone change refreshes the timestamp: simulate "it left and returned"

@@ -144,7 +144,7 @@
           },
           "prompt": {
             "title": "Mosswort Bridge: optional",
-            "instruction": "Do you want to you may play linked_exile without paying its mana cost?",
+            "instruction": "Do you want to cast or play the card exiled with Mosswort Bridge without paying its mana cost?",
             "source": {
               "card": "Mosswort Bridge",
               "ability": "a4"

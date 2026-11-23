@@ -17,6 +17,7 @@ import { chooseAiAction, type AiMemory } from "./kernelAi";
 import { evaluateWindow, hasResponse, type WindowVerdict } from "./kernelStops";
 import { DEFAULT_STOP_SETTINGS, stopKey, type PriorityStopSettings } from "@/lib/priorityStops";
 import { toggleYield, type SeatYield } from "@/engine/yieldPolicy";
+import { stackSession, type StackIndex } from "./tokenStacks";
 
 /** the driver never takes more than this many automatic actions in one turn (a loop guard, not a rule) */
 export const MAX_AUTO_ACTIONS_PER_TURN = 150;
@@ -80,9 +81,61 @@ export class KernelGameController {
   inspectCard = (card: VisibleCard): void => {
     // clicking my own permanent that I just tapped for mana (mana unspent, nothing cast since) takes the tap back, like in the legacy table
     if (this.canUntapForMana(card.id)) { this.untapForMana(this.human, card.id); return; }
+    this.stackChosen = undefined;
     this.inspectedCard = card; this.bump();
   };
-  closeInspect = (): void => { this.inspectedCard = undefined; this.bump(); };
+  closeInspect = (): void => { this.stackChosen = undefined; this.inspectedCard = undefined; this.bump(); };
+
+  // ------------------------------------------------------------------ token stacks (tokenStacks.ts)
+  /** how the table's token stacks map to members; rebuilt by every table() */
+  private stackIndex: StackIndex = { members: new Map(), repOf: new Map() };
+  /** the session before stacking: what the legacy block modal lists, one card per token */
+  private rawSession?: GameSession;
+  /** how many tokens of the open stack the player chose (undefined = automatic: all for an attack, one for an ability or a mana tap) */
+  private stackChosen?: number;
+  /** the ids (table ids) of the tokens a card stands for: itself unless it is a stack's card or one of its members, sorted, so "first N" is deterministic */
+  stackMembers(cardId: string): string[] {
+    this.table();
+    const rep = this.stackIndex.repOf.get(cardId) ?? cardId;
+    return this.stackIndex.members.get(rep) ?? [cardId];
+  }
+  setStackChosen = (n: number | undefined): void => {
+    const size = this.inspectedCard ? this.stackMembers(this.inspectedCard.id).length : 1;
+    this.stackChosen = n === undefined ? undefined : Math.max(1, Math.min(size, Math.floor(n)));
+    this.bump();
+  };
+  /** the count selector's data for the open inspector (only for a stack of 2+) */
+  private inspectedStack(): { count: number; chosen: number | undefined; onChange: (n: number | undefined) => void } | undefined {
+    if (!this.inspectedCard) return undefined;
+    const count = this.stackMembers(this.inspectedCard.id).length;
+    return count > 1 ? { count, chosen: this.stackChosen, onChange: this.setStackChosen } : undefined;
+  }
+  /** the first `n` members (kernel ids) of a card's stack that pass `ok` */
+  private firstN(cardId: string, ok: (id: ObjId) => boolean, n: number): ObjId[] {
+    return this.stackMembers(cardId).map((m) => this.kid(m)).filter(ok).slice(0, n);
+  }
+  /** the table ids picked right now (board pick or blockers), to show "2/5" on a stack */
+  private pickedMemberIds(ts: TableState): Set<string> {
+    const out = new Set<string>();
+    const d = ts.decision;
+    if (d && this.pickSel?.id === d.id && !this.pickSel.list) {
+      const chosen = new Set(this.pickSel.ids);
+      for (const [cardId, opt] of Object.entries(boardPickModel(d).cardOptions)) if (chosen.has(opt)) out.add(cardId);
+    }
+    const att = this.declaration()?.kind === "blockers" ? this.currentAttacker() : undefined;
+    if (att) for (const b of this.blockPicks[att] ?? []) out.add(this.ks.legacyIdOf(b) ?? b);
+    return out;
+  }
+  private withStackSelection(session: GameSession, picked: Set<string>): GameSession {
+    if (!picked.size) return session;
+    let changed = false;
+    const seats = session.seats.map((seat) => {
+      if (!seat.board.battlefield.some((c) => c.stackIds?.some((i) => picked.has(i)))) return seat;
+      changed = true;
+      return { ...seat, board: { ...seat.board, battlefield: seat.board.battlefield.map((c) => (c.stackIds ? { ...c, stackSelected: c.stackIds.filter((i) => picked.has(i)).length } : c)) } };
+    });
+    return changed ? { ...session, seats } : session;
+  }
   private attackPicks: Record<string, string> = {};
   /** attacker (kernel id) -> its blockers (kernel ids) in the order they were tapped: that order is the damage-assignment order, as in the legacy modal */
   private blockPicks: Record<string, string[]> = {};
@@ -153,6 +206,16 @@ export class KernelGameController {
     }
     if (this.positions.size) session = this.withPositions(session);
     if (Object.keys(this.attackPicks).length) session = this.withAttackPicks(session);
+    this.rawSession = session;
+    const stacked = stackSession(session);
+    this.stackIndex = stacked.index;
+    session = this.withStackSelection(stacked.session, this.pickedMemberIds(ts));
+    // an open inspector on a token follows the stack it belongs to (the representative can change when the stack splits or a member dies)
+    if (this.inspectedCard?.token) {
+      const want = this.stackIndex.repOf.get(this.inspectedCard.id) ?? this.inspectedCard.id;
+      const fresh = session.seats.flatMap((s) => s.board.battlefield).find((c) => c.id === want);
+      if (fresh && fresh !== this.inspectedCard) this.inspectedCard = fresh;
+    }
     let table = session === ts.session ? ts : { ...ts, session };
     // the legacy table's priority UI (the stack dock with Pass Priority) is keyed on a pending action: when the human is stopped at an empty-stack window,
     // hand it the same "phase" window the legacy game opens, so there is exactly one priority UI
@@ -184,7 +247,7 @@ export class KernelGameController {
     return { ...session, seats };
   }
   moveBattlefieldCard = (_seatId: string, cardId: string, position: { x: number; z: number }): void => {
-    this.positions.set(cardId, position);
+    for (const id of this.stackMembers(cardId)) this.positions.set(id, position); // a stack moves as one: every member keeps the new spot, so it stays put when the stack splits
     this.bump();
   };
 
@@ -226,7 +289,7 @@ export class KernelGameController {
     this.consumeHold();
     const seen = this.beforeStep();
     const res: DispatchResult = this.ks.dispatch(this.human, action);
-    if (res.ok || this.ks.version !== before) { this.attackPicks = {}; this.blockPicks = {}; this.blockIdx = 0; this.failures = 0; this.observe(seen, action); this.bump(); return res.ok; }
+    if (res.ok || this.ks.version !== before) { this.stackChosen = undefined; this.attackPicks = {}; this.blockPicks = {}; this.blockIdx = 0; this.failures = 0; this.observe(seen, action); this.bump(); return res.ok; }
     if (!res.stale) this.note(`Can't do that: ${res.error?.message ?? "the engine refused"}.`, "Rules");
     else this.bump();
     return false;
@@ -363,20 +426,26 @@ export class KernelGameController {
 
   tapForMana = (seatId: string, cardId: string): void => {
     if (seatId !== this.human) return this.inert("tap another seat's permanent");
-    const id = this.kid(cardId);
-    const ways = manaWays(this.legalFor("activateAbility", id).filter((a) => a.isMana && a.action));
+    const waysOf = (x: ObjId) => manaWays(this.legalFor("activateAbility", x).filter((a) => a.isMana && a.action));
+    // a token stack taps / sacrifices the chosen number of its tokens (one unless the player chose more), one after the other
+    const ids = this.firstN(cardId, (x) => waysOf(x).length > 0, this.stackChosen ?? 1);
+    const id = ids[0] ?? this.kid(cardId);
+    const ways = waysOf(id);
     // exactly one way: just do it; several (the free {C} and a damaging coloured ability, two colours): the player chooses, with the cost shown
     if (ways.length > 1) { this.manaPick = { cardName: this.nameOf(id), options: ways }; this.bump(); return; }
-    if (ways[0]) this.act(ways[0].action); else this.note(`${this.nameOf(id)} has no mana ability you can use right now.`, "Rules");
+    if (!ways[0]) { this.note(`${this.nameOf(id)} has no mana ability you can use right now.`, "Rules"); return; }
+    for (const x of ids) { const w = waysOf(x)[0]; if (!w || !this.act(w.action)) break; }
   };
 
   /** every legacy "activate ..." callback lands here: the kernel lists the abilities by id, the table only knows an index */
   activateAbility = (seatId: string, cardId: string, abilityIndex = 0): void => {
     if (seatId !== this.human) return this.inert("activate another seat's ability");
-    const id = this.kid(cardId);
-    const list = this.legalFor("activateAbility", id).filter((a) => !a.isMana && a.action);
-    const pick = list.length === 1 ? list[0] : list[abilityIndex] ?? list[0];
-    if (pick?.action) this.act(pick.action); else this.note(`${this.nameOf(id)}: no ability can be activated right now.`, "Rules");
+    const listOf = (x: ObjId) => this.legalFor("activateAbility", x).filter((a) => !a.isMana && a.action);
+    const pickOf = (x: ObjId) => { const list = listOf(x); return list.length === 1 ? list[0] : list[abilityIndex] ?? list[0]; };
+    // one token of a stack, or as many as the player chose
+    const ids = this.firstN(cardId, (x) => !!pickOf(x)?.action, this.stackChosen ?? 1);
+    if (!ids.length) { this.note(`${this.nameOf(this.kid(cardId))}: no ability can be activated right now.`, "Rules"); return; }
+    for (const x of ids) { const pick = pickOf(x); if (!pick?.action || !this.act(pick.action)) break; }
   };
 
   activateLoyalty = (seatId: string, cardId: string, _cost: number, text: string): void => {
@@ -426,18 +495,24 @@ export class KernelGameController {
 
   /** one attacker at a time (the legacy table's callback); sent together by confirmAttackers() */
   declareAttack = (cardId: string, targetId: string): void => {
-    const id = this.kid(cardId);
-    if (!this.declaration() || this.declaration()?.kind !== "attackers") { this.note("You are not declaring attackers now.", "Rules"); return; }
-    const opt = this.declaration()?.kind === "attackers" ? (this.declaration() as Extract<Declaration, { kind: "attackers" }>).attackers.find((a) => a.id === id) : undefined;
-    if (!opt) { this.note(`${this.nameOf(id)} can't attack this turn.`, "Rules"); return; }
+    const d = this.declaration();
+    if (!d || d.kind !== "attackers") { this.note("You are not declaring attackers now.", "Rules"); return; }
+    // a token stack attacks with the chosen number of its tokens (all by default): the first N by id
+    const ids = this.stackMembers(cardId).map((m) => this.kid(m));
+    const n = this.stackChosen ?? ids.length;
+    const opts = ids.map((id) => d.attackers.find((a) => a.id === id)).filter((o): o is AttackerOption => !!o);
+    if (!opts.length) { this.note(`${this.nameOf(ids[0])} can't attack this turn.`, "Rules"); return; }
     if (!targetId) {
-      if (opt.mustAttack) this.note(`${opt.name} must attack if able.`, "Rules");
-      else { const { [id]: _gone, ...rest } = this.attackPicks; this.attackPicks = rest; }
+      const free = opts.filter((o) => !o.mustAttack);
+      if (!free.length) this.note(`${opts[0].name} must attack if able.`, "Rules");
+      else { const drop = new Set(free.filter((o) => o.id in this.attackPicks).slice(0, n).map((o) => o.id)); this.attackPicks = Object.fromEntries(Object.entries(this.attackPicks).filter(([id]) => !drop.has(id))); }
     } else {
       const target = this.kid(targetId);
-      if (!opt.defenders.some((d) => d.id === target)) { this.note(`${opt.name} can't attack ${this.nameOf(target)}.`, "Rules"); return; }
-      this.attackPicks = { ...this.attackPicks, [id]: target };
+      const able = opts.filter((o) => o.defenders.some((x) => x.id === target));
+      if (!able.length) { this.note(`${opts[0].name} can't attack ${this.nameOf(target)}.`, "Rules"); return; }
+      this.attackPicks = { ...this.attackPicks, ...Object.fromEntries(able.slice(0, n).map((o) => [o.id, target])) };
     }
+    this.stackChosen = undefined;
     this.inspectedCard = undefined;
     this.bump();
   };
@@ -488,8 +563,31 @@ export class KernelGameController {
   private currentAttacker(): string | undefined { return this.blockQueue()[this.blockIdx]; }
   private cardById(kernelId: string): VisibleCard | undefined {
     const legacy = this.ks.legacyIdOf(kernelId) ?? kernelId;
-    for (const seat of this.table().session.seats) { const c = seat.board.battlefield.find((x) => x.id === legacy); if (c) return c; }
+    this.table();
+    for (const seat of (this.rawSession ?? this.table().session).seats) { const c = seat.board.battlefield.find((x) => x.id === legacy); if (c) return c; } // raw: the block modal lists one card per token
     return undefined;
+  }
+  /** the legal blockers for the block modal: tokens of one stack are ONE entry (stackCount = how many may block, stackSelected = how many are picked), other creatures one each */
+  private blockerEntries(att: string): { cards: VisibleCard[]; selectedIds: string[] } {
+    const legal = this.legalBlockersFor(att);
+    const picks = this.blockPicks[att] ?? [];
+    const cards: VisibleCard[] = [];
+    const entryOf = new Map<string, string>(); // member legacy id -> its entry's id
+    const done = new Set<string>();
+    for (const id of legal) {
+      const card = this.cardById(id);
+      if (!card) continue;
+      const rep = this.stackIndex.repOf.get(card.id);
+      if (!rep) { cards.push(card); entryOf.set(card.id, card.id); continue; }
+      if (done.has(rep)) continue;
+      done.add(rep);
+      const mem = (this.stackIndex.members.get(rep) ?? []).filter((m) => legal.includes(this.kid(m)));
+      const first = this.cardById(mem[0]) ?? card;
+      for (const m of mem) entryOf.set(m, first.id);
+      cards.push(mem.length > 1 ? { ...first, stackCount: mem.length, stackIds: mem, stackSelected: picks.filter((x) => mem.includes(this.ks.legacyIdOf(x) ?? x)).length } : first);
+    }
+    const selectedIds = [...new Set(picks.map((x) => { const l = this.ks.legacyIdOf(x) ?? x; return entryOf.get(l) ?? l; }))];
+    return { cards, selectedIds };
   }
 
   /** the props the legacy table needs to run attack / block declarations (spread next to tableProps; recomputed each version) */
@@ -498,11 +596,11 @@ export class KernelGameController {
     const props: Record<string, unknown> = {};
     const d = this.declaration();
     if (d?.kind === "attackers") {
-      const open = this.inspectedCard ? this.kid(this.inspectedCard.id) : undefined;
-      const a = d.attackers.find((x) => x.id === open);
+      const open = this.inspectedCard ? new Set(this.stackMembers(this.inspectedCard.id).map((m) => this.kid(m))) : undefined;
+      const a = d.attackers.find((x) => open?.has(x.id));
       if (a) {
         const targets = a.defenders.map((x) => ({ targetId: this.ks.legacyIdOf(x.id) ?? x.id, label: `Attack ${x.label}` }));
-        if (a.id in d.picks) targets.push({ targetId: "", label: a.mustAttack ? "Attacks (must attack)" : "Do not attack" });
+        if ([...(open ?? [])].some((x) => x in d.picks)) targets.push({ targetId: "", label: a.mustAttack ? "Attacks (must attack)" : "Do not attack" });
         props.humanAttackTargets = targets;
       }
     } else if (d?.kind === "blockers") {
@@ -511,11 +609,13 @@ export class KernelGameController {
       if (att && attackingCard) {
         const seats = this.table().session.seats;
         const attackerSeat = seats.find((s) => s.board.battlefield.some((c) => c.id === attackingCard.id));
-        const blockers = this.legalBlockersFor(att).map((id) => this.cardById(id)).filter((c): c is VisibleCard => !!c);
+        const { cards: blockers, selectedIds } = this.blockerEntries(att);
         props.blockChoice = { attackerName: attackerSeat?.name ?? "Opponent", defenderName: seats.find((s) => s.id === this.human)?.name ?? "You", attackingCard, blockers };
-        props.selectedBlockerIds = (this.blockPicks[att] ?? []).map((id) => this.ks.legacyIdOf(id) ?? id);
+        props.selectedBlockerIds = selectedIds;
       }
     }
+    const stack = this.inspectedStack();
+    if (stack) props.inspectedStack = stack;
     this.combatCache = { ver: this.ver, props };
     return props;
   }
@@ -525,10 +625,13 @@ export class KernelGameController {
   toggleBlocker = (cardId: string): void => {
     const att = this.currentAttacker();
     if (!att) return;
-    const id = this.kid(cardId);
-    if (!this.legalBlockersFor(att).includes(id)) { this.note(`${this.nameOf(id)} can't block ${this.nameOf(att)}.`, "Rules"); return; }
+    const legal = this.legalBlockersFor(att);
     const cur = this.blockPicks[att] ?? [];
-    this.blockPicks = { ...this.blockPicks, [att]: cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id] };
+    // a token stack: each tap adds one more of its tokens (first by id); when all of them block, the next tap takes them all back
+    const members = this.stackMembers(cardId).map((m) => this.kid(m)).filter((m) => legal.includes(m));
+    if (!members.length) { const id = this.kid(cardId); this.note(`${this.nameOf(id)} can't block ${this.nameOf(att)}.`, "Rules"); return; }
+    const next = members.find((m) => !cur.includes(m));
+    this.blockPicks = { ...this.blockPicks, [att]: next ? [...cur, next] : cur.filter((x) => !members.includes(x)) };
     this.bump();
   };
   /** legacy "Confirm N Blockers" / "Do Not Block": settle this attacker, ask about the next, declare once the last is settled */
@@ -758,14 +861,24 @@ export class KernelGameController {
     const m = boardPickModel(d);
     const chosen = new Set(sel.ids);
     const cardOf = (opt: string) => Object.keys(m.cardOptions).find((k) => m.cardOptions[k] === opt);
+    // token stacks: the table shows one card for a stack, so the card ids it can click are the stack's representative; a click adds one more member, the tap after the last takes them all back
+    this.table();
+    const repOf = (id: string) => this.stackIndex.repOf.get(id) ?? id;
+    const uniq = (ids: string[]) => [...new Set(ids)];
     return {
       title: d.source?.card ?? d.title,
       instruction: d.source?.card ? `${d.title}${d.instruction ? ": " + d.instruction : ""}` : d.instruction,
-      legalCardIds: Object.keys(m.cardOptions), legalSeatIds: Object.keys(m.seatOptions),
-      selectedCardIds: Object.values(m.cardOptions).filter((o) => chosen.has(o)).map((o) => cardOf(o)!).filter(Boolean),
+      legalCardIds: uniq(Object.keys(m.cardOptions).map(repOf)), legalSeatIds: Object.keys(m.seatOptions),
+      selectedCardIds: uniq(Object.values(m.cardOptions).filter((o) => chosen.has(o)).map((o) => cardOf(o)!).filter(Boolean).map(repOf)),
       selectedSeatIds: Object.keys(m.seatOptions).filter((k) => chosen.has(m.seatOptions[k])),
       summary: selectionHint(d, sel.ids), canConfirm: canConfirm(d, sel.ids), confirmLabel: confirmLabel(d, sel.ids),
-      onToggleCard: (cardId) => { const o = m.cardOptions[cardId]; if (o) this.togglePick(d.id, o); },
+      onToggleCard: (cardId) => {
+        const mem = this.stackMembers(cardId).filter((x) => m.cardOptions[x]);
+        if (!mem.length) return;
+        const next = mem.find((x) => !chosen.has(m.cardOptions[x]));
+        if (next || mem.length === 1) this.togglePick(d.id, m.cardOptions[next ?? mem[0]]);
+        else for (const x of mem) this.togglePick(d.id, m.cardOptions[x]);
+      },
       onToggleSeat: (seatId) => { const o = m.seatOptions[seatId]; if (o) this.togglePick(d.id, o); },
       onConfirm: () => this.confirmPick(d.id),
       ...(d.cancellable ? { onCancel: () => { this.answer(d.id, { cancel: true }); } } : {}),

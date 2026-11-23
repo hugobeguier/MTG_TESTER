@@ -18,6 +18,7 @@ import type { AgentReasoning, GameSession, PlayerSeat, VisibleCard } from "@/lib
 import type { AgentLesson } from "@/lib/agentLessons";
 import { effectivePower, effectiveToughness } from "@/lib/counters";
 import { HOURGLASS_PATH, SUMMONING_SICK_TOOLTIP, isSummoningSick } from "@/lib/summoningSickness";
+import { attachmentLayout } from "@/components/game/attachmentLayout";
 import { SummoningSickBadge } from "@/components/SummoningSickBadge";
 import { rotateDelta } from "@/lib/cameraPan";
 import { cardPickOptions, toggleCardSelection } from "@/lib/cardPick";
@@ -96,6 +97,8 @@ interface ThreeGameTableProps {
   selectedCardFaceOptions?: Array<{ faceIndex: number; actionKind: "play_land" | "cast_spell"; label: string; payable: boolean }>;
   lockedRoomDoorFaceIndex?: number;
   humanAttackTargets?: Array<{ targetId: string; label: string }>;
+  /** Kernel mode: the open card is a stack of identical tokens: how many there are, how many the player chose for the next attack / ability / mana tap (undefined = automatic: all to attack, one otherwise) */
+  inspectedStack?: { count: number; chosen: number | undefined; onChange: (n: number | undefined) => void };
   inspectedCard?: VisibleCard;
   libraryLook?: LibraryLookState;
   // "Minimize" for the choice boxes: the open box is tucked away (and its backdrop removed) so the board is clickable, while the choice stays pending.
@@ -1567,7 +1570,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
         );
         ring.rotation.x = -Math.PI / 2;
         ring.position.copy((mesh as THREE.Mesh).position);
-        ring.position.y += 0.02;
+        ring.position.y = Math.max(ring.position.y, 0.08) + 0.02;
         group.add(ring);
       }
       return;
@@ -1583,7 +1586,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
       );
       ring.rotation.x = -Math.PI / 2;
       ring.position.copy((mesh as THREE.Mesh).position);
-      ring.position.y += 0.02;
+      ring.position.y = Math.max(ring.position.y, 0.08) + 0.02;
       group.add(ring);
     }
   }, [tableRenderKey, boardTargetingKey, kernelPickKey]);
@@ -1616,7 +1619,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
     const findCardMesh = (cardId: string) =>
       cardMeshesRef.current.find((mesh) => {
         const data = mesh.userData as Partial<InteractionUserData>;
-        return data.kind === "card" && data.card?.id === cardId;
+        return data.kind === "card" && (data.card?.id === cardId || Boolean(data.card?.stackIds?.includes(cardId)));
       });
     const findPlayerMesh = (seatId: string) =>
       cardMeshesRef.current.find((mesh) => {
@@ -2255,6 +2258,8 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
               ? () => props.onTapForMana?.(inspectedActionOwner.seat.id, props.inspectedCard!.id)
               : undefined
           }
+          stack={inspectedActionOwner?.seat.kind === "human" && inspectedActionOwner.zone === "battlefield" ? props.inspectedStack : undefined}
+          stackCount={props.inspectedCard.stackCount}
           attackTargets={
             inspectedActionOwner?.seat.kind === "human" && inspectedActionOwner.zone === "battlefield" && props.humanAttackTargets && props.humanAttackTargets.length > 0
               ? props.humanAttackTargets
@@ -2697,6 +2702,8 @@ function CardInspector({
   onActivateEquip,
   onActivateManlandAnimation,
   onTapForMana,
+  stack,
+  stackCount,
   attackTargets,
   onDeclareAttack,
   onCastCommander,
@@ -2729,6 +2736,8 @@ function CardInspector({
   onActivateManlandAnimation?: () => void;
   onTapForMana?: () => void;
   attackTargets?: Array<{ targetId: string; label: string }>;
+  stack?: { count: number; chosen: number | undefined; onChange: (n: number | undefined) => void };
+  stackCount?: number;
   onDeclareAttack?: (targetId: string) => void;
   onCastCommander?: () => void;
   onChangeCounter?: (delta: number) => void;
@@ -2759,7 +2768,7 @@ function CardInspector({
         <div className="card-inspector-detail">
           <div>
             <p className="eyebrow">{owner?.zone ?? card.zone}</p>
-            <h2>{card.name}</h2>
+            <h2>{card.name}{stackCount && stackCount > 1 ? ` x${stackCount}` : ""}</h2>
             <span>{card.typeLine}</span>
             <RoomDoorStatus card={card} />
           </div>
@@ -2851,6 +2860,15 @@ function CardInspector({
                   {ability.clause}
                 </button>
               ))}
+            </div>
+          ) : null}
+          {stack ? (
+            <div className="modal-actions" aria-label="Token count">
+              <span data-testid="stack-count-label">{stack.chosen === undefined ? `All ${stack.count} to attack, one for an ability` : `${stack.chosen} of ${stack.count} tokens`}</span>
+              <button className="inspector-action" type="button" aria-label="Fewer tokens" onClick={() => stack.onChange(Math.max(1, (stack.chosen ?? stack.count) - 1))}>-</button>
+              <button className="inspector-action" type="button" aria-label="More tokens" onClick={() => stack.onChange(Math.min(stack.count, (stack.chosen ?? 0) + 1))}>+</button>
+              <button className="inspector-action" type="button" onClick={() => stack.onChange(1)}>One</button>
+              <button className="inspector-action" type="button" onClick={() => stack.onChange(stack.count)}>All</button>
             </div>
           ) : null}
           {attackTargets && attackTargets.length > 0 ? (
@@ -4556,7 +4574,7 @@ function BlockChoiceModal({
                   onClick={() => onToggle?.(card.id)}
                 >
                   {selected ? <span className="block-assign-order">{order + 1}</span> : null}
-                  <span className="block-assign-name">{card.name}</span>
+                  <span className="block-assign-name">{card.name}{card.stackCount && card.stackCount > 1 ? ` x${card.stackCount}${card.stackSelected ? ` (${card.stackSelected} picked)` : ""}` : ""}</span>
                   <span className="block-assign-stats">{effectivePowerText(card)}</span>
                 </button>
               );
@@ -4833,6 +4851,7 @@ function cardRenderKey(card: VisibleCard) {
     z: card.battlefieldPosition?.z,
     counters: card.counters?.map((counter) => `${counter.kind}:${counter.count}`).join("|"),
     damage: card.damage ?? 0,
+    stack: card.stackCount ? `${card.stackCount}/${card.stackSelected ?? 0}` : undefined,
     // The power/toughness plate follows the live values (counters, until-end-of-turn bonuses, Auras and Equipment), so a change redraws it.
     pt: card.typeLine.includes("Creature") ? `${effectivePower(card)}/${effectiveToughness(card)}` : undefined
   };
@@ -4911,12 +4930,17 @@ function rebuildDynamicScene(
 
     attachedEquipmentByTarget.forEach((equipmentCards, targetId) => {
       const targetPoint = resolvedBattlefieldPositions.get(targetId);
-      equipmentCards.forEach((card, siblingIndex) => {
+      // Attachments lie BEHIND their host (lower height, peeking out sideways: Auras left, Equipment right) so they never cut through it or flicker against it (attachmentLayout.ts)
+      const sideCount = { left: equipmentCards.filter((c) => isAura(c)).length, right: equipmentCards.filter((c) => !isAura(c)).length };
+      const sideSeen = { left: 0, right: 0 };
+      equipmentCards.forEach((card) => {
+        const side = isAura(card) ? "left" : "right";
+        const place = attachmentLayout(sideCount[side], sideSeen[side]++, side);
         const point = targetPoint
-          ? { x: targetPoint.x + (isAura(card) ? -0.15 - siblingIndex * 0.12 : 0.15 + siblingIndex * 0.12), z: targetPoint.z + 0.14 }
+          ? { x: targetPoint.x + place.dx, z: targetPoint.z + place.dz }
           : card.battlefieldPosition ?? defaultBattlefieldPosition(area, card, seat.board.battlefield);
         const host = card.attachedToId ? hostOrientation.get(card.attachedToId) : undefined;
-        addCard(group, card, seat.id, "battlefield", point.x, point.z, host?.rot ?? area.rot, selectedCardId, cardMeshesRef, host?.tapped);
+        addCard(group, card, seat.id, "battlefield", point.x, point.z, host?.rot ?? area.rot, selectedCardId, cardMeshesRef, host?.tapped, targetPoint ? { y: place.y, renderOrder: place.renderOrder } : undefined);
       });
     });
 
@@ -5088,7 +5112,8 @@ function addCard(
   rot: number,
   selectedCardId: string | undefined,
   cardMeshesRef: MutableRefObject<THREE.Object3D[]>,
-  tappedOverride?: boolean
+  tappedOverride?: boolean,
+  depth?: { y: number; renderOrder: number }
 ) {
   const texture = makeCardTexture(card, selectedCardId === card.id);
   const material = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide });
@@ -5099,13 +5124,17 @@ function addCard(
   }
   mesh.rotation.x = -Math.PI / 2;
   mesh.rotation.z = rot + ((tappedOverride ?? card.tapped) ? Math.PI / 2 : 0);
-  mesh.position.set(x, 0.08, z);
+  mesh.position.set(x, depth?.y ?? 0.08, z);
+  if (depth) mesh.renderOrder = depth.renderOrder;
   mesh.userData = { kind: "card", card, seatId, location } satisfies CardUserData;
   group.add(mesh);
   cardMeshesRef.current.push(mesh);
   addCounterBadges(group, card, x, z);
   addTokenBadge(group, card, x, z);
-  if (location === "battlefield") addSummoningSickBadge(group, card, x, z);
+  if (location === "battlefield" && card.stackCount && card.stackCount > 1) {
+    addStackLayers(group, mesh, material, card.stackCount);
+    addStackBadge(group, card, x, z);
+  } else if (location === "battlefield") addSummoningSickBadge(group, card, x, z);
   addPhaseVisual(group, mesh, material, card, x, z);
   if (location === "battlefield") addRoomLockOverlays(mesh, card);
 }
@@ -5238,6 +5267,68 @@ function addTokenBadge(group: THREE.Group, card: VisibleCard, x: number, z: numb
   const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false }));
   sprite.scale.set(0.34, 0.113, 1);
   sprite.position.set(x + 0.2, 0.36, z - 0.44);
+  sprite.renderOrder = 12;
+  group.add(sprite);
+}
+
+// Kernel token stacks: one card stands for stackCount identical tokens. Two dimmed copies peek out behind it (never more, so a hundred tokens do not clog the board);
+// they are not in the pick list, so every click / hover / drag hits the one real card.
+function addStackLayers(group: THREE.Group, mesh: THREE.Mesh, material: THREE.MeshBasicMaterial, count: number) {
+  for (let layer = Math.min(2, count - 1); layer >= 1; layer--) {
+    const back = new THREE.Mesh(mesh.geometry, material.clone());
+    (back.material as THREE.MeshBasicMaterial).color.set("#7d8294");
+    back.rotation.copy(mesh.rotation);
+    back.position.set(mesh.position.x + 0.06 * layer, mesh.position.y - 0.012 * layer, mesh.position.z + 0.05 * layer);
+    back.raycast = () => undefined;
+    group.add(back);
+  }
+}
+
+// "x5" pill under a stack's card; an hourglass in front of it when the stack is summoning sick (same predicate), and "2/5" while some of it is picked (targets, blockers, sacrifices).
+function addStackBadge(group: THREE.Group, card: VisibleCard, x: number, z: number) {
+  const sick = isSummoningSick(card);
+  const label = card.stackSelected ? `${card.stackSelected}/${card.stackCount}` : `x${card.stackCount}`;
+  const key = `stack-badge:${label}:${sick ? 1 : 0}`;
+  let texture = counterBadgeTextureCache.get(key);
+  if (!texture) {
+    const canvas = document.createElement("canvas");
+    canvas.width = 256;
+    canvas.height = 96;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    roundRect(ctx, 4, 4, 248, 88, 40);
+    ctx.fillStyle = "rgba(20,24,38,0.94)";
+    ctx.fill();
+    ctx.lineWidth = 5;
+    ctx.strokeStyle = card.stackSelected ? "rgba(95,208,138,0.98)" : "rgba(255,255,255,0.95)";
+    ctx.stroke();
+    let textX = 128;
+    if (sick) {
+      ctx.save();
+      ctx.translate(26, 14);
+      ctx.scale(3.2, 3.2);
+      const path = new Path2D(HOURGLASS_PATH);
+      ctx.fillStyle = "#ffd76a";
+      ctx.fill(path);
+      ctx.lineWidth = 0.8;
+      ctx.strokeStyle = "rgba(0,0,0,0.55)";
+      ctx.stroke(path);
+      ctx.restore();
+      textX = 158;
+    }
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 60px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(label, textX, 52);
+    texture = new THREE.CanvasTexture(canvas);
+    texture.needsUpdate = true;
+    counterBadgeTextureCache.set(key, texture);
+  }
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false }));
+  sprite.name = sick ? `${card.stackCount} tokens. ${SUMMONING_SICK_TOOLTIP}` : `${card.stackCount} tokens`;
+  sprite.scale.set(0.5, 0.1875, 1);
+  sprite.position.set(x, 0.36, z + 0.5);
   sprite.renderOrder = 12;
   group.add(sprite);
 }

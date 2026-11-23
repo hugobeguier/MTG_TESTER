@@ -44,7 +44,7 @@
           "src": 1,
           "prompt": {
             "title": "Mind's Dilation: optional",
-            "instruction": "Do you want to you may play linked_exile without paying its mana cost?",
+            "instruction": "Do you want to cast or play the card exiled with Mind's Dilation without paying its mana cost?",
             "source": {
               "card": "Mind's Dilation",
               "ability": "a1"

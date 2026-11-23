@@ -392,6 +392,10 @@ export interface VisibleCard {
   commander?: boolean;
   commanderTax?: number;
   token?: boolean;
+  // Kernel token stacks (components/game/tokenStacks.ts): this card stands for stackCount identical tokens (their ids, first = this card's id); stackSelected = how many are picked right now.
+  stackCount?: number;
+  stackIds?: string[];
+  stackSelected?: number;
   tokenSourceCardId?: string;
   // The seat this card truly belongs to, distinct from whichever seat's zone array currently
   // holds it — set whenever a card changes controller (reanimation, theft, temporary control

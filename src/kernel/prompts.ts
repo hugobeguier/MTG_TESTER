@@ -431,7 +431,7 @@ export function describeStep(step: Step, targets: Map<string, TargetSpec> = new 
     case "attach": return `attach ${refName(String(step.what), targets)} to ${refName(String(step.to), targets)}`;
     case "gain_control": return `gain control of ${t()}${dur}`;
     case "grant_effect": return `${t()} ${describeModifiers(step.modify as Modifier[] | undefined, false, "step")}${dur}`;
-    case "permission_to_play": return `you may play ${String(step.what)}${step.withoutPaying ? " without paying its mana cost" : ""}${dur}`;
+    case "permission_to_play": return `cast or play ${refName(String(step.what ?? step.target), targets)}${step.withoutPaying ? " without paying its mana cost" : ""}${dur}`;
     case "choose": return describeChoose(step);
     case "add_mana": return Array.isArray(step.produces) && step.produces.length ? `add ${(step.produces as ManaSpec[]).map(describeManaSpec).join(" and ")}` : "add mana";
     case "create_delayed_trigger": return "create a delayed trigger";
@@ -495,7 +495,7 @@ export function promptForX(name: string, hint?: string): Prompt {
 }
 
 export function promptForMay(name: string, doing: string): Prompt {
-  return { title: `${name}: optional`, instruction: `Do you want to ${doing}?` };
+  return { title: `${name}: optional`, instruction: `Do you want to ${doing.replace(/^you may /i, "")}?` };
 }
 
 export function promptForCost(name: string, c: Cost): Prompt | undefined {
