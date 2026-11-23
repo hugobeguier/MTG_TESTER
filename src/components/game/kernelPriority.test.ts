@@ -86,6 +86,17 @@ describe("human priority windows on an opponent's turn", () => {
     // the turn went on to the human's turn and stopped at their precombat main (a default stop)
     expect(ks.state.turn.active).toBe("p1");
     expect(c.stopReason()).toBe("own_turn");
+    // the legacy stack dock is the one priority UI: an empty-stack stop is handed to it as the legacy "phase" window; with a decision open there is none
+    const t = c.table();
+    expect(t.pendingAction?.type).toBe("phase");
+    expect(t.stackActions).toEqual([]);
+    expect(t.prioritySeatId).toBe("p1");
+  });
+
+  it("no priority window is invented when the human is not stopped", () => {
+    const a = game({ phase: "upkeep", active: "p2", humanHand: [] });
+    expect(a.c.stopReason()).toBeUndefined();
+    expect(a.c.table().pendingAction).toBeUndefined();
   });
 
   it("is never asked on an opponent's step without a response, even with Full Control; with a response Full Control opens every step", () => {

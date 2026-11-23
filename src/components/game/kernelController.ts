@@ -112,7 +112,12 @@ export class KernelGameController {
       else { session = { ...ts.session, events: [...this.notes, ...ts.session.events] }; this.mergedCache = { base: ts.session, notes: this.notes, session }; }
     }
     if (this.positions.size) session = this.withPositions(session);
-    const table = session === ts.session ? ts : { ...ts, session };
+    let table = session === ts.session ? ts : { ...ts, session };
+    // the legacy table's priority UI (the stack dock with Pass Priority) is keyed on a pending action: when the human is stopped at an empty-stack window,
+    // hand it the same "phase" window the legacy game opens, so there is exactly one priority UI
+    if (!table.pendingAction && !table.decision && this.stopReason() !== undefined) {
+      table = { ...table, pendingAction: { id: `kernel-window-${this.ks.version}`, type: "phase", actorSeatId: this.human, message: `You want to pass ${table.session.phase}.` } };
+    }
     this.tableCache = { ver: this.ver, table };
     return table;
   }
@@ -361,8 +366,8 @@ export class KernelGameController {
       onActivateLoyalty: this.activateLoyalty,
       onPassPriority: this.passPriority, onAdvanceTurn: this.advanceTurn, onEndTurn: this.endTurn,
       onDeclareAttack: this.declareAttack, onToggleBlocker: this.toggleBlocker, onConfirmBlockers: this.confirmBlockers, onPassBlocks: this.passBlocks,
-      // no separate "respond" flow: while the human holds priority they cast / activate directly, and Pass answers the window
-      onRespond: this.passPriority, onRespondWithSelectedCard: this.respondWithSelected,
+      // no separate "respond" review: while the human holds priority they cast / activate directly (glowing cards, "Respond Selected"), and Pass answers the window
+      onRespond: () => this.note("Click a glowing card in your hand (or a permanent's ability) to respond; Pass Priority lets the stack resolve.", "Priority"), onRespondWithSelectedCard: this.respondWithSelected,
       onResolvePendingTrigger: this.passPriority,
       onDrawCard: inert("draw a card"), onShuffleLibrary: inert("shuffle the library"), onOpenLibrarySearch: inert("search the library"),
       onMoveCardToGraveyard: inert("move a card to the graveyard"), onMoveCardToExile: inert("move a card to exile"), onMoveCardToHand: inert("move a card to hand"),
@@ -490,6 +495,17 @@ export class KernelGameController {
     const s = this.ks.state;
     if (s.pending || s.combat?.expect || s.priority !== this.human) return [];
     return this.legalNow().filter((a) => !!a.action && !a.isMana && (a.kind === "castSpell" || a.kind === "activateAbility" || a.kind === "turnFaceUp" || a.kind === "castPrepared" || a.kind === "playLand"));
+  }
+  /** the ways of using one card that only the kernel lists (turn a morph face up, cast a prepared copy, flashback / alternative-cost casts); shown in the card's detail view */
+  cardActions(cardId: string): Array<{ id: string; label: string; title?: string }> {
+    const id = this.kid(cardId);
+    return this.options()
+      .filter((a) => a.objectId === id && (a.kind === "turnFaceUp" || a.kind === "castPrepared" || (a.kind === "castSpell" && !!a.option && a.option !== "normal")))
+      .map((a) => ({ id: a.id, label: a.label, ...(a.asks ? { title: `Asks: ${a.asks.replace(/_/g, " ")}` } : {}) }));
+  }
+  /** can the selected hand card be cast / played right now (the dock's "Respond Selected") */
+  selectedCanRespond(): boolean {
+    return !!this.selectedCardId && this.handHints().castable.includes(this.selectedCardId);
   }
   /** hand card ids (legacy ids when they had one) that can be played right now, for highlighting */
   playableCardIds(): Set<string> {

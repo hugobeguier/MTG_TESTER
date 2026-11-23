@@ -4,14 +4,16 @@
 import type { GameEvent as KernelEvent, GameState } from "../engine/types";
 import type { GameEvent as LogLine } from "../../lib/types";
 import type { PlayerView } from "../engine/view";
+import { displayTurnNumber } from "../../lib/turnNumber";
 
-export interface LogNames { card(id: string | undefined): string; player(id: string | undefined): string }
+export interface LogNames { card(id: string | undefined): string; player(id: string | undefined): string; /** seats at the table (turn lines show the round number when known) */ seatCount?: number }
 
 export function namesFrom(view: Pick<PlayerView, "objects" | "players">): LogNames {
   const players = new Map(view.players.map((p) => [p.id, p.name]));
   return {
     card: (id) => (id && view.objects[id] ? view.objects[id].token?.name ?? view.objects[id].cardName : "a card"),
-    player: (id) => (id ? players.get(id) ?? id : "someone")
+    player: (id) => (id ? players.get(id) ?? id : "someone"),
+    seatCount: view.players.length
   };
 }
 
@@ -26,7 +28,8 @@ export function namesForViewer(state: GameState, viewer: string): LogNames {
       if (o.faceDown && o.owner !== viewer && o.controller !== viewer) return "a card";
       return o.token?.name ?? o.cardName;
     },
-    player: (id) => (id ? players.get(id) ?? id : "someone")
+    player: (id) => (id ? players.get(id) ?? id : "someone"),
+    seatCount: state.players.length
   };
 }
 
@@ -40,7 +43,8 @@ export function formatEvent(ev: KernelEvent, n: LogNames): { seatId?: string; me
   const P = (id: unknown) => n.player(seat(id));
   const C = (id: unknown) => n.card(seat(id));
   switch (ev.type) {
-    case "turn_started": return { seatId: seat(ev.player), message: `Turn ${num(ev.turn)}: ${P(ev.player)}'s turn begins.` };
+    // the number players see (rounds), as the legacy log words it; the kernel's own count is one per player's turn
+    case "turn_started": return { seatId: seat(ev.player), message: `Turn ${n.seatCount ? displayTurnNumber(num(ev.turn), n.seatCount) : num(ev.turn)}: ${P(ev.player)}'s turn begins.` };
     case "land_played": return { seatId: seat(ev.player), message: `${P(ev.player)} plays ${C(ev.id)}.` };
     case "cast": return { seatId: seat(ev.player), message: `${P(ev.player)} casts ${str(ev.name) || C(ev.id)}.` };
     case "ability_activated": return { seatId: seat(ev.player), message: `${P(ev.player)} activates an ability of ${C(ev.source)}.` };

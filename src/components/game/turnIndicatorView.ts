@@ -10,7 +10,10 @@ export interface IndicatorInput {
   prioritySeatId?: string;
   /** legacy phase string ("combat damage step") or a kernel phase id ("first_strike_damage") */
   phase: string;
+  /** the number players see (round-style, see lib/turnNumber.ts) */
   turnNumber: number;
+  /** the engine's own count of every player's turn, shown only as a tooltip */
+  globalTurn?: number;
   stackSize: number;
   /** a seat that owes a decision (a choice or an attack / block declaration) */
   pendingDecisionSeatId?: string;
@@ -23,6 +26,8 @@ export interface SeatChip { id: string; name: string; isHuman: boolean; eliminat
 export interface PhaseCell { id: string; label: string; state: "past" | "current" | "future" }
 export interface IndicatorView {
   banner: string;
+  /** tooltip / aria detail for the banner (the engine's global turn count), when known */
+  bannerTitle?: string;
   bannerSeatId?: string;
   seats: SeatChip[];
   phases: PhaseCell[];
@@ -92,7 +97,7 @@ export function buildIndicatorView(i: IndicatorInput): IndicatorView {
     ? `Stack: ${i.stackSize} item${i.stackSize === 1 ? "" : "s"}${i.prioritySeatId && !i.pendingDecisionSeatId ? ` - ${who(i.prioritySeatId)} must respond or pass` : ""}`
     : undefined;
   return {
-    banner, bannerSeatId: i.activeSeatId, seats, phases: phaseTrack(i.phase), phaseLabel, status, stackLine, humanPriority,
+    banner, ...(i.globalTurn !== undefined ? { bannerTitle: `Round ${i.turnNumber}; ${i.globalTurn} player turn${i.globalTurn === 1 ? "" : "s"} played so far (every player's turn counts once)` } : {}), bannerSeatId:i.activeSeatId, seats, phases: phaseTrack(i.phase), phaseLabel, status, stackLine, humanPriority,
     announcement: i.gameOver ? "Game over" : `${banner}. ${phaseLabel}. ${status}.${stackLine ? ` ${stackLine}.` : ""}`
   };
 }

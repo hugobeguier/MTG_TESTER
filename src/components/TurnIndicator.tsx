@@ -23,7 +23,7 @@ export function TurnIndicator(props: IndicatorInput) {
   const v = buildIndicatorView(props);
   return (
     <div className="turn-indicator" data-testid="turn-indicator">
-      <div className="turn-banner" data-testid="turn-banner">{v.banner}</div>
+      <div className="turn-banner" data-testid="turn-banner" title={v.bannerTitle}>{v.banner}</div>
       <ul className="turn-chips" aria-label="Players">
         {v.seats.map((chip, i) => <Chip key={chip.id} chip={chip} index={i} />)}
       </ul>

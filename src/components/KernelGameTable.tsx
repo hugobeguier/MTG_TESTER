@@ -1,6 +1,7 @@
 "use client";
 // The table for a game running on the kernel engine (dev flag ?engine=kernel): the unchanged 3D table fed by the controller's derived TableState and intent API,
 // plus the two things the legacy table has no kernel-shaped UI for yet: the attack / block declaration bar and the generic decision dialog.
+// Priority uses the LEGACY UI only (the stack dock with Pass Priority / Respond Selected, Space to pass, the glowing hand cards); there is no second panel.
 import { useEffect, useSyncExternalStore } from "react";
 import type { KernelBoardPick } from "./ThreeGameTable";
 import { classifyDecision } from "./game/kernelDecisionView";
@@ -9,7 +10,6 @@ import { useKernelDriver } from "./game/useKernelGame";
 import { ThreeGameTable } from "./ThreeGameTable";
 import { GameOverDialog } from "./GameOverDialog";
 import { KernelDecisionDialog } from "./KernelDecisionDialog";
-import { KernelPriorityPanel } from "./KernelPriorityPanel";
 
 const bar = { position: "fixed", left: "50%", bottom: 150, transform: "translateX(-50%)", zIndex: 50, background: "#1c1b22ee", color: "#eee", border: "1px solid #6b6a7a", borderRadius: 10, padding: "10px 14px", maxWidth: "min(900px, 94vw)", display: "flex", flexDirection: "column", gap: 8 } as const;
 const btn = { padding: "5px 12px", borderRadius: 6, border: "1px solid #6b6a7a", background: "#34333f", color: "#eee", cursor: "pointer", font: "inherit" } as const;
@@ -89,6 +89,7 @@ export function KernelGameTable({ controller, onBack }: { controller: KernelGame
   const pick = controller.boardPick();
   const hints = controller.handHints();
   useDecisionKeys(pick);
+  const onKernelCardAction = (id: string) => { controller.closeInspect(); controller.doOption(id); };
   return (
     <main className="app-shell game-shell">
       {table.session.status === "complete" ? (
@@ -117,12 +118,14 @@ export function KernelGameTable({ controller, onBack }: { controller: KernelGame
         kernelPick={pick}
         kernelCastableIds={hints.castable}
         kernelHandReasons={hints.reasons}
+        kernelCardActions={(id) => controller.cardActions(id)}
+        onKernelCardAction={onKernelCardAction}
+        selectedCardCanRespond={controller.selectedCanRespond()}
         selectedCardId={controller.selectedCardId}
         inspectedCard={controller.inspectedCard}
         {...(controller.tableProps() as object)}
       />
       <KernelDeclarationBar controller={controller} />
-      {table.decision ? null : <KernelPriorityPanel controller={controller} />}
       {table.decision && !pick ? <KernelDecisionDialog key={table.decision.id} decision={table.decision} onAnswer={controller.answer} sourceArt={controller.decisionSourceArt()} onBoard={classifyDecision(table.decision).board ? () => controller.showList(table.decision!.id, false) : undefined} /> : null}
     </main>
   );

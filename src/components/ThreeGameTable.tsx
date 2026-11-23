@@ -48,6 +48,7 @@ import { hostHumanSeat } from "@/lib/multiplayer/seatMap";
 import { isMyStopColumn } from "@/lib/multiplayer/seatStops";
 import { describeKeyEvent, priorityShortcut } from "@/lib/yieldShortcuts";
 import { TurnIndicator } from "@/components/TurnIndicator";
+import { displayTurnNumber } from "@/lib/turnNumber";
 import { PHASE_ANIM_MS, nextPhaseTween, phaseProgress, type PhaseTween } from "@/components/phaseAnim";
 import { battlefieldPreviewCard, isLeftAlt } from "@/components/boardPreview";
 
@@ -245,7 +246,7 @@ interface ThreeGameTableProps {
   onToggleYield?: () => void;
   yielding?: boolean;
   holdPriorityOnce?: boolean;
-  /** Kernel mode: the engine's own turn number (every player's turn counts, like the log), shown as is; and the stack dock clears the moment the stack is empty. */
+  /** Kernel mode: the engine's own count of every player's turn (shown only as the banner tooltip; the banner shows the legacy round number); also marks kernel mode (the stack dock clears the moment the stack is empty). */
   kernelTurnNumber?: number;
   /** Kernel mode: the engine's raw step id (tells the first-strike damage step apart) and who owes a decision / declaration, for the turn indicator. */
   kernelStepId?: string;
@@ -255,6 +256,9 @@ interface ThreeGameTableProps {
   /** Kernel mode: hand card ids that can be cast / played right now (a glow) and the reason shown on the others */
   kernelCastableIds?: string[];
   kernelHandReasons?: Record<string, string>;
+  /** Kernel mode: extra buttons for a card's detail view (turn face up, cast prepared, flashback / alternative-cost casts) that only the kernel lists, and what they do */
+  kernelCardActions?: (cardId: string) => Array<{ id: string; label: string; title?: string }>;
+  onKernelCardAction?: (actionId: string) => void;
   // Recently resolving/resolved stack items (newest first) with their "result" derived from the events produced while they resolved — the
   // stack shows what each item DID, so the game reads without the log.
   stackFeed?: StackFeedEntry[];
@@ -997,6 +1001,9 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
   const prioritySeat = props.session.seats.find((seat) => seat.id === props.prioritySeatId);
   const humanHasPriority = props.prioritySeatId === human.id;
   const humanIsActive = props.session.activePlayerId === human.id;
+  // a response window that restricts what may be cast from the graveyard / exile to instant speed; in kernel mode the empty-stack "phase" window only shows the
+  // priority UI (the kernel itself says what is legal), so it does not count
+  const kernelStackWindowOpen = Boolean(props.pendingAction) && !(props.kernelTurnNumber !== undefined && props.pendingAction?.type === "phase");
   // Space = pass priority, Shift+Space = yield until end of turn (never while typing, on a button, or with a prompt/modal open; see lib/yieldShortcuts.ts).
   const shortcutPromptOpen = Boolean(props.ruleChoice || props.blockChoice || props.manaChoice || props.libraryLook || props.myriadTapChoice || props.basicLandFetchSearch || props.inspectedCard || priorityStopsOpen);
   useEffect(() => {
@@ -1840,7 +1847,8 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
           activeSeatId={props.session.activePlayerId}
           prioritySeatId={props.prioritySeatId}
           phase={props.kernelStepId ?? props.session.phase}
-          turnNumber={props.kernelTurnNumber ?? Math.max(1, Math.ceil(props.session.turn / Math.max(1, props.session.seats.length)))}
+          turnNumber={displayTurnNumber(props.session.turn, props.session.seats.length)}
+          globalTurn={props.kernelTurnNumber}
           stackSize={(props.pendingAction && props.pendingAction.type !== "phase" ? 1 : 0) + (props.stackActions?.length ?? 0)}
           pendingDecisionSeatId={props.kernelWaiting?.seatId}
           pendingKind={props.kernelWaiting?.kind}
@@ -2123,6 +2131,8 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
         <CardInspector
           card={props.inspectedCard}
           owner={inspectedOwner}
+          extraActions={inspectedActionOwner?.seat.kind === "human" ? props.kernelCardActions?.(props.inspectedCard.id) : undefined}
+          onExtraAction={props.onKernelCardAction}
           onClose={props.onCloseInspectCard}
           onMoveToGraveyard={
             testToolOwner?.seat.kind === "human" && (testToolOwner.zone === "hand" || testToolOwner.zone === "battlefield" || testToolOwner.zone === "exile")
@@ -2250,7 +2260,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
             (props.inspectedCard.exiledPlayableUntilTurn === undefined || props.session.turn <= props.inspectedCard.exiledPlayableUntilTurn) &&
             // If a response window is open, only an instant/flash card is actually castable —
             // main-phase casting (no pendingAction) has no such restriction.
-            (!props.pendingAction || canCastAtInstantSpeed(props.inspectedCard, seatHasFlashGrant(inspectedActionOwner.seat)))
+            (!kernelStackWindowOpen || canCastAtInstantSpeed(props.inspectedCard, seatHasFlashGrant(inspectedActionOwner.seat)))
               ? () => props.onCastFromExile?.(inspectedActionOwner.seat.id, props.inspectedCard!.id)
               : undefined
           }
@@ -2528,7 +2538,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
           seat={props.session.seats.find((seat) => seat.id === zoneView.seatId)}
           zone={zoneView.zone}
           turn={props.session.turn}
-          hasOpenResponseWindow={Boolean(props.pendingAction)}
+          hasOpenResponseWindow={kernelStackWindowOpen}
           onClose={() => setZoneView(undefined)}
           onInspect={(card) => {
             setZoneView(undefined);
@@ -2650,6 +2660,8 @@ function findCardOwner(session: GameSession, cardId: string) {
 function CardInspector({
   card,
   owner,
+  extraActions,
+  onExtraAction,
   onClose,
   onMoveToGraveyard,
   onMoveToExile,
@@ -2679,6 +2691,8 @@ function CardInspector({
 }: {
   card: VisibleCard;
   owner?: ReturnType<typeof findCardOwner>;
+  extraActions?: Array<{ id: string; label: string; title?: string }>;
+  onExtraAction?: (actionId: string) => void;
   onClose?: () => void;
   onMoveToGraveyard?: () => void;
   onMoveToExile?: () => void;
@@ -2732,6 +2746,11 @@ function CardInspector({
             <h2>{card.name}</h2>
             <span>{card.typeLine}</span>
           </div>
+          {extraActions?.map((action) => (
+            <button key={action.id} className="inspector-action" type="button" title={action.title} onClick={() => onExtraAction?.(action.id)}>
+              {action.label}
+            </button>
+          ))}
           {onMoveToGraveyard ? (
             <button className="inspector-action" type="button" onClick={onMoveToGraveyard}>
               Move To Graveyard
