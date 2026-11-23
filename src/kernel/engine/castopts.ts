@@ -7,7 +7,7 @@
 // predicates `kicked`, `paid_additional_cost` and `cast_with` read.
 
 import type { Ability, CastOption, Cost, Step } from "../schema";
-import { getIndex } from "./layers";
+import { getIndex, sourceIntact } from "./layers";
 import { isTopCard, topPerms } from "./topcast";
 import { abilitiesOf, continueHooks, continuing, defOf, faceMeta, label, opponentsOf, type Run } from "./core";
 import { evalPredicate, matchesFilter } from "./query";
@@ -38,7 +38,7 @@ function grantedMiracle(r: Run, o: GameObject): CastOption[] {
     for (const m of st.spec.modify) {
       const ga = (m as { grantAbility?: Ability }).grantAbility;
       const kw = ga && (typeof ga.keyword === "string" ? ga.keyword : ga.keyword?.name);
-      if (!ga || ga.kind !== "cast_option" || kw !== "miracle") continue;
+      if (!ga || ga.kind !== "cast_option" || kw !== "miracle" || !sourceIntact(r, st)) continue;
       const aff = st.spec.affects;
       if (typeof aff !== "object" || !matchesFilter(r, o.id, o.zone === "stack" ? { ...aff, zone: "stack" } : aff, { controller: st.controller, source: st.id })) continue;
       const own = faceMeta(defOf(r, o)!, o).manaCost ?? "";

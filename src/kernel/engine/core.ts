@@ -363,6 +363,8 @@ export function moveObject(r: Run, id: ObjId, to: Zone, opts: MoveOpts = {}): Ga
   // abilities a static effect had GIVEN it (Mikaeus: undying) are part of its last-known information: its dies / leaves triggers still use them
   o.leftWith = from === "battlefield" && !o.token ? chars(r, id).abilities.filter((a) => a.id.startsWith("g:") || a.id.startsWith("ga:") || a.id.startsWith("kw:")) : undefined;
   if (o.leftWith && !o.leftWith.length) o.leftWith = undefined;
+  if (from === "battlefield" && layerSixActive(r)) { const eff = new Set(chars(r, id).abilities.map((a) => a.id)); const lost = printedAbilities(r, o).filter((a) => !eff.has(a.id)).map((a) => a.id); o.leftLost = lost.length ? lost : undefined; }
+  else o.leftLost = undefined;
   if (from === "battlefield") { o.tapped = false; o.counters = {}; o.damage = 0; o.dtHit = undefined; o.controller = o.owner; o.attachedTo = undefined; o.attachedToTs = undefined; o.attachedPlayer = undefined; o.copyDef = undefined; o.copyUntilEot = undefined; r.s.effects = r.s.effects.filter((e) => e.objectId !== id); }
   // abilities gained by a resolved effect (Rivaz of the Claw): a spell keeps them as the permanent it becomes, any other move ends them
   const kept = from === "stack" && to === "battlefield";

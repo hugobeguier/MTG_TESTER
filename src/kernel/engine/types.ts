@@ -110,6 +110,8 @@ export interface GameObject {
   copyUntilEot?: boolean;
   /** abilities it had on the battlefield that something else gave it (undying from Mikaeus): its dies / leaves triggers use them; cleared on the next zone change */
   leftWith?: import("../schema").Ability[];
+  /** ids of printed abilities it had lost (layer 6) when it left the battlefield: its leaves / dies triggers look back at that (CR 603.10a) */
+  leftLost?: string[];
   /** the "next spell" grants this spell was cast with (improvise, affinity for artifacts, cant:be_countered) */
   castGrants?: string[];
   /** regeneration shields (regen.ts): cleared at cleanup */

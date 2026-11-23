@@ -1615,6 +1615,7 @@ function scanTriggers(r: Run): void {
       if (!o) continue;
       for (const ab of abilitiesOf(r, o)) {
         if (ab.kind !== "triggered" || !ab.trigger) continue;
+        if (h.lki && o.leftLost?.includes(ab.id)) continue; // it had lost this ability on the battlefield (Utter Insignificance): no look-back trigger
         if (ab.scripted?.handler === "tapped_for_mana" && !ev.forMana) continue; // Treasure Nabber: only a tap made to pay a MANA ability counts
         if (ab.scripted?.handler === "mana_rider_text") continue; // Path of Ancestry: the rider belongs to the mana (manapool.ts), not to a cast trigger
         if (ab.scripted?.handler === "tapped_for_colorless_mana") continue; // Forsaken Monument: not a stack trigger, mana.ts adds the extra {C} when the permanent is tapped for mana

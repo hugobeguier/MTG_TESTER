@@ -16,7 +16,7 @@
 
 import type { Ability, ObjectFilter, PlayerRef, Prompt, ReplacementSpec, Step } from "../schema";
 import { chars, emit, label, NeedAsk, obj, printedAbilities, Reject, takeAnswer, tryObj, Unsupported, type Run } from "./core";
-import { getIndex, grantedEnterAbilities } from "./layers";
+import { effectiveRepls, getIndex, grantedEnterAbilities } from "./layers";
 import { durables } from "./durable";
 import { evalPredicate, evalQuantity, matchesFilter, resolvePlayers, type QCtx } from "./query";
 import { changeLife, decide, runInline, standardCounterPT, tokenDefFromStep, type AskSpec } from "./steps";
@@ -168,7 +168,7 @@ function candidates(r: Run, ev: ReplEvent, done: Set<string>): Cand[] {
     const c: Cand = { key, src, ability, spec, controller, ts, self: src === eventObjectId(ev) };
     if (applies(r, c, ev)) out.push(c);
   };
-  for (const s of getIndex(r).repls) consider(s.id, s.ability, s.controller, s.ts);
+  for (const s of effectiveRepls(r)) consider(s.id, s.ability, s.controller, s.ts);
   // shields granted to players for a while (grant_effect with a replacement): the durable effect IS the ability
   for (const d of durables(r)) if (d.replacement) consider(d.source, { id: `d:${d.id}`, kind: "replacement", text: "", replacement: d.replacement } as Ability, d.owner, d.timestamp);
   const id = eventObjectId(ev);
