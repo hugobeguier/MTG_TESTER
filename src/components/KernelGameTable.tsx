@@ -116,6 +116,7 @@ export function KernelGameTable({ controller, onBack }: { controller: KernelGame
         kernelStepId={controller.ks.state.turn.phase}
         kernelWaiting={table.decision ? { seatId: human, kind: "choice" } : table.waitingFor ? { seatId: table.waitingFor.player, kind: "choice" } : table.declaring?.players[0] ? { seatId: table.declaring.players[0], kind: table.declaring.kind } : undefined}
         kernelPick={pick}
+        hoverLogCards
         kernelCastableIds={hints.castable}
         kernelHandReasons={hints.reasons}
         kernelCardActions={(id) => controller.cardActions(id)}

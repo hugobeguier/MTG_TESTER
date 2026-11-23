@@ -5,7 +5,7 @@ import type { DecisionKind, DecisionOption, GameState, PendingView, PlayerId, St
 import type { GameSession, ManaPool, VisibleCard } from "../../lib/types";
 import type { PendingActionView } from "../../components/ThreeGameTable";
 import type { StackItemDescription } from "../../lib/stackDescription";
-import { cardForObject, manaPoolsOf, toSession, type ToSessionEnv } from "./toSession";
+import { cardForListedObject, cardForName, cardForObject, manaPoolsOf, toSession, type ToSessionEnv } from "./toSession";
 
 export interface DecisionOptionView extends DecisionOption {
   /** the card an object option stands for (targets, discards, search results), when it is visible to the viewer */
@@ -21,6 +21,8 @@ export interface DecisionView {
   instruction: string;
   /** the card / ability the question comes from (the card JSON's prompt.source), for the dialog header */
   source?: { card?: string; ability?: string };
+  /** the card named by `source`, with its printed text and art, looked up by name (stack, board, graveyard, else the pack's card definitions) */
+  sourceCard?: VisibleCard;
   options: DecisionOptionView[];
   min: number;
   max: number;
@@ -85,6 +87,18 @@ export function stackViews(state: GameState, viewer: PlayerId, env: ToSessionEnv
   return out;
 }
 
+/** The card a decision comes from: the visible object of that name on the stack / battlefield / graveyard (live text), else its printed data by name. */
+function sourceCardOf(state: GameState, viewer: PlayerId, env: ToSessionEnv, p: NonNullable<GameState["pending"]>): VisibleCard | undefined {
+  // the card JSON names it (prompt.source.card), else the pending's own continuation knows which object is asking
+  const c = p.ctx as { exec?: { env?: { source?: string } }; draft?: { sourceId?: string } };
+  const asking = c.exec?.env?.source ?? c.draft?.sourceId;
+  const name = p.prompt?.source?.card ?? (asking ? state.objects[asking]?.cardName : undefined);
+  if (!name) return undefined;
+  const ids = [...state.stack.map((i) => i.sourceId).reverse(), ...state.battlefield, ...state.players.flatMap((p) => p.graveyard)];
+  const hit = ids.find((id) => state.objects[id]?.cardName === name && !state.objects[id]?.faceDown);
+  return (hit ? cardForObject(state, viewer, env, hit, state.objects[hit].zone as VisibleCard["zone"]) : undefined) ?? cardForName(env, name);
+}
+
 /** The open decision as the viewer may see it: their own with options (object options carry the card), somebody else's as "waiting for". */
 export function decisionView(state: GameState, viewer: PlayerId, env: ToSessionEnv): { decision?: DecisionView; waitingFor?: WaitingFor } {
   const p = state.pending;
@@ -92,13 +106,14 @@ export function decisionView(state: GameState, viewer: PlayerId, env: ToSessionE
   const title = p.prompt?.title || p.kind;
   if (p.player !== viewer) return { waitingFor: { player: p.player, kind: p.kind, title } };
   const options: DecisionOptionView[] = p.options.map((o) => {
-    if (o.id.startsWith("#")) { const card = cardForObject(state, viewer, env, o.id, state.objects[o.id]?.zone as VisibleCard["zone"]); return { ...o, ...(card ? { card } : {}) }; }
+    if (o.id.startsWith("#")) { const card = cardForListedObject(state, viewer, env, o.id, o.label); return { ...o, ...(card ? { card } : {}) }; }
     if (state.players.some((x) => x.id === o.id)) return { ...o, seatId: o.id };
     return { ...o };
   });
+  const sourceCard = sourceCardOf(state, viewer, env, p);
   return {
     decision: {
-      id: p.id, kind: p.kind, player: p.player, title, instruction: p.prompt?.instruction ?? "", ...(p.prompt?.source ? { source: p.prompt.source } : {}), options, min: p.min, max: p.max, cancellable: p.cancellable,
+      id: p.id, kind: p.kind, player: p.player, title, instruction: p.prompt?.instruction ?? "", ...(p.prompt?.source ? { source: p.prompt.source } : {}), ...(sourceCard ? { sourceCard } : {}), options, min: p.min, max: p.max, cancellable: p.cancellable,
       ...(p.repeatable ? { repeatable: true } : {}), ...(p.numeric ? { numeric: true } : {}), ...(p.amounts ? { amounts: p.amounts } : {}), ...(p.mana ? { mana: p.mana } : {}), ...(p.counters ? { counters: p.counters } : {})
     }
   };

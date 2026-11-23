@@ -12,6 +12,8 @@ import {
   canConfirm, classifyDecision, clampNumber, confirmLabel, defaultDamageSplit, initialOrder, moveItem, numberChoice, numberHint, orderChoice, pickChoice,
   selectionHint, setSplit, splitChoice, splitModel, splitSum, splitValid, toggleSelection, undoLast
 } from "./game/kernelDecisionView";
+import { pileDestination } from "./game/kernelCardInfo";
+import { CardChip, CardFull, CardPreviewPanel, CardTile, useCardPreview, type CardPreviewApi } from "./KernelCardView";
 
 export interface KernelDecisionDialogProps {
   decision: DecisionView;
@@ -24,7 +26,7 @@ export interface KernelDecisionDialogProps {
 
 const S = {
   backdrop: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 },
-  box: { background: "#1c1b22", color: "#eee", border: "1px solid #6b6a7a", borderRadius: 10, padding: 16, maxWidth: 780, width: "100%", maxHeight: "86vh", overflow: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.6)" },
+  box: { background: "#1c1b22", color: "#eee", border: "1px solid #6b6a7a", borderRadius: 10, padding: 16, maxWidth: 980, width: "100%", maxHeight: "86vh", overflow: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.6)" },
   head: { display: "flex", gap: 12, alignItems: "flex-start", marginBottom: 8 },
   tag: { fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, color: "#e8c04a" },
   title: { margin: "2px 0 4px", fontSize: 18 },
@@ -42,33 +44,39 @@ const S = {
 
 const COLOR_TINT: Record<string, string> = { W: "#f4efc9", U: "#7fb4ff", B: "#b9a8c9", R: "#ff8f7a", G: "#8fd49a", C: "#cfcfcf" };
 
-function art(o: DecisionOptionView): string | undefined { return o.card?.imageUris?.small ?? o.card?.imageUris?.normal; }
-
-function OptionButton({ o, order, on, onClick }: { o: DecisionOptionView; order?: number; on: boolean; onClick: () => void }) {
-  const src = art(o);
-  const tint = !src && /^[WUBRGC]$/.test(o.id) ? COLOR_TINT[o.id] : undefined;
+function OptionButton({ o, order, on, onClick, api, width, extra }: { o: DecisionOptionView; order?: number; on: boolean; onClick: () => void; api: CardPreviewApi; width: number; extra?: React.ReactNode }) {
+  const badge = order !== undefined ? <strong aria-label="order">#{order + 1}</strong> : null;
+  if (o.card) return <CardTile card={o.card} api={api} width={width} on={on} onClick={onClick} badge={badge} extra={extra} label={o.label === o.card.name ? undefined : o.label} />;
+  const tint = /^[WUBRGC]$/.test(o.id) ? COLOR_TINT[o.id] : undefined;
   return (
-    <button type="button" style={{ ...S.opt, ...(on ? S.optOn : {}), ...(tint ? { color: tint } : {}) }} onClick={onClick} aria-pressed={on} title={o.card?.oracleText || o.label}>
-      {src ? <img src={src} alt={o.card?.name ?? o.label} style={S.img} /> : null}
+    <button type="button" style={{ ...S.opt, ...(on ? S.optOn : {}), ...(tint ? { color: tint } : {}) }} onClick={onClick} aria-pressed={on} title={o.label}>
       <span>{o.label}</span>
-      {order !== undefined ? <strong aria-label="order">#{order + 1}</strong> : null}
+      {badge}
     </button>
   );
 }
 
-function Split({ decision, onAnswer }: { decision: DecisionView; onAnswer: KernelDecisionDialogProps["onAnswer"] }) {
+/** how wide the card tiles are: bigger when there are few cards or they are the cards in a library (scry, surveil, look at the top) */
+function tileWidth(d: DecisionView): number {
+  const cards = d.options.filter((o) => o.card).length;
+  return cards <= 3 ? 190 : cards <= 6 ? 160 : cards <= 12 ? 130 : 105;
+}
+
+function Split({ decision, onAnswer, api }: { decision: DecisionView; onAnswer: KernelDecisionDialogProps["onAnswer"]; api: CardPreviewApi }) {
   const m = useMemo(() => splitModel(decision), [decision]);
   const [vals, setVals] = useState<Record<string, number>>(() => (decision.kind === "assign_damage" ? defaultDamageSplit(m, decision.amounts?.lethal ?? {}) : {}));
   const sum = splitSum(m, vals);
   const ok = splitValid(m, vals);
   const label = (id: string) => decision.options.find((o) => o.id === id)?.label ?? id;
+  const cardOf = (id: string) => decision.options.find((o) => o.id === id)?.card;
   const range = m.total !== undefined ? `${sum} of ${m.total}` : `${sum} (between ${m.min} and ${m.max})`;
   return (
     <>
       <div style={S.grid}>
         {m.ids.map((id) => (
           <label key={id} style={{ ...S.opt, cursor: "default" }}>
-            <span>{label(id)}{decision.amounts?.lethal[id] ? ` (lethal ${decision.amounts.lethal[id]})` : ""}</span>
+            {cardOf(id) ? <CardTile card={cardOf(id)!} api={api} width={96} label={label(id)} /> : <span>{label(id)}</span>}
+            {decision.amounts?.lethal[id] && !cardOf(id) ? <span>{`(lethal ${decision.amounts.lethal[id]})`}</span> : null}
             <span style={S.row}>
               <button type="button" style={S.btn} aria-label={`less ${label(id)}`} onClick={() => setVals(setSplit(m, vals, id, (vals[id] ?? 0) - 1))}>-</button>
               <input type="number" min={0} max={m.caps[id]} value={vals[id] ?? 0} style={S.num} onChange={(e) => setVals(setSplit(m, vals, id, Number(e.target.value)))} />
@@ -85,7 +93,7 @@ function Split({ decision, onAnswer }: { decision: DecisionView; onAnswer: Kerne
   );
 }
 
-function Order({ decision, onAnswer }: { decision: DecisionView; onAnswer: KernelDecisionDialogProps["onAnswer"] }) {
+function Order({ decision, onAnswer, api }: { decision: DecisionView; onAnswer: KernelDecisionDialogProps["onAnswer"]; api: CardPreviewApi }) {
   const [order, setOrder] = useState<string[]>(() => initialOrder(decision));
   const byId = new Map(decision.options.map((o) => [o.id, o]));
   const first = decision.max <= 1;
@@ -98,7 +106,7 @@ function Order({ decision, onAnswer }: { decision: DecisionView; onAnswer: Kerne
           return (
             <div key={id} style={S.orderRow}>
               <strong>{i + 1}.</strong>
-              {art(o) ? <img src={art(o)} alt="" style={{ width: 36, borderRadius: 4 }} /> : null}
+              {o.card ? <CardChip card={o.card} api={api} thumb={64} /> : null}
               <span style={{ flex: 1 }}>{o.label}</span>
               {first ? <button type="button" style={{ ...S.btn, ...(i === 0 ? S.primary : {}) }} onClick={() => setOrder([id, ...order.filter((x) => x !== id)])}>{i === 0 ? "First" : "Make first"}</button> : (
                 <>
@@ -115,8 +123,31 @@ function Order({ decision, onAnswer }: { decision: DecisionView; onAnswer: Kerne
   );
 }
 
+/** scry / surveil / look-at-top: the listed cards side by side in two piles, "stay on top" and the pile the kernel's text says they move to; click a card (or its button) to move it */
+function Piles({ decision, picked, dest, api, width, onToggle }: { decision: DecisionView; picked: string[]; dest: "bottom" | "graveyard" | "top" | "exile" | "hand"; api: CardPreviewApi; width: number; onToggle: (id: string) => void }) {
+  const destLabel = dest === "bottom" ? "Put on the bottom of the library" : dest === "graveyard" ? "Put into the graveyard" : dest === "hand" ? "Put into your hand" : dest === "exile" ? "Exile" : "Put on top";
+  const topFirst = decision.options.filter((o) => !picked.includes(o.id));
+  const moved = decision.options.filter((o) => picked.includes(o.id));
+  const pile = (title: string, list: DecisionOptionView[], keep: boolean) => (
+    <div style={{ flex: 1, minWidth: 200 }} data-testid={keep ? "pile-top" : "pile-moved"}>
+      <div style={S.tag}>{title} ({list.length})</div>
+      <div style={S.grid}>
+        {list.map((o) => (
+          <OptionButton key={o.id} o={o} api={api} width={width} on={!keep} onClick={() => onToggle(o.id)}
+            order={keep ? decision.options.findIndex((x) => x.id === o.id) : undefined}
+            extra={<button type="button" style={S.btn} onClick={() => onToggle(o.id)}>{keep ? "To " + (dest === "bottom" ? "bottom" : dest) : "Back on top"}</button>} />
+        ))}
+        {list.length === 0 ? <em style={S.hint}>None</em> : null}
+      </div>
+    </div>
+  );
+  return <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>{pile("Stays on top (first is the top card)", topFirst, true)}{pile(destLabel, moved, false)}</div>;
+}
+
 export function KernelDecisionDialog({ decision, onAnswer, sourceArt, onBoard }: KernelDecisionDialogProps) {
   const cls = classifyDecision(decision);
+  const api = useCardPreview();
+  const pile = pileDestination(decision);
   const [picked, setPicked] = useState<string[]>([]);
   const [num, setNum] = useState<number>(Math.max(0, decision.min));
   const [filter, setFilter] = useState("");
@@ -138,9 +169,9 @@ export function KernelDecisionDialog({ decision, onAnswer, sourceArt, onBoard }:
   let body: React.ReactNode;
   answerRef.current = () => undefined;
   if (cls.layout === "split") {
-    body = <Split decision={decision} onAnswer={onAnswer} />;
+    body = <Split decision={decision} onAnswer={onAnswer} api={api} />;
   } else if (cls.layout === "order") {
-    body = <Order decision={decision} onAnswer={onAnswer} />;
+    body = <Order decision={decision} onAnswer={onAnswer} api={api} />;
   } else if (cls.layout === "number") {
     answerRef.current = () => onAnswer(decision.id, numberChoice(decision, num));
     body = (
@@ -172,9 +203,10 @@ export function KernelDecisionDialog({ decision, onAnswer, sourceArt, onBoard }:
     body = (
       <>
         {decision.options.length > 8 ? <input type="search" aria-label="filter" placeholder="Filter by name, type or text" value={filter} onChange={(e) => setFilter(e.target.value)} style={{ ...S.num, width: "100%", marginBottom: 6 }} /> : null}
-        <div style={S.grid}>
+        {pile ? <Piles decision={decision} picked={picked} dest={pile} api={api} width={tileWidth(decision)} onToggle={(id) => setPicked(toggleSelection(decision, picked, id))} /> : null}
+        <div style={{ ...S.grid, ...(pile ? { display: "none" } : {}) }}>
           {shown.map((o) => (
-            <OptionButton key={o.id} o={o} on={picked.includes(o.id)} order={ordering && picked.includes(o.id) ? picked.indexOf(o.id) : undefined} onClick={() => setPicked(toggleSelection(decision, picked, o.id))} />
+            <OptionButton key={o.id} o={o} api={api} width={tileWidth(decision)} on={picked.includes(o.id)} order={ordering && picked.includes(o.id) ? picked.indexOf(o.id) : undefined} onClick={() => setPicked(toggleSelection(decision, picked, o.id))} />
           ))}
           {shown.length === 0 ? <em style={S.hint}>{decision.options.length ? "No option matches the filter." : "Nothing to choose from."}</em> : null}
         </div>
@@ -194,15 +226,19 @@ export function KernelDecisionDialog({ decision, onAnswer, sourceArt, onBoard }:
     <div style={S.backdrop} role="dialog" aria-modal="true" aria-label={decision.title} data-decision-id={decision.id}>
       <div style={S.box}>
         <div style={S.head}>
-          {sourceArt ? <img src={sourceArt} alt={decision.source?.card ?? ""} style={{ width: 84, borderRadius: 6 }} /> : null}
+          {decision.sourceCard ? (
+            <div style={{ width: 170, flex: "none" }} data-testid="source-card" {...api.handlers(decision.sourceCard)}><CardFull card={decision.sourceCard} art="normal" showText={false} /></div>
+          ) : sourceArt ? <img src={sourceArt} alt={decision.source?.card ?? ""} style={{ width: 120, borderRadius: 6 }} /> : null}
           <div>
             <div style={S.tag}>{decision.source?.card ? `${decision.source.card} - ${cls.label}` : cls.label}</div>
             <h3 style={S.title}>{decision.title}</h3>
             {decision.instruction ? <p style={S.hint}>{decision.instruction}</p> : null}
+            {decision.sourceCard ? <p style={{ ...S.hint, whiteSpace: "pre-wrap", fontSize: 12 }} data-testid="source-text"><strong>{decision.sourceCard.name}</strong> {decision.sourceCard.manaCost ?? ""} - {decision.sourceCard.typeLine}{decision.sourceCard.oracleText ? ` ${decision.sourceCard.oracleText}` : ""}</p> : null}
           </div>
         </div>
         {body}
       </div>
+      <CardPreviewPanel api={api} />
     </div>
   );
 }

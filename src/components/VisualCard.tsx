@@ -15,13 +15,16 @@ export function VisualCard({
   compact = false,
   tabletop = false,
   selected = false,
-  onClick
+  onClick,
+  hover
 }: {
   card: VisibleCard;
   compact?: boolean;
   tabletop?: boolean;
   selected?: boolean;
   onClick?: (card: VisibleCard) => void;
+  /** optional hover handlers (the shared enlarged-card preview), spread on the card */
+  hover?: { onMouseEnter: () => void; onMouseLeave: () => void };
 }) {
   const colorClass = card.colors.length === 0 ? "card-colorless" : `card-${card.colors[0].toLowerCase()}`;
   const counters = card.counters?.map((counter) => `${counter.count} ${counter.kind}`).join(", ");
@@ -34,6 +37,7 @@ export function VisualCard({
       title={`${card.name}\n${card.typeLine}\n${card.oracleText}`}
       aria-pressed={selected}
       onClick={() => onClick?.(card)}
+      {...hover}
     >
       {imageUrl ? <img className="visual-card-image" src={imageUrl} alt="" loading="lazy" /> : null}
       <SummoningSickBadge card={card} />

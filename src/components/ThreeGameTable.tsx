@@ -51,6 +51,7 @@ import { TurnIndicator } from "@/components/TurnIndicator";
 import { displayTurnNumber } from "@/lib/turnNumber";
 import { PHASE_ANIM_MS, nextPhaseTween, phaseProgress, type PhaseTween } from "@/components/phaseAnim";
 import { battlefieldPreviewCard, isLeftAlt } from "@/components/boardPreview";
+import { KernelLogLine } from "@/components/KernelLogLine";
 
 type ManaColor = "W" | "U" | "B" | "R" | "G" | "C";
 type ManaPool = Record<ManaColor, number>;
@@ -80,6 +81,8 @@ export interface KernelBoardPick {
   onCancel?: () => void;
   /** switch to the dialog's list for the same decision */
   onList?: () => void;
+  /** the card the question comes from: shown in the banner, hover for the full card */
+  sourceCard?: VisibleCard;
 }
 
 interface ThreeGameTableProps {
@@ -253,6 +256,8 @@ interface ThreeGameTableProps {
   kernelWaiting?: { seatId: string; kind: "choice" | "attackers" | "blockers" };
   /** Kernel mode: an open target / card pick answered by clicking the highlighted permanents, players and hand cards (ids are the table's card / seat ids). Absent = legacy behaviour. */
   kernelPick?: KernelBoardPick;
+  /** kernel mode: card names in the action log show the full card on hover */
+  hoverLogCards?: boolean;
   /** Kernel mode: hand card ids that can be cast / played right now (a glow) and the reason shown on the others */
   kernelCastableIds?: string[];
   kernelHandReasons?: Record<string, string>;
@@ -358,7 +363,7 @@ function StackDock(props: StackDockProps) {
           const affectsYou = description?.affectsPlayerSeatId !== undefined && description.affectsPlayerSeatId === props.humanSeatId;
           return (
             <div className={`stack-dock-item${index === 0 ? " is-top" : ""}${resolving ? " is-resolving" : ""}${affectsYou ? " targets-you" : ""}`} key={view.id}>
-              {view.type !== "phase" && view.sourceCard ? <VisualCard card={view.sourceCard} compact /> : null}
+              {view.type !== "phase" && view.sourceCard ? <VisualCard card={view.sourceCard} compact hover={cardHoverHandlers(view.sourceCard)} /> : null}
               <div className="stack-dock-body">
                 <div className="stack-feed-head">
                   <span className="stack-feed-kind">{kind}</span>
@@ -1320,7 +1325,9 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
 
       const kpick = propsRef.current.kernelPick;
       if (kpick) {
-        hoveredCardRef.current = undefined;
+        // Left Alt still enlarges whatever card is under the pointer while picking on the board (the same public cards as without a pick)
+        hoveredCardRef.current = data?.kind === "card" && data.card && data.seatId && data.location ? (data as CardUserData) : undefined;
+        syncAltPreview();
         const legal = (data?.kind === "card" && !!data.card && kpick.legalCardIds.includes(data.card.id)) || (data?.kind === "player" && !!data.seatId && kpick.legalSeatIds.includes(data.seatId));
         renderer.domElement.style.cursor = legal ? "crosshair" : "not-allowed";
         return;
@@ -1363,7 +1370,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
       const humanId = hostHumanSeat(propsRef.current.session.seats)?.id;
       const targeting = asBoardTargetingChoice(propsRef.current.ruleChoice);
       draggedBattlefieldCardRef.current =
-        !targeting && event.button === 0 && !event.shiftKey && hovered?.location === "battlefield" && hovered.seatId === humanId ? hovered : undefined;
+        !targeting && !propsRef.current.kernelPick && event.button === 0 && !event.shiftKey && hovered?.location === "battlefield" && hovered.seatId === humanId ? hovered : undefined;
       if (draggedBattlefieldCardRef.current) {
         renderer.domElement.style.cursor = "grabbing";
       }
@@ -1454,7 +1461,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
       const key = event.key.toLowerCase();
       if (key === "t" && active) {
         const hovered = hoveredCardRef.current;
-        if (!hovered) return;
+        if (!hovered || propsRef.current.kernelPick) return;
         propsRef.current.onToggleTapCard?.(hovered.seatId, hovered.card.id, hovered.location);
       } else if (key === "w") movementKeys.current.forward = active;
       else if (key === "a") movementKeys.current.left = active;
@@ -1985,7 +1992,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
             {actionLogEvents.length === 0 ? (
               <p>No actions yet this game.</p>
             ) : (
-              actionLogEvents.map((event) => <p key={event.id} className={event.detail === "Unresolved" || event.message.startsWith("Couldn't resolve") ? "log-unresolved" : event.detail === "Rules" ? "log-refused" : undefined}>{event.message}</p>)
+              actionLogEvents.map((event) => <p key={event.id} className={event.detail === "Unresolved" || event.message.startsWith("Couldn't resolve") ? "log-unresolved" : event.detail === "Rules" ? "log-refused" : undefined}>{props.hoverLogCards ? <KernelLogLine message={event.message} session={props.session} /> : event.message}</p>)
             )}
           </div>
         </aside>
@@ -2418,6 +2425,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
       </div>
       {props.kernelPick ? (
         <div className="targeting-banner kernel-pick-banner" role="status" aria-live="polite" data-testid="kernel-pick-banner">
+          {props.kernelPick.sourceCard ? <VisualCard card={props.kernelPick.sourceCard} compact hover={cardHoverHandlers(props.kernelPick.sourceCard)} /> : null}
           <span>{props.kernelPick.title}</span>
           {props.kernelPick.instruction ? <strong>{props.kernelPick.instruction}</strong> : null}
           <p>{props.kernelPick.summary}</p>

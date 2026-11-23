@@ -21,3 +21,20 @@ describe("Alt battlefield preview", () => {
     expect(isLeftAlt({ code: "AltRight" })).toBe(false);
   });
 });
+
+import { listedPreviewCard } from "./boardPreview";
+describe("listed card preview (dialog, stack, log, piles)", () => {
+  it("enlarges listed cards of any zone, including library / graveyard / stack", () => {
+    for (const zone of ["library", "graveyard", "exile", "hand", "stack"] as const) {
+      const c = card({ zone: zone as VisibleCard["zone"] });
+      expect(listedPreviewCard(c)).toBe(c);
+    }
+  });
+  it("never enlarges hidden stubs or anonymous face-down cards", () => {
+    expect(listedPreviewCard(card({ role: "hidden" }))).toBeUndefined();
+    expect(listedPreviewCard(card({ id: "hidden:p2:hand:0" }))).toBeUndefined();
+    expect(listedPreviewCard(card({ name: "Hidden card" }))).toBeUndefined();
+    expect(listedPreviewCard(card({ name: "Face-down card" }))).toBeUndefined();
+    expect(listedPreviewCard(undefined)).toBeUndefined();
+  });
+});

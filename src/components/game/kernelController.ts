@@ -556,7 +556,8 @@ export class KernelGameController {
       onToggleSeat: (seatId) => { const o = m.seatOptions[seatId]; if (o) this.togglePick(d.id, o); },
       onConfirm: () => this.confirmPick(d.id),
       ...(d.cancellable ? { onCancel: () => { this.answer(d.id, { cancel: true }); } } : {}),
-      onList: () => this.showList(d.id, true)
+      onList: () => this.showList(d.id, true),
+      ...(d.sourceCard ? { sourceCard: d.sourceCard } : {})
     };
   }
   /** art of the card a decision comes from (looked up by the name in the card JSON's prompt.source: the stack, then the board, then the hand) */

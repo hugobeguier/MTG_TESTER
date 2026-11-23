@@ -261,3 +261,37 @@ export function cardForObject(state: GameState, viewer: PlayerId, env: ToSession
   const b: Build = { state, view, viewer, env, views: effectiveViews(state, env.ctx, [id]), idOf: (x) => env.legacyIds?.get(x) ?? x };
   return cardOf(b, o, zone);
 }
+
+/**
+ * An object a decision LISTED to the viewer, as a VisibleCard, also when the viewer's redacted view hides it (a scry / search / look-at-top / tutor
+ * candidate still in the library, a card in the hand of the one who must choose). The kernel only lists an option to the player who decides, and its label
+ * already carries the card's name, so showing the card is no new leak; for safety a hidden object is shown only when the label names it.
+ */
+export function cardForListedObject(state: GameState, viewer: PlayerId, env: ToSessionEnv, id: ObjId, label: string): VisibleCard | undefined {
+  const o = state.objects[id];
+  if (!o) return undefined;
+  const zone = (o.zone as Zone) ?? "battlefield";
+  const seen = cardForObject(state, viewer, env, id, zone);
+  if (seen) return seen;
+  if (!label.toLowerCase().includes(o.cardName.toLowerCase())) return undefined;
+  const view = viewFor(state, viewer);
+  const b: Build = { state, view, viewer, env, views: effectiveViews(state, env.ctx, []), idOf: (x) => env.legacyIds?.get(x) ?? x };
+  return cardOf(b, o, zone);
+}
+
+/** A card by NAME (printed data from the pack / card definitions): the source of a question that is not on any visible zone. Never reads the game state. */
+export function cardForName(env: ToSessionEnv, name: string): VisibleCard | undefined {
+  const d = env.display?.(name) ?? (env.ctx.cards(name) ? displayFromDef(env.ctx.cards(name)!) : undefined);
+  if (!d || (!d.typeLine && !d.oracleText && !d.imageUris)) return undefined;
+  const card: VisibleCard = {
+    id: `source:${name}`, name: d.name, typeLine: d.typeLine, oracleText: d.oracleText, manaValue: d.manaValue, colors: d.colors.map(letterOf).filter(Boolean),
+    role: "spell", zone: "hand"
+  };
+  if (d.manaCost) card.manaCost = d.manaCost;
+  if (d.imageUris) card.imageUris = d.imageUris;
+  if (d.faces) card.faces = d.faces;
+  if (d.power !== undefined) card.power = d.power;
+  if (d.toughness !== undefined) card.toughness = d.toughness;
+  if (d.loyalty !== undefined) card.loyalty = d.loyalty;
+  return card;
+}

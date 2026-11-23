@@ -14,3 +14,12 @@ export function battlefieldPreviewCard(card: VisibleCard | undefined, location: 
 
 /** Left Alt only (AltGr reports AltRight and must keep working for typing). */
 export const isLeftAlt = (event: { code: string }): boolean => event.code === "AltLeft";
+
+/**
+ * The card to enlarge for a card shown OUTSIDE the board (decision options, the stack, the log, graveyard / exile piles), by plain hover or Left Alt + hover.
+ * Only what the table already shows the viewer: hidden stubs and anonymous face-down cards are never enlarged (they carry no real data anyway).
+ */
+export function listedPreviewCard(card: VisibleCard | undefined): VisibleCard | undefined {
+  if (!card || card.role === "hidden" || card.id.startsWith("hidden:") || card.name === "Hidden card" || card.name === "Face-down card" || card.name === "Face-down creature") return undefined;
+  return card;
+}
