@@ -129,10 +129,11 @@ export function discardCard(r: Run, pid: PlayerId, id: ObjId): void {
   runAfter(r, ev);
 }
 
-const PREDEFINED_TOKEN_ABILITIES: Record<string, Ability> = {
+export const PREDEFINED_TOKEN_ABILITIES: Record<string, Ability> = {
   Treasure: { id: "t:treasure", kind: "mana", text: "{T}, Sacrifice this artifact: Add one mana of any color.", costs: [{ tap: "self" }, { sacrifice: "self", count: 1 }], mana: { produces: [{ anyColor: 1 }] } },
   Food: { id: "t:food", kind: "activated", text: "{2}, {T}, Sacrifice this artifact: You gain 3 life.", costs: [{ mana: "{2}" }, { tap: "self" }, { sacrifice: "self", count: 1 }], steps: [{ kind: "life_change", lifeDelta: 3, who: "you" }] },
-  Clue: { id: "t:clue", kind: "activated", text: "{2}, Sacrifice this artifact: Draw a card.", costs: [{ mana: "{2}" }, { sacrifice: "self", count: 1 }], steps: [{ kind: "draw_cards", amount: 1, who: "you" }] }
+  Clue: { id: "t:clue", kind: "activated", text: "{2}, Sacrifice this artifact: Draw a card.", costs: [{ mana: "{2}" }, { sacrifice: "self", count: 1 }], steps: [{ kind: "draw_cards", amount: 1, who: "you" }] },
+  Blood: { id: "t:blood", kind: "activated", text: "{1}, {T}, Discard a card, Sacrifice this artifact: Draw a card.", costs: [{ mana: "{1}" }, { tap: "self" }, { discard: {}, count: 1 }, { sacrifice: "self", count: 1 }], steps: [{ kind: "draw_cards", amount: 1, who: "you" }] }
 };
 
 /** The token a create_tokens step describes (before any replacement effect sees it). Predefined artifact tokens carry their rules. */
@@ -141,7 +142,7 @@ export function tokenDefFromStep(r: Run, env: QCtx, step: Step): TokenDef {
   const abilities: Ability[] = [];
   for (const s of subtypes) {
     if (PREDEFINED_TOKEN_ABILITIES[s]) abilities.push(PREDEFINED_TOKEN_ABILITIES[s]);
-    else if (["Blood", "Map", "Powerstone", "Junk", "Gold", "Shard", "Incubator"].includes(s)) throw new Unsupported("token:predefined_abilities", s + " tokens carry rules the engine does not model yet");
+    else if (["Map", "Powerstone", "Junk", "Gold", "Shard", "Incubator"].includes(s)) throw new Unsupported("token:predefined_abilities", s + " tokens carry rules the engine does not model yet");
   }
   for (const a of (step.tokenAbilities as Ability[] | undefined) ?? []) abilities.push(structuredClone(a)); // the token's own printed abilities ("When this token dies, you gain 1 life")
   return {
@@ -349,19 +350,20 @@ const STEPS: Record<string, StepSpec> = {
       if (step.all && !step.filter && !step.target) throw new Unsupported("field:grant_effect.all", "an unfiltered mass grant");
       // player-scoped form: a replacement shield / a player flag for a while (durable.ts)
       if (!step.target && !step.filter) { grantToPlayers(r, ex.env, step); return "done"; }
-      if (!step.duration && (step.modify as Array<Record<string, unknown>> | undefined)?.every((m) => "grantAbility" in m)) { // "it gains 'When this creature dies, exile it.'": the object keeps the ability as long as it stays that object
-        for (const id of refs(r, ex.env, step)) { const o = tryObj(r, id); if (!o || (o.zone !== "stack" && o.zone !== "battlefield")) continue; for (const m of step.modify as Array<{ grantAbility: import("../schema").Ability }>) { r.s.effects.push({ id: `e${r.s.effects.length}_${r.s.clock}`, timestamp: tick(r), objectId: id, objectTimestamp: o.timestamp, until: "leaves", ability: m.grantAbility }); } invalidateIndex(r); }
+      if ((!step.duration || step.duration === "until_end_of_turn") && (step.modify as Array<Record<string, unknown>> | undefined)?.every((m) => "grantAbility" in m)) { // "it gains 'When this creature dies, exile it.'": the object keeps the ability as long as it stays that object
+        for (const id of refs(r, ex.env, step)) { const o = tryObj(r, id); if (!o || (o.zone !== "stack" && o.zone !== "battlefield")) continue; for (const m of step.modify as Array<{ grantAbility: import("../schema").Ability }>) { r.s.effects.push({ id: `e${r.s.effects.length}_${r.s.clock}`, timestamp: tick(r), objectId: id, objectTimestamp: o.timestamp, until: step.duration ? "end_of_turn" : "leaves", ability: m.grantAbility }); } invalidateIndex(r); }
         return "done";
       }
       requireEot(step);
       // mass form ("creatures you control gain indestructible until end of turn"): the filter picks the permanents, `who` is only whose perspective it is
       const mods = ((step.modify ?? []) as Array<Record<string, unknown>>).map((m) => (m.cant === "be_blocked" && Object.keys(m).length === 1 ? { grant: "unblockable" } : m)); // "it can't be blocked this turn" = unblockable for the turn
-      const GRANTABLE = ["grant", "lose", "setBasePT", "addTypes", "setColors"];
+      const GRANTABLE = ["grant", "lose", "setBasePT", "addTypes", "setColors", "pt"];
       for (const m of mods) if (Object.keys(m).length !== 1 || !GRANTABLE.includes(Object.keys(m)[0])) throw new Unsupported(`field:grant_effect.modify.${Object.keys(m)[0]}`);
       const granted = step.target ? refs(r, ex.env, step) : objectsMatching(r, step.filter as ObjectFilter, ex.env);
       for (const id of granted) for (const m of mods) {
         if ("grant" in m) addEffect(r, id, { grant: String(m.grant).toLowerCase() });
         else if ("lose" in m) addEffect(r, id, { lose: String(m.lose) });
+        else if ("pt" in m) { const b = m.pt as { power: never; toughness: never }; addEffect(r, id, { power: evalQuantity(r, b.power, ex.env), toughness: evalQuantity(r, b.toughness, ex.env) }); }
         else if ("setBasePT" in m) { const b = m.setBasePT as { power: never; toughness: never }; addEffect(r, id, { base: { power: evalQuantity(r, b.power, ex.env), toughness: evalQuantity(r, b.toughness, ex.env) } }); }
         else if ("addTypes" in m) addEffect(r, id, { addTypes: m.addTypes as string[] });
         else addEffect(r, id, { setColors: m.setColors as string[] });

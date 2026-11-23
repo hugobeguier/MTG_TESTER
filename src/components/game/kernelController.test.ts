@@ -13,7 +13,6 @@ import { KernelGameController, MAX_AUTO_ACTIONS_PER_TURN } from "./kernelControl
 import { kernelReadiness, setLoadedKernelPacks, type LoadedPacks } from "./kernelPacks";
 import { startKernelGame } from "./useKernelGame";
 import { KernelDecisionDialog } from "@/components/KernelDecisionDialog";
-import { KernelDeclarationBar } from "@/components/KernelGameTable";
 
 const pack = JSON.parse(JSON.stringify(buildPack("wretched-ranks", { catalog: false })));
 const kit = packKit([pack]);
@@ -117,10 +116,15 @@ describe("a scripted human turn on the kernel", () => {
     settle(c);
     const decl = c.declaration();
     expect(decl?.kind).toBe("attackers");
-    expect(renderToStaticMarkup(createElement(KernelDeclarationBar, { controller: c }))).toContain("Gravecrawler");
     if (decl?.kind !== "attackers") return;
-    c.attackWithAll();
-    expect(c.confirmAttackers()).toBe(true);
+    // the LEGACY flow: open the creature, pick "Attack <player>", then Continue
+    const gc = c.table().session.seats.find((x) => x.id === "p1")!.board.battlefield.find((x) => x.name === "Gravecrawler")!;
+    c.inspectCard(gc);
+    const targets = (c.combatProps().humanAttackTargets as Array<{ targetId: string; label: string }>);
+    expect(targets.map((t) => t.label)).toContain("Attack p2");
+    c.declareAttack(gc.id, targets[0].targetId);
+    expect(c.table().session.seats.find((x) => x.id === "p1")!.board.battlefield.find((x) => x.name === "Gravecrawler")!.attacking).toBe(true);
+    c.advanceTurn();
     settle(c);
     expect(ks.state.players[1].life).toBeLessThan(40);
 

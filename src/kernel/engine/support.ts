@@ -6,7 +6,9 @@ import { STEP10_HANDLERS } from "./step10";
 import { TOP_GRANTS, TOP_HANDLERS } from "./topcast";
 import { SYNTHESISED_KEYWORDS } from "./keywords8";
 import type { Ability, Cost, ObjectFilter, Predicate, Quantity, Step } from "../schema";
-import { SUPPORTED_FILTER_KEYS } from "./query";
+import { EVENT_TO_LOG, SUPPORTED_FILTER_KEYS } from "./query";
+import { PREDEFINED_TOKEN_ABILITIES } from "./steps";
+import { MOVE_WHAT_KINDS } from "./moves";
 import { META_FIELDS, STEP_FIELDS, SUPPORTED_ENGINE_STEP_KINDS } from "./steps";
 import { CHOOSE_CHOICES } from "./choose";
 
@@ -57,6 +59,7 @@ function checkQuantity(q: Quantity | undefined, out: string[]): void {
   if (q === undefined || typeof q === "number") return;
   if ("math" in q) { q.args.forEach((a) => checkQuantity(a, out)); return; }
   if (!SUPPORTED_QUANTITY_REFS.has(q.ref)) { add(out, `quantity:${q.ref}`); return; }
+  if (q.ref === "count_this_turn" && !EVENT_TO_LOG[String((q as { event?: string }).event)]) add(out, `event:${String((q as { event?: string }).event)}`);
   if (q.ref === "players_count" && "where" in q) checkPredicate((q as unknown as { where: Predicate }).where, out);
   if ("of" in q && typeof q.of === "object") checkFilter(q.of, out);
   if ("filter" in q) checkFilter(q.filter as object | undefined, out);
@@ -69,6 +72,7 @@ function checkPredicate(p: Predicate | undefined, out: string[]): void {
   if ("not" in p) return checkPredicate(p.not, out);
   if ("unsupported" in p) return add(out, "predicate:unsupported");
   if (!SUPPORTED_PREDICATES.has(p.check)) return add(out, `predicate:${p.check}`);
+  if (p.check === "did_this_turn" && !EVENT_TO_LOG[String(p.event)]) add(out, `event:${String(p.event)}`); // query.countLog only knows the events it logs
   if ("filter" in p) checkFilter(p.filter, out);
   if ("cmp" in p && p.cmp) checkQuantity(p.cmp.value, out);
   if (p.check === "compare") checkQuantity(p.left, out);
@@ -132,6 +136,7 @@ function checkStep(s: Step, out: string[]): void {
   if (s.kind === "create_emblem") for (const a of ((s.emblem as { abilities?: Ability[] } | undefined)?.abilities ?? [])) abilityUnsupported({ ...a, zone: "battlefield" }).forEach((n) => add(out, n)); // emblem abilities work from the command zone, judged as if on the battlefield
   if (s.kind === "reveal" && !(s.until !== undefined || s.what === "top_card_of_library" || (s.what === undefined && (s.target || s.filter)))) add(out, `field:reveal.what=${String(s.what)}`);
   if (s.kind === "repeat_for_each") {
+    if (s.repeatCount !== undefined && s.repeatCount !== "as_many_as_you_choose") add(out, `field:repeat_for_each.repeatCount=${String(s.repeatCount)}`); // steps7 runs only the player-chosen loop
     if (s.repeatCount === "as_many_as_you_choose" && !s.over) { /* repeat while the player says yes (steps7 __repeat_ask) */ }
     else if (typeof s.over === "string" ? !REPEAT_PLAYER_REFS.includes(s.over) : !s.over) add(out, `field:repeat_for_each.over`);
     if (s.over && typeof s.over === "object") checkFilter(s.over as object, out);
@@ -144,6 +149,13 @@ function checkStep(s: Step, out: string[]): void {
     if (s.appliesTo && s.appliesTo !== "next_spell_cast") add(out, "field:grant_effect.appliesTo");
     if (s.appliesTo === "next_spell_cast") for (const m of (s.modify ?? []) as Array<Record<string, unknown>>) if (!(typeof m.grant === "string" || m.cant === "be_countered")) add(out, "field:grant_effect.modify");
   }
+  if (s.kind === "grant_effect" && (s.target || s.filter) && !s.phaseOut && !s.prepared) {
+    // steps.ts grant_effect: a grantAbility-only grant without duration is a permanent gain; otherwise every modify entry is one of GRANTABLE (+ "can't be blocked")
+    const ms = (s.modify ?? []) as Array<Record<string, unknown>>;
+    const permanent = (!s.duration || s.duration === "until_end_of_turn") && ms.length > 0 && ms.every((m) => "grantAbility" in m);
+    if (!permanent) for (const m of ms) { const k = Object.keys(m); if (k[0] === "copyOf" && ms.length === 1 && typeof m.copyOf === "string" && (!s.duration || s.duration === "until_end_of_turn")) continue; if (!(k.length === 1 && (["grant", "lose", "setBasePT", "addTypes", "setColors", "pt"].includes(k[0]) || (k[0] === "cant" && m.cant === "be_blocked")))) add(out, `field:grant_effect.modify.${k[0]}`); }
+  }
+  if (s.kind === "create_tokens" && typeof s.tokenTypeLine === "string") for (const sub of s.tokenTypeLine.split(/[—-]/).slice(1).join(" ").split(/\s+/)) if (["Map", "Powerstone", "Junk", "Gold", "Shard", "Incubator"].includes(sub) && !PREDEFINED_TOKEN_ABILITIES[sub]) add(out, `token:predefined_abilities:${sub}`);
   if (s.kind === "grant_effect" && (s.target || s.filter)) for (const m of (s.modify ?? []) as Array<Record<string, unknown>>) if (m.cant !== undefined && m.cant !== "be_blocked") add(out, `field:grant_effect.modify.cant=${String(m.cant)}`);
   if (s.kind === "permission_to_play") {
     const ref = (s.what ?? s.target) as string | undefined;
@@ -283,6 +295,16 @@ function zoneSupported(a: Ability): boolean {
   return false;
 }
 
+/** move_card_zone.what names a built-in list or a list an earlier step of the same ability saved (saveAs / step id): anything else is unknown to moves.sourceCards at run time. */
+function checkSavedLists(a: Ability, out: string[]): void {
+  const names = new Set<string>(["found", "chosen"]);
+  const all: Step[] = [];
+  const walk = (ss?: Step[]) => ss?.forEach((s) => { all.push(s); walk(s.then); walk(s.else); walk(s.steps); });
+  walk(a.steps); a.modes?.options.forEach((o) => walk(o.steps)); walk((a.replacement?.result as { steps?: Step[] } | undefined)?.steps);
+  for (const s of all) { if (typeof s.saveAs === "string") names.add(s.saveAs); if (s.id) names.add(s.id); }
+  for (const s of all) if (s.kind === "move_card_zone" && typeof s.what === "string" && !MOVE_WHAT_KINDS.includes(s.what) && !/^graveyard_of_t\d+$/.test(s.what) && !["rest_of_revealed_cards", "revealed_cards"].includes(s.what) && !names.has(s.what)) add(out, `field:move_card_zone.what=${s.what}`);
+}
+
 /** Capabilities this one ability needs that the engine lacks. Empty = fully supported. */
 export function abilityUnsupported(a: Ability): string[] {
   const out: string[] = [];
@@ -344,6 +366,7 @@ export function abilityUnsupported(a: Ability): string[] {
   for (const sp of specs) { if (sp.maxQuantity !== undefined) checkQuantity(sp.maxQuantity, out); checkFilter(sp.filter, out); checkPredicate(sp.onlyIf, out); }
   a.steps?.forEach((s) => checkStep(s, out));
   a.modes?.options.forEach((o) => o.steps.forEach((s) => checkStep(s, out)));
+  checkSavedLists(a, out);
   return out;
 }
 

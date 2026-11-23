@@ -37,8 +37,8 @@
             }
           ],
           "prompt": {
-            "title": "Lim-Dûl's Vault: optional",
-            "instruction": "Do you want to repeat for each matching object?",
+            "title": "Lim-Dûl's Vault",
+            "instruction": "Pay 1 life, put these cards on the bottom of your library in any order, and look at the top five cards again?",
             "source": {
               "card": "Lim-Dûl's Vault",
               "ability": "a1"

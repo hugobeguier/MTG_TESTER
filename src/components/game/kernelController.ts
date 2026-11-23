@@ -24,7 +24,7 @@ export interface AttackerOption { id: string; name: string; defenders: Array<{ i
 export interface BlockerOption { id: string; name: string; attackers: Array<{ id: string; name: string }> }
 export type Declaration =
   | { kind: "attackers"; attackers: AttackerOption[]; picks: Record<string, string> }
-  | { kind: "blockers"; blockers: BlockerOption[]; picks: Record<string, string> };
+  | { kind: "blockers"; blockers: BlockerOption[]; picks: Record<string, string[]> };
 
 export interface ControllerOptions {
   human: PlayerId;
@@ -53,7 +53,10 @@ export class KernelGameController {
   inspectCard = (card: VisibleCard): void => { this.inspectedCard = card; this.bump(); };
   closeInspect = (): void => { this.inspectedCard = undefined; this.bump(); };
   private attackPicks: Record<string, string> = {};
-  private blockPicks: Record<string, string> = {};
+  /** attacker (kernel id) -> its blockers (kernel ids) in the order they were tapped: that order is the damage-assignment order, as in the legacy modal */
+  private blockPicks: Record<string, string[]> = {};
+  /** the legacy modal asks about one attacker at a time: the index into blockQueue() */
+  private blockIdx = 0;
   private toKernel = new Map<string, ObjId>();
   private tableCache?: { ver: number; table: TableState };
   private mergedCache?: { base: GameSession; notes: LogLine[]; session: GameSession };
@@ -112,6 +115,7 @@ export class KernelGameController {
       else { session = { ...ts.session, events: [...this.notes, ...ts.session.events] }; this.mergedCache = { base: ts.session, notes: this.notes, session }; }
     }
     if (this.positions.size) session = this.withPositions(session);
+    if (Object.keys(this.attackPicks).length) session = this.withAttackPicks(session);
     let table = session === ts.session ? ts : { ...ts, session };
     // the legacy table's priority UI (the stack dock with Pass Priority) is keyed on a pending action: when the human is stopped at an empty-stack window,
     // hand it the same "phase" window the legacy game opens, so there is exactly one priority UI
@@ -132,6 +136,15 @@ export class KernelGameController {
       return { ...seat, board: { ...seat.board, battlefield: seat.board.battlefield.map((c) => (this.positions.has(c.id) ? { ...c, battlefieldPosition: this.positions.get(c.id) } : c)) } };
     });
     return changed ? { ...session, seats } : session;
+  }
+  /** the attackers picked so far look like declared attackers (legacy: attacking, tapped unless vigilance, pointing at their target) before the kernel gets the declaration */
+  private withAttackPicks(session: GameSession): GameSession {
+    const picks = new Map(Object.entries(this.attackPicks).map(([id, def]) => [this.ks.legacyIdOf(id) ?? id, this.ks.legacyIdOf(def) ?? def]));
+    const seats = session.seats.map((seat) => {
+      if (!seat.board.battlefield.some((c) => picks.has(c.id))) return seat;
+      return { ...seat, board: { ...seat.board, battlefield: seat.board.battlefield.map((c) => (picks.has(c.id) ? { ...c, attacking: true, attackTargetId: picks.get(c.id), tapped: c.tapped || !/\bvigilance\b/i.test(c.oracleText ?? "") } : c)) } };
+    });
+    return { ...session, seats };
   }
   moveBattlefieldCard = (_seatId: string, cardId: string, position: { x: number; z: number }): void => {
     this.positions.set(cardId, position);
@@ -175,7 +188,7 @@ export class KernelGameController {
     const before = this.ks.version;
     this.consumeHold();
     const res: DispatchResult = this.ks.dispatch(this.human, action);
-    if (res.ok || this.ks.version !== before) { this.attackPicks = {}; this.blockPicks = {}; this.failures = 0; this.bump(); return res.ok; }
+    if (res.ok || this.ks.version !== before) { this.attackPicks = {}; this.blockPicks = {}; this.blockIdx = 0; this.failures = 0; this.bump(); return res.ok; }
     if (!res.stale) this.note(`Can't do that: ${res.error?.message ?? "the engine refused"}.`, "Rules");
     else this.bump();
     return false;
@@ -269,6 +282,7 @@ export class KernelGameController {
   advanceTurn = (): void => {
     const s = this.ks.state;
     if (s.pending) { this.note("Answer the open question first.", "Rules"); return; }
+    if (this.declaration()?.kind === "attackers") { this.confirmAttackers(); return; } // legacy "Continue" in the declare attackers step: the attackers picked so far go in
     if (s.turn.active === this.human && !s.stack.length) { this.act({ type: "advancePhase", player: this.human }); return; }
     this.passPriority();
   };
@@ -280,6 +294,7 @@ export class KernelGameController {
       const s = this.ks.state;
       if (s.gameOver || s.pending || s.turn.number !== turn || this.ks.actor !== this.human) break;
       if (s.turn.active !== this.human) break;
+      if (this.declaration()?.kind === "attackers") { if (!this.confirmAttackers()) break; continue; }
       const ok = s.stack.length ? this.act({ type: "passPriority", player: this.human }) : this.act({ type: "advancePhase", player: this.human });
       if (!ok) break;
     }
@@ -291,7 +306,17 @@ export class KernelGameController {
   declareAttack = (cardId: string, targetId: string): void => {
     const id = this.kid(cardId);
     if (!this.declaration() || this.declaration()?.kind !== "attackers") { this.note("You are not declaring attackers now.", "Rules"); return; }
-    this.attackPicks = { ...this.attackPicks, [id]: this.kid(targetId) };
+    const opt = this.declaration()?.kind === "attackers" ? (this.declaration() as Extract<Declaration, { kind: "attackers" }>).attackers.find((a) => a.id === id) : undefined;
+    if (!opt) { this.note(`${this.nameOf(id)} can't attack this turn.`, "Rules"); return; }
+    if (!targetId) {
+      if (opt.mustAttack) this.note(`${opt.name} must attack if able.`, "Rules");
+      else { const { [id]: _gone, ...rest } = this.attackPicks; this.attackPicks = rest; }
+    } else {
+      const target = this.kid(targetId);
+      if (!opt.defenders.some((d) => d.id === target)) { this.note(`${opt.name} can't attack ${this.nameOf(target)}.`, "Rules"); return; }
+      this.attackPicks = { ...this.attackPicks, [id]: target };
+    }
+    this.inspectedCard = undefined;
     this.bump();
   };
   toggleAttacker = (id: string, defender?: string): void => {
@@ -317,29 +342,90 @@ export class KernelGameController {
     if (d?.kind !== "attackers") return false;
     const must = d.attackers.filter((a) => a.mustAttack && !(a.id in this.attackPicks)).map((a) => a.id);
     const picks = { ...this.attackPicks };
-    for (const id of must) { const a = d.attackers.find((x) => x.id === id); if (a?.defenders[0]) picks[id] = a.defenders[0].id; }
+    for (const id of must) { const a = d.attackers.find((x) => x.id === id); if (a?.defenders[0]) { picks[id] = a.defenders[0].id; this.note(`${a.name} must attack: added to the attack.`, "Rules"); } }
     return this.act({ type: "declareAttackers", player: this.human, attackers: Object.entries(picks).map(([id, defender]) => ({ id, defender })), autoPay: true });
   };
   noAttack = (): boolean => { this.attackPicks = {}; return this.confirmAttackers() || this.act({ type: "declareAttackers", player: this.human, attackers: [] }); };
 
-  /** one blocker -> one attacker (or none) */
-  setBlock = (blockerId: string, attackerId: string | undefined): void => {
-    const next = { ...this.blockPicks };
-    if (attackerId) next[blockerId] = attackerId; else delete next[blockerId];
-    this.blockPicks = next;
+  // ---- the legacy block modal, one attacker at a time
+
+  /** the attackers the human is asked about: everything attacking them or their planeswalkers, plus anything one of their blockers may block */
+  private blockQueue(): string[] {
+    const ex = this.ks.state.combat?.expect;
+    if (!ex || ex.kind !== "blockers" || !ex.players.includes(this.human) || this.ks.state.pending) return [];
+    const entry = this.legalNow().find((a) => a.kind === "declareBlockers");
+    const blockable = new Set((entry?.blockers ?? []).flatMap((b) => b.attackers));
+    const objs = this.ks.state.objects;
+    return (this.ks.state.combat?.attackers ?? []).filter((att) => att.defender === this.human || objs[att.defender]?.controller === this.human || blockable.has(att.id)).map((a) => a.id);
+  }
+  private legalBlockersFor(attackerId: string): string[] {
+    const entry = this.legalNow().find((a) => a.kind === "declareBlockers");
+    const taken = new Set(Object.entries(this.blockPicks).filter(([att]) => att !== attackerId).flatMap(([, bl]) => bl));
+    return (entry?.blockers ?? []).filter((b) => b.attackers.includes(attackerId) && !taken.has(b.id)).map((b) => b.id);
+  }
+  private currentAttacker(): string | undefined { return this.blockQueue()[this.blockIdx]; }
+  private cardById(kernelId: string): VisibleCard | undefined {
+    const legacy = this.ks.legacyIdOf(kernelId) ?? kernelId;
+    for (const seat of this.table().session.seats) { const c = seat.board.battlefield.find((x) => x.id === legacy); if (c) return c; }
+    return undefined;
+  }
+
+  /** the props the legacy table needs to run attack / block declarations (spread next to tableProps; recomputed each version) */
+  combatProps(): Record<string, unknown> {
+    if (this.combatCache?.ver === this.ver) return this.combatCache.props;
+    const props: Record<string, unknown> = {};
+    const d = this.declaration();
+    if (d?.kind === "attackers") {
+      const open = this.inspectedCard ? this.kid(this.inspectedCard.id) : undefined;
+      const a = d.attackers.find((x) => x.id === open);
+      if (a) {
+        const targets = a.defenders.map((x) => ({ targetId: this.ks.legacyIdOf(x.id) ?? x.id, label: `Attack ${x.label}` }));
+        if (a.id in d.picks) targets.push({ targetId: "", label: a.mustAttack ? "Attacks (must attack)" : "Do not attack" });
+        props.humanAttackTargets = targets;
+      }
+    } else if (d?.kind === "blockers") {
+      const att = this.currentAttacker();
+      const attackingCard = att ? this.cardById(att) : undefined;
+      if (att && attackingCard) {
+        const seats = this.table().session.seats;
+        const attackerSeat = seats.find((s) => s.board.battlefield.some((c) => c.id === attackingCard.id));
+        const blockers = this.legalBlockersFor(att).map((id) => this.cardById(id)).filter((c): c is VisibleCard => !!c);
+        props.blockChoice = { attackerName: attackerSeat?.name ?? "Opponent", defenderName: seats.find((s) => s.id === this.human)?.name ?? "You", attackingCard, blockers };
+        props.selectedBlockerIds = (this.blockPicks[att] ?? []).map((id) => this.ks.legacyIdOf(id) ?? id);
+      }
+    }
+    this.combatCache = { ver: this.ver, props };
+    return props;
+  }
+  private combatCache?: { ver: number; props: Record<string, unknown> };
+
+  /** legacy onToggleBlocker: tap a creature to add it (damage order = tap order) or remove it */
+  toggleBlocker = (cardId: string): void => {
+    const att = this.currentAttacker();
+    if (!att) return;
+    const id = this.kid(cardId);
+    if (!this.legalBlockersFor(att).includes(id)) { this.note(`${this.nameOf(id)} can't block ${this.nameOf(att)}.`, "Rules"); return; }
+    const cur = this.blockPicks[att] ?? [];
+    this.blockPicks = { ...this.blockPicks, [att]: cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id] };
     this.bump();
   };
-  toggleBlocker = (cardId: string): void => {
-    const d = this.declaration();
-    if (d?.kind !== "blockers") return;
-    const id = this.kid(cardId);
-    const b = d.blockers.find((x) => x.id === id);
-    if (!b) return;
-    const cur = this.blockPicks[id];
-    const i = b.attackers.findIndex((a) => a.id === cur);
-    this.setBlock(id, i + 1 < b.attackers.length ? b.attackers[i + 1].id : undefined);
-  };
-  confirmBlockers = (): boolean => this.declaration()?.kind === "blockers" && this.act({ type: "declareBlockers", player: this.human, blocks: Object.entries(this.blockPicks).map(([blocker, attacker]) => ({ blocker, attacker })), autoPay: true });
+  /** legacy "Confirm N Blockers" / "Do Not Block": settle this attacker, ask about the next, declare once the last is settled */
+  private settleCurrentBlock(blockers: string[]): boolean {
+    const att = this.currentAttacker();
+    if (!att) return false;
+    this.blockPicks = { ...this.blockPicks, [att]: blockers };
+    this.blockIdx++;
+    if (this.blockIdx < this.blockQueue().length) { this.bump(); return true; }
+    const ok = this.confirmBlockers();
+    if (!ok) { this.blockPicks = {}; this.blockIdx = 0; this.bump(); }
+    return ok;
+  }
+  confirmCurrentBlock = (): boolean => { const att = this.currentAttacker(); return att ? this.settleCurrentBlock(this.blockPicks[att] ?? []) : false; };
+  passCurrentBlock = (): boolean => this.settleCurrentBlock([]);
+
+  /** everything picked so far, sent as the one declaration the kernel wants */
+  confirmBlockers = (): boolean => this.declaration()?.kind === "blockers" && this.act({ type: "declareBlockers", player: this.human, blocks: Object.entries(this.blockPicks).flatMap(([attacker, bl]) => bl.map((blocker) => ({ blocker, attacker }))), autoPay: true });
+  /** no blocks at all (tests and the automatic skip) */
   passBlocks = (): boolean => { this.blockPicks = {}; return this.declaration()?.kind === "blockers" && this.act({ type: "declareBlockers", player: this.human, blocks: [], autoPay: true }); };
 
   // ---- everything the kernel has no meaning for
@@ -365,7 +451,7 @@ export class KernelGameController {
       onActivateGraveyardAbility: (s: string, c: string) => this.activateAbility(s, c, 0),
       onActivateLoyalty: this.activateLoyalty,
       onPassPriority: this.passPriority, onAdvanceTurn: this.advanceTurn, onEndTurn: this.endTurn,
-      onDeclareAttack: this.declareAttack, onToggleBlocker: this.toggleBlocker, onConfirmBlockers: this.confirmBlockers, onPassBlocks: this.passBlocks,
+      onDeclareAttack: this.declareAttack, onToggleBlocker: this.toggleBlocker, onConfirmBlockers: this.confirmCurrentBlock, onPassBlocks: this.passCurrentBlock,
       // no separate "respond" review: while the human holds priority they cast / activate directly (glowing cards, "Respond Selected"), and Pass answers the window
       onRespond: () => this.note("Click a glowing card in your hand (or a permanent's ability) to respond; Pass Priority lets the stack resolve.", "Priority"), onRespondWithSelectedCard: this.respondWithSelected,
       onResolvePendingTrigger: this.passPriority,
@@ -397,6 +483,10 @@ export class KernelGameController {
   /** the human has priority and nothing the slice asks them about: pass / advance for them (they can still act during the pace delay) */
   private humanAutoAction(): Action | undefined {
     const s = this.ks.state;
+    // nothing attacks them and nothing of theirs could block: no modal to show, declare no blocks
+    const ex = s.combat?.expect;
+    if (ex?.kind === "blockers" && ex.players[0] === this.human && !s.pending && this.blockQueue().length === 0) return { type: "declareBlockers", player: this.human, blocks: [] };
+    if (ex?.kind === "attackers" && ex.player === this.human && !s.pending && !(this.legalNow().find((a) => a.kind === "declareAttackers")?.attackers ?? []).length) return { type: "declareAttackers", player: this.human, attackers: [] };
     if (s.pending || s.combat?.expect || s.priority !== this.human) return undefined;
     const v = this.windowVerdict();
     if (v.stop) return undefined; // a stop: the human decides (pass / respond / continue)

@@ -259,12 +259,13 @@ describe("linked exile / until this leaves", () => {
 
 describe("hideaway (linked exile, cast during resolution)", () => {
   const lib = (t: Table, n: number) => { const ids: string[] = []; for (let i = 0; i < n; i++) ids.push(t.give("p1", i === 0 ? "Llanowar Elves" : "Fill A", "library")); return ids; };
-  it("Spinerock Knoll / Mosswort Bridge / Cemetery Tampering are supported", () => {
-    for (const n of ["Spinerock Knoll", "Mosswort Bridge", "Cemetery Tampering"]) expect(cardUnsupported(realDef(n)!).all, n).toEqual([]);
+  it("Mosswort Bridge / Cemetery Tampering are supported; Spinerock Knoll is not (its \"7 or more damage\" condition counts damage EVENTS, and deals_damage is not logged)", () => {
+    for (const n of ["Mosswort Bridge", "Cemetery Tampering"]) expect(cardUnsupported(realDef(n)!).all, n).toEqual([]);
+    expect(cardUnsupported(realDef("Spinerock Knoll")!).all).toEqual(["event:deals_damage"]);
   });
   it("entering: look at four, exile one face down (linked), the rest go to the bottom", () => {
     const t = realTable(["p1", "p2"], famCards); const ids = lib(t, 6);
-    const knoll = t.give("p1", "Spinerock Knoll", "hand");
+    const knoll = t.give("p1", "Mosswort Bridge", "hand");
     t.ok({ type: "playLand", player: "p1", cardId: knoll });
     expect(t.state.stack).toHaveLength(1);
     t.resolveTop();
@@ -278,7 +279,7 @@ describe("hideaway (linked exile, cast during resolution)", () => {
   });
   it("the exiled card is hidden from the opponent", () => {
     const t = realTable(["p1", "p2"], famCards); const ids = lib(t, 5);
-    t.ok({ type: "playLand", player: "p1", cardId: t.give("p1", "Spinerock Knoll", "hand") });
+    t.ok({ type: "playLand", player: "p1", cardId: t.give("p1", "Mosswort Bridge", "hand") });
     t.resolveTop();
     const pick = t.state.pending!.options[0].id;
     answerWith(t, { ids: [pick] });

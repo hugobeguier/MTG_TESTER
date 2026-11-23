@@ -71,10 +71,15 @@ export const INTERNAL7: Record<string, Handler> = {
   },
   /** "as many times as you choose, ..." (Lim-Dul's Vault): ask whether to do the nested steps once more; each answer "yes" runs them and asks again */
   __repeat_ask: (r, ex, step, answer) => {
+    // a round that starts with paying life cannot be started without the life (CR 119.4); a guard bounds the rounds (the player could otherwise loop forever on an empty library)
+    const first = (step.inner as Step[])[0];
+    const cost = first?.kind === "life_change" && typeof first.lifeDelta === "number" && first.lifeDelta < 0 ? -first.lifeDelta : 0;
+    const rounds = Number(step.rounds ?? 0);
+    if (rounds >= 100 || (cost && player(r, ex.env.controller).life < cost)) return "done";
     const prompt = (step.prompt as Prompt | undefined) ?? fallbackPromptOf(r, ex.env, "repeat", "Do this (again)?");
     const d = decide({ kind: "choose_yes_no", player: ex.env.controller, prompt, options: [{ id: "yes", label: "Yes" }, { id: "no", label: "No" }], min: 1, max: 1 }, answer);
     if ("ask" in d) return d;
-    return d.yes ? { push: [...(step.inner as Step[]), step] } : "done";
+    return d.yes ? { push: [...(step.inner as Step[]), { ...step, rounds: rounds + 1 } as Step] } : "done";
   },
   /** "put any number of target creature cards with total mana value X or less ... onto the battlefield" (Ancient Brass Dragon): picked one at a time, only cards that still fit the budget are offered */
   __reanimate_pick: (r, ex, step, answer) => {
@@ -173,7 +178,17 @@ export function steps7(base: Record<string, StepSpec>): void {
     if (total === 0) { if (typeof step.saveAs === "string") ex.env.chosen[step.saveAs] = []; return "done"; }
     return { push: [{ kind: "__counters_pick" as never, on: id, n, upTo: !!step.upTo, saveAs: step.saveAs, prompt: step.prompt } as Step] };
   });
-  extend(base, "grant_effect", ["appliesTo"]);
+  // "becomes a copy of <card> until end of turn" (Scion of the Ur-Dragon): a layer-1 copy effect, the copy machinery of copy.ts (copiable values, same object)
+  extend(base, "grant_effect", ["appliesTo"], (r, ex, step) => {
+    const ms = (step.modify ?? []) as Array<Record<string, unknown>>;
+    const c = ms.find((m) => "copyOf" in m);
+    if (!c) return undefined;
+    if (ms.length !== 1 || !(step.target === "self" || typeof step.target === "string") || !(step.duration === undefined || step.duration === "until_end_of_turn")) throw new Unsupported("field:grant_effect.modify.copyOf");
+    // "put it into your graveyard ... becomes a copy of THAT card": the card is followed into its new zone (the saved list is re-stamped)
+    let of = c.copyOf;
+    if (typeof of === "string" && ex.env.chosen[of]) { saveList(r, ex.env, "__copy_src", ex.env.chosen[of].filter((id) => isObjId(id) && !!tryObj(r, id))); of = "__copy_src"; }
+    return base.copy.run(r, ex, { kind: "copy", of, target: step.target, duration: step.duration } as Step, undefined);
+  });
   extend(base, "sacrifice_permanent", ["sharesCardTypeWith"], (r, ex, step) => {
     if (step.sharesCardTypeWith === undefined) return undefined;
     if (step.sharesCardTypeWith !== "sacrificed") throw new Unsupported("field:sacrifice_permanent.sharesCardTypeWith");

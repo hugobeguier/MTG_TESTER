@@ -754,7 +754,7 @@ Lim-Dûl's Vault [draft]
 
 Player prompts:
 
-- Lim-Dûl's Vault: optional: Do you want to repeat for each matching object?
+- Lim-Dûl's Vault: Pay 1 life, put these cards on the bottom of your library in any order, and look at the top five cards again?
 
 Implementation: needed (step:look_top, step:repeat_for_each, field:repeat_for_each.repeatCount, field:repeat_for_each.steps, field:move_card_zone.ordered, field:move_card_zone.position, field:move_card_zone.what, step:shuffle, field:shuffle.exceptLooked)
 

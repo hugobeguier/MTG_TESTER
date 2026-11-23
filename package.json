@@ -22,6 +22,7 @@
     "kernel:readiness": "vite-node -c vitest.config.ts scripts/kernel-readiness.ts --",
     "unresolved:report": "vite-node -c vitest.config.ts scripts/unresolved-report.ts --",
     "kernel:bundle-drafts": "vite-node -c vitest.config.ts scripts/kernel-bundle-drafts.ts --",
+    "kernel:audit-support": "vite-node -c vitest.config.ts scripts/audit-support.ts",
     "kernel:overview": "vite-node -c vitest.config.ts scripts/gen-kernel-overview.ts",
     "audit:deck-cards": "vite-node -c vitest.config.ts scripts/deck-card-audit.ts",
     "audit:abilities": "vite-node -c vitest.config.ts scripts/ability-audit.ts --"

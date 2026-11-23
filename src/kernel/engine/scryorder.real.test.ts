@@ -1,4 +1,4 @@
-// Ordered placement with real drafted cards (aminatou deck): Otherworldly Gaze (surveil), Halimar Depths, Lim-Dul's Vault, Aminatou, Veil Piercer (surveil trigger),
+// Ordered placement with real drafted cards (aminatou deck): Otherworldly Gaze (surveil), Halimar Depths, Lim-Dûl's Vault, Aminatou, Veil Piercer (surveil trigger),
 // the observer's default policy, and the card view a player gets for the options.
 import { describe, expect, it } from "vitest";
 import { ctx, mini } from "../integration/testgame";
@@ -44,13 +44,13 @@ describe("real drafts", () => {
     expect(t.state.players[0].library.slice(0, 3)).toEqual([c, a, b]);
   });
 
-  it("Lim-Dul's Vault: asks the order of the five cards put back (declined repeats)", () => {
-    if (!supported("Lim-Dul's Vault")) return; // the kernel has no runnable definition for it yet (repeat as-many-times-as-you-choose is unsupported): nothing to order
+  it("Lim-Dûl's Vault: asks the order of the five cards put back (declined repeats)", () => {
+    expect(supported("Lim-Dûl's Vault")).toBe(true); // (a wrong card name here once made this test a silent no-op)
     const t = mini();
     t.give("p1", "Island", "battlefield"); t.give("p1", "Swamp", "battlefield");
     t.give("p1", "Plains", "library");
     library(t, ["Forest", "Mountain", "Plains", "Island", "Swamp"]);
-    t.ok({ type: "castSpell", player: "p1", cardId: t.give("p1", "Lim-Dul's Vault", "hand") });
+    t.ok({ type: "castSpell", player: "p1", cardId: t.give("p1", "Lim-Dûl's Vault", "hand") });
     t.settle();
     for (let i = 0; i < 6 && t.state.pending && t.state.pending.kind !== "order_library"; i++) t.answer(t.state.pending.kind === "choose_yes_no" ? { yes: false } : { ids: [] });
     expect(t.state.pending?.kind).toBe("order_library");

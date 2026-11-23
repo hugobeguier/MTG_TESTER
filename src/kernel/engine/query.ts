@@ -262,7 +262,7 @@ export function evalQuantity(r: Run, qy: Quantity, q: QCtx): number {
 
 // ---------------------------------------------------------------- turn log
 
-const EVENT_TO_LOG: Record<string, string> = { gain_life: "gain_life", lose_life: "lose_life", token_created: "token_created", cast: "cast", etb: "etb", dies: "dies", draw: "draw", discard: "discard", sacrifice: "sacrifice", mill: "mill", excess_damage: "excess_damage" };
+export const EVENT_TO_LOG: Record<string, string> = { gain_life: "gain_life", lose_life: "lose_life", token_created: "token_created", cast: "cast", etb: "etb", dies: "dies", draw: "draw", discard: "discard", sacrifice: "sacrifice", mill: "mill", excess_damage: "excess_damage" };
 
 export function countLog(r: Run, event: string, q: QCtx, filter?: ObjectFilter, actor?: PlayerRef): LogEntry[] {
   const type = EVENT_TO_LOG[event];

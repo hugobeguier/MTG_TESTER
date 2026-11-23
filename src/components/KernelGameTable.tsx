@@ -1,6 +1,7 @@
 "use client";
 // The table for a game running on the kernel engine (dev flag ?engine=kernel): the unchanged 3D table fed by the controller's derived TableState and intent API,
-// plus the two things the legacy table has no kernel-shaped UI for yet: the attack / block declaration bar and the generic decision dialog.
+// plus the generic decision dialog (the legacy table has no kernel-shaped UI for that).
+// Combat uses the LEGACY UI only: attack targets in the card inspector + Continue, the per-attacker block panel; there is no kernel-only declaration bar.
 // Priority uses the LEGACY UI only (the stack dock with Pass Priority / Respond Selected, Space to pass, the glowing hand cards); there is no second panel.
 import { useEffect, useSyncExternalStore } from "react";
 import type { KernelBoardPick } from "./ThreeGameTable";
@@ -10,59 +11,6 @@ import { useKernelDriver } from "./game/useKernelGame";
 import { ThreeGameTable } from "./ThreeGameTable";
 import { GameOverDialog } from "./GameOverDialog";
 import { KernelDecisionDialog } from "./KernelDecisionDialog";
-
-const bar = { position: "fixed", left: "50%", bottom: 150, transform: "translateX(-50%)", zIndex: 50, background: "#1c1b22ee", color: "#eee", border: "1px solid #6b6a7a", borderRadius: 10, padding: "10px 14px", maxWidth: "min(900px, 94vw)", display: "flex", flexDirection: "column", gap: 8 } as const;
-const btn = { padding: "5px 12px", borderRadius: 6, border: "1px solid #6b6a7a", background: "#34333f", color: "#eee", cursor: "pointer", font: "inherit" } as const;
-const on = { borderColor: "#e8c04a", background: "#3b3624" } as const;
-
-export function KernelDeclarationBar({ controller }: { controller: KernelGameController }) {
-  const d = controller.declaration();
-  if (!d) return null;
-  if (d.kind === "attackers") {
-    const n = Object.keys(d.picks).length;
-    return (
-      <div style={bar} role="group" aria-label="Declare attackers">
-        <strong>Declare attackers</strong>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-          {d.attackers.map((a) => (
-            <span key={a.id} style={{ display: "inline-flex", gap: 4 }}>
-              <button type="button" style={{ ...btn, ...(a.id in d.picks ? on : {}) }} aria-pressed={a.id in d.picks} onClick={() => controller.toggleAttacker(a.id)}>{a.name}{a.mustAttack ? " (must attack)" : ""}</button>
-              {a.defenders.length > 1 ? (
-                <select aria-label={`${a.name} attacks`} value={d.picks[a.id] ?? ""} onChange={(e) => controller.toggleAttacker(a.id, e.target.value || undefined)}>
-                  <option value="">-</option>
-                  {a.defenders.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
-                </select>
-              ) : null}
-            </span>
-          ))}
-        </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button type="button" style={btn} onClick={controller.attackWithAll}>All attack</button>
-          <button type="button" style={{ ...btn, background: "#7a5cd6" }} onClick={controller.confirmAttackers}>{n ? `Declare ${n} attacker${n === 1 ? "" : "s"}` : "Declare (no attack)"}</button>
-          <button type="button" style={btn} onClick={controller.noAttack}>No attack</button>
-        </div>
-      </div>
-    );
-  }
-  return (
-    <div style={bar} role="group" aria-label="Declare blockers">
-      <strong>Declare blockers</strong>
-      {d.blockers.map((b) => (
-        <label key={b.id} style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          {b.name} blocks
-          <select value={d.picks[b.id] ?? ""} onChange={(e) => controller.setBlock(b.id, e.target.value || undefined)}>
-            <option value="">nothing</option>
-            {b.attackers.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-          </select>
-        </label>
-      ))}
-      <div style={{ display: "flex", gap: 8 }}>
-        <button type="button" style={{ ...btn, background: "#7a5cd6" }} onClick={controller.confirmBlockers}>Confirm blocks</button>
-        <button type="button" style={btn} onClick={controller.passBlocks}>No blocks</button>
-      </div>
-    </div>
-  );
-}
 
 /** Enter confirms / Escape cancels a click-on-the-board pick (the dialog handles its own keys) */
 function useDecisionKeys(pick: KernelBoardPick | undefined): void {
@@ -125,8 +73,8 @@ export function KernelGameTable({ controller, onBack }: { controller: KernelGame
         selectedCardId={controller.selectedCardId}
         inspectedCard={controller.inspectedCard}
         {...(controller.tableProps() as object)}
+        {...(controller.combatProps() as object)}
       />
-      <KernelDeclarationBar controller={controller} />
       {table.decision && !pick ? <KernelDecisionDialog key={table.decision.id} decision={table.decision} onAnswer={controller.answer} sourceArt={controller.decisionSourceArt()} onBoard={classifyDecision(table.decision).board ? () => controller.showList(table.decision!.id, false) : undefined} /> : null}
     </main>
   );
