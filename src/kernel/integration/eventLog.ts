@@ -84,6 +84,8 @@ export function formatEvent(ev: KernelEvent, n: LogNames): { seatId?: string; me
     case "unresolved":
       // continue mode: a part of a card the kernel could not resolve (public; a card in a hidden zone is nameless, see eventsFor)
       return { seatId: seat(ev.player), message: str(ev.message) || "A card could not be fully resolved.", detail: "Unresolved" };
+    // a free cast ("cast it without paying") that could not start; public text only (the card is in a public zone, a face-down one shows as such)
+    case "cast_now_failed": return { seatId: seat(ev.player), message: `Could not cast ${C(ev.id)}${ev.code === "illegal_target" ? ": no legal target" : ""}.` };
     case "trigger_removed": return { message: `${C(ev.source)}'s ability has no legal target and is removed.` };
     default: return undefined;
   }

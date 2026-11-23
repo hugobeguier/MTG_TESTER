@@ -15,7 +15,7 @@ Reading guide: each card below shows the oracle text and what the structured JSO
 - **Counterspell** (Instant): [targets: target spell] Counter target spell [needs: step:counter_spell]
 - **Darksteel Citadel** (Artifact Land): Keyword indestructible | {T}: add {C} [implemented]
 - **Darksteel Forge** (Artifact): Artifacts you control have indestructible [needs: static]
-- **Emry, Lurker of the Loch** (Legendary Creature — Merfolk Wizard): Keyword affinity artifacts | Whenever Emry, Lurker of the Loch enters: Mill 4 cards | {T}: [targets: target artifact card in your graveyard] You may you may play undefined until end of turn [needs: cost_reduction, step:permission_to_play]
+- **Emry, Lurker of the Loch** (Legendary Creature — Merfolk Wizard): Keyword affinity artifacts | Whenever Emry, Lurker of the Loch enters: Mill 4 cards | {T}: [targets: target artifact card in your graveyard] You may cast or play target artifact card in your graveyard until end of turn [needs: cost_reduction, step:permission_to_play]
 - **Enthusiastic Mechanaut** (Artifact Creature — Goblin Artificer): Keyword flying | Artifact spells you cast cost {1} less to cast [needs: static]
 - **Etherium Sculptor** (Artifact Creature — Vedalken Artificer): Artifact spells you cast cost {1} less to cast [needs: static]
 - **Foundry Inspector** (Artifact Creature — Construct): Artifact spells you cast cost {1} less to cast [needs: static]

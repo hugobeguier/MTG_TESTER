@@ -234,6 +234,9 @@ export function boardDump(s0: GameSession, s1: GameSession, m: Mapped, meta: Obs
     kernelPool: a0.state.players.find((p) => p.id === seatId)?.manaPool ?? {},
     untappedSources: sources.filter((c) => !c.tappedBefore).map((c) => c.name + (c.summoningSick ? " (sick)" : "") + (c.tappedForThisAction ? " [legacy tapped]" : "") + (c.produces ? ` ${c.produces}` : "")),
     tappedSources: sources.filter((c) => c.tappedBefore).map((c) => c.name + (c.produces ? ` ${c.produces}` : "")),
+    // every cost-changing permanent of either seat (a payment refused by the kernel is usually a discount / tax one engine applies and the other does not)
+    costModifiers: s0.seats.flatMap((s) => s.board.battlefield.map((c) => ({ seat: s.id, c }))).filter(({ c }) => /less to cast|cost\s*\{?\w*\}?\s*(more|less)|costs? (\{\w+\})+ (more|less)/i.test(c.oracleText ?? "")).map(({ seat, c }) => `${c.name} (${seat})${(c as { chosenType?: string }).chosenType ? ` [${(c as { chosenType?: string }).chosenType}]` : ""}`),
+    battlefield: (seat0?.board.battlefield ?? []).map((c) => c.name + (c.tapped ? " (T)" : "")),
     attackTaxHolders: s0.seats.flatMap((s) => s.board.battlefield).filter((c) => /attack.*(pay|unless)|(pay|unless).*attack/i.test(c.oracleText ?? "")).map((c) => c.name)
   };
 }

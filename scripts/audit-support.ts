@@ -82,12 +82,26 @@ for (const [, c] of cards) {
   }
 }
 
+function savers(a: Ability): Array<Step & { saveAs?: string }> {
+  const out: Array<Step & { saveAs?: string }> = [];
+  const walk = (ss: Step[] | undefined) => { for (const s of ss ?? []) { if (typeof (s as { saveAs?: unknown }).saveAs === "string") out.push(s); walk(s.then); walk(s.else); walk(s.steps); } };
+  walk(a.steps); for (const o of a.modes?.options ?? []) walk(o.steps);
+  return out;
+}
+
 // ---- 3. runtime probe
 const NOISE = /_missing|no player target chosen|left no numeric result|ref:found|field:move_card_zone.what=|predicate:paid_additional_cost|step_result|opponent_multiplayer|evaluated on something|no color was chosen|no direction was chosen|decision_in_mana/;
 let probed = 0;
 for (const { step, ability, cards: names } of distinct.values()) {
   const inner = JSON.parse(JSON.stringify(step)) as Step;
-  const ab = { id: "a1", kind: "spell_effect", text: "probe", steps: [inner], ...(ability.targets?.length ? { targets: ability.targets } : {}) } as Ability;
+  // a step that reads a name an EARLIER step of the same ability saved (saveAs: "exiled") is probed after that saving step; a name nobody saves stays an unsupported ref
+  const pre: Step[] = [];
+  for (const k of ["what", "target", "on", "source"]) {
+    const v = (step as Record<string, unknown>)[k];
+    const saver = typeof v === "string" ? savers(ability).find((x) => x.saveAs === v) : undefined;
+    if (saver && !pre.some((p) => p.saveAs === saver.saveAs)) pre.push(JSON.parse(JSON.stringify(saver)) as Step);
+  }
+  const ab = { id: "a1", kind: "spell_effect", text: "probe", steps: [...pre, inner], ...(ability.targets?.length ? { targets: ability.targets } : {}) } as Ability;
   const def = mk("Audit Probe", { manaCost: "{U}", types: ["sorcery"] }, [ab]);
   const t = game({ extra: { ...famCards, "Audit Probe": def } });
   try {

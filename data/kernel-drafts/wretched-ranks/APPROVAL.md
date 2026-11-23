@@ -47,7 +47,7 @@ Reading guide: each card below shows the oracle text and what the structured JSO
 - **Undead Warchief** (Creature — Zombie): Zombie spells you cast cost {1} less to cast | Zombies you control get +2/+1 [needs: static]
 - **Wight of Precinct Six** (Creature — Zombie): Wight of Precinct Six gets +X/+X, where X is the number of creature cards in an opponent's graveyard [needs: static]
 - **Withering Torment** (Instant): [targets: target creature or enchantment] Destroy target creature or enchantment, then lose 2 life [implemented]
-- **Zul Ashur, Lich Lord** (Legendary Creature — Zombie Warlock): Whenever Zul Ashur, Lich Lord becomes the target of a spell or ability: Counter that object | {T}: [targets: target Zombie card in your graveyard] You may you may play t1 until end of turn [needs: trigger:becomes_target, step:counter_spell, step:unless_pay, step:permission_to_play, field:permission_to_play.what, field:permission_to_play.zone]
+- **Zul Ashur, Lich Lord** (Legendary Creature — Zombie Warlock): Whenever Zul Ashur, Lich Lord becomes the target of a spell or ability: Counter that object | {T}: [targets: target Zombie card in your graveyard] You may cast or play target Zombie card in your graveyard until end of turn [needs: trigger:becomes_target, step:counter_spell, step:unless_pay, step:permission_to_play, field:permission_to_play.what, field:permission_to_play.zone]
 
 ## (B) Complex cards
 
@@ -306,14 +306,14 @@ Cemetery Tampering [draft]
   [a2] triggered [needed: needs ref:linked_exile, step:permission_to_play, field:permission_to_play.what, field:permission_to_play.withoutPaying, field:permission_to_play.zone]
     Oracle: At the beginning of your upkeep, you may mill three cards. Then if there are twenty or more cards in your graveyard, you may play the exiled card without paying its mana cost.
     Trigger: At the beginning of your upkeep
-    Effect: You may mill 3 cards. Then, IF you have 20 or greater cards in graveyard: you may you may play linked_exile without paying its mana cost.
+    Effect: You may mill 3 cards. Then, IF you have 20 or greater cards in graveyard: you may cast or play the card exiled with Cemetery Tampering without paying its mana cost.
 ```
 
 Player prompts:
 
 - Cemetery Tampering: choose: Choose a card from among the looked-at cards.
 - Cemetery Tampering: optional: Do you want to mill 3 cards?
-- Cemetery Tampering: optional: Do you want to you may play linked_exile without paying its mana cost?
+- Cemetery Tampering: optional: Do you want to cast or play the card exiled with Cemetery Tampering without paying its mana cost?
 
 Implementation: needed (step:look_top, step:choose, field:choose.count, field:choose.from, field:choose.fromLooked, field:choose.saveAs, field:move_card_zone.faceDown, field:move_card_zone.linkExile, field:move_card_zone.order, field:move_card_zone.position, field:move_card_zone.what, ref:linked_exile, step:permission_to_play, field:permission_to_play.what, field:permission_to_play.withoutPaying, field:permission_to_play.zone)
 

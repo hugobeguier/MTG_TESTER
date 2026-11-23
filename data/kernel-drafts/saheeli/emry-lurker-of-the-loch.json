@@ -81,15 +81,7 @@
           "kind": "permission_to_play",
           "target": "t1",
           "optional": true,
-          "duration": "until_end_of_turn",
-          "prompt": {
-            "title": "Emry, Lurker of the Loch: optional",
-            "instruction": "Do you want to you may play undefined until end of turn?",
-            "source": {
-              "card": "Emry, Lurker of the Loch",
-              "ability": "a3"
-            }
-          }
+          "duration": "until_end_of_turn"
         }
       ],
       "implementation": "needed",

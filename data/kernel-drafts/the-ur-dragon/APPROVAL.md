@@ -55,7 +55,7 @@ Re-rendered plain English:
 
 ```
 The Ur-Dragon [draft]
-  [a1] static [needed: needs static]
+  [a1] static (from command) [needed: needs static, zone:command]
     Oracle: Eminence — As long as The Ur-Dragon is in the command zone or on the battlefield, other Dragon spells you cast cost {1} less to cast.
     Static: Other Dragon spells you cast cost {1} less to cast as long as The Ur-Dragon is on battlefield or you have 1 or greater permanents named The Ur-Dragon in command
   [a2] keyword [implemented]
@@ -65,13 +65,16 @@ The Ur-Dragon [draft]
     Oracle: Whenever one or more Dragons you control attack, draw that many cards, then you may put a permanent card from your hand onto the battlefield.
     Trigger: Whenever one or more Dragons you control attack
     Effect: Draw that many cards. Then, you may put a card onto the battlefield.
+  [a4] static [needed: needs static]
+    Oracle: Eminence — As long as The Ur-Dragon is in the command zone or on the battlefield, other Dragon spells you cast cost {1} less to cast.
+    Static: Other Dragon spells you cast cost {1} less to cast as long as The Ur-Dragon is on battlefield
 ```
 
 Player prompts:
 
 - The Ur-Dragon: optional: Do you want to put a card onto the battlefield?
 
-Implementation: needed (static, trigger:batch, trigger:subject, quantity:event_amount, field:move_card_zone.filter, field:move_card_zone.from, field:move_card_zone.what)
+Implementation: needed (static, zone:command, trigger:batch, trigger:subject, quantity:event_amount, field:move_card_zone.filter, field:move_card_zone.from, field:move_card_zone.what)
 
 Questions for you:
 
@@ -2311,6 +2314,7 @@ Implementation: needed (timing)
 | `targets:multi` | 1 | Ancient Brass Dragon |
 | `trigger:dealt_damage` | 1 | Wrathful Red Dragon |
 | `trigger:nth` | 1 | Scourge of the Throne |
+| `zone:command` | 1 | The Ur-Dragon |
 | `zone:hand` | 1 | Boseiju, Who Endures |
 | `zone:stack` | 1 | Dragonlord Dromoka |
 

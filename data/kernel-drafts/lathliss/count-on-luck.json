@@ -26,15 +26,7 @@
           "what": "exiled",
           "optional": true,
           "duration": "until_end_of_turn",
-          "src": 1,
-          "prompt": {
-            "title": "Count on Luck: optional",
-            "instruction": "Do you want to you may play exiled until end of turn?",
-            "source": {
-              "card": "Count on Luck",
-              "ability": "a1"
-            }
-          }
+          "src": 1
         }
       ],
       "implementation": "needed",

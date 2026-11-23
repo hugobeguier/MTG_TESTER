@@ -1866,7 +1866,7 @@ function runCastNow(r: Run): boolean {
       if (!(e instanceof Reject)) throw e;
       r.s = snap; r.events.length = nEvents; invalidateIndex(r);
       r.s.durableEffects = (r.s.durableEffects ?? []).filter((d) => !(d.permission?.objectId === q.id && d.permission.objectTs === q.ts));
-      emit(r, { type: "cast_now_failed", player: q.player, reason: e.message });
+      emit(r, { type: "cast_now_failed", player: q.player, id: q.id, code: e.code, reason: e.message }); // the card stays in its (public) zone: the log can name it
       if (q.elseToHand && tryObj(r, q.id)?.timestamp === q.ts) moveObject(r, q.id, "hand");
     } finally { r.ignoreTiming = false; r.castingMiracle = false; }
   }

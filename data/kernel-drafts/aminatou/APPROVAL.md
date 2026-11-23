@@ -782,7 +782,7 @@ Mind's Dilation [draft]
 
 Player prompts:
 
-- Mind's Dilation: optional: Do you want to you may play linked_exile without paying its mana cost?
+- Mind's Dilation: optional: Do you want to cast or play the card exiled with Mind's Dilation without paying its mana cost?
 
 Implementation: needed (ref:linked_exile, trigger:nth, field:move_card_zone.linkExile, field:move_card_zone.what, field:move_card_zone.who, step:permission_to_play, field:permission_to_play.what, field:permission_to_play.withoutPaying, field:permission_to_play.zone, predicate:matches)
 

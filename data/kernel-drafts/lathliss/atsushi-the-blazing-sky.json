@@ -55,15 +55,7 @@
                 "what": "exiled",
                 "optional": true,
                 "duration": "until_end_of_your_next_turn",
-                "src": 1,
-                "prompt": {
-                  "title": "Atsushi, the Blazing Sky: optional",
-                  "instruction": "Do you want to you may play exiled until end of your next turn?",
-                  "source": {
-                    "card": "Atsushi, the Blazing Sky",
-                    "ability": "a3"
-                  }
-                }
+                "src": 1
               }
             ]
           },

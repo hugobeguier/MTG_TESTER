@@ -422,7 +422,7 @@ export function describeStep(step: Step, targets: Map<string, TargetSpec> = new 
     case "remove_counters": return `remove ${counterPhrase(step.amount ?? 1, String(step.counterKind ?? "").trim())} from ${step.on ? refName(String(step.on), targets) : "it"}`;
     case "extra_turn": return "take an extra turn after this one";
     case "connive": return `${String(step.on ?? "it")} connives (draw, discard, +1/+1 counter if the discarded card is nonland)`;
-    case "exploit": return "you may sacrifice a creature (exploit)";
+    case "exploit": return "sacrifice a creature (exploit)";
     case "fight": return `${refName(String(step.a ?? "self"), targets)} fights ${refName(String(step.b ?? "t1"), targets)}`;
     case "fight_pairs": return `${step.fighters === "created" ? "each of the tokens just created" : refName(String(step.fighters ?? "created"), targets)} fights a different ${step.against ? describeFilter(step.against) : "creature"}, the pairing chosen by ${step.pairing === "controller_chooses" || !step.pairing ? "you" : "the controller"}`;
     case "investigate": return `investigate${step.amount === undefined || step.amount === 1 ? "" : ` ${amt(step)} times`}`;
@@ -495,7 +495,7 @@ export function promptForX(name: string, hint?: string): Prompt {
 }
 
 export function promptForMay(name: string, doing: string): Prompt {
-  return { title: `${name}: optional`, instruction: `Do you want to ${doing.replace(/^you may /i, "")}?` };
+  return { title: `${name}: optional`, instruction: `Do you want to ${doing.replace(/\byou may (?=(?:cast|play|exile|put|return|draw|discard|sacrifice|pay|have|choose|search|look|reveal|create|untap|tap|copy|gain|attach)\b)/gi, "").replace(/^may /i, "")}?` };
 }
 
 export function promptForCost(name: string, c: Cost): Prompt | undefined {
@@ -523,7 +523,10 @@ export function costHasX(c: Cost): boolean {
 }
 
 const DECISION_STEP_KINDS = new Set(["choose", "search_library", "discard", "sacrifice_permanent", "connive", "exploit", "fight_pairs", "vote"]);
+/** A permission_to_play that outlasts this resolution ("until end of turn", "as long as it stays exiled"): always granted, the player decides later when (and whether) to cast, so no up-front question and no prompt. */
+export const isDurablePermission = (step: Step): boolean => step.kind === "permission_to_play" && !((((step.what ?? step.target) as string | undefined) === "linked_exile" && step.duration === undefined) || step.duration === "instant");
 export function stepNeedsPrompt(step: Step): boolean {
+  if (isDurablePermission(step)) return false;
   return step.optional === true || DECISION_STEP_KINDS.has(step.kind);
 }
 
@@ -552,7 +555,9 @@ function promptForStep(name: string, step: Step, targets: Map<string, TargetSpec
 function stepList(name: string, steps: Step[], targets: Map<string, TargetSpec>, abilityId: string): Step[] {
   return steps.map((s) => {
     const out: Step = { ...s };
-    if (stepNeedsPrompt(s) && !s.prompt) out.prompt = withSource(promptForStep(name, s, targets), name, abilityId);
+    if (isDurablePermission(s)) delete out.prompt; // never asked (see isDurablePermission): a stale stored question like "Do you want to you may play exiled..." must not survive
+    else if (s.prompt && /\bDo you want to you may /.test(s.prompt.instruction)) out.prompt = { ...s.prompt, instruction: s.prompt.instruction.replace(/\bDo you want to you may /g, "Do you want to ") }; // a question stored by an older generator
+    else if (stepNeedsPrompt(s) && !s.prompt) out.prompt = withSource(promptForStep(name, s, targets), name, abilityId);
     if (s.unlessPay && !s.unlessPay.prompt) {
       out.unlessPay = {
         ...s.unlessPay,
@@ -608,7 +613,8 @@ function generatePromptsFor(card: Card, cardName: string): Card {
         out.xPrompt = withSource(promptForX(cardName, a.costs.some((c) => "mana" in c && /\{X\}/i.test(c.mana)) ? "paid in mana" : "the amount used in the cost"), cardName, a.id);
       }
     }
-    if (a.optional && !a.prompt) {
+    if (a.prompt && /\bDo you want to you may /.test(a.prompt.instruction)) out.prompt = { ...a.prompt, instruction: a.prompt.instruction.replace(/\bDo you want to you may /g, "Do you want to ") }; // stored by an older generator
+    else if (a.optional && !a.prompt) {
       const doing = (a.steps ?? []).map((s) => describeStep(s, abilityTargets)).join(", then ") || "use this ability";
       out.prompt = withSource(promptForMay(cardName, doing), cardName, a.id);
     }

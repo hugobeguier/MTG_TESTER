@@ -121,15 +121,7 @@
             "land",
             "spell"
           ],
-          "src": 1,
-          "prompt": {
-            "title": "Gix, Yawgmoth Praetor: optional",
-            "instruction": "Do you want to you may play exiled?",
-            "source": {
-              "card": "Gix, Yawgmoth Praetor",
-              "ability": "a2"
-            }
-          }
+          "src": 1
         }
       ],
       "id": "a2",

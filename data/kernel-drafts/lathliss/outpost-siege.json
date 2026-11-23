@@ -67,15 +67,7 @@
           "kind": "permission_to_play",
           "what": "exiled",
           "optional": true,
-          "duration": "until_end_of_turn",
-          "prompt": {
-            "title": "Outpost Siege: optional",
-            "instruction": "Do you want to you may play exiled until end of turn?",
-            "source": {
-              "card": "Outpost Siege",
-              "ability": "a2"
-            }
-          }
+          "duration": "until_end_of_turn"
         }
       ],
       "implementation": "needed",

@@ -755,7 +755,7 @@ Gix, Yawgmoth Praetor [draft]
     Oracle: {4}{B}{B}{B}, Discard X cards: Exile the top X cards of target opponent's library. You may play lands and cast spells from among cards exiled this way without paying their mana costs.
     Cost: {4}{B}{B}{B}, discard X cards in your hand
     Target t1: target player  <- prompt: "Choose target player."
-    Effect: Exile a card. Then, you may you may play exiled.
+    Effect: Exile a card. Then, you may cast or play exiled.
     X prompt: "Choose a value for X (the amount used in the cost)."
 ```
 
@@ -765,7 +765,6 @@ Player prompts:
 - Gix, Yawgmoth Praetor: choose a target: Choose target player.
 - Gix, Yawgmoth Praetor: choose X: Choose a value for X (the amount used in the cost).
 - Gix, Yawgmoth Praetor: choose what to discard: Choose X cards in your hand to discard.
-- Gix, Yawgmoth Praetor: optional: Do you want to you may play exiled?
 
 Implementation: needed (trigger:subject, field:life_change.who, field:draw_cards.who, predicate:step_done, cost:discard, field:move_card_zone.position, field:move_card_zone.saveAs, field:move_card_zone.who, step:permission_to_play, field:permission_to_play.allow, field:permission_to_play.what, field:permission_to_play.withoutPayingManaCost)
 

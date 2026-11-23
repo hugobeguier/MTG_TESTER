@@ -8,8 +8,7 @@ import { addDelayed, addDurable, expiryFor, SUPPORTED_DURABLE_DURATIONS } from "
 import type { StepSpec } from "./steps";
 import type { Env, PlayerId } from "./types";
 
-/** A permission_to_play that outlasts this resolution (cast later, from the card list) rather than "cast it right now as part of resolving". */
-export const isDurablePermission = (step: Step): boolean => step.kind === "permission_to_play" && !((((step.what ?? step.target) as string | undefined) === "linked_exile" && step.duration === undefined) || step.duration === "instant");
+export { isDurablePermission } from "../prompts"; // (the predicate lives with the prompt generator: durable permissions never carry a prompt)
 
 export const permissionStep: StepSpec = {
   fields: ["what", "target", "zone", "withoutPaying", "withoutPayingManaCost", "duration", "allow", "who", "elseToHand"],

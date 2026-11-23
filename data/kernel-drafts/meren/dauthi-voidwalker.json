@@ -83,15 +83,7 @@
           "what": "chosen",
           "withoutPaying": true,
           "duration": "until_end_of_turn",
-          "optional": true,
-          "prompt": {
-            "title": "Dauthi Voidwalker: optional",
-            "instruction": "Do you want to you may play chosen without paying its mana cost until end of turn?",
-            "source": {
-              "card": "Dauthi Voidwalker",
-              "ability": "a3"
-            }
-          }
+          "optional": true
         }
       ],
       "implementation": "needed",

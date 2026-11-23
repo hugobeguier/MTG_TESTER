@@ -44,8 +44,10 @@
       },
       "implementation": "needed",
       "needs": [
-        "static"
-      ]
+        "static",
+        "zone:command"
+      ],
+      "zone": "command"
     },
     {
       "id": "a2",
@@ -116,6 +118,37 @@
         "field:move_card_zone.from",
         "field:move_card_zone.what"
       ]
+    },
+    {
+      "id": "a4",
+      "kind": "static",
+      "text": "Eminence — As long as The Ur-Dragon is in the command zone or on the battlefield, other Dragon spells you cast cost {1} less to cast.",
+      "static": {
+        "affects": "you",
+        "modify": [
+          {
+            "costMod": {
+              "filter": {
+                "subtypes": [
+                  "Dragon"
+                ],
+                "zone": "stack",
+                "another": true
+              },
+              "delta": -1
+            }
+          }
+        ],
+        "while": {
+          "check": "source_state",
+          "state": "on_battlefield"
+        }
+      },
+      "implementation": "needed",
+      "needs": [
+        "static"
+      ],
+      "zone": "battlefield"
     }
   ],
   "review": {

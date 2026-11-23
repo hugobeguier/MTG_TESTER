@@ -52,15 +52,7 @@
           "what": "exiled",
           "optional": true,
           "duration": "until_your_next_end_step",
-          "src": 1,
-          "prompt": {
-            "title": "Dragonhawk, Fate's Tempest: optional",
-            "instruction": "Do you want to you may play exiled until your next end step?",
-            "source": {
-              "card": "Dragonhawk, Fate's Tempest",
-              "ability": "a2"
-            }
-          }
+          "src": 1
         },
         {
           "kind": "create_delayed_trigger",

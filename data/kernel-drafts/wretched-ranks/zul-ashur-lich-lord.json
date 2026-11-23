@@ -85,15 +85,7 @@
           "what": "t1",
           "zone": "graveyard",
           "duration": "until_end_of_turn",
-          "optional": true,
-          "prompt": {
-            "title": "Zul Ashur, Lich Lord: optional",
-            "instruction": "Do you want to you may play t1 until end of turn?",
-            "source": {
-              "card": "Zul Ashur, Lich Lord",
-              "ability": "a2"
-            }
-          }
+          "optional": true
         }
       ],
       "implementation": "needed",

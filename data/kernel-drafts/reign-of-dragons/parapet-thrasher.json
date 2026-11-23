@@ -99,15 +99,7 @@
                 "kind": "permission_to_play",
                 "what": "exiled",
                 "optional": true,
-                "duration": "until_end_of_turn",
-                "prompt": {
-                  "title": "Parapet Thrasher: optional",
-                  "instruction": "Do you want to you may play exiled until end of turn?",
-                  "source": {
-                    "card": "Parapet Thrasher",
-                    "ability": "a2"
-                  }
-                }
+                "duration": "until_end_of_turn"
               }
             ]
           }

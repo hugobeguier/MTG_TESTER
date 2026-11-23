@@ -30,7 +30,7 @@
           "amount": 1,
           "prompt": {
             "title": "Sidisi, Undead Vizier: optional",
-            "instruction": "Do you want to you may sacrifice a creature (exploit)?",
+            "instruction": "Do you want to sacrifice a creature (exploit)?",
             "source": {
               "card": "Sidisi, Undead Vizier",
               "ability": "a2"
@@ -40,7 +40,7 @@
       ],
       "prompt": {
         "title": "Sidisi, Undead Vizier: optional",
-        "instruction": "Do you want to you may sacrifice a creature (exploit)?",
+        "instruction": "Do you want to sacrifice a creature (exploit)?",
         "source": {
           "card": "Sidisi, Undead Vizier",
           "ability": "a2"

@@ -11,7 +11,7 @@ Reading guide: each card below shows the oracle text and what the structured JSO
 - **Blasphemous Act** (Sorcery): (costs {1} less for each creature) | Deal 13 damage to the target [needs: cast_option, cost_reduction, field:damage_target.all, field:damage_target.filter]
 - **Breath Weapon** (Instant): Deal 2 damage to the target [needs: filter:notSubtypes, field:damage_target.all, field:damage_target.filter]
 - **Commander's Sphere** (Artifact): {T}: add one mana of any color in your commander's color identity | sacrifice Commander's Sphere: Draw a card [needs: mana:variable, cost:sacrifice]
-- **Count on Luck** (Enchantment): At the beginning of your upkeep: Exile a card, then you may you may play exiled until end of turn [needs: field:move_card_zone.position, field:move_card_zone.saveAs, step:permission_to_play, field:permission_to_play.what]
+- **Count on Luck** (Enchantment): At the beginning of your upkeep: Exile a card, then you may cast or play exiled until end of turn [needs: field:move_card_zone.position, field:move_card_zone.saveAs, step:permission_to_play, field:permission_to_play.what]
 - **Crucible of Fire** (Enchantment): Dragons you control get +3/+3 [needs: static]
 - **Dragon's Hoard** (Artifact): Whenever a Dragon you control enters: Put a gold counter on Dragon's Hoard | {T}, remove a gold counter from Dragon's Hoard: Draw a card | {T}: add one mana of any color [needs: trigger:subject, step:add_counters, field:add_counters.on, cost:counters, mana:variable]
 - **Dragonlord's Servant** (Creature — Goblin Shaman): Dragon spells you cast cost {1} less to cast [needs: static]
@@ -121,14 +121,13 @@ Atsushi, the Blazing Sky [draft]
     Oracle: When Atsushi dies, choose one — / • Exile the top two cards of your library. Until the end of your next turn, you may play those cards. / • Create three Treasure tokens.
     Trigger: Whenever Atsushi, the Blazing Sky dies
     Modes: choose 1  <- prompt: "Choose one mode."
-      - Exile a card. Then, you may you may play exiled until end of your next turn.
+      - Exile a card. Then, you may cast or play exiled until end of your next turn.
       - Create three ?/? colorless Treasure artifact tokens.
 ```
 
 Player prompts:
 
 - Atsushi, the Blazing Sky: choose a mode: Choose one mode.
-- Atsushi, the Blazing Sky: optional: Do you want to you may play exiled until end of your next turn?
 
 Implementation: needed (modes, field:move_card_zone.position, field:move_card_zone.saveAs, step:permission_to_play, field:permission_to_play.what, duration:until_end_of_your_next_turn)
 
@@ -178,7 +177,7 @@ Breaching Dragonstorm [draft]
   [a1] triggered [needed: needs field:move_card_zone.position, field:move_card_zone.saveHitAs, field:move_card_zone.until, step:permission_to_play, field:permission_to_play.elseToHand, field:permission_to_play.what, field:permission_to_play.withoutPaying, predicate:matches, predicate:not, predicate:step_done]
     Oracle: When this enchantment enters, exile cards from the top of your library until you exile a nonland card. You may cast it without paying its mana cost if that spell's mana value is 8 or less. If you don't, put that card into your hand.
     Trigger: Whenever Breaching Dragonstorm enters
-    Effect: Exile a card. Then, IF that object is a permanent with mana value 8 or less: you may you may play event_object without paying its mana cost. Then, IF it is not true that you did (castit): put that object into your hand.
+    Effect: Exile a card. Then, IF that object is a permanent with mana value 8 or less: you may cast or play that object without paying its mana cost. Then, IF it is not true that you did (castit): put that object into your hand.
   [a2] triggered [needed: needs trigger:subject]
     Oracle: When a Dragon you control enters, return this enchantment to its owner's hand.
     Trigger: Whenever a Dragon you control enters
@@ -368,12 +367,12 @@ Dragonhawk, Fate's Tempest [draft]
   [a2] triggered [needed: needs trigger:multi_event, field:move_card_zone.position, field:move_card_zone.saveAs, step:permission_to_play, field:permission_to_play.what, duration:until_your_next_end_step, step:create_delayed_trigger, field:create_delayed_trigger.at, field:create_delayed_trigger.steps, quantity:math, field:damage_target.source, field:damage_target.who]
     Oracle: Whenever Dragonhawk enters or attacks, exile the top X cards of your library, where X is the number of creatures you control with power 4 or greater. You may play those cards until your next end step. At the beginning of your next end step, Dragonhawk deals 2 damage to each opponent for each of those cards that are still exiled.
     Trigger: Whenever Dragonhawk, Fate's Tempest enters or attacks
-    Effect: Exile a card. Then, you may you may play exiled until your next end step. Then, create a delayed trigger.
+    Effect: Exile a card. Then, you may cast or play exiled until your next end step. Then, create a delayed trigger.
 ```
 
 Player prompts:
 
-- Dragonhawk, Fate's Tempest: optional: Do you want to you may play exiled until your next end step?
+- (none: no decisions)
 
 Implementation: needed (trigger:multi_event, field:move_card_zone.position, field:move_card_zone.saveAs, step:permission_to_play, field:permission_to_play.what, duration:until_your_next_end_step, step:create_delayed_trigger, field:create_delayed_trigger.at, field:create_delayed_trigger.steps, quantity:math, field:damage_target.source, field:damage_target.who)
 
@@ -785,7 +784,7 @@ Outpost Siege [draft]
   [a2] triggered [needed: needs trigger:intervening_if, predicate:chosen_is, field:move_card_zone.position, field:move_card_zone.saveAs, step:permission_to_play, field:permission_to_play.what]
     Oracle: • Khans — At the beginning of your upkeep, exile the top card of your library. Until end of turn, you may play that card.
     Trigger: At the beginning of your upkeep, if the chosen mode is Khans
-    Effect: Exile a card. Then, you may you may play exiled until end of turn.
+    Effect: Exile a card. Then, you may cast or play exiled until end of turn.
   [a3] triggered [needed: needs trigger:leaves, trigger:intervening_if, predicate:chosen_is, trigger:subject, field:damage_target.source]
     Oracle: • Dragons — Whenever a creature you control leaves the battlefield, this enchantment deals 1 damage to any target.
     Trigger: Whenever a creature you control leaves the battlefield, if the chosen mode is Dragons
@@ -796,7 +795,6 @@ Outpost Siege [draft]
 Player prompts:
 
 - Outpost Siege: choose: Choose one of Khans or Dragons.
-- Outpost Siege: optional: Do you want to you may play exiled until end of turn?
 - Outpost Siege: choose a target: Choose target.
 
 Implementation: needed (replacement:would_enter, step:choose, field:choose.choice, field:choose.options, field:choose.remember, trigger:intervening_if, predicate:chosen_is, field:move_card_zone.position, field:move_card_zone.saveAs, step:permission_to_play, field:permission_to_play.what, trigger:leaves, trigger:subject, field:damage_target.source)
@@ -826,14 +824,13 @@ Parapet Thrasher [draft]
     Modes: choose 1  <- prompt: "Choose one mode."
       - Destroy target artifact an opponent controls. (target: target artifact an opponent controls)
       - Parapet Thrasher deals 4 damage to the target.
-      - Exile a card. Then, you may you may play exiled until end of turn.
+      - Exile a card. Then, you may cast or play exiled until end of turn.
 ```
 
 Player prompts:
 
 - Parapet Thrasher: choose a mode: Choose one mode.
 - Parapet Thrasher: choose a target: Choose target artifact an opponent controls.
-- Parapet Thrasher: optional: Do you want to you may play exiled until end of turn?
 
 Implementation: needed (modes, modes:repeat_restriction, trigger:batch, trigger:subject, field:damage_target.excludeWho, field:damage_target.source, field:damage_target.who, field:move_card_zone.position, field:move_card_zone.saveAs, step:permission_to_play, field:permission_to_play.what)
 
@@ -1063,13 +1060,13 @@ Spinerock Knoll [draft]
   [a4] activated [needed: needs ref:linked_exile, quantity:players_count, step:permission_to_play, field:permission_to_play.what, field:permission_to_play.withoutPaying, predicate:compare]
     Oracle: {R}, {T}: You may play the exiled card without paying its mana cost if an opponent was dealt 7 or more damage this turn.
     Cost: {R}, {T}
-    Effect: IF the number of opponents for which the damage dealt to that player this turn is 7 or greater is 1 or greater: you may you may play linked_exile without paying its mana cost.
+    Effect: IF the number of opponents for which the damage dealt to that player this turn is 7 or greater is 1 or greater: you may cast or play the card exiled with Spinerock Knoll without paying its mana cost.
 ```
 
 Player prompts:
 
 - Spinerock Knoll: choose: Choose a card from among the looked-at cards.
-- Spinerock Knoll: optional: Do you want to you may play linked_exile without paying its mana cost?
+- Spinerock Knoll: optional: Do you want to cast or play the card exiled with Spinerock Knoll without paying its mana cost?
 
 Implementation: needed (step:look_top, step:choose, field:choose.count, field:choose.from, field:choose.fromLooked, field:choose.saveAs, field:move_card_zone.faceDown, field:move_card_zone.linkExile, field:move_card_zone.order, field:move_card_zone.position, field:move_card_zone.what, replacement:would_enter, ref:linked_exile, quantity:players_count, step:permission_to_play, field:permission_to_play.what, field:permission_to_play.withoutPaying, predicate:compare)
 

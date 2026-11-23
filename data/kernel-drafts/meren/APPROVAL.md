@@ -741,9 +741,9 @@ Sidisi, Undead Vizier [draft]
   [a2] triggered [needed: needs keyword:exploit, step:exploit]
     Oracle: Exploit (When this creature enters, you may sacrifice a creature.)
     Trigger: Whenever Sidisi, Undead Vizier enters
-    Effect: You may you may sacrifice a creature (exploit).
+    Effect: You may sacrifice a creature (exploit).
     Keyword: exploit
-    (optional: Do you want to you may sacrifice a creature (exploit)?)
+    (optional: Do you want to sacrifice a creature (exploit)?)
   [a3] triggered [needed: needs trigger:exploit, step:search_library, field:search_library.count, field:search_library.filter, field:search_library.shuffle, field:search_library.to]
     Oracle: When Sidisi exploits a creature, you may search your library for a card, put it into your hand, then shuffle.
     Trigger: Whenever Sidisi, Undead Vizier exploits a creature
@@ -753,7 +753,7 @@ Sidisi, Undead Vizier [draft]
 
 Player prompts:
 
-- Sidisi, Undead Vizier: optional: Do you want to you may sacrifice a creature (exploit)?
+- Sidisi, Undead Vizier: optional: Do you want to sacrifice a creature (exploit)?
 - Sidisi, Undead Vizier: optional: Do you want to search your library for a permanent, put it onto your hand, then shuffle?
 - Sidisi, Undead Vizier: search: Choose a permanent from the library.
 
@@ -847,13 +847,12 @@ Dauthi Voidwalker [draft]
   [a3] activated [needed: needs cost:sacrifice, step:choose, field:choose.count, field:choose.from, field:choose.saveAs, step:permission_to_play, field:permission_to_play.what, field:permission_to_play.withoutPaying]
     Oracle: {T}, Sacrifice this creature: Choose an exiled card an opponent owns with a void counter on it. You may play it this turn without paying its mana cost.
     Cost: {T}, sacrifice Dauthi Voidwalker
-    Effect: Choose a card with a void counter on it an opponent owns in exile. Then, you may you may play chosen without paying its mana cost until end of turn.
+    Effect: Choose a card with a void counter on it an opponent owns in exile. Then, you may cast or play the chosen object without paying its mana cost until end of turn.
 ```
 
 Player prompts:
 
 - Dauthi Voidwalker: choose: Choose a card with a void counter on it an opponent owns in exile.
-- Dauthi Voidwalker: optional: Do you want to you may play chosen without paying its mana cost until end of turn?
 
 Implementation: needed (replacement:would_be_put_into_zone, step:add_counters, field:add_counters.on, cost:sacrifice, step:choose, field:choose.count, field:choose.from, field:choose.saveAs, step:permission_to_play, field:permission_to_play.what, field:permission_to_play.withoutPaying)
 

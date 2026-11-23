@@ -216,7 +216,7 @@ Rishkar's Expertise [draft]
     Effect: Draw the greatest power among creatures you control cards.
   [a2] spell_effect [needed: needs step:choose, field:choose.count, field:choose.from, field:choose.saveAs, step:permission_to_play, field:permission_to_play.what, field:permission_to_play.withoutPaying, field:permission_to_play.zone]
     Oracle: You may cast a spell with mana value 5 or less from your hand without paying its mana cost.
-    Effect: You may choose a nonland card with mana value 5 or less in your hand. Then, you may play chosen without paying its mana cost.
+    Effect: You may choose a nonland card with mana value 5 or less in your hand. Then, cast or play the chosen object without paying its mana cost.
 ```
 
 Player prompts:
@@ -495,13 +495,13 @@ Mosswort Bridge [draft]
   [a4] activated [needed: needs ref:linked_exile, step:permission_to_play, field:permission_to_play.what, field:permission_to_play.withoutPaying, field:permission_to_play.zone, predicate:compare]
     Oracle: {G}, {T}: You may play the exiled card without paying its mana cost if creatures you control have total power 10 or greater.
     Cost: {G}, {T}
-    Effect: IF the total power of creatures you control is 10 or greater: you may you may play linked_exile without paying its mana cost.
+    Effect: IF the total power of creatures you control is 10 or greater: you may cast or play the card exiled with Mosswort Bridge without paying its mana cost.
 ```
 
 Player prompts:
 
 - Mosswort Bridge: choose: Choose a card from among the looked-at cards.
-- Mosswort Bridge: optional: Do you want to you may play linked_exile without paying its mana cost?
+- Mosswort Bridge: optional: Do you want to cast or play the card exiled with Mosswort Bridge without paying its mana cost?
 
 Implementation: needed (step:look_top, step:choose, field:choose.count, field:choose.from, field:choose.fromLooked, field:choose.saveAs, field:move_card_zone.faceDown, field:move_card_zone.linkExile, field:move_card_zone.order, field:move_card_zone.position, field:move_card_zone.what, replacement:would_enter, ref:linked_exile, step:permission_to_play, field:permission_to_play.what, field:permission_to_play.withoutPaying, field:permission_to_play.zone, predicate:compare)
 
