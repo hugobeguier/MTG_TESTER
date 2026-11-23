@@ -13,6 +13,8 @@ import {
   selectionHint, setSplit, splitChoice, splitModel, splitSum, splitValid, toggleSelection, undoLast
 } from "./game/kernelDecisionView";
 import { pileDestination } from "./game/kernelCardInfo";
+import { escapeCancels } from "./game/kernelPlacement";
+import { PlacementBody } from "./KernelPlacementBody";
 import { CardChip, CardFull, CardPreviewPanel, CardTile, useCardPreview, type CardPreviewApi } from "./KernelCardView";
 
 export interface KernelDecisionDialogProps {
@@ -159,17 +161,20 @@ export function KernelDecisionDialog({ decision, onAnswer, sourceArt, onBoard }:
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
-      if (e.key === "Escape" && decision.cancellable) { e.preventDefault(); onAnswer(decision.id, { cancel: true }); }
+      if (e.key === "Escape" && !escapeCancels(decision)) e.preventDefault(); // a rules-required placement (scry / surveil / order) cannot be cancelled
+      else if (e.key === "Escape" && decision.cancellable) { e.preventDefault(); onAnswer(decision.id, { cancel: true }); }
       else if (e.key === "Enter" && t?.tagName !== "BUTTON") { e.preventDefault(); answerRef.current(); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [decision.id, decision.cancellable, onAnswer]);
+  }, [decision, onAnswer]);
 
   let body: React.ReactNode;
   answerRef.current = () => undefined;
   if (cls.layout === "split") {
     body = <Split decision={decision} onAnswer={onAnswer} api={api} />;
+  } else if (cls.layout === "place") {
+    body = <PlacementBody decision={decision} onAnswer={onAnswer} api={api} answerRef={answerRef} />;
   } else if (cls.layout === "order") {
     body = <Order decision={decision} onAnswer={onAnswer} api={api} />;
   } else if (cls.layout === "number") {

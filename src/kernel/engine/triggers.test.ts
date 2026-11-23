@@ -130,7 +130,7 @@ describe("Mazemind Tome (counters as costs, scry)", () => {
     const second = t.give("p1", "Island", "library", { top: false });
     t.ok({ type: "activateAbility", player: "p1", sourceId: tome, abilityId: "a1" });
     const res = t.pass("p1", "p2");
-    expect(res.pending).toMatchObject({ kind: "choose_cards", min: 0, max: 1 });
+    expect(res.pending).toMatchObject({ kind: "order_library", min: 0, max: 1 });
     expect(res.pending!.options.map((o) => o.id)).toEqual([top]);
     t.answer(res, { ids: [top] });
     expect(t.p("p1").library).toEqual([second, top]);

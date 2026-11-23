@@ -12,6 +12,7 @@ import { emit, label, moveObject, obj, player, shuffleInPlace, tryObj, Unsupport
 import { evalQuantity, matchesFilter, resolveObjs, resolvePlayers } from "./query";
 import { liveIds, saveList, setResult } from "./saved";
 import { addLink } from "./links";
+import { placementSpec, readPlacement } from "./placement";
 import { faceNames, defOf } from "./core";
 import { decide, type AskSpec, type StepResult, type StepSpec } from "./steps";
 import type { Env, ObjId, PlayerId } from "./types";
@@ -91,14 +92,12 @@ export const moveStep: StepSpec = {
     // ---- order of cards going to a library
     if (to === "library" && ids.length > 1) {
       if (step.ordered === "any_order" || step.order === "chosen") {
-        const spec: AskSpec = {
-          kind: "choose_cards", player: env.controller,
-          prompt: step.prompt ?? { title: `${label(r, env.source)}: order the cards`, instruction: `Put the cards in order, first = ${step.position === "bottom" ? "closest to the top of that group" : "on top of the library"}.` },
-          options: ids.map((id) => ({ id, label: label(r, id) })), min: ids.length, max: ids.length
-        };
-        const d = decide(spec, answer);
-        if ("ask" in d) return d;
-        ids = d.ids;
+        const bottom = step.position === "bottom";
+        const spec = placementSpec(env.controller,
+          step.prompt ?? { title: `${label(r, env.source)}: order the cards`, instruction: bottom ? "Put the cards on the bottom of your library in the order you want (first = closest to the top of the bottom group)." : "Put the cards back on top of your library in the order you want (first = the next card you draw)." },
+          ids.map((id) => ({ id, label: label(r, id) })), { to: "none", stack: bottom ? "bottom" : "top" });
+        if (!answer) return { ask: spec };
+        ids = readPlacement(spec, answer).top;
       } else if (step.order === "random") ids = shuffleInPlace(r, [...ids]);
     }
 

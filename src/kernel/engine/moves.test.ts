@@ -156,7 +156,7 @@ describe("order of cards put into a library", () => {
     const a = t.give("p1", "Fill A", "hand"); const b = t.give("p1", "Fill B", "hand");
     t.ok({ type: "castSpell", player: "p1", cardId: t.give("p1", "Mover", "hand") });
     const res = t.resolveTop();
-    expect(res.pending).toMatchObject({ kind: "choose_cards", min: 2, max: 2, player: "p1" });
+    expect(res.pending).toMatchObject({ kind: "order_library", min: 2, max: 2, player: "p1" });
     t.answer(res, { ids: [b, a] });
     expect(t.p("p1").library.slice(0, 2)).toEqual([b, a]);
   });

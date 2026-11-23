@@ -41,7 +41,7 @@ describe("Brainstorm: draw three, then choose two cards from hand", () => {
     const res = stack(t);
     const keep = res.pending!.options.find((o) => o.label === "Fill B")!.id;
     const second = t.answer(res, { ids: [held, keep] });
-    expect(second.pending).toMatchObject({ kind: "choose_cards", min: 2, max: 2 });
+    expect(second.pending).toMatchObject({ kind: "order_library", min: 2, max: 2 });
     expect(second.pending!.options.map((o) => o.id).sort()).toEqual([held, keep].sort());
     const done = t.answer(second, { ids: [keep, held] });
     expect(done.pending).toBeUndefined();

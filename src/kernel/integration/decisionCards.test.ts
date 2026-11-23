@@ -25,7 +25,7 @@ describe("decision options carry cards", () => {
   it("a surveil lists the top cards of the library with their cards, and the source card by name", () => {
     const { t, hidden, tops } = surveilGame();
     const d = toTableState(t.state, "p1", env).decision!;
-    expect(d.kind).toBe("choose_cards");
+    expect(d.kind).toBe("order_library");
     expect(d.options.length).toBe(3);
     for (const o of d.options) {
       expect(o.card?.zone).toBe("library");

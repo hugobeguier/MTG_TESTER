@@ -18,6 +18,7 @@ import type { ContinuousEffect } from "./types";
 import { isObjId } from "./types";
 import { chooseStep } from "./choose";
 import { moveStep } from "./moves";
+import { applyScry, placementSpec, readPlacement } from "./placement";
 import { lookTopStep, revealStep, searchPickStep, searchStep } from "./library";
 import { repeatStep } from "./repeat";
 import { unlessDiscardHandler, unlessHandler, unlessPaySupported, type UnlessPay } from "./unlesspay";
@@ -34,7 +35,7 @@ import { addCommanderDamage, isCommanderObj } from "./commander";
 import { INTERNAL7, STEPS7, steps7 } from "./steps7";
 import { countersTransferSteps, INTERNAL6, STEPS6, wrapRevealStep } from "./steps6";
 
-export interface AskSpec { kind: DecisionKind; player: PlayerId; prompt: Prompt; options: DecisionOption[]; min: number; max: number; repeatable?: boolean; numeric?: boolean; mana?: { total: number; colors: string[] }; counters?: { min: number; max: number; available: Record<string, number> } }
+export interface AskSpec { kind: DecisionKind; player: PlayerId; prompt: Prompt; options: DecisionOption[]; min: number; max: number; repeatable?: boolean; numeric?: boolean; mana?: { total: number; colors: string[] }; counters?: { min: number; max: number; available: Record<string, number> }; placement?: { to: "bottom" | "graveyard" | "none"; stack: "top" | "bottom" } }
 export type StepResult = "done" | { ask: AskSpec } | { push: Step[] };
 export type StepStatus = { status: "done" } | { status: "ask"; spec: AskSpec };
 
@@ -692,16 +693,15 @@ const INTERNAL: Record<string, Handler> = {
     if (n <= 0) return "done";
     const top = lib.slice(0, n);
     const to = String(step.to);
-    const spec: AskSpec = {
-      kind: "choose_cards", player: pid,
-      prompt: (step.prompt as Prompt | undefined) ?? fallbackPrompt(r, ex.env, to === "bottom" ? "scry" : "surveil", to === "bottom" ? "Choose any cards to put on the bottom of your library; the rest stay on top." : "Choose any cards to put into your graveyard; the rest stay on top."),
-      options: cardOptions(r, top), min: 0, max: n
-    };
-    const d = decide(spec, answer);
-    if ("ask" in d) return d;
-    // the kept cards stay on top in their current order (ordering the top is a documented simplification)
-    for (const id of d.ids) moveObject(r, id, to === "bottom" ? "library" : "graveyard", { position: "bottom" });
-    emit(r, { type: to === "bottom" ? "scry" : "surveil", player: pid, count: n, moved: d.ids.length });
+    const spec = placementSpec(pid,
+      (step.prompt as Prompt | undefined) ?? fallbackPrompt(r, ex.env, `${to === "bottom" ? "scry" : "surveil"} ${n}`, to === "bottom"
+        ? `Scry ${n}: choose the cards to put on the bottom of your library, then put the rest back on top in the order you want (first = the next card you draw).`
+        : `Surveil ${n}: choose the cards to put into your graveyard, then put the rest back on top in the order you want (first = the next card you draw).`),
+      cardOptions(r, top), { to: to === "bottom" ? "bottom" : "graveyard", stack: "top" });
+    if (!answer) return { ask: spec };
+    const placed = readPlacement(spec, answer);
+    applyScry(r, pid, placed);
+    emit(r, { type: to === "bottom" ? "scry" : "surveil", player: pid, count: n, moved: placed.toBottom.length + placed.toGraveyard.length });
     return "done";
   }
 };

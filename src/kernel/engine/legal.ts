@@ -99,6 +99,7 @@ function choicesOf(p: PendingView): Choice[] {
   const out: Choice[] = [];
   if (p.numeric) { if (p.cancellable) out.push({ cancel: true }); return out; }
   if (p.kind === "choose_yes_no" || p.kind === "pay_unless") out.push({ yes: true }, { yes: false });
+  else if (p.kind === "order_library") { const ids = p.options.map((o) => o.id); out.push({ place: { top: ids } }); if (p.placement?.to === "bottom") out.push({ place: { toBottom: ids } }); if (p.placement?.to === "graveyard") out.push({ place: { toGraveyard: ids } }); }
   else if (p.kind === "assign_damage" || p.kind === "assign_mana" || p.kind === "assign_counters") { /* needs a split: see pending */ }
   else if (p.max === 1) { for (const o of p.options) out.push({ ids: [o.id] }); if (p.min === 0) out.push({ ids: [] }); }
   else if (p.min === 0 && p.max >= 0) out.push({ ids: [] });

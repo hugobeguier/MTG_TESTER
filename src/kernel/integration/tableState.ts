@@ -32,6 +32,7 @@ export interface DecisionView {
   amounts?: PendingView["amounts"];
   mana?: PendingView["mana"];
   counters?: PendingView["counters"];
+  placement?: PendingView["placement"];
 }
 export interface WaitingFor { player: PlayerId; kind: DecisionKind; title: string }
 
@@ -114,7 +115,7 @@ export function decisionView(state: GameState, viewer: PlayerId, env: ToSessionE
   return {
     decision: {
       id: p.id, kind: p.kind, player: p.player, title, instruction: p.prompt?.instruction ?? "", ...(p.prompt?.source ? { source: p.prompt.source } : {}), ...(sourceCard ? { sourceCard } : {}), options, min: p.min, max: p.max, cancellable: p.cancellable,
-      ...(p.repeatable ? { repeatable: true } : {}), ...(p.numeric ? { numeric: true } : {}), ...(p.amounts ? { amounts: p.amounts } : {}), ...(p.mana ? { mana: p.mana } : {}), ...(p.counters ? { counters: p.counters } : {})
+      ...(p.repeatable ? { repeatable: true } : {}), ...(p.numeric ? { numeric: true } : {}), ...(p.amounts ? { amounts: p.amounts } : {}), ...(p.mana ? { mana: p.mana } : {}), ...(p.counters ? { counters: p.counters } : {}), ...(p.placement ? { placement: p.placement } : {})
     }
   };
 }

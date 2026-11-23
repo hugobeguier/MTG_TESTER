@@ -149,7 +149,7 @@ describe("look_top", () => {
     const [a, b, c, d, e] = res.pending!.options.map((o) => o.id);
     const order = t.answer(res, { ids: [c] });
     expect(t.obj(c).zone).toBe("hand");
-    expect(order.pending).toMatchObject({ kind: "choose_cards", min: 4, max: 4 });
+    expect(order.pending).toMatchObject({ kind: "order_library", min: 4, max: 4 });
     t.answer(order, { ids: [e, d, b, a] });
     expect(t.p("p1").library.slice(0, 4)).toEqual([e, d, b, a]);
   });
@@ -174,7 +174,7 @@ describe("look_top", () => {
     t.ok({ type: "castSpell", player: "p1", cardId: t.give("p1", "Ponder", "hand") });
     const res = t.resolveTop();
     const [a, b, c] = t.p("p1").library;
-    expect(res.pending).toMatchObject({ kind: "choose_cards", min: 3, max: 3 });
+    expect(res.pending).toMatchObject({ kind: "order_library", min: 3, max: 3 });
     const sh = t.answer(res, { ids: [c, a, b] });
     expect(sh.pending).toMatchObject({ kind: "choose_yes_no" }); // "you may shuffle"
     t.answer(sh, { yes: false });

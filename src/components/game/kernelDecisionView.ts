@@ -7,7 +7,7 @@
 import type { Choice } from "@/kernel/engine/types";
 import type { DecisionOptionView, DecisionView } from "@/kernel/integration/tableState";
 
-export type DecisionLayout = "yes_no" | "number" | "split" | "order" | "pick";
+export type DecisionLayout = "yes_no" | "number" | "split" | "order" | "place" | "pick";
 
 export interface DecisionClass {
   layout: DecisionLayout;
@@ -22,7 +22,7 @@ export interface DecisionClass {
 const LABEL: Record<string, string> = {
   choose_targets: "Choose targets", cast_target_player: "Choose a player", choose_modes: "Choose modes", choose_x: "Choose X", choose_number: "Choose a number",
   choose_cards: "Choose cards", choose_yes_no: "Yes or no", choose_color: "Choose a colour", order_triggers: "Order triggers", order_replacements: "Order effects",
-  assign_damage: "Assign combat damage", choose_option: "Choose", pay_unless: "Pay or not", choose_cast_option: "How to cast", assign_mana: "Assign mana", assign_counters: "Assign counters"
+  assign_damage: "Assign combat damage", choose_option: "Choose", pay_unless: "Pay or not", choose_cast_option: "How to cast", assign_mana: "Assign mana", assign_counters: "Assign counters", order_library: "Place cards"
 };
 
 /** options a click on the board can answer: the viewer's battlefield permanents / hand cards (ThreeGameTable renders these) and players (their life plate) */
@@ -35,6 +35,7 @@ export function boardClickable(o: DecisionOptionView): boolean {
 export function classifyDecision(d: DecisionView): DecisionClass {
   const base = { upTo: d.min === 0 && !d.numeric, label: LABEL[d.kind] ?? d.kind.replace(/_/g, " ") };
   if (d.kind === "assign_damage" || d.kind === "assign_mana" || d.kind === "assign_counters") return { ...base, layout: "split", board: false };
+  if (d.kind === "order_library") return { ...base, layout: "place", board: false, upTo: false };
   if (d.numeric) return { ...base, layout: "number", board: false };
   if (d.kind === "choose_yes_no" || d.kind === "pay_unless") return { ...base, layout: "yes_no", board: false };
   if (d.kind === "order_triggers" || d.kind === "order_replacements") return { ...base, layout: "order", board: false };
