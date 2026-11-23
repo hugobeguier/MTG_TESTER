@@ -85,7 +85,7 @@ The `unresolved` event: `{ type, card, source?, zone?, ability?, abilityKind, cl
 
 | What is unsupported | What happens (`effect`) |
 |---|---|
-| a step (unknown kind, field, duration, reference, predicate / condition, or something that only fails while running, e.g. "opponent" in a 3-player game) | `skipped`: that step only; the steps after it still run, so the rest of the card resolves. Judged when the ability resolves, deduped per card + ability + capability within one action |
+| a step (unknown kind, field, duration, reference, predicate / condition, or something that only fails while running, e.g. a "target_player" reference when no player was chosen) | `skipped`: that step only; the steps after it still run, so the rest of the card resolves. Judged when the ability resolves, deduped per card + ability + capability within one action |
 | a cost of an activated / mana ability, or any other frame part of it (targets, timing, zone, keyword, scripted marker, declined) | `not_performed`: never silently free. Nothing is paid or tapped, nothing goes on the stack, the player keeps priority (the action succeeds with just the event) |
 | a cast option (kicker, alternative cost, flashback, overload ...) | `not_performed`: the option is not offered, the normal way to cast stays available; reported when the card is cast |
 | the spell ability of a spell (targets / frame unsupported, declined) | `skipped`: the spell is cast and goes to its zone, its effect is skipped; reported when cast |

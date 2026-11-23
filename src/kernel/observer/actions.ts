@@ -262,6 +262,16 @@ export function defaultAnswer(p: PendingView, state: GameState, actor: PlayerId)
       return { assign };
     }
     case "assign_mana": case "assign_counters": return undefined;
+    case "choose_option": {
+      // "choose an opponent" / the gift recipient: deterministic and simple. A harmful effect goes to the opponent with the most life, a gift to the one with the least; ties keep the first (turn order)
+      const lifeOf = (id: string): number | undefined => state.players.find((x) => x.id === id)?.life;
+      if (ids.length > 1 && ids.every((id) => lifeOf(id) !== undefined)) {
+        const gift = /gift/i.test(`${p.prompt?.title ?? ""} ${p.prompt?.instruction ?? ""}`);
+        const best = ids.reduce((a, b) => (gift ? lifeOf(b)! < lifeOf(a)! : lifeOf(b)! > lifeOf(a)!) ? b : a);
+        return { ids: [best] };
+      }
+      return { ids: ids.slice(0, Math.max(p.min, 0)) };
+    }
     default: return { ids: ids.slice(0, Math.max(p.min, 0)) };
   }
 }

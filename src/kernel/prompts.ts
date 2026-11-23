@@ -99,6 +99,7 @@ function playerName(p: string): string {
   switch (p) {
     case "you": return "you";
     case "opponent": return "an opponent";
+    case "gift_recipient": return "the opponent who received the gift";
     case "each_opponent": return "each opponent";
     case "each_player": return "each player";
     case "target_player": return "target player";
@@ -276,6 +277,7 @@ export function describePredicate(p: Predicate): string {
     case "mana_spent": return `${p.cmp ? `${describeCmp(p.cmp)} ` : "at least one "}{${p.color}} mana was spent to cast this spell`;
     case "cast_with": return `it was cast with ${p.option}`;
     case "name_matches": return `${refName(p.obj)} has the same name as ${list(p.among.map((f) => withArticle(describeFilter(f))))}`;
+    case "attacked_opponent_has_more_life": return "the attacked opponent has more life than another of your opponents";
     case "attacked_defender": return `${p.who === "all" ? "all" : p.who === "none" ? "none" : "at least one"} of those creatures attacked ${p.defender === "you" ? "you" : "you or a planeswalker you control"}`;
   }
 }

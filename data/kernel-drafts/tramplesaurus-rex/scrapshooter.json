@@ -21,7 +21,7 @@
         {
           "kind": "draw_cards",
           "amount": 1,
-          "who": "opponent"
+          "who": "gift_recipient"
         }
       ],
       "implementation": "needed",

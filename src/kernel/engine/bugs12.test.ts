@@ -136,7 +136,7 @@ describe("D: Rooms (CR 709)", () => {
     expect(charsOf(t, arc).abilities.map((a) => a.face)).toEqual(["Dusty Parlor"]);
     expect(t.obj(arc).zone).toBe("battlefield");
     const opts = legalActions(t.state, "p1", ctxOf(t)).filter((a) => a.kind === "unlockDoor");
-    expect(opts.map((a) => a.label)).toEqual(["Unlock the Secret Arcade door of Secret Arcade"]);
+    expect(opts.map((a) => a.label)).toEqual(["Unlock the Secret Arcade door of Secret Arcade ({4}{W})"]);
     t.ok(opts[0].action!);
     expect(t.obj(arc).unlocked).toEqual(["Dusty Parlor", "Secret Arcade"]);
     expect(t.obj(arc).zone).toBe("battlefield");

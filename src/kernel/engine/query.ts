@@ -30,6 +30,8 @@ export interface QCtx {
   cast?: CastInfo;
   /** the player being tested by players_count */
   thatPlayer?: PlayerId;
+  /** who: "opponent" with several opponents: the one the controller chose (steps.ts __pick_opponent) */
+  chosenOpponent?: PlayerId;
   /** saved-choice bookkeeping (saved.ts) */
   savedTs?: Record<string, number>;
   lastChosen?: string;
@@ -169,6 +171,7 @@ export function resolvePlayers(r: Run, ref: PlayerRef | undefined, q: QCtx): Pla
     case "each_opponent": return apnap(r).filter((p) => p.id !== q.controller).map((p) => p.id);
     case "opponent": {
       const o = opponentsOf(r, q.controller);
+      if (q.chosenOpponent) return o.some((p) => p.id === q.chosenOpponent) ? [q.chosenOpponent] : []; // chosen earlier in this resolution; gone since: nobody
       if (o.length !== 1) throw new Unsupported("player_ref:opponent_multiplayer", '"opponent" is ambiguous with more than one opponent');
       return [o[0].id];
     }
@@ -186,6 +189,10 @@ export function resolvePlayers(r: Run, ref: PlayerRef | undefined, q: QCtx): Pla
       const o = tryObj(r, t);
       if (!o) return []; // target gone
       return [ref === "controller_of_target" ? o.controller : o.owner];
+    }
+    case "gift_recipient": {
+      const g = (q.cast ?? q.item?.cast ?? (q.source ? tryObj(r, q.source)?.cast : undefined))?.giftTo; // a permanent keeps how it was cast
+      return g && alive(r).some((p) => p.id === g) ? [g] : [];
     }
     case "that_player":
       if (q.thatPlayer) return [q.thatPlayer];
@@ -302,7 +309,7 @@ export const EVENT_TO_LOG: Record<string, string> = { gain_life: "gain_life", lo
 export function countLog(r: Run, event: string, q: QCtx, filter?: ObjectFilter, actor?: PlayerRef): LogEntry[] {
   const type = EVENT_TO_LOG[event];
   if (!type) throw new Unsupported(`event:${event}`, `the engine does not log "${event}" events`);
-  const actors = actor ? resolvePlayers(r, actor, q) : undefined;
+  const actors = actor ? (actor === "opponent" ? opponentsOf(r, q.controller).map((p) => p.id) : resolvePlayers(r, actor, q)) : undefined; // "an opponent" as the actor of a past event: any opponent
   return r.s.turnLog.filter((e) => {
     if (e.type !== type) return false;
     if (actors && (!e.player || !actors.includes(e.player))) return false;
@@ -368,11 +375,13 @@ export function evalPredicate(r: Run, p: Predicate, q: QCtx): boolean {
       const n = p.filter.sameName ? Math.max(0, ...Object.values(ids.reduce<Record<string, number>>((m, i) => { const nm = chars(r, i).name; m[nm] = (m[nm] ?? 0) + 1; return m; }, {}))) : ids.length;
       return p.count ? cmp(n, p.count, r, q) : n >= 1;
     }
-    case "life": { const ps = resolvePlayers(r, p.who, q); return ps.length > 0 && ps.every((id) => cmp(player(r, id).life, p.cmp, r, q)); }
+    case "life": { if (p.who === "opponent") return opponentsOf(r, q.controller).some((o) => cmp(o.life, p.cmp, r, q)); const ps = resolvePlayers(r, p.who, q); return ps.length > 0 && ps.every((id) => cmp(player(r, id).life, p.cmp, r, q)); }
     case "zone_count": {
       const z = p.zone;
+      const countOf = (id: PlayerId): number => z === "battlefield" ? objectsMatching(r, { ...p.filter, controller: id === q.controller ? "you" : "that_player" }, { ...q, thatPlayer: id }).length : (player(r, id)[z as "hand"] as ObjId[]).filter((o) => !p.filter || matchesFilter(r, o, p.filter, q)).length;
+      if (p.who === "opponent") return opponentsOf(r, q.controller).some((o) => cmp(countOf(o.id), p.cmp, r, q)); // "an opponent has eight or more cards in their graveyard": any one opponent
       let n = 0;
-      for (const id of resolvePlayers(r, p.who, q)) n += z === "battlefield" ? objectsMatching(r, { ...p.filter, controller: id === q.controller ? "you" : "opponent" }, q).length : (player(r, id)[z as "hand"] as ObjId[]).filter((o) => !p.filter || matchesFilter(r, o, p.filter, q)).length;
+      for (const id of resolvePlayers(r, p.who, q)) n += countOf(id);
       return cmp(n, p.cmp, r, q);
     }
     case "did_this_turn": { const n = countLog(r, p.event, q, undefined, p.actor).length; return p.cmp ? cmp(n, p.cmp, r, q) : n >= 1; }
@@ -400,6 +409,11 @@ export function evalPredicate(r: Run, p: Predicate, q: QCtx): boolean {
       // "your Nth turn of the game" is judged during your own turns only ("you can't cast this during your first, second, or third turns")
       if (p.scope === "yours") return r.s.turn.active === q.controller && cmp(turnsTakenBy(r, q.controller), p.cmp, r, q);
       return cmp(r.s.turn.number, p.cmp, r, q);
+    }
+    case "attacked_opponent_has_more_life": {
+      if (!q.defenders) throw new Unsupported("predicate:attacked_opponent_has_more_life", "outside an attack trigger");
+      const opps = opponentsOf(r, q.controller);
+      return q.defenders.some((d) => { const o = opps.find((x) => x.id === d); return !!o && opps.some((x) => x.id !== o.id && x.life < o.life); });
     }
     case "attacked_defender": {
       const ds = q.defenders;

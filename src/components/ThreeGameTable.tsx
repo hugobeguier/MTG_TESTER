@@ -45,6 +45,8 @@ import { hasKeyword as hasOracleKeyword } from "@/lib/keywords";
 import { cardMatchesTypeFilter, isBasicLandFetchAbility } from "@/lib/oracleClauses";
 import { DEFAULT_STOP_SETTINGS, stopKey, TURN_PHASES, type PriorityStopSettings } from "@/lib/priorityStops";
 import { VisualCard } from "./VisualCard";
+import { RoomArt, RoomDoorStatus } from "./RoomDoorLocks";
+import { lockedDoors } from "@/lib/roomDoors";
 import { hostHumanSeat } from "@/lib/multiplayer/seatMap";
 import { isMyStopColumn } from "@/lib/multiplayer/seatStops";
 import { describeKeyEvent, priorityShortcut } from "@/lib/yieldShortcuts";
@@ -2593,11 +2595,11 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
       ) : null}
       {hoverPreviewCard && !props.inspectedCard ? (
         <div className="hand-hover-preview" aria-hidden="true">
-          {hoverPreviewCard.imageUris?.large || hoverPreviewCard.imageUris?.normal ? (
+          <RoomArt card={hoverPreviewCard}>{hoverPreviewCard.imageUris?.large || hoverPreviewCard.imageUris?.normal ? (
             <img src={hoverPreviewCard.imageUris.large ?? hoverPreviewCard.imageUris.normal} alt="" draggable={false} />
           ) : (
             <FallbackHandCard card={hoverPreviewCard} />
-          )}
+          )}</RoomArt>
           {hoverPreviewCard.token ? <span className="token-ribbon">TOKEN</span> : null}
           {hoverPreviewCard.phasedOut ? <span className="phased-ribbon">PHASED OUT</span> : null}
         </div>
@@ -2749,7 +2751,7 @@ function CardInspector({
           x
         </button>
         <div className="card-inspector-image">
-          {imageUrl ? <img src={imageUrl} alt="" /> : <FallbackLargeCard card={card} />}
+          <RoomArt card={card}>{imageUrl ? <img src={imageUrl} alt="" /> : <FallbackLargeCard card={card} />}</RoomArt>
           {card.token ? <span className="token-ribbon">TOKEN</span> : null}
           <SummoningSickBadge card={card} />
           {card.phasedOut ? <span className="phased-ribbon">PHASED OUT</span> : null}
@@ -2759,6 +2761,7 @@ function CardInspector({
             <p className="eyebrow">{owner?.zone ?? card.zone}</p>
             <h2>{card.name}</h2>
             <span>{card.typeLine}</span>
+            <RoomDoorStatus card={card} />
           </div>
           {extraActions?.map((action) => (
             <button key={action.id} className="inspector-action" type="button" title={action.title} onClick={() => onExtraAction?.(action.id)}>
@@ -5104,6 +5107,41 @@ function addCard(
   addTokenBadge(group, card, x, z);
   if (location === "battlefield") addSummoningSickBadge(group, card, x, z);
   addPhaseVisual(group, mesh, material, card, x, z);
+  if (location === "battlefield") addRoomLockOverlays(mesh, card);
+}
+
+// Rooms (kernel mode): each LOCKED half of a Room (top = first door) gets a dimmed panel with a padlock, children of the card mesh so they follow its tap / rotation.
+// The overlay is not part of the pick list (its raycast is disabled) so clicking a locked half still selects the card.
+let roomLockTexture: THREE.Texture | undefined;
+function addRoomLockOverlays(mesh: THREE.Mesh, card: VisibleCard) {
+  const locked = lockedDoors(card);
+  if (locked.length === 0) return;
+  if (!roomLockTexture) {
+    const canvas = document.createElement("canvas");
+    canvas.width = 256;
+    canvas.height = 180;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.fillStyle = "rgba(8,10,18,0.62)";
+    roundRect(ctx, 0, 0, 256, 180, 14);
+    ctx.fill();
+    ctx.translate(128, 90);
+    ctx.lineWidth = 15; ctx.lineCap = "round"; ctx.strokeStyle = "#ffd76a";
+    ctx.beginPath(); ctx.arc(0, -14, 26, Math.PI, 0); ctx.lineTo(26, -4); ctx.moveTo(-26, -14); ctx.lineTo(-26, -4); ctx.stroke();
+    ctx.fillStyle = "#ffd76a"; ctx.strokeStyle = "rgba(0,0,0,0.75)"; ctx.lineWidth = 4;
+    roundRect(ctx, -42, -6, 84, 60, 10); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "rgba(20,20,20,0.85)";
+    ctx.beginPath(); ctx.arc(0, 18, 9, 0, Math.PI * 2); ctx.fill(); ctx.fillRect(-4, 20, 8, 20);
+    roomLockTexture = new THREE.CanvasTexture(canvas);
+  }
+  for (const door of locked) {
+    const panel = new THREE.Mesh(new THREE.PlaneGeometry(0.66, 0.46), new THREE.MeshBasicMaterial({ map: roomLockTexture, transparent: true, depthWrite: false, side: THREE.DoubleSide }));
+    panel.position.set(0, door.index === 0 ? 0.25 : -0.25, 0.004);
+    panel.name = door.ariaLabel;
+    panel.renderOrder = 11;
+    panel.raycast = () => undefined;
+    mesh.add(panel);
+  }
 }
 
 // The scene is rebuilt on every state change, so a card's phase tween lives here (by card id) and survives the rebuild: when `phasedOut` flips, the

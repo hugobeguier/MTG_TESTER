@@ -21,26 +21,7 @@
         "defender": "other_player",
         "batch": true,
         "interveningIf": {
-          "check": "compare",
-          "left": {
-            "ref": "players_count",
-            "who": "each_opponent",
-            "where": {
-              "check": "life",
-              "who": "that_player",
-              "cmp": {
-                "op": "<",
-                "value": {
-                  "ref": "life_total",
-                  "who": "opponent"
-                }
-              }
-            }
-          },
-          "cmp": {
-            "op": ">=",
-            "value": 1
-          }
+          "check": "attacked_opponent_has_more_life"
         }
       },
       "steps": [
@@ -82,11 +63,9 @@
       "id": "a2",
       "implementation": "needed",
       "needs": [
-        "quantity:life_total",
-        "quantity:players_count",
         "trigger:batch",
         "trigger:intervening_if",
-        "predicate:compare",
+        "predicate:attacked_opponent_has_more_life",
         "trigger:subject",
         "trigger:defender",
         "field:draw_cards.who",

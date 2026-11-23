@@ -80,13 +80,13 @@ describe("continue mode: steps", () => {
     const { events } = castAndResolve(t, "Two Kinds");
     expect(unres(events).map((e) => e.capability).sort()).toEqual(["step:goad_everything", "step:unmake_reality"]);
   });
-  it("a step that only turns out unsupported while running (opponent is ambiguous in a 3-player game) is skipped too", () => {
-    const t = setup([spell("Which Opponent", [{ kind: "life_change", lifeDelta: -3, who: "opponent" }, { kind: "life_change", lifeDelta: 1, who: "you" }])], { players: ["p1", "p2", "p3"] });
+  it("a step that only turns out unsupported while running (a player reference with no player chosen) is skipped too", () => {
+    const t = setup([spell("Which Player", [{ kind: "life_change", lifeDelta: -3, who: "target_player" }, { kind: "life_change", lifeDelta: 1, who: "you" }])], { players: ["p1", "p2", "p3"] });
     const life = t.p("p1").life;
-    const { events } = castAndResolve(t, "Which Opponent");
+    const { events } = castAndResolve(t, "Which Player");
     const u = unres(events);
     expect(u).toHaveLength(1);
-    expect(u[0].capability).toBe("player_ref:opponent_multiplayer");
+    expect(u[0].capability).toBe("player_ref:target_player_missing");
     expect(u[0].effect).toBe("skipped");
     expect(t.p("p1").life).toBe(life + 1);
   });

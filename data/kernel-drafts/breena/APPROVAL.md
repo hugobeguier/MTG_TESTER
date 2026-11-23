@@ -270,9 +270,9 @@ Breena, the Demagogue [draft]
   [a1] keyword [implemented]
     Oracle: Flying
     Keyword: flying
-  [a2] triggered [needed: needs quantity:life_total, quantity:players_count, trigger:batch, trigger:intervening_if, predicate:compare, trigger:subject, trigger:defender, field:draw_cards.who, step:choose, field:choose.count, field:choose.from, field:choose.saveAs, step:add_counters, field:add_counters.on]
+  [a2] triggered [needed: needs trigger:batch, trigger:intervening_if, predicate:attacked_opponent_has_more_life, trigger:subject, trigger:defender, field:draw_cards.who, step:choose, field:choose.count, field:choose.from, field:choose.saveAs, step:add_counters, field:add_counters.on]
     Oracle: Whenever a player attacks one of your opponents, if that opponent has more life than another of your opponents, that attacking player draws a card and you put two +1/+1 counters on a creature you control.
-    Trigger: Whenever a player attacks a player other than you, if the number of opponents for which that player's life total is less than an opponent's life total is 1 or greater
+    Trigger: Whenever a player attacks a player other than you, if the attacked opponent has more life than another of your opponents
     Effect: That player draws a card. Then, choose a creature you control. Then, put 2 +1/+1 counters on the chosen object.
 ```
 
@@ -280,7 +280,7 @@ Player prompts:
 
 - Breena, the Demagogue: choose: Choose a creature you control.
 
-Implementation: needed (quantity:life_total, quantity:players_count, trigger:batch, trigger:intervening_if, predicate:compare, trigger:subject, trigger:defender, field:draw_cards.who, step:choose, field:choose.count, field:choose.from, field:choose.saveAs, step:add_counters, field:add_counters.on)
+Implementation: needed (trigger:batch, trigger:intervening_if, predicate:attacked_opponent_has_more_life, trigger:subject, trigger:defender, field:draw_cards.who, step:choose, field:choose.count, field:choose.from, field:choose.saveAs, step:add_counters, field:add_counters.on)
 
 Questions for you:
 
@@ -1843,13 +1843,13 @@ Implementation: needed (static, static:attackTax)
 | `field:choose.saveAs` | 6 | Breena, the Demagogue; Master of Ceremonies; Orzhov Advokist; Orzhov Basilica; Promise of Loyalty; Reluctant Role Model |
 | `field:grant_effect.filter` | 6 | Flawless Maneuver; Orzhov Advokist; Perch Protection; Selfless Spirit; Shadowspear; Spectacular Spider-Man |
 | `field:life_change.who` | 6 | Swords to Plowshares; Batwing Brume; Gix, Yawgmoth Praetor; Kambal, Consul of Allocation; Shadrix Silverquill; Sign in Blood |
-| `predicate:compare` | 6 | Breena, the Demagogue; Knight of the White Orchid; Land Tax; Mangara, the Diplomat; Mister Negative; The Ozolith |
 | `predicate:matches` | 6 | Deathbringer Liege; Enshrouding Mist; Felisa, Fang of Silverquill; Reluctant Role Model; Resourceful Defense; The Ozolith |
 | `predicate:step_done` | 6 | Gix, Yawgmoth Praetor; Godless Shrine; Incarnation Technique; Nihil Spellbomb; Orzhov Advokist; Shineshadow Snarl |
 | `field:grant_effect.replacement` | 5 | Inkshield; Batwing Brume; Enshrouding Mist; Perch Protection; Selfless Squire |
 | `field:repeat_for_each.over` | 5 | Batwing Brume; Master of Ceremonies; Orzhov Advokist; Promise of Loyalty; Shadrix Silverquill |
 | `field:repeat_for_each.steps` | 5 | Batwing Brume; Master of Ceremonies; Orzhov Advokist; Promise of Loyalty; Shadrix Silverquill |
 | `field:search_library.tapped` | 5 | Evolving Wilds; Myriad Landscape; Knight of the White Orchid; Path to Exile; Sword of the Animist |
+| `predicate:compare` | 5 | Knight of the White Orchid; Land Tax; Mangara, the Diplomat; Mister Negative; The Ozolith |
 | `step:repeat_for_each` | 5 | Batwing Brume; Master of Ceremonies; Orzhov Advokist; Promise of Loyalty; Shadrix Silverquill |
 | `targets:multi` | 5 | Nils, Discipline Enforcer; Parker Luck; Reluctant Role Model; Scheming Symmetry; Together Forever |
 | `trigger:batch` | 5 | Breena, the Demagogue; Combat Calligrapher; Duelist's Heritage; Dusk Legion Duelist; Mangara, the Diplomat |
@@ -1872,7 +1872,6 @@ Implementation: needed (static, static:attackTax)
 | `mana:variable` | 3 | Command Tower; Commander's Sphere; Exotic Orchard |
 | `predicate:not` | 3 | Godless Shrine; Parting Gust; Shineshadow Snarl |
 | `quantity:math` | 3 | Batwing Brume; Retribution of the Ancients; Toxic Deluge |
-| `quantity:players_count` | 3 | Breena, the Demagogue; Knight of the White Orchid; Land Tax |
 | `trigger:leaves` | 3 | Nihil Spellbomb; Resourceful Defense; The Ozolith |
 | `trigger:zones` | 3 | Nihil Spellbomb; Resourceful Defense; The Ozolith |
 | `zone:hand` | 3 | Secluded Steppe; Ash Barrens; Eiganjo, Seat of the Empire |
@@ -1903,6 +1902,7 @@ Implementation: needed (static, static:attackTax)
 | `keyword:enchant` | 2 | Martial Impetus; Vow of Malice |
 | `predicate:chosen_is` | 2 | Citadel Siege; Master of Ceremonies |
 | `predicate:paid_additional_cost` | 2 | Parting Gust; Perch Protection |
+| `quantity:players_count` | 2 | Knight of the White Orchid; Land Tax |
 | `static:cant_protects` | 2 | Combat Calligrapher; Vow of Malice |
 | `step:create_delayed_trigger` | 2 | Parting Gust; Together Forever |
 | `step:mutual_reveal` | 2 | Keen Duelist; Parker Luck |
@@ -1951,11 +1951,11 @@ Implementation: needed (static, static:attackTax)
 | `modes` | 1 | Shadrix Silverquill |
 | `modes:distinct_targets` | 1 | Shadrix Silverquill |
 | `modes:multiple` | 1 | Shadrix Silverquill |
+| `predicate:attacked_opponent_has_more_life` | 1 | Breena, the Demagogue |
 | `predicate:mana_spent` | 1 | Batwing Brume |
 | `predicate:source_state` | 1 | Reluctant Role Model |
 | `quantity:event_amount` | 1 | Selfless Squire |
 | `quantity:life_lost_this_way` | 1 | Mister Negative |
-| `quantity:life_total` | 1 | Breena, the Demagogue |
 | `quantity:opponents_count` | 1 | Vault of Champions |
 | `quantity:stat` | 1 | Swords to Plowshares |
 | `ref:iterated` | 1 | Shadrix Silverquill |

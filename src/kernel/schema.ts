@@ -62,7 +62,9 @@ export type EventName = (typeof EVENT_NAMES)[number];
 
 const PLAYER_REFS = [
   "you", "opponent", "each_opponent", "each_player", "target_player", "controller_of_target",
-  "owner_of_target", "that_player"
+  "owner_of_target", "that_player",
+  // the opponent the caster promised a gift to (gift: "they draw a card when it enters"); nobody when no gift was promised or that player left
+  "gift_recipient"
 ] as const;
 export const PlayerRefSchema = z.enum(PLAYER_REFS);
 export type PlayerRef = z.infer<typeof PlayerRefSchema>;
@@ -188,6 +190,7 @@ export type Predicate =
   | { check: "cast_with"; option: string }                                // "was cast with escape / flashback / evoke ..."
   | { check: "name_matches"; obj: ObjRef; among: ObjectFilter[] }         // obj has the same name as some object matching any of the filters (negate with `not`)
   | { check: "attacked_defender"; defender: "you" | "you_or_your_planeswalkers"; who: "all" | "none" | "any" } // of the attackers in this trigger, did all/none/any attack you?
+  | { check: "attacked_opponent_has_more_life" } // attack trigger: a player attacked by this batch is an opponent of the controller with more life than another opponent of the controller (Breena)
   | { all: Predicate[] }
   | { any: Predicate[] }
   | { not: Predicate }
@@ -273,6 +276,7 @@ export const PredicateSchema: z.ZodType<Predicate> = z.lazy(() =>
     z.object({ check: z.literal("mana_spent"), color: z.enum(["W", "U", "B", "R", "G", "C"]), cmp: CmpSchema.optional() }).strict(),
     z.object({ check: z.literal("cast_with"), option: z.string() }).strict(),
     z.object({ check: z.literal("name_matches"), obj: ObjRefSchema, among: z.array(ObjectFilterSchema).min(1) }).strict(),
+    z.object({ check: z.literal("attacked_opponent_has_more_life") }).strict(),
     z.object({ check: z.literal("attacked_defender"), defender: z.enum(["you", "you_or_your_planeswalkers"]), who: z.enum(["all", "none", "any"]) }).strict(),
     z.object({ all: z.array(PredicateSchema) }).strict(),
     z.object({ any: z.array(PredicateSchema) }).strict(),

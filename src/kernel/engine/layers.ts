@@ -416,7 +416,7 @@ export function spellCostDelta(r: Run, caster: PlayerId, spellId: ObjId): number
       if (!("costMod" in m)) continue;
       if (s.ability.scripted?.handler === "cost_reduction_colored_mana_only") continue; // reduces colored pips, not generic (spellColoredReduction)
       const who = s.spec.affects;
-      const applies = who === "you" ? caster === s.controller : who === "each_player" ? true : who === "each_opponent" ? caster !== s.controller : false;
+      const applies = who === "you" ? caster === s.controller : who === "each_player" ? true : who === "each_opponent" || who === "opponent" ? caster !== s.controller : false;
       if (!applies || !whileOk(r, s, memo) || !sourceIntact(r, s)) continue;
       if (!matchesFilter(r, spellId, m.costMod.filter, qctx(s))) continue;
       delta += evalQuantity(r, m.costMod.delta, qctx(s));

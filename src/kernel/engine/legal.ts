@@ -19,7 +19,7 @@ import { baseChoices } from "./castopts";
 import { permissionsFor } from "./durable";
 import { attackProblem, blockProblem, defenderOptions, legalAttackers } from "./combat";
 import { goadersOf, hostOf, mustAttack, restrictionsOf } from "./layers";
-import { resolve, untapForManaProblem } from "./resolve";
+import { doorCost, resolve, untapForManaProblem } from "./resolve";
 import type { Action, Choice, DecisionKind, EngineContext, GameState, ObjId, PendingView, PlayerId } from "./types";
 import { isObjId } from "./types";
 
@@ -214,7 +214,7 @@ export function legalActions(state: GameState, player: PlayerId, ctx: EngineCont
       for (const face of faceNames(rdef)) {
         if ((o.unlocked ?? []).includes(face)) continue;
         const action: Action = { type: "unlockDoor", player, objectId: id, face, autoPay: true };
-        if (probe(state, action, ctx, false).ok) add({ id: `unlockDoor:${id}:${face}`, kind: "unlockDoor", player, objectId: id, zone: o.zone, label: `Unlock the ${face} door of ${o.cardName}`, action });
+        if (probe(state, action, ctx, false).ok) add({ id: `unlockDoor:${id}:${face}`, kind: "unlockDoor", player, objectId: id, zone: o.zone, label: `Unlock the ${face} door of ${o.cardName}${doorCost(rdef, face) ? ` (${doorCost(rdef, face)})` : ""}`, action });
       }
     }
     if (o.prepared) {

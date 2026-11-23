@@ -2864,3 +2864,27 @@ ol {
 .kernel-order-list { display: grid; gap: 0.4rem; }
 .kernel-split-row { grid-template-columns: auto; justify-items: center; }
 .mana-choice-button.selected { box-shadow: 0 0 0 3px var(--text); }
+
+/* Rooms (kernel mode): a dimmed overlay with a padlock on each locked half of the card art (top = first door). Additive; absent for every other card. */
+.room-art { display: inline-block; line-height: 0; max-width: 100%; position: relative; }
+.room-door-lock {
+  align-items: center;
+  background: rgba(8, 10, 18, 0.58);
+  border-radius: 6px;
+  display: flex;
+  justify-content: center;
+  left: 4%;
+  pointer-events: none;
+  position: absolute;
+  width: 92%;
+}
+.room-door-top { height: 46%; top: 4%; }
+.room-door-bottom { bottom: 4%; height: 46%; }
+.room-door-lock-icon { color: #ffd76a; filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.9)); height: 34%; max-height: 56px; min-height: 14px; width: auto; aspect-ratio: 1; }
+.room-door-status { list-style: none; margin: 6px 0; padding: 0; }
+.room-door-status li { align-items: center; display: flex; gap: 6px; }
+.room-door-status-icon { color: #ffd76a; display: inline-block; height: 16px; width: 16px; }
+.visual-card .room-art { display: block; inset: 0; position: absolute; z-index: 0; }
+.hand-hover-preview .room-art { display: block; height: 100%; width: 100%; }
+.hand-hover-preview .room-art img { height: 100%; width: 100%; }
+.room-art-block { display: block; }

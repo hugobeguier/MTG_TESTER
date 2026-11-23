@@ -660,7 +660,7 @@ function commitDraft(r: Run, d: Draft, a: Ability | undefined): void {
     for (const c of chosen) if (c.id.startsWith("freecast1:")) r.s.activations[`t:${c.id.slice(10)}:freecast`] = 1; // One with the Multiverse: once per turn
     for (const c of chosen) { if (c.id.startsWith("lifecast1:")) r.s.activations[`t:${c.id.slice(10)}:lifecast`] = 1; if (c.id.startsWith("grave1:")) r.s.activations[`t:${c.id.slice(7)}:grave1`] = 1; } // Demon of Fate's Design / Rivaz of the Claw: once per turn
     if (d.preparedFrom) { const pf = tryObj(r, d.preparedFrom); if (pf) { pf.prepared = undefined; invalidateIndex(r); } } // casting the copy ends the prepared state
-    if (d.cast) { d.cast.paid = castTags(d, r); src.cast = structuredClone(d.cast); }
+    if (d.cast) { d.cast.paid = castTags(d, r); if (d.giftTo && chosen.some((c) => c.kind === "gift")) d.cast.giftTo = d.giftTo; src.cast = structuredClone(d.cast); }
     for (const id of d.castChosen ?? []) { const pid2 = permissionIdOf(id); if (pid2) consumePermission(r, pid2); } // a permission is used up when you cast with it
     const extraSteps = addedSteps(r, d);
     if (extraSteps.length && d.parts?.length) {
@@ -1110,7 +1110,12 @@ function unlockDoor(r: Run, a: Extract<Action, { type: "unlockDoor" }>): void {
   const cost = doorCost(def, a.face);
   if (!cost) throw new Reject("cannot_activate", "that door has no mana cost");
   const d: Draft = { kind: "activated", player: a.player, sourceId: o.id, abilityId: "kw:unlock", payWith: a.payWith, autoPay: a.autoPay };
-  payMana(r, a.player, parseManaCost(cost), 0, d, [], { abilitySource: o.id, spent: [] });
+  const parsed = parseManaCost(cost);
+  // "Unlock costs you pay cost {N} less" (Inquisitive Glimmer): only generic mana is reduced
+  let cut = 0;
+  for (const id of r.s.battlefield) { const x = r.s.objects[id]; if (x && x.controller === a.player) for (const ab of abilitiesOf(r, x)) if (ab.scripted?.handler === "unlock_cost_reduction") cut += Number(/(\d+)/.exec(String((ab.scripted.params as { amount?: string } | undefined)?.amount ?? "1"))?.[1] ?? 1); }
+  const reduced = Math.min(cut, parsed.generic); parsed.generic -= reduced; parsed.mv -= reduced;
+  payMana(r, a.player, parsed, 0, d, [], { abilitySource: o.id, spent: [] });
   o.unlocked = [...(o.unlocked ?? []), a.face];
   invalidateIndex(r);
   emit(r, { type: "door_unlocked", id: o.id, player: a.player, face: a.face, fully: o.unlocked.length >= names.length });

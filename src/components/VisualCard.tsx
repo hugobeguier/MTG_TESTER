@@ -1,4 +1,5 @@
 import type { VisibleCard } from "@/lib/types";
+import { RoomArt } from "./RoomDoorLocks";
 import { SummoningSickBadge } from "@/components/SummoningSickBadge";
 import { effectivePower, effectiveToughness } from "@/lib/counters";
 
@@ -39,7 +40,7 @@ export function VisualCard({
       onClick={() => onClick?.(card)}
       {...hover}
     >
-      {imageUrl ? <img className="visual-card-image" src={imageUrl} alt="" loading="lazy" /> : null}
+      {imageUrl ? <RoomArt card={card}><img className="visual-card-image" src={imageUrl} alt="" loading="lazy" /></RoomArt> : null}
       <SummoningSickBadge card={card} />
       <div className={imageUrl ? "visual-card-fallback sr-only" : "visual-card-fallback"}>
         <header className="visual-card-header">

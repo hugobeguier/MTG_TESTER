@@ -268,7 +268,7 @@ Scrapshooter [draft]
   [a1] triggered [needed: needs trigger:intervening_if, predicate:paid_additional_cost, field:draw_cards.who]
     Oracle: Gift a card (You may promise an opponent a gift as you cast this spell. If you do, when it enters, they draw a card.)
     Trigger: Whenever Scrapshooter enters, if the additional cost (gift) was paid
-    Effect: An opponent draws a card.
+    Effect: That player draws a card.
     Keyword: gift a card
   [a2] keyword [implemented]
     Oracle: Reach

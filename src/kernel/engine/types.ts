@@ -153,6 +153,8 @@ export interface CastInfo {
   paid?: string[];
   /** the colors of the mana spent to cast this spell (read by mana_spent: "if {W} was spent to cast this spell") */
   spent?: ManaColor[];
+  /** gift: the opponent the caster promised the gift to (read by the gift_recipient player reference) */
+  giftTo?: PlayerId;
 }
 
 /** One chosen mode (or the implicit single part of a non-modal ability) with its chosen targets. */
@@ -511,6 +513,8 @@ export interface Env {
   looked?: string[];
   /** the player the current repeat_for_each iteration is about ("that player") */
   thatPlayer?: PlayerId;
+  /** "an opponent" (who: "opponent") in a game with several opponents: the one the controller chose when the first such step ran (later references reuse it) */
+  chosenOpponent?: PlayerId;
   /** per-player results of steps that every player of a group answers for themselves (Braids: "each opponent may sacrifice ..."): step id -> players who did it */
   doneBy?: Record<string, PlayerId[]>;
   /** the card types of the permanent(s) a sacrifice step just sacrificed (read by sharesCardTypeWith) */

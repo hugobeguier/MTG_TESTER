@@ -21,7 +21,7 @@ export const STEP10_HANDLERS: readonly string[] = [
   "cast_enchantment_paying_life", "cast_from_graveyard_permission", // castopts.grantedFree
   "flash_if_targets_commander", // resolve.checkSpellTiming / commitDraft
   "stun_counters_cant_be_removed_from_opponent_permanents", // core.stunLocked / untapObject
-  "unlock_cost_reduction", // Rooms are not modelled (no Room card exists in the pool): inert
+  "unlock_cost_reduction", // resolve.unlockDoor: generic part of an unlock cost
   "enchanted_player_cant_activate_nonmana_nonloyalty_abilities", "additional_beginning_phase", // resolve.ts (Auras on players)
   "one_counter_per_color_on_distinct_dragons_win_if_five", // callTheSpiritDragonsSteps
   "cost_reduction_colored_mana_only", // layers.spellColoredReduction

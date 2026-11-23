@@ -7,7 +7,7 @@ import { phaseOut } from "./phasing";
 import type { ObjectFilter, PlayerRef, Prompt, Step } from "../schema";
 import { promptForMay } from "../prompts";
 import {
-  abilitiesOf, chars, continueHooks, targetHooks, continuing, drawCards, emit, label, moveObject, NeedAsk, newObject, obj, parseManaCost, player, shuffleInPlace, takeAnswer, tick, tryObj, Unsupported, Reject, type Run
+  abilitiesOf, chars, continueHooks, opponentsOf, targetHooks, continuing, drawCards, emit, label, moveObject, NeedAsk, newObject, obj, parseManaCost, player, shuffleInPlace, takeAnswer, tick, tryObj, Unsupported, Reject, type Run
   , untapObject, stunLocked
 } from "./core";
 import { evalPredicate, evalQuantity, matchesFilter, objectsMatching, resolveObjs, resolvePlayers, type QCtx } from "./query";
@@ -648,6 +648,17 @@ const INTERNAL: Record<string, Handler> = {
     if ("ask" in d) return d;
     return d.yes ? { push: [step.inner as Step] } : "done";
   },
+  // "an opponent" (who: "opponent") with several opponents: the controller chooses one (CR 608.2d); the auto-pick for a single opponent never asks
+  __pick_opponent: (r, ex, step, answer) => {
+    const opps = opponentsOf(r, ex.env.controller);
+    if (opps.length <= 1) { ex.env.chosenOpponent = opps[0]?.id; return "done"; }
+    const spec: AskSpec = { kind: "choose_option", player: ex.env.controller, prompt: step.prompt ?? fallbackPrompt(r, ex.env, "choose an opponent", "Choose an opponent."), options: opps.map((p) => ({ id: p.id, label: label(r, p.id) })), min: 1, max: 1 };
+    const d = decide(spec, answer);
+    if ("ask" in d) return d;
+    ex.env.chosenOpponent = d.ids[0];
+    emit(r, { type: "player_chosen", source: ex.env.source, player: ex.env.controller, chosen: d.ids[0] });
+    return "done";
+  },
   __iter: (_r, ex, step) => {
     for (const id of (step.clear as string[] | undefined) ?? []) ex.env.done = ex.env.done.filter((d) => d !== id);
     ex.env.iterated = step.object as string | undefined;
@@ -784,6 +795,10 @@ export function runExec(r: Run, ex: Exec, answer?: Choice): StepStatus {
     else {
       const spec = STEPS[step.kind];
       if (!spec) throw new Unsupported(`step:${step.kind}`);
+      if (step.who === "opponent" && ex.env.chosenOpponent === undefined && !pendingAnswer && opponentsOf(r, ex.env.controller).length > 1) { // a single-opponent reference in a multiplayer game: choose the opponent first
+        frame.steps = [...frame.steps]; frame.steps.splice(frame.i, 0, { kind: "__pick_opponent" as never } as Step);
+        continue;
+      }
       if (step.unlessPay && !unlessPaySupported(step.unlessPay as unknown as UnlessPay)) throw new Unsupported("step:unless_pay");
       if (step.optionalCost && !unlessPaySupported({ payer: "you", cost: step.optionalCost as never })) throw new Unsupported("step:optional_cost");
       for (const k of Object.keys(step)) if (!META_FIELDS.includes(k) && !spec.fields.includes(k)) throw new Unsupported(`field:${step.kind}.${k}`);

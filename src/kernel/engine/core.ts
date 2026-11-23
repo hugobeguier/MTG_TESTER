@@ -281,7 +281,7 @@ export function baseChars(r: Run, o: GameObject): Chars {
 
 /**
  * A Room on the battlefield (CR 709.4): it is an enchantment Room whatever its doors; name, mana cost, colors and abilities are those of the UNLOCKED
- * doors only (one door open: that half; both open: both halves, mana values added). With both doors locked it has no abilities, no colors, mana value 0.
+ * doors only (one door open: that half; both open: both halves, mana values added). With both doors locked it has no name (CR 709.5), no abilities, no colors, mana value 0.
  */
 function roomChars(r: Run, o: GameObject, d: CardDef): Chars {
   const names = faceNames(d);
@@ -292,7 +292,7 @@ function roomChars(r: Run, o: GameObject, d: CardDef): Chars {
   let mv = 0; const colors = new Set<string>();
   for (const n of open) { const pc = parseManaCost(metaOf(n).manaCost); mv += pc.mv; for (const c of metaOf(n).colors ?? pc.symbolColors ?? []) if (c !== "C") colors.add(c); }
   return {
-    name: open.length === 1 ? open[0] : names.join(" // "), types: lc(front.types), subtypes: [...new Set([...(front.subtypes ?? []), ...names.flatMap((n) => metaOf(n).subtypes ?? [])])],
+    name: open.length === 0 ? "" : open.length === 1 ? open[0] : names.join(" // "), types: lc(front.types), subtypes: [...new Set([...(front.subtypes ?? []), ...names.flatMap((n) => metaOf(n).subtypes ?? [])])],
     supertypes: lc(front.supertypes), colors: [...colors], mv, power: undefined, toughness: undefined,
     keywords: abilities.filter((a) => a.kind === "keyword" && a.keyword).map((a) => a.keyword!.name.toLowerCase().replace(/_/g, " ")), abilities
   };

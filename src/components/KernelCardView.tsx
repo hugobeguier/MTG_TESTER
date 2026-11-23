@@ -5,6 +5,7 @@
 import { useCallback, useState } from "react";
 import type { ReactNode } from "react";
 import type { VisibleCard } from "@/lib/types";
+import { RoomArt } from "./RoomDoorLocks";
 import { listedPreviewCard } from "./boardPreview";
 import { cardImageUrl, cardInfo, cardSummary, type ImageSize } from "./game/kernelCardInfo";
 
@@ -39,7 +40,7 @@ export function CardFull({ card, art = "large", showText = true }: { card: Visib
   const img = i.imageUrl && failed !== i.imageUrl ? i.imageUrl : undefined;
   return (
     <div data-testid="card-full" aria-label={card.name}>
-      {img ? <img src={img} alt={card.name} onError={() => setFailed(img)} style={{ width: "100%", borderRadius: 12, display: "block" }} /> : null}
+      {img ? <RoomArt card={card} block><img src={img} alt={card.name} onError={() => setFailed(img)} style={{ width: "100%", borderRadius: 12, display: "block" }} /></RoomArt> : null}
       {showText || !img ? (
         <div style={{ marginTop: img ? 6 : 0 }}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}><strong>{i.name}</strong><span>{i.manaCost ?? ""}</span></div>
@@ -72,7 +73,7 @@ export function CardTile({ card, api, width = 110, on = false, onClick, badge, l
   const art = i.imageUrl && !failed ? i.imageUrl : undefined;
   const body = (
     <>
-      {art ? <img className="card-thumb" src={art} alt={card.name} onError={() => setFailed(true)} style={{ width, borderRadius: Math.max(4, width / 18), display: "block" }} />
+      {art ? <RoomArt card={card} block><img className="card-thumb" src={art} alt={card.name} onError={() => setFailed(true)} style={{ width, borderRadius: Math.max(4, width / 18), display: "block" }} /></RoomArt>
         : <div className="card-thumb-fallback" style={{ width, minHeight: width * 1.4 }}><strong>{i.name}</strong> {i.manaCost}<div className="card-pick-detail">{i.typeLine}</div><div className="card-oracle">{i.oracleText}</div>{i.stats ? <strong>{i.stats}</strong> : null}</div>}
       <span className="card-pick-name" style={{ maxWidth: width }}>{label ?? card.name}</span>
       {badge}

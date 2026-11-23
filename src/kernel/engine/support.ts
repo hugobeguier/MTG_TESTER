@@ -33,7 +33,7 @@ const isPassive = (k: string) => (PASSIVE_KEYWORDS.has(k.toLowerCase()) && k.toL
 const TOKEN_FILTER_KEYS = new Set(["types", "notTypes", "subtypes", "notSubtypes", "colors", "notColors", "controller", "token", "anyOf", "colored"]);
 const SUPPORTED_PREDICATES = new Set([
   "cast_during", "cast_from", "turn_is", "phase_is", "controls", "life", "zone_count", "did_this_turn", "nth_this_turn", "compare",
-  "turn_number", "attacked_defender", "stat", "matches", "source_state", "step_done", "most_life", "kicked", "paid_additional_cost", "cast_with", "chosen_is", "mana_spent", "name_matches"
+  "turn_number", "attacked_defender", "attacked_opponent_has_more_life", "stat", "matches", "source_state", "step_done", "most_life", "kicked", "paid_additional_cost", "cast_with", "chosen_is", "mana_spent", "name_matches"
 ]);
 const SUPPORTED_QUANTITY_REFS = new Set(["X", "count", "stat", "counters", "life_lost_this_way", "event_amount", "life_total", "starting_life", "count_this_turn", "life_gained_this_turn", "greatest", "sum", "step_result", "players_count", "opponents_count", "commander_colors", "devotion", "saved_count", "damage_taken_this_turn"]);
 const SUPPORTED_REFS = new Set(["linked_exile", "self", "chosen", "event_object", "created", "iterated", "vote_winners", "enchanted", "sacrificed", "looked_cards", "rest_of_looked_cards"]);

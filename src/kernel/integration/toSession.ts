@@ -85,7 +85,9 @@ function cardOf(b: Build, o: GameObject, zone: Zone): VisibleCard {
   const onBf = zone === "battlefield";
   const d = faceDownHidden ? undefined : displayOf(b, o);
   const tok = o.token ?? o.copyDef;
-  const faceRec = o.face ? d?.faces?.find((f) => f.name === o.face) : undefined;
+  // a Room permanent is one object with two doors (CR 709.5): its art, text and type line are the whole card, the lock state travels as unlockedFaceIndices
+  const roomOnBf = onBf && !o.token && !o.copyDef && b.env.ctx.cards(o.cardName)?.layout === "room";
+  const faceRec = o.face && !roomOnBf ? d?.faces?.find((f) => f.name === o.face) : undefined;
   // ---- identity and text
   let name = v?.name || d?.name || o.cardName;
   let typeLine = faceRec?.typeLine ?? d?.typeLine ?? typeLineOf(v?.types ?? [], v?.subtypes ?? [], v?.supertypes ?? []);
@@ -122,7 +124,8 @@ function cardOf(b: Build, o: GameObject, zone: Zone): VisibleCard {
   if (d?.producedMana) card.producedMana = d.producedMana;
   if (imageUris) card.imageUris = imageUris;
   if (!o.faceDown && d?.faces) card.faces = d.faces;
-  if (o.face && d?.faces) { const i = d.faces.findIndex((f) => f.name === o.face); if (i > 0) card.unlockedFaceIndices = [i]; }
+  if (roomOnBf && d?.faces) card.unlockedFaceIndices = d.faces.flatMap((f, i) => ((o.unlocked ?? []).includes(f.name) ? [i] : [])); // [] = both doors locked
+  else if (o.face && d?.faces) { const i = d.faces.findIndex((f) => f.name === o.face); if (i > 0) card.unlockedFaceIndices = [i]; }
   if (o.token) { card.token = true; }
   if (o.owner !== o.controller) card.ownerSeatId = o.owner;
   if (zone === "exile") {
