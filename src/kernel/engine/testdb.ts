@@ -44,7 +44,7 @@ export function sqliteCardDb(file = path.resolve(process.cwd(), "data/cards.db")
         const back = faceOf(rawFaces[1]);
         const adventure = /adventure/i.test(rawFaces[1].typeLine);
         const spellBoth = rawFaces.every((f) => /instant|sorcery/i.test(f.typeLine));
-        info.layout = adventure ? "adventure" : spellBoth ? "split" : (back.manaCost || (back.types.includes("land") && !front.types.includes("land"))) ? "modal_dfc" : "transform";
+        info.layout = adventure ? "adventure" : spellBoth ? "split" : (back.manaCost || (back.types.includes("land") && !front.types.includes("land") && !/^\(transforms from /i.test((rawFaces[1]?.oracleText ?? "").trim()))) ? "modal_dfc" : "transform"; // a transforming card's land back (Growing Rites // Itlimoc, Storm the Vault) is "(Transforms from X.)": never played or cast from hand
       }
       return info;
     }

@@ -21,6 +21,12 @@ export function castableFaces(def: CardDef): string[] {
   return def.layout === "modal_dfc" || def.layout === "split" ? names.filter((n, i) => i === 0 || !def.faces?.[n]?.types.includes("land")) : [names[0]];
 }
 
+/** The faces a land PLAY may use: only a modal double-faced card has a land face playable from hand. A transforming card's land back (Growing Rites of Itlimoc // Itlimoc, Cradle of the Sun) is reached only by transforming on the battlefield, never played (CR 712.8a/b). */
+export function playableFaces(def: CardDef): string[] {
+  const names = faceNames(def);
+  return def.layout === "modal_dfc" ? names : names.slice(0, 1);
+}
+
 export const transformStep: StepSpec = {
   fields: ["target"],
   run: (r: Run, ex, step) => {

@@ -140,8 +140,8 @@ describe("zone forms", () => {
     const { t } = run([
       S({ kind: "move_card_zone", id: "m1", who: "you", moveFrom: "library", moveTo: "graveyard", moveCount: 3, position: "top" }),
       S({ kind: "draw_cards", amount: { ref: "step_result", step: "m1" }, who: "you" })
-    ], (t) => { for (const n of ["Fill A", "Fill B", "Fill C", "Fill D", "Fill E"]) t.give("p1", n, "library"); });
-    expect(t.p("p1").hand).toHaveLength(2); // 3 milled, then draws 3? library has 2 left
+    ], (t) => { for (const n of ["Fill A", "Fill B", "Fill C", "Fill D", "Fill E", "Fill A", "Fill B", "Fill C"]) t.give("p1", n, "library"); });
+    expect(t.p("p1").hand).toHaveLength(3); // 3 milled, then draws 3
   });
 });
 

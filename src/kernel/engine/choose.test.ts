@@ -96,7 +96,7 @@ describe("Brainstorm: draw three, then choose two cards from hand", () => {
     const res = stack(t);
     expect(res.pending).toBeUndefined();
     expect(t.p("p1").hand).toHaveLength(0);
-    expect(t.p("p1").library).toHaveLength(1);
+    expect(t.p("p1").hasLost).toBe(true); // one card for three draws: drew from an empty library and left the game (CR 800.4a)
   });
 
   it("is deterministic: the same game and answers give the same state and events", () => {

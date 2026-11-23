@@ -84,3 +84,23 @@ describe("findCastTriggers — Esper Sentinel's 'unless that player pays' cast t
     expect(triggers).toHaveLength(0);
   });
 });
+
+// Reported: Mystic Remora fired for its own controller's spells. Real oracle text: "Whenever an opponent casts a noncreature spell, you may draw a card unless that player pays {4}."
+describe("findCastTriggers — Mystic Remora scoping", () => {
+  const remora = () => card({ id: "remora", name: "Mystic Remora", typeLine: "Enchantment", oracleText: "Cumulative upkeep {1}\nWhenever an opponent casts a noncreature spell, you may draw a card unless that player pays {4}." });
+  const human = () => seat({ id: "human", name: "Human", kind: "human", board: { hand: [], battlefield: [remora()] } });
+  const sable = () => seat({ id: "sable", name: "Sable", kind: "agent", board: { hand: [], battlefield: [] } });
+  it("fires for every opponent noncreature spell (no 'first each turn' limit)", () => {
+    expect(findCastTriggers(session([human(), sable()]), "sable", gravePact(), 1)).toHaveLength(1);
+    expect(findCastTriggers(session([human(), sable()]), "sable", gravePact(), 3)).toHaveLength(1);
+  });
+  it("never fires for its controller's own spells, nor for creature spells", () => {
+    expect(findCastTriggers(session([human(), sable()]), "human", gravePact(), 1)).toHaveLength(0);
+    expect(findCastTriggers(session([human(), sable()]), "sable", card({ id: "bear", name: "Bear", typeLine: "Creature — Bear" }), 1)).toHaveLength(0);
+  });
+  it("'their first noncreature spell' uses the per-filter ordinal: a creature spell first does not use it up", () => {
+    const sentinelSeat = seat({ id: "human", name: "Human", kind: "human", board: { hand: [], battlefield: [esperSentinel()] } });
+    expect(findCastTriggers(session([sentinelSeat, sable()]), "sable", gravePact(), 2, { noncreature: 1 })).toHaveLength(1);
+    expect(findCastTriggers(session([sentinelSeat, sable()]), "sable", gravePact(), 3, { noncreature: 2 })).toHaveLength(0);
+  });
+});

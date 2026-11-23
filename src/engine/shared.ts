@@ -53,7 +53,17 @@ export function numberWordToInt(value?: string) {
   )[value];
 }
 
+// A TRANSFORMING double-faced card whose front is not a land but whose back is (Growing Rites of Itlimoc // Itlimoc, Cradle of the Sun; Storm the Vault //
+// Vault of Catlacan). Its combined type line contains "Land", but in hand it is the nonland front: the back face can only be reached by transforming on
+// the battlefield (CR 712.8a-b), never played or cast. (A modal DFC, whose back face has no "(Transforms from ...)" reminder, really can be played as a land.)
+export function isNonlandFrontTransformCard(card: VisibleCard): boolean {
+  if (!card.faces || card.faces.length !== 2) return false;
+  const [front, back] = card.faces;
+  return !front.typeLine.includes("Land") && back.typeLine.includes("Land") && /^\(transforms from /i.test(back.oracleText.trim());
+}
+
 export function isLandCard(card: VisibleCard) {
+  if (isNonlandFrontTransformCard(card)) return false;
   return card.typeLine.includes("Land") || card.role === "land";
 }
 

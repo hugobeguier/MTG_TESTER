@@ -21,7 +21,7 @@ import { countCreaturesAttackingSeat } from "@/engine/combat";
 import { parseCounterSpellAbility, parseDelayedUpkeepDraws } from "@/lib/counterSpells";
 import { createTokensForSeat, parseCreateTokenSpecs } from "@/engine/tokens";
 import { etbEffectText, parseAdditionalDiscardCost, parseAdditionalSacrificeCost, parseModalHeader, parseSpellModalHeader } from "@/lib/oracleClauses";
-import { findCastTriggers, findEntersBatchWatcherTriggers } from "@/engine/triggerFinders";
+import { castSpellFilterKeys, findCastTriggers, findEntersBatchWatcherTriggers } from "@/engine/triggerFinders";
 import { findSpellSourceCard, nextPrioritySeatId, nextSeatAfterPass, pendingActionRequiredPasses, withPendingActionSourceCard } from "@/engine/priority";
 import { flushSync } from "react-dom";
 import { hasChooseCreatureTypeEtb, parseChooseColorEtb } from "@/lib/characteristics";
@@ -211,7 +211,14 @@ export function useStackResolution(ctx: GameContext) {
         // Terror of the Peaks charges life for targeting it; Scalelord Reckoner reacts to a Dragon becoming the target of an opponent's spell.
         const castTargets = action.castChoices?.targets ?? [];
         if (targetingLifeTax(session, action.actorSeatId, castTargets) > 0) setSession((current) => applyTargetingLifeTax(current, action.actorSeatId, castTargets));
-        const castTriggers = [...findCastTriggers(session, action.actorSeatId, sourceCard, castOrdinal), ...findSpellTargetTriggers(session, action.actorSeatId, castTargets)];
+        // "their first noncreature spell each turn": a per-filter counter, so an earlier creature spell does not use up the noncreature slot.
+        const filteredOrdinals: Record<string, number> = {};
+        for (const key of castSpellFilterKeys(sourceCard)) {
+          const k = `${turnSeatKey}:${key}`;
+          filteredOrdinals[key] = (spellsCastThisTurn.current.get(k) ?? 0) + 1;
+          spellsCastThisTurn.current.set(k, filteredOrdinals[key]);
+        }
+        const castTriggers = [...findCastTriggers(session, action.actorSeatId, sourceCard, castOrdinal, filteredOrdinals), ...findSpellTargetTriggers(session, action.actorSeatId, castTargets)];
         hasCastTriggers = castTriggers.length > 0;
         // Deferred, same reasoning as the land-ETB-trigger scheduling elsewhere in this file:
         // queueCommonTriggers itself calls beginPendingAction, so calling it synchronously here

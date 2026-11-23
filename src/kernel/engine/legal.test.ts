@@ -275,3 +275,17 @@ describe("property: legalActions agrees with resolve on random Wretched Ranks po
     expect(seen.activateAbility).toBeGreaterThan(0);
   }, 120_000);
 });
+
+describe("legalActions: transforming card with a land back (Growing Rites of Itlimoc // Itlimoc, Cradle of the Sun)", () => {
+  it("offers only the front cast: never a land play of the back, never a cast of the land face", () => {
+    const t = mini(); const rites = t.give("p1", "Growing Rites of Itlimoc // Itlimoc, Cradle of the Sun", "hand");
+    for (let i = 0; i < 3; i++) t.give("p1", "Forest", "battlefield");
+    const acts = legalActions(t.state, "p1", ctx);
+    expect(kinds(acts, "playLand").filter((a) => a.objectId === rites)).toEqual([]);
+    const casts = kinds(acts, "castSpell").filter((a) => a.objectId === rites);
+    expect(casts.length).toBeGreaterThan(0);
+    expect(casts.every((a) => !a.face || a.face === "Growing Rites of Itlimoc")).toBe(true);
+    expect(t.do({ type: "playLand", player: "p1", cardId: rites, face: "Itlimoc, Cradle of the Sun" }).error).toBeDefined();
+    expect(t.do({ type: "castSpell", player: "p1", cardId: rites, face: "Itlimoc, Cradle of the Sun" }).error).toBeDefined();
+  });
+});

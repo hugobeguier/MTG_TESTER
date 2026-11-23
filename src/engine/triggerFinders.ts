@@ -954,11 +954,19 @@ function isImpulseCastFreeEffectClause(clause: string): boolean {
   return /\bexiles? the top card of (their|your) library\b/i.test(clause) && /\bwithout paying its mana cost\b/i.test(clause) && /\bnonland\b/i.test(clause);
 }
 
+// The spell-type filters a cast spell satisfies ("noncreature", "creature", ...): "their first NONCREATURE spell each turn" counts only
+// spells of that kind, so callers keep one per-turn counter per filter name returned here (plus the all-spells counter).
+export function castSpellFilterKeys(card: VisibleCard): string[] {
+  const all: NonNullable<CastTriggerCondition["spellTypeFilter"]>[] = ["noncreature", "instant_or_sorcery", "enchantment", "artifact", "creature", "planeswalker", "land", "historic"];
+  return all.filter((f) => spellMatchesCastTriggerFilter(card, f));
+}
+
 export function findCastTriggers(
   session: GameSession,
   casterSeatId: string,
   castCard: VisibleCard,
-  castOrdinalThisTurnForCaster: number
+  castOrdinalThisTurnForCaster: number,
+  filteredOrdinals?: Record<string, number>
 ): Array<Extract<PendingAction, { type: "trigger" }>> {
   const triggers: Array<Extract<PendingAction, { type: "trigger" }>> = [];
 
@@ -971,7 +979,8 @@ export function findCastTriggers(
         if (!condition) continue;
         if (condition.relativity === "you" && seat.id !== casterSeatId) continue;
         if (condition.relativity === "opponent" && seat.id === casterSeatId) continue;
-        if (condition.requiredOrdinal !== undefined && condition.requiredOrdinal !== castOrdinalThisTurnForCaster) continue;
+        const ordinalHere = condition.spellTypeFilter ? (filteredOrdinals?.[condition.spellTypeFilter] ?? castOrdinalThisTurnForCaster) : castOrdinalThisTurnForCaster;
+        if (condition.requiredOrdinal !== undefined && condition.requiredOrdinal !== ordinalHere) continue;
         const matchesFilter = spellMatchesCastTriggerFilter(castCard, condition.spellTypeFilter);
         const matchesAlso = condition.alsoDescriptor ? permanentMatchesQualifier(castCard, condition.alsoDescriptor) : false;
         if (!matchesFilter && !matchesAlso) continue;

@@ -31,7 +31,8 @@ import { ofOpponent, opponentIds, slotUsesX, targetBounds, totalMax } from "./ta
 import { addDurable, expiryFor, consumePermission, expireDurable, hasFlag, permissionIdOf, permissionOptions, permissionsFor, delayeds } from "./durable";
 import { isTopCard, refreshTopLookers, topPerms } from "./topcast";
 import { flashGrantCovers, playerCantCast, playerHas } from "./layers";
-import { castableFaces } from "./faces";
+import { castableFaces, playableFaces } from "./faces";
+import { leaveGame } from "./leave";
 import { addedSteps, baseChoices, castTags, grantedFree, grantedMorph, grantedTop, mandatoryExtras, optionalExtras, optionLabel, selectedOptions, spellExtraCosts, spellManaString } from "./castopts";
 import type {
   Action, CastInfo, Choice, Draft, EngineContext, Exec, GameEvent, GameObject, GameState, Lki, ObjId, Part, Pending, PendingView, PlayerId,
@@ -1013,7 +1014,7 @@ function playLand(r: Run, a: Extract<Action, { type: "playLand" }>): void {
   const p = player(r, a.player);
   const topLand = !landPerm && o.zone === "library" && o.owner === a.player && isTopCard(r, o.id) && topPerms(r, a.player).some((x) => x.lands); // One with the Multiverse
   if (!landPerm && !topLand && (o.zone !== "hand" || !p.hand.includes(o.id))) throw new Reject("not_in_zone", `${label(r, o.id)} is not in ${a.player}'s hand`);
-  if (a.face !== undefined) { if (!faceNames(defOf(r, o)!).includes(a.face)) throw new Reject("invalid_choice", `"${a.face}" is not a face of ${label(r, o.id)}`); o.face = a.face; }
+  if (a.face !== undefined) { if (!playableFaces(defOf(r, o)!).includes(a.face)) throw new Reject("invalid_choice", `"${a.face}" cannot be played as a land from ${label(r, o.id)} (a transforming card's back face is never played or cast)`); if (!faceNames(defOf(r, o)!).includes(a.face)) throw new Reject("invalid_choice", `"${a.face}" is not a face of ${label(r, o.id)}`); o.face = a.face; }
   if (!chars(r, o.id).types.includes("land")) throw new Reject("not_castable", `${label(r, o.id)} is not a land`);
   if (!r.ignoreTiming && !inMainWithEmptyStack(r, a.player)) throw new Reject("wrong_timing", "lands can only be played during your main phase with an empty stack");
   if (p.landsPlayed >= landDrops(r, a.player)) throw new Reject("land_limit", "you already played a land this turn");
@@ -1091,7 +1092,7 @@ function grantPriority(r: Run, to?: PlayerId | null): void {
 function finish(r: Run, keep?: PlayerId): void {
   if (settle(r)) return;
   if (r.s.gameOver) { r.s.priority = null; return; }
-  if (keep) { r.s.priorityAfter = null; r.s.priority = keep; return; }
+  if (keep && !player(r, keep).hasLost) { r.s.priorityAfter = null; r.s.priority = keep; return; }
   grantPriority(r);
 }
 
@@ -1181,6 +1182,7 @@ function continueExec(r: Run, ex: Exec, answerIn?: Choice): void {
 
 function advanceStep(r: Run): void {
   const cur = r.s.turn.phase;
+  if (player(r, r.s.turn.active).hasLost && cur !== "cleanup") { endCleanup(r); return; } // 800.4: the active player left the game, so their turn ends and the next player starts a new one
   if (cur === "end_of_combat") {
     r.s.combat = null;
     if (r.s.extraCombats > 0) { r.s.extraCombats--; enterStep(r, "beginning_of_combat"); return; }
@@ -1348,13 +1350,15 @@ function sba(r: Run): boolean {
   let any = false;
   for (let guard = 0; guard < 1000; guard++) {
     let changed = false;
+    const newlyLost: string[] = [];
     for (const p of r.s.players) {
       const cmdr = overCommanderLimit(r, p.id);
       if (!p.hasLost && (p.life <= 0 || p.drewFromEmpty || cmdr) && !playerHas(r, p.id, "can't lose the game")) {
-        p.hasLost = true; changed = true;
+        p.hasLost = true; changed = true; newlyLost.push(p.id);
         emit(r, { type: "player_lost", player: p.id, reason: p.life <= 0 ? "life" : p.drewFromEmpty ? "empty_library" : "commander_damage" });
       }
     }
+    for (const id of newlyLost) leaveGame(r, id); // 800.4a: their objects leave the game, their stack items cease to exist, control effects end
     // commander in the graveyard / exile: its owner may put it into the command zone (704.6d); asked once, remembered when declined
     for (const p of r.s.players) for (const id of [...p.graveyard, ...p.exile]) {
       const o = r.s.objects[id];
@@ -1566,9 +1570,23 @@ function scanTriggers(r: Run): void {
             else if (subject === "self") match = ev.id === h.id;
             else if (subject === "you") match = who === h.controller;
             else if (subject === "opponent" || subject === "each_opponent") match = who !== h.controller;
-            else if (typeof subject === "object") match = matchesFilter(r, ev.id as string, subject as ObjectFilter, q);
+            else if (typeof subject === "object") {
+              match = matchesFilter(r, ev.id as string, subject as ObjectFilter, q);
+              // "Whenever an opponent casts a noncreature spell" (Mystic Remora): the caster's side is scoped by `whose` even when the subject is a spell filter
+              if (match && tr.whose && tr.whose !== "each" && (tr.whose === "yours") !== (who === h.controller)) match = false;
+            }
             else throw new Unsupported(`trigger:subject:${String(subject)}`);
-            if (match && tr.nth) match = r.s.turnLog.filter((e) => e.type === "cast" && e.player === who).length === tr.nth.n;
+            // "their first NONCREATURE spell each turn": the count is per caster and only over spells matching the type filter (a creature spell does not use it up)
+            if (match && tr.nth) {
+              const sf = typeof subject === "object" ? (subject as ObjectFilter) : undefined;
+              const lc = (a: string[] | undefined) => (a ?? []).map((x) => x.toLowerCase());
+              const need = lc(sf?.types), ban = lc(sf?.notTypes);
+              match = r.s.turnLog.filter((e) => {
+                if (e.type !== "cast" || e.player !== who) return false;
+                const ty = lc(e.types as string[] | undefined);
+                return need.every((x) => ty.includes(x)) && !ban.some((x) => ty.includes(x));
+              }).length === tr.nth.n;
+            }
             ctx.eventObj = ev.id as string; ctx.eventPlayer = who;
             const castItem = r.s.stack.find((i) => i.objectId === ev.id);
             ctx.cast = castItem?.cast;

@@ -14,7 +14,7 @@
 import type { Ability } from "../schema";
 import { attackerEntry, abilitiesOf, chars, defOf, faceNames, isBlocking, isSummoningSick, printedAbilities, type Run } from "./core";
 import { withCardDb } from "./carddb";
-import { castableFaces } from "./faces";
+import { castableFaces, playableFaces } from "./faces";
 import { baseChoices } from "./castopts";
 import { permissionsFor } from "./durable";
 import { attackProblem, blockProblem, defenderOptions, legalAttackers } from "./combat";
@@ -149,8 +149,8 @@ export function legalActions(state: GameState, player: PlayerId, ctx: EngineCont
       if (o.zone !== "hand" && o.zone !== "exile" && o.zone !== "library") continue;
       const def = defOf(r, o);
       if (!def || !(def.types.includes("land") || Object.values(def.faces ?? {}).some((f) => f.types.includes("land")))) continue;
-      const faces = faceNames(def);
-      const variants: Array<string | undefined> = faces.length > 1 ? faces : [undefined];
+      const faces = playableFaces(def);
+      const variants: Array<string | undefined> = faceNames(def).length > 1 && faces.length > 1 ? faces : [undefined];
       for (const face of variants) {
         const action: Action = { type: "playLand", player, cardId: id, ...(face ? { face } : {}) };
         const pr = probe(state, action, ctx, false);

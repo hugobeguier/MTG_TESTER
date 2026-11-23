@@ -262,6 +262,7 @@ export function legalMainPhaseActions(
   // Unhallowed), a standing "you may cast this card from your graveyard" (Gravecrawler), or a one-turn grant
   // (Zul Ashur). See graveyardCasting.ts.
   for (const card of seat.board.graveyard ?? []) {
+    if (isLandCard(card)) continue; // lands are played, never cast (CR 305.1)
     const permission = graveyardCastPermission(card, { seatId: seat.id, turn, controllerBattlefield: seat.board.battlefield });
     if (!permission) continue;
     const castCard = permission.costText ? cardWithFaceManaCost(card, permission.costText) : card;

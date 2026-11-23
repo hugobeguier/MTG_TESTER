@@ -237,3 +237,23 @@ describe("choose: creature type, card name, player, opponent", () => {
     expect(t.state.pending).toBeNull(); expect(t.p("p2").life).toBe(38);
   });
 });
+
+// Growing Rites of Itlimoc // Itlimoc, Cradle of the Sun is a TRANSFORMING card: the land back is reached only by transforming on the battlefield, never played or cast.
+describe("transforming card with a land back face", () => {
+  const rites: CardDef = {
+    name: "Rites Front", manaCost: "{2}{G}", types: ["enchantment"], layout: "transform",
+    faces: { "Cradle Back": { types: ["land"], subtypes: [] } },
+    kernel: { schemaVersion: 2, abilities: [fa("Rites Front", { id: "a1", kind: "spell_effect", text: "gain 1", steps: gain(1) }), fa("Cradle Back", { id: "a2", kind: "mana", text: "{T}: Add {G}.", costs: [{ tap: "self" }], mana: { produces: [{ colors: "{G}" }] } })] }
+  };
+  const w = () => table(["p1", "p2"], { extra: { ...CARDS, "Rites Front": rites } });
+  it("playLand with the land back is refused, and the front enchantment is not a land", () => {
+    const t = w(); const c = t.give("p1", "Rites Front", "hand");
+    expect(t.do({ type: "playLand", player: "p1", cardId: c, face: "Cradle Back" }).error?.code).toBe("invalid_choice");
+    expect(t.do({ type: "playLand", player: "p1", cardId: c }).error?.code).toBe("not_castable");
+    expect(t.obj(c).zone).toBe("hand");
+  });
+  it("casting with the land back is refused", () => {
+    const t = w(); t.lands("p1", "Forest", 3); const c = t.give("p1", "Rites Front", "hand");
+    expect(t.do({ type: "castSpell", player: "p1", cardId: c, face: "Cradle Back" }).error).toBeDefined();
+  });
+});
