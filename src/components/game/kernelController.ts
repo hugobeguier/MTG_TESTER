@@ -7,7 +7,8 @@
 // A rejected action never changes anything (KernelSession.dispatch returns the old state); the controller turns the refusal into a log note.
 import type { KernelSession, DispatchResult } from "@/kernel/integration/kernelSession";
 import type { DecisionView, TableState } from "@/kernel/integration/tableState";
-import type { KernelBoardPick } from "@/components/ThreeGameTable";
+import type { KernelBoardPick, PendingActionView, StackFeedEntry } from "@/components/ThreeGameTable";
+import { classifyChange, type PaceSnap, type PacingClock } from "./kernelPacing";
 import { boardPickModel, canConfirm, castHint, classifyDecision, confirmLabel, pickChoice, selectionHint, toggleSelection } from "./kernelDecisionView";
 import { legalActions, type LegalAction } from "@/kernel/engine/legal";
 import type { Action, Choice, GameState, ObjId, PlayerId } from "@/kernel/engine/types";
@@ -57,6 +58,8 @@ export interface ControllerOptions {
   /** the human's priority-stop settings (default: the legacy defaults) and where changes are saved (the app passes localStorage; tests pass nothing) */
   stops?: PriorityStopSettings;
   saveStops?: (settings: PriorityStopSettings) => void;
+  /** pacing (kernelPacing.ts): how long each visible change (a cast, a trigger, a resolution, combat) is shown before the next automatic step. Absent = no waiting (tests, headless). */
+  pacing?: PacingClock;
 }
 
 type Timer = ReturnType<typeof setTimeout>;
@@ -102,6 +105,11 @@ export class KernelGameController {
   private yielding?: SeatYield;
   private holdArmedAt?: number;
   private legalCache?: { ver: number; list: LegalAction[] };
+  /** pacing: the clock (undefined = never wait), the stack items that just resolved (for the dock's "what it did" rows), and the driver's timer clearer */
+  readonly pacing?: PacingClock;
+  private resolvedFeed: StackFeedEntry[] = [];
+  private feedCache?: { ver: number; feed: StackFeedEntry[] };
+  private driverClear?: (t: Timer) => void;
 
   constructor(ks: KernelSession, o: ControllerOptions) {
     this.ks = ks;
@@ -109,6 +117,7 @@ export class KernelGameController {
     this.pace = o.pace ?? ((ms) => ms);
     this.stopSettings = { ...(o.stops ?? DEFAULT_STOP_SETTINGS), fullControl: false };
     this.saveStops = o.saveStops;
+    this.pacing = o.pacing;
     for (const id of Object.keys(ks.state.objects)) { const legacy = ks.legacyIdOf(id); if (legacy) this.toKernel.set(legacy, id); }
   }
 
@@ -215,8 +224,9 @@ export class KernelGameController {
   private act(action: Action): boolean {
     const before = this.ks.version;
     this.consumeHold();
+    const seen = this.beforeStep();
     const res: DispatchResult = this.ks.dispatch(this.human, action);
-    if (res.ok || this.ks.version !== before) { this.attackPicks = {}; this.blockPicks = {}; this.blockIdx = 0; this.failures = 0; this.bump(); return res.ok; }
+    if (res.ok || this.ks.version !== before) { this.attackPicks = {}; this.blockPicks = {}; this.blockIdx = 0; this.failures = 0; this.observe(seen, action); this.bump(); return res.ok; }
     if (!res.stale) this.note(`Can't do that: ${res.error?.message ?? "the engine refused"}.`, "Rules");
     else this.bump();
     return false;
@@ -228,11 +238,60 @@ export class KernelGameController {
 
   /** answer the open decision; `decisionId` is the id the dialog was rendered for (a late click on an older dialog is ignored) */
   answer = (decisionId: string, choice: Choice): boolean => {
+    const seen = this.beforeStep();
     const res = this.ks.decide(this.human, decisionId, choice);
     if (!res.ok && !res.stale) this.note(`That choice was refused: ${res.error?.message ?? "invalid"}.`, "Rules");
-    else this.bump();
+    else { if (res.ok) this.observe(seen); this.bump(); }
     return res.ok;
   };
+
+  // ------------------------------------------------------------------ pacing (kernelPacing.ts)
+
+  private paceSnap(): PaceSnap {
+    const s = this.ks.state;
+    const atts = s.combat?.attackers ?? [];
+    return { stack: s.stack.map((i) => i.id), turn: s.turn.number, phase: String(s.turn.phase), attackers: atts.length, blockers: atts.reduce((n, a) => n + a.blockers.length, 0) };
+  }
+  /** what to remember before a step so observe() can tell what the player saw happen (only gathered when pacing is on) */
+  private beforeStep(): { snap: PaceSnap; top?: PendingActionView; eventId?: string } | undefined {
+    if (!this.pacing) return undefined;
+    const t = this.table();
+    return { snap: this.paceSnap(), ...(t.pendingAction ? { top: t.pendingAction } : {}), eventId: t.session.events[0]?.id };
+  }
+  /** after a step: the stack item that just resolved joins the dock's feed, and the visible change holds the next automatic step for its pacing delay */
+  private observe(seen: ReturnType<KernelGameController["beforeStep"]>, action?: Action): void {
+    const pacing = this.pacing;
+    if (!pacing || !seen) return;
+    const next = this.paceSnap();
+    if (seen.top && seen.top.type !== "phase" && !next.stack.includes(seen.top.id)) {
+      this.resolvedFeed = [{ id: seen.top.id, view: seen.top, status: "resolved" as const, resolvedAt: Date.now(), startEventId: seen.eventId }, ...this.resolvedFeed].slice(0, 3);
+    }
+    if (this.yielding) { pacing.cancel(); return; } // "yield to end of turn" means: hurry
+    const kind = classifyChange(seen.snap, next, action);
+    if (kind !== "none") pacing.note(kind, next.turn);
+    if (!pacing.active) return;
+    // a decision, the human's own window, or the end of the game: nothing automatic follows, so nothing to wait for
+    if (!this.needsStep()) pacing.cancel();
+  }
+  /** is the table holding an automatic step back to show what just happened? (the Skip button / Space; the decision timer must not count this) */
+  isPacing(): boolean { return !!this.pacing && this.pacing.active && this.needsStep(); }
+  /** speed past the current wait */
+  skipPacing = (): void => {
+    if (!this.pacing) return;
+    this.pacing.skip();
+    if (this.timer !== undefined && this.driverClear) { this.driverClear(this.timer); this.timer = undefined; }
+    this.bump();
+  };
+  /** the stack dock's feed: the top item shows "Resolving..." while the table holds still on it, and the items that just resolved show what they did */
+  stackFeed(): StackFeedEntry[] {
+    if (!this.pacing) return [];
+    if (this.feedCache?.ver === this.ver) return this.feedCache.feed;
+    const t = this.table();
+    const feed: StackFeedEntry[] = this.resolvedFeed.filter((e) => !t.stackActions.some((v) => v.id === e.id) && t.pendingAction?.id !== e.id);
+    if (t.pendingAction && t.pendingAction.type !== "phase" && this.isPacing()) feed.unshift({ id: t.pendingAction.id, view: t.pendingAction, status: "resolving" });
+    this.feedCache = { ver: this.ver, feed };
+    return feed;
+  }
 
   playCard = (seatId: string, cardId: string, _pos?: unknown, _zone?: string): void => {
     if (seatId !== this.human) return this.inert("play a card for another seat");
@@ -351,6 +410,7 @@ export class KernelGameController {
   /** hurry to the end of the human's turn: stops at a question, a declaration, or when the turn passes to somebody else */
   endTurn = (): void => {
     const turn = this.ks.state.turn.number;
+    this.pacing?.skip(); // the human asked to hurry
     for (let i = 0; i < 40; i++) {
       const s = this.ks.state;
       if (s.gameOver || s.pending || s.turn.number !== turn || this.ks.actor !== this.human) break;
@@ -359,6 +419,7 @@ export class KernelGameController {
       const ok = s.stack.length ? this.act({ type: "passPriority", player: this.human }) : this.act({ type: "advancePhase", player: this.human });
       if (!ok) break;
     }
+    this.pacing?.skip();
   };
 
   // ---- combat declarations
@@ -634,6 +695,7 @@ export class KernelGameController {
     const s = this.ks.state;
     const next = toggleYield(this.yielding ? { [this.human]: this.yielding } : {}, this.human, s.turn.number, s.turn.active)[this.human];
     this.yielding = next;
+    if (next) this.pacing?.skip();
     this.note(next ? "Yielding until the end of this turn." : "Yield cancelled.", "Priority");
   };
   /** "Stop Next": the very next priority window opens, whatever the settings */
@@ -776,8 +838,9 @@ export class KernelGameController {
       if (!action) return false;
       this.autoTurn.count++;
       const before = this.ks.version;
+      const seen = this.beforeStep();
       const res = this.ks.dispatch(actor, action);
-      if (res.ok || this.ks.version !== before) { this.failures = 0; this.bump(); return true; }
+      if (res.ok || this.ks.version !== before) { this.failures = 0; this.observe(seen, action); this.bump(); return true; }
       // refused: never retry the same thing; fall back to the least committal move, and give up loudly after three refusals in a row
       this.failures++;
       const key = actionKey(action);
@@ -802,10 +865,13 @@ export class KernelGameController {
   startDriver(setT: (fn: () => void, ms: number) => Timer = setTimeout, clearT: (t: Timer) => void = clearTimeout): () => void {
     if (this.running) return () => undefined;
     this.running = true;
+    this.driverClear = clearT;
     const arm = (): void => {
       if (!this.running || this.timer !== undefined || !this.needsStep()) return;
       const human = this.ks.actor === this.human;
-      this.timer = setT(() => { this.timer = undefined; this.step(); arm(); }, this.pace(human ? 900 : 700));
+      // a visible change (a cast, a trigger, a resolution, combat) is shown for its pacing delay before anyone passes or advances; a new wait noted while a shorter timer runs re-arms
+      const hold = this.pacing?.remaining() ?? 0;
+      this.timer = setT(() => { this.timer = undefined; if ((this.pacing?.remaining() ?? 0) > 0) { arm(); return; } this.step(); arm(); }, hold > 0 ? hold : this.pace(human ? 900 : 700));
     };
     const unsub = this.subscribe(arm);
     arm();

@@ -4,6 +4,8 @@
 // data/cards.db) into public/kernel-packs/<deck>.json and fetched by the browser; this file is pure (no fs, no sqlite) and is what the app imports.
 import type { CardDb, CardDef, CardInfo, CardLookup } from "../engine/types";
 import type { CardImageUris, CardFaceRecord } from "../../lib/types";
+import type { TokenSpec } from "../../lib/tokenArt";
+import { tokenArtResolver, type TokenPrintings } from "./tokenArt";
 
 /** The part of the legacy CardRecord the table renders. */
 export interface DisplayCard {
@@ -39,6 +41,8 @@ export interface CardPack {
   display: Record<string, DisplayCard>;
   /** the deck list(s) this pack was built from (the first is the deck itself) */
   decks: PackDeck[];
+  /** Scryfall printings of every token the deck's cards can create (+ the predefined tokens), for token art; attached by the bundler (nodeTokenArt.ts) */
+  tokenPrintings?: TokenPrintings;
   /** cards the kernel cannot fully run (empty = the deck is fully runnable); continue mode skips only the unsupported part */
   unsupported: PackUnsupported[];
 }
@@ -48,6 +52,8 @@ export interface PackKit {
   db: CardDb;
   display(name: string): DisplayCard | undefined;
   deck(name: string): PackDeck | undefined;
+  /** the art of a token (memoised; undefined = none known: the table draws the placeholder card) */
+  tokenArt(spec: TokenSpec): CardImageUris | undefined;
   names: string[];
 }
 
@@ -58,7 +64,9 @@ export function packKit(packs: readonly CardPack[]): PackKit {
   const display = new Map<string, DisplayCard>();
   const decks = new Map<string, PackDeck>();
   const types = new Set<string>();
+  const printings: TokenPrintings = {};
   for (const p of packs) {
+    for (const [n, list] of Object.entries(p.tokenPrintings ?? {})) if (!printings[n]) printings[n] = list;
     for (const [n, c] of Object.entries(p.cards)) if (!cards.has(n)) cards.set(n, c);
     for (const [n, c] of Object.entries(p.info)) if (!info.has(n)) info.set(n, c);
     for (const [n, c] of Object.entries(p.display)) if (!display.has(n)) display.set(n, c);
@@ -76,6 +84,7 @@ export function packKit(packs: readonly CardPack[]): PackKit {
     db: { creatureTypes: () => creatureTypes, cardNames: () => names, card: (name) => info.get(real(name)) },
     display: (name) => display.get(real(name)),
     deck: (name) => decks.get(name),
+    tokenArt: tokenArtResolver(printings),
     names
   };
 }

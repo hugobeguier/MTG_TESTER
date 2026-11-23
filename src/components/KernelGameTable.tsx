@@ -9,6 +9,7 @@ import type { KernelBoardPick } from "./ThreeGameTable";
 import { classifyDecision } from "./game/kernelDecisionView";
 import type { KernelGameController } from "./game/kernelController";
 import { useKernelDriver } from "./game/useKernelGame";
+import { PACE_SPEEDS, type PaceSpeed } from "./game/kernelPacing";
 import { ThreeGameTable } from "./ThreeGameTable";
 import { GameOverDialog } from "./GameOverDialog";
 import { KernelDecisionDialog } from "./KernelDecisionDialog";
@@ -46,9 +47,44 @@ function useDecisionVisibility(decisionId: string | undefined): { hidden: boolea
   return { hidden, toggle: () => setVis((v) => toggleHidden(v, decisionId)), setHidden: (h) => setVis((v) => setHiddenState(v, decisionId, h)) };
 }
 
+const PACE_LABELS: Record<PaceSpeed, string> = { off: "Off", fast: "Fast", normal: "Normal", slow: "Slow" };
+
+/** Space / Enter speeds past a pacing wait (captured before the table's own Space = pass priority); other times the keys behave as before */
+function usePacingSkipKey(controller: KernelGameController): void {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.key !== " " && e.key !== "Enter") || !controller.isPacing()) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA" || t.tagName === "BUTTON")) return;
+      e.preventDefault(); e.stopPropagation();
+      controller.skipPacing();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [controller]);
+}
+
+/** the pacing speed picker and the Skip button (shown while the table is holding on a cast / trigger / resolution) */
+function PacingControls({ controller }: { controller: KernelGameController }) {
+  const clock = controller.pacing;
+  if (!clock) return null;
+  return (
+    <div data-testid="kernel-pacing" className="kernel-pacing">
+      <label>
+        Speed{" "}
+        <select value={clock.speed} aria-label="Game speed" data-testid="kernel-pace-speed" onChange={(e) => { clock.setSpeed(e.target.value as PaceSpeed); controller.skipPacing(); }}>
+          {PACE_SPEEDS.map((s) => <option key={s} value={s}>{PACE_LABELS[s]}</option>)}
+        </select>
+      </label>
+      {controller.isPacing() ? <button type="button" data-testid="kernel-pace-skip" onClick={controller.skipPacing} title="Skip the wait (Space)">Skip (Space)</button> : null}
+    </div>
+  );
+}
+
 export function KernelGameTable({ controller, onBack }: { controller: KernelGameController; onBack: () => void }) {
   useSyncExternalStore(controller.subscribe, controller.getVersion, controller.getVersion);
   useKernelDriver(controller);
+  usePacingSkipKey(controller);
   const table = controller.table();
   const human = controller.human;
   const thinking = controller.thinkingSeat();
@@ -73,7 +109,9 @@ export function KernelGameTable({ controller, onBack }: { controller: KernelGame
       <div data-testid="kernel-badge" className="kernel-badge">
         Kernel engine (dev){degraded ? ` - degraded: ${degraded}` : ""}
       </div>
+      <PacingControls controller={controller} />
       <ThreeGameTable
+        stackFeed={controller.stackFeed()}
         session={table.session}
         prioritySeatId={table.prioritySeatId}
         pendingAction={table.pendingAction}

@@ -30,6 +30,8 @@ export interface KernelSessionOptions {
   ctx: EngineContext;
   /** printed display data by card name (art, oracle text); default: synthesised from the card definitions */
   display?: (name: string) => DisplayCard | undefined;
+  /** token art by spec (a pack kit's `tokenArt`); default none = the placeholder card */
+  tokenArt?: ToSessionEnv["tokenArt"];
   /** per-seat metadata (human / agent / remote slot) */
   seats?: Record<PlayerId, SeatMeta>;
   /** receives each distinct `unresolved` occurrence (full, unredacted events); e.g. appendUnresolvedRecord on the server */
@@ -164,7 +166,7 @@ export class KernelSession {
   }
 
   private env(viewer: PlayerId): ToSessionEnv {
-    return { ctx: this.ctx, display: this.opts.display ?? ((n) => { const d = this.ctx.cards(n); return d ? displayFromDef(d) : undefined; }), seats: this.opts.seats, log: this.logs.get(viewer) ?? [], legacyIds: this.legacyIds, id: this.gameId };
+    return { ctx: this.ctx, display: this.opts.display ?? ((n) => { const d = this.ctx.cards(n); return d ? displayFromDef(d) : undefined; }), tokenArt: this.opts.tokenArt, seats: this.opts.seats, log: this.logs.get(viewer) ?? [], legacyIds: this.legacyIds, id: this.gameId };
   }
 
   /** The legacy GameSession for `viewer` (a player id or SPECTATOR). Memoised per version; untouched cards / seats keep their object identity. */

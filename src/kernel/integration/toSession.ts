@@ -15,6 +15,9 @@ import { hasKeyword as textHasKeyword } from "../../lib/keywords";
 import { inferRoleFromRecord } from "../../lib/deckParser";
 import { LEGACY_TO_KERNEL_PHASE } from "../observer/adapter";
 import { displayFromDef, typeLineOf, type DisplayCard } from "./cardPack";
+import { tokenSpecOf } from "./tokenArt";
+import type { TokenSpec } from "../../lib/tokenArt";
+import type { CardImageUris } from "../../lib/types";
 
 export interface SeatMeta { kind?: "human" | "agent"; agentName?: PlayerSeat["agentName"]; remoteSlot?: string }
 
@@ -23,6 +26,8 @@ export interface ToSessionEnv {
   ctx: EngineContext;
   /** printed display data by card name (art, oracle text, faces); missing = synthesised from the card definition */
   display?: (name: string) => DisplayCard | undefined;
+  /** art for a token (a pack kit's `tokenArt`); missing / undefined = the placeholder card (name, type line, P/T, rules text) */
+  tokenArt?: (spec: TokenSpec) => CardImageUris | undefined;
   /** per player: human / agent / remote slot; default: the viewer is the (only) human, everybody else an agent */
   seats?: Record<PlayerId, SeatMeta>;
   /** the game log lines for THIS viewer (newest first, same shape as GameSession.events) */
@@ -91,6 +96,9 @@ function cardOf(b: Build, o: GameObject, zone: Zone): VisibleCard {
     typeLine = `Token ${typeLineOf(v.types, v.subtypes, v.supertypes)}`;
     oracle = [...(o.token.keywords.length ? [o.token.keywords.map((k) => k.charAt(0).toUpperCase() + k.slice(1)).join(", ")] : []), ...(o.token.abilities ?? []).map((a) => a.text)].join("\n");
     manaCost = o.token.manaCost;
+    // a token COPY of a card (Scion of the Ur-Dragon copying, Saheeli's copies) shows that card's art; any other token gets its Scryfall token printing
+    const copied = b.env.display?.(o.cardName);
+    imageUris = copied?.imageUris && !/^token\b/i.test(copied.typeLine) ? copied.imageUris : b.env.tokenArt?.(tokenSpecOf(o.token, typeLine, oracle));
   } else if (o.copyDef && v && onBf) {
     typeLine = typeLineOf(v.types, v.subtypes, v.supertypes);
     oracle = (o.copyDef.abilities ?? []).map((a) => a.text).join("\n") || oracle;

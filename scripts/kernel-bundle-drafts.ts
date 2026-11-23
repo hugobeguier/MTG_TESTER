@@ -7,6 +7,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { buildPack, draftSlugs } from "../src/kernel/integration/nodePack";
+import { attachTokenArt } from "../src/kernel/integration/nodeTokenArt";
 import { loadDraftLookup } from "../src/kernel/observer/draftLookup";
 
 const args = process.argv.slice(2);
@@ -24,6 +25,8 @@ for (const slug of slugs) {
   const pack = buildPack(slug, { dl });
   const ready = pack.unsupported.length === 0;
   if (!ready && !flag("all") && !wanted) { console.log(`skip ${slug}: ${pack.unsupported.length} card(s) the kernel cannot run fully (use --all or --decks to bundle anyway)`); continue; }
+  const tok = await attachTokenArt(pack, { offline: flag("offline-tokens") });
+  console.log(`  token art ${slug}: ${tok.withArt.length}/${tok.names.length} tokens have Scryfall art${tok.missing.length ? ` (placeholder: ${tok.missing.join(", ")})` : ""}`);
   const json = JSON.stringify(pack);
   fs.writeFileSync(path.join(out, `${slug}.json`), json);
   index.push({ slug, deck: pack.deck, cards: Object.keys(pack.cards).length, unsupported: pack.unsupported.length, ready, bytes: json.length });
