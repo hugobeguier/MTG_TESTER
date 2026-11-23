@@ -13,7 +13,7 @@ export function KernelLogLine({ message, session }: { message: string; session: 
   return (
     <>
       {parts.map((p, i) => p.card ? (
-        <span key={i} className="log-card-name" style={{ textDecoration: "underline dotted", cursor: "help" }} onMouseEnter={() => fire({ card: p.card as VisibleCard })} onMouseLeave={() => fire({ leaveId: p.card!.id })}>{p.text}</span>
+        <span key={i} className="log-card-name kernel-log-card" onMouseEnter={() => fire({ card: p.card as VisibleCard })} onMouseLeave={() => fire({ leaveId: p.card!.id })}>{p.text}</span>
       ) : <span key={i}>{p.text}</span>)}
     </>
   );

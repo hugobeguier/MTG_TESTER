@@ -44,7 +44,7 @@ export function KernelGameTable({ controller, onBack }: { controller: KernelGame
         <GameOverDialog session={table.session} gameStarting={false} setupMessage={undefined} onPlayAgain={onBack} onDismiss={() => undefined} onBackToSetup={onBack} />
       ) : null}
       <button className="game-back-button" type="button" onClick={onBack} aria-label="Back to setup">×</button>
-      <div data-testid="kernel-badge" style={{ position: "fixed", top: 6, left: 10, zIndex: 40, fontSize: 11, padding: "2px 8px", borderRadius: 8, background: "#7a5cd6", color: "#fff" }}>
+      <div data-testid="kernel-badge" className="kernel-badge">
         Kernel engine (dev){degraded ? ` - degraded: ${degraded}` : ""}
       </div>
       <ThreeGameTable

@@ -3,17 +3,11 @@
 // name, cost, type line, rules text, P/T, counters), and a hover / focus / click preview that works for cards in ANY zone (library, graveyard, exile, stack,
 // revealed), because it only needs the VisibleCard the kernel put on the option. Pure data helpers are in game/kernelCardInfo.ts.
 import { useCallback, useState } from "react";
-import type { CSSProperties, ReactNode } from "react";
+import type { ReactNode } from "react";
 import type { VisibleCard } from "@/lib/types";
 import { listedPreviewCard } from "./boardPreview";
 import { cardImageUrl, cardInfo, cardSummary, type ImageSize } from "./game/kernelCardInfo";
 
-const C = {
-  tile: { display: "flex", flexDirection: "column", alignItems: "center", gap: 4, padding: 6, background: "#2a2933", color: "#eee", border: "2px solid #44434f", borderRadius: 8, cursor: "pointer", font: "inherit", textAlign: "center" },
-  on: { borderColor: "#5fd08a", background: "#1f3a2b" },
-  text: { width: "100%", minHeight: 120, padding: 6, boxSizing: "border-box", background: "#15141a", border: "1px solid #44434f", borderRadius: 6, fontSize: 11, textAlign: "left", overflow: "hidden" },
-  preview: { position: "fixed", right: 16, top: "50%", transform: "translateY(-50%)", width: "min(330px, 30vw)", maxHeight: "92vh", overflow: "auto", zIndex: 90, background: "#101014", border: "1px solid #8a89a0", borderRadius: 12, boxShadow: "0 12px 36px rgba(0,0,0,0.7)", padding: 8, color: "#eee", fontSize: 13 }
-} as const satisfies Record<string, CSSProperties>;
 
 export interface CardPreviewApi {
   card: VisibleCard | undefined;
@@ -63,7 +57,7 @@ export function CardFull({ card, art = "large", showText = true }: { card: Visib
 export function CardPreviewPanel({ api }: { api: CardPreviewApi }) {
   if (!api.card) return null;
   return (
-    <div style={{ ...C.preview, pointerEvents: api.pinned ? "auto" : "none" }} role="img" aria-label={`Enlarged ${api.card.name}`} data-testid="card-preview" onClick={api.close}>
+    <div className={`kernel-preview${api.pinned ? "" : " is-hover"}`} role="img" aria-label={`Enlarged ${api.card.name}`} data-testid="card-preview" onClick={api.close}>
       <CardFull card={api.card} />
     </div>
   );
@@ -78,22 +72,21 @@ export function CardTile({ card, api, width = 110, on = false, onClick, badge, l
   const art = i.imageUrl && !failed ? i.imageUrl : undefined;
   const body = (
     <>
-      {art ? <img src={art} alt={card.name} onError={() => setFailed(true)} style={{ width, borderRadius: Math.max(4, width / 18), display: "block" }} />
-        : <div style={{ ...C.text, width, minHeight: width * 1.2 }}><strong>{i.name}</strong> {i.manaCost}<div style={{ opacity: 0.8 }}>{i.typeLine}</div><div>{i.oracleText}</div>{i.stats ? <strong>{i.stats}</strong> : null}</div>}
-      <span style={{ maxWidth: width }}>{label ?? card.name}</span>
+      {art ? <img className="card-thumb" src={art} alt={card.name} onError={() => setFailed(true)} style={{ width, borderRadius: Math.max(4, width / 18), display: "block" }} />
+        : <div className="card-thumb-fallback" style={{ width, minHeight: width * 1.4 }}><strong>{i.name}</strong> {i.manaCost}<div className="card-pick-detail">{i.typeLine}</div><div className="card-oracle">{i.oracleText}</div>{i.stats ? <strong>{i.stats}</strong> : null}</div>}
+      <span className="card-pick-name" style={{ maxWidth: width }}>{label ?? card.name}</span>
       {badge}
     </>
   );
-  const style = { ...C.tile, ...(on ? C.on : {}), ...(disabled ? { opacity: 0.5, cursor: "default" } : {}) };
   return (
-    <div style={{ display: "inline-flex", flexDirection: "column", alignItems: "center", gap: 2 }} {...api.handlers(card)}>
+    <div className="kernel-tile" {...api.handlers(card)}>
       {onClick ? (
-        <button type="button" style={style} onClick={onClick} disabled={disabled} aria-pressed={ariaPressed ?? on} title={cardSummary(card)}>{body}</button>
+        <button type="button" className={`card-pick${on ? " selected" : ""}`} onClick={onClick} disabled={disabled} aria-pressed={ariaPressed ?? on} title={cardSummary(card)}>{body}</button>
       ) : (
-        <div style={{ ...style, cursor: "zoom-in" }} tabIndex={0} title={cardSummary(card)} onClick={() => api.togglePin(card)}>{body}</div>
+        <div className={`card-pick${on ? " selected" : ""}`} style={{ cursor: "zoom-in" }} tabIndex={0} title={cardSummary(card)} onClick={() => api.togglePin(card)}>{body}</div>
       )}
       {extra}
-      <button type="button" aria-label={`Enlarge ${card.name}`} style={{ font: "inherit", fontSize: 11, background: "none", border: "none", color: "#9fb4ff", cursor: "zoom-in", padding: 0 }} onClick={() => api.togglePin(card)}>enlarge</button>
+      <button type="button" aria-label={`Enlarge ${card.name}`} className="kernel-link" onClick={() => api.togglePin(card)}>enlarge</button>
     </div>
   );
 }
@@ -102,7 +95,7 @@ export function CardTile({ card, api, width = 110, on = false, onClick, badge, l
 export function CardChip({ card, api, thumb = 36 }: { card: VisibleCard; api: CardPreviewApi; thumb?: number }) {
   const url = cardImageUrl(card, "small");
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }} {...api.handlers(card)} title={cardSummary(card)}>
+    <span className="kernel-chip" {...api.handlers(card)} title={cardSummary(card)}>
       {url ? <img src={url} alt="" style={{ width: thumb, borderRadius: 4 }} /> : null}
       <span>{card.name}</span>
     </span>
