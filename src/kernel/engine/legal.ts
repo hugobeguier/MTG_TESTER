@@ -26,7 +26,7 @@ import { isObjId } from "./types";
 export interface LegalAction {
   /** stable id: "<kind>:<object>[:<ability|face|option>]" (the same action keeps the same id from one call to the next) */
   id: string;
-  kind: "playLand" | "castSpell" | "activateAbility" | "untapForMana" | "turnFaceUp" | "castPrepared" | "passPriority" | "declareAttackers" | "declareBlockers" | "answerDecision";
+  kind: "playLand" | "castSpell" | "activateAbility" | "untapForMana" | "turnFaceUp" | "unlockDoor" | "castPrepared" | "passPriority" | "declareAttackers" | "declareBlockers" | "answerDecision";
   player: PlayerId;
   label: string;
   /** a ready action for `resolve` (casts / activations use autoPay; declarations and answers have their own fields below) */
@@ -208,6 +208,14 @@ export function legalActions(state: GameState, player: PlayerId, ctx: EngineCont
     if (o.faceDown) {
       const action: Action = { type: "turnFaceUp", player, objectId: id, autoPay: true };
       if (probe(state, action, ctx, false).ok) add({ id: `turnFaceUp:${id}`, kind: "turnFaceUp", player, objectId: id, zone: o.zone, label: `Turn ${cardName(r, id)} face up (morph)`, action });
+    }
+    const rdef = defOf(r, o);
+    if (rdef?.layout === "room") { // Rooms: unlock a locked door (special action, sorcery timing)
+      for (const face of faceNames(rdef)) {
+        if ((o.unlocked ?? []).includes(face)) continue;
+        const action: Action = { type: "unlockDoor", player, objectId: id, face, autoPay: true };
+        if (probe(state, action, ctx, false).ok) add({ id: `unlockDoor:${id}:${face}`, kind: "unlockDoor", player, objectId: id, zone: o.zone, label: `Unlock the ${face} door of ${o.cardName}`, action });
+      }
     }
     if (o.prepared) {
       const action: Action = { type: "castPrepared", player, objectId: id, autoPay: true };

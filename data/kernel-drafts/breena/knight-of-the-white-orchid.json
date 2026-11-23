@@ -20,25 +20,36 @@
         "interveningIf": {
           "check": "compare",
           "left": {
-            "ref": "count",
-            "of": {
-              "types": [
-                "land"
-              ],
-              "controller": "opponent"
+            "ref": "players_count",
+            "who": "each_opponent",
+            "where": {
+              "check": "compare",
+              "left": {
+                "ref": "count",
+                "of": {
+                  "types": [
+                    "land"
+                  ],
+                  "controller": "that_player"
+                }
+              },
+              "cmp": {
+                "op": ">",
+                "value": {
+                  "ref": "count",
+                  "of": {
+                    "types": [
+                      "land"
+                    ],
+                    "controller": "you"
+                  }
+                }
+              }
             }
           },
           "cmp": {
-            "op": ">",
-            "value": {
-              "ref": "count",
-              "of": {
-                "types": [
-                  "land"
-                ],
-                "controller": "you"
-              }
-            }
+            "op": ">=",
+            "value": 1
           }
         }
       },
@@ -70,6 +81,7 @@
       "id": "a2",
       "implementation": "needed",
       "needs": [
+        "quantity:players_count",
         "trigger:intervening_if",
         "predicate:compare",
         "step:search_library",

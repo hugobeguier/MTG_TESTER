@@ -14,7 +14,8 @@ import type { ObjectFilter } from "../schema";
 import { attackerEntry, chars, defenderPlayer, emit, isSummoningSick, label, obj, parseManaCost, player, Reject, tick, tryObj, alive, type ParsedCost, type Run } from "./core";
 import { goadersOf, restrictionsOf } from "./layers";
 import { autoTapFor, payFromPool } from "./mana";
-import { matchesFilter, type QCtx } from "./query";
+import { durables } from "./durable";
+import { evalPredicate, matchesFilter, type QCtx } from "./query";
 import { changeLife, dealDamage, type AskSpec } from "./steps";
 import type { Action, Attacker, CombatCreature, CombatState, Choice, ObjId, PlayerId } from "./types";
 import { isObjId } from "./types";
@@ -74,6 +75,14 @@ export function attackProblem(r: Run, id: ObjId, pid: PlayerId, defender?: strin
     if (x.except && matchesFilter(r, id, x.except, { controller: tryObj(r, x.source)?.controller ?? pid, source: x.source })) continue;
     if (!x.protects) return `${label(r, id)} can't attack`;
     if (defender !== undefined && covers(r, x.protects, x.source, defender)) return `${label(r, id)} can't attack ${label(r, defender)} (${label(r, x.source)})`;
+  }
+  for (const d of durables(r)) { // "can't attack you or planeswalkers you control until your next turn / for as long as ..." granted by a resolved ability
+    const b = d.attackBan;
+    if (!b || !(b.objects ? b.objects.some((x) => x.id === id && x.ts === o.timestamp) : b.controllerOf === o.controller)) continue;
+    if (b.whileP && !evalPredicate(r, b.whileP, { controller: d.owner, source: d.source, chosen: b.chosen ?? {} })) continue;
+    if (!b.protects) return `${label(r, id)} can't attack`;
+    const mine = defender === d.owner || (b.protects === "you_and_planeswalkers" && !!defender && isObjId(defender) && r.s.objects[defender]?.controller === d.owner && chars(r, defender).types.includes("planeswalker"));
+    if (defender !== undefined && mine) return `${label(r, id)} can't attack ${label(r, defender)} (${label(r, d.source)})`;
   }
   return null;
 }

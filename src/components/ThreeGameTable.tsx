@@ -257,6 +257,8 @@ interface ThreeGameTableProps {
   /** Kernel mode: the engine's raw step id (tells the first-strike damage step apart) and who owes a decision / declaration, for the turn indicator. */
   kernelStepId?: string;
   kernelWaiting?: { seatId: string; kind: "choice" | "attackers" | "blockers" };
+  /** Kernel mode: small controls (engine badge, game speed) rendered in the top-left HUD under the turn indicator, in normal flow so they never cover the turn text. */
+  kernelHudExtras?: ReactNode;
   /** Kernel mode: an open target / card pick answered by clicking the highlighted permanents, players and hand cards (ids are the table's card / seat ids). Absent = legacy behaviour. */
   kernelPick?: KernelBoardPick;
   /** kernel mode: card names in the action log show the full card on hover */
@@ -1864,6 +1866,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
           pendingKind={props.kernelWaiting?.kind}
           gameOver={props.session.status === "complete"}
         />
+        {props.kernelHudExtras}
       </div>
       <div className="three-hud top-right">
         <button

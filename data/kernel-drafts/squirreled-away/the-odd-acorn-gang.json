@@ -60,7 +60,7 @@
               },
               "targets": [
                 {
-                  "id": "g1",
+                  "id": "t1",
                   "what": "object",
                   "filter": {
                     "types": [
@@ -79,7 +79,6 @@
               "steps": [
                 {
                   "kind": "grant_effect",
-                  "targetRef": "g1",
                   "modify": [
                     {
                       "pt": {
@@ -91,7 +90,8 @@
                       "grant": "trample"
                     }
                   ],
-                  "duration": "until_end_of_turn"
+                  "duration": "until_end_of_turn",
+                  "target": "t1"
                 }
               ]
             }

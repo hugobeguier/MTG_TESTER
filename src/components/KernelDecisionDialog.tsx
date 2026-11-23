@@ -9,7 +9,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { Choice } from "@/kernel/engine/types";
 import type { DecisionOptionView, DecisionView } from "@/kernel/integration/tableState";
 import {
-  canConfirm, classifyDecision, clampNumber, confirmLabel, defaultDamageSplit, initialOrder, moveItem, numberChoice, numberHint, orderChoice, pickChoice,
+  canConfirm, causeLine, classifyDecision, clampNumber, confirmLabel, defaultDamageSplit, entriesChoice, entryText, moveItem, numberChoice, numberHint, orderEntries, pickChoice,
   selectionHint, setSplit, splitChoice, splitModel, splitSum, splitValid, toggleSelection, undoLast
 } from "./game/kernelDecisionView";
 import { pileDestination } from "./game/kernelCardInfo";
@@ -85,13 +85,14 @@ function Split({ decision, onAnswer, api, answerRef }: { decision: DecisionView;
 /** order_triggers / order_replacements: the same drag-to-slot behaviour as the library placement, for a list that is already complete (every entry has a slot, the kernel's order is the start).
  *  Drag an entry onto a slot to put it there, or use its Up / Down buttons; when only the first one matters (max 1) drag it to the top or press "Make first". */
 function Order({ decision, onAnswer, api, answerRef }: { decision: DecisionView; onAnswer: KernelDecisionDialogProps["onAnswer"]; api: CardPreviewApi; answerRef: AnswerRef }) {
-  const [order, setOrder] = useState<string[]>(() => initialOrder(decision));
+  const entries = useMemo(() => orderEntries(decision), [decision]);
+  const [order, setOrder] = useState<string[]>(() => entries.map((e) => e.key));
   const [over, setOver] = useState<number | undefined>();
-  const byId = new Map(decision.options.map((o) => [o.id, o]));
+  const byKey = new Map(entries.map((e) => [e.key, e]));
   const first = decision.max <= 1;
-  const start = initialOrder(decision);
-  const changed = order.some((id, i) => id !== start[i]);
-  answerRef.current = () => onAnswer(decision.id, orderChoice(decision, order));
+  const start = entries.map((e) => e.key);
+  const changed = order.some((k, i) => k !== start[i]);
+  answerRef.current = () => onAnswer(decision.id, entriesChoice(decision, order));
   const dropAt = (i: number) => (e: React.DragEvent) => {
     e.preventDefault(); setOver(undefined);
     const from = order.indexOf(e.dataTransfer.getData("text/plain"));
@@ -99,17 +100,30 @@ function Order({ decision, onAnswer, api, answerRef }: { decision: DecisionView;
   };
   return (
     <>
-      <p className="kernel-hint">{first ? "Drag the one to apply first to the top slot, or press Make first." : "Drag the entries into the order you want (first at the top), or use Up / Down."}</p>
+      <p className="kernel-hint">{first ? "Drag the one to apply first to the top slot, or press Make first." : "Drag the entries into the order you want (first at the top), or use Up / Down. Hover a card to enlarge it."}</p>
       <div className="kernel-order-list" data-testid="order-list">
-        {order.map((id, i) => {
-          const o = byId.get(id)!;
+        {order.map((key, i) => {
+          const e = byKey.get(key)!;
+          const o = e.option;
+          const because = causeLine(o);
           return (
-            <div key={id} className={`kernel-order-row${over === i ? " is-over" : ""}`} data-testid={`order-slot-${i}`} draggable onDragStart={(e) => e.dataTransfer.setData("text/plain", id)}
-              onDragOver={(e) => { e.preventDefault(); setOver(i); }} onDragLeave={() => setOver((x) => (x === i ? undefined : x))} onDrop={dropAt(i)}>
+            <div key={key} className={`kernel-order-row${over === i ? " is-over" : ""}`} data-testid={`order-slot-${i}`} draggable onDragStart={(ev) => ev.dataTransfer.setData("text/plain", key)}
+              onDragOver={(ev) => { ev.preventDefault(); setOver(i); }} onDragLeave={() => setOver((x) => (x === i ? undefined : x))} onDrop={dropAt(i)} style={{ alignItems: "flex-start" }}>
               <strong>{i + 1}.</strong>
-              {o.card ? <CardChip card={o.card} api={api} thumb={64} /> : null}
-              <span className="kernel-order-label">{o.label}</span>
-              {first ? <button type="button" className="kernel-small" onClick={() => setOrder([id, ...order.filter((x) => x !== id)])}>{i === 0 ? "First" : "Make first"}</button> : (
+              {o.card ? <CardChip card={o.card} api={api} thumb={72} /> : null}
+              <span className="kernel-order-label" style={{ whiteSpace: "normal", overflow: "visible", textOverflow: "clip", flex: 1 }}>
+                {o.card ? null : <strong>{o.label.split(":")[0]}: </strong>}
+                <span data-testid={`order-text-${i}`}>{entryText(o)}</span>
+                {e.count > 1 ? <strong className="kernel-count-badge" data-testid={`order-count-${i}`} aria-label={`${e.count} identical triggers`}> ×{e.count}</strong> : null}
+                {because && o.causeCard ? (
+                  <span className="kernel-order-cause" data-testid={`order-cause-${i}`} style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4, opacity: 0.85 }}>
+                    <em>{because.slice(0, because.indexOf(o.causeCard.name))}</em>
+                    <CardChip card={o.causeCard} api={api} thumb={40} />
+                    <em>{because.slice(because.indexOf(o.causeCard.name) + o.causeCard.name.length)}</em>
+                  </span>
+                ) : null}
+              </span>
+              {first ? <button type="button" className="kernel-small" onClick={() => setOrder([key, ...order.filter((x) => x !== key)])}>{i === 0 ? "First" : "Make first"}</button> : (
                 <>
                   <button type="button" className="kernel-small" disabled={i === 0} aria-label={`move ${o.label} up`} onClick={() => setOrder(moveItem(order, i, i - 1))}>Up</button>
                   <button type="button" className="kernel-small" disabled={i === order.length - 1} aria-label={`move ${o.label} down`} onClick={() => setOrder(moveItem(order, i, i + 1))}>Down</button>
@@ -121,7 +135,7 @@ function Order({ decision, onAnswer, api, answerRef }: { decision: DecisionView;
       </div>
       <div className="modal-actions">
         <button type="button" disabled={!changed} onClick={() => setOrder(start)}>Reset</button>
-        <button type="button" onClick={() => onAnswer(decision.id, orderChoice(decision, order))}>Confirm</button>
+        <button type="button" onClick={() => onAnswer(decision.id, entriesChoice(decision, order))}>Confirm</button>
       </div>
     </>
   );

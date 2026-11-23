@@ -11,8 +11,9 @@ import { liveIds, lookedLive, saveList, setResult } from "./saved";
 import { decide, type AskSpec, type StepSpec } from "./steps";
 import type { Env, PlayerId } from "./types";
 import { emit } from "./core";
+import { revealCards } from "./library";
 
-export const CHOOSE_FIELDS = ["choice", "exclude", "remember", "options", "who", "from", "count", "saveAs", "fromLooked", "fromRevealed", "fromMilled", "upTo", "anyNumber", "min", "max", "what"];
+export const CHOOSE_FIELDS = ["choice", "exclude", "remember", "options", "who", "from", "count", "saveAs", "fromLooked", "fromRevealed", "fromMilled", "upTo", "anyNumber", "min", "max", "what", "behold"];
 export const CHOOSE_CHOICES = ["color", "mode", "number", "creature_type", "card_type", "basic_land_type", "card_name", "player", "opponent"];
 const CARD_TYPES = ["Artifact", "Creature", "Enchantment", "Instant", "Land", "Planeswalker", "Sorcery", "Battle", "Kindred"];
 const LAND_TYPES = ["Plains", "Island", "Swamp", "Mountain", "Forest"];
@@ -140,7 +141,11 @@ export const chooseStep: StepSpec = {
     const max = step.anyNumber ? cands.length : Math.min(count, cands.length);
     const min = optionalCount ? 0 : max;
     // a step with an id different from its saveAs also leaves "how many were chosen" as its numeric result ({ref: step_result})
-    const count_ = (ids: string[]) => { saveList(r, env, key, ids); if (step.id && step.id !== key) setResult(env, step.id, ids.length); };
+    const count_ = (ids: string[]) => {
+      saveList(r, env, key, ids); if (step.id && step.id !== key) setResult(env, step.id, ids.length);
+      // behold (CR 701.4x): choose a permanent you control OR reveal a card from your hand: a card chosen in the hand is revealed
+      if (step.behold) { const shown = ids.filter((id) => tryObj(r, id)?.zone === "hand"); if (shown.length) revealCards(r, chooser, shown, env.source); }
+    };
     if (cands.length === 0 || max === 0) { count_([]); return "done"; }
     if (min === max && max === cands.length) { count_(cands); return "done"; } // nothing to choose
     const spec: AskSpec = {

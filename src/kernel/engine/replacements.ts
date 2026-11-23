@@ -398,7 +398,7 @@ function choose(r: Run, ev: ReplEvent, cands: Cand[], done: Set<string>): Cand {
   const spec: AskSpec = {
     kind: "order_replacements", player: affectedPlayer(r, ev),
     prompt: orderPrompt(ev),
-    options: cands.map((c) => ({ id: c.key, label: `${label(r, c.src)}: ${(c.spec.prompt?.title ?? c.ability.text).replace(/\s+/g, " ").slice(0, 140)}` })),
+    options: cands.map((c) => { const about = eventObjectId(ev); return { id: c.key, label: `${label(r, c.src)}: ${(c.spec.prompt?.title ?? c.ability.text).replace(/\s+/g, " ").slice(0, 140)}`, source: c.src, text: c.ability.text.replace(/\s+/g, " "), ...(about && tryObj(r, about) ? { cause: about, causeLabel: `is about to ${ev.kind === "enter" ? "enter the battlefield" : ev.kind === "zone" ? "change zones" : ev.kind === "discard" ? "be discarded" : "be affected"}` } : {}) }; }),
     min: 1, max: 1
   };
   const given = takeAnswer(r)?.ids?.[0];

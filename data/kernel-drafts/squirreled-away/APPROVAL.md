@@ -660,10 +660,10 @@ Re-rendered plain English:
 
 ```
 Insatiable Frugivore [draft]
-  [a1] triggered [needed: needs step:repeat_process, field:repeat_process.repeatIf, field:repeat_process.steps, field:move_card_zone.count, field:move_card_zone.filter, field:move_card_zone.from]
+  [a1] triggered [needed: needs step:repeat_process, field:repeat_process.repeatIf, field:repeat_process.steps, step:choose, field:choose.count, field:choose.from, field:choose.saveAs, field:move_card_zone.what, predicate:step_done]
     Oracle: When this creature enters, create a Food token, then you may exile three cards from your graveyard. If you do, repeat this process.
     Trigger: Whenever Insatiable Frugivore enters
-    Effect: Create a ?/? colorless Food artifact token, then exile a card; then repeat this process as long as you did (s2).
+    Effect: Create a ?/? colorless Food artifact token, then choose 3 cards in your graveyard, then exile a card; then repeat this process as long as you did (s2).
   [a2] activated [needed: needs cost:sacrifice, step:grant_effect, field:grant_effect.all, field:grant_effect.filter, field:grant_effect.modify]
     Oracle: {3}{B}, Sacrifice X Foods: Creatures you control get +X/+0 and gain menace until end of turn.
     Cost: {3}{B}, sacrifice X Foods you control
@@ -673,11 +673,11 @@ Insatiable Frugivore [draft]
 
 Player prompts:
 
-- Insatiable Frugivore: optional: Do you want to exile a card?
+- Insatiable Frugivore: exile three cards: Choose three cards from your graveyard to exile. If you do, repeat this process.
 - Insatiable Frugivore: choose X: Choose a value for X (the amount used in the cost).
 - Insatiable Frugivore: choose what to sacrifice: Choose X Foods you control to sacrifice.
 
-Implementation: needed (step:repeat_process, field:repeat_process.repeatIf, field:repeat_process.steps, field:move_card_zone.count, field:move_card_zone.filter, field:move_card_zone.from, cost:sacrifice, step:grant_effect, field:grant_effect.all, field:grant_effect.filter, field:grant_effect.modify)
+Implementation: needed (step:repeat_process, field:repeat_process.repeatIf, field:repeat_process.steps, step:choose, field:choose.count, field:choose.from, field:choose.saveAs, field:move_card_zone.what, predicate:step_done, cost:sacrifice, step:grant_effect, field:grant_effect.all, field:grant_effect.filter, field:grant_effect.modify)
 
 ### Morbid Opportunist
 
@@ -923,17 +923,17 @@ Re-rendered plain English:
 
 ```
 Saw in Half [draft]
-  [a1] spell_effect [needed: needs quantity:division, step:copy, field:copy.count, field:copy.setPower, field:copy.setToughness, field:copy.token, field:copy.who, predicate:step_done]
+  [a1] spell_effect [needed: needs quantity:step_result, quantity:division, step:copy, field:copy.count, field:copy.setPower, field:copy.setToughness, field:copy.token, field:copy.who, predicate:compare]
     Oracle: Destroy target creature. If that creature dies this way, its controller creates two tokens that are copies of that creature, except their power is half that creature's power and their toughness is half that creature's toughness. Round up each time.
     Target t1: target creature  <- prompt: "Choose target creature."
-    Effect: Destroy target creature. Then, IF you did (s1): copy target creature.
+    Effect: Destroy target creature. Then, IF the number affected this way (s1) is 1 or greater: copy target creature.
 ```
 
 Player prompts:
 
 - Saw in Half: choose a target: Choose target creature.
 
-Implementation: needed (quantity:division, step:copy, field:copy.count, field:copy.setPower, field:copy.setToughness, field:copy.token, field:copy.who, predicate:step_done)
+Implementation: needed (quantity:step_result, quantity:division, step:copy, field:copy.count, field:copy.setPower, field:copy.setToughness, field:copy.token, field:copy.who, predicate:compare)
 
 ### Scurry of Squirrels
 
@@ -951,7 +951,7 @@ Scurry of Squirrels [draft]
   [a1] triggered [needed: needs scripted:myriad, step:copy, field:copy.attacking, field:copy.exileAt, field:copy.forEach, field:copy.tapped, field:copy.token]
     Oracle: Myriad, myriad (Whenever this creature attacks, for each opponent other than defending player, you may create a token that's a copy of this creature that's tapped and attacking that player or a planeswalker they control. Then do it again. Exile the tokens at end of combat.)
     Trigger: Whenever Scurry of Squirrels attacks
-    Effect: You may copy Scurry of Squirrels.
+    Effect: Copy Scurry of Squirrels. Then, copy Scurry of Squirrels.
     Scripted (engine-specific rule, not described by the fields above): myriad
     Keyword: myriad
   [a2] triggered [needed: needs step:add_counters, field:add_counters.on]
@@ -963,7 +963,6 @@ Scurry of Squirrels [draft]
 
 Player prompts:
 
-- Scurry of Squirrels: optional: Do you want to copy Scurry of Squirrels?
 - Scurry of Squirrels: choose a target: Choose target creature you control.
 
 Implementation: needed (scripted:myriad, step:copy, field:copy.attacking, field:copy.exileAt, field:copy.forEach, field:copy.tapped, field:copy.token, step:add_counters, field:add_counters.on)
@@ -1378,18 +1377,22 @@ Implementation: needed (trigger:multi_event, trigger:subject, field:life_change.
 | `step:copy` | 7 | Hazel of the Rootbloom; Chatterstorm; Plumb the Forbidden; Rootcast Apprenticeship; Saw in Half; Scurry of Squirrels; Second Harvest |
 | `field:copy.count` | 6 | Hazel of the Rootbloom; Chatterstorm; Plumb the Forbidden; Rootcast Apprenticeship; Saw in Half; Second Harvest |
 | `mana:variable` | 6 | Hazel of the Rootbloom; Arcane Signet; Command Tower; Exotic Orchard; Gilded Goose; Path of Ancestry |
-| `predicate:step_done` | 6 | Cache Grab; Chitterspitter; Necroblossom Snarl; Plaguecrafter; Saw in Half; Skyfisher Spider |
+| `predicate:step_done` | 6 | Cache Grab; Chitterspitter; Insatiable Frugivore; Necroblossom Snarl; Plaguecrafter; Skyfisher Spider |
 | `timing` | 6 | Beledros Witherbloom; Garruk, Cursed Huntsman; Idol of Oblivion; Morbid Opportunist; Tainted Wood; Wolfwillow Haven |
 | `field:copy.token` | 5 | Hazel of the Rootbloom; Rootcast Apprenticeship; Saw in Half; Scurry of Squirrels; Second Harvest |
 | `field:life_change.lose` | 5 | Bastion of Remembrance; Nadier's Nightblade; Plumb the Forbidden; Poison-Tip Archer; Zulaport Cutthroat |
 | `field:life_change.who` | 4 | Bastion of Remembrance; Nadier's Nightblade; Poison-Tip Archer; Zulaport Cutthroat |
-| `field:move_card_zone.from` | 4 | Cache Grab; Golgari Rot Farm; Insatiable Frugivore; Skyfisher Spider |
 | `field:sacrifice_permanent.filter` | 4 | Chitterspitter; Plaguecrafter; Rootcast Apprenticeship; Skyfisher Spider |
 | `ref:iterated` | 4 | Garruk, Cursed Huntsman; Gourmand's Talent; Oran-Rief, the Vastwood; Second Harvest |
+| `step:choose` | 4 | Cache Grab; Golgari Rot Farm; Insatiable Frugivore; Tireless Provisioner |
 | `cost:discard` | 3 | Barren Moor; Decree of Pain; Tranquil Thicket |
+| `field:choose.count` | 3 | Cache Grab; Golgari Rot Farm; Insatiable Frugivore |
+| `field:choose.from` | 3 | Cache Grab; Golgari Rot Farm; Insatiable Frugivore |
+| `field:choose.saveAs` | 3 | Cache Grab; Golgari Rot Farm; Insatiable Frugivore |
 | `field:grant_effect.all` | 3 | Binding the Old Gods; End-Raze Forerunners; Insatiable Frugivore |
 | `field:grant_effect.filter` | 3 | Binding the Old Gods; End-Raze Forerunners; Insatiable Frugivore |
 | `field:grant_effect.modify` | 3 | Binding the Old Gods; End-Raze Forerunners; Insatiable Frugivore |
+| `field:move_card_zone.from` | 3 | Cache Grab; Golgari Rot Farm; Skyfisher Spider |
 | `field:repeat_for_each.over` | 3 | Gourmand's Talent; Oran-Rief, the Vastwood; Second Harvest |
 | `field:repeat_for_each.steps` | 3 | Gourmand's Talent; Oran-Rief, the Vastwood; Second Harvest |
 | `field:search_library.count` | 3 | Binding the Old Gods; Evolving Wilds; Terramorphic Expanse |
@@ -1398,7 +1401,6 @@ Implementation: needed (trigger:multi_event, trigger:subject, field:life_change.
 | `field:search_library.tapped` | 3 | Binding the Old Gods; Evolving Wilds; Terramorphic Expanse |
 | `field:search_library.to` | 3 | Binding the Old Gods; Evolving Wilds; Terramorphic Expanse |
 | `quantity:count` | 3 | Honored Dreyleader; Shamanic Revelation; Skyfisher Spider |
-| `step:choose` | 3 | Cache Grab; Golgari Rot Farm; Tireless Provisioner |
 | `step:grant_effect` | 3 | Binding the Old Gods; End-Raze Forerunners; Insatiable Frugivore |
 | `step:repeat_for_each` | 3 | Gourmand's Talent; Oran-Rief, the Vastwood; Second Harvest |
 | `step:scry` | 3 | Path of Ancestry; Temple of Malady; Woe Strider |
@@ -1409,9 +1411,6 @@ Implementation: needed (trigger:multi_event, trigger:subject, field:life_change.
 | `cost:life` | 2 | Hazel of the Rootbloom; Beledros Witherbloom |
 | `field:attach.to` | 2 | Skullclamp; Sword of the Squeak |
 | `field:attach.what` | 2 | Skullclamp; Sword of the Squeak |
-| `field:choose.count` | 2 | Cache Grab; Golgari Rot Farm |
-| `field:choose.from` | 2 | Cache Grab; Golgari Rot Farm |
-| `field:choose.saveAs` | 2 | Cache Grab; Golgari Rot Farm |
 | `field:create_tokens.tokenAbilities` | 2 | Beledros Witherbloom; Garruk, Cursed Huntsman |
 | `field:create_tokens.tokenKeywords` | 2 | Arasta of the Endless Web; Maskwood Nexus |
 | `field:damage_target.source` | 2 | Llanowar Wastes; Talisman of Resilience |
@@ -1420,6 +1419,7 @@ Implementation: needed (trigger:multi_event, trigger:subject, field:life_change.
 | `field:if_else.if` | 2 | Hazel of the Rootbloom; Tear Asunder |
 | `field:if_else.then` | 2 | Hazel of the Rootbloom; Tear Asunder |
 | `field:mass_pump.filter` | 2 | Decree of Pain; Swarmyard Massacre |
+| `field:move_card_zone.what` | 2 | Bojuka Bog; Insatiable Frugivore |
 | `field:sacrifice_permanent.who` | 2 | Plaguecrafter; Rootcast Apprenticeship |
 | `keyword:enchant` | 2 | Squirrel Nest; Wolfwillow Haven |
 | `modes` | 2 | Casualties of War; Rootcast Apprenticeship |
@@ -1428,6 +1428,7 @@ Implementation: needed (trigger:multi_event, trigger:subject, field:life_change.
 | `predicate:not` | 2 | Necroblossom Snarl; Plaguecrafter |
 | `quantity:event_amount` | 2 | Academy Manufactor; Chatterfang, Squirrel General |
 | `quantity:math` | 2 | Chatterfang, Squirrel General; Swarmyard Massacre |
+| `quantity:step_result` | 2 | Decree of Pain; Saw in Half |
 | `replacement:would_create_token` | 2 | Academy Manufactor; Chatterfang, Squirrel General |
 | `step:attach` | 2 | Skullclamp; Sword of the Squeak |
 | `step:if_else` | 2 | Hazel of the Rootbloom; Tear Asunder |
@@ -1465,9 +1466,6 @@ Implementation: needed (trigger:multi_event, trigger:subject, field:life_change.
 | `field:destroy_target.reflexive` | 1 | Skyfisher Spider |
 | `field:discard.who` | 1 | Plaguecrafter |
 | `field:exile_target.linkExile` | 1 | Hazel's Brewmaster |
-| `field:move_card_zone.count` | 1 | Insatiable Frugivore |
-| `field:move_card_zone.filter` | 1 | Insatiable Frugivore |
-| `field:move_card_zone.what` | 1 | Bojuka Bog |
 | `field:repeat_process.repeatIf` | 1 | Insatiable Frugivore |
 | `field:repeat_process.steps` | 1 | Insatiable Frugivore |
 | `field:reveal.filter` | 1 | Necroblossom Snarl |
@@ -1480,6 +1478,7 @@ Implementation: needed (trigger:multi_event, trigger:subject, field:life_change.
 | `modes:repeatable` | 1 | Rootcast Apprenticeship |
 | `predicate:all` | 1 | Cache Grab |
 | `predicate:chosen_is` | 1 | Tireless Provisioner |
+| `predicate:compare` | 1 | Saw in Half |
 | `predicate:kicked` | 1 | Tear Asunder |
 | `predicate:paid_additional_cost` | 1 | Plumb the Forbidden |
 | `predicate:stat` | 1 | Gourmand's Talent |
@@ -1487,7 +1486,6 @@ Implementation: needed (trigger:multi_event, trigger:subject, field:life_change.
 | `quantity:division` | 1 | Saw in Half |
 | `quantity:opponents_count` | 1 | Chittering Witch |
 | `quantity:stat` | 1 | Nested Shambler |
-| `quantity:step_result` | 1 | Decree of Pain |
 | `quantity:X` | 1 | Chatterfang, Squirrel General |
 | `scripted:colors_lands_opponents_control_could_produce` | 1 | Exotic Orchard |
 | `scripted:mana_rider_text` | 1 | Path of Ancestry |

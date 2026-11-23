@@ -22,6 +22,8 @@ export interface QCtx {
   iterated?: string;
   eventObj?: string;
   eventPlayer?: PlayerId;
+  /** attack batch: defenders attacked (attacked_defender) */
+  defenders?: string[];
   amount?: number;
   lastLifeLost?: number;
   item?: { cast?: CastInfo };
@@ -86,6 +88,13 @@ export function matchesFilter(r: Run, id: string, f: ObjectFilter, q: QCtx): boo
   }
   if (f.controller === "you" && o.controller !== q.controller) return false;
   if (f.controller === "opponent" && o.controller === q.controller) return false;
+  if (f.controller === "that_player") { const tp = q.thatPlayer ?? q.eventPlayer; if (!tp) throw new Unsupported("player_ref:that_player_missing"); if (o.controller !== tp) return false; } // "the player of the enclosing loop / event"
+  if (f.controller === "active_player" && o.controller !== r.s.turn.active) return false;
+  if (f.controller === "defending_player") { // "creatures defending player controls": the player the source creature attacks
+    const at = q.source ? attackerEntry(r, q.source) : undefined;
+    if (!at) return false; // outside combat there is no defending player: nothing matches
+    if (o.controller !== defenderPlayer(r, at.defender)) return false;
+  }
   if (f.controller === "enchanted_player") { const ap = q.source ? tryObj(r, q.source)?.attachedPlayer : undefined; if (!ap || o.controller !== ap) return false; } // "creatures enchanted player controls"
   if (f.owner === "you" && o.owner !== q.controller) return false;
   if (f.owner === "opponent" && o.owner === q.controller) return false;
@@ -115,13 +124,33 @@ export function matchesFilter(r: Run, id: string, f: ObjectFilter, q: QCtx): boo
     const chosen = q.source ? tryObj(r, q.source)?.chosen?.type : undefined;
     if (!chosen || !lcAll(c.subtypes).includes(chosen.toLowerCase())) return false;
   }
-  if (f.with && !lcAll(f.with).every((k) => c.keywords.includes(k))) return false;
-  if (f.without && lcAll(f.without).some((k) => c.keywords.includes(k))) return false;
+  if (f.with && !lcAll(f.with).every((k) => (k === "modified" ? isModified(r, id) : c.keywords.includes(k)))) return false;
+  if (f.without && lcAll(f.without).some((k) => (k === "modified" ? isModified(r, id) : c.keywords.includes(k)))) return false;
   return true;
+}
+
+/** "Modified" (CR 700.9): a permanent with a counter on it, that is equipped, or that is enchanted by an Aura its controller controls. */
+export function isModified(r: Run, id: ObjId): boolean {
+  const o = tryObj(r, id);
+  if (!o || o.zone !== "battlefield") return false;
+  if (Object.values(o.counters).some((n) => n > 0)) return true;
+  return r.s.battlefield.some((aid) => {
+    const a = r.s.objects[aid];
+    if (!a || a.attachedTo !== id) return false;
+    const subs = chars(r, aid).subtypes.map((s) => s.toLowerCase());
+    return subs.includes("equipment") || (subs.includes("aura") && a.controller === o.controller);
+  });
 }
 
 /** Ids of objects in `zone` (battlefield by default) matching the filter. Library/hand/etc. span every player unless owner is set. */
 export function objectsMatching(r: Run, f: ObjectFilter, q: QCtx, zoneDefault: Zone = "battlefield"): ObjId[] {
+  // alternatives that name different zones ("a Dragon you control or a Dragon card in your hand"): each one is searched in its own zone
+  if (f.anyOf?.some((s) => s.zone) && !f.zone) {
+    const { anyOf, ...rest } = f;
+    const seen = new Set<ObjId>();
+    for (const sub of anyOf) for (const id of objectsMatching(r, { ...rest, ...sub }, q, zoneDefault)) seen.add(id);
+    return [...seen];
+  }
   const zone = f.zone && f.zone !== "any" ? f.zone : zoneDefault;
   let pool: ObjId[];
   if (f.zone === "any") pool = Object.keys(r.s.objects);
@@ -179,6 +208,7 @@ export function resolveObjs(r: Run, ref: string | undefined, q: QCtx): string[] 
     case "rest_of_looked_cards": return lookedLive(r, { ...q, chosen: q.chosen ?? {} });
     case "linked_exile": return linkedObjs(r, q.source);
     case "event_object": return q.eventObj ? [q.eventObj] : [];
+    case "vote_winners": return q.chosen && "vote_winners" in q.chosen ? savedObjs(r, { ...q, chosen: q.chosen }, "vote_winners") : [];
     case "created": return q.created ?? [];
     case "iterated": return q.iterated ? [q.iterated] : [];
     default:
@@ -206,6 +236,11 @@ export function evalQuantity(r: Run, qy: Quantity, q: QCtx): number {
   switch (qy.ref) {
     case "X": return q.x ?? 0;
     case "count": return objectsMatching(r, qy.of, q).length;
+    case "damage_taken_this_turn": { const who = resolvePlayers(r, qy.who, q)[0]; return r.s.turnLog.filter((e) => e.type === "damage_to_player" && e.player === who).reduce((n, e) => n + (e.amount ?? 0), 0); }
+    case "saved_count": { // cards of a saved list (or the copy a delayed trigger kept) that are still in the zone
+      const ids = q.chosen?.[qy.list] ?? q.targets?.["__l_" + qy.list] ?? [];
+      return ids.filter((id) => isObjId(id) && tryObj(r, id)?.zone === (qy.zone ?? "exile")).length;
+    }
     case "stat": {
       const ids = resolveObjs(r, qy.of, q);
       if (!ids.length) return 0;
@@ -347,6 +382,7 @@ export function evalPredicate(r: Run, p: Predicate, q: QCtx): boolean {
       const ids = resolveObjs(r, p.of, q);
       if (!ids[0] || !tryObj(r, ids[0])) return false;
       { const m = /^([a-z]+)_counters$/.exec(p.stat); if (m) return cmp(tryObj(r, ids[0])!.counters[m[1]] ?? 0, p.cmp, r, q); }
+      if (p.stat === "class_level") return cmp(tryObj(r, ids[0])!.classLevel ?? 1, p.cmp, r, q); // a Class's level (CR 716)
       if (p.stat === "monarch_exists") return cmp(r.s.monarch !== undefined ? 1 : 0, p.cmp, r, q); // "if there is no monarch" (Crown of Gondor)
       if (p.stat === "controller_is_monarch") return cmp(r.s.monarch !== undefined && r.s.monarch === tryObj(r, ids[0])!.controller ? 1 : 0, p.cmp, r, q);
       if (p.stat === "power" || p.stat === "toughness" || p.stat === "mana_value") return cmp(evalQuantity(r, { ref: "stat", of: p.of, stat: p.stat }, q), p.cmp, r, q);
@@ -360,7 +396,17 @@ export function evalPredicate(r: Run, p: Predicate, q: QCtx): boolean {
       if (p.state === "attacking") return !!o && isAttacking(r, o.id);
       throw new Unsupported(`predicate:source_state.${p.state}`);
     }
-    case "turn_number": throw new Unsupported("predicate:turn_number");
+    case "turn_number": {
+      // "your Nth turn of the game" is judged during your own turns only ("you can't cast this during your first, second, or third turns")
+      if (p.scope === "yours") return r.s.turn.active === q.controller && cmp(turnsTakenBy(r, q.controller), p.cmp, r, q);
+      return cmp(r.s.turn.number, p.cmp, r, q);
+    }
+    case "attacked_defender": {
+      const ds = q.defenders;
+      if (!ds) throw new Unsupported("predicate:attacked_defender", "attacked_defender outside an attack trigger");
+      const mine = (d: string): boolean => d === q.controller || (p.defender === "you_or_your_planeswalkers" && isObjId(d) && tryObj(r, d)?.controller === q.controller);
+      return p.who === "all" ? ds.every(mine) : p.who === "none" ? !ds.some(mine) : ds.some(mine);
+    }
     case "chosen_is": {
       const so = q.source ? tryObj(r, q.source) : undefined;
       const ch = so?.chosen;
@@ -383,5 +429,8 @@ export function evalPredicate(r: Run, p: Predicate, q: QCtx): boolean {
     default: throw new Unsupported(`predicate:${(p as { check: string }).check}`);
   }
 }
+
+/** How many turns this player has begun (the first turn of the game counts for its player). */
+export function turnsTakenBy(r: Run, pid: PlayerId): number { return Math.max(r.s.turnsTaken?.[pid] ?? 0, r.s.turn.active === pid ? 1 : 0); }
 
 export function isSick(r: Run, id: ObjId): boolean { return isSummoningSick(r, obj(r, id)); }

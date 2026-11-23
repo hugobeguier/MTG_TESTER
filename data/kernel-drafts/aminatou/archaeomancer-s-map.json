@@ -71,7 +71,7 @@
               "types": [
                 "land"
               ],
-              "controller": "opponent"
+              "controller": "that_player"
             }
           },
           "cmp": {

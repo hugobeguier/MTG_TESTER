@@ -32,86 +32,21 @@
       ],
       "steps": [
         {
-          "kind": "choose",
-          "who": "you",
-          "alsoWho": "target_player",
-          "from": {
-            "zone": "library"
-          },
-          "position": "top",
-          "count": 1,
-          "reveal": true,
-          "saveAs": "chosen",
-          "src": 0,
-          "prompt": {
-            "title": "Keen Duelist: choose",
-            "instruction": "Choose a card in a library.",
-            "source": {
-              "card": "Keen Duelist",
-              "ability": "a1"
-            }
-          }
-        },
-        {
-          "kind": "life_change",
-          "who": "you",
-          "amount": {
-            "math": "*",
-            "args": [
-              -1,
-              {
-                "ref": "stat",
-                "of": "chosen",
-                "stat": "mana_value"
-              }
-            ]
-          },
-          "lifeFrom": "theirs",
-          "src": 1
-        },
-        {
-          "kind": "life_change",
-          "who": "target_player",
-          "amount": {
-            "math": "*",
-            "args": [
-              -1,
-              {
-                "ref": "stat",
-                "of": "chosen",
-                "stat": "mana_value"
-              }
-            ]
-          },
-          "lifeFrom": "yours",
-          "src": 1
-        },
-        {
-          "kind": "move_card_zone",
-          "what": "chosen",
-          "moveFrom": "library",
-          "moveTo": "hand",
-          "who": "you",
-          "alsoWho": "target_player",
-          "src": 2
+          "kind": "mutual_reveal",
+          "players": "you_and_target_player",
+          "srcs": [
+            0,
+            1,
+            2
+          ]
         }
       ],
       "id": "a1",
       "implementation": "needed",
       "needs": [
-        "step:choose",
-        "field:choose.alsoWho",
-        "field:choose.count",
-        "field:choose.from",
-        "field:choose.position",
-        "field:choose.reveal",
-        "field:choose.saveAs",
-        "quantity:math",
-        "field:life_change.amount",
-        "field:life_change.lifeFrom",
-        "field:life_change.who",
-        "field:move_card_zone.alsoWho",
-        "field:move_card_zone.what"
+        "step:mutual_reveal",
+        "field:mutual_reveal.players",
+        "field:mutual_reveal.srcs"
       ]
     }
   ],
@@ -119,12 +54,16 @@
     "status": "draft",
     "ignore": [
       {
-        "lexeme": "another",
-        "reason": "'the other player' (the other revealer), not a second object of the same filter"
+        "lexeme": "quantity",
+        "reason": "the mana value of the other player's revealed card is read inside the mutual_reveal step, not as a Quantity field"
       },
       {
         "lexeme": "each",
-        "reason": "you and target opponent each: alsoWho on the steps"
+        "reason": "the mutual_reveal step is the whole each-player effect (reveal, lose life, put into hand) for the two players named by its players field"
+      },
+      {
+        "lexeme": "another",
+        "reason": "\"the other player\" is the second player of the mutual_reveal step, not a filter.another"
       }
     ]
   }

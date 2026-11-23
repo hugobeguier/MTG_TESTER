@@ -6,15 +6,11 @@
       "kind": "keyword",
       "text": "Read ahead",
       "keyword": {
-        "name": "read_ahead"
+        "name": "read_ahead",
+        "param": 3
       },
-      "scripted": {
-        "handler": "read_ahead"
-      },
-      "implementation": "needed",
-      "needs": [
-        "scripted:read_ahead"
-      ]
+      "implementation": "implemented",
+      "needs": []
     },
     {
       "id": "a2",
@@ -37,8 +33,15 @@
               "creature"
             ]
           },
-          "alsoWho": "each_opponent",
-          "amount": 2
+          "amount": 2,
+          "src": 0
+        },
+        {
+          "kind": "damage_target",
+          "source": "self",
+          "who": "each_opponent",
+          "amount": 2,
+          "src": 0
         }
       ],
       "implementation": "needed",
@@ -46,9 +49,9 @@
         "trigger:counter_put",
         "trigger:chapters",
         "field:damage_target.all",
-        "field:damage_target.alsoWho",
         "field:damage_target.filter",
-        "field:damage_target.source"
+        "field:damage_target.source",
+        "field:damage_target.who"
       ]
     },
     {
@@ -64,17 +67,39 @@
       },
       "steps": [
         {
+          "kind": "choose",
+          "choice": "number",
+          "id": "n",
+          "min": 0,
+          "max": {
+            "ref": "count",
+            "of": {
+              "zone": "hand",
+              "owner": "you"
+            }
+          },
+          "who": "you",
+          "src": 0,
+          "prompt": {
+            "title": "The Elder Dragon War: discard",
+            "instruction": "Choose how many cards to discard, then draw that many cards.",
+            "source": {
+              "card": "The Elder Dragon War",
+              "ability": "a3"
+            }
+          }
+        },
+        {
           "kind": "discard",
           "who": "you",
           "amount": {
-            "ref": "X"
+            "ref": "step_result",
+            "step": "n"
           },
-          "upTo": true,
-          "min": 0,
-          "saveAs": "discarded",
+          "src": 0,
           "prompt": {
             "title": "The Elder Dragon War: discard",
-            "instruction": "Choose X cards to discard.",
+            "instruction": "Choose the number affected this way (n) cards to discard.",
             "source": {
               "card": "The Elder Dragon War",
               "ability": "a3"
@@ -85,18 +110,21 @@
           "kind": "draw_cards",
           "who": "you",
           "amount": {
-            "ref": "X"
-          }
+            "ref": "step_result",
+            "step": "n"
+          },
+          "src": 0
         }
       ],
       "implementation": "needed",
       "needs": [
+        "quantity:step_result",
         "trigger:counter_put",
         "trigger:chapters",
-        "quantity:X",
-        "field:discard.min",
-        "field:discard.saveAs",
-        "field:discard.upTo"
+        "step:choose",
+        "field:choose.choice",
+        "field:choose.max",
+        "field:choose.min"
       ]
     },
     {
@@ -135,6 +163,12 @@
     }
   ],
   "review": {
-    "status": "draft"
+    "status": "draft",
+    "ignore": [
+      {
+        "lexeme": "literal:2",
+        "reason": "the text says \"2 damage to each creature and each opponent\" once; it is two damage steps (creatures, opponents)"
+      }
+    ]
   }
 }

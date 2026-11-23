@@ -78,6 +78,35 @@ export function moveItem<T>(list: readonly T[], from: number, to: number): T[] {
 
 /** the initial order of an ordering decision: the kernel's own order */
 export function initialOrder(d: DecisionView): string[] { return d.options.map((o) => o.id); }
+/**
+ * One row of an ordering dialog: the kernel's entries that are identical in effect AND cause (same source object, ability, causing object, amount ... = the same `group`)
+ * are shown once with a count badge and move together; every other entry is its own row.
+ */
+export interface OrderEntry { key: string; ids: string[]; count: number; option: DecisionView["options"][number] }
+export function orderEntries(d: Pick<DecisionView, "options">): OrderEntry[] {
+  const out: OrderEntry[] = [];
+  const byGroup = new Map<string, OrderEntry>();
+  for (const o of d.options) {
+    const g = o.group;
+    const hit = g !== undefined ? byGroup.get(g) : undefined;
+    if (hit) { hit.ids.push(o.id); hit.count++; continue; }
+    const e: OrderEntry = { key: o.id, ids: [o.id], count: 1, option: o };
+    out.push(e);
+    if (g !== undefined) byGroup.set(g, e);
+  }
+  return out;
+}
+/** the answer for an order of entry keys: every entry's ids in that order (a merged row contributes its ids side by side); max 1 = just the first id */
+export function entriesChoice(d: Pick<DecisionView, "max" | "options">, order: readonly string[]): Choice {
+  const by = new Map(orderEntries(d).map((e) => [e.key, e]));
+  const ids = order.flatMap((k) => by.get(k)?.ids ?? []);
+  return { ids: d.max <= 1 ? ids.slice(0, 1) : ids };
+}
+/** the full text of an ordering entry (never truncated): the ability's text, else the kernel's label */
+export function entryText(o: { label: string; text?: string }): string { return o.text ?? o.label; }
+/** "because Fear of Sleep Paralysis entered the battlefield" for entries that have a causing card */
+export function causeLine(o: { causeLabel?: string; causeCard?: { name: string } }): string | undefined { return o.causeCard ? `because ${o.causeCard.name}${o.causeLabel ? " " + o.causeLabel : ""}` : undefined; }
+
 /** order_triggers / order_replacements: one id (the first to apply) is the answer when max is 1, otherwise the whole order */
 export function orderChoice(d: Pick<DecisionView, "max">, order: readonly string[]): Choice { return { ids: d.max <= 1 ? order.slice(0, 1) : [...order] }; }
 

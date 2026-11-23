@@ -22,17 +22,19 @@
           "forEach": "opponent_other_than_defending_player",
           "tapped": true,
           "attacking": true,
-          "optional": true,
           "exileAt": "end_of_combat",
           "token": true,
-          "prompt": {
-            "title": "Scurry of Squirrels: optional",
-            "instruction": "Do you want to copy Scurry of Squirrels?",
-            "source": {
-              "card": "Scurry of Squirrels",
-              "ability": "a1"
-            }
-          }
+          "src": 0
+        },
+        {
+          "kind": "copy",
+          "target": "self",
+          "forEach": "opponent_other_than_defending_player",
+          "tapped": true,
+          "attacking": true,
+          "exileAt": "end_of_combat",
+          "token": true,
+          "src": 0
         }
       ],
       "implementation": "needed",

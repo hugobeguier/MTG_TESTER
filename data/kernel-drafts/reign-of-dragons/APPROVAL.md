@@ -18,7 +18,7 @@ Reading guide: each card below shows the oracle text and what the structured JSO
 - **Dragonspeaker Shaman** (Creature — Human Barbarian Shaman): Dragon spells you cast cost {2} less to cast [needs: static]
 - **Dragonstorm Globe** (Artifact): If a Dragon you control would enter, also: put a +1/+1 counter on that object | {T}: add one mana of any color [needs: replacement:would_enter, step:add_counters, field:add_counters.on, mana:variable]
 - **Fire Diamond** (Artifact): If Fire Diamond would enter, it enters tapped | {T}: add {R} [needs: replacement:would_enter]
-- **Leyline Tyrant** (Creature — Dragon): Keyword flying | You have keep_unspent_red_mana_between_steps_and_phases | Whenever Leyline Tyrant dies: [targets: target] You may Leyline Tyrant deals X damage to target [needs: static, quantity:X, field:damage_target.optionalCost, field:damage_target.source, predicate:paid_additional_cost]
+- **Leyline Tyrant** (Creature — Dragon): Keyword flying | You have keep_unspent_red_mana_between_steps_and_phases | Whenever Leyline Tyrant dies: [targets: target] You may Leyline Tyrant deals X damage to target [needs: static, quantity:X, field:damage_target.optionalCost, field:damage_target.reflexive, field:damage_target.source]
 - **Lightning Bolt** (Instant): [targets: target] Deal 3 damage to target [implemented]
 - **Mana Geyser** (Sorcery): Add {R} [needs: step:add_mana, quantity:count, field:add_mana.produces]
 - **Mountain** (Basic Land — Mountain): {T}: add {R} [implemented]
@@ -175,10 +175,10 @@ Re-rendered plain English:
 
 ```
 Breaching Dragonstorm [draft]
-  [a1] triggered [needed: needs field:move_card_zone.position, field:move_card_zone.saveAs, field:move_card_zone.until, step:permission_to_play, field:permission_to_play.what, field:permission_to_play.withoutPaying, predicate:matches]
+  [a1] triggered [needed: needs field:move_card_zone.position, field:move_card_zone.saveHitAs, field:move_card_zone.until, step:permission_to_play, field:permission_to_play.elseToHand, field:permission_to_play.what, field:permission_to_play.withoutPaying, predicate:matches, predicate:not, predicate:step_done]
     Oracle: When this enchantment enters, exile cards from the top of your library until you exile a nonland card. You may cast it without paying its mana cost if that spell's mana value is 8 or less. If you don't, put that card into your hand.
     Trigger: Whenever Breaching Dragonstorm enters
-    Effect: Exile a card. Then, IF that object is a permanent with mana value 8 or less: you may you may play event_object without paying its mana cost. Then, IF that object is a card in exile: put that object into your hand.
+    Effect: Exile a card. Then, IF that object is a permanent with mana value 8 or less: you may you may play event_object without paying its mana cost. Then, IF it is not true that you did (castit): put that object into your hand.
   [a2] triggered [needed: needs trigger:subject]
     Oracle: When a Dragon you control enters, return this enchantment to its owner's hand.
     Trigger: Whenever a Dragon you control enters
@@ -187,9 +187,9 @@ Breaching Dragonstorm [draft]
 
 Player prompts:
 
-- Breaching Dragonstorm: optional: Do you want to you may play event_object without paying its mana cost?
+- Breaching Dragonstorm: cast it?: You may cast the exiled nonland card without paying its mana cost (mana value 8 or less). If you do not, it goes to your hand.
 
-Implementation: needed (field:move_card_zone.position, field:move_card_zone.saveAs, field:move_card_zone.until, step:permission_to_play, field:permission_to_play.what, field:permission_to_play.withoutPaying, predicate:matches, trigger:subject)
+Implementation: needed (field:move_card_zone.position, field:move_card_zone.saveHitAs, field:move_card_zone.until, step:permission_to_play, field:permission_to_play.elseToHand, field:permission_to_play.what, field:permission_to_play.withoutPaying, predicate:matches, predicate:not, predicate:step_done, trigger:subject)
 
 ### Carnelian Orb of Dragonkind
 
@@ -365,7 +365,7 @@ Dragonhawk, Fate's Tempest [draft]
   [a1] keyword [implemented]
     Oracle: Flying
     Keyword: flying
-  [a2] triggered [needed: needs trigger:multi_event, field:move_card_zone.position, field:move_card_zone.saveAs, step:permission_to_play, field:permission_to_play.what, duration:until_your_next_end_step, step:create_delayed_trigger, field:create_delayed_trigger.at, field:create_delayed_trigger.steps, quantity:math, field:damage_target.from, field:damage_target.source, field:damage_target.who]
+  [a2] triggered [needed: needs trigger:multi_event, field:move_card_zone.position, field:move_card_zone.saveAs, step:permission_to_play, field:permission_to_play.what, duration:until_your_next_end_step, step:create_delayed_trigger, field:create_delayed_trigger.at, field:create_delayed_trigger.steps, quantity:math, field:damage_target.source, field:damage_target.who]
     Oracle: Whenever Dragonhawk enters or attacks, exile the top X cards of your library, where X is the number of creatures you control with power 4 or greater. You may play those cards until your next end step. At the beginning of your next end step, Dragonhawk deals 2 damage to each opponent for each of those cards that are still exiled.
     Trigger: Whenever Dragonhawk, Fate's Tempest enters or attacks
     Effect: Exile a card. Then, you may you may play exiled until your next end step. Then, create a delayed trigger.
@@ -375,7 +375,7 @@ Player prompts:
 
 - Dragonhawk, Fate's Tempest: optional: Do you want to you may play exiled until your next end step?
 
-Implementation: needed (trigger:multi_event, field:move_card_zone.position, field:move_card_zone.saveAs, step:permission_to_play, field:permission_to_play.what, duration:until_your_next_end_step, step:create_delayed_trigger, field:create_delayed_trigger.at, field:create_delayed_trigger.steps, quantity:math, field:damage_target.from, field:damage_target.source, field:damage_target.who)
+Implementation: needed (trigger:multi_event, field:move_card_zone.position, field:move_card_zone.saveAs, step:permission_to_play, field:permission_to_play.what, duration:until_your_next_end_step, step:create_delayed_trigger, field:create_delayed_trigger.at, field:create_delayed_trigger.steps, quantity:math, field:damage_target.source, field:damage_target.who)
 
 ### Dragonmaster Outcast
 
@@ -546,7 +546,7 @@ Goldlust Triad [draft]
   [a2] triggered [needed: needs scripted:myriad, step:copy, field:copy.attacking, field:copy.exileAt, field:copy.forEach, field:copy.tapped, field:copy.token]
     Oracle: Myriad (Whenever this creature attacks, for each opponent other than defending player, you may create a token copy that's tapped and attacking that player or a planeswalker they control. Exile the tokens at end of combat.)
     Trigger: Whenever Goldlust Triad attacks
-    Effect: You may copy Goldlust Triad.
+    Effect: Copy Goldlust Triad.
     Scripted (engine-specific rule, not described by the fields above): myriad
     Keyword: myriad
   [a3] triggered [implemented]
@@ -557,7 +557,7 @@ Goldlust Triad [draft]
 
 Player prompts:
 
-- Goldlust Triad: optional: Do you want to copy Goldlust Triad?
+- (none: no decisions)
 
 Implementation: needed (scripted:myriad, step:copy, field:copy.attacking, field:copy.exileAt, field:copy.forEach, field:copy.tapped, field:copy.token)
 
@@ -612,17 +612,17 @@ Hazoret's Monument [draft]
   [a1] static [needed: needs static]
     Oracle: Red creature spells you cast cost {1} less to cast.
     Static: Red creature spells you cast cost {1} less to cast
-  [a2] triggered [needed: needs predicate:paid_additional_cost]
+  [a2] triggered [needed: needs predicate:step_done]
     Oracle: Whenever you cast a creature spell, you may discard a card. If you do, draw a card.
     Trigger: Whenever you cast a creature spell
-    Effect: You may discard a card. Then, IF the additional cost (discard a card) was paid: draw a card.
+    Effect: You may discard a card. Then, IF you did (disc): draw a card.
 ```
 
 Player prompts:
 
 - Hazoret's Monument: optional: Do you want to discard a card?
 
-Implementation: needed (static, predicate:paid_additional_cost)
+Implementation: needed (static, predicate:step_done)
 
 ### Hellkite Charger
 
@@ -886,10 +886,10 @@ Re-rendered plain English:
 
 ```
 Sarkhan, Dragon Ascendant [draft]
-  [a1] triggered [needed: needs step:choose, field:choose.behold, field:choose.count, field:choose.from, field:choose.saveAs, predicate:paid_additional_cost]
+  [a1] triggered [needed: needs step:choose, field:choose.behold, field:choose.count, field:choose.from, field:choose.saveAs, predicate:matches]
     Oracle: When Sarkhan enters, you may behold a Dragon. If you do, create a Treasure token. (To behold a Dragon, choose a Dragon you control or reveal a Dragon card from your hand.)
     Trigger: Whenever Sarkhan, Dragon Ascendant enters
-    Effect: You may choose a Dragon you control or Dragon card in your hand. Then, IF the additional cost (behold a Dragon) was paid: create a ?/? colorless Treasure artifact token.
+    Effect: You may choose a Dragon you control or Dragon card in your hand. Then, IF the chosen object is a card: create a ?/? colorless Treasure artifact token.
   [a2] triggered [needed: needs trigger:subject, step:add_counters, field:add_counters.on, step:grant_effect, field:grant_effect.modify]
     Oracle: Whenever a Dragon you control enters, put a +1/+1 counter on Sarkhan. Until end of turn, Sarkhan becomes a Dragon in addition to its other types and gains flying.
     Trigger: Whenever a Dragon you control enters
@@ -900,7 +900,7 @@ Player prompts:
 
 - Sarkhan, Dragon Ascendant: optional: Do you want to choose a Dragon you control or Dragon card in your hand?
 
-Implementation: needed (step:choose, field:choose.behold, field:choose.count, field:choose.from, field:choose.saveAs, predicate:paid_additional_cost, trigger:subject, step:add_counters, field:add_counters.on, step:grant_effect, field:grant_effect.modify)
+Implementation: needed (step:choose, field:choose.behold, field:choose.count, field:choose.from, field:choose.saveAs, predicate:matches, trigger:subject, step:add_counters, field:add_counters.on, step:grant_effect, field:grant_effect.modify)
 
 ### Scourge of the Throne
 
@@ -1060,10 +1060,10 @@ Spinerock Knoll [draft]
     Oracle: {T}: Add {R}.
     Cost: {T}
     Mana: add {R}
-  [a4] activated [needed: needs ref:linked_exile, step:permission_to_play, field:permission_to_play.what, field:permission_to_play.withoutPaying]
+  [a4] activated [needed: needs ref:linked_exile, quantity:players_count, step:permission_to_play, field:permission_to_play.what, field:permission_to_play.withoutPaying, predicate:compare]
     Oracle: {R}, {T}: You may play the exiled card without paying its mana cost if an opponent was dealt 7 or more damage this turn.
     Cost: {R}, {T}
-    Effect: IF an opponent deals damage this turn: you may you may play linked_exile without paying its mana cost.
+    Effect: IF the number of opponents for which the damage dealt to that player this turn is 7 or greater is 1 or greater: you may you may play linked_exile without paying its mana cost.
 ```
 
 Player prompts:
@@ -1071,7 +1071,7 @@ Player prompts:
 - Spinerock Knoll: choose: Choose a card from among the looked-at cards.
 - Spinerock Knoll: optional: Do you want to you may play linked_exile without paying its mana cost?
 
-Implementation: needed (step:look_top, step:choose, field:choose.count, field:choose.from, field:choose.fromLooked, field:choose.saveAs, field:move_card_zone.faceDown, field:move_card_zone.linkExile, field:move_card_zone.order, field:move_card_zone.position, field:move_card_zone.what, replacement:would_enter, ref:linked_exile, step:permission_to_play, field:permission_to_play.what, field:permission_to_play.withoutPaying)
+Implementation: needed (step:look_top, step:choose, field:choose.count, field:choose.from, field:choose.fromLooked, field:choose.saveAs, field:move_card_zone.faceDown, field:move_card_zone.linkExile, field:move_card_zone.order, field:move_card_zone.position, field:move_card_zone.what, replacement:would_enter, ref:linked_exile, quantity:players_count, step:permission_to_play, field:permission_to_play.what, field:permission_to_play.withoutPaying, predicate:compare)
 
 ### Stormscale Scion
 
@@ -1179,18 +1179,17 @@ Re-rendered plain English:
 
 ```
 The Elder Dragon War [draft]
-  [a1] keyword [needed: needs scripted:read_ahead]
+  [a1] keyword [implemented]
     Oracle: Read ahead
-    Scripted (engine-specific rule, not described by the fields above): read_ahead
-    Keyword: read_ahead
-  [a2] triggered [needed: needs trigger:counter_put, trigger:chapters, field:damage_target.all, field:damage_target.alsoWho, field:damage_target.filter, field:damage_target.source]
+    Keyword: read_ahead 3
+  [a2] triggered [needed: needs trigger:counter_put, trigger:chapters, field:damage_target.all, field:damage_target.filter, field:damage_target.source, field:damage_target.who]
     Oracle: I — This Saga deals 2 damage to each creature and each opponent.
     Trigger: Chapter I
-    Effect: The Elder Dragon War deals 2 damage to the target.
-  [a3] triggered [needed: needs trigger:counter_put, trigger:chapters, quantity:X, field:discard.min, field:discard.saveAs, field:discard.upTo]
+    Effect: The Elder Dragon War deals 2 damage to the target. Then, The Elder Dragon War deals 2 damage to the target.
+  [a3] triggered [needed: needs quantity:step_result, trigger:counter_put, trigger:chapters, step:choose, field:choose.choice, field:choose.max, field:choose.min]
     Oracle: II — Discard any number of cards, then draw that many cards.
     Trigger: Chapter II
-    Effect: Discard X cards. Then, draw X cards.
+    Effect: Choose a number. Then, discard the number affected this way (n) cards. Then, draw the number affected this way (n) cards.
   [a4] triggered [needed: needs trigger:counter_put, trigger:chapters, field:create_tokens.tokenKeywords]
     Oracle: III — Create a 4/4 red Dragon creature token with flying.
     Trigger: Chapter III
@@ -1199,9 +1198,10 @@ The Elder Dragon War [draft]
 
 Player prompts:
 
-- The Elder Dragon War: discard: Choose X cards to discard.
+- The Elder Dragon War: discard: Choose how many cards to discard, then draw that many cards.
+- The Elder Dragon War: discard: Choose the number affected this way (n) cards to discard.
 
-Implementation: needed (scripted:read_ahead, trigger:counter_put, trigger:chapters, field:damage_target.all, field:damage_target.alsoWho, field:damage_target.filter, field:damage_target.source, quantity:X, field:discard.min, field:discard.saveAs, field:discard.upTo, field:create_tokens.tokenKeywords)
+Implementation: needed (trigger:counter_put, trigger:chapters, field:damage_target.all, field:damage_target.filter, field:damage_target.source, field:damage_target.who, quantity:step_result, step:choose, field:choose.choice, field:choose.max, field:choose.min, field:create_tokens.tokenKeywords)
 
 ### The Misty Mountains Cold
 
@@ -1364,21 +1364,21 @@ Implementation: needed (replacement:would_create_token, quantity:event_amount, f
 | `field:add_counters.on` | 6 | Dragon's Hoard; Dragonstorm Globe; Sarkhan, Dragon Ascendant; Scourge of the Throne; Shivan Devastator; Taurean Mauler |
 | `field:damage_target.all` | 6 | Blasphemous Act; Breath Weapon; Chandra's Ignition; Desolation of Smaug; Magmaquake; The Elder Dragon War |
 | `field:damage_target.filter` | 6 | Blasphemous Act; Breath Weapon; Chandra's Ignition; Desolation of Smaug; Magmaquake; The Elder Dragon War |
-| `field:move_card_zone.saveAs` | 6 | Atsushi, the Blazing Sky; Breaching Dragonstorm; Count on Luck; Dragonhawk, Fate's Tempest; Outpost Siege; Parapet Thrasher |
+| `field:damage_target.who` | 6 | Chandra's Ignition; Dragonhawk, Fate's Tempest; Firespitter Whelp; Parapet Thrasher; The Elder Dragon War; Thunderbreak Regent |
 | `mana:variable` | 6 | Arcane Signet; Commander's Sphere; Dragon's Hoard; Dragonstorm Globe; Haven of the Spirit Dragon; Orb of Dragonkind |
 | `step:add_counters` | 6 | Dragon's Hoard; Dragonstorm Globe; Sarkhan, Dragon Ascendant; Scourge of the Throne; Shivan Devastator; Taurean Mauler |
-| `field:damage_target.who` | 5 | Chandra's Ignition; Dragonhawk, Fate's Tempest; Firespitter Whelp; Parapet Thrasher; Thunderbreak Regent |
+| `field:move_card_zone.saveAs` | 5 | Atsushi, the Blazing Sky; Count on Luck; Dragonhawk, Fate's Tempest; Outpost Siege; Parapet Thrasher |
+| `predicate:matches` | 5 | Breaching Dragonstorm; Carnelian Orb of Dragonkind; Chaos Warp; Sarkhan, Dragon Ascendant; Thundermane Dragon |
+| `step:choose` | 5 | Orb of Dragonkind; Outpost Siege; Sarkhan, Dragon Ascendant; Spinerock Knoll; The Elder Dragon War |
 | `trigger:intervening_if` | 5 | Dragonmaster Outcast; Nogi, Draco-Zealot; Outpost Siege; Scourge of the Throne; Skyline Despot |
 | `cost:sacrifice` | 4 | Commander's Sphere; Haven of the Spirit Dragon; Magda, the Hoardmaster; Orb of Dragonkind |
-| `predicate:matches` | 4 | Breaching Dragonstorm; Carnelian Orb of Dragonkind; Chaos Warp; Thundermane Dragon |
-| `quantity:X` | 4 | Leyline Tyrant; Magmaquake; Shivan Devastator; The Elder Dragon War |
-| `step:choose` | 4 | Orb of Dragonkind; Outpost Siege; Sarkhan, Dragon Ascendant; Spinerock Knoll |
+| `predicate:step_done` | 4 | Breaching Dragonstorm; Hazoret's Monument; Hellkite Charger; The Misty Mountains Cold |
 | `field:choose.count` | 3 | Orb of Dragonkind; Sarkhan, Dragon Ascendant; Spinerock Knoll |
 | `field:choose.from` | 3 | Orb of Dragonkind; Sarkhan, Dragon Ascendant; Spinerock Knoll |
 | `field:choose.saveAs` | 3 | Orb of Dragonkind; Sarkhan, Dragon Ascendant; Spinerock Knoll |
 | `modes` | 3 | Abrade; Atsushi, the Blazing Sky; Parapet Thrasher |
-| `predicate:paid_additional_cost` | 3 | Hazoret's Monument; Leyline Tyrant; Sarkhan, Dragon Ascendant |
 | `quantity:count` | 3 | Dragon Tempest; Mana Geyser; Scourge of Valkas |
+| `quantity:X` | 3 | Leyline Tyrant; Magmaquake; Shivan Devastator |
 | `step:copy` | 3 | Cursed Mirror; Goldlust Triad; Stormscale Scion |
 | `timing` | 3 | Bonders' Enclave; Sarkhan the Masterless; Temple of the False God |
 | `cast_option` | 2 | Blasphemous Act; Unexpected Windfall |
@@ -1386,6 +1386,7 @@ Implementation: needed (replacement:would_create_token, quantity:event_amount, f
 | `field:add_mana.produces` | 2 | Desolation of Smaug; Mana Geyser |
 | `field:attach.to` | 2 | Basilisk Collar; Swiftfoot Boots |
 | `field:attach.what` | 2 | Basilisk Collar; Swiftfoot Boots |
+| `field:choose.choice` | 2 | Outpost Siege; The Elder Dragon War |
 | `field:choose.fromLooked` | 2 | Orb of Dragonkind; Spinerock Knoll |
 | `field:copy.token` | 2 | Goldlust Triad; Stormscale Scion |
 | `field:grant_effect.all` | 2 | Sarkhan the Masterless; Terror of Mount Velus |
@@ -1397,7 +1398,6 @@ Implementation: needed (replacement:would_create_token, quantity:event_amount, f
 | `field:untap_target.filter` | 2 | Hellkite Charger; Scourge of the Throne |
 | `filter:notSubtypes` | 2 | Breath Weapon; Desolation of Smaug |
 | `mana:restriction` | 2 | Haven of the Spirit Dragon; Orb of Dragonkind |
-| `predicate:step_done` | 2 | Hellkite Charger; The Misty Mountains Cold |
 | `quantity:stat` | 2 | Chandra's Ignition; Warstorm Surge |
 | `step:add_mana` | 2 | Desolation of Smaug; Mana Geyser |
 | `step:attach` | 2 | Basilisk Collar; Swiftfoot Boots |
@@ -1418,7 +1418,8 @@ Implementation: needed (replacement:would_create_token, quantity:event_amount, f
 | `field:add_counters.counterPT` | 1 | Shivan Devastator |
 | `field:add_mana.srcs` | 1 | Desolation of Smaug |
 | `field:choose.behold` | 1 | Sarkhan, Dragon Ascendant |
-| `field:choose.choice` | 1 | Outpost Siege |
+| `field:choose.max` | 1 | The Elder Dragon War |
+| `field:choose.min` | 1 | The Elder Dragon War |
 | `field:choose.options` | 1 | Outpost Siege |
 | `field:choose.remember` | 1 | Outpost Siege |
 | `field:copy.attacking` | 1 | Goldlust Triad |
@@ -1431,21 +1432,19 @@ Implementation: needed (replacement:would_create_token, quantity:event_amount, f
 | `field:create_delayed_trigger.at` | 1 | Dragonhawk, Fate's Tempest |
 | `field:create_delayed_trigger.steps` | 1 | Dragonhawk, Fate's Tempest |
 | `field:create_tokens.tokenTapped` | 1 | Magda, the Hoardmaster |
-| `field:damage_target.alsoWho` | 1 | The Elder Dragon War |
 | `field:damage_target.excludeWho` | 1 | Parapet Thrasher |
-| `field:damage_target.from` | 1 | Dragonhawk, Fate's Tempest |
 | `field:damage_target.optionalCost` | 1 | Leyline Tyrant |
-| `field:discard.min` | 1 | The Elder Dragon War |
-| `field:discard.saveAs` | 1 | The Elder Dragon War |
-| `field:discard.upTo` | 1 | The Elder Dragon War |
+| `field:damage_target.reflexive` | 1 | Leyline Tyrant |
 | `field:if_else.if` | 1 | Chaos Warp |
 | `field:if_else.then` | 1 | Chaos Warp |
 | `field:mass_pump.filter` | 1 | Lathliss, Dragon Queen |
 | `field:move_card_zone.faceDown` | 1 | Spinerock Knoll |
 | `field:move_card_zone.linkExile` | 1 | Spinerock Knoll |
+| `field:move_card_zone.saveHitAs` | 1 | Breaching Dragonstorm |
 | `field:move_card_zone.shuffle` | 1 | Chaos Warp |
 | `field:move_card_zone.until` | 1 | Breaching Dragonstorm |
 | `field:move_card_zone.who` | 1 | Chaos Warp |
+| `field:permission_to_play.elseToHand` | 1 | Breaching Dragonstorm |
 | `field:repeat_for_each.over` | 1 | Sarkhan the Masterless |
 | `field:repeat_for_each.steps` | 1 | Sarkhan the Masterless |
 | `field:reveal.saveAs` | 1 | Chaos Warp |
@@ -1464,17 +1463,20 @@ Implementation: needed (replacement:would_create_token, quantity:event_amount, f
 | `predicate:all` | 1 | Thundermane Dragon |
 | `predicate:cast_from` | 1 | Thundermane Dragon |
 | `predicate:chosen_is` | 1 | Outpost Siege |
+| `predicate:compare` | 1 | Spinerock Knoll |
 | `predicate:most_life` | 1 | Scourge of the Throne |
+| `predicate:not` | 1 | Breaching Dragonstorm |
 | `predicate:stat` | 1 | Skyline Despot |
 | `quantity:count_this_turn` | 1 | Gadrak, the Crown-Scourge |
 | `quantity:event_amount` | 1 | Draconic Visitor |
 | `quantity:math` | 1 | Dragonhawk, Fate's Tempest |
+| `quantity:players_count` | 1 | Spinerock Knoll |
+| `quantity:step_result` | 1 | The Elder Dragon War |
 | `ref:iterated` | 1 | Sarkhan the Masterless |
 | `ref:linked_exile` | 1 | Spinerock Knoll |
 | `replacement:would_create_token` | 1 | Draconic Visitor |
 | `scripted:become_monarch` | 1 | Skyline Despot |
 | `scripted:myriad` | 1 | Goldlust Triad |
-| `scripted:read_ahead` | 1 | The Elder Dragon War |
 | `scripted:storm` | 1 | Stormscale Scion |
 | `step:create_delayed_trigger` | 1 | Dragonhawk, Fate's Tempest |
 | `step:if_else` | 1 | Chaos Warp |

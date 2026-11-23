@@ -707,13 +707,13 @@ export class KernelGameController {
   options(): LegalAction[] {
     const s = this.ks.state;
     if (s.pending || s.combat?.expect || s.priority !== this.human) return [];
-    return this.legalNow().filter((a) => !!a.action && !a.isMana && (a.kind === "castSpell" || a.kind === "activateAbility" || a.kind === "turnFaceUp" || a.kind === "castPrepared" || a.kind === "playLand"));
+    return this.legalNow().filter((a) => !!a.action && !a.isMana && (a.kind === "castSpell" || a.kind === "activateAbility" || a.kind === "turnFaceUp" || a.kind === "unlockDoor" || a.kind === "castPrepared" || a.kind === "playLand"));
   }
   /** the ways of using one card that only the kernel lists (turn a morph face up, cast a prepared copy, flashback / alternative-cost casts); shown in the card's detail view */
   cardActions(cardId: string): Array<{ id: string; label: string; title?: string }> {
     const id = this.kid(cardId);
     return this.options()
-      .filter((a) => a.objectId === id && (a.kind === "turnFaceUp" || a.kind === "castPrepared" || (a.kind === "castSpell" && !!a.option && a.option !== "normal")))
+      .filter((a) => a.objectId === id && (a.kind === "turnFaceUp" || a.kind === "unlockDoor" || a.kind === "castPrepared" || (a.kind === "castSpell" && !!a.option && a.option !== "normal")))
       .map((a) => ({ id: a.id, label: a.label, ...(a.asks ? { title: `Asks: ${a.asks.replace(/_/g, " ")}` } : {}) }));
   }
   /** can the selected hand card be cast / played right now (the dock's "Respond Selected") */

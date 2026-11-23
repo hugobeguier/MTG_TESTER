@@ -13,8 +13,8 @@ import type { Env, ObjId } from "./types";
 export const MILLED_KEY = "__milled";
 
 /** The cards a "reveal until" step reveals: from the top of the library until the condition is met (all of it when it never is). */
-export function revealUntil(r: Run, env: Env, step: Step): ObjId[] {
-  const who = resolvePlayers(r, step.who ?? "you", env)[0];
+export function revealUntil(r: Run, env: Env, step: Step, whoOverride?: string): ObjId[] {
+  const who = whoOverride ?? resolvePlayers(r, step.who ?? "you", env)[0];
   const lib = player(r, who).library;
   const u = step.until as { count?: unknown; filter?: ObjectFilter } & ObjectFilter;
   const filter = (u.count !== undefined ? u.filter : u) ?? {};

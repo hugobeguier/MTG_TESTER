@@ -29,7 +29,6 @@
         },
         {
           "kind": "repeat_for_each",
-          "who": "each_player",
           "src": 1,
           "condition": {
             "when": "on_resolution",
@@ -61,7 +60,8 @@
               },
               "src": 1
             }
-          ]
+          ],
+          "over": "each_player"
         }
       ],
       "id": "a1",
@@ -72,8 +72,8 @@
         "field:grant_effect.replacement",
         "field:grant_effect.who",
         "step:repeat_for_each",
+        "field:repeat_for_each.over",
         "field:repeat_for_each.steps",
-        "field:repeat_for_each.who",
         "quantity:math",
         "field:life_change.amount",
         "field:life_change.who"

@@ -11,15 +11,15 @@
 // new targets, copies that enter tapped / attacking, `forEach`, `chooseOne`, extra abilities on the copy.
 
 import type { Ability, Step } from "../schema";
-import { baseChars, defOf, emit, label, newObject, tick, tryObj, Unsupported, type Run } from "./core";
+import { baseChars, chars, defOf, emit, label, newObject, opponentsOf, player, tick, tryObj, Unsupported, type Run } from "./core";
 import { addDelayed } from "./durable";
 import { evalQuantity, objectsMatching, resolveObjs, resolvePlayers } from "./query";
 import { invalidateIndex } from "./layers";
 import { applyReplacements, runAfter } from "./replacements";
-import { createToken, type StepSpec } from "./steps";
+import { createToken, decide, type StepSpec } from "./steps";
 import type { GameObject, ObjId, PlayerId, StackItem, TokenDef } from "./types";
 
-export const COPY_FIELDS = ["what", "target", "count", "token", "controller", "notLegendary", "gainKeywords", "exceptAddTypes", "exileAt", "reflexive", "who", "of", "duration", "exceptGrant", "asEnters", "addAbility", "all", "filter", "becomes", "excludeChosen", "chooseNewTargets", "chooseOne", "exceptName"];
+export const COPY_FIELDS = ["what", "target", "count", "token", "controller", "notLegendary", "gainKeywords", "exceptAddTypes", "exileAt", "reflexive", "who", "of", "duration", "exceptGrant", "asEnters", "addAbility", "all", "filter", "becomes", "excludeChosen", "chooseNewTargets", "chooseOne", "exceptName", "forEach", "forPlayer", "tapped", "attacking", "setPower", "setToughness"];
 
 /** The copiable values of an object as a token definition (exceptions are applied by the caller). */
 export function copiableDef(r: Run, o: GameObject): TokenDef {
@@ -100,7 +100,7 @@ function becomeStep(r: Run, ex: { env: import("./types").Env }, step: Step): "do
 
 export const copyStep: StepSpec = {
   fields: COPY_FIELDS,
-  run: (r, ex, step) => {
+  run: (r, ex, step, answer) => {
     if (step.of !== undefined || step.asEnters) return becomeStep(r, ex, step);
     const env = ex.env;
     // "a token that's a copy of ONE of them" (Twilight Diviner): the controller picks which of the objects of the batch
@@ -118,6 +118,26 @@ export const copyStep: StepSpec = {
       tick(r);
       return step.chooseNewTargets ? { push: [{ kind: "__retarget" as never, itemId: ci.id, pi: 0, si: 0 } as unknown as Step] } : "done";
     }
+    if (step.forEach !== undefined) {
+      // Myriad (CR 702.116): for each opponent other than the defending player, you MAY make a token copy attacking that player or a planeswalker they control
+      if (step.forEach !== "opponent_other_than_defending_player") throw new Unsupported(`field:copy.forEach=${String(step.forEach)}`);
+      const others = opponentsOf(r, env.controller).filter((p) => p.id !== env.eventPlayer);
+      return { push: others.map((p) => ({ ...step, forEach: undefined, forPlayer: p.id, optional: true, prompt: { title: `${label(r, env.source)}: myriad`, instruction: `Create a tapped and attacking token copy of ${label(r, env.source)} that attacks ${p.name}?` } }) as Step) };
+    }
+    // a copy that enters attacking: the defender is the named player or one of their planeswalkers (asked when there is a choice)
+    let defender: string | undefined;
+    if (step.attacking) {
+      const fp = (step.forPlayer ?? env.eventPlayer) as PlayerId | undefined;
+      if (!fp) throw new Unsupported("field:copy.attacking");
+      if (!r.s.combat) return "done";
+      const pws = r.s.battlefield.filter((id) => r.s.objects[id].controller === fp && chars(r, id).types.includes("planeswalker"));
+      if (!pws.length) defender = fp;
+      else {
+        const d = decide({ kind: "choose_option", player: env.controller, prompt: { title: `${label(r, env.source)}: what does the copy attack?`, instruction: `Choose ${player(r, fp).name} or one of their planeswalkers.` }, options: [{ id: fp, label: player(r, fp).name }, ...pws.map((id) => ({ id, label: label(r, id) }))], min: 1, max: 1 }, answer);
+        if ("ask" in d) return d;
+        defender = d.ids[0];
+      }
+    }
     const sources = ref === "self" ? [env.source] : resolveObjs(r, ref, env);
     const n = step.count === undefined ? 1 : Math.max(0, Number(typeof step.count === "number" ? step.count : evalQuantity(r, step.count as never, env)));
     const who: PlayerId = resolvePlayers(r, (step.controller ?? step.who ?? "you") as never, env)[0];
@@ -125,19 +145,29 @@ export const copyStep: StepSpec = {
     const copiedItems: string[] = [];
     for (const id of sources) {
       const o = tryObj(r, id);
-      if (!o) continue;
-      if (o.zone === "stack") {
+      if (!o && !r.s.lki[id]?.copyDef) continue;
+      if (o && o.zone === "stack") {
         // a copy of a spell (the object may also be a copy: copy of a copy)
         for (let i = 0; i < n; i++) { const c = copySpell(r, o, who); if (c) { env.created.push(c); const it = r.s.stack.find((x) => x.objectId === c); if (it) copiedItems.push(it.id); } }
         continue;
       }
-      if (o.zone !== "battlefield") continue; // nothing to copy any more (it left; its last-known information is not a copy source here)
       if (!step.token) throw new Unsupported("field:copy.token", "a non-token copy of a permanent only exists as 'enters as a copy' (not modelled)");
-      const def = applyExceptions(copiableDef(r, o), step);
+      let def: TokenDef;
+      if (o && o.zone === "battlefield") def = applyExceptions(copiableDef(r, o), step);
+      else {
+        // it left the battlefield during this resolution ("destroy it; if it dies, its controller creates two tokens that are copies of that creature", Saw in Half): copy how it last existed
+        const lk = r.s.lki[id];
+        const base = lk?.copyDef ? structuredClone(lk.copyDef) : o && lk ? copiableDef(r, o) : undefined;
+        if (!base) continue;
+        def = applyExceptions(base, step);
+      }
+      if (step.setPower !== undefined) def.power = evalQuantity(r, step.setPower as never, env); // "except its power is half ..."
+      if (step.setToughness !== undefined) def.toughness = evalQuantity(r, step.setToughness as never, env);
       const ev = applyReplacements(r, { kind: "tokens", player: who, groups: n > 0 ? [{ def, count: n, tapped: false }] : [] });
-      if (!ev.cancelled && ev.kind === "tokens") for (const g of ev.groups) for (let i = 0; i < g.count; i++) createToken(r, who, g.def, !!g.tapped, env.created);
+      if (!ev.cancelled && ev.kind === "tokens") for (const g of ev.groups) for (let i = 0; i < g.count; i++) createToken(r, who, g.def, !!g.tapped || !!step.tapped, env.created);
       runAfter(r, ev);
     }
+    if (defender && r.s.combat) for (const id of env.created) { const o = tryObj(r, id); if (o && o.zone === "battlefield") r.s.combat.attackers.push({ id, ts: o.timestamp, defender, blockers: [], blocked: false }); } // never declared as attackers: no attack triggers
     const exileAt = step.exileAt as string | undefined;
     if (exileAt && env.created.length) {
       if (exileAt !== "next_end_step" && exileAt !== "end_of_combat") throw new Unsupported(`field:copy.exileAt=${exileAt}`);

@@ -175,7 +175,9 @@ describe("real drafted cards never make continue mode refuse or crash", () => {
   for (const f of files) {
     const slug = path.basename(f, ".json");
     try {
-      const kernel = loadDraft(slug);
+      const real = loadDraft(slug);
+      // every real card is supported by the kernel now (step 11), so each one is made unsupported on purpose: a step the engine has never heard of is appended to every ability that has steps
+      const kernel = { ...real, abilities: real.abilities.map((a) => (a.steps?.length ? { ...a, steps: [...a.steps, { kind: "teleport" } as never] } : a)) };
       const nonPerm = kernel.abilities.some((a) => a.kind === "spell_effect");
       const def: CardDef = { name: slug, manaCost: "{1}", types: nonPerm ? ["instant"] : ["artifact"], kernel };
       if (!cardUnsupported(def).ok) cards.push(def);

@@ -21,7 +21,7 @@
               "land"
             ]
           },
-          "saveAs": "event_object",
+          "saveHitAs": "event_object",
           "src": 0
         },
         {
@@ -29,6 +29,9 @@
           "what": "event_object",
           "withoutPaying": true,
           "optional": true,
+          "duration": "instant",
+          "elseToHand": true,
+          "id": "castit",
           "src": 1,
           "condition": {
             "when": "on_resolution",
@@ -45,8 +48,8 @@
             "src": 1
           },
           "prompt": {
-            "title": "Breaching Dragonstorm: optional",
-            "instruction": "Do you want to you may play event_object without paying its mana cost?",
+            "title": "Breaching Dragonstorm: cast it?",
+            "instruction": "You may cast the exiled nonland card without paying its mana cost (mana value 8 or less). If you do not, it goes to your hand.",
             "source": {
               "card": "Breaching Dragonstorm",
               "ability": "a1"
@@ -55,31 +58,33 @@
         },
         {
           "kind": "move_card_zone",
-          "target": "event_object",
           "moveTo": "hand",
           "src": 2,
           "condition": {
             "when": "on_resolution",
             "if": {
-              "check": "matches",
-              "obj": "event_object",
-              "filter": {
-                "zone": "exile"
+              "not": {
+                "check": "step_done",
+                "step": "castit"
               }
             },
             "src": 2
-          }
+          },
+          "target": "event_object"
         }
       ],
       "implementation": "needed",
       "needs": [
         "field:move_card_zone.position",
-        "field:move_card_zone.saveAs",
+        "field:move_card_zone.saveHitAs",
         "field:move_card_zone.until",
         "step:permission_to_play",
+        "field:permission_to_play.elseToHand",
         "field:permission_to_play.what",
         "field:permission_to_play.withoutPaying",
-        "predicate:matches"
+        "predicate:matches",
+        "predicate:not",
+        "predicate:step_done"
       ]
     },
     {

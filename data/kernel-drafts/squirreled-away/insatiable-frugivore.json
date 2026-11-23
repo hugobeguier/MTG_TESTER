@@ -16,6 +16,7 @@
             "check": "step_done",
             "step": "s2"
           },
+          "src": 1,
           "steps": [
             {
               "kind": "create_tokens",
@@ -25,33 +26,57 @@
                 "colorless"
               ],
               "tokenTypeLine": "Artifact — Food",
-              "id": "s1",
               "src": 0
             },
             {
-              "kind": "move_card_zone",
+              "kind": "choose",
               "id": "s2",
-              "optional": true,
               "who": "you",
-              "from": "graveyard",
-              "moveTo": "exile",
-              "filter": {
+              "from": {
                 "zone": "graveyard",
                 "owner": "you"
               },
               "count": 3,
+              "saveAs": "exiledThree",
+              "optional": true,
               "src": 0,
+              "condition": {
+                "when": "on_resolution",
+                "if": {
+                  "check": "zone_count",
+                  "who": "you",
+                  "zone": "graveyard",
+                  "cmp": {
+                    "op": ">=",
+                    "value": 3
+                  }
+                },
+                "src": 0
+              },
               "prompt": {
-                "title": "Insatiable Frugivore: optional",
-                "instruction": "Do you want to exile a card?",
+                "title": "Insatiable Frugivore: exile three cards",
+                "instruction": "Choose three cards from your graveyard to exile. If you do, repeat this process.",
                 "source": {
                   "card": "Insatiable Frugivore",
                   "ability": "a1"
                 }
               }
+            },
+            {
+              "kind": "move_card_zone",
+              "what": "exiledThree",
+              "moveTo": "exile",
+              "src": 0,
+              "condition": {
+                "when": "on_resolution",
+                "if": {
+                  "check": "step_done",
+                  "step": "s2"
+                },
+                "src": 0
+              }
             }
-          ],
-          "src": 1
+          ]
         }
       ],
       "implementation": "needed",
@@ -59,9 +84,12 @@
         "step:repeat_process",
         "field:repeat_process.repeatIf",
         "field:repeat_process.steps",
-        "field:move_card_zone.count",
-        "field:move_card_zone.filter",
-        "field:move_card_zone.from"
+        "step:choose",
+        "field:choose.count",
+        "field:choose.from",
+        "field:choose.saveAs",
+        "field:move_card_zone.what",
+        "predicate:step_done"
       ]
     },
     {

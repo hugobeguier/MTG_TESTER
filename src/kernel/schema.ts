@@ -29,7 +29,9 @@ export const NEW_STEP_KINDS = [
   // round 2: manifest dread (face-down 2/2 from the top two cards)
   "manifest_dread", "reselect_attack_target",
   // step 9: morph (turn a face-down permanent face up), prepared (the prepared state ends when its spell copy is cast)
-  "turn_face_up", "unprepare"
+  "turn_face_up", "unprepare",
+  // step 11: "you and target opponent / two target players each reveal the top card, lose life equal to the other's card, put it into hand"
+  "mutual_reveal"
 ] as const;
 
 export const STEP_KINDS = [...EXISTING_STEP_KINDS, ...NEW_STEP_KINDS] as const;
@@ -52,7 +54,9 @@ export const EVENT_NAMES = [
   // "was dealt excess damage" (damage beyond lethal to a creature, or beyond the loyalty of a planeswalker): the actor is the damaged permanent's controller
   "excess_damage",
   // "whenever damage that would be dealt to you is prevented" (event_amount = the amount prevented)
-  "damage_prevented"
+  "damage_prevented",
+  // Rooms (CR 709): a door was unlocked (a Room spell resolving unlocks the half that was cast; the special action unlocks another). `fully: true` = "whenever you fully unlock a Room" (both doors unlocked now)
+  "unlock_door"
 ] as const;
 export type EventName = (typeof EVENT_NAMES)[number];
 
@@ -120,6 +124,10 @@ export type Quantity =
   | { ref: "count_this_turn"; event: EventName; filter?: ObjectFilter; actor?: PlayerRef }
   // how many players of `who` satisfy `where` (evaluated with "that_player" = the player being tested)
   | { ref: "players_count"; who: PlayerRef; where: Predicate }
+  // how many cards of a list an earlier step saved are (still) in `zone` ("for each of those cards that are still exiled"); a delayed trigger keeps the list
+  | { ref: "saved_count"; list: string; zone?: Zone }
+  // total damage dealt to a player this turn ("an opponent was dealt 7 or more damage this turn": use inside players_count.where with who "that_player")
+  | { ref: "damage_taken_this_turn"; who: PlayerRef }
   // div_down / div_up: args[0] divided by args[1], rounded down / up ("half X, rounded down")
   | { math: "+" | "-" | "*" | "min" | "max" | "div_down" | "div_up"; args: Quantity[] };
 
@@ -207,6 +215,8 @@ export const QuantitySchema: z.ZodType<Quantity> = z.lazy(() =>
     z.object({ ref: z.literal("starting_life") }).strict(),
     z.object({ ref: z.literal("count_this_turn"), event: z.enum(EVENT_NAMES), filter: ObjectFilterSchema.optional(), actor: PlayerRefSchema.optional() }).strict(),
     z.object({ ref: z.literal("players_count"), who: PlayerRefSchema, where: PredicateSchema }).strict(),
+    z.object({ ref: z.literal("saved_count"), list: z.string(), zone: ZoneSchema.optional() }).strict(),
+    z.object({ ref: z.literal("damage_taken_this_turn"), who: PlayerRefSchema }).strict(),
     z.object({ math: z.enum(["+", "-", "*", "min", "max", "div_down", "div_up"]), args: z.array(QuantitySchema) }).strict()
   ])
 ) as z.ZodType<Quantity>;
@@ -523,6 +533,10 @@ export const TriggerSpecSchema = z.object({
   chapters: z.array(int.min(1)).optional(),
   // "attacks with two or more creatures": fires only when at least this many objects are in the batch (use with batch)
   minCount: int.min(2).optional(),
+  // "attacks alone" (exalted): only when the declared attack has exactly one attacker
+  alone: z.boolean().optional(),
+  // unlock_door: only when the unlock left the Room with both doors unlocked (Eerie: "whenever you fully unlock a Room")
+  fully: z.boolean().optional(),
   // attack triggers: who the attack is aimed at ("attacks you or a planeswalker you control")
   defender: z.enum(["you", "you_or_your_planeswalkers", "other_player"]).optional(),
   // further events that fire the same ability ("enters or attacks", "enters or is put into a graveyard from the battlefield").
@@ -532,7 +546,8 @@ export const TriggerSpecSchema = z.object({
     subject: z.union([ObjectFilterSchema, PlayerRefSchema, ObjRefSchema]).optional(),
     step: z.enum(PHASES).optional(),
     whose: z.enum(["yours", "opponents", "each"]).optional(),
-    fromZone: ZoneSchema.optional(), toZone: ZoneSchema.optional(), notFromZone: ZoneSchema.optional()
+    fromZone: ZoneSchema.optional(), toZone: ZoneSchema.optional(), notFromZone: ZoneSchema.optional(),
+    fully: z.boolean().optional()
   }).strict()).optional()
 }).strict();
 export type TriggerSpec = z.infer<typeof TriggerSpecSchema>;

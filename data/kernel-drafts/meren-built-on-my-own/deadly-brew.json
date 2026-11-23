@@ -53,7 +53,8 @@
             "when": "on_resolution",
             "if": {
               "check": "step_done",
-              "step": "s1"
+              "step": "s1",
+              "who": "you"
             },
             "src": 1
           },

@@ -7,6 +7,7 @@ import { label, parseManaCost, player, Reject, type Run } from "./core";
 import { evalQuantity, resolvePlayers } from "./query";
 import { costCandidates, costCount, costOptions, payChoiceCost, type ChoiceCost } from "./costs";
 import { autoTapFor, payFromPool, totalPotentialMana } from "./mana";
+import { invalidateIndex } from "./layers";
 import { changeLife, decide, type AskSpec, type StepResult } from "./steps";
 import type { Choice, Env, PlayerId } from "./types";
 
@@ -45,6 +46,8 @@ export function unlessHandler(r: Run, env: Env, step: Step, answer: Choice | und
   const u = step.pay as UnlessPay;
   const inner = step.inner as Step;
   const payer = resolvePlayers(r, u.payer as never, env)[0];
+  const anyC = u.cost.find((c) => "mana" in c && (c as { anyAmount?: boolean }).anyAmount) as { mana: string } | undefined;
+  if (anyC && payer && u.inverse) return payAnyAmount(r, env, payer, anyC.mana, u, inner, answer);
   if (!payer || !canPay(r, payer, u, env)) return u.inverse ? "done" : { push: [inner] };
   const spec: AskSpec = {
     kind: "pay_unless", player: payer,
@@ -63,6 +66,28 @@ export function unlessHandler(r: Run, env: Env, step: Step, answer: Choice | und
   const dc = discardCost(u);
   if (dc) return { push: [{ kind: "__unless_discard" as never, player: payer, cost: dc, prompt: u.prompt } as Step, ...(u.inverse ? [inner] : [])] };
   return u.inverse ? { push: [inner] } : "done";
+}
+
+/** "You may pay any amount of {R}. When you do, ...": choose how many (0 = none), pay that many, then the inner step runs with X = that amount. */
+function payAnyAmount(r: Run, env: Env, payer: PlayerId, sym: string, u: UnlessPay, inner: Step, answer: Choice | undefined): StepResult {
+  const one = parseManaCost(sym);
+  const affordable = (n: number): boolean => {
+    const cost = parseManaCost(sym.repeat(n));
+    const snap = structuredClone(r.s), nEv = r.events.length;
+    try { return payFromPool(r, payer, cost, 0) || (autoTapFor(r, payer, cost, 0) && payFromPool(r, payer, cost, 0)); } finally { r.s = snap; r.events.length = nEv; invalidateIndex(r); }
+  };
+  let max = 0;
+  for (let n = Math.min(totalPotentialMana(r, payer), 50); n >= 1; n--) if (affordable(n)) { max = n; break; }
+  if (max <= 0 || one.mv === 0) return "done";
+  const spec: AskSpec = { kind: "choose_number", player: payer, prompt: u.prompt ?? { title: `${label(r, env.source)}: pay any amount`, instruction: `Choose how many ${sym} to pay (0 to pay nothing).` }, options: [], min: 0, max, numeric: true };
+  const d = decide(spec, answer);
+  if ("ask" in d) return d;
+  const n = d.number ?? 0;
+  if (n <= 0) return "done";
+  const cost = parseManaCost(sym.repeat(n));
+  if (!(payFromPool(r, payer, cost, 0) || (autoTapFor(r, payer, cost, 0) && payFromPool(r, payer, cost, 0)))) throw new Reject("cannot_pay", "cannot pay");
+  env.x = n;
+  return { push: [inner] };
 }
 
 /** The card(s) discarded as the payment of an "unless ... discards" cost: asked when there is a real choice. */

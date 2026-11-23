@@ -76,17 +76,14 @@
               "kind": "damage_target",
               "source": "self",
               "who": "each_opponent",
-              "from": "exiled",
               "amount": {
                 "math": "*",
                 "args": [
                   2,
                   {
-                    "ref": "count",
-                    "of": {
-                      "zone": "exile",
-                      "owner": "you"
-                    }
+                    "ref": "saved_count",
+                    "list": "exiled",
+                    "zone": "exile"
                   }
                 ]
               }
@@ -106,7 +103,6 @@
         "field:create_delayed_trigger.at",
         "field:create_delayed_trigger.steps",
         "quantity:math",
-        "field:damage_target.from",
         "field:damage_target.source",
         "field:damage_target.who"
       ]

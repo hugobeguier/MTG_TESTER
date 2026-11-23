@@ -43,8 +43,9 @@ export function sqliteCardDb(file = path.resolve(process.cwd(), "data/cards.db")
         info.faces = Object.fromEntries(rawFaces.map((f) => [f.name, faceOf(f)]));
         const back = faceOf(rawFaces[1]);
         const adventure = /adventure/i.test(rawFaces[1].typeLine);
+        const room = rawFaces.every((f) => /Room/.test(f.typeLine));
         const spellBoth = rawFaces.every((f) => /instant|sorcery/i.test(f.typeLine));
-        info.layout = adventure ? "adventure" : spellBoth ? "split" : (back.manaCost || (back.types.includes("land") && !front.types.includes("land") && !/^\(transforms from /i.test((rawFaces[1]?.oracleText ?? "").trim()))) ? "modal_dfc" : "transform"; // a transforming card's land back (Growing Rites // Itlimoc, Storm the Vault) is "(Transforms from X.)": never played or cast from hand
+        info.layout = room ? "room" : adventure ? "adventure" : spellBoth ? "split" : (back.manaCost || (back.types.includes("land") && !front.types.includes("land") && !/^\(transforms from /i.test((rawFaces[1]?.oracleText ?? "").trim()))) ? "modal_dfc" : "transform"; // a transforming card's land back (Growing Rites // Itlimoc, Storm the Vault) is "(Transforms from X.)": never played or cast from hand
       }
       return info;
     }
@@ -100,3 +101,6 @@ import { chars } from "./core";
 export function charsOf(t: Table, id: string) {
   return chars({ s: structuredClone(t.state), events: [], defs: lookups.get(t)!, scanned: 0 } as never, id);
 }
+
+/** The EngineContext of a table made by realTable (test helper): for legalActions and direct resolve calls. */
+export function ctxOf(t: Table): { cards: (n: string) => CardDef | undefined; db: CardDb } { return { cards: lookups.get(t)!, db: testDb() }; }

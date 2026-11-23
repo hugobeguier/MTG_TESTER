@@ -32,17 +32,8 @@
           "forEach": "opponent_other_than_defending_player",
           "tapped": true,
           "attacking": true,
-          "optional": true,
           "exileAt": "end_of_combat",
-          "token": true,
-          "prompt": {
-            "title": "Goldlust Triad: optional",
-            "instruction": "Do you want to copy Goldlust Triad?",
-            "source": {
-              "card": "Goldlust Triad",
-              "ability": "a2"
-            }
-          }
+          "token": true
         }
       ],
       "implementation": "needed",

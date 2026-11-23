@@ -44,7 +44,7 @@
               },
               "targets": [
                 {
-                  "id": "tg1",
+                  "id": "t1",
                   "what": "object",
                   "filter": {
                     "types": [
@@ -62,7 +62,7 @@
                 {
                   "kind": "damage_target",
                   "source": "self",
-                  "target": "tg1",
+                  "target": "t1",
                   "amount": 7
                 }
               ]

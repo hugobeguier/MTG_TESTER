@@ -56,7 +56,8 @@
               "card": "Hazoret's Monument",
               "ability": "a2"
             }
-          }
+          },
+          "id": "disc"
         },
         {
           "kind": "draw_cards",
@@ -66,8 +67,8 @@
           "condition": {
             "when": "on_resolution",
             "if": {
-              "check": "paid_additional_cost",
-              "option": "discard a card"
+              "check": "step_done",
+              "step": "disc"
             },
             "src": 1
           }
@@ -75,7 +76,7 @@
       ],
       "implementation": "needed",
       "needs": [
-        "predicate:paid_additional_cost"
+        "predicate:step_done"
       ]
     }
   ],

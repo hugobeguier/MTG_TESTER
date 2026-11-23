@@ -4,7 +4,7 @@ import type { DecisionView } from "@/kernel/integration/tableState";
 import type { VisibleCard } from "@/lib/types";
 import {
   boardPickModel, canConfirm, castHint, classifyDecision, clampNumber, confirmLabel, defaultDamageSplit, moveItem, numberChoice, orderChoice, pickChoice, selectionHint,
-  setSplit, splitChoice, splitModel, splitSum, splitValid, toggleSelection, undoLast
+  causeLine, entriesChoice, entryText, orderEntries, setSplit, splitChoice, splitModel, splitSum, splitValid, toggleSelection, undoLast
 } from "./kernelDecisionView";
 
 const card = (id: string, zone: VisibleCard["zone"]): VisibleCard => ({ id, name: id, typeLine: "Creature", oracleText: "", manaValue: 1, colors: [], role: "permanent", zone } as VisibleCard);
@@ -126,5 +126,25 @@ describe("board bridge and cast hints", () => {
     expect(castHint("b", o).reason).toMatch(/mana or wrong timing/);
     expect(castHint("l", { ...o, isLand: true }).reason).toMatch(/No land drop/);
     expect(castHint("b", { ...o, holdsPriority: false }).reason).toMatch(/priority/);
+  });
+});
+
+describe("ordering entries (trigger order dialog)", () => {
+  const opt = (id: string, group: string | undefined, extra: Record<string, unknown> = {}) => ({ id, label: "Src: short", ...(group ? { group } : {}), ...extra });
+  const d = withOpts({ kind: "order_triggers", min: 4, max: 4, options: [opt("q1", "A"), opt("q2", "B"), opt("q3", "A"), opt("q4", undefined)] });
+  it("merges only entries with the same group, keeps first-appearance order, and counts them", () => {
+    const e = orderEntries(d);
+    expect(e.map((x) => [x.key, x.count])).toEqual([["q1", 2], ["q2", 1], ["q4", 1]]);
+    expect(e[0].ids).toEqual(["q1", "q3"]);
+  });
+  it("the answer lists every id, a merged row contributing its ids side by side", () => {
+    expect(entriesChoice(d, ["q4", "q1", "q2"])).toEqual({ ids: ["q4", "q1", "q3", "q2"] });
+    expect(entriesChoice({ ...d, max: 1 }, ["q2", "q1", "q4"])).toEqual({ ids: ["q2"] });
+  });
+  it("shows the full text (never the truncated label) and 'because <card> <verb>'", () => {
+    expect(entryText({ label: "Src: trunc", text: "The whole ability text, long as it is." })).toBe("The whole ability text, long as it is.");
+    expect(entryText({ label: "Src: only label" })).toBe("Src: only label");
+    expect(causeLine({ causeCard: { name: "Fear of Sleep Paralysis" }, causeLabel: "entered the battlefield" })).toBe("because Fear of Sleep Paralysis entered the battlefield");
+    expect(causeLine({})).toBeUndefined();
   });
 });

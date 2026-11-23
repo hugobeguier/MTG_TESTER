@@ -593,13 +593,13 @@ Linvala, the Preserver [draft]
   [a1] keyword [implemented]
     Oracle: Flying
     Keyword: flying
-  [a2] triggered [needed: needs quantity:life_total, trigger:intervening_if]
+  [a2] triggered [needed: needs quantity:life_total, quantity:players_count, trigger:intervening_if, predicate:compare]
     Oracle: When Linvala enters, if an opponent has more life than you, you gain 5 life.
-    Trigger: Whenever Linvala, the Preserver enters, if an opponent's life total is greater than your life total
+    Trigger: Whenever Linvala, the Preserver enters, if the number of opponents for which that player's life total is greater than your life total is 1 or greater
     Effect: Gain 5 life.
-  [a3] triggered [needed: needs trigger:intervening_if, field:create_tokens.tokenKeywords]
+  [a3] triggered [needed: needs quantity:players_count, trigger:intervening_if, predicate:compare, field:create_tokens.tokenKeywords]
     Oracle: When Linvala enters, if an opponent controls more creatures than you, create a 3/3 white Angel creature token with flying.
-    Trigger: Whenever Linvala, the Preserver enters, if you control greater than the number of creatures you control creatures an opponent controls
+    Trigger: Whenever Linvala, the Preserver enters, if the number of opponents for which the number of creatures that player controls is greater than the number of creatures you control is 1 or greater
     Effect: Create a 3/3 white Angel creature token with flying.
 ```
 
@@ -607,7 +607,7 @@ Player prompts:
 
 - (none: no decisions)
 
-Implementation: needed (quantity:life_total, trigger:intervening_if, field:create_tokens.tokenKeywords)
+Implementation: needed (quantity:life_total, quantity:players_count, trigger:intervening_if, predicate:compare, field:create_tokens.tokenKeywords)
 
 ### Metallic Mimic
 
@@ -1015,6 +1015,7 @@ Implementation: needed (replacement:would_enter, mana:restriction)
 | `field:if_else.if` | 2 | Court of Grace; Emeria Shepherd |
 | `field:if_else.then` | 2 | Court of Grace; Emeria Shepherd |
 | `quantity:event_amount` | 2 | Cut a Deal; Metropolis Reformer |
+| `quantity:players_count` | 2 | Linvala, the Preserver; Wojek Investigator |
 | `quantity:starting_life` | 2 | Righteous Valkyrie; Speaker of the Heavens |
 | `quantity:stat` | 2 | Righteous Valkyrie; Swords to Plowshares |
 | `step:if_else` | 2 | Court of Grace; Emeria Shepherd |
@@ -1048,12 +1049,12 @@ Implementation: needed (replacement:would_enter, mana:restriction)
 | `mana:restriction` | 1 | Giada, Font of Hope |
 | `modes:multiple` | 1 | Austere Command |
 | `predicate:attacked_defender` | 1 | Firemane Commando |
+| `predicate:compare` | 1 | Linvala, the Preserver |
 | `predicate:not` | 1 | Emeria Shepherd |
 | `predicate:stat` | 1 | Court of Grace |
 | `predicate:step_done` | 1 | Emeria Shepherd |
 | `quantity:life_total` | 1 | Linvala, the Preserver |
 | `quantity:math` | 1 | Angel of Vitality |
-| `quantity:players_count` | 1 | Wojek Investigator |
 | `replacement:damage_qualifiers` | 1 | Seraph of the Sword |
 | `replacement:would_deal_damage` | 1 | Seraph of the Sword |
 | `replacement:would_gain_life` | 1 | Angel of Vitality |

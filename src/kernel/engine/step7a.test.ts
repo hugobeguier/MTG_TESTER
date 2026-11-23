@@ -261,7 +261,7 @@ describe("hideaway (linked exile, cast during resolution)", () => {
   const lib = (t: Table, n: number) => { const ids: string[] = []; for (let i = 0; i < n; i++) ids.push(t.give("p1", i === 0 ? "Llanowar Elves" : "Fill A", "library")); return ids; };
   it("Mosswort Bridge / Cemetery Tampering are supported; Spinerock Knoll is not (its \"7 or more damage\" condition counts damage EVENTS, and deals_damage is not logged)", () => {
     for (const n of ["Mosswort Bridge", "Cemetery Tampering"]) expect(cardUnsupported(realDef(n)!).all, n).toEqual([]);
-    expect(cardUnsupported(realDef("Spinerock Knoll")!).all).toEqual(["event:deals_damage"]);
+    expect(cardUnsupported(realDef("Spinerock Knoll")!).all).toEqual([]); // "an opponent was dealt 7 or more damage this turn" reads the damage log (step 11)
   });
   it("entering: look at four, exile one face down (linked), the rest go to the bottom", () => {
     const t = realTable(["p1", "p2"], famCards); const ids = lib(t, 6);

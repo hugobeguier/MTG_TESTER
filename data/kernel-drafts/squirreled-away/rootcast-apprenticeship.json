@@ -114,8 +114,7 @@
                   "green"
                 ],
                 "tokenTypeLine": "Creature — Squirrel",
-                "who": "target_player",
-                "target": "t1"
+                "who": "target_player"
               }
             ]
           },
@@ -147,7 +146,6 @@
               {
                 "kind": "sacrifice_permanent",
                 "who": "target_player",
-                "target": "t1",
                 "filter": {
                   "types": [
                     "artifact"

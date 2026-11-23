@@ -17,6 +17,7 @@ import type { CardDef } from "./types";
 export function castableFaces(def: CardDef): string[] {
   const names = faceNames(def);
   if (names.length <= 1) return names;
+  if (def.layout === "room") return names; // either half of a Room may be cast (CR 709.3)
   // a land face is played, never cast
   return def.layout === "modal_dfc" || def.layout === "split" ? names.filter((n, i) => i === 0 || !def.faces?.[n]?.types.includes("land")) : [names[0]];
 }

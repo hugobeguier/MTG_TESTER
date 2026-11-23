@@ -30,12 +30,12 @@ import { clearRegenShields, regenerates } from "./regen";
 import { ofOpponent, opponentIds, slotUsesX, targetBounds, totalMax } from "./targets7";
 import { addDurable, expiryFor, consumePermission, expireDurable, hasFlag, permissionIdOf, permissionOptions, permissionsFor, delayeds } from "./durable";
 import { isTopCard, refreshTopLookers, topPerms } from "./topcast";
-import { flashGrantCovers, playerCantCast, playerHas } from "./layers";
+import { cantCastCard, flashGrantCovers, playerCantCast, playerHas } from "./layers";
 import { castableFaces, playableFaces } from "./faces";
 import { leaveGame } from "./leave";
 import { addedSteps, baseChoices, castTags, grantedFree, grantedMorph, grantedTop, mandatoryExtras, optionalExtras, optionLabel, selectedOptions, spellExtraCosts, spellManaString } from "./castopts";
 import type {
-  Action, CastInfo, Choice, Draft, EngineContext, Exec, GameEvent, GameObject, GameState, Lki, ObjId, Part, Pending, PendingView, PlayerId,
+  Action, CardDef, CastInfo, Choice, DecisionOption, Draft, EngineContext, Exec, GameEvent, GameObject, GameState, Lki, ObjId, Part, Pending, PendingView, PlayerId,
   QueuedTrigger, ResolveResult, StackItem, TriggerContext
 } from "./types";
 import { isObjId } from "./types";
@@ -139,6 +139,7 @@ function dispatch(r: Run, a: Action): void {
     case "passPriority": return passPriority(r, a.player, !!a.fastForward);
     case "advancePhase": return advancePhase(r, a.player);
     case "turnFaceUp": return turnFaceUp(r, a);
+    case "unlockDoor": return unlockDoor(r, a);
     case "castPrepared": return castPrepared(r, a);
   }
 }
@@ -198,7 +199,7 @@ targetHooks.candidates = (r, spec, q, self) => targetCandidates(r, spec as Targe
 export function targetCandidates(r: Run, spec: TargetSpec, q: QCtx, selfSpell?: ObjId): string[] {
   const out: string[] = [];
   const f: ObjectFilter = spec.filter ?? {};
-  if (spec.what === "player" || spec.what === "any") for (const p of alive(r)) { if (f.controller === "opponent" && p.id === q.controller) continue; /* "target opponent" */ if (f.controller === "you" && p.id !== q.controller) continue; if (p.id === q.controller || !playerHas(r, p.id, "hexproof")) out.push(p.id); }
+  if (spec.what === "player" || spec.what === "any") for (const p of alive(r)) { if (f.controller === "opponent" && p.id === q.controller) continue; /* "target opponent" */ if (f.controller === "you" && p.id !== q.controller) continue; if (!hasFlag(r, p.id, "protection_everything") && (p.id === q.controller || !playerHas(r, p.id, "hexproof"))) out.push(p.id); }
   if (spec.what === "object" || spec.what === "any") {
     const zone = f.zone ?? ((f.types ?? []).includes("spell") ? "stack" : "battlefield");
     let ids = objectsMatching(r, { ...f, zone }, q);
@@ -550,7 +551,7 @@ function payAbilityCosts(r: Run, d: Draft, costs: Cost[], a?: Ability): { sacrif
       // cycling / channel: discard this card from your hand as a cost
       if (src.zone !== "hand") throw new Reject("cannot_pay", `${label(r, src.id)} is no longer in your hand`);
       discardCard(r, d.player, src.id);
-      if (a?.keyword?.name.toLowerCase() === "cycling") { emit(r, { type: "cycle", id: src.id, player: d.player, x: d.x ?? 0 }); r.s.turnLog.push({ type: "cycle", id: src.id, player: d.player, ts: r.s.clock }); }
+      if (/cycling$/.test(a?.keyword?.name.toLowerCase() ?? "")) { emit(r, { type: "cycle", id: src.id, player: d.player, x: d.x ?? 0 }); r.s.turnLog.push({ type: "cycle", id: src.id, player: d.player, ts: r.s.clock }); }
       continue;
     }
     if ("loyalty" in c) {
@@ -763,6 +764,7 @@ function castSpell(r: Run, a: Extract<Action, { type: "castSpell" }>): void {
   const c = chars(r, o.id);
   if (c.types.includes("land")) throw new Reject("not_castable", "lands are played, not cast");
   if (playerCantCast(r, a.player)) throw new Reject("wrong_timing", `${a.player} can't cast spells right now`);
+  if (cantCastCard(r, o.id)) throw new Reject("wrong_timing", `${label(r, o.id)} can't be cast right now`);
   assertSupported(r, o);
   if (continuing(r)) reportCast(r, o.id); // the spell ability / cast options the engine cannot run: reported now, the spell is still cast
   // double-faced cards: a preset face is validated now; with several castable faces and none given, the draft asks and re-checks the timing for the chosen one
@@ -877,6 +879,7 @@ function activateAbility(r: Run, a: Extract<Action, { type: "activateAbility" }>
     if (r.s.activations[`t:${src.id}:loyalty`]) throw new Reject("cannot_activate", `${label(r, src.id)} already activated a loyalty ability this turn`);
   }
   if (ab.timing?.speed === "sorcery" && !inMainWithEmptyStack(r, a.player)) throw new Reject("wrong_timing", "this ability can only be activated at sorcery speed");
+  if (ab.keyword?.name === "class_level" && (src.classLevel ?? 1) !== Number(ab.keyword.param) - 1) throw new Reject("cannot_activate", `${label(r, src.id)} is level ${src.classLevel ?? 1}: level ${String(ab.keyword.param)} can only be gained from level ${Number(ab.keyword.param) - 1}`); // CR 716.2b
   for (const pr of ab.timing?.only ?? []) if (!evalPredicate(r, pr, { controller: a.player, source: src.id })) throw new Reject("wrong_timing", "timing restriction not met");
   const draft: Draft = { kind: "activated", player: a.player, sourceId: src.id, abilityId: ab.id, payWith: a.payWith, autoPay: a.autoPay, ...(a.phyrexian ? { phyPreset: [...a.phyrexian] } : {}) };
   if (a.x !== undefined) { draft.x = a.x; draft.xChosen = true; }
@@ -911,28 +914,52 @@ function runManaSteps(r: Run, pid: PlayerId, src: GameObject, ab: Ability): void
 }
 manaHooks.runSteps = runManaSteps;
 
-function activateMana(r: Run, pid: PlayerId, src: GameObject, ab: Ability, color?: string, answer?: Choice, savedChoices?: Record<number, ObjId[]>): void {
+function activateMana(r: Run, pid: PlayerId, src: GameObject, ab: Ability, color?: string, answer?: Choice, savedChoices?: Record<number, ObjId[]>, xIn?: number): void {
   if (!manaAbilityActivatable(r, src, ab)) throw new Reject("cannot_activate", `${label(r, src.id)} cannot produce mana right now (tapped or summoning sick)`);
+  // "X mana in any combination of colors" paid for by "Tap X untapped tokens" (Hazel of the Rootbloom): X is chosen first, then what to tap, then the colors
+  const variable = ab.mana?.produces.length === 1 && "anyColorAmount" in ab.mana.produces[0];
+  let xv = xIn ?? 0;
+  if (variable && xIn === undefined) {
+    const tapCost = (ab.costs ?? []).find((c) => "tapOther" in c) as ChoiceCost | undefined;
+    const maxX = tapCost ? costCandidates(r, tapCost, { player: pid, source: src.id, x: 0 }).length : 0;
+    if (maxX < 1) throw new Reject("cannot_activate", `nothing to tap for ${label(r, src.id)}`);
+    const spec: AskSpec = { kind: "choose_number", player: pid, prompt: ab.xPrompt ?? { title: `${label(r, src.id)}: choose X`, instruction: "Choose X: the number of untapped tokens to tap (and mana to add)." }, options: [], min: 1, max: maxX, numeric: true };
+    const dec = decide(spec, answer);
+    if ("ask" in dec) { setPending(r, dec.ask, { t: "draft", stage: "color", draft: { kind: "activated", player: pid, sourceId: src.id, abilityId: ab.id, costChoices: { ...(savedChoices ?? {}) }, x: undefined, xChosen: false } }, true); return; }
+    xv = dec.number!;
+    answer = undefined;
+  }
   // costs that need a choice ("Sacrifice a creature"): asked before anything is paid, like any activated ability
   const choices: Record<number, ObjId[]> = { ...(savedChoices ?? {}) };
   const costs = ab.costs ?? [];
   for (const [i, c] of costs.entries()) {
     if (!needsChoice(c) || i in choices) continue;
-    const cx = { player: pid, source: src.id, x: 0 };
+    const cx = { player: pid, source: src.id, x: xv };
     const cands = costCandidates(r, c, cx), n = costCount(r, c, cx);
     if (cands.length < n) throw new Reject("cannot_activate", `nothing to ${costNoun(c)} for ${label(r, src.id)}`);
     if (cands.length === n) { choices[i] = [...cands]; continue; }
     const spec: AskSpec = { kind: "choose_cards", player: pid, prompt: (c as { prompt?: Prompt }).prompt ?? { title: `${label(r, src.id)}: choose`, instruction: `Choose ${n} to ${costNoun(c)}.` }, options: costOptions(r, cands), min: n, max: n };
     const dec = decide(spec, answer);
-    if ("ask" in dec) { setPending(r, dec.ask, { t: "draft", stage: "color", draft: { kind: "activated", player: pid, sourceId: src.id, abilityId: ab.id, costChoices: choices } }, true); return; }
+    if ("ask" in dec) { setPending(r, dec.ask, { t: "draft", stage: "color", draft: { kind: "activated", player: pid, sourceId: src.id, abilityId: ab.id, costChoices: choices, ...(variable ? { x: xv, xChosen: true } : {}) } }, true); return; }
     answer = undefined;
     choices[i] = dec.ids;
   }
   if (ab.scripted?.handler === "exert_and_haste_if_spent_on_creature_spell") { src.exerted = r.s.turn.number; emit(r, { type: "exerted", id: src.id }); } // Arena of Glory: exerted, it skips its controller's next untap step
-  const prod = productionOfAbility(r, pid, ab);
+  const askDraft = { t: "draft" as const, stage: "color" as const, draft: { kind: "activated" as const, player: pid, sourceId: src.id, abilityId: ab.id, costChoices: choices, ...(variable ? { x: xv, xChosen: true } : {}) } };
+  const prod = variable ? ({ fixed: [] } as ReturnType<typeof productionOfAbility>) : productionOfAbility(r, pid, ab);
   let colors: string[];
-  const askDraft = { t: "draft" as const, stage: "color" as const, draft: { kind: "activated" as const, player: pid, sourceId: src.id, abilityId: ab.id, costChoices: choices } };
-  if ("fixed" in prod) colors = prod.fixed;
+  if (variable) {
+    // X mana in any combination of colors: one split decision (assign_mana)
+    const KEYS = ["W", "U", "B", "R", "G"];
+    const spec: AskSpec = { kind: "assign_mana", player: pid, prompt: { title: `${label(r, src.id)}: choose the mana`, instruction: `Choose ${xv} mana in any combination of colors.` }, options: KEYS.map((c) => ({ id: c, label: c })), min: xv, max: xv, mana: { total: xv, colors: KEYS } };
+    if (!answer) { setPending(r, spec, askDraft, true); return; }
+    const asg = answer.assign ?? {};
+    let sum = 0;
+    for (const [c, v] of Object.entries(asg)) { if (!KEYS.includes(c)) throw new Reject("invalid_choice", `${c} is not a color of mana`); if (!Number.isInteger(v) || v < 0) throw new Reject("invalid_choice", "amounts must be whole numbers, 0 or more"); sum += v; }
+    if (sum !== xv) throw new Reject("invalid_choice", `the amounts must add up to ${xv}, got ${sum}`);
+    colors = KEYS.flatMap((c) => Array(asg[c] ?? 0).fill(c));
+    answer = undefined;
+  } else if ("fixed" in prod) colors = prod.fixed;
   else if ("alternatives" in prod) {
     // "Add {W}{W}, {W}{B}, or {B}{B}": the player picks one whole alternative
     let pick = color;
@@ -964,7 +991,12 @@ function activateMana(r: Run, pid: PlayerId, src: GameObject, ab: Ability, color
     if (!payFromPool(r, pid, cost, 0, sctx) && !(autoTapFor(r, pid, cost, 0, undefined, [src.id], sctx) && payFromPool(r, pid, cost, 0, sctx))) throw new Reject("cannot_pay", "cannot pay the mana cost of this mana ability");
     if (life > 0) changeLife(r, undefined, pid, -life);
   }
-  for (const [i, c] of costs.entries()) if (needsChoice(c)) payChoiceCost(r, c as ChoiceCost, choices[i], { player: pid, source: src.id, x: 0 });
+  for (const c of costs) if ("life" in c) { // Hazel of the Rootbloom: "Pay 2 life" is part of the mana ability
+    const n = evalQuantity(r, c.life, { controller: pid, source: src.id, x: xv });
+    if (player(r, pid).life < n) throw new Reject("cannot_pay", "not enough life");
+    changeLife(r, undefined, pid, -n);
+  }
+  for (const [i, c] of costs.entries()) if (needsChoice(c)) payChoiceCost(r, c as ChoiceCost, choices[i], { player: pid, source: src.id, x: xv });
   const tapBefore = { pool: manaPoolSize(r, pid), queue: r.s.triggerQueue.length, stack: r.s.stack.length };
   payManaAbilityCosts(r, src, ab, pid);
   const addedColors = prod.props ? colors : costs.some((c) => "tap" in c) ? withTapBonus(r, pid, colors as never) : colors;
@@ -1058,6 +1090,34 @@ function turnFaceUp(r: Run, a: Extract<Action, { type: "turnFaceUp" }>): void {
   finish(r, a.player);
 }
 
+/** The mana cost of one door (face) of a Room. */
+export function doorCost(def: CardDef, face: string): string | undefined { const names = faceNames(def); return face === names[0] ? def.manaCost : def.faces?.[face]?.manaCost; }
+
+/**
+ * Special action (CR 116.2m / 709.5): unlock a locked door of a Room you control by paying that door's mana cost. Sorcery timing, no stack, you keep priority.
+ * Triggers "whenever you unlock a door" / "fully unlock a Room" (Eerie) come from the door_unlocked event.
+ */
+function unlockDoor(r: Run, a: Extract<Action, { type: "unlockDoor" }>): void {
+  const o = r.s.objects[a.objectId];
+  if (!o || o.zone !== "battlefield") throw new Reject("cannot_activate", "that Room is not on the battlefield");
+  if (o.controller !== a.player) throw new Reject("not_owner", `${a.player} does not control ${a.objectId}`);
+  const def = defOf(r, o);
+  if (!def || def.layout !== "room") throw new Reject("cannot_activate", "that permanent is not a Room");
+  const names = faceNames(def);
+  if (!names.includes(a.face)) throw new Reject("invalid_choice", `"${a.face}" is not a door of ${label(r, o.id)}`);
+  if ((o.unlocked ?? []).includes(a.face)) throw new Reject("cannot_activate", `the ${a.face} door is already unlocked`);
+  if (!r.ignoreTiming && !inMainWithEmptyStack(r, a.player)) throw new Reject("wrong_timing", "doors can only be unlocked during your main phase with an empty stack");
+  const cost = doorCost(def, a.face);
+  if (!cost) throw new Reject("cannot_activate", "that door has no mana cost");
+  const d: Draft = { kind: "activated", player: a.player, sourceId: o.id, abilityId: "kw:unlock", payWith: a.payWith, autoPay: a.autoPay };
+  payMana(r, a.player, parseManaCost(cost), 0, d, [], { abilitySource: o.id, spent: [] });
+  o.unlocked = [...(o.unlocked ?? []), a.face];
+  invalidateIndex(r);
+  emit(r, { type: "door_unlocked", id: o.id, player: a.player, face: a.face, fully: o.unlocked.length >= names.length });
+  r.s.passes = [];
+  finish(r, a.player);
+}
+
 /**
  * Cast a copy of the other face's spell of a PREPARED permanent you control (Secrets of Strixhaven): the copy is a real card-like object that goes
  * through the normal casting pipeline (targets, costs, cast triggers, can be countered); casting it ends the prepared state.
@@ -1124,7 +1184,7 @@ function resolveTop(r: Run): void {
     finish(r); return;
   }
   const ab = src ? abilitiesOf(r, src).find((a) => a.id === item.abilityId) : undefined;
-  if (item.kind === "triggered" && ab?.trigger?.interveningIf && !evalPredicate(r, ab.trigger.interveningIf, { controller: item.controller, source: item.sourceId, eventObj: item.trigger?.eventObj, eventPlayer: item.trigger?.eventPlayer, cast: item.cast, x: item.x })) {
+  if (item.kind === "triggered" && ab?.trigger?.interveningIf && !evalPredicate(r, ab.trigger.interveningIf, { controller: item.controller, source: item.sourceId, eventObj: item.trigger?.eventObj, eventPlayer: item.trigger?.eventPlayer, defenders: item.trigger?.defenders, cast: item.cast, x: item.x })) {
     emit(r, { type: "trigger_fizzled", source: item.sourceId }); finish(r); return;
   }
   if (item.kind === "spell") {
@@ -1162,6 +1222,7 @@ function resolveTop(r: Run): void {
   }
   // a one-shot shield written on a spell / activated ability ("Prevent all combat damage that would be dealt this turn"): it starts when the ability resolves
   if (ab?.replacement && ab.kind !== "replacement") addDurable(r, { owner: item.controller, source: item.sourceId, expires: expiryFor(r, "until_end_of_turn", item.controller), replacement: { ...ab.replacement, duration: undefined } });
+  if (ab?.keyword?.name === "class_level") { const cs = tryObj(r, item.sourceId); if (cs) { cs.classLevel = Number(ab.keyword.param); emit(r, { type: "class_level", id: cs.id, level: cs.classLevel }); invalidateIndex(r); } } // the level-up ability resolves: the Class becomes that level
   const ex = startExec(item);
   if (ab?.scripted?.handler === "one_counter_per_color_on_distinct_dragons_win_if_five") ex.frames[0].steps.push(...(callTheSpiritDragonsSteps() as unknown as Step[])); // Call the Spirit Dragons
   continueExec(r, ex);
@@ -1197,6 +1258,9 @@ function advanceStep(r: Run): void {
 function startNextTurn(r: Run): void {
   const extra = (r.s.extraTurns ??= []).pop();
   const next = (extra && r.s.players.find((p) => p.id === extra && !p.hasLost)) || nextPlayer(r, r.s.turn.active);
+  const tt = (r.s.turnsTaken ??= {});
+  tt[r.s.turn.active] = Math.max(tt[r.s.turn.active] ?? 0, 1); // the turn that just ended counts for its player (the first turn of the game is not counted anywhere else)
+  tt[next.id] = (tt[next.id] ?? 0) + 1;
   r.s.turn = { number: r.s.turn.number + 1, active: next.id, phase: "untap" };
   r.s.turnLog = [];
   r.s.combat = null; r.s.extraCombats = 0; r.s.extraBeginnings = 0; r.s.inExtraBeginning = false;
@@ -1305,7 +1369,7 @@ function answer(r: Run, a: Extract<Action, { type: "answerDecision" }>): void {
       if (ctx.stage === "color") {
         const src = obj(r, d.sourceId);
         const ab = abilitiesOf(r, src).find((x) => x.id === d.abilityId)!;
-        activateMana(r, d.player, src, ab, undefined, choice, d.costChoices);
+        activateMana(r, d.player, src, ab, undefined, choice, d.costChoices, d.xChosen ? d.x : undefined);
         return;
       }
       startDraft(r, d, pend.cancellable, choice);
@@ -1315,7 +1379,7 @@ function answer(r: Run, a: Extract<Action, { type: "answerDecision" }>): void {
     case "triggers": {
       if (ctx.stage === "order") {
         const group = r.s.triggerQueue.filter((t) => t.controller === ctx.player);
-        const spec: AskSpec = { kind: "order_triggers", player: ctx.player, prompt: pend.prompt, options: group.map((t) => ({ id: t.id, label: t.label })), min: group.length, max: group.length };
+        const spec: AskSpec = { kind: "order_triggers", player: ctx.player, prompt: pend.prompt, options: group.map((t) => triggerOption(r, t)), min: group.length, max: group.length };
         const dec = decide(spec, choice);
         if ("ask" in dec) throw new Reject("invalid_choice", "answer required");
         const others = r.s.triggerQueue.filter((t) => t.controller !== ctx.player);
@@ -1435,8 +1499,9 @@ function queueTrigger(r: Run, src: ObjId, ab: Ability, controller: PlayerId, ctx
     if (r.s.config.lenient) { emit(r, { type: "unsupported_ignored", source: src, ability: ab.id, needs }); return; }
     throw new Unsupported(needs[0], `${label(r, src)}: triggered ability ${ab.id} needs ${needs.join(", ")}`, needs);
   }
-  const q: QCtx = { controller, source: src, eventObj: ctx.eventObj, eventPlayer: ctx.eventPlayer, cast: ctx.cast, x: ctx.x };
+  const q: QCtx = { controller, source: src, eventObj: ctx.eventObj, eventPlayer: ctx.eventPlayer, cast: ctx.cast, x: ctx.x, defenders: ctx.defenders };
   if (ab.trigger?.interveningIf && !evalPredicate(r, ab.trigger.interveningIf, q)) return;
+  for (const c of ab.conditions ?? []) if (c.when === "static" && !evalPredicate(r, c.if, q)) return; // "as long as this Class is level 2 or higher" (the level abilities of a Class)
   // Roaming Throne: a triggered ability of ANOTHER creature you control of the chosen type triggers an additional time (once per such permanent)
   let times = 1;
   const so = tryObj(r, src);
@@ -1483,6 +1548,7 @@ function matchCombat(r: Run, tr: TriggerSpec, h: { id: ObjId; controller: Player
   if (!ok) return null;
   // "attacks for the first time each turn" (Scourge of the Throne): the n-th time THIS creature was declared as an attacker this turn
   if (tr.event === "attack" && tr.nth) { const nth = tr.nth; if (nth.per !== "turn" || r.s.turnLog.filter((e) => e.type === "attack" && e.id === actor).length !== nth.n) return null; }
+  if (tr.event === "attack" && tr.alone && r.events.filter((e) => e.type === "attack" && e.batch === ev.batch).length !== 1) return null; // exalted: the whole declared attack is this one creature
   if (tr.event === "attack" && tr.defender) {
     const d = ev.defender as string;
     const mine = d === h.controller || (isObjId(d) && tryObj(r, d)?.controller === h.controller);
@@ -1520,7 +1586,11 @@ function scanTriggers(r: Run): void {
     if (!SCANNED_EVENTS.has(ev.type)) continue;
     fireDelayed(r, ev, evIdx);
     // Saga: as it enters it gets a lore counter (chapter I triggers off it)
-    if (ev.type === "etb" && r.s.objects[ev.id as string]?.zone === "battlefield" && chars(r, ev.id as string).subtypes.some((s) => s.toLowerCase() === "saga")) addCounters(r, [ev.id as string], "lore", 1);
+    if (ev.type === "etb" && r.s.objects[ev.id as string]?.zone === "battlefield" && chars(r, ev.id as string).subtypes.some((s) => s.toLowerCase() === "saga") ) {
+      const sg = r.s.objects[ev.id as string];
+      if (abilitiesOf(r, sg).some((a) => a.kind === "keyword" && a.keyword?.name === "read_ahead")) { if ((sg.counters.lore ?? 0) > 0) emit(r, { type: "counter_added", id: sg.id, kind: "lore", amount: sg.counters.lore }); } // read ahead: it entered WITH its lore counters (only the chosen chapter triggers)
+      else addCounters(r, [ev.id as string], "lore", 1);
+    }
     const names = triggerNames(ev);
     const holders: Array<{ id: ObjId; controller: PlayerId; lki?: boolean }> = r.s.battlefield.map((id) => ({ id, controller: r.s.objects[id].controller }));
     for (const p of r.s.players) for (const id of p.command) if (r.s.objects[id]?.token) holders.push({ id, controller: r.s.objects[id].controller }); // emblems: their abilities work from the command zone
@@ -1639,9 +1709,15 @@ function scanTriggers(r: Run): void {
               const seen = (r.seenBatch ??= new Set());
               if (seen.has(key)) continue;
               seen.add(key);
-              const hits = r.events.filter((e) => e.type === ev.type && e.batch === ev.batch && triggerNames(e as never).includes(tr.event)).map((e) => matchCombat(r, tr, h, e as never)).filter((c): c is TriggerContext => !!c);
-              if (hits.length < (tr.minCount ?? 1)) continue;
-              ctx = hits[0]; match = true;
+              const hitEvs = r.events.filter((e) => e.type === ev.type && e.batch === ev.batch && triggerNames(e as never).includes(tr.event));
+              const hitCtxs = hitEvs.map((e) => ({ e, c: matchCombat(r, tr, h, e as never) })).filter((x): x is { e: typeof x.e; c: TriggerContext } => !!x.c);
+              if (hitCtxs.length < (tr.minCount ?? 1)) continue;
+              ctx = hitCtxs[0].c; match = true;
+              if (tr.event === "attack") {
+                // the defenders of the whole batch (attacked_defender) and, for "whenever another player attacks", that player is the attacker
+                ctx.defenders = [...new Set(hitCtxs.map((x) => String((x.e as Record<string, unknown>).defender)))];
+                if (tr.whose === "opponents" || tr.whose === "each") ctx.eventPlayer = String((hitCtxs[0].e as Record<string, unknown>).player);
+              }
             } else {
               const c = matchCombat(r, tr, h, ev);
               if (c) { match = true; ctx = c; }
@@ -1712,6 +1788,21 @@ function settle(r: Run): boolean {
   throw new LoopDetected("trigger placement did not terminate");
 }
 
+const CAUSE_VERB: Record<string, string> = {
+  etb: "entered the battlefield", dies: "died", leaves: "left the battlefield", cast: "was cast", attack: "attacked", block: "blocked", draw: "drew", discard: "discarded",
+  gain_life: "gained life", lose_life: "lost life", sacrifice: "was sacrificed", becomes_target: "became a target", unlock_door: "had a door unlocked", token_created: "was created", counter_put: "got a counter"
+};
+/** An ordering option for a queued trigger: its source object, full ability text and the object that caused it (see DecisionOption). */
+function triggerOption(r: Run, t: QueuedTrigger): DecisionOption {
+  const src = tryObj(r, t.sourceId);
+  const ab = src ? abilitiesOf(r, src).find((a) => a.id === t.abilityId) : undefined;
+  const text = (ab?.text ?? t.label).replace(/\s+/g, " ");
+  const cause = t.ctx.eventObj;
+  const ev = ab?.trigger?.event;
+  const group = [t.sourceId, t.abilityId, t.ctx.eventObj ?? "", t.ctx.eventPlayer ?? "", t.ctx.amount ?? "", t.ctx.x ?? "", (t.ctx.batchObjs ?? []).join(","), (t.ctx.defenders ?? []).join(","), t.delayed ? t.id : ""].join("|");
+  return { id: t.id, label: t.label, ...(src ? { source: t.sourceId } : {}), text, ...(cause && tryObj(r, cause) ? { cause, ...(ev && CAUSE_VERB[ev] ? { causeLabel: CAUSE_VERB[ev] } : {}) } : {}), group };
+}
+
 /** Puts the next trigger (APNAP order) on the stack. Returns true if it needs a decision first. */
 function placeNextTrigger(r: Run): boolean {
   for (const p of apnap(r)) {
@@ -1721,7 +1812,7 @@ function placeNextTrigger(r: Run): boolean {
       setPending(r, {
         kind: "order_triggers", player: p.id,
         prompt: { title: "Order your triggered abilities", instruction: "Choose the order to put your triggered abilities on the stack (the first one you choose goes on the stack first and resolves last)." },
-        options: group.map((t) => ({ id: t.id, label: t.label })), min: group.length, max: group.length
+        options: group.map((t) => triggerOption(r, t)), min: group.length, max: group.length
       }, { t: "triggers", stage: "order", player: p.id });
       return true;
     }
@@ -1770,6 +1861,7 @@ function runCastNow(r: Run): boolean {
       r.s = snap; r.events.length = nEvents; invalidateIndex(r);
       r.s.durableEffects = (r.s.durableEffects ?? []).filter((d) => !(d.permission?.objectId === q.id && d.permission.objectTs === q.ts));
       emit(r, { type: "cast_now_failed", player: q.player, reason: e.message });
+      if (q.elseToHand && tryObj(r, q.id)?.timestamp === q.ts) moveObject(r, q.id, "hand");
     } finally { r.ignoreTiming = false; r.castingMiracle = false; }
   }
   return false;

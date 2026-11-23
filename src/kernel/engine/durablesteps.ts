@@ -9,7 +9,7 @@ import type { StepSpec } from "./steps";
 import type { Env, PlayerId } from "./types";
 
 export const permissionStep: StepSpec = {
-  fields: ["what", "target", "zone", "withoutPaying", "withoutPayingManaCost", "duration", "allow", "who"],
+  fields: ["what", "target", "zone", "withoutPaying", "withoutPayingManaCost", "duration", "allow", "who", "elseToHand"],
   run: (r, ex, step) => {
     const env = ex.env;
     const ref = (step.what ?? step.target) as string | undefined;
@@ -24,7 +24,7 @@ export const permissionStep: StepSpec = {
       const o = tryObj(r, id);
       if (!o || o.zone === "battlefield" || o.zone === "stack") continue;
       if (step.zone && step.zone !== "any" && o.zone !== step.zone) continue;
-      if (now) { (r.castNow ??= []).push({ player: owner, id, ts: o.timestamp, withoutPaying: !!(step.withoutPaying || step.withoutPayingManaCost) }); }
+      if (now) { (r.castNow ??= []).push({ player: owner, id, ts: o.timestamp, withoutPaying: !!(step.withoutPaying || step.withoutPayingManaCost), ...(step.elseToHand ? { elseToHand: true } : {}) }); }
       addDurable(r, {
         owner, source: env.source, expires: now ? { ev: "cleanup", turn: r.s.turn.number } : expiryFor(r, dur, owner),
         permission: { objectId: id, objectTs: o.timestamp, zone: o.zone, withoutPaying: !!(step.withoutPaying || step.withoutPayingManaCost), allow }
@@ -54,6 +54,7 @@ export const delayedStep: StepSpec = {
       targets.__e = resolveObjs(r, "enchanted", env);
       steps = JSON.parse(JSON.stringify(steps).replace(/"(target|what)":"enchanted"/g, '"$1":"__e"'));
     }
+    for (const k of Object.keys(env.chosen)) if (steps && JSON.stringify(steps).includes(`"list":"${k}"`)) targets["__l_" + k] = (env.chosen[k] ?? []).filter((id) => id.startsWith("#")); // lists the delayed steps count ("for each of those cards still exiled")
     const base = { source: env.source, controller: env.controller, steps, targets, ctx, label: `${label(r, env.source)}: delayed trigger` };
     if (at.event === "begin_step") {
       if (!at.step || at.next === false) throw new Unsupported("field:create_delayed_trigger.at");
@@ -95,6 +96,7 @@ export function grantToPlayers(r: Run, env: Env, step: Step): void {
   const mods = (step.modify ?? []) as Array<Record<string, unknown>>;
   for (const m of mods) {
     if ("grant" in m && String(m.grant).toLowerCase() === "no maximum hand size") addDurable(r, { owner, source: env.source, expires, flag: "no_max_hand_size" });
+    else if ("grant" in m && String(m.grant).toLowerCase() === "protection from everything") addDurable(r, { owner, source: env.source, expires, flag: "protection_everything" }); // Perch Protection: damage to the player is prevented, nothing can target the player
     else throw new Unsupported(`field:grant_effect.modify.${Object.keys(m)[0]}`, "this player-scoped grant is not modelled");
   }
 }

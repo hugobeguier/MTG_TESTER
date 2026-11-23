@@ -299,16 +299,16 @@ Re-rendered plain English:
 
 ```
 Batwing Brume [draft]
-  [a1] spell_effect [needed: needs predicate:mana_spent, step:grant_effect, field:grant_effect.replacement, field:grant_effect.who, step:repeat_for_each, field:repeat_for_each.steps, field:repeat_for_each.who, quantity:math, field:life_change.amount, field:life_change.who]
+  [a1] spell_effect [needed: needs predicate:mana_spent, step:grant_effect, field:grant_effect.replacement, field:grant_effect.who, step:repeat_for_each, field:repeat_for_each.over, field:repeat_for_each.steps, quantity:math, field:life_change.amount, field:life_change.who]
     Oracle: Prevent all combat damage that would be dealt this turn if {W} was spent to cast this spell. Each player loses 1 life for each attacking creature they control if {B} was spent to cast this spell. (Do both if {W}{B} was spent.)
-    Effect: IF at least one {W} mana was spent to cast this spell: the target gains an effect until end of turn. Then, IF at least one {B} mana was spent to cast this spell: repeat for each matching object.
+    Effect: IF at least one {W} mana was spent to cast this spell: the target gains an effect until end of turn. Then, IF at least one {B} mana was spent to cast this spell: for each permanent, that player gains -1 x the number of attacking creatures that player controls life.
 ```
 
 Player prompts:
 
 - (none: no decisions)
 
-Implementation: needed (predicate:mana_spent, step:grant_effect, field:grant_effect.replacement, field:grant_effect.who, step:repeat_for_each, field:repeat_for_each.steps, field:repeat_for_each.who, quantity:math, field:life_change.amount, field:life_change.who)
+Implementation: needed (predicate:mana_spent, step:grant_effect, field:grant_effect.replacement, field:grant_effect.who, step:repeat_for_each, field:repeat_for_each.over, field:repeat_for_each.steps, quantity:math, field:life_change.amount, field:life_change.who)
 
 Questions for you:
 
@@ -849,7 +849,7 @@ Re-rendered plain English:
 
 ```
 Incarnation Technique [draft]
-  [a1] triggered [needed: needs step:copy, step:choose, field:choose.choice, field:choose.saveAs, predicate:step_done, field:copy.who]
+  [a1] triggered (from stack) [needed: needs zone:stack, step:copy, step:choose, field:choose.choice, predicate:step_done, field:copy.who]
     Oracle: Demonstrate (When you cast this spell, you may copy it. If you do, choose an opponent to also copy it.)
     Trigger: Whenever a player casts Incarnation Technique
     Effect: You may copy Incarnation Technique. Then, IF you did (d1): choose a opponent. Then, IF you did (d1): copy Incarnation Technique.
@@ -864,7 +864,7 @@ Player prompts:
 - Incarnation Technique: optional: Do you want to copy Incarnation Technique?
 - Incarnation Technique: choose: Choose a opponent.
 
-Implementation: needed (step:copy, step:choose, field:choose.choice, field:choose.saveAs, predicate:step_done, field:copy.who, field:move_card_zone.filter, field:move_card_zone.from, field:move_card_zone.what)
+Implementation: needed (zone:stack, step:copy, step:choose, field:choose.choice, predicate:step_done, field:copy.who, field:move_card_zone.filter, field:move_card_zone.from, field:move_card_zone.what)
 
 Questions for you:
 
@@ -882,19 +882,18 @@ Re-rendered plain English:
 
 ```
 Keen Duelist [draft]
-  [a1] triggered [needed: needs step:choose, field:choose.alsoWho, field:choose.count, field:choose.from, field:choose.position, field:choose.reveal, field:choose.saveAs, quantity:math, field:life_change.amount, field:life_change.lifeFrom, field:life_change.who, field:move_card_zone.alsoWho, field:move_card_zone.what]
+  [a1] triggered [needed: needs step:mutual_reveal, field:mutual_reveal.players, field:mutual_reveal.srcs]
     Oracle: At the beginning of your upkeep, you and target opponent each reveal the top card of your library. You each lose life equal to the mana value of the card revealed by the other player. You each put the card you revealed into your hand.
     Trigger: At the beginning of your upkeep
     Target t1: target player  <- prompt: "Choose target player."
-    Effect: Choose a card in a library. Then, gain -1 x the chosen object's mana value life. Then, target player gains -1 x the chosen object's mana value life. Then, put a card into your hand.
+    Effect: You and target player each reveal the top card of your library, each loses life equal to the mana value of the card the other revealed, then each puts the card they revealed into their hand.
 ```
 
 Player prompts:
 
 - Keen Duelist: choose a target: Choose target player.
-- Keen Duelist: choose: Choose a card in a library.
 
-Implementation: needed (step:choose, field:choose.alsoWho, field:choose.count, field:choose.from, field:choose.position, field:choose.reveal, field:choose.saveAs, quantity:math, field:life_change.amount, field:life_change.lifeFrom, field:life_change.who, field:move_card_zone.alsoWho, field:move_card_zone.what)
+Implementation: needed (step:mutual_reveal, field:mutual_reveal.players, field:mutual_reveal.srcs)
 
 Questions for you:
 
@@ -916,9 +915,9 @@ Knight of the White Orchid [draft]
   [a1] keyword [implemented]
     Oracle: First strike
     Keyword: first strike
-  [a2] triggered [needed: needs trigger:intervening_if, predicate:compare, step:search_library, field:search_library.count, field:search_library.filter, field:search_library.shuffle, field:search_library.tapped, field:search_library.to]
+  [a2] triggered [needed: needs quantity:players_count, trigger:intervening_if, predicate:compare, step:search_library, field:search_library.count, field:search_library.filter, field:search_library.shuffle, field:search_library.tapped, field:search_library.to]
     Oracle: When this creature enters, if an opponent controls more lands than you, you may search your library for a Plains card, put it onto the battlefield, then shuffle.
-    Trigger: Whenever Knight of the White Orchid enters, if the number of lands an opponent controls is greater than the number of lands you control
+    Trigger: Whenever Knight of the White Orchid enters, if the number of opponents for which the number of lands that player controls is greater than the number of lands you control is 1 or greater
     Effect: You may search your library for a Plains, put it onto the battlefield, then shuffle.
 ```
 
@@ -926,7 +925,7 @@ Player prompts:
 
 - Knight of the White Orchid: optional: Do you want to search your library for a Plains, put it onto the battlefield, then shuffle?
 
-Implementation: needed (trigger:intervening_if, predicate:compare, step:search_library, field:search_library.count, field:search_library.filter, field:search_library.shuffle, field:search_library.tapped, field:search_library.to)
+Implementation: needed (quantity:players_count, trigger:intervening_if, predicate:compare, step:search_library, field:search_library.count, field:search_library.filter, field:search_library.shuffle, field:search_library.tapped, field:search_library.to)
 
 ### Land Tax
 
@@ -940,9 +939,9 @@ Re-rendered plain English:
 
 ```
 Land Tax [draft]
-  [a1] triggered [needed: needs trigger:intervening_if, predicate:compare, step:search_library, field:search_library.count, field:search_library.filter, field:search_library.reveal, field:search_library.shuffle, field:search_library.to, field:search_library.upTo]
+  [a1] triggered [needed: needs quantity:players_count, trigger:intervening_if, predicate:compare, step:search_library, field:search_library.count, field:search_library.filter, field:search_library.reveal, field:search_library.shuffle, field:search_library.to, field:search_library.upTo]
     Oracle: At the beginning of your upkeep, if an opponent controls more lands than you, you may search your library for up to three basic land cards, reveal them, put them into your hand, then shuffle.
-    Trigger: At the beginning of your upkeep, if the number of lands an opponent controls is greater than the number of lands you control
+    Trigger: At the beginning of your upkeep, if the number of opponents for which the number of lands that player controls is greater than the number of lands you control is 1 or greater
     Effect: You may search your library for a basic land, put it onto your hand, then shuffle.
 ```
 
@@ -950,7 +949,7 @@ Player prompts:
 
 - Land Tax: optional: Do you want to search your library for a basic land, put it onto your hand, then shuffle?
 
-Implementation: needed (trigger:intervening_if, predicate:compare, step:search_library, field:search_library.count, field:search_library.filter, field:search_library.reveal, field:search_library.shuffle, field:search_library.to, field:search_library.upTo)
+Implementation: needed (quantity:players_count, trigger:intervening_if, predicate:compare, step:search_library, field:search_library.count, field:search_library.filter, field:search_library.reveal, field:search_library.shuffle, field:search_library.to, field:search_library.upTo)
 
 ### Loran's Escape
 
@@ -1214,17 +1213,17 @@ Re-rendered plain English:
 
 ```
 Orzhov Advokist [draft]
-  [a1] triggered [needed: needs ref:iterated, step:repeat_for_each, field:repeat_for_each.over, field:repeat_for_each.steps, step:choose, field:choose.count, field:choose.from, field:choose.ofPlayer, field:choose.saveAs, field:choose.who, step:add_counters, field:add_counters.on, step:grant_effect, field:grant_effect.filter, field:grant_effect.modify, field:grant_effect.ofPlayer, field:grant_effect.who, predicate:step_done, duration:until_your_next_turn]
+  [a1] triggered [needed: needs step:repeat_for_each, field:repeat_for_each.over, field:repeat_for_each.steps, step:choose, field:choose.count, field:choose.from, field:choose.saveAs, field:choose.who, step:add_counters, field:add_counters.on, predicate:step_done, step:grant_effect, field:grant_effect.filter, field:grant_effect.modify, field:grant_effect.who, duration:until_your_next_turn]
     Oracle: At the beginning of your upkeep, each player may put two +1/+1 counters on a creature they control. If a player does, creatures that player controls can't attack you or planeswalkers you control until your next turn.
     Trigger: At the beginning of your upkeep
-    Effect: For each permanent, choose a creature, then put 2 +1/+1 counters on the chosen object, then the target can't attack you or planeswalkers you control until your next turn.
+    Effect: For each permanent, choose a creature you control, then put 2 +1/+1 counters on the chosen object, then the target can't attack you or planeswalkers you control until your next turn.
 ```
 
 Player prompts:
 
-- Orzhov Advokist: optional: Do you want to choose a creature?
+- Orzhov Advokist: put counters?: Do you want to put two +1/+1 counters on a creature you control? Choose it.
 
-Implementation: needed (ref:iterated, step:repeat_for_each, field:repeat_for_each.over, field:repeat_for_each.steps, step:choose, field:choose.count, field:choose.from, field:choose.ofPlayer, field:choose.saveAs, field:choose.who, step:add_counters, field:add_counters.on, step:grant_effect, field:grant_effect.filter, field:grant_effect.modify, field:grant_effect.ofPlayer, field:grant_effect.who, predicate:step_done, duration:until_your_next_turn)
+Implementation: needed (step:repeat_for_each, field:repeat_for_each.over, field:repeat_for_each.steps, step:choose, field:choose.count, field:choose.from, field:choose.saveAs, field:choose.who, step:add_counters, field:add_counters.on, predicate:step_done, step:grant_effect, field:grant_effect.filter, field:grant_effect.modify, field:grant_effect.who, duration:until_your_next_turn)
 
 Questions for you:
 
@@ -1242,19 +1241,18 @@ Re-rendered plain English:
 
 ```
 Parker Luck [draft]
-  [a1] triggered [needed: needs targets:multi, step:choose, field:choose.count, field:choose.from, field:choose.position, field:choose.reveal, field:choose.saveAs, field:choose.who, quantity:math, field:life_change.amount, field:life_change.lifeFrom, field:life_change.who, field:move_card_zone.what, field:move_card_zone.who]
+  [a1] triggered [needed: needs targets:multi, step:mutual_reveal, field:mutual_reveal.players, field:mutual_reveal.srcs]
     Oracle: At the beginning of your end step, two target players each reveal the top card of their library. They each lose life equal to the mana value of the card revealed by the other player. Then they each put the card they revealed into their hand.
     Trigger: At the beginning of your end step
     Target t1: two target players  <- prompt: "Choose two target players."
-    Effect: Choose a card in a library. Then, target player gains -1 x the chosen object's mana value life. Then, put a card into your hand.
+    Effect: Two target players each reveal the top card of their library, each loses life equal to the mana value of the card the other revealed, then each puts the card they revealed into their hand.
 ```
 
 Player prompts:
 
 - Parker Luck: choose targets: Choose two target players.
-- Parker Luck: choose: Choose a card in a library.
 
-Implementation: needed (targets:multi, step:choose, field:choose.count, field:choose.from, field:choose.position, field:choose.reveal, field:choose.saveAs, field:choose.who, quantity:math, field:life_change.amount, field:life_change.lifeFrom, field:life_change.who, field:move_card_zone.what, field:move_card_zone.who)
+Implementation: needed (targets:multi, step:mutual_reveal, field:mutual_reveal.players, field:mutual_reveal.srcs)
 
 Questions for you:
 
@@ -1306,9 +1304,9 @@ Re-rendered plain English:
 ```
 Perch Protection [draft]
   Cast option c1: you may use gift (from hand, cost ) [needed]
-  [a1] spell_effect [needed: needs field:create_tokens.tokenKeywords, step:grant_effect, field:grant_effect.filter, field:grant_effect.modify, predicate:paid_additional_cost, field:grant_effect.replacement, duration:until_your_next_turn]
+  [a1] spell_effect [needed: needs field:create_tokens.tokenKeywords, step:grant_effect, field:grant_effect.filter, field:grant_effect.phaseOut, predicate:paid_additional_cost, field:grant_effect.replacement, duration:until_your_next_turn, field:grant_effect.modify]
     Oracle: Create four 2/2 blue Bird creature tokens with flying. If the gift was promised, all permanents you control phase out, and until your next turn, your life total can't change and you gain protection from everything.
-    Effect: Create four 2/2 blue Bird creature tokens with flying. Then, IF the additional cost (gift) was paid: the target gains phased out. Then, IF the additional cost (gift) was paid: the target gains an effect until your next turn. Then, IF the additional cost (gift) was paid: the target gains an effect until your next turn. Then, IF the additional cost (gift) was paid: the target protection from everything until your next turn.
+    Effect: Create four 2/2 blue Bird creature tokens with flying. Then, IF the additional cost (gift) was paid: the target gains an effect. Then, IF the additional cost (gift) was paid: the target gains an effect until your next turn. Then, IF the additional cost (gift) was paid: the target gains an effect until your next turn. Then, IF the additional cost (gift) was paid: the target protection from everything until your next turn.
   [a2] spell_effect [implemented]
     Oracle: Exile Perch Protection.
     Effect: Exile Perch Protection.
@@ -1318,7 +1316,7 @@ Player prompts:
 
 - Perch Protection: gift: Do you want to promise a extra turn to an opponent? If you do, choose that opponent.
 
-Implementation: needed (field:create_tokens.tokenKeywords, step:grant_effect, field:grant_effect.filter, field:grant_effect.modify, predicate:paid_additional_cost, field:grant_effect.replacement, duration:until_your_next_turn, cast_option:gift, step:extra_turn, field:extra_turn.who)
+Implementation: needed (field:create_tokens.tokenKeywords, step:grant_effect, field:grant_effect.filter, field:grant_effect.phaseOut, predicate:paid_additional_cost, field:grant_effect.replacement, duration:until_your_next_turn, field:grant_effect.modify, cast_option:gift, step:extra_turn, field:extra_turn.who)
 
 Questions for you:
 
@@ -1336,17 +1334,17 @@ Re-rendered plain English:
 
 ```
 Promise of Loyalty [draft]
-  [a1] spell_effect [needed: needs ref:iterated, step:repeat_for_each, field:repeat_for_each.over, field:repeat_for_each.steps, step:choose, field:choose.count, field:choose.from, field:choose.ofPlayer, field:choose.saveAs, field:choose.who, step:add_counters, field:add_counters.on, quantity:math, field:sacrifice_permanent.amount, field:sacrifice_permanent.except, field:sacrifice_permanent.filter, field:sacrifice_permanent.who, step:grant_effect, field:grant_effect.modify, duration:forAsLongAs]
+  [a1] spell_effect [needed: needs step:repeat_for_each, field:repeat_for_each.over, field:repeat_for_each.steps, step:choose, field:choose.count, field:choose.from, field:choose.saveAs, field:choose.who, step:add_counters, field:add_counters.on, field:sacrifice_permanent.all, field:sacrifice_permanent.except, field:sacrifice_permanent.filter, field:sacrifice_permanent.who, step:grant_effect, field:grant_effect.modify, duration:forAsLongAs]
     Oracle: Each player puts a vow counter on a creature they control and sacrifices the rest. Each of those creatures can't attack you or planeswalkers you control for as long as it has a vow counter on it.
-    Effect: For each permanent, choose a creature, then put a vow counter on the chosen object, then that player sacrifices a creature, then the chosen object can't attack you or planeswalkers you control for a duration.
+    Effect: For each permanent, choose a creature you control, then put a vow counter on the chosen object, then that player sacrifices a creature, then the chosen object can't attack you or planeswalkers you control for a duration.
 ```
 
 Player prompts:
 
-- Promise of Loyalty: choose: Choose a creature.
+- Promise of Loyalty: choose: Choose a creature you control: it gets a vow counter and you sacrifice the rest.
 - Promise of Loyalty: sacrifice: Choose a permanent to sacrifice.
 
-Implementation: needed (ref:iterated, step:repeat_for_each, field:repeat_for_each.over, field:repeat_for_each.steps, step:choose, field:choose.count, field:choose.from, field:choose.ofPlayer, field:choose.saveAs, field:choose.who, step:add_counters, field:add_counters.on, quantity:math, field:sacrifice_permanent.amount, field:sacrifice_permanent.except, field:sacrifice_permanent.filter, field:sacrifice_permanent.who, step:grant_effect, field:grant_effect.modify, duration:forAsLongAs)
+Implementation: needed (step:repeat_for_each, field:repeat_for_each.over, field:repeat_for_each.steps, step:choose, field:choose.count, field:choose.from, field:choose.saveAs, field:choose.who, step:add_counters, field:add_counters.on, field:sacrifice_permanent.all, field:sacrifice_permanent.except, field:sacrifice_permanent.filter, field:sacrifice_permanent.who, step:grant_effect, field:grant_effect.modify, duration:forAsLongAs)
 
 Questions for you:
 
@@ -1834,24 +1832,22 @@ Implementation: needed (static, static:attackTax)
 | `trigger:subject` | 13 | Breena, the Demagogue; Combat Calligrapher; Duelist's Heritage; Felisa, Fang of Silverquill; Gix, Yawgmoth Praetor; Mangara, the Diplomat; Martial Impetus; Reluctant Role Model; Resourceful Defense; Selfless Squire; Sword of the Animist; The Ozolith; Yathan Tombguard |
 | `replacement:would_enter` | 12 | Isolated Chapel; Marble Diamond; Myriad Landscape; Secluded Steppe; Temple of Silence; Citadel Siege; Godless Shrine; Orzhov Basilica; Orzhov Guildgate; Shattered Sanctum; Shineshadow Snarl; Vault of Champions |
 | `field:grant_effect.modify` | 10 | Rogue's Passage; Duelist's Heritage; Flawless Maneuver; Loran's Escape; Orzhov Advokist; Perch Protection; Promise of Loyalty; Selfless Spirit; Shadowspear; Spectacular Spider-Man |
-| `step:choose` | 10 | Breena, the Demagogue; Citadel Siege; Incarnation Technique; Keen Duelist; Master of Ceremonies; Orzhov Advokist; Orzhov Basilica; Parker Luck; Promise of Loyalty; Reluctant Role Model |
 | `trigger:intervening_if` | 10 | Breena, the Demagogue; Citadel Siege; Felisa, Fang of Silverquill; Hopeful Initiate; Knight of the White Orchid; Land Tax; Mangara, the Diplomat; Reluctant Role Model; Resourceful Defense; The Ozolith |
-| `field:choose.saveAs` | 9 | Breena, the Demagogue; Incarnation Technique; Keen Duelist; Master of Ceremonies; Orzhov Advokist; Orzhov Basilica; Parker Luck; Promise of Loyalty; Reluctant Role Model |
-| `field:life_change.who` | 8 | Swords to Plowshares; Batwing Brume; Gix, Yawgmoth Praetor; Kambal, Consul of Allocation; Keen Duelist; Parker Luck; Shadrix Silverquill; Sign in Blood |
 | `field:search_library.count` | 8 | Evolving Wilds; Myriad Landscape; Ash Barrens; Knight of the White Orchid; Land Tax; Path to Exile; Scheming Symmetry; Sword of the Animist |
 | `field:search_library.filter` | 8 | Evolving Wilds; Myriad Landscape; Ash Barrens; Knight of the White Orchid; Land Tax; Path to Exile; Scheming Symmetry; Sword of the Animist |
 | `field:search_library.shuffle` | 8 | Evolving Wilds; Myriad Landscape; Ash Barrens; Knight of the White Orchid; Land Tax; Path to Exile; Scheming Symmetry; Sword of the Animist |
 | `field:search_library.to` | 8 | Evolving Wilds; Myriad Landscape; Ash Barrens; Knight of the White Orchid; Land Tax; Path to Exile; Scheming Symmetry; Sword of the Animist |
+| `step:choose` | 8 | Breena, the Demagogue; Citadel Siege; Incarnation Technique; Master of Ceremonies; Orzhov Advokist; Orzhov Basilica; Promise of Loyalty; Reluctant Role Model |
 | `step:search_library` | 8 | Evolving Wilds; Myriad Landscape; Ash Barrens; Knight of the White Orchid; Land Tax; Path to Exile; Scheming Symmetry; Sword of the Animist |
 | `cost:sacrifice` | 7 | Commander's Sphere; Evolving Wilds; Myriad Landscape; Nihil Spellbomb; Orzhov Locket; Selfless Spirit; Spectacular Spider-Man |
-| `field:choose.count` | 6 | Breena, the Demagogue; Keen Duelist; Orzhov Advokist; Orzhov Basilica; Parker Luck; Promise of Loyalty |
-| `field:choose.from` | 6 | Breena, the Demagogue; Keen Duelist; Orzhov Advokist; Orzhov Basilica; Parker Luck; Promise of Loyalty |
+| `field:choose.saveAs` | 6 | Breena, the Demagogue; Master of Ceremonies; Orzhov Advokist; Orzhov Basilica; Promise of Loyalty; Reluctant Role Model |
 | `field:grant_effect.filter` | 6 | Flawless Maneuver; Orzhov Advokist; Perch Protection; Selfless Spirit; Shadowspear; Spectacular Spider-Man |
+| `field:life_change.who` | 6 | Swords to Plowshares; Batwing Brume; Gix, Yawgmoth Praetor; Kambal, Consul of Allocation; Shadrix Silverquill; Sign in Blood |
 | `predicate:compare` | 6 | Breena, the Demagogue; Knight of the White Orchid; Land Tax; Mangara, the Diplomat; Mister Negative; The Ozolith |
 | `predicate:matches` | 6 | Deathbringer Liege; Enshrouding Mist; Felisa, Fang of Silverquill; Reluctant Role Model; Resourceful Defense; The Ozolith |
 | `predicate:step_done` | 6 | Gix, Yawgmoth Praetor; Godless Shrine; Incarnation Technique; Nihil Spellbomb; Orzhov Advokist; Shineshadow Snarl |
-| `quantity:math` | 6 | Batwing Brume; Keen Duelist; Parker Luck; Promise of Loyalty; Retribution of the Ancients; Toxic Deluge |
 | `field:grant_effect.replacement` | 5 | Inkshield; Batwing Brume; Enshrouding Mist; Perch Protection; Selfless Squire |
+| `field:repeat_for_each.over` | 5 | Batwing Brume; Master of Ceremonies; Orzhov Advokist; Promise of Loyalty; Shadrix Silverquill |
 | `field:repeat_for_each.steps` | 5 | Batwing Brume; Master of Ceremonies; Orzhov Advokist; Promise of Loyalty; Shadrix Silverquill |
 | `field:search_library.tapped` | 5 | Evolving Wilds; Myriad Landscape; Knight of the White Orchid; Path to Exile; Sword of the Animist |
 | `step:repeat_for_each` | 5 | Batwing Brume; Master of Ceremonies; Orzhov Advokist; Promise of Loyalty; Shadrix Silverquill |
@@ -1861,23 +1857,22 @@ Implementation: needed (static, static:attackTax)
 | `field:attach.to` | 4 | Bloodthirsty Blade; Lightning Greaves; Shadowspear; Sword of the Animist |
 | `field:attach.what` | 4 | Bloodthirsty Blade; Lightning Greaves; Shadowspear; Sword of the Animist |
 | `field:choose.choice` | 4 | Citadel Siege; Incarnation Technique; Master of Ceremonies; Reluctant Role Model |
-| `field:choose.who` | 4 | Master of Ceremonies; Orzhov Advokist; Parker Luck; Promise of Loyalty |
+| `field:choose.count` | 4 | Breena, the Demagogue; Orzhov Advokist; Orzhov Basilica; Promise of Loyalty |
+| `field:choose.from` | 4 | Breena, the Demagogue; Orzhov Advokist; Orzhov Basilica; Promise of Loyalty |
 | `field:create_tokens.tokenKeywords` | 4 | Combat Calligrapher; Felisa, Fang of Silverquill; Perch Protection; Shadrix Silverquill |
 | `field:create_tokens.who` | 4 | Combat Calligrapher; Generous Gift; Parting Gust; Shadrix Silverquill |
 | `field:draw_cards.who` | 4 | Breena, the Demagogue; Gix, Yawgmoth Praetor; Shadrix Silverquill; Sign in Blood |
-| `field:life_change.amount` | 4 | Swords to Plowshares; Batwing Brume; Keen Duelist; Parker Luck |
-| `field:repeat_for_each.over` | 4 | Master of Ceremonies; Orzhov Advokist; Promise of Loyalty; Shadrix Silverquill |
 | `quantity:counters` | 4 | Felisa, Fang of Silverquill; Reluctant Role Model; Resourceful Defense; The Ozolith |
 | `static:attackTax` | 4 | Archangel of Tithes; Ghostly Prison; Nils, Discipline Enforcer; Windborn Muse |
 | `step:attach` | 4 | Bloodthirsty Blade; Lightning Greaves; Shadowspear; Sword of the Animist |
 | `field:choose.options` | 3 | Citadel Siege; Master of Ceremonies; Reluctant Role Model |
+| `field:choose.who` | 3 | Master of Ceremonies; Orzhov Advokist; Promise of Loyalty |
 | `field:create_tokens.tokenTapped` | 3 | Combat Calligrapher; Felisa, Fang of Silverquill; Parting Gust |
 | `field:grant_effect.who` | 3 | Batwing Brume; Orzhov Advokist; Shadowspear |
-| `field:move_card_zone.what` | 3 | Incarnation Technique; Keen Duelist; Parker Luck |
-| `field:move_card_zone.who` | 3 | Gix, Yawgmoth Praetor; Nihil Spellbomb; Parker Luck |
 | `mana:variable` | 3 | Command Tower; Commander's Sphere; Exotic Orchard |
 | `predicate:not` | 3 | Godless Shrine; Parting Gust; Shineshadow Snarl |
-| `ref:iterated` | 3 | Orzhov Advokist; Promise of Loyalty; Shadrix Silverquill |
+| `quantity:math` | 3 | Batwing Brume; Retribution of the Ancients; Toxic Deluge |
+| `quantity:players_count` | 3 | Breena, the Demagogue; Knight of the White Orchid; Land Tax |
 | `trigger:leaves` | 3 | Nihil Spellbomb; Resourceful Defense; The Ozolith |
 | `trigger:zones` | 3 | Nihil Spellbomb; Resourceful Defense; The Ozolith |
 | `zone:hand` | 3 | Secluded Steppe; Ash Barrens; Eiganjo, Seat of the Empire |
@@ -1888,18 +1883,18 @@ Implementation: needed (static, static:attackTax)
 | `cost:life` | 2 | War Room; Toxic Deluge |
 | `duration:until_your_next_turn` | 2 | Orzhov Advokist; Perch Protection |
 | `field:add_counters.from` | 2 | Resourceful Defense; The Ozolith |
-| `field:choose.ofPlayer` | 2 | Orzhov Advokist; Promise of Loyalty |
-| `field:choose.position` | 2 | Keen Duelist; Parker Luck |
 | `field:choose.remember` | 2 | Citadel Siege; Master of Ceremonies |
-| `field:choose.reveal` | 2 | Keen Duelist; Parker Luck |
 | `field:create_delayed_trigger.at` | 2 | Parting Gust; Together Forever |
 | `field:create_delayed_trigger.steps` | 2 | Parting Gust; Together Forever |
 | `field:damage_target.source` | 2 | Caves of Koilos; Eiganjo, Seat of the Empire |
 | `field:draw_cards.alsoWho` | 2 | Secret Rendezvous; Master of Ceremonies |
-| `field:life_change.lifeFrom` | 2 | Keen Duelist; Parker Luck |
+| `field:life_change.amount` | 2 | Swords to Plowshares; Batwing Brume |
 | `field:mass_pump.filter` | 2 | Martial Impetus; Toxic Deluge |
 | `field:move_card_zone.from` | 2 | Incarnation Technique; Orzhov Basilica |
 | `field:move_card_zone.position` | 2 | Gix, Yawgmoth Praetor; Hall of Heliod's Generosity |
+| `field:move_card_zone.who` | 2 | Gix, Yawgmoth Praetor; Nihil Spellbomb |
+| `field:mutual_reveal.players` | 2 | Keen Duelist; Parker Luck |
+| `field:mutual_reveal.srcs` | 2 | Keen Duelist; Parker Luck |
 | `field:remove_counters.on` | 2 | Resourceful Defense; The Ozolith |
 | `field:remove_counters.saveAs` | 2 | Resourceful Defense; The Ozolith |
 | `field:search_library.reveal` | 2 | Ash Barrens; Land Tax |
@@ -1910,6 +1905,7 @@ Implementation: needed (static, static:attackTax)
 | `predicate:paid_additional_cost` | 2 | Parting Gust; Perch Protection |
 | `static:cant_protects` | 2 | Combat Calligrapher; Vow of Malice |
 | `step:create_delayed_trigger` | 2 | Parting Gust; Together Forever |
+| `step:mutual_reveal` | 2 | Keen Duelist; Parker Luck |
 | `step:remove_counters` | 2 | Resourceful Defense; The Ozolith |
 | `step:scry` | 2 | Temple of Silence; Loran's Escape |
 | `timing` | 2 | Tainted Field; Dusk Legion Duelist |
@@ -1920,28 +1916,26 @@ Implementation: needed (static, static:attackTax)
 | `cast_option:mandatory` | 1 | Toxic Deluge |
 | `cost_reduction` | 1 | Eiganjo, Seat of the Empire |
 | `duration:forAsLongAs` | 1 | Promise of Loyalty |
-| `field:choose.alsoWho` | 1 | Keen Duelist |
 | `field:copy.who` | 1 | Incarnation Technique |
 | `field:create_tokens.alsoWho` | 1 | Master of Ceremonies |
 | `field:create_tokens.tokenAttacking` | 1 | Combat Calligrapher |
 | `field:exchange_life.withWho` | 1 | Mister Negative |
 | `field:extra_turn.who` | 1 | Perch Protection |
-| `field:grant_effect.ofPlayer` | 1 | Orzhov Advokist |
+| `field:grant_effect.phaseOut` | 1 | Perch Protection |
 | `field:if_else.optionalCost` | 1 | Nihil Spellbomb |
 | `field:mass_pump.amountLockedOn` | 1 | Toxic Deluge |
-| `field:move_card_zone.alsoWho` | 1 | Keen Duelist |
 | `field:move_card_zone.filter` | 1 | Incarnation Technique |
 | `field:move_card_zone.saveAs` | 1 | Gix, Yawgmoth Praetor |
 | `field:move_card_zone.underControlOf` | 1 | Parting Gust |
+| `field:move_card_zone.what` | 1 | Incarnation Technique |
 | `field:move_card_zone.withCounters` | 1 | Parting Gust |
 | `field:permission_to_play.allow` | 1 | Gix, Yawgmoth Praetor |
 | `field:permission_to_play.what` | 1 | Gix, Yawgmoth Praetor |
 | `field:permission_to_play.withoutPayingManaCost` | 1 | Gix, Yawgmoth Praetor |
 | `field:remove_counters.upTo` | 1 | Resourceful Defense |
 | `field:repeat_for_each.ofPlayer` | 1 | Shadrix Silverquill |
-| `field:repeat_for_each.who` | 1 | Batwing Brume |
 | `field:reveal.filter` | 1 | Shineshadow Snarl |
-| `field:sacrifice_permanent.amount` | 1 | Promise of Loyalty |
+| `field:sacrifice_permanent.all` | 1 | Promise of Loyalty |
 | `field:sacrifice_permanent.except` | 1 | Promise of Loyalty |
 | `field:sacrifice_permanent.filter` | 1 | Promise of Loyalty |
 | `field:sacrifice_permanent.who` | 1 | Promise of Loyalty |
@@ -1963,8 +1957,8 @@ Implementation: needed (static, static:attackTax)
 | `quantity:life_lost_this_way` | 1 | Mister Negative |
 | `quantity:life_total` | 1 | Breena, the Demagogue |
 | `quantity:opponents_count` | 1 | Vault of Champions |
-| `quantity:players_count` | 1 | Breena, the Demagogue |
 | `quantity:stat` | 1 | Swords to Plowshares |
+| `ref:iterated` | 1 | Shadrix Silverquill |
 | `scripted:colors_lands_opponents_control_could_produce` | 1 | Exotic Orchard |
 | `static:addTypes` | 1 | Sigarda's Summons |
 | `static:blockTax` | 1 | Archangel of Tithes |
@@ -1983,3 +1977,4 @@ Implementation: needed (static, static:attackTax)
 | `trigger:counter_put` | 1 | Dusk Legion Duelist |
 | `trigger:damage_prevented` | 1 | Selfless Squire |
 | `trigger:nth` | 1 | Mangara, the Diplomat |
+| `zone:stack` | 1 | Incarnation Technique |

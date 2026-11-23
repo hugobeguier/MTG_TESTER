@@ -14,11 +14,12 @@ import { liveIds, saveList, setResult } from "./saved";
 import { addLink } from "./links";
 import { placementSpec, readPlacement } from "./placement";
 import { faceNames, defOf } from "./core";
+import { revealUntil } from "./reveal7";
 import { decide, type AskSpec, type StepResult, type StepSpec } from "./steps";
 import type { Env, ObjId, PlayerId } from "./types";
 import { isObjId } from "./types";
 
-export const MOVE_FIELDS = ["target", "moveTo", "moveFrom", "from", "position", "tapped", "what", "who", "filter", "ordered", "order", "all", "moveCount", "saveAs", "shuffle", "withCounters", "underControlOf", "faceDown", "faceUp", "linkExile", "transformed", "excludeLatest", "reflexive"];
+export const MOVE_FIELDS = ["target", "moveTo", "moveFrom", "from", "position", "tapped", "what", "who", "filter", "ordered", "order", "all", "moveCount", "saveAs", "shuffle", "withCounters", "underControlOf", "faceDown", "faceUp", "linkExile", "transformed", "excludeLatest", "reflexive", "until", "saveHitAs"];
 /** `what` values the engine understands besides a saved-choice name. */
 export const MOVE_WHAT_KINDS = ["choose", "all", "top_of_library", "rest_of_looked_cards", "looked_cards", "rest_of_revealed_cards", "revealed_cards", "chosen", "found"];
 export const isMoveWhatSupported = (w: string): boolean => MOVE_WHAT_KINDS.includes(w) || /^graveyard_of_t\d+$/.test(w);
@@ -57,6 +58,11 @@ function sourceCards(r: Run, env: Env, step: Step): ObjId[] {
   const out: ObjId[] = [];
   for (const pid of resolvePlayers(r, step.who ?? "you", env)) {
     let cards = zoneCards(r, pid, from).filter((id) => fits(id, pid));
+    if (step.until !== undefined) { // "exile cards from the top of your library until you exile a nonland card": the top cards down to and including the first match
+      if (from !== "library") throw new Unsupported("field:move_card_zone.until", "until is only supported for a library");
+      out.push(...revealUntil(r, env, step, pid));
+      continue;
+    }
     const all = what === "all" || step.all === true || step.moveCount === "all";
     if (!all && (from === "library" || step.moveCount !== undefined)) {
       const n = step.moveCount === undefined ? 1 : evalQuantity(r, step.moveCount as never, env);
@@ -87,7 +93,7 @@ export const moveStep: StepSpec = {
         { ...step, what: key, filter: undefined, who: step.who } as Step
       ] };
     }
-    let ids = liveIds(r, env, sourceCards(r, env, step)).filter((id) => { const o = tryObj(r, id); return !!o && o.zone !== "stack"; });
+    let ids = liveIds(r, env, sourceCards(r, env, step)).filter((id) => { const o = tryObj(r, id); return !!o && (o.zone !== "stack" || (to === "exile" && env.item.kind === "spell" && env.item.objectId === id)); }); // the resolving spell may exile ITSELF ("Exile Perch Protection")
 
     // ---- order of cards going to a library
     if (to === "library" && ids.length > 1) {
@@ -116,7 +122,7 @@ export const moveStep: StepSpec = {
     const moved: ObjId[] = [];
     for (const id of placing) {
       const o = tryObj(r, id);
-      if (!o || o.zone === "stack") continue;
+      if (!o || (o.zone === "stack" && !(to === "exile" && env.item.kind === "spell" && env.item.objectId === id))) continue;
       const names = step.transformed && !o.token ? faceNames(defOf(r, o)!) : [];
       if (step.transformed && to === "battlefield" && names.length < 2) continue; // only a double-faced card can enter transformed
       moveObject(r, id, to, { position: step.position as "top" | "bottom" | undefined, controller: to === "battlefield" ? (controller || o.owner) : undefined, tapped: !!step.tapped, counters, ...(names.length > 1 && to === "battlefield" ? { face: names[1] } : {}) });
@@ -130,6 +136,10 @@ export const moveStep: StepSpec = {
     if (to === "library" && step.shuffle) for (const p of new Set(ids.map((id) => obj(r, id).owner))) { shuffleInPlace(r, player(r, p).library); emit(r, { type: "shuffle", player: p }); }
     const order = to === "library" && step.position !== "bottom" ? [...moved].reverse() : moved;
     if (step.saveAs) saveList(r, env, String(step.saveAs), order);
+    if (typeof step.saveHitAs === "string" && step.until) { // the card that ended an "until": the last card moved, when it satisfies the condition
+      const hit = order.filter((id) => matchesFilter(r, id, { ...(step.until as ObjectFilter), zone: undefined, owner: undefined, controller: undefined } as ObjectFilter, env));
+      saveList(r, env, step.saveHitAs, hit.slice(-1));
+    }
     if (step.id && !step.saveAs) setResult(env, step.id, moved.length);
     return "done";
   }

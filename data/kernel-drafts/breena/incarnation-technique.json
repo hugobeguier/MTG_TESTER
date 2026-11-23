@@ -31,7 +31,6 @@
           "kind": "choose",
           "id": "d2",
           "choice": "opponent",
-          "saveAs": "chosen",
           "src": 0,
           "condition": {
             "when": "on_resolution",
@@ -53,7 +52,7 @@
         {
           "kind": "copy",
           "target": "self",
-          "who": "opponent",
+          "who": "that_player",
           "src": 0,
           "condition": {
             "when": "on_resolution",
@@ -68,13 +67,14 @@
       "id": "a1",
       "implementation": "needed",
       "needs": [
+        "zone:stack",
         "step:copy",
         "step:choose",
         "field:choose.choice",
-        "field:choose.saveAs",
         "predicate:step_done",
         "field:copy.who"
-      ]
+      ],
+      "zone": "stack"
     },
     {
       "kind": "spell_effect",

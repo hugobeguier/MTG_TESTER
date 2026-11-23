@@ -12,20 +12,38 @@
           "steps": [
             {
               "kind": "choose",
+              "id": "v1",
               "who": "that_player",
               "from": {
                 "types": [
                   "creature"
                 ],
-                "zone": "battlefield"
+                "controller": "you"
               },
-              "ofPlayer": "iterated",
               "count": 1,
               "saveAs": "chosen",
               "src": 0,
+              "condition": {
+                "when": "on_resolution",
+                "if": {
+                  "check": "zone_count",
+                  "who": "that_player",
+                  "zone": "battlefield",
+                  "filter": {
+                    "types": [
+                      "creature"
+                    ]
+                  },
+                  "cmp": {
+                    "op": ">=",
+                    "value": 1
+                  }
+                },
+                "src": 0
+              },
               "prompt": {
                 "title": "Promise of Loyalty: choose",
-                "instruction": "Choose a creature.",
+                "instruction": "Choose a creature you control: it gets a vow counter and you sacrifice the rest.",
                 "source": {
                   "card": "Promise of Loyalty",
                   "ability": "a1"
@@ -37,31 +55,36 @@
               "on": "chosen",
               "counterKind": "vow",
               "amount": 1,
-              "src": 0
+              "src": 0,
+              "condition": {
+                "when": "on_resolution",
+                "if": {
+                  "check": "zone_count",
+                  "who": "that_player",
+                  "zone": "battlefield",
+                  "filter": {
+                    "types": [
+                      "creature"
+                    ]
+                  },
+                  "cmp": {
+                    "op": ">=",
+                    "value": 1
+                  }
+                },
+                "src": 0
+              }
             },
             {
               "kind": "sacrifice_permanent",
               "who": "that_player",
+              "all": true,
               "filter": {
                 "types": [
                   "creature"
                 ]
               },
               "except": "chosen",
-              "amount": {
-                "math": "-",
-                "args": [
-                  {
-                    "ref": "count",
-                    "of": {
-                      "types": [
-                        "creature"
-                      ]
-                    }
-                  },
-                  1
-                ]
-              },
               "src": 0,
               "prompt": {
                 "title": "Promise of Loyalty: sacrifice",
@@ -90,7 +113,25 @@
                   }
                 }
               },
-              "src": 1
+              "src": 1,
+              "condition": {
+                "when": "on_resolution",
+                "if": {
+                  "check": "zone_count",
+                  "who": "that_player",
+                  "zone": "battlefield",
+                  "filter": {
+                    "types": [
+                      "creature"
+                    ]
+                  },
+                  "cmp": {
+                    "op": ">=",
+                    "value": 1
+                  }
+                },
+                "src": 0
+              }
             }
           ]
         }
@@ -98,20 +139,17 @@
       "id": "a1",
       "implementation": "needed",
       "needs": [
-        "ref:iterated",
         "step:repeat_for_each",
         "field:repeat_for_each.over",
         "field:repeat_for_each.steps",
         "step:choose",
         "field:choose.count",
         "field:choose.from",
-        "field:choose.ofPlayer",
         "field:choose.saveAs",
         "field:choose.who",
         "step:add_counters",
         "field:add_counters.on",
-        "quantity:math",
-        "field:sacrifice_permanent.amount",
+        "field:sacrifice_permanent.all",
         "field:sacrifice_permanent.except",
         "field:sacrifice_permanent.filter",
         "field:sacrifice_permanent.who",

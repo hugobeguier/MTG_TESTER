@@ -9,8 +9,10 @@ const needs = (name: string) => cardUnsupported(ctx.cards(name)!).all;
 
 describe("support check is as strict as the interpreter", () => {
   it("reports what the interpreter would refuse at run time", () => {
-    expect(needs("Nogi, Draco-Zealot")).toContain("field:grant_effect.modify.setTypes");
-    expect(needs("Spinerock Knoll")).toContain("event:deals_damage");
+    // (Nogi's setTypes and Spinerock Knoll's damage count are implemented since step 11; a made-up field is still named)
+    expect(needs("Nogi, Draco-Zealot")).toEqual([]);
+    expect(needs("Spinerock Knoll")).toEqual([]);
+    expect(cardUnsupported({ name: "Odd", types: ["instant"], kernel: { schemaVersion: 2, abilities: [{ id: "a1", kind: "spell_effect", text: "x", steps: [{ kind: "grant_effect", target: "self", modify: [{ copyOf: "x" }, { cant: "block" }] }] }] } as never }).all).toContain("field:grant_effect.modify.cant=block");
   });
   it("accepts what the interpreter now runs (Blood tokens, pt grants, timed granted abilities)", () => {
     for (const n of ["Moonstone Eulogist", "End-Raze Forerunners", "Malakir Rebirth // Malakir Mire", "Bojuka Bog", "Living Death", "Lim-Dûl's Vault", "Scion of the Ur-Dragon"]) expect(needs(n), n).toEqual([]);

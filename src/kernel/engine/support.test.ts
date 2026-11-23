@@ -24,13 +24,13 @@ describe("unsupported capabilities are errors, never silent skips", () => {
     expect(t.obj(bs).zone).toBe("hand");
   });
 
-  it("Rootcast Apprenticeship needs create_tokens.target (one unsupported step blocks the whole card)", () => {
-    const t = table();
-    t.lands("p1", "Forest", 5);
-    const ra = t.give("p1", "Rootcast Apprenticeship", "hand");
-    const res = t.do({ type: "castSpell", player: "p1", cardId: ra });
+  it("an unknown field on a step is named (one unsupported step blocks the whole card)", () => {
+    const odd = oddCard("Odd Token", "{G}", { kind: "create_tokens", tokenCount: 1, tokenName: "Squirrel", target: "t1", bogusField: 1 } as never);
+    const t = table(["p1", "p2"], { extra: { "Odd Token": odd } });
+    t.give("p1", "Forest", "battlefield");
+    const res = t.do({ type: "castSpell", player: "p1", cardId: t.give("p1", "Odd Token", "hand") });
     expect(res.error?.code).toBe("unsupported");
-    expect(res.error?.capability).toContain("field:create_tokens.target");
+    expect(res.error?.capability).toContain("field:create_tokens.bogusField");
   });
 
   it("a replacement-effect land (Spymaster's Vault: enters tapped unless you control a Swamp) now runs through the replacement pipeline", () => {
@@ -56,11 +56,11 @@ describe("unsupported capabilities are errors, never silent skips", () => {
   });
 
   it("an unsupported predicate inside a step condition is named", () => {
-    const odd = oddCard("Odd Cond", "{U}", { kind: "draw_cards", amount: 1, who: "you", condition: { when: "on_resolution", if: { check: "turn_number", cmp: { op: ">=", value: 2 } } } as never });
+    const odd = oddCard("Odd Cond", "{U}", { kind: "draw_cards", amount: 1, who: "you", condition: { when: "on_resolution", if: { check: "bogus_check", cmp: { op: ">=", value: 2 } } } as never });
     const t = table(["p1", "p2"], { extra: { "Odd Cond": odd } });
     t.give("p1", "Island", "battlefield");
     const id = t.give("p1", "Odd Cond", "hand");
-    expect(t.do({ type: "castSpell", player: "p1", cardId: id }).error?.capability).toContain("predicate:turn_number");
+    expect(t.do({ type: "castSpell", player: "p1", cardId: id }).error?.capability).toContain("predicate:bogus_check");
   });
 
   it("an unsupported step kind is named and nothing resolves", () => {

@@ -64,7 +64,7 @@ export interface Run {
   /** a cast / land play that happens DURING the resolution of an ability ("you may play the exiled card"): timing restrictions are ignored (608.2g) */
   ignoreTiming?: boolean;
   /** cards the resolving ability lets its controller cast / play right after it finishes resolving (permission_to_play with no duration) */
-  castNow?: Array<{ player: PlayerId; id: ObjId; ts: number; withoutPaying: boolean; /** cast with this option id (miracle) */ option?: string }>;
+  castNow?: Array<{ player: PlayerId; id: ObjId; ts: number; withoutPaying: boolean; /** "if you don't, put it into your hand": a cast that cannot be made moves the card there */ elseToHand?: boolean; /** cast with this option id (miracle) */ option?: string }>;
   /** a miracle cast is in progress: the miracle option may be chosen */
   castingMiracle?: boolean;
   /** replacement effects currently applying (their nested steps must not re-apply them), as "<source>:<ability>" */
@@ -161,6 +161,7 @@ export const continuing = (r: Run): boolean => r.s.config.onUnsupported === "con
 export function rawPrintedAbilities(r: Run, o: GameObject): Ability[] {
   if (o.token || o.copyDef) return tokenAbilities((o.copyDef ?? o.token)!);
   const def = defOf(r, o)!;
+  if (isRoomOnBattlefield(def, o)) { const open = o.unlocked ?? []; return withKeywordExtras(def.kernel.abilities.filter((a) => !a.face || open.includes(a.face))); } // Rooms (CR 709.5): only the unlocked doors' abilities exist
   const cur = currentFace(def, o);
   return withKeywordExtras(cur === undefined ? def.kernel.abilities : def.kernel.abilities.filter((a) => !a.face || a.face === cur));
 }
@@ -179,6 +180,8 @@ export function faceNames(def: CardDef): string[] {
   for (const a of def.kernel.abilities) if (a.face && !out.includes(a.face)) out.push(a.face);
   return out;
 }
+/** A Room permanent: its characteristics come from the doors that are unlocked (CR 709.4), not from one chosen face. */
+export function isRoomOnBattlefield(def: CardDef, o: GameObject): boolean { return def.layout === "room" && o.zone === "battlefield" && faceNames(def).length >= 2; }
 export function currentFace(def: CardDef, o: GameObject): string | undefined {
   const names = faceNames(def);
   if (!names.length) return undefined;
@@ -267,12 +270,32 @@ export function baseChars(r: Run, o: GameObject): Chars {
     return { name: t.name, types: lc(t.types), subtypes: [...t.subtypes], supertypes: lc(t.supertypes), colors: [...t.colors], mv: parseManaCost(t.manaCost).mv, power: t.power, toughness: t.toughness, keywords: lc(t.keywords), abilities: tokenAbilities(t) };
   }
   const d = defOf(r, o)!;
+  if (isRoomOnBattlefield(d, o)) return roomChars(r, o, d);
   const m = faceMeta(d, o);
   const abilities = printedAbilities(r, o);
   const pc = parseManaCost(m.manaCost);
   const colors = m.colors ?? [...new Set(pc.symbolColors ?? [])].filter((c) => c !== "C");
   const keywords = abilities.filter((a) => a.kind === "keyword" && a.keyword).map((a) => a.keyword!.name.toLowerCase().replace(/_/g, " "));
   return { name: currentFace(d, o) ?? d.name, types: lc(m.types), subtypes: [...(m.subtypes ?? [])], supertypes: lc(m.supertypes), colors: [...colors], mv: pc.mv, power: m.power, toughness: m.toughness, keywords, abilities };
+}
+
+/**
+ * A Room on the battlefield (CR 709.4): it is an enchantment Room whatever its doors; name, mana cost, colors and abilities are those of the UNLOCKED
+ * doors only (one door open: that half; both open: both halves, mana values added). With both doors locked it has no abilities, no colors, mana value 0.
+ */
+function roomChars(r: Run, o: GameObject, d: CardDef): Chars {
+  const names = faceNames(d);
+  const open = names.filter((n) => (o.unlocked ?? []).includes(n));
+  const metaOf = (n: string) => (n === names[0] ? d : d.faces?.[n] ?? d);
+  const abilities = printedAbilities(r, o);
+  const front = metaOf(names[0]);
+  let mv = 0; const colors = new Set<string>();
+  for (const n of open) { const pc = parseManaCost(metaOf(n).manaCost); mv += pc.mv; for (const c of metaOf(n).colors ?? pc.symbolColors ?? []) if (c !== "C") colors.add(c); }
+  return {
+    name: open.length === 1 ? open[0] : names.join(" // "), types: lc(front.types), subtypes: [...new Set([...(front.subtypes ?? []), ...names.flatMap((n) => metaOf(n).subtypes ?? [])])],
+    supertypes: lc(front.supertypes), colors: [...colors], mv, power: undefined, toughness: undefined,
+    keywords: abilities.filter((a) => a.kind === "keyword" && a.keyword).map((a) => a.keyword!.name.toLowerCase().replace(/_/g, " ")), abilities
+  };
 }
 
 /**
@@ -290,7 +313,7 @@ export function isSummoningSick(r: Run, o: GameObject): boolean {
 
 export function makeLki(r: Run, o: GameObject): Lki {
   const c = chars(r, o.id);
-  return { controller: o.controller, owner: o.owner, name: c.name, types: c.types, subtypes: c.subtypes, colors: c.colors, mv: c.mv, power: c.power, toughness: c.toughness, token: !!o.token, counters: { ...o.counters }, ...(o.attachedTo ? { attachedTo: o.attachedTo } : {}) };
+  return { controller: o.controller, owner: o.owner, name: c.name, types: c.types, subtypes: c.subtypes, colors: c.colors, mv: c.mv, power: c.power, toughness: c.toughness, token: !!o.token, ...((o.token ?? o.copyDef) ? { copyDef: structuredClone((o.copyDef ?? o.token)!) } : {}), counters: { ...o.counters }, ...(o.attachedTo ? { attachedTo: o.attachedTo } : {}) };
 }
 
 // ---------------------------------------------------------------- zones
@@ -351,6 +374,8 @@ export function moveObject(r: Run, id: ObjId, to: Zone, opts: MoveOpts = {}): Ga
   if (to !== "battlefield" && to !== "stack") o.face = undefined; // a card in any other zone shows its front face
   if (from === "battlefield" && to === "battlefield") o.face = undefined;
   if (to === "battlefield" && opts.face) o.face = opts.face;
+  // Rooms (CR 709.5): a Room that resolves as a spell enters with the door of the half that was cast unlocked; entering any other way (Redress Fate, reanimation, flicker) both doors are locked
+  o.unlocked = to === "battlefield" && from === "stack" && defOf(r, o)?.layout === "room" && o.face ? [o.face] : undefined;
   if (to === "battlefield" && opts.faceDown) o.faceDown = true;
   if (!(from === "stack" && to === "battlefield")) o.cast = undefined;
   o.timestamp = tick(r);
@@ -371,6 +396,7 @@ export function moveObject(r: Run, id: ObjId, to: Zone, opts: MoveOpts = {}): Ga
   emit(r, { type: "zone_change", id, from, to, owner: o.owner, name: chars(r, id).name });
   if (to === "battlefield") {
     emit(r, { type: "etb", id, player: o.controller, from });
+    if (o.unlocked?.length) emit(r, { type: "door_unlocked", id, player: o.controller, face: o.unlocked[0], fully: false }); // the cast half's door unlocks as the Room enters
     r.s.turnLog.push({ type: "etb", id, player: o.controller, name: o.cardName, types: chars(r, id).types, token: !!o.token, ts: r.s.clock });
   }
   if (from === "graveyard" && lki) emit(r, { type: "leaves", id, from, to, lki });

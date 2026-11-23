@@ -67,8 +67,15 @@
           "condition": {
             "when": "on_resolution",
             "if": {
-              "check": "step_done",
-              "step": "s1"
+              "check": "compare",
+              "left": {
+                "ref": "step_result",
+                "step": "s1"
+              },
+              "cmp": {
+                "op": ">=",
+                "value": 1
+              }
             },
             "src": 1
           }
@@ -79,6 +86,7 @@
       ],
       "implementation": "needed",
       "needs": [
+        "quantity:step_result",
         "quantity:division",
         "step:copy",
         "field:copy.count",
@@ -86,7 +94,7 @@
         "field:copy.setToughness",
         "field:copy.token",
         "field:copy.who",
-        "predicate:step_done"
+        "predicate:compare"
       ]
     }
   ],

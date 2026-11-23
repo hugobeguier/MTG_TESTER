@@ -83,6 +83,8 @@ export function describeQuantity(q: Quantity): string {
     case "life_total": return q.who === "you" ? "your life total" : `${playerName(q.who)}'s life total`;
     case "starting_life": return "your starting life total";
     case "count_this_turn": return `the number of ${q.filter ? describeFilter(q.filter, { plural: true }) : "things"} that ${q.event.replace(/_/g, " ")} this turn`;
+    case "damage_taken_this_turn": return `the damage dealt to ${playerName(q.who)} this turn`;
+    case "saved_count": return `the number of those cards still in ${q.zone ?? "exile"}`;
     case "players_count": return `the number of ${q.who === "each_opponent" ? "opponents" : "players"} for which ${describePredicate(q.where)}`;
   }
 }
@@ -446,6 +448,7 @@ export function describeStep(step: Step, targets: Map<string, TargetSpec> = new 
       const cand = step.candidates ? describeFilter(step.candidates) : (step.voteOptions as string[] | undefined)?.join(" or ") ?? "an option";
       return `${step.voters === "each_opponent" ? "each opponent" : "each player"} votes for ${step.candidates ? withArticle(cand) : cand}${step.voters === "each_opponent" ? "" : " (starting with you)"}; ${step.tie === "controller_chooses" ? "if tied you choose among the tied" : "every one tied for the most votes wins"}`;
     }
+    case "mutual_reveal": return step.players === "target_players" ? "two target players each reveal the top card of their library, each loses life equal to the mana value of the card the other revealed, then each puts the card they revealed into their hand" : "you and target player each reveal the top card of your library, each loses life equal to the mana value of the card the other revealed, then each puts the card they revealed into their hand";
     case "exchange_life": return `exchange life totals with ${whoPhrase((step.withWho as Step["who"]) ?? "target_player")}`;
     case "regenerate": return `regenerate ${t()}`;
     case "repeat_process": return `${(step.steps ?? []).map((x) => describeStep(x, targets)).join(", then ")}; then repeat this process ${step.repeatIf ? `as long as ${describePredicate(step.repeatIf as Predicate)}` : "as often as you choose"}`;
@@ -945,6 +948,7 @@ function describeTriggerSingle(tr: NonNullable<Ability["trigger"]>): string {
     case "attack": {
       if (tr.minCount) body = `${actor ?? "you"} ${verb(ev, actorIsYou || !actor)} with ${numberWord(tr.minCount)} or more ${filterSubj ? describeFilter(filterSubj, { plural: true }) : "creatures"}`;
       else body = objNp ? `${objNp} ${verb(ev, objPlural)}` : `${actor ?? "a creature"} ${verb(ev, actorIsYou)}`;
+      if (tr.alone) body += " alone";
       if (tr.defender) body += tr.defender === "you" ? " you" : tr.defender === "you_or_your_planeswalkers" ? " you or a planeswalker you control" : " a player other than you";
       break;
     }

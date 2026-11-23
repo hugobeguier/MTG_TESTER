@@ -15,7 +15,7 @@ import { isObjId } from "./types";
 import { shuffleInPlace } from "./core";
 import { recordMilled, revealUntilRun } from "./reveal7";
 import { checkCounterAnswer, counterSpec } from "./counters7";
-import { addCounters, changeLife, dealDamage, decide, destroyObject, discardCard, fallbackPromptOf, players, refs, sacrificeObject, type AskSpec, type Handler, type StepResult, type StepSpec } from "./steps";
+import { addCounters, changeLife, dealDamage, decide, destroyObject, discardCard, fallbackPromptOf, noteDone, players, refs, sacrificeObject, type AskSpec, type Handler, type StepResult, type StepSpec } from "./steps";
 import type { Env, ObjId } from "./types";
 
 import { addTemporaryPT as addPump } from "./steps";
@@ -66,7 +66,7 @@ export const INTERNAL7: Record<string, Handler> = {
     if (!mine.length) return "done";
     const d = decide({ kind: "choose_cards", player: pid, prompt: (step.prompt as Prompt | undefined) ?? fallbackPromptOf(r, env, "sacrifice", `You may sacrifice a permanent that shares a card type with ${types.join(" / ")}. Choose one, or none.`), options: cardOptions(r, mine), min: 0, max: 1 }, answer);
     if ("ask" in d) return d;
-    if (d.ids.length) { for (const id of d.ids) sacrificeObject(r, id); ((env.doneBy ??= {})[String(step.stepId)] ??= []).push(pid); }
+    if (d.ids.length) { for (const id of d.ids) sacrificeObject(r, id); noteDone(env, step, pid); }
     return "done";
   },
   /** "as many times as you choose, ..." (Lim-Dul's Vault): ask whether to do the nested steps once more; each answer "yes" runs them and asks again */

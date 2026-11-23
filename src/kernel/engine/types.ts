@@ -34,7 +34,7 @@ export interface CardDef {
    */
   faces?: Record<string, FaceDef>;
   /** "transform" (default: only the front face can be cast; the step transform flips it), "modal_dfc" / "split": the face is chosen on cast */
-  layout?: "transform" | "modal_dfc" | "split" | "adventure";
+  layout?: "transform" | "modal_dfc" | "split" | "adventure" | "room";
   kernel: Card;
 }
 export interface FaceDef { manaCost?: string; types: string[]; subtypes?: string[]; supertypes?: string[]; colors?: string[]; power?: number; toughness?: number; loyalty?: number }
@@ -59,6 +59,8 @@ export interface TokenDef {
 
 export interface GameObject {
   id: ObjId;
+  /** a Class's current level (CR 716); absent = level 1 */
+  classLevel?: number;
   /** definition name (tokens: the token's name; its characteristics come from `token`) */
   cardName: string;
   owner: PlayerId;
@@ -98,6 +100,8 @@ export interface GameObject {
   exileInstead?: boolean;
   /** the face this object currently shows (double-faced cards: set by casting a chosen face, playing a land face, transform); undefined = front */
   face?: string;
+  /** Rooms (CR 709): the doors (face names) that are unlocked while this Room is on the battlefield; undefined / empty = both locked */
+  unlocked?: string[];
   /** a COPY of a spell: a new object that exists only on the stack (and, as a permanent-spell copy, on the battlefield); it ceases to exist elsewhere */
   isCopy?: boolean;
   /** layer 1: this permanent is a copy of something (copiable values snapshot, like a token copy); cleared when it leaves the battlefield */
@@ -170,11 +174,13 @@ export interface TriggerContext {
   cast?: CastInfo;
   /** "whenever one or more ... enter": every object that entered in the same batch and matches (Twilight Diviner: "a token that's a copy of ONE of them") */
   batchObjs?: ObjId[];
+  /** attack batches: the defenders (players / planeswalkers) the batch attacked (attacked_defender) */
+  defenders?: string[];
   /** X of the ability that caused the trigger (cycling {X}{1}{U}: "When you cycle this card, create an X/X Shark") */
   x?: number;
 }
 
-export interface Lki { controller: PlayerId; owner: PlayerId; name: string; types: string[]; subtypes: string[]; colors: string[]; mv: number; power?: number; toughness?: number; token: boolean; counters?: Record<string, number>; /** what it was attached to (Animate Dead's leave trigger) */ attachedTo?: ObjId }
+export interface Lki { controller: PlayerId; owner: PlayerId; name: string; types: string[]; subtypes: string[]; colors: string[]; mv: number; power?: number; toughness?: number; token: boolean; /** a token's / copy's definition (a copy of it can still be made after it left: Saw in Half) */ copyDef?: TokenDef; counters?: Record<string, number>; /** what it was attached to (Animate Dead's leave trigger) */ attachedTo?: ObjId }
 
 export interface StackItem {
   id: string;
@@ -220,6 +226,8 @@ export interface ContinuousEffect {
   /** base power/toughness (layer 7b) */
   base?: { power: number; toughness: number };
   addTypes?: string[];
+  /** "becomes a Dragon" / "becomes an artifact creature": an effect that SETS types (layer 4). Only subtypes named = the creature types are replaced, card types stay (CR 205.1a) */
+  setTypes?: string[];
   setColors?: string[];
   /** an ability the object gained ("it gains a dies trigger"): a spell keeps it as the permanent it becomes (core.moveObject re-stamps it); it ends when the object leaves the battlefield */
   ability?: import("../schema").Ability;
@@ -251,6 +259,11 @@ export interface DurableEffect {
   unexile?: { objectId: ObjId; objectTs: number; sourceId: ObjId; sourceTs: number };
   /** "gain control of X until ...": when it expires, the object (if still the same one) returns to `was` */
   control?: { objectId: ObjId; objectTs: number; was: PlayerId };
+  /**
+   * "Creatures <that player> controls can't attack you or planeswalkers you control until your next turn" (Orzhov Advokist) / "as long as it has a vow counter on it" (Promise of Loyalty).
+   * `owner` is the player who cannot be attacked; the ban covers the listed objects (still the same objects) or every creature `controllerOf` controls.
+   */
+  attackBan?: { objects?: Array<{ id: ObjId; ts: number }>; controllerOf?: PlayerId; protects?: "you" | "you_and_planeswalkers"; whileP?: import("../schema").Predicate; chosen?: Record<string, string[]> };
 }
 
 /** "At the beginning of the next end step / upkeep, ..." and "when <object> dies this turn, ...": a one-shot trigger created by a step. */
@@ -320,6 +333,8 @@ export interface GameState {
   phased?: Array<{ id: ObjId; indirectOf?: ObjId }>;
   stack: StackItem[];
   turn: { number: number; active: PlayerId; phase: Phase };
+  /** how many turns each player has begun (turn_number scope "yours") */
+  turnsTaken?: Record<PlayerId, number>;
   /** null while nobody holds priority (untap/cleanup, a pending decision, game over) */
   priority: PlayerId | null;
   /** players that passed in succession since the last action */
@@ -369,7 +384,12 @@ export type DecisionKind =
   | "choose_modes" | "choose_targets" | "choose_x" | "choose_cards" | "choose_yes_no" | "choose_color"
   | "order_triggers" | "cast_target_player" | "order_replacements" | "assign_damage" | "choose_option" | "choose_number" | "pay_unless" | "choose_cast_option" | "assign_mana" | "assign_counters" | "order_library";
 
-export interface DecisionOption { id: string; label: string }
+/**
+ * One listed option. Ordering decisions (order_triggers / order_replacements) also say where the entry comes from so the table can show the cards:
+ * `source` = the object whose ability it is, `text` = the ability's full text, `cause` = the object the event was about (the permanent that entered / died, the
+ * spell cast) with `causeLabel` the verb ("entered the battlefield"), `group` = entries with the same group are identical in effect AND cause (the UI may merge them).
+ */
+export interface DecisionOption { id: string; label: string; source?: ObjId; text?: string; cause?: ObjId; causeLabel?: string; group?: string }
 
 export interface PendingView {
   id: string;
@@ -521,6 +541,8 @@ export type Action =
   | { type: "advancePhase"; player: PlayerId }
   /** a special action (CR 116.2b / 702.37e): turn a face-down permanent you control face up by paying its morph cost. It does not use the stack and you keep priority. */
   | { type: "turnFaceUp"; player: PlayerId; objectId: ObjId; payWith?: ObjId[]; autoPay?: boolean }
+  /** a special action (CR 116.2m / 709.5): unlock a locked door of a Room you control by paying that door's mana cost; sorcery timing, no stack, you keep priority */
+  | { type: "unlockDoor"; player: PlayerId; objectId: ObjId; face: string; payWith?: ObjId[]; autoPay?: boolean }
   /** cast a copy of the other face's spell of a prepared permanent you control: a REAL spell (cast triggers, can be countered); it stops being prepared */
   | { type: "castPrepared"; player: PlayerId; objectId: ObjId; targets?: Record<string, string[]>; payWith?: ObjId[]; autoPay?: boolean }
   /** the active player's turn-based action in the declare attackers step; an empty list = no attack. Attack taxes are paid from the pool / by tapping sources (payWith, autoPay as for casting). */
@@ -558,7 +580,7 @@ export interface ResolveResult {
 }
 
 /** Printed data of one card from the host's database. */
-export interface CardInfo { name: string; manaCost?: string; types: string[]; subtypes?: string[]; supertypes?: string[]; colors?: string[]; power?: number; toughness?: number; loyalty?: number; layout?: CardDef["layout"] | "adventure"; faces?: Record<string, FaceDef>; oracle?: string }
+export interface CardInfo { name: string; manaCost?: string; types: string[]; subtypes?: string[]; supertypes?: string[]; colors?: string[]; power?: number; toughness?: number; loyalty?: number; layout?: CardDef["layout"] | "adventure" | "room"; faces?: Record<string, FaceDef>; oracle?: string }
 /**
  * The host's card database (kernel step 6). Used by "choose a creature type / card name" (the full lists) and to complete multi-faced
  * cards (faces, layout). Pure lookups: the engine never does I/O. A test adapter built from data/cards.db lives in testdb.ts.

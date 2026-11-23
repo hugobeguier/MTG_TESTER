@@ -12,6 +12,8 @@ export interface DecisionOptionView extends DecisionOption {
   card?: VisibleCard;
   /** a player option: the seat */
   seatId?: string;
+  /** ordering decisions: the object that caused the entry (the permanent that entered / died, the spell cast), with its card when the viewer may see it. `source` / `text` / `causeLabel` / `group` come from the kernel's option (DecisionOption). */
+  causeCard?: VisibleCard;
 }
 export interface DecisionView {
   id: string;
@@ -107,6 +109,12 @@ export function decisionView(state: GameState, viewer: PlayerId, env: ToSessionE
   const title = p.prompt?.title || p.kind;
   if (p.player !== viewer) return { waitingFor: { player: p.player, kind: p.kind, title } };
   const options: DecisionOptionView[] = p.options.map((o) => {
+    if (p.kind === "order_triggers" || p.kind === "order_replacements") { // entries come from an ability: show its source card and the card that caused it
+      const zoneOf = (id: string) => (state.objects[id]?.zone ?? "battlefield") as VisibleCard["zone"];
+      const card = o.source ? cardForObject(state, viewer, env, o.source, zoneOf(o.source)) : undefined;
+      const causeCard = o.cause ? cardForObject(state, viewer, env, o.cause, zoneOf(o.cause)) : undefined;
+      return { ...o, ...(card ? { card } : {}), ...(causeCard ? { causeCard } : {}) };
+    }
     if (o.id.startsWith("#")) { const card = cardForListedObject(state, viewer, env, o.id, o.label); return { ...o, ...(card ? { card } : {}) }; }
     if (state.players.some((x) => x.id === o.id)) return { ...o, seatId: o.id };
     return { ...o };

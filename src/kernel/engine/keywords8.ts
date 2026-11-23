@@ -42,6 +42,29 @@ const RULES: Record<string, (param?: unknown) => Ability[]> = {
     costs: [{ tapOther: { types: ["creature"], controller: "you" }, count: 1 }], timing: { speed: "sorcery" },
     steps: [{ kind: "add_counters", on: "self", counterKind: "charge", amount: { ref: "stat", of: "sacrificed", stat: "power" } }]
   } as unknown as Ability],
+  // Exalted (CR 702.83): every instance triggers separately, so Merchant of Truth's Clues add one +1/+1 each
+  exalted: () => [{
+    id: "kw:exalted", kind: "triggered", text: "Exalted (Whenever a creature you control attacks alone, that creature gets +1/+1 until end of turn.)", keyword: { name: "exalted" },
+    trigger: { event: "attack", subject: { types: ["creature"], controller: "you" }, alone: true },
+    steps: [{ kind: "grant_effect", target: "event_object", modify: [{ pt: { power: 1, toughness: 1 } }], duration: "until_end_of_turn" }]
+  } as unknown as Ability],
+  // Read ahead (CR 702.155): as the Saga enters, choose a chapter (1..param) and start with that many lore counters; the chapters before it are skipped
+  read_ahead: (param) => [{
+    id: "kw:read_ahead", kind: "replacement", text: "Read ahead (Choose a chapter and start with that many lore counters. Add one after your draw step. Skipped chapters don't trigger. Sacrifice after the last chapter.)",
+    replacement: { event: "would_enter", subject: "self", result: { mode: "also", steps: [
+      { kind: "choose", choice: "number", id: "ra", min: 1, max: Number(param ?? 3), who: "you", prompt: { title: "Read ahead", instruction: "Choose a chapter: the Saga starts with that many lore counters." } },
+      { kind: "add_counters", on: "self", counterKind: "lore", amount: { ref: "step_result", step: "ra" } }
+    ] } }
+  } as unknown as Ability],
+  // Vanishing N (CR 702.63): enters with N time counters; at the beginning of your upkeep remove one; when the last is removed, sacrifice it (modelled in the same trigger)
+  vanishing: (param) => [{
+    id: "kw:vanishing", kind: "replacement", text: `Vanishing ${String(param ?? 1)} (This permanent enters with ${String(param ?? 1)} time counters on it.)`,
+    replacement: { event: "would_enter", subject: "self", result: { mode: "also", steps: [{ kind: "add_counters", on: "self", counterKind: "time", amount: Number(param ?? 1) }] } }
+  } as unknown as Ability, {
+    id: "kw:vanishing_upkeep", kind: "triggered", text: "At the beginning of your upkeep, if this permanent has a time counter on it, remove a time counter from it. When the last is removed, sacrifice it.",
+    trigger: { event: "begin_step", step: "upkeep", whose: "yours", interveningIf: { check: "matches", obj: "self", filter: { hasCounter: "time" } } },
+    steps: [{ kind: "remove_counters", on: "self", counterKind: "time", amount: 1 }, { kind: "if_else", if: { not: { check: "matches", obj: "self", filter: { hasCounter: "time" } } }, then: [{ kind: "sacrifice_permanent", target: "self" }] }]
+  } as unknown as Ability],
   persist: () => [dies("persist", "-1/-1", "Persist (When this creature dies, if it had no -1/-1 counters on it, return it to the battlefield under its owner's control with a -1/-1 counter on it.)")]
 };
 

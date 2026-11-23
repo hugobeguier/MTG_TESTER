@@ -106,11 +106,15 @@ export function KernelGameTable({ controller, onBack }: { controller: KernelGame
         <GameOverDialog session={table.session} gameStarting={false} setupMessage={undefined} onPlayAgain={onBack} onDismiss={() => undefined} onBackToSetup={onBack} />
       ) : null}
       <button className="game-back-button" type="button" onClick={onBack} aria-label="Back to setup">×</button>
-      <div data-testid="kernel-badge" className="kernel-badge">
-        Kernel engine (dev){degraded ? ` - degraded: ${degraded}` : ""}
-      </div>
-      <PacingControls controller={controller} />
       <ThreeGameTable
+        kernelHudExtras={(
+          <div className="kernel-hud-extras">
+            <div data-testid="kernel-badge" className="kernel-badge">
+              Kernel engine (dev){degraded ? ` - degraded: ${degraded}` : ""}
+            </div>
+            <PacingControls controller={controller} />
+          </div>
+        )}
         stackFeed={controller.stackFeed()}
         session={table.session}
         prioritySeatId={table.prioritySeatId}

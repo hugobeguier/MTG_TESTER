@@ -71,30 +71,23 @@
             }
           ],
           "src": 0,
-          "condition": {
-            "when": "on_resolution",
-            "if": {
-              "check": "paid_additional_cost",
-              "option": "{R}"
-            },
-            "src": 1
-          },
           "prompt": {
-            "title": "Leyline Tyrant: optional payment",
-            "instruction": "Do you want to pay any amount of {R}? If you do, Leyline Tyrant deals that much damage to any target.",
+            "title": "Leyline Tyrant: pay red mana",
+            "instruction": "You may pay any amount of {R}. When you do, Leyline Tyrant deals that much damage to any target.",
             "source": {
               "card": "Leyline Tyrant",
               "ability": "a3"
             }
-          }
+          },
+          "reflexive": true
         }
       ],
       "implementation": "needed",
       "needs": [
         "quantity:X",
         "field:damage_target.optionalCost",
-        "field:damage_target.source",
-        "predicate:paid_additional_cost"
+        "field:damage_target.reflexive",
+        "field:damage_target.source"
       ]
     }
   ],

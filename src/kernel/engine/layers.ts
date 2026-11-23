@@ -46,6 +46,8 @@ export function getIndex(r: Run): Idx {
   };
   for (const id of r.s.battlefield) { const o = r.s.objects[id]; if (o) consider(o); }
   for (const p of r.s.players) for (const id of [...p.graveyard, ...p.command]) { const o = r.s.objects[id]; if (o) consider(o); }
+  // statics that work from the hand ("You can't cast this spell during your first three turns", Serra Avenger)
+  for (const p of r.s.players) for (const id of p.hand) { const o = r.s.objects[id]; if (o && printedAbilities(r, o).some((a) => a.kind === "static" && a.zone === "hand")) consider(o); }
   for (const it of r.s.stack) { const o = it.objectId ? r.s.objects[it.objectId] : undefined; if (o) consider(o); } // "this spell can't be countered": statics that work on the stack
   return (r.idx = { statics, repls, l6 });
 }
@@ -71,7 +73,7 @@ export function grantedEnterAbilities(r: Run, o: GameObject): Ability[] {
 
 /** True when some effect can change abilities (so battlefield abilities must be read through chars()). */
 export function layerSixActive(r: Run): boolean {
-  return getIndex(r).l6 || r.s.effects.some((e) => e.grant !== undefined || e.lose !== undefined || e.addTypes !== undefined || e.ability !== undefined);
+  return getIndex(r).l6 || r.s.effects.some((e) => e.grant !== undefined || e.lose !== undefined || e.addTypes !== undefined || e.setTypes !== undefined || e.ability !== undefined);
 }
 
 // ---------------------------------------------------------------- attachment
@@ -131,6 +133,13 @@ function addType(c: Chars, name: string): void {
   if (CARD_TYPES.has(l)) { if (!c.types.includes(l)) c.types.push(l); }
   else if (!c.subtypes.some((x) => x.toLowerCase() === l)) c.subtypes.push(name);
 }
+const NON_CREATURE_SUBTYPES = new Set(["plains", "island", "swamp", "mountain", "forest", "aura", "equipment", "saga", "food", "clue", "treasure", "blood", "vehicle", "role", "class", "curse", "shrine", "background", "desert", "gate", "lair", "locus", "cave", "town", "urza's"]);
+/** "becomes a Dragon": naming only subtypes replaces the CREATURE types and keeps card types and other subtypes; naming card types replaces card types and subtypes. */
+function setTypesEffect(c: Chars, names: string[]): void {
+  if (names.some((n) => CARD_TYPES.has(n.toLowerCase()))) { setTypes(c, names); return; }
+  c.subtypes = c.subtypes.filter((s) => NON_CREATURE_SUBTYPES.has(s.toLowerCase()));
+  for (const n of names) addType(c, n);
+}
 function setTypes(c: Chars, names: string[]): void {
   c.types = []; c.subtypes = [];
   for (const n of names) addType(c, n);
@@ -189,6 +198,7 @@ function applyModify(r: Run, s: StaticSrc, m: Modify, c: Chars): void {
 function effectItems(e: ContinuousEffect, c: Chars, seq: () => number): Item[] {
   const out: Item[] = [];
   const add = (layer: number, run: () => void) => out.push({ layer, ts: e.timestamp, seq: seq(), run });
+  if (e.setTypes) add(L.types, () => setTypesEffect(c, e.setTypes!));
   if (e.addTypes) add(L.types, () => e.addTypes!.forEach((t) => addType(c, t)));
   if (e.setColors) add(L.colors, () => { c.colors = [...e.setColors!]; });
   if (e.grant) add(L.abilities, () => grantKeyword(c, e.grant!));
@@ -297,7 +307,7 @@ export function restrictionsOf(r: Run, id: ObjId): Restriction[] {
     for (const m of mods) {
       if ("cant" in m) out.push({ kind: "cant", what: m.cant, except: m.except, protects: m.protects, source: s.id });
       else if ("mustAttack" in m) out.push({ kind: "mustAttack", source: s.id });
-      else if ("attackTax" in m) out.push({ kind: "attackTax", cost: m.attackTax.cost === "{X}" && s.ability.scripted?.params && "x" in (s.ability.scripted.params as object) ? `{${evalQuantity(r, (s.ability.scripted.params as { x: never }).x, qctx(s))}}` : m.attackTax.cost, /* Sphere of Safety: {X} with X from the scripted params, read now */ protects: m.attackTax.protects, source: s.id });
+      else if ("attackTax" in m) out.push({ kind: "attackTax", cost: m.attackTax.cost === "{X}" && s.ability.scripted?.params && "x" in (s.ability.scripted.params as object) ? `{${evalQuantity(r, (s.ability.scripted.params as { x: never }).x, qctx(s))}}` : m.attackTax.cost === "{X}" && !s.ability.scripted?.params ? `{${Object.values(tryObj(r, id)?.counters ?? {}).reduce((a, b) => a + b, 0)}}` /* Nils, Discipline Enforcer: X = the number of counters on the attacking creature */ : m.attackTax.cost, /* Sphere of Safety: {X} with X from the scripted params, read now */ protects: m.attackTax.protects, source: s.id });
       else if ("blockTax" in m) out.push({ kind: "blockTax", cost: m.blockTax.cost, source: s.id });
       else if ("evasion" in m) out.push({ kind: "evasion", source: s.id, cantBeBlockedBy: m.evasion.cantBeBlockedBy, unlessDefenderControls: m.evasion.unlessDefenderControls });
     }
@@ -341,6 +351,8 @@ export function playerCantCast(r: Run, pid: PlayerId): boolean {
   }
   return false;
 }
+/** A static of the card itself that forbids casting it right now ("You can't cast this during your first three turns"). */
+export const cantCastCard = (r: Run, id: ObjId): boolean => restrictionsOf(r, id).some((x) => x.kind === "cant" && x.what === "cast");
 export const mustAttack = (r: Run, id: ObjId): boolean => restrictionsOf(r, id).some((x) => x.kind === "mustAttack");
 
 /** How many land drops a player has per turn (1 + extraLandDrops statics whose source they control). */

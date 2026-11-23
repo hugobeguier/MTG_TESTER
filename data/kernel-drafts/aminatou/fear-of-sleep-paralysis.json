@@ -30,8 +30,9 @@
             }
           },
           {
-            "event": "unspecified",
-            "subject": "you"
+            "event": "unlock_door",
+            "subject": "you",
+            "fully": true
           }
         ]
       },
@@ -76,7 +77,7 @@
       "needs": [
         "trigger:multi_event",
         "trigger:subject",
-        "trigger:unspecified",
+        "trigger:unlock_door",
         "targets:multi",
         "step:add_counters",
         "field:add_counters.on"

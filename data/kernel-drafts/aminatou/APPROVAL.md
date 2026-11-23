@@ -177,7 +177,7 @@ Archaeomancer's Map [draft]
     Effect: Search your library for a basic Plains, put it onto your hand, then shuffle.
   [a2] triggered [needed: needs trigger:intervening_if, predicate:compare, trigger:subject, step:choose, field:choose.count, field:choose.from, field:choose.saveAs, field:move_card_zone.from, field:move_card_zone.what]
     Oracle: Whenever a land an opponent controls enters, if that player controls more lands than you, you may put a land card from your hand onto the battlefield.
-    Trigger: Whenever a land an opponent controls enters, if the number of lands an opponent controls is greater than the number of lands you control
+    Trigger: Whenever a land an opponent controls enters, if the number of lands that player controls is greater than the number of lands you control
     Effect: You may choose a land card in your hand. Then, you may put a card onto the battlefield.
 ```
 
@@ -546,9 +546,9 @@ Fear of Sleep Paralysis [draft]
   [a1] keyword [implemented]
     Oracle: Flying
     Keyword: flying
-  [a2] triggered [needed: needs trigger:multi_event, trigger:subject, trigger:unspecified, targets:multi, step:add_counters, field:add_counters.on]
+  [a2] triggered [needed: needs trigger:multi_event, trigger:subject, trigger:unlock_door, targets:multi, step:add_counters, field:add_counters.on]
     Oracle: Eerie — Whenever this creature or another enchantment you control enters and whenever you fully unlock a Room, tap up to one target creature and put a stun counter on it.
-    Trigger: Whenever Fear of Sleep Paralysis enters or an another enchantment you control enters or you unspecified
+    Trigger: Whenever Fear of Sleep Paralysis enters or an another enchantment you control enters or you unlock door
     Target t1: up to one target creature  <- prompt: "Choose up to one target creature."
     Effect: Tap up to one target creature. Then, put a stun counter on up to one target creature.
   [a3] scripted [needed: needs scripted:stun_counters_cant_be_removed_from_opponent_permanents]
@@ -560,7 +560,7 @@ Player prompts:
 
 - Fear of Sleep Paralysis: choose a target: Choose up to one target creature.
 
-Implementation: needed (trigger:multi_event, trigger:subject, trigger:unspecified, targets:multi, step:add_counters, field:add_counters.on, scripted:stun_counters_cant_be_removed_from_opponent_permanents)
+Implementation: needed (trigger:multi_event, trigger:subject, trigger:unlock_door, targets:multi, step:add_counters, field:add_counters.on, scripted:stun_counters_cant_be_removed_from_opponent_permanents)
 
 Questions for you:
 
@@ -1108,10 +1108,10 @@ Re-rendered plain English:
 
 ```
 Secret Arcade [draft]
-  [a1] static [needed: needs static, static:addTypes]
+  [a1] static [needed: needs static, static:addTypes, face]
     Oracle: Secret Arcade: Nonland permanents you control and permanent spells you control are enchantments in addition to their other types.
     Static: Nonland permanents you control are enchantments in addition to their other types
-  [a2] triggered [needed: needs targets:multi, step:add_counters, quantity:stat, field:add_counters.on]
+  [a2] triggered [needed: needs targets:multi, face, step:add_counters, quantity:stat, field:add_counters.on]
     Oracle: Dusty Parlor: Whenever you cast an enchantment spell, put a number of +1/+1 counters equal to that spell's mana value on up to one target creature.
     Trigger: Whenever you cast an enchantment spell
     Target t1: up to one target creature  <- prompt: "Choose up to one target creature."
@@ -1122,7 +1122,7 @@ Player prompts:
 
 - Secret Arcade: choose a target: Choose up to one target creature.
 
-Implementation: needed (static, static:addTypes, targets:multi, step:add_counters, quantity:stat, field:add_counters.on)
+Implementation: needed (static, static:addTypes, face, targets:multi, step:add_counters, quantity:stat, field:add_counters.on)
 
 Questions for you:
 
@@ -1715,6 +1715,7 @@ Questions for you:
 | `cost:life` | 1 | Greed |
 | `cost:loyalty` | 1 | Aminatou, the Fateshifter |
 | `cost:x` | 1 | Shark Typhoon |
+| `face` | 1 | Secret Arcade |
 | `field:choose.fromLooked` | 1 | Diabolic Vision |
 | `field:choose.max` | 1 | Arcane Denial |
 | `field:choose.min` | 1 | Arcane Denial |
@@ -1797,7 +1798,7 @@ Questions for you:
 | `trigger:cycle` | 1 | Shark Typhoon |
 | `trigger:intervening_if` | 1 | Archaeomancer's Map |
 | `trigger:leaves` | 1 | Athreos, Shroud-Veiled |
-| `trigger:unspecified` | 1 | Fear of Sleep Paralysis |
+| `trigger:unlock_door` | 1 | Fear of Sleep Paralysis |
 | `trigger:zones` | 1 | Athreos, Shroud-Veiled |
 | `zone:stack` | 1 | Void Rend |
 

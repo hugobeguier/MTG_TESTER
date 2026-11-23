@@ -11,10 +11,10 @@ import type { GameEvent, Lki, ObjId, PlayerId, TriggerContext } from "./types";
 /** engine event type -> trigger event name */
 export const SIMPLE_EVENTS: Record<string, string> = {
   draw: "draw", life_gain: "gain_life", life_loss: "lose_life", tap: "tap", sacrificed: "sacrifice", counter_added: "counter_put",
-  discard: "discard", mill: "mill", token_created: "token_created", crime: "commit_crime", exploited: "exploit"
+  discard: "discard", mill: "mill", token_created: "token_created", crime: "commit_crime", exploited: "exploit", damage_prevented: "damage_prevented", door_unlocked: "unlock_door"
 };
 export const SIMPLE_TRIGGER_EVENTS: ReadonlySet<string> = new Set(Object.values(SIMPLE_EVENTS));
-const PLAYER_EVENTS = new Set(["draw", "gain_life", "lose_life", "discard", "mill", "commit_crime"]);
+const PLAYER_EVENTS = new Set(["draw", "gain_life", "lose_life", "discard", "mill", "commit_crime", "damage_prevented"]);
 const LOG_TYPE: Record<string, string> = { draw: "draw", gain_life: "gain_life", lose_life: "lose_life", discard: "discard", mill: "mill", sacrifice: "sacrifice", token_created: "token_created", commit_crime: "crime" };
 
 function lkiOk(f: ObjectFilter, l: Lki, q: QCtx, id: string): boolean {
@@ -42,7 +42,8 @@ export function matchSimple(r: Run, ev: GameEvent & Record<string, unknown>, tr:
   let ctx: TriggerContext;
   let actorPlayer: PlayerId | undefined;
   if (PLAYER_EVENTS.has(name)) {
-    const who = ev.player as PlayerId;
+    // damage_prevented: the player is the one the prevented damage would have been dealt to ("whenever damage that would be dealt to you is prevented")
+    const who = (name === "damage_prevented" ? (typeof ev.target === "string" && ev.target.startsWith("#") ? tryObj(r, ev.target)?.controller : ev.target) : ev.player) as PlayerId;
     actorPlayer = who;
     let ok: boolean;
     if (s === undefined) ok = tr.whose ? tr.whose === "each" || (tr.whose === "yours") === (who === h.controller) : who === h.controller;
@@ -67,6 +68,7 @@ export function matchSimple(r: Run, ev: GameEvent & Record<string, unknown>, tr:
       else ok = !!live && live.zone === "battlefield" && matchesFilter(r, id, s as ObjectFilter, q);
     } else throw new Unsupported(`trigger:subject:${String(s)}`);
     if (!ok) return null;
+    if (name === "unlock_door" && tr.fully !== undefined && !!ev.fully !== tr.fully) return null; // Eerie: only the unlock that leaves both doors open
     actorPlayer = (ev.player as PlayerId | undefined) ?? live?.controller ?? l?.controller;
     if (tr.whose && tr.whose !== "each" && actorPlayer !== undefined && (tr.whose === "yours") !== (actorPlayer === h.controller)) return null;
     if (name === "counter_put" && tr.chapters) {

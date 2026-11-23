@@ -23,16 +23,10 @@
         },
         {
           "kind": "grant_effect",
-          "who": "you",
           "filter": {
             "controller": "you"
           },
-          "modify": [
-            {
-              "grant": "phased out"
-            }
-          ],
-          "duration": "instant",
+          "phaseOut": true,
           "src": 1,
           "condition": {
             "when": "on_resolution",
@@ -113,10 +107,11 @@
         "field:create_tokens.tokenKeywords",
         "step:grant_effect",
         "field:grant_effect.filter",
-        "field:grant_effect.modify",
+        "field:grant_effect.phaseOut",
         "predicate:paid_additional_cost",
         "field:grant_effect.replacement",
-        "duration:until_your_next_turn"
+        "duration:until_your_next_turn",
+        "field:grant_effect.modify"
       ]
     },
     {

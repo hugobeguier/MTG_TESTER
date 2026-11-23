@@ -23,16 +23,33 @@
                 "types": [
                   "creature"
                 ],
-                "zone": "battlefield"
+                "controller": "you"
               },
-              "ofPlayer": "iterated",
               "count": 1,
               "saveAs": "chosen",
               "optional": true,
               "src": 0,
+              "condition": {
+                "when": "on_resolution",
+                "if": {
+                  "check": "zone_count",
+                  "who": "that_player",
+                  "zone": "battlefield",
+                  "filter": {
+                    "types": [
+                      "creature"
+                    ]
+                  },
+                  "cmp": {
+                    "op": ">=",
+                    "value": 1
+                  }
+                },
+                "src": 0
+              },
               "prompt": {
-                "title": "Orzhov Advokist: optional",
-                "instruction": "Do you want to choose a creature?",
+                "title": "Orzhov Advokist: put counters?",
+                "instruction": "Do you want to put two +1/+1 counters on a creature you control? Choose it.",
                 "source": {
                   "card": "Orzhov Advokist",
                   "ability": "a1"
@@ -44,7 +61,15 @@
               "on": "chosen",
               "counterKind": "+1/+1",
               "amount": 2,
-              "src": 0
+              "src": 0,
+              "condition": {
+                "when": "on_resolution",
+                "if": {
+                  "check": "step_done",
+                  "step": "c1"
+                },
+                "src": 1
+              }
             },
             {
               "kind": "grant_effect",
@@ -54,7 +79,6 @@
                   "creature"
                 ]
               },
-              "ofPlayer": "iterated",
               "modify": [
                 {
                   "cant": "attack",
@@ -78,24 +102,21 @@
       "id": "a1",
       "implementation": "needed",
       "needs": [
-        "ref:iterated",
         "step:repeat_for_each",
         "field:repeat_for_each.over",
         "field:repeat_for_each.steps",
         "step:choose",
         "field:choose.count",
         "field:choose.from",
-        "field:choose.ofPlayer",
         "field:choose.saveAs",
         "field:choose.who",
         "step:add_counters",
         "field:add_counters.on",
+        "predicate:step_done",
         "step:grant_effect",
         "field:grant_effect.filter",
         "field:grant_effect.modify",
-        "field:grant_effect.ofPlayer",
         "field:grant_effect.who",
-        "predicate:step_done",
         "duration:until_your_next_turn"
       ]
     }

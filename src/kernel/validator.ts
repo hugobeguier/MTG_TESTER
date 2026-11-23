@@ -340,10 +340,18 @@ export function validateCard(cardInput: unknown, oracleText: string, cardName: s
     }
     if (a.declined) aErr("DECLINED_ABILITY", "ability is declined (no deterministic outcome)");
 
-    const refCheck = (node: unknown, declared: Set<string>, where: string) =>
-      walk(node, (k, v) => {
-        if (typeof v === "string" && /^t\d+$/.test(v) && k !== "id" && !declared.has(v)) aErr("STRUCT_UNDECLARED_TARGET", `${where} references ${v} which is not declared in targets`);
-      });
+    // a granted ability ("grantAbility": {...targets...}) is its own scope: its steps refer to ITS targets, not to the granting ability's
+    const refCheck = (node: unknown, declared: Set<string>, where: string): void => {
+      const go = (n: unknown, k: string | undefined, decl: Set<string>): void => {
+        if (typeof n === "string") { if (/^td+$/.test(n) && k !== "id" && !decl.has(n)) aErr("STRUCT_UNDECLARED_TARGET", `${where} references ${n} which is not declared in targets`); return; }
+        if (Array.isArray(n)) { n.forEach((x) => go(x, k, decl)); return; }
+        if (n && typeof n === "object") for (const [kk, vv] of Object.entries(n)) {
+          if (kk === "grantAbility" && vv && typeof vv === "object") go(vv, kk, new Set(((vv as { targets?: Array<{ id: string }> }).targets ?? []).map((t) => t.id)));
+          else go(vv, kk, decl);
+        }
+      };
+      go(node, undefined, declared);
+    };
     const declared = new Set((a.targets ?? []).map((t) => t.id));
     const { modes, ...rest } = a;
     refCheck(rest, declared, "ability");

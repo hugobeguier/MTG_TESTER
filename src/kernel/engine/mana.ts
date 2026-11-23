@@ -131,7 +131,7 @@ export function manaAbilityUsable(r: Run, o: GameObject, a: Ability): boolean {
 export function manaAbilityActivatable(r: Run, o: GameObject, a: Ability): boolean {
   if (o.zone !== "battlefield" || a.kind !== "mana") return false;
   const costs = a.costs ?? [];
-  if (costs.some((c) => !("tap" in c) && !("mana" in c) && !("sacrifice" in c) && !("discard" in c) && !("tapOther" in c) && !("returnToHand" in c) && !("exileFrom" in c))) return false;
+  if (costs.some((c) => !("tap" in c) && !("mana" in c) && !("sacrifice" in c) && !("discard" in c) && !("tapOther" in c) && !("returnToHand" in c) && !("exileFrom" in c) && !("life" in c))) return false;
   if (costs.some((c) => "tap" in c) && (o.tapped || isSummoningSick(r, o))) return false;
   return true;
 }

@@ -59,8 +59,11 @@
           "condition": {
             "when": "on_resolution",
             "if": {
-              "check": "paid_additional_cost",
-              "option": "behold a Dragon"
+              "check": "matches",
+              "obj": "chosen",
+              "filter": {
+                "zone": "any"
+              }
             },
             "src": 1
           }
@@ -73,7 +76,7 @@
         "field:choose.count",
         "field:choose.from",
         "field:choose.saveAs",
-        "predicate:paid_additional_cost"
+        "predicate:matches"
       ]
     },
     {
