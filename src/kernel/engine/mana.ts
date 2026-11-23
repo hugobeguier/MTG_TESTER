@@ -13,7 +13,8 @@ export type UnitProps = { restriction?: import("../schema").ObjectFilter; abilit
 /** mana abilities whose `steps` are a RIDER of the mana produced (run when it is spent on a spell), not an effect of the ability itself */
 export const RIDER_HANDLERS: Record<string, import("../schema").ObjectFilter | undefined> = {
   mana_spent_on_creature_sharing_type_with_commander: { types: ["creature"], sharesCreatureTypeWith: "commander" } as never,
-  copy_spell_or_ability_when_mana_spent: undefined
+  copy_spell_or_ability_when_mana_spent: undefined,
+  exert_and_haste_if_spent_on_creature_spell: { types: ["creature"] } as never // Arena of Glory: the rider grants haste to the creature spell the mana pays for
 };
 export type Production = ({ fixed: ManaColor[] } | { choose: { count: number; options: ManaColor[] } } | { alternatives: ManaColor[][] }) & { props?: UnitProps };
 const propsOf = (spec: { restriction?: import("../schema").ObjectFilter; abilitiesOf?: import("../schema").ObjectFilter }): UnitProps | undefined => (spec.restriction || spec.abilitiesOf ? { ...(spec.restriction ? { restriction: spec.restriction } : {}), ...(spec.abilitiesOf ? { abilities: spec.abilitiesOf } : {}) } : undefined);

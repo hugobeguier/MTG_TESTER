@@ -12,7 +12,7 @@
 // Dependencies (613.8) are approximated by that fixed order: effects of layers 4-6 keep applying even if their source
 // loses its abilities later (613.6); an effect of layer 7 is dropped when its source no longer has the static ability.
 
-import { withKeywordExtras } from "./keywords8";
+import { keywordExtras, withKeywordExtras } from "./keywords8";
 import type { Ability, Cost, ObjectFilter, Quantity, StaticSpec } from "../schema";
 import { baseChars, continueHooks, continuing, obj, printedAbilities, tryObj, Unsupported, type Chars, type Run } from "./core";
 import { evalPredicate, evalQuantity, matchesFilter, objectsMatching, resolveObjs } from "./query";
@@ -51,9 +51,27 @@ export function getIndex(r: Run): Idx {
 }
 export function invalidateIndex(r: Run): void { r.idx = undefined; }
 
+/**
+ * "As this enters" replacements an entering object gets from other permanents' statics (Rhythm of the Wild: nontoken creatures you control have riot):
+ * the object is not on the battlefield yet, so its chars() cannot show them. Judged as if it were already there (its current zone stands for the battlefield).
+ */
+export function grantedEnterAbilities(r: Run, o: GameObject): Ability[] {
+  const out: Ability[] = [];
+  const memo = new Map<StaticSrc, boolean>();
+  for (const s of getIndex(r).statics) {
+    const a = s.spec.affects;
+    if (typeof a === "string" || s.id === o.id) continue;
+    for (const m of s.spec.modify) {
+      if (!("grant" in m)) continue;
+      for (const x of keywordExtras(String(m.grant))) if (x.kind === "replacement" && !out.some((y) => y.id === x.id) && whileOk(r, s, memo) && sourceIntact(r, s) && matchesFilter(r, o.id, { ...(a as ObjectFilter), zone: o.zone }, qctx(s))) out.push(x);
+    }
+  }
+  return out;
+}
+
 /** True when some effect can change abilities (so battlefield abilities must be read through chars()). */
 export function layerSixActive(r: Run): boolean {
-  return getIndex(r).l6 || r.s.effects.some((e) => e.grant !== undefined || e.lose !== undefined || e.addTypes !== undefined);
+  return getIndex(r).l6 || r.s.effects.some((e) => e.grant !== undefined || e.lose !== undefined || e.addTypes !== undefined || e.ability !== undefined);
 }
 
 // ---------------------------------------------------------------- attachment
@@ -148,7 +166,7 @@ function layerOf(m: Modify, spec: StaticSpec): number | null {
 
 function applyModify(r: Run, s: StaticSrc, m: Modify, c: Chars): void {
   const q = qctx(s);
-  if ("addTypes" in m) m.addTypes.forEach((t) => addType(c, t));
+  if ("addTypes" in m) m.addTypes.forEach((t) => { if (t.toLowerCase() === "chosen type") { const ch = tryObj(r, s.id)?.chosen?.type; if (ch) addType(c, ch); } else addType(c, t); }); // "is the chosen type in addition to its other types" (Roaming Throne)
   else if ("addChosenType" in m) { const ch = tryObj(r, s.id)?.chosen?.type; if (ch) addType(c, ch); } // Metallic Mimic: the type its controller chose as it entered
   else if ("setTypes" in m) setTypes(c, m.setTypes);
   else if ("copySubtypesOf" in m) {
@@ -174,6 +192,7 @@ function effectItems(e: ContinuousEffect, c: Chars, seq: () => number): Item[] {
   if (e.addTypes) add(L.types, () => e.addTypes!.forEach((t) => addType(c, t)));
   if (e.setColors) add(L.colors, () => { c.colors = [...e.setColors!]; });
   if (e.grant) add(L.abilities, () => grantKeyword(c, e.grant!));
+  if (e.ability) add(L.abilities, () => { const gid = `ga:eff:${e.id}`; if (!c.abilities.some((x) => x.id === gid)) c.abilities = [...c.abilities, { ...e.ability!, id: gid }]; });
   if (e.lose) add(L.abilities, () => loseAbilities(c, e.lose!));
   if (e.base) add(L.base, () => { c.power = e.base!.power; c.toughness = e.base!.toughness; });
   if (e.power !== undefined || e.toughness !== undefined) add(L.pump, () => { if (c.power !== undefined) c.power += e.power ?? 0; if (c.toughness !== undefined) c.toughness += e.toughness ?? 0; });
@@ -254,6 +273,7 @@ function computeChars0(r: Run, id: ObjId): Chars {
     try { applyLayers(r, o, c, idx, effects); } finally { busy.delete(id); }
   }
   applyCounters(c, o);
+  if (o.chosen?.mode === "haste" && o.zone === "battlefield") grantKeyword(c, "haste"); // riot: the haste option chosen as it entered
   c.keywords = [...new Set(c.abilities.filter((a) => a.kind === "keyword" && a.keyword).map((a) => a.keyword!.name.toLowerCase().replace(/_/g, " ")))];
   return c;
 }
@@ -340,12 +360,49 @@ export function landDrops(r: Run, pid: PlayerId): number {
  * Net change to the generic mana of a spell being cast (negative = cheaper): "costMod" statics of permanents (the
  * delta is ADDED: a reduction is negative) plus the spell's own affinity-style `costReduction` keyword abilities.
  */
+/**
+ * Costs an opponent pays for targeting something (CR 601.2f): "spells your opponents cast that target this cost {1} more" (Callaphe, Beloved of the Sea grants it to your
+ * creatures and enchantments: a granted static with `onlyIfTargets: self`) and "... cost an additional 3 life" (Terror of the Peaks, a scripted marker).
+ * Each targeted permanent counts once per spell however many times it is chosen.
+ */
+export function targetCostExtras(r: Run, caster: PlayerId, targets: ObjId[]): { generic: number; life: number } {
+  const out = { generic: 0, life: 0 };
+  for (const id of new Set(targets)) {
+    const o = tryObj(r, id);
+    if (!o || o.zone !== "battlefield" || o.controller === caster) continue;
+    for (const a of computeChars(r, id).abilities) {
+      if (a.kind === "static" && (a as { onlyIfTargets?: string }).onlyIfTargets === "self") for (const m of a.static?.modify ?? []) if ("costMod" in m) out.generic += evalQuantity(r, m.costMod.delta, { controller: o.controller, source: id });
+      if (a.scripted?.handler === "additional_cost_life_when_targeting_this") out.life += Number(/(\d+)/.exec(String((a.scripted.params as { additional?: string } | undefined)?.additional ?? "0"))?.[1] ?? 0);
+    }
+  }
+  return out;
+}
+
+/** "Spells of the chosen type cost {W}{U}{B}{R}{G} less ... reduces only the amount of colored mana you pay" (Morophon): the colors whose pip is removed once each. */
+export function spellColoredReduction(r: Run, caster: PlayerId, spellId: ObjId): string[] {
+  const out: string[] = [];
+  const memo = new Map<StaticSrc, boolean>();
+  for (const s of getIndex(r).statics) {
+    if (s.ability.scripted?.handler !== "cost_reduction_colored_mana_only" || s.spec.affects !== "you" || caster !== s.controller || !whileOk(r, s, memo) || !sourceIntact(r, s)) continue;
+    for (const m of s.spec.modify) if ("costMod" in m && matchesFilter(r, spellId, m.costMod.filter, qctx(s))) out.push(...[...String((s.ability.scripted.params as { mana?: string } | undefined)?.mana ?? "").matchAll(/\{([WUBRG])\}/g)].map((x) => x[1]));
+  }
+  return out;
+}
+
+/** Domain: the number of different basic land types among lands `pid` controls. */
+export function domainCount(r: Run, pid: PlayerId): number {
+  const types = new Set<string>();
+  for (const id of r.s.battlefield) { const o = r.s.objects[id]; if (!o || o.controller !== pid) continue; const c = computeChars(r, id); if (!c.types.includes("land")) continue; for (const t of c.subtypes) if (["Plains", "Island", "Swamp", "Mountain", "Forest"].includes(t)) types.add(t); }
+  return types.size;
+}
+
 export function spellCostDelta(r: Run, caster: PlayerId, spellId: ObjId): number {
   let delta = 0;
   const memo = new Map<StaticSrc, boolean>();
   for (const s of getIndex(r).statics) {
     for (const m of s.spec.modify) {
       if (!("costMod" in m)) continue;
+      if (s.ability.scripted?.handler === "cost_reduction_colored_mana_only") continue; // reduces colored pips, not generic (spellColoredReduction)
       const who = s.spec.affects;
       const applies = who === "you" ? caster === s.controller : who === "each_player" ? true : who === "each_opponent" ? caster !== s.controller : false;
       if (!applies || !whileOk(r, s, memo) || !sourceIntact(r, s)) continue;
@@ -359,7 +416,7 @@ export function spellCostDelta(r: Run, caster: PlayerId, spellId: ObjId): number
     if (!cr || (a.zone && a.zone !== "stack") || (a.kind !== "keyword" && a.kind !== "static" && a.kind !== "cast_option")) continue;
     const q = { controller: caster, source: spellId };
     if (cr.condition && !evalPredicate(r, cr.condition, q)) continue;
-    const per = cr.per ? objectsMatching(r, cr.per, q).length : 1;
+    const per = a.scripted?.handler === "domain_count_distinct_basic_land_types" ? domainCount(r, caster) : cr.per ? objectsMatching(r, cr.per, q).length : 1;
     delta -= evalQuantity(r, cr.amount as Quantity, q) * per;
   }
   return delta;

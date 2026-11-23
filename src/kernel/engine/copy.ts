@@ -19,7 +19,7 @@ import { applyReplacements, runAfter } from "./replacements";
 import { createToken, type StepSpec } from "./steps";
 import type { GameObject, ObjId, PlayerId, StackItem, TokenDef } from "./types";
 
-export const COPY_FIELDS = ["what", "target", "count", "token", "controller", "notLegendary", "gainKeywords", "exceptAddTypes", "exileAt", "reflexive", "who", "of", "duration", "exceptGrant", "asEnters", "addAbility", "all", "filter", "becomes", "excludeChosen", "chooseNewTargets", "chooseOne"];
+export const COPY_FIELDS = ["what", "target", "count", "token", "controller", "notLegendary", "gainKeywords", "exceptAddTypes", "exileAt", "reflexive", "who", "of", "duration", "exceptGrant", "asEnters", "addAbility", "all", "filter", "becomes", "excludeChosen", "chooseNewTargets", "chooseOne", "exceptName"];
 
 /** The copiable values of an object as a token definition (exceptions are applied by the caller). */
 export function copiableDef(r: Run, o: GameObject): TokenDef {
@@ -33,9 +33,11 @@ export function copiableDef(r: Run, o: GameObject): TokenDef {
 
 function applyExceptions(def: TokenDef, step: Step): TokenDef {
   const d = structuredClone(def);
+  if (step.exceptName) d.name = String(step.exceptName);
   if (step.notLegendary) d.supertypes = (d.supertypes ?? []).filter((s) => s.toLowerCase() !== "legendary");
   for (const t of (step.exceptAddTypes as string[] | undefined) ?? []) {
     const l = t.toLowerCase();
+    if (l === "legendary") { if (!(d.supertypes ?? []).includes("legendary")) d.supertypes = [...(d.supertypes ?? []), "legendary"]; continue; }
     if (["artifact", "creature", "enchantment", "land", "planeswalker", "battle", "kindred"].includes(l)) { if (!d.types.includes(l)) d.types.push(l); }
     else if (!d.subtypes.includes(t)) d.subtypes.push(t);
   }
@@ -101,18 +103,32 @@ export const copyStep: StepSpec = {
   run: (r, ex, step) => {
     if (step.of !== undefined || step.asEnters) return becomeStep(r, ex, step);
     const env = ex.env;
+    // "a token that's a copy of ONE of them" (Twilight Diviner): the controller picks which of the objects of the batch
+    if (step.chooseOne && step.what === "event_object" && (env.batchObjs?.length ?? 0) > 1) return { push: [{ kind: "__choose_ids" as never, ids: env.batchObjs, saveAs: "chosen" } as unknown as Step, { ...step, chooseOne: undefined, what: "chosen" } as Step] };
     const ref = String(step.what ?? step.target ?? "");
     if (!ref) throw new Unsupported("field:copy.what");
+    // a copy of an ABILITY on the stack (Sunken Palace: "copy that spell or ability"): a new stack item with the same targets / modes / X; it has no source object of its own
+    if (ref === "event_object" && env.eventObj && /^s\d+$/.test(env.eventObj)) {
+      const item = r.s.stack.find((i) => i.id === env.eventObj);
+      if (!item) return "done";
+      const who0: PlayerId = resolvePlayers(r, (step.controller ?? step.who ?? "you") as never, env)[0];
+      const ci: StackItem = { ...structuredClone(item), id: `s${r.s.nextId++}`, controller: who0 };
+      r.s.stack.push(ci);
+      emit(r, { type: "ability_copied", of: item.id, controller: who0 });
+      tick(r);
+      return step.chooseNewTargets ? { push: [{ kind: "__retarget" as never, itemId: ci.id, pi: 0, si: 0 } as unknown as Step] } : "done";
+    }
     const sources = ref === "self" ? [env.source] : resolveObjs(r, ref, env);
     const n = step.count === undefined ? 1 : Math.max(0, Number(typeof step.count === "number" ? step.count : evalQuantity(r, step.count as never, env)));
     const who: PlayerId = resolvePlayers(r, (step.controller ?? step.who ?? "you") as never, env)[0];
     env.created = [];
+    const copiedItems: string[] = [];
     for (const id of sources) {
       const o = tryObj(r, id);
       if (!o) continue;
       if (o.zone === "stack") {
         // a copy of a spell (the object may also be a copy: copy of a copy)
-        for (let i = 0; i < n; i++) { const c = copySpell(r, o, who); if (c) env.created.push(c); }
+        for (let i = 0; i < n; i++) { const c = copySpell(r, o, who); if (c) { env.created.push(c); const it = r.s.stack.find((x) => x.objectId === c); if (it) copiedItems.push(it.id); } }
         continue;
       }
       if (o.zone !== "battlefield") continue; // nothing to copy any more (it left; its last-known information is not a copy source here)
@@ -131,6 +147,8 @@ export const copyStep: StepSpec = {
         at: { event: "begin_step", step: exileAt === "end_of_combat" ? "end_of_combat" : "end_step", whose: "each" }, label: `${label(r, env.source)}: exile the copies`
       });
     }
+    // "You may choose new targets for the copy": the controller of the copy re-chooses each target slot (keeping the same targets is allowed)
+    if (step.chooseNewTargets && copiedItems.length) return { push: copiedItems.map((itemId) => ({ kind: "__retarget" as never, itemId, pi: 0, si: 0 }) as unknown as Step) };
     return "done";
   }
 };

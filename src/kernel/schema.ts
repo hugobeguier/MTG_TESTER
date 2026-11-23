@@ -49,6 +49,8 @@ export const EVENT_NAMES = [
   "sacrifice", "exploit", "cycle", "tap", "landfall", "becomes_target", "activate", "mill", "unspecified",
   // "is dealt damage" (the damaged object; deals_damage is the dealer) and "commits a crime"
   "dealt_damage", "commit_crime",
+  // "was dealt excess damage" (damage beyond lethal to a creature, or beyond the loyalty of a planeswalker): the actor is the damaged permanent's controller
+  "excess_damage",
   // "whenever damage that would be dealt to you is prevented" (event_amount = the amount prevented)
   "damage_prevented"
 ] as const;
@@ -124,7 +126,7 @@ export type Quantity =
 export interface ObjectFilter {
   types?: string[]; notTypes?: string[]; subtypes?: string[]; supertypes?: string[];
   notSupertypes?: string[]; colors?: string[]; notColors?: string[];
-  controller?: "you" | "opponent" | "any" | "defending_player" | "that_player" | "active_player"; // defending_player: the player the source creature is attacking; that_player: the player of the enclosing loop/event; active_player: the player whose turn it is
+  controller?: "you" | "opponent" | "any" | "defending_player" | "that_player" | "active_player" | "enchanted_player"; // defending_player: the player the source creature is attacking; that_player: the player of the enclosing loop/event; active_player: the player whose turn it is
   owner?: "you" | "opponent" | "any";
   zone?: Zone | "any";
   // colored: true = "one or more colors", false = colorless
@@ -219,7 +221,7 @@ export const ObjectFilterSchema: z.ZodType<ObjectFilter> = z.lazy(() =>
     types: strArr.optional(), notTypes: strArr.optional(), subtypes: strArr.optional(),
     supertypes: strArr.optional(), notSupertypes: strArr.optional(), colors: strArr.optional(),
     notColors: strArr.optional(),
-    controller: z.enum(["you", "opponent", "any", "defending_player", "that_player", "active_player"]).optional(),
+    controller: z.enum(["you", "opponent", "any", "defending_player", "that_player", "active_player", "enchanted_player"]).optional(),
     owner: z.enum(["you", "opponent", "any"]).optional(),
     zone: FilterZoneSchema.optional(),
     colored: z.boolean().optional(),

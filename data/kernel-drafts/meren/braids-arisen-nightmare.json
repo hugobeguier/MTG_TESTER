@@ -95,19 +95,8 @@
           "condition": {
             "when": "on_resolution",
             "if": {
-              "all": [
-                {
-                  "check": "step_done",
-                  "step": "s1"
-                },
-                {
-                  "not": {
-                    "check": "step_done",
-                    "step": "s2",
-                    "who": "that_player"
-                  }
-                }
-              ]
+              "check": "step_done",
+              "step": "s1"
             },
             "src": 2
           }
@@ -148,9 +137,7 @@
         "field:life_change.amount",
         "field:life_change.lose",
         "field:life_change.onlyForPlayersWhoDidNot",
-        "field:life_change.who",
-        "predicate:all",
-        "predicate:not"
+        "field:life_change.who"
       ]
     }
   ],

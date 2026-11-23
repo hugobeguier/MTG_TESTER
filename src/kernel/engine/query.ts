@@ -17,6 +17,7 @@ export interface QCtx {
   targets?: Record<string, string[]>;
   chosen?: Record<string, string[]>;
   done?: string[];
+  doneBy?: Record<string, string[]>;
   created?: string[];
   iterated?: string;
   eventObj?: string;
@@ -85,6 +86,7 @@ export function matchesFilter(r: Run, id: string, f: ObjectFilter, q: QCtx): boo
   }
   if (f.controller === "you" && o.controller !== q.controller) return false;
   if (f.controller === "opponent" && o.controller === q.controller) return false;
+  if (f.controller === "enchanted_player") { const ap = q.source ? tryObj(r, q.source)?.attachedPlayer : undefined; if (!ap || o.controller !== ap) return false; } // "creatures enchanted player controls"
   if (f.owner === "you" && o.owner !== q.controller) return false;
   if (f.owner === "opponent" && o.owner === q.controller) return false;
   if (f.another && id === q.source) return false;
@@ -260,7 +262,7 @@ export function evalQuantity(r: Run, qy: Quantity, q: QCtx): number {
 
 // ---------------------------------------------------------------- turn log
 
-const EVENT_TO_LOG: Record<string, string> = { gain_life: "gain_life", lose_life: "lose_life", token_created: "token_created", cast: "cast", etb: "etb", dies: "dies", draw: "draw", discard: "discard", sacrifice: "sacrifice", mill: "mill" };
+const EVENT_TO_LOG: Record<string, string> = { gain_life: "gain_life", lose_life: "lose_life", token_created: "token_created", cast: "cast", etb: "etb", dies: "dies", draw: "draw", discard: "discard", sacrifice: "sacrifice", mill: "mill", excess_damage: "excess_damage" };
 
 export function countLog(r: Run, event: string, q: QCtx, filter?: ObjectFilter, actor?: PlayerRef): LogEntry[] {
   const type = EVENT_TO_LOG[event];
@@ -365,7 +367,10 @@ export function evalPredicate(r: Run, p: Predicate, q: QCtx): boolean {
       const v = p.kind === "color" ? ch?.color : p.kind === "mode" ? ch?.mode : p.kind === "creature_type" ? ch?.type : p.kind === "card_type" ? ch?.cardType : p.kind === "basic_land_type" ? ch?.landType : ch?.name;
       return v !== undefined && v.toLowerCase() === p.value.toLowerCase();
     }
-    case "step_done": return (q.done ?? []).includes(p.step);
+    case "step_done": {
+      if (p.who !== undefined) { const who = resolvePlayers(r, p.who, q)[0]; return !!who && (q.doneBy?.[p.step] ?? []).includes(who); } // per-player loops: did THAT player do it
+      return (q.done ?? []).includes(p.step);
+    }
     case "name_matches": {
       // "has the same name as another creature you control or a creature card in your graveyard" (Guardian Project): the object itself never counts as its own match
       const subj = resolveObjs(r, p.obj, q)[0];

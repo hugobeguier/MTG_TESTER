@@ -62,7 +62,8 @@ describe("step 9 keywords", () => {
     t.ok({ type: "castSpell", player: "p1", cardId: card, option: "morph" }); t.resolveTop();
     expect(t.obj(card).faceDown).toBe(true);
     expect(charsOf(t, card)).toMatchObject({ name: "", power: 2, toughness: 2 });
-    t.ok({ type: "activateAbility", player: "p1", sourceId: card, abilityId: "kw:unmorph" }); t.resolveTop();
+    t.ok({ type: "turnFaceUp", player: "p1", objectId: card }); // a special action: no stack
+    expect(t.state.stack.length).toBe(0);
     expect(t.obj(card).faceDown).toBeFalsy();
     expect(charsOf(t, card).name).toBe("Grim Haruspex");
   });
@@ -72,9 +73,12 @@ describe("step 9 keywords", () => {
     const t = rt(); const pf = t.give("p1", "Eccentric Pestfinder // Turn Stones", "battlefield");
     for (let i = 0; i < 4; i++) { t.give("p1", "Forest", "battlefield"); t.give("p1", "Swamp", "battlefield"); }
     t.obj(pf).prepared = true;
-    t.ok({ type: "activateAbility", player: "p1", sourceId: pf, abilityId: "kw:prepared" }); settle(t);
-    expect(t.state.battlefield.map((id) => t.obj(id).cardName)).toContain("Pest");
+    t.ok({ type: "castPrepared", player: "p1", objectId: pf });
+    expect(t.state.stack.length).toBe(1); // a real spell on the stack: it can be responded to / countered
+    expect(t.state.objects[t.state.stack[0].objectId!].isCopy).toBe(true);
     expect(t.obj(pf).prepared).toBeFalsy();
-    expect(() => t.ok({ type: "activateAbility", player: "p1", sourceId: pf, abilityId: "kw:prepared" })).toThrow();
+    settle(t);
+    expect(t.state.battlefield.map((id) => t.obj(id).cardName)).toContain("Pest");
+    expect(() => t.ok({ type: "castPrepared", player: "p1", objectId: pf })).toThrow();
   });
 });

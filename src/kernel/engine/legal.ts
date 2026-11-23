@@ -26,7 +26,7 @@ import { isObjId } from "./types";
 export interface LegalAction {
   /** stable id: "<kind>:<object>[:<ability|face|option>]" (the same action keeps the same id from one call to the next) */
   id: string;
-  kind: "playLand" | "castSpell" | "activateAbility" | "passPriority" | "declareAttackers" | "declareBlockers" | "answerDecision";
+  kind: "playLand" | "castSpell" | "activateAbility" | "turnFaceUp" | "castPrepared" | "passPriority" | "declareAttackers" | "declareBlockers" | "answerDecision";
   player: PlayerId;
   label: string;
   /** a ready action for `resolve` (casts / activations use autoPay; declarations and answers have their own fields below) */
@@ -195,6 +195,21 @@ export function legalActions(state: GameState, player: PlayerId, ctx: EngineCont
       const pr = probe(state, action, ctx, ab.kind !== "mana");
       if (!pr.ok) continue;
       add({ id: `activateAbility:${id}:${ab.id}`, kind: "activateAbility", player, objectId: id, abilityId: ab.id, zone: o.zone, isMana: ab.kind === "mana", label: `${cardName(r, id)}: ${ab.text}`, action, ...(pr.asks ? { asks: pr.asks } : {}), ...(pr.targetOptions ? { targetOptions: pr.targetOptions } : {}) });
+    }
+  }
+
+  // special actions on the battlefield: turn a morph face up (no stack), cast the spell copy of a prepared permanent
+  for (const id of state.battlefield) {
+    const o = state.objects[id];
+    if (!o || o.controller !== player) continue;
+    if (o.faceDown) {
+      const action: Action = { type: "turnFaceUp", player, objectId: id, autoPay: true };
+      if (probe(state, action, ctx, false).ok) add({ id: `turnFaceUp:${id}`, kind: "turnFaceUp", player, objectId: id, zone: o.zone, label: `Turn ${cardName(r, id)} face up (morph)`, action });
+    }
+    if (o.prepared) {
+      const action: Action = { type: "castPrepared", player, objectId: id, autoPay: true };
+      const pr = probe(state, action, ctx, true);
+      if (pr.ok) add({ id: `castPrepared:${id}`, kind: "castPrepared", player, objectId: id, zone: o.zone, label: `Cast a copy of the prepared spell of ${cardName(r, id)}`, action, ...(pr.asks ? { asks: pr.asks } : {}), ...(pr.targetOptions ? { targetOptions: pr.targetOptions } : {}) });
     }
   }
 

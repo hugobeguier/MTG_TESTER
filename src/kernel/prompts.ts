@@ -213,6 +213,7 @@ export function describeFilter(f: ObjectFilter, opts: FilterOptions = {}): strin
   if (f.controller === "you") out += " you control";
   else if (f.controller === "opponent") out += " an opponent controls";
   else if (f.controller === "defending_player") out += " the defending player controls";
+  else if (f.controller === "enchanted_player") out += " the enchanted player controls";
   else if (f.controller === "that_player") out += " that player controls";
   else if (f.controller === "active_player") out += " the active player controls";
   if (inZone) {

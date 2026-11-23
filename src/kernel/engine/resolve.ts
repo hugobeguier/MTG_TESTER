@@ -10,13 +10,15 @@ import { promptForModes, promptForTarget, promptForX } from "../prompts";
 import {
   abilitiesOf, alive, faceNames, printedAbilities, apnap, chars, defOf, drawCards, emit, label, LoopDetected, makeLki, moveObject, NeedAsk, nextPlayer, obj, opponentsOf,
   parseManaCost, player, randInt, Reject, tick, tryObj, Unsupported, isSummoningSick, continuing, type Run
+  , untapObject, morphCostOf, newObject, targetHooks
 } from "./core";
 import { emitUnresolved, reportAbilityNotPerformed, reportCast } from "./unresolved";
 import { autoTapFor, addMana, withTapBonus, manaAbilityActivatable, manaAbilityUsable, payManaAbilityCosts, payFromPool, phyrexianOptions, productionOfAbility, settleCost, totalPotentialMana } from "./mana";
 import { evalPredicate, evalQuantity, matchesFilter, objectsMatching, resolveObjs, type QCtx } from "./query";
 import { addCounters, changeLife, decide, discardCard, runExec, sacrificeObject, startExec, type AskSpec } from "./steps";
 import { costCandidates, costCount, costNoun, costOptions, needsChoice, payChoiceCost, type ChoiceCost } from "./costs";
-import { hostOf, invalidateIndex, landDrops, spellCostDelta } from "./layers";
+import { callTheSpiritDragonsSteps } from "./step10";
+import { hostOf, invalidateIndex, landDrops, spellColoredReduction, spellCostDelta, targetCostExtras } from "./layers";
 import { anyFirstStrike, applyDamage, blockersToDeclare, checkAssignment, declareAttackers, declareBlockers, gatherDamage, legalAttackers, newCombat } from "./combat";
 import { abilityUnsupported, cardUnsupported, SUPPORTED_TRIGGER_EVENTS } from "./support";
 import { unattachIllegal } from "./attach";
@@ -133,6 +135,8 @@ function dispatch(r: Run, a: Action): void {
     case "playLand": return playLand(r, a);
     case "passPriority": return passPriority(r, a.player, !!a.fastForward);
     case "advancePhase": return advancePhase(r, a.player);
+    case "turnFaceUp": return turnFaceUp(r, a);
+    case "castPrepared": return castPrepared(r, a);
   }
 }
 
@@ -187,6 +191,7 @@ function untargetable(r: Run, id: ObjId, by: PlayerId, source?: ObjId): boolean 
   return protectedFrom(r, id, source) || c.keywords.includes("shroud") || (c.keywords.includes("hexproof") && obj(r, id).controller !== by);
 }
 
+targetHooks.candidates = (r, spec, q, self) => targetCandidates(r, spec as TargetSpec, q as QCtx, self);
 export function targetCandidates(r: Run, spec: TargetSpec, q: QCtx, selfSpell?: ObjId): string[] {
   const out: string[] = [];
   const f: ObjectFilter = spec.filter ?? {};
@@ -533,7 +538,7 @@ function abilityReduction(r: Run, d: Draft, a: Ability | undefined): number {
   return Math.max(0, evalQuantity(r, cr.amount, q) * per);
 }
 
-function payAbilityCosts(r: Run, d: Draft, costs: Cost[], a?: Ability): { sacrificed: ObjId[]; lki: Record<ObjId, Lki> } {
+function payAbilityCosts(r: Run, d: Draft, costs: Cost[], a?: Ability): { sacrificed: ObjId[]; lki: Record<ObjId, Lki>; spend?: SpendCtx } {
   const src = obj(r, d.sourceId);
   const paid = { sacrificed: [] as ObjId[], lki: {} as Record<ObjId, Lki> };
   let reduction = abilityReduction(r, d, a);
@@ -556,7 +561,7 @@ function payAbilityCosts(r: Run, d: Draft, costs: Cost[], a?: Ability): { sacrif
     if (needsChoice(c)) {
       const ids = d.costChoices?.[ci] ?? [];
       Object.assign(paid.lki, payChoiceCost(r, c as ChoiceCost, ids, { player: d.player, source: d.sourceId, x: d.x }));
-      if ("sacrifice" in c) paid.sacrificed.push(...ids);
+      if ("sacrifice" in c || ("tapOther" in c && a?.keyword?.name === "station")) paid.sacrificed.push(...ids);
       continue;
     }
     if ("exileFrom" in c && (c as unknown as { what: unknown }).what === "self") {
@@ -569,7 +574,9 @@ function payAbilityCosts(r: Run, d: Draft, costs: Cost[], a?: Ability): { sacrif
     if ("mana" in c) {
       const pc = parseManaCost(c.mana);
       if (reduction > 0) { const g = Math.max(0, pc.generic - reduction); reduction -= pc.generic - g; pc.mv -= pc.generic - g; pc.generic = g; }
-      payMana(r, d.player, pc, d.x ?? 0, d, costs.some((k) => "tap" in k || ("sacrifice" in k && k.sacrifice === "self")) ? [d.sourceId] : [], { abilitySource: d.sourceId, spent: [] });
+      const sp: SpendCtx = { abilitySource: d.sourceId, spent: [] };
+      payMana(r, d.player, pc, d.x ?? 0, d, costs.some((k) => "tap" in k || ("sacrifice" in k && k.sacrifice === "self")) ? [d.sourceId] : [], sp);
+      (paid as { spend?: SpendCtx }).spend = sp; // riders of mana spent on this ability (Sunken Palace) fire once it is on the stack
     } else if ("tap" in c) {
       if (src.zone !== "battlefield" || src.tapped) throw new Reject("cannot_pay", `${label(r, src.id)} is already tapped`);
       if (isSummoningSick(r, src)) throw new Reject("cannot_pay", `${label(r, src.id)} is summoning sick`);
@@ -614,8 +621,18 @@ function commitDraft(r: Run, d: Draft, a: Ability | undefined): void {
     const tax = d.origin?.zone === "command" ? 2 * (player(r, pid).commanderCasts[src.id] ?? 0) : 0;
     const cost = parseManaCost(spellManaString(r, d));
     cost.generic += tax; cost.mv += tax;
-    const delta = spellCostDelta(r, pid, src.id);
+    if (hasCondFlash(r, src) && !r.ignoreTiming) {
+      const c0 = chars(r, src.id), spellAb = printedAbilities(r, src).find((x) => x.kind === "spell_effect");
+      const natural = c0.types.includes("instant") || c0.keywords.includes("flash") || flashGrantCovers(r, pid, src.id) || spellAb?.timing?.speed === "instant";
+      const main = r.s.turn.active === pid && MAIN.includes(r.s.turn.phase) && r.s.stack.length === 0;
+      const hitsCommander = (d.parts ?? []).some((pp) => Object.values(pp.targets).flat().some((t) => isObjId(t) && !!tryObj(r, t)?.isCommander));
+      if (!natural && !main && !hitsCommander) throw new Reject("wrong_timing", `${c0.name} can only be cast at instant speed if it targets a commander`);
+    }
+    const tx = targetCostExtras(r, pid, (d.parts ?? []).flatMap((pp) => Object.values(pp.targets).flat()).filter(isObjId));
+    const delta = spellCostDelta(r, pid, src.id) + tx.generic;
+    if (tx.life > 0 && player(r, pid).life < tx.life) throw new Reject("cannot_pay", "not enough life to pay the additional cost of targeting that permanent");
     if (delta) { const g = Math.max(0, cost.generic + delta); cost.mv += g - cost.generic; cost.generic = g; }
+    for (const col of spellColoredReduction(r, pid, src.id)) if ((cost.colored[col] ?? 0) > 0) { cost.colored[col]--; cost.mv--; } // Morophon: only colored mana is reduced
     { const aff = affinityReduction(r, pid, d.grants); if (aff) { const g = Math.max(0, cost.generic - aff); cost.mv -= cost.generic - g; cost.generic = g; } }
     // improvise: each tapped artifact pays for {1} of the generic part
     if (d.improvised?.length) {
@@ -632,10 +649,13 @@ function commitDraft(r: Run, d: Draft, a: Ability | undefined): void {
     payMana(r, pid, cost, d.x ?? 0, d, [], spend);
     if (d.cast) d.cast.spent = [...spend.spent];
     paidCosts = payAbilityCosts(r, d, spellExtraCosts(r, d));
+    if (tx.life > 0) changeLife(r, undefined, pid, -tx.life);
     if (d.origin?.zone === "command") player(r, pid).commanderCasts[src.id] = (player(r, pid).commanderCasts[src.id] ?? 0) + 1;
     const chosen = selectedOptions(r, d);
     if (chosen.some((c) => c.afterResolution === "exile")) src.exileInstead = true;
     for (const c of chosen) if (c.id.startsWith("freecast1:")) r.s.activations[`t:${c.id.slice(10)}:freecast`] = 1; // One with the Multiverse: once per turn
+    for (const c of chosen) { if (c.id.startsWith("lifecast1:")) r.s.activations[`t:${c.id.slice(10)}:lifecast`] = 1; if (c.id.startsWith("grave1:")) r.s.activations[`t:${c.id.slice(7)}:grave1`] = 1; } // Demon of Fate's Design / Rivaz of the Claw: once per turn
+    if (d.preparedFrom) { const pf = tryObj(r, d.preparedFrom); if (pf) { pf.prepared = undefined; invalidateIndex(r); } } // casting the copy ends the prepared state
     if (d.cast) { d.cast.paid = castTags(d, r); src.cast = structuredClone(d.cast); }
     for (const id of d.castChosen ?? []) { const pid2 = permissionIdOf(id); if (pid2) consumePermission(r, pid2); } // a permission is used up when you cast with it
     const extraSteps = addedSteps(r, d);
@@ -671,6 +691,7 @@ function commitDraft(r: Run, d: Draft, a: Ability | undefined): void {
   };
   r.s.stack.push(item);
   if (spend) flushRiders(r, pid, spend);
+  else if (paidCosts?.spend?.riders?.length) flushRiders(r, pid, { ...paidCosts.spend, itemId: item.id }); // "when you spend this mana to ... activate an ability, copy that ability"
   r.s.passes = [];
   for (const part of item.parts) for (const ids of Object.values(part.targets)) for (const tid of ids) if (isObjId(tid)) emit(r, { type: "becomes_target", id: tid, by: item.objectId ?? item.id, player: pid });
   commitCrime(r, item, pid);
@@ -742,7 +763,7 @@ function castSpell(r: Run, a: Extract<Action, { type: "castSpell" }>): void {
   assertSupported(r, o);
   if (continuing(r)) reportCast(r, o.id); // the spell ability / cast options the engine cannot run: reported now, the spell is still cast
   // double-faced cards: a preset face is validated now; with several castable faces and none given, the draft asks and re-checks the timing for the chosen one
-  const faces = castableFaces(def);
+  const faces = a.preparedFrom && a.face ? [a.face] : castableFaces(def); // a prepared permanent's spell copy is cast as the other face whatever the card's layout
   if (a.face !== undefined) { if (!faces.includes(a.face)) throw new Reject("invalid_choice", `"${a.face}" is not a face of ${def.name} that can be cast (${faces.join(", ")})`); o.face = a.face; }
   const deferTiming = faces.length > 1 && a.face === undefined;
   if (!deferTiming) checkSpellTiming(r, o, a.player, from);
@@ -757,7 +778,7 @@ function castSpell(r: Run, a: Extract<Action, { type: "castSpell" }>): void {
   const draft: Draft = {
     kind: "spell", player: a.player, sourceId: o.id, objectId: o.id, abilityId: spellAbility?.id ?? "",
     cast: { turn: r.s.turn.number, phase: r.s.turn.phase, activePlayer: r.s.turn.active, from, caster: a.player },
-    origin: { zone: from, index }, payWith: a.payWith, autoPay: a.autoPay, permSnap, faceDone: faceChosen
+    origin: { zone: from, index }, ...(a.preparedFrom ? { preparedFrom: a.preparedFrom } : {}), payWith: a.payWith, autoPay: a.autoPay, permSnap, faceDone: faceChosen
   };
   if (a.x !== undefined) { draft.x = a.x; draft.xChosen = true; }
   if (a.phyrexian) draft.phyPreset = [...a.phyrexian];
@@ -785,11 +806,14 @@ function presetOptions(r: Run, d: Draft, card: GameObject, a: Extract<Action, { 
   }
 }
 
+/** "You may cast this spell as though it had flash if it targets a commander" (Timely Ward): the timing is provisional until the targets are chosen (see commitDraft). */
+const hasCondFlash = (r: Run, o: GameObject): boolean => printedAbilities(r, o).some((x) => x.scripted?.handler === "flash_if_targets_commander");
+
 function checkSpellTiming(r: Run, o: GameObject, pid: PlayerId, from: string): void {
   if (r.ignoreTiming) return;
   const c = chars(r, o.id);
   const spellAbility = printedAbilities(r, o).find((x) => x.kind === "spell_effect");
-  const instantSpeed = c.types.includes("instant") || c.keywords.includes("flash") || flashGrantCovers(r, pid, o.id) || spellAbility?.timing?.speed === "instant" || spellAbility?.timing?.speed === "flash";
+  const instantSpeed = c.types.includes("instant") || c.keywords.includes("flash") || hasCondFlash(r, o) || flashGrantCovers(r, pid, o.id) || spellAbility?.timing?.speed === "instant" || spellAbility?.timing?.speed === "flash";
   if (!instantSpeed && !(r.s.turn.active === pid && MAIN.includes(r.s.turn.phase) && (r.s.stack.length === 0 || (o.zone === "stack" && r.s.stack.length === 0)))) throw new Reject("wrong_timing", `${c.name} can only be cast during your main phase with an empty stack`);
   const q: QCtx = { controller: pid, source: o.id };
   for (const pr of spellAbility?.timing?.only ?? []) if (!evalPredicate(r, pr, { ...q, cast: { turn: r.s.turn.number, phase: r.s.turn.phase, activePlayer: r.s.turn.active, from: from as never, caster: pid } })) throw new Reject("wrong_timing", `${c.name}: timing restriction not met`);
@@ -840,6 +864,8 @@ function activateAbility(r: Run, a: Extract<Action, { type: "activateAbility" }>
   if (ab.kind === "mana") return activateMana(r, a.player, src, ab, a.color);
   if (ab.scripted?.handler === "crew") return activateCrew(r, a, src, ab);
   const loyalty = (ab.costs ?? []).some((c) => "loyalty" in c);
+  // Overwhelming Splendor: the enchanted player can't activate abilities that aren't mana abilities or loyalty abilities
+  if (!loyalty && r.s.battlefield.some((id) => { const x = r.s.objects[id]; return !!x && x.attachedPlayer === a.player && abilitiesOf(r, x).some((y) => y.scripted?.handler === "enchanted_player_cant_activate_nonmana_nonloyalty_abilities"); })) throw new Reject("cannot_activate", "you can't activate abilities that aren't mana abilities or loyalty abilities");
   if (loyalty) {
     // 606.3: loyalty abilities are sorcery speed and only one per planeswalker each turn
     if (!chars(r, src.id).types.includes("planeswalker")) throw new Reject("cannot_activate", "only planeswalkers have loyalty abilities");
@@ -890,6 +916,7 @@ function activateMana(r: Run, pid: PlayerId, src: GameObject, ab: Ability, color
     answer = undefined;
     choices[i] = dec.ids;
   }
+  if (ab.scripted?.handler === "exert_and_haste_if_spent_on_creature_spell") { src.exerted = r.s.turn.number; emit(r, { type: "exerted", id: src.id }); } // Arena of Glory: exerted, it skips its controller's next untap step
   const prod = productionOfAbility(r, pid, ab);
   let colors: string[];
   const askDraft = { t: "draft" as const, stage: "color" as const, draft: { kind: "activated" as const, player: pid, sourceId: src.id, abilityId: ab.id, costChoices: choices } };
@@ -971,6 +998,39 @@ function passPriority(r: Run, pid: PlayerId, fast: boolean): void {
   }
 }
 
+/**
+ * Special action (CR 116.2b, 702.37e): turn a face-down permanent you control face up by paying its morph cost. No stack, no responses; you keep priority.
+ */
+function turnFaceUp(r: Run, a: Extract<Action, { type: "turnFaceUp" }>): void {
+  const o = r.s.objects[a.objectId];
+  if (!o || o.zone !== "battlefield" || !o.faceDown) throw new Reject("cannot_activate", "that permanent is not face down");
+  if (o.controller !== a.player) throw new Reject("not_owner", `${a.player} does not control ${a.objectId}`);
+  const cost = morphCostOf(r, o);
+  if (!cost) throw new Reject("cannot_activate", "that face-down permanent has no morph cost");
+  const d: Draft = { kind: "activated", player: a.player, sourceId: o.id, abilityId: "kw:unmorph", payWith: a.payWith, autoPay: a.autoPay };
+  payMana(r, a.player, parseManaCost(cost), 0, d, [], { abilitySource: o.id, spent: [] });
+  o.faceDown = undefined; invalidateIndex(r);
+  emit(r, { type: "turned_face_up", id: o.id, player: a.player });
+  r.s.passes = [];
+  finish(r, a.player);
+}
+
+/**
+ * Cast a copy of the other face's spell of a PREPARED permanent you control (Secrets of Strixhaven): the copy is a real card-like object that goes
+ * through the normal casting pipeline (targets, costs, cast triggers, can be countered); casting it ends the prepared state.
+ */
+function castPrepared(r: Run, a: Extract<Action, { type: "castPrepared" }>): void {
+  const o = r.s.objects[a.objectId];
+  if (!o || o.zone !== "battlefield" || !o.prepared) throw new Reject("cannot_activate", "that permanent is not prepared");
+  if (o.controller !== a.player) throw new Reject("not_owner", `${a.player} does not control ${a.objectId}`);
+  const def = defOf(r, o);
+  const other = def ? faceNames(def)[1] : undefined;
+  if (!def || !other) throw new Reject("cannot_activate", "that permanent has no prepared spell");
+  const copy = newObject(r, o.cardName, a.player, "hand", { isCopy: true, face: other });
+  player(r, a.player).hand.push(copy.id);
+  castSpell(r, { type: "castSpell", player: a.player, cardId: copy.id, face: other, preparedFrom: o.id, ...(a.targets ? { targets: a.targets } : {}), ...(a.payWith ? { payWith: a.payWith } : {}), ...(a.autoPay !== undefined ? { autoPay: a.autoPay } : {}) });
+}
+
 function advancePhase(r: Run, pid: PlayerId): void {
   if (r.s.turn.active !== pid) throw new Reject("not_your_priority", "only the active player can advance the phase");
   if (r.s.stack.length) throw new Reject("stack_not_empty", "the stack must be empty to advance the phase");
@@ -1031,9 +1091,11 @@ function resolveTop(r: Run): void {
     if (permanent) {
       const aura = c.subtypes.some((s) => s.toLowerCase() === "aura");
       const host = aura ? item.parts.flatMap((p) => Object.values(p.targets).flat()).find((x) => isObjId(x)) : undefined;
+      const hostPlayer = aura && !host ? item.parts.flatMap((p) => Object.values(p.targets).flat()).find((x) => !isObjId(x)) : undefined; // "Enchant player"
       const moved = moveObject(r, src!.id, "battlefield", { controller: item.controller, ...((item.cast?.paid ?? []).includes("morph") ? { faceDown: true } : {}) }); // morph: cast face down
       const h = host ? r.s.objects[host] : undefined;
       if (moved && h && h.zone === "graveyard") { moved.auraTarget = h.id; moved.attachedTo = h.id; moved.attachedToTs = h.timestamp; } // Animate Dead: enchants a card in a graveyard until its ETB trigger resolves
+      if (moved && hostPlayer && moved.zone === "battlefield") { moved.attachedPlayer = hostPlayer; emit(r, { type: "attached", id: moved.id, to: hostPlayer }); }
       if (moved && h && h.zone === "battlefield") { moved.attachedTo = h.id; moved.attachedToTs = h.timestamp; emit(r, { type: "attached", id: moved.id, to: h.id }); }
       emit(r, { type: "spell_resolved", id: src!.id, player: item.controller });
       // cast from the top of the library by Thundermane Dragon: it gains haste until end of turn
@@ -1046,6 +1108,7 @@ function resolveTop(r: Run): void {
     }
   }
   if (ab?.scripted?.handler === "win_the_game" && !playerHas(r, item.controller, "can't win the game") && !r.s.gameOver) { r.s.gameOver = { winner: item.controller, reason: `${label(r, item.sourceId)}: you win the game` }; emit(r, { type: "game_over", ...r.s.gameOver }); }
+  if (ab?.scripted?.handler === "additional_beginning_phase") r.s.extraBeginnings = (r.s.extraBeginnings ?? 0) + 1; // Shadow of the Second Sun: an additional beginning phase after this phase
   if (ab?.scripted?.handler === "become_monarch") { r.s.monarch = item.controller; emit(r, { type: "monarch_changed", player: item.controller }); }
   if (ab?.scripted?.handler === "roll_d20_result_is_X") {
     // "roll a d20. ... a number equal to the result": the roll uses the seeded RNG in the state (replayable) and becomes X for the steps
@@ -1057,6 +1120,7 @@ function resolveTop(r: Run): void {
   // a one-shot shield written on a spell / activated ability ("Prevent all combat damage that would be dealt this turn"): it starts when the ability resolves
   if (ab?.replacement && ab.kind !== "replacement") addDurable(r, { owner: item.controller, source: item.sourceId, expires: expiryFor(r, "until_end_of_turn", item.controller), replacement: { ...ab.replacement, duration: undefined } });
   const ex = startExec(item);
+  if (ab?.scripted?.handler === "one_counter_per_color_on_distinct_dragons_win_if_five") ex.frames[0].steps.push(...(callTheSpiritDragonsSteps() as unknown as Step[])); // Call the Spirit Dragons
   continueExec(r, ex);
 }
 
@@ -1079,6 +1143,8 @@ function advanceStep(r: Run): void {
     r.s.combat = null;
     if (r.s.extraCombats > 0) { r.s.extraCombats--; enterStep(r, "beginning_of_combat"); return; }
   }
+  if (cur === "postcombat_main" && (r.s.extraBeginnings ?? 0) > 0) { r.s.extraBeginnings = r.s.extraBeginnings! - 1; r.s.inExtraBeginning = true; enterStep(r, "untap"); return; } // an additional beginning phase: untap, upkeep, draw, then the end step
+  if (cur === "draw" && r.s.inExtraBeginning) { r.s.inExtraBeginning = false; enterStep(r, "end_step"); return; }
   const idx = STEP_ORDER.indexOf(cur);
   if (cur === "cleanup" || idx === STEP_ORDER.length - 1) { startNextTurn(r); return; }
   enterStep(r, STEP_ORDER[idx + 1]);
@@ -1089,7 +1155,7 @@ function startNextTurn(r: Run): void {
   const next = (extra && r.s.players.find((p) => p.id === extra && !p.hasLost)) || nextPlayer(r, r.s.turn.active);
   r.s.turn = { number: r.s.turn.number + 1, active: next.id, phase: "untap" };
   r.s.turnLog = [];
-  r.s.combat = null; r.s.extraCombats = 0;
+  r.s.combat = null; r.s.extraCombats = 0; r.s.extraBeginnings = 0; r.s.inExtraBeginning = false;
   expireDurable(r, "turn_start");
   for (const k of Object.keys(r.s.activations)) if (k.startsWith("t:")) delete r.s.activations[k];
   emit(r, { type: "turn_started", turn: r.s.turn.number, player: next.id });
@@ -1105,12 +1171,11 @@ function enterStep(r: Run, step: Phase, turnStart = false): void {
   const active = player(r, r.s.turn.active);
   emit(r, { type: "phase_changed", phase: step, player: active.id });
   if (step === "untap") {
-    active.lastTurnStartTs = tick(r);
-    active.landsPlayed = 0;
+    if (!r.s.inExtraBeginning) { active.lastTurnStartTs = tick(r); active.landsPlayed = 0; } // the added untap step is not a new turn
     phaseInFor(r, active.id); // phasing happens before untapping
     // Unwinding Clock: its controller's artifacts also untap during each OTHER player's untap step
-    for (const id of r.s.battlefield) { const o = r.s.objects[id]; if (o.controller !== active.id && o.tapped && chars(r, id).types.includes("artifact") && r.s.battlefield.some((cid) => r.s.objects[cid].controller === o.controller && abilitiesOf(r, r.s.objects[cid]).some((a) => a.scripted?.handler === "untap_during_each_other_players_untap_step"))) { o.tapped = false; emit(r, { type: "untap", id }); } }
-    for (const id of r.s.battlefield) { const o = r.s.objects[id]; if (o.controller === active.id && o.tapped && !chars(r, id).keywords.includes("doesn't untap during its controller's untap step")) { o.tapped = false; emit(r, { type: "untap", id }); } }
+    for (const id of r.s.battlefield) { const o = r.s.objects[id]; if (o.controller !== active.id && o.tapped && chars(r, id).types.includes("artifact") && r.s.battlefield.some((cid) => r.s.objects[cid].controller === o.controller && abilitiesOf(r, r.s.objects[cid]).some((a) => a.scripted?.handler === "untap_during_each_other_players_untap_step"))) untapObject(r, o); }
+    for (const id of r.s.battlefield) { const o = r.s.objects[id]; if (o.controller === active.id && o.tapped && !chars(r, id).keywords.includes("doesn't untap during its controller's untap step")) { if (o.exerted !== undefined) o.exerted = undefined; else untapObject(r, o); } }
     void turnStart;
     enterStep(r, "upkeep"); return;
   }
@@ -1177,6 +1242,7 @@ function answer(r: Run, a: Extract<Action, { type: "answerDecision" }>): void {
       const o = obj(r, d.sourceId);
       o.zone = d.origin.zone; o.timestamp = tick(r);
       (player(r, o.owner)[d.origin.zone as "hand" | "command"] as ObjId[]).splice(d.origin.index, 0, o.id);
+      if (o.isCopy && d.preparedFrom) { const l = player(r, o.owner).hand; l.splice(l.indexOf(o.id), 1); delete r.s.objects[o.id]; } // cancelled: the spell copy of a prepared permanent simply ceases to exist
     }
     r.s.pending = null; r.s.priority = d.player; r.s.priorityAfter = null;
     emit(r, { type: "cast_cancelled", player: d.player, id: d.sourceId });
@@ -1261,7 +1327,7 @@ function sba(r: Run): boolean {
       const o = r.s.objects[id];
       if (!o || o.zone !== "battlefield") continue;
       const c = chars(r, id);
-      if (c.subtypes.some((s) => s.toLowerCase() === "aura") && !hostOf(r, o) && !(o.auraTarget && r.s.objects[o.auraTarget]?.zone === "graveyard")) { moveObject(r, id, "graveyard"); emit(r, { type: "sba_aura_unattached", id }); changed = true; continue; }
+      if (c.subtypes.some((s) => s.toLowerCase() === "aura") && !hostOf(r, o) && !(o.attachedPlayer && !player(r, o.attachedPlayer).hasLost) && !(o.auraTarget && r.s.objects[o.auraTarget]?.zone === "graveyard")) { moveObject(r, id, "graveyard"); emit(r, { type: "sba_aura_unattached", id }); changed = true; continue; }
       if (unattachIllegal(r, o)) changed = true; // equipment whose host is gone or is no longer a creature (704.5n)
       if (c.types.includes("planeswalker") && (o.counters.loyalty ?? 0) <= 0) { moveObject(r, id, "graveyard"); emit(r, { type: "sba_zero_loyalty", id }); changed = true; continue; }
       if (c.subtypes.some((s) => s.toLowerCase() === "saga") && sagaDone(r, o)) { sacrificeObject(r, id); emit(r, { type: "sba_saga_done", id }); changed = true; continue; } // 714.4: the final chapter ability has left the stack
@@ -1325,7 +1391,14 @@ function queueTrigger(r: Run, src: ObjId, ab: Ability, controller: PlayerId, ctx
   }
   const q: QCtx = { controller, source: src, eventObj: ctx.eventObj, eventPlayer: ctx.eventPlayer, cast: ctx.cast, x: ctx.x };
   if (ab.trigger?.interveningIf && !evalPredicate(r, ab.trigger.interveningIf, q)) return;
-  r.s.triggerQueue.push({ id: `q${r.s.nextId++}`, sourceId: src, abilityId: ab.id, controller, ctx, label: `${label(r, src)}: ${ab.text.replace(/\s+/g, " ").slice(0, 80)}` });
+  // Roaming Throne: a triggered ability of ANOTHER creature you control of the chosen type triggers an additional time (once per such permanent)
+  let times = 1;
+  const so = tryObj(r, src);
+  if (so && so.zone === "battlefield" && chars(r, src).types.includes("creature")) {
+    const subs = chars(r, src).subtypes.map((x) => x.toLowerCase());
+    for (const id of r.s.battlefield) { const t = r.s.objects[id]; const ct = t?.chosen?.type?.toLowerCase(); if (t && id !== src && t.controller === controller && ct && subs.includes(ct) && abilitiesOf(r, t).some((x) => x.scripted?.handler === "triggers_additional_time")) times++; }
+  }
+  for (let i = 0; i < times; i++) r.s.triggerQueue.push({ id: `q${r.s.nextId++}`, sourceId: src, abilityId: ab.id, controller, ctx: structuredClone(ctx), label: `${label(r, src)}: ${ab.text.replace(/\s+/g, " ").slice(0, 80)}` });
 }
 
 /** Trigger alternatives of one ability: the main event plus every "alsoOn" event (omitted qualifiers are inherited). */
@@ -1362,6 +1435,8 @@ function matchCombat(r: Run, tr: TriggerSpec, h: { id: ObjId; controller: Player
   else if (typeof s === "object") ok = isObjId(actor) && !!tryObj(r, actor) && matchesFilter(r, actor, s as ObjectFilter, q);
   else throw new Unsupported(`trigger:subject:${String(s)}`);
   if (!ok) return null;
+  // "attacks for the first time each turn" (Scourge of the Throne): the n-th time THIS creature was declared as an attacker this turn
+  if (tr.event === "attack" && tr.nth) { const nth = tr.nth; if (nth.per !== "turn" || r.s.turnLog.filter((e) => e.type === "attack" && e.id === actor).length !== nth.n) return null; }
   if (tr.event === "attack" && tr.defender) {
     const d = ev.defender as string;
     const mine = d === h.controller || (isObjId(d) && tryObj(r, d)?.controller === h.controller);
@@ -1455,6 +1530,7 @@ function scanTriggers(r: Run): void {
             ctx.eventObj = ev.id as string; ctx.eventPlayer = who;
             const castItem = r.s.stack.find((i) => i.objectId === ev.id);
             ctx.cast = castItem?.cast;
+            if (ab.scripted?.handler === "count_spell_colors") ctx.amount = chars(r, ev.id as string).colors.length; // Ramos: a counter for each of the spell's colors
             if (subject === "self" && castItem) {
               // storm: the number of spells cast before this one this turn; otherwise "for each creature sacrificed" / X of the spell
               ctx.amount = ab.scripted?.handler === "storm" ? r.s.turnLog.filter((e) => e.type === "cast").length - 1 : (castItem.sacrificed?.length ?? castItem.x);
@@ -1494,7 +1570,7 @@ function scanTriggers(r: Run): void {
           } else if (ev.type === "begin_step") {
             if (ev.step !== tr.step) continue;
             const whose = tr.whose ?? "yours";
-            match = whose === "each" || (whose === "yours") === (ev.player === h.controller);
+            match = tr.subject === "enchanted" ? obj(r, h.id).attachedPlayer === ev.player : whose === "each" || (whose === "yours") === (ev.player === h.controller); // "each of enchanted player's postcombat main phases"
             ctx.eventPlayer = ev.player as string;
           } else {
             // attack / block / damage
@@ -1515,7 +1591,10 @@ function scanTriggers(r: Run): void {
             // "whenever one or more ...": everything one resolution / action did is ONE batch, so it triggers once for it
             const key = `${h.id}:${ab.id}:${tr.event}:w${scanWindow}`;
             const seen = (r.seenBatch ??= new Set());
-            if (seen.has(key)) match = false; else seen.add(key);
+            if (seen.has(key)) match = false; else {
+              seen.add(key);
+              if (ev.type === "etb") ctx.batchObjs = r.events.slice(scanWindow).filter((e) => e.type === "etb" && (!tr.fromZone || tr.fromZone === e.from) && typeof subject === "object" && !!tryObj(r, e.id as string) && matchesFilter(r, e.id as string, subject as ObjectFilter, q)).map((e) => e.id as string);
+            }
           }
           if (match) queueTrigger(r, h.id, ab, h.controller, ctx);
           } catch (e) {

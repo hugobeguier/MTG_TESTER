@@ -152,6 +152,8 @@ export const continueHooks: {
   stepNeeds?: (s: import("../schema").Step) => string[];
   stepSkipped?: (r: Run, source: ObjId, abilityId: string, step: import("../schema").Step, needs: string[]) => void;
 } = {};
+/** set by resolve.ts: the legal targets of a target spec (copy.ts uses it to let the controller of a copy choose new targets) */
+export const targetHooks: { candidates?: (r: Run, spec: unknown, q: unknown, self?: ObjId) => string[] } = {};
 /** continue mode: unsupported things are reported (`unresolved` events) and skipped instead of refusing the action */
 export const continuing = (r: Run): boolean => r.s.config.onUnsupported === "continue";
 
@@ -163,20 +165,8 @@ export function rawPrintedAbilities(r: Run, o: GameObject): Ability[] {
   return withKeywordExtras(cur === undefined ? def.kernel.abilities : def.kernel.abilities.filter((a) => !a.face || a.face === cur));
 }
 /** Printed abilities: card JSON, or a token's own abilities + keyword abilities. Zone-agnostic; see abilitiesOf for the effective list. Continue mode leaves out the ones whose frame is unsupported. */
-/** "While it's prepared, you may cast a copy of its spell": modelled as an activated ability costing the other face's mana cost whose steps are that face's spell effect (it is not a spell: no cast triggers, cannot be countered as a spell). */
-function preparedAbility(r: Run, o: GameObject): Ability[] {
-  if (!o.prepared || o.zone !== "battlefield" || o.token || o.copyDef) return [];
-  const def = defOf(r, o)!;
-  const names = faceNames(def);
-  const other = names[1];
-  const spell = other ? def.kernel.abilities.find((a) => a.face === other && a.kind === "spell_effect") : undefined;
-  if (!other || !spell) return [];
-  const cost = def.faces?.[other]?.manaCost;
-  const sorcery = (def.faces?.[other]?.types ?? []).includes("sorcery");
-  return [{ id: "kw:prepared", kind: "activated", text: `Cast a copy of ${other}.`, costs: cost ? [{ mana: cost }] : [], targets: spell.targets, steps: [...(spell.steps ?? []), { kind: "unprepare", target: "self" }], ...(sorcery ? { timing: { speed: "sorcery" } } : {}) } as unknown as Ability];
-}
 export function printedAbilities(r: Run, o: GameObject): Ability[] {
-  const all = [...rawPrintedAbilities(r, o), ...preparedAbility(r, o)];
+  const all = rawPrintedAbilities(r, o);
   const blocked = continueHooks.blocked;
   return blocked && continuing(r) ? all.filter((a) => !blocked(r, a)) : all;
 }
@@ -209,12 +199,11 @@ function tokenAbilitiesRaw(t: TokenDef): Ability[] {
   return [...kw, ...(t.abilities ?? [])];
 }
 /** Effective abilities: on the battlefield what layer 6 leaves (a stripped permanent has none), elsewhere the printed ones. */
-/** a face-down permanent has no abilities of its own, only the special action of turning a morph creature face up (modelled as an activated ability) */
-function faceDownAbilities(r: Run, o: GameObject): Ability[] {
-  if (o.token || o.copyDef) return [];
+/** a face-down permanent has no abilities of its own; turning a morph creature face up is the special action turnFaceUp (resolve.ts), which pays this cost */
+export function morphCostOf(r: Run, o: GameObject): string | undefined {
+  if (!o.faceDown || o.zone !== "battlefield" || o.token || o.copyDef) return undefined;
   const mk = rawPrintedAbilities(r, o).find((a) => a.kind === "keyword" && a.keyword?.name.toLowerCase() === "morph");
-  const cost = typeof mk?.keyword?.param === "string" ? mk.keyword.param : undefined;
-  return cost ? [{ id: "kw:unmorph", kind: "activated", text: `Turn this creature face up (morph ${cost}).`, costs: [{ mana: cost }], steps: [{ kind: "turn_face_up", target: "self" }] } as unknown as Ability] : [];
+  return typeof mk?.keyword?.param === "string" ? mk.keyword.param : undefined;
 }
 export function abilitiesOf(r: Run, o: GameObject): Ability[] {
   if (o.faceDown && o.zone === "battlefield") return baseChars(r, o).abilities;
@@ -272,7 +261,7 @@ const lc = (a: string[] | undefined) => (a ?? []).map((x) => x.toLowerCase());
 
 /** Characteristics before any continuous effect (copiable values; layers.ts applies everything else). */
 export function baseChars(r: Run, o: GameObject): Chars {
-  if (o.faceDown && o.zone === "battlefield") return { name: "", types: ["creature"], subtypes: [], supertypes: [], colors: [], mv: 0, power: 2, toughness: 2, keywords: [], abilities: faceDownAbilities(r, o) };
+  if (o.faceDown && o.zone === "battlefield") return { name: "", types: ["creature"], subtypes: [], supertypes: [], colors: [], mv: 0, power: 2, toughness: 2, keywords: [], abilities: [] };
   if (o.token || o.copyDef) {
     const t = (o.copyDef ?? o.token)!;
     return { name: t.name, types: lc(t.types), subtypes: [...t.subtypes], supertypes: lc(t.supertypes), colors: [...t.colors], mv: parseManaCost(t.manaCost).mv, power: t.power, toughness: t.toughness, keywords: lc(t.keywords), abilities: tokenAbilities(t) };
@@ -351,7 +340,10 @@ export function moveObject(r: Run, id: ObjId, to: Zone, opts: MoveOpts = {}): Ga
   // abilities a static effect had GIVEN it (Mikaeus: undying) are part of its last-known information: its dies / leaves triggers still use them
   o.leftWith = from === "battlefield" && !o.token ? chars(r, id).abilities.filter((a) => a.id.startsWith("g:") || a.id.startsWith("ga:") || a.id.startsWith("kw:")) : undefined;
   if (o.leftWith && !o.leftWith.length) o.leftWith = undefined;
-  if (from === "battlefield") { o.tapped = false; o.counters = {}; o.damage = 0; o.dtHit = undefined; o.controller = o.owner; o.attachedTo = undefined; o.attachedToTs = undefined; o.copyDef = undefined; o.copyUntilEot = undefined; r.s.effects = r.s.effects.filter((e) => e.objectId !== id); }
+  if (from === "battlefield") { o.tapped = false; o.counters = {}; o.damage = 0; o.dtHit = undefined; o.controller = o.owner; o.attachedTo = undefined; o.attachedToTs = undefined; o.attachedPlayer = undefined; o.copyDef = undefined; o.copyUntilEot = undefined; r.s.effects = r.s.effects.filter((e) => e.objectId !== id); }
+  // abilities gained by a resolved effect (Rivaz of the Claw): a spell keeps them as the permanent it becomes, any other move ends them
+  const kept = from === "stack" && to === "battlefield";
+  if (!kept && from === "stack") r.s.effects = r.s.effects.filter((e) => e.objectId !== id);
   o.zone = to;
   o.exileInstead = undefined;
   o.faceDown = undefined; o.prepared = undefined; o.auraTarget = undefined;
@@ -362,6 +354,7 @@ export function moveObject(r: Run, id: ObjId, to: Zone, opts: MoveOpts = {}): Ga
   if (to === "battlefield" && opts.faceDown) o.faceDown = true;
   if (!(from === "stack" && to === "battlefield")) o.cast = undefined;
   o.timestamp = tick(r);
+  if (kept) for (const e of r.s.effects) if (e.objectId === id) e.objectTimestamp = o.timestamp;
   if (to === "battlefield") {
     o.controller = opts.controller ?? o.owner;
     o.controlledSince = o.timestamp;
@@ -454,4 +447,27 @@ export function defenderPlayer(r: Run, defender: string): PlayerId | undefined {
   if (!isObjId(defender)) return defender;
   const o = r.s.objects[defender];
   return o && o.zone === "battlefield" ? o.controller : undefined;
+}
+
+/** Fear of Sleep Paralysis: stun counters can't be removed from permanents ITS controller's opponents control. */
+export function stunLocked(r: Run, o: GameObject): boolean {
+  return r.s.battlefield.some((id) => { const x = r.s.objects[id]; return !!x && x.controller !== o.controller && abilitiesOf(r, x).some((a) => a.scripted?.handler === "stun_counters_cant_be_removed_from_opponent_permanents"); });
+}
+
+/**
+ * Untapping a permanent (CR 122.1g): if it has a stun counter, a stun counter is removed from it INSTEAD and it stays tapped (and when stun counters
+ * can't be removed from it, nothing happens). Returns true when it really untapped.
+ */
+export function untapObject(r: Run, o: GameObject): boolean {
+  if (!o.tapped) return false;
+  if ((o.counters.stun ?? 0) > 0) {
+    if (stunLocked(r, o)) return false;
+    o.counters.stun -= 1;
+    if (o.counters.stun === 0) delete o.counters.stun;
+    emit(r, { type: "counter_removed", id: o.id, kind: "stun", amount: 1 });
+    return false;
+  }
+  o.tapped = false;
+  emit(r, { type: "untap", id: o.id });
+  return true;
 }

@@ -44,20 +44,14 @@
       },
       "steps": [
         {
-          "kind": "grant_effect",
+          "kind": "copy",
           "target": "self",
+          "of": "event_object",
           "optional": true,
-          "modify": [
-            {
-              "copyOf": "event_object"
-            },
-            {
-              "addTypes": [
-                "Legendary"
-              ]
-            }
-          ],
           "exceptName": "Sarkhan, Soul Aflame",
+          "exceptAddTypes": [
+            "legendary"
+          ],
           "duration": "until_end_of_turn",
           "prompt": {
             "title": "Sarkhan, Soul Aflame: optional",
@@ -72,9 +66,10 @@
       "implementation": "needed",
       "needs": [
         "trigger:subject",
-        "step:grant_effect",
-        "field:grant_effect.exceptName",
-        "field:grant_effect.modify"
+        "step:copy",
+        "field:copy.exceptAddTypes",
+        "field:copy.exceptName",
+        "field:copy.of"
       ]
     }
   ],

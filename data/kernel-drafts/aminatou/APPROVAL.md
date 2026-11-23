@@ -747,7 +747,7 @@ Re-rendered plain English:
 
 ```
 Lim-Dûl's Vault [draft]
-  [a1] spell_effect [needed: needs step:look_top, step:repeat_for_each, field:repeat_for_each.repeatCount, field:repeat_for_each.steps, field:move_card_zone.ordered, field:move_card_zone.position, field:move_card_zone.what, step:shuffle]
+  [a1] spell_effect [needed: needs step:look_top, step:repeat_for_each, field:repeat_for_each.repeatCount, field:repeat_for_each.steps, field:move_card_zone.ordered, field:move_card_zone.position, field:move_card_zone.what, step:shuffle, field:shuffle.exceptLooked]
     Oracle: Look at the top five cards of your library. As many times as you choose, you may pay 1 life, put those cards on the bottom of your library in any order, then look at the top five cards of your library. Then shuffle and put the last cards you looked at this way on top in any order.
     Effect: Look at the top five cards of your library. Then, you may repeat for each matching object. Then, shuffle. Then, put the rest of the looked-at cards on the top of your library.
 ```
@@ -756,7 +756,7 @@ Player prompts:
 
 - Lim-Dûl's Vault: optional: Do you want to repeat for each matching object?
 
-Implementation: needed (step:look_top, step:repeat_for_each, field:repeat_for_each.repeatCount, field:repeat_for_each.steps, field:move_card_zone.ordered, field:move_card_zone.position, field:move_card_zone.what, step:shuffle)
+Implementation: needed (step:look_top, step:repeat_for_each, field:repeat_for_each.repeatCount, field:repeat_for_each.steps, field:move_card_zone.ordered, field:move_card_zone.position, field:move_card_zone.what, step:shuffle, field:shuffle.exceptLooked)
 
 Questions for you:
 
@@ -969,7 +969,7 @@ Overwhelming Splendor [draft]
     Keyword: enchant
   [a2] static [needed: needs static, static:setBasePT]
     Oracle: Creatures enchanted player controls lose all abilities and have base power and toughness 1/1.
-    Static: Creatures an opponent controls lose all abilities and have base power and toughness 1/1
+    Static: Creatures the enchanted player controls lose all abilities and have base power and toughness 1/1
   [a3] scripted [needed: needs scripted:enchanted_player_cant_activate_nonmana_nonloyalty_abilities]
     Oracle: Enchanted player can't activate abilities that aren't mana abilities or loyalty abilities.
     Scripted (engine-specific rule, not described by the fields above): enchanted_player_cant_activate_nonmana_nonloyalty_abilities
@@ -1759,6 +1759,7 @@ Questions for you:
 | `field:search_library.position` | 1 | Moon-Blessed Cleric |
 | `field:search_library.reflexive` | 1 | Obscura Storefront |
 | `field:search_library.sharesLandType` | 1 | Myriad Landscape |
+| `field:shuffle.exceptLooked` | 1 | Lim-Dûl's Vault |
 | `field:shuffle.who` | 1 | Portent |
 | `predicate:matches` | 1 | Mind's Dilation |
 | `predicate:step_done` | 1 | Obscura Storefront |

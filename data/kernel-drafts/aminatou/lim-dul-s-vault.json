@@ -13,7 +13,6 @@
         },
         {
           "kind": "repeat_for_each",
-          "optional": true,
           "repeatCount": "as_many_as_you_choose",
           "src": 1,
           "steps": [
@@ -44,12 +43,14 @@
               "card": "Lim-Dûl's Vault",
               "ability": "a1"
             }
-          }
+          },
+          "optional": true
         },
         {
           "kind": "shuffle",
           "who": "you",
-          "src": 2
+          "src": 2,
+          "exceptLooked": true
         },
         {
           "kind": "move_card_zone",
@@ -69,7 +70,8 @@
         "field:move_card_zone.ordered",
         "field:move_card_zone.position",
         "field:move_card_zone.what",
-        "step:shuffle"
+        "step:shuffle",
+        "field:shuffle.exceptLooked"
       ]
     }
   ],

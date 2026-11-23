@@ -8,6 +8,7 @@ import type { ObjectFilter, PlayerRef, Prompt, Step } from "../schema";
 import { promptForMay } from "../prompts";
 import {
   abilitiesOf, chars, continueHooks, continuing, drawCards, emit, label, moveObject, NeedAsk, newObject, obj, parseManaCost, player, shuffleInPlace, takeAnswer, tick, tryObj, Unsupported, Reject, type Run
+  , untapObject, stunLocked
 } from "./core";
 import { evalPredicate, evalQuantity, matchesFilter, objectsMatching, resolveObjs, resolvePlayers, type QCtx } from "./query";
 import { applyReplacements, runAfter } from "./replacements";
@@ -97,8 +98,8 @@ export function dealDamage(r: Run, env: Env | undefined, source: string | undefi
     const o = tryObj(r, target);
     if (o && o.zone === "battlefield") {
       const c = chars(r, target);
-      if (c.types.includes("creature")) { o.damage += amount; if (deathtouch) o.dtHit = true; dealt = amount; emit(r, { type: "damage", source, target, amount, combat, batch: r.batch }); }
-      else if (c.types.includes("planeswalker")) { o.counters.loyalty = Math.max(0, (o.counters.loyalty ?? 0) - amount); dealt = amount; emit(r, { type: "damage", source, target, amount, combat, batch: r.batch }); }
+      if (c.types.includes("creature")) { const lethal = Math.max(0, (c.toughness ?? 0) - o.damage); const excess = amount - (deathtouch ? Math.min(1, lethal || 1) : lethal); if (excess > 0) r.s.turnLog.push({ type: "excess_damage", player: o.controller, id: target, amount: excess, ts: r.s.clock }); o.damage += amount; if (deathtouch) o.dtHit = true; dealt = amount; emit(r, { type: "damage", source, target, amount, combat, batch: r.batch }); }
+      else if (c.types.includes("planeswalker")) { const excess = amount - (o.counters.loyalty ?? 0); if (excess > 0) r.s.turnLog.push({ type: "excess_damage", player: o.controller, id: target, amount: excess, ts: r.s.clock }); o.counters.loyalty = Math.max(0, (o.counters.loyalty ?? 0) - amount); dealt = amount; emit(r, { type: "damage", source, target, amount, combat, batch: r.batch }); }
       else if (c.types.includes("battle")) { o.counters.defense = Math.max(0, (o.counters.defense ?? 0) - amount); dealt = amount; emit(r, { type: "damage", source, target, amount, combat, batch: r.batch }); }
     }
   }
@@ -317,7 +318,7 @@ const STEPS: Record<string, StepSpec> = {
     fields: ["target", "all", "filter"],
     run: (r, ex, step) => {
       const ids = step.all ? objectsMatching(r, (step.filter ?? {}) as ObjectFilter, ex.env) : refs(r, ex.env, step);
-      for (const t of ids) { const o = tryObj(r, t); if (o && o.zone === "battlefield" && o.tapped) { o.tapped = false; emit(r, { type: "untap", id: t }); } }
+      for (const t of ids) { const o = tryObj(r, t); if (o && o.zone === "battlefield" && o.tapped) untapObject(r, o); }
       return "done";
     }
   },
@@ -347,6 +348,10 @@ const STEPS: Record<string, StepSpec> = {
       if (step.all && !step.filter && !step.target) throw new Unsupported("field:grant_effect.all", "an unfiltered mass grant");
       // player-scoped form: a replacement shield / a player flag for a while (durable.ts)
       if (!step.target && !step.filter) { grantToPlayers(r, ex.env, step); return "done"; }
+      if (!step.duration && (step.modify as Array<Record<string, unknown>> | undefined)?.every((m) => "grantAbility" in m)) { // "it gains 'When this creature dies, exile it.'": the object keeps the ability as long as it stays that object
+        for (const id of refs(r, ex.env, step)) { const o = tryObj(r, id); if (!o || (o.zone !== "stack" && o.zone !== "battlefield")) continue; for (const m of step.modify as Array<{ grantAbility: import("../schema").Ability }>) { r.s.effects.push({ id: `e${r.s.effects.length}_${r.s.clock}`, timestamp: tick(r), objectId: id, objectTimestamp: o.timestamp, until: "leaves", ability: m.grantAbility }); } invalidateIndex(r); }
+        return "done";
+      }
       requireEot(step);
       // mass form ("creatures you control gain indestructible until end of turn"): the filter picks the permanents, `who` is only whose perspective it is
       const mods = ((step.modify ?? []) as Array<Record<string, unknown>>).map((m) => (m.cant === "be_blocked" && Object.keys(m).length === 1 ? { grant: "unblockable" } : m)); // "it can't be blocked this turn" = unblockable for the turn
@@ -524,7 +529,7 @@ export function addTemporaryPT(r: Run, id: ObjId, power: number, toughness: numb
 
 function addEffect(r: Run, id: ObjId, e: Partial<Pick<ContinuousEffect, "power" | "toughness" | "grant" | "lose" | "base" | "addTypes" | "setColors">>): void {
   const o = tryObj(r, id);
-  if (!o || o.zone !== "battlefield") return;
+  if (!o || (o.zone !== "battlefield" && !(o.zone === "stack" && e.grant))) return; // a keyword granted to a creature SPELL ("it gains haste") stays on the permanent it becomes (core.moveObject re-stamps it)
   r.s.effects.push({ id: `e${r.s.effects.length}_${r.s.clock}`, timestamp: tick(r), objectId: id, objectTimestamp: o.timestamp, until: "end_of_turn", ...e });
   emit(r, { type: "effect_added", id, ...e });
 }
@@ -563,6 +568,7 @@ export function addCounters(r: Run, ids: string[], kind: string, n: number): voi
       runAfter(r, ev);
       continue;
     }
+    if (kind === "stun" && stunLocked(r, o)) continue;
     const next = Math.max(0, (o.counters[kind] ?? 0) + n);
     o.counters[kind] = next;
     if (next === 0) delete o.counters[kind];
@@ -653,10 +659,12 @@ const INTERNAL: Record<string, Handler> = {
     }
     const n = Math.min(Number(step.n), mine.length);
     if (n <= 0) return "done";
-    if (n === mine.length) { for (const id of [...mine]) sacrificeObject(r, id); return "done"; }
+    ex.env.sacrificedTypes = [...new Set(mine.flatMap((id) => chars(r, id).types))]; // narrowed below to what was really sacrificed
+    if (n === mine.length) { ex.env.sacrificedTypes = [...new Set(mine.flatMap((id) => chars(r, id).types))]; ex.env.sacrificed = [...mine]; for (const id of [...mine]) sacrificeObject(r, id); return "done"; }
     const spec: AskSpec = { kind: "choose_cards", player: pid, prompt: (step.prompt as Prompt | undefined) ?? fallbackPrompt(r, ex.env, "sacrifice", `Choose ${n} permanent${n === 1 ? "" : "s"} to sacrifice.`), options: cardOptions(r, mine), min: n, max: n };
     const d = decide(spec, answer);
     if ("ask" in d) return d;
+    ex.env.sacrificedTypes = [...new Set(d.ids.flatMap((id) => chars(r, id).types))]; ex.env.sacrificed = [...d.ids];
     for (const id of d.ids) sacrificeObject(r, id);
     return "done";
   },
@@ -707,7 +715,7 @@ export function startExec(item: StackItem): Exec {
     frames: [{ steps, i: 0 }], partIndex: 0,
     env: {
       item, source: item.sourceId, controller: item.controller, x: item.x, targets: {}, chosen: {}, done: [], created: [],
-      eventObj: item.trigger?.eventObj, eventPlayer: item.trigger?.eventPlayer, amount: item.trigger?.amount, sacrificed: item.sacrificed
+      eventObj: item.trigger?.eventObj, eventPlayer: item.trigger?.eventPlayer, amount: item.trigger?.amount, sacrificed: item.sacrificed, batchObjs: item.trigger?.batchObjs
     }
   };
 }
@@ -743,7 +751,7 @@ export function runExec(r: Run, ex: Exec, answer?: Choice): StepStatus {
         frame.steps = [...frame.steps]; frame.steps[frame.i] = { kind: "__unless" as never, inner, pay: { payer: "you", cost: step.optionalCost, inverse: true } } as Step;
         continue;
       }
-      if (step.optional && !(step as Step & { __asked?: boolean }).__asked) {
+      if (step.optional && step.repeatCount === undefined && step.sharesCardTypeWith === undefined && !(step as Step & { __asked?: boolean }).__asked) { // "as many times as you choose" asks on every round instead (steps7 __repeat_ask)
         const inner = { ...step, optional: false, condition: undefined, __asked: true } as Step;
         const asker = step.kind === "search_library" ? resolvePlayers(r, step.who ?? "you", ex.env)[0] : undefined; // "its controller MAY search": they decide
         const may: Step = { kind: "__may" as never, inner, asker, prompt: step.prompt ?? promptForMay(label(r, ex.env.source), String(step.kind).replace(/_/g, " ")) } as Step;
@@ -760,7 +768,7 @@ export function runExec(r: Run, ex: Exec, answer?: Choice): StepStatus {
         frame.steps = [...frame.steps]; frame.steps[frame.i] = { kind: "__unless" as never, inner, pay } as Step;
         continue;
       }
-      if (step.reflexive && typeof step.target === "string" && !["move_card_zone", "copy"].includes(step.kind)) {
+      if (step.reflexive && typeof step.target === "string" && !["move_card_zone", "copy"].includes(step.kind) && !(step.kind === "reanimate" && step.amount !== undefined)) {
         // "When you do, destroy target nonland permanent" (Skyfisher Spider): the reflexive trigger picks its target NOW, after the earlier steps ran
         const tspec = ex.env.item.parts.flatMap((pp) => pp.specs).find((sp) => sp.id === step.target);
         if (tspec) {

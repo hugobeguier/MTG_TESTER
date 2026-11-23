@@ -306,18 +306,17 @@ Call the Spirit Dragons [draft]
   [a1] static [needed: needs static]
     Oracle: Dragons you control have indestructible.
     Static: Dragons you control have indestructible
-  [a2] triggered [needed: needs scripted:one_counter_per_color_on_distinct_dragons_win_if_five, filter:colored, step:repeat_for_each, field:repeat_for_each.over, field:repeat_for_each.steps, step:choose, field:choose.count, field:choose.from, field:choose.saveAs, step:add_counters, field:add_counters.on]
+  [a2] triggered [needed: needs scripted:one_counter_per_color_on_distinct_dragons_win_if_five]
     Oracle: At the beginning of your upkeep, for each color, put a +1/+1 counter on a Dragon you control of that color. If you put +1/+1 counters on five Dragons this way, you win the game.
     Trigger: At the beginning of your upkeep
-    Effect: For each colored permanent, choose a Dragon you control, then put a +1/+1 counter on the chosen object.
     Scripted (engine-specific rule, not described by the fields above): one_counter_per_color_on_distinct_dragons_win_if_five
 ```
 
 Player prompts:
 
-- Call the Spirit Dragons: choose: Choose a Dragon you control.
+- (none: no decisions)
 
-Implementation: needed (static, scripted:one_counter_per_color_on_distinct_dragons_win_if_five, filter:colored, step:repeat_for_each, field:repeat_for_each.over, field:repeat_for_each.steps, step:choose, field:choose.count, field:choose.from, field:choose.saveAs, step:add_counters, field:add_counters.on)
+Implementation: needed (static, scripted:one_counter_per_color_on_distinct_dragons_win_if_five)
 
 Questions for you:
 
@@ -505,17 +504,17 @@ Sarkhan, Soul Aflame [draft]
   [a1] static [needed: needs static]
     Oracle: Dragon spells you cast cost {1} less to cast.
     Static: Dragon spells you cast cost {1} less to cast
-  [a2] triggered [needed: needs trigger:subject, step:grant_effect, field:grant_effect.exceptName, field:grant_effect.modify]
+  [a2] triggered [needed: needs trigger:subject, step:copy, field:copy.exceptAddTypes, field:copy.exceptName, field:copy.of]
     Oracle: Whenever a Dragon you control enters, you may have Sarkhan become a copy of it until end of turn, except its name is Sarkhan, Soul Aflame and it's legendary in addition to its other types.
     Trigger: Whenever a Dragon you control enters
-    Effect: You may Sarkhan, Soul Aflame is a copy of that object and becomes a legendary in addition to its other types until end of turn.
+    Effect: You may copy Sarkhan, Soul Aflame.
 ```
 
 Player prompts:
 
 - Sarkhan, Soul Aflame: optional: Do you want to Sarkhan, Soul Aflame is a copy of that object and becomes a legendary in addition to its other types until end of turn?
 
-Implementation: needed (static, trigger:subject, step:grant_effect, field:grant_effect.exceptName, field:grant_effect.modify)
+Implementation: needed (static, trigger:subject, step:copy, field:copy.exceptAddTypes, field:copy.exceptName, field:copy.of)
 
 ### Rivaz of the Claw
 
@@ -744,18 +743,17 @@ Rith, Liberated Primeval [draft]
   [a3] static [needed: needs static]
     Oracle: Other Dragons you control have ward {2}.
     Static: Other Dragons you control have ward {2}
-  [a4] triggered [needed: needs scripted:excess_damage_dealt_to_opponent_creature_or_planeswalker, trigger:intervening_if, field:create_tokens.tokenKeywords]
+  [a4] triggered [needed: needs trigger:intervening_if, field:create_tokens.tokenKeywords]
     Oracle: At the beginning of your end step, if a creature or planeswalker an opponent controlled was dealt excess damage this turn, create a 4/4 red Dragon creature token with flying.
-    Trigger: At the beginning of your end step, if an opponent dealt damage this turn
+    Trigger: At the beginning of your end step, if an opponent excess damage this turn
     Effect: Create a 4/4 red Dragon creature token with flying.
-    Scripted (engine-specific rule, not described by the fields above): excess_damage_dealt_to_opponent_creature_or_planeswalker
 ```
 
 Player prompts:
 
 - Rith, Liberated Primeval: pay or not: Do you want to pay {2}? If you don't, counter that object.
 
-Implementation: needed (trigger:becomes_target, step:counter_spell, step:unless_pay, static, scripted:excess_damage_dealt_to_opponent_creature_or_planeswalker, trigger:intervening_if, field:create_tokens.tokenKeywords)
+Implementation: needed (trigger:becomes_target, step:counter_spell, step:unless_pay, static, trigger:intervening_if, field:create_tokens.tokenKeywords)
 
 Questions for you:
 
@@ -1505,9 +1503,10 @@ Arena of Glory [draft]
     Oracle: {T}: Add {R}.
     Cost: {T}
     Mana: add {R}
-  [a3] mana [needed: needs scripted:exert_and_haste_if_spent_on_creature_spell]
+  [a3] mana [needed: needs scripted:exert_and_haste_if_spent_on_creature_spell, step:grant_effect, field:grant_effect.modify]
     Oracle: {R}, {T}, Exert this land: Add {R}{R}. If that mana is spent on a creature spell, it gains haste until end of turn.
     Cost: {R}, {T}
+    Effect: That object gains haste until end of turn.
     Scripted (engine-specific rule, not described by the fields above): exert_and_haste_if_spent_on_creature_spell
     Mana: add {R}{R}
 ```
@@ -1516,7 +1515,7 @@ Player prompts:
 
 - (none: no decisions)
 
-Implementation: needed (replacement:would_enter, scripted:exert_and_haste_if_spent_on_creature_spell)
+Implementation: needed (replacement:would_enter, scripted:exert_and_haste_if_spent_on_creature_spell, step:grant_effect, field:grant_effect.modify)
 
 Questions for you:
 
@@ -2182,21 +2181,21 @@ Implementation: needed (timing)
 | `static` | 19 | The Ur-Dragon; Urza's Incubator; Goldspan Dragon; Call the Spirit Dragons; Dragonlord Dromoka; Morophon, the Boundless; Scion of Draco; Sarkhan, Soul Aflame; Rhythm of the Wild; Temur Ascendancy; Rith, Liberated Primeval; Herald's Horn; Roaming Throne; Zurgo and Ojutai; Yavimaya, Cradle of Growth; Reliquary Tower; Garruk's Uprising; Dragonspeaker Shaman; Dragonlord's Servant |
 | `trigger:subject` | 19 | The Ur-Dragon; Sarkhan, Soul Aflame; Temur Ascendancy; Silumgar, the Drifting Death; Scalelord Reckoner; Old Gnawbone; Terror of the Peaks; Miirym, Sentinel Wyrm; Atarka, World Render; Ganax, Astral Hunter; Wrathful Red Dragon; Zurgo and Ojutai; The Great Henge; Dragon Tempest; Scourge of Valkas; Lathliss, Dragon Queen; Dragon's Hoard; Garruk's Uprising; Utvara Hellkite |
 | `replacement:would_enter` | 17 | Urza's Incubator; Morophon, the Boundless; Herald's Horn; Roaming Throne; Arena of Glory; Mistrise Village; Three Tree City; Path of Ancestry; Myriad Landscape; Prairie Stream; Drowned Catacomb; Glacial Fortress; Isolated Chapel; Temple of Deceit; Temple of Silence; Dragonstorm Globe; Bojuka Bog |
-| `field:choose.saveAs` | 11 | Urza's Incubator; Call the Spirit Dragons; Morophon, the Boundless; Ureni of the Unwritten; Hellkite Courser; Scion of the Ur-Dragon; Herald's Horn; Roaming Throne; Zurgo and Ojutai; Three Tree City; Orb of Dragonkind |
 | `mana:variable` | 11 | Mox Jasper; Rivaz of the Claw; Mox Opal; Cascading Cataracts; Command Tower; Path of Ancestry; Exotic Orchard; Reflecting Pool; Dragon's Hoard; Dragonstorm Globe; Orb of Dragonkind |
-| `step:choose` | 11 | Urza's Incubator; Call the Spirit Dragons; Morophon, the Boundless; Ureni of the Unwritten; Hellkite Courser; Scion of the Ur-Dragon; Herald's Horn; Roaming Throne; Zurgo and Ojutai; Three Tree City; Orb of Dragonkind |
-| `field:grant_effect.modify` | 10 | Sarkhan, Soul Aflame; Rivaz of the Claw; Hellkite Courser; Ancient Silver Dragon; Atarka, World Render; Scion of the Ur-Dragon; Mistrise Village; Dragon Tempest; Carnelian Orb of Dragonkind; Rogue's Passage |
-| `step:grant_effect` | 10 | Sarkhan, Soul Aflame; Rivaz of the Claw; Hellkite Courser; Ancient Silver Dragon; Atarka, World Render; Scion of the Ur-Dragon; Mistrise Village; Dragon Tempest; Carnelian Orb of Dragonkind; Rogue's Passage |
+| `field:choose.saveAs` | 10 | Urza's Incubator; Morophon, the Boundless; Ureni of the Unwritten; Hellkite Courser; Scion of the Ur-Dragon; Herald's Horn; Roaming Throne; Zurgo and Ojutai; Three Tree City; Orb of Dragonkind |
+| `field:grant_effect.modify` | 10 | Rivaz of the Claw; Hellkite Courser; Ancient Silver Dragon; Atarka, World Render; Scion of the Ur-Dragon; Arena of Glory; Mistrise Village; Dragon Tempest; Carnelian Orb of Dragonkind; Rogue's Passage |
+| `step:choose` | 10 | Urza's Incubator; Morophon, the Boundless; Ureni of the Unwritten; Hellkite Courser; Scion of the Ur-Dragon; Herald's Horn; Roaming Throne; Zurgo and Ojutai; Three Tree City; Orb of Dragonkind |
+| `step:grant_effect` | 10 | Rivaz of the Claw; Hellkite Courser; Ancient Silver Dragon; Atarka, World Render; Scion of the Ur-Dragon; Arena of Glory; Mistrise Village; Dragon Tempest; Carnelian Orb of Dragonkind; Rogue's Passage |
 | `field:damage_target.source` | 8 | Balefire Dragon; Terror of the Peaks; Wrathful Red Dragon; Caves of Koilos; Adarkar Wastes; Underground River; Dragon Tempest; Scourge of Valkas |
 | `field:search_library.filter` | 8 | Tiamat; Sarkhan Unbroken; Farseek; Boseiju, Who Endures; Myriad Landscape; Evolving Wilds; Terramorphic Expanse; Sarkhan's Triumph |
 | `field:search_library.shuffle` | 8 | Tiamat; Sarkhan Unbroken; Farseek; Boseiju, Who Endures; Myriad Landscape; Evolving Wilds; Terramorphic Expanse; Sarkhan's Triumph |
 | `field:search_library.to` | 8 | Tiamat; Sarkhan Unbroken; Farseek; Boseiju, Who Endures; Myriad Landscape; Evolving Wilds; Terramorphic Expanse; Sarkhan's Triumph |
 | `step:search_library` | 8 | Tiamat; Sarkhan Unbroken; Farseek; Boseiju, Who Endures; Myriad Landscape; Evolving Wilds; Terramorphic Expanse; Sarkhan's Triumph |
-| `field:add_counters.on` | 7 | Call the Spirit Dragons; Ramos, Dragon Engine; The Great Henge; Crucible of the Spirit Dragon; Dragon's Hoard; Dragonstorm Globe; Scourge of the Throne |
-| `field:choose.count` | 7 | Call the Spirit Dragons; Ureni of the Unwritten; Hellkite Courser; Scion of the Ur-Dragon; Herald's Horn; Zurgo and Ojutai; Orb of Dragonkind |
-| `field:choose.from` | 7 | Call the Spirit Dragons; Ureni of the Unwritten; Hellkite Courser; Scion of the Ur-Dragon; Herald's Horn; Zurgo and Ojutai; Orb of Dragonkind |
 | `field:search_library.count` | 7 | Tiamat; Farseek; Boseiju, Who Endures; Myriad Landscape; Evolving Wilds; Terramorphic Expanse; Sarkhan's Triumph |
-| `step:add_counters` | 7 | Call the Spirit Dragons; Ramos, Dragon Engine; The Great Henge; Crucible of the Spirit Dragon; Dragon's Hoard; Dragonstorm Globe; Scourge of the Throne |
+| `field:add_counters.on` | 6 | Ramos, Dragon Engine; The Great Henge; Crucible of the Spirit Dragon; Dragon's Hoard; Dragonstorm Globe; Scourge of the Throne |
+| `field:choose.count` | 6 | Ureni of the Unwritten; Hellkite Courser; Scion of the Ur-Dragon; Herald's Horn; Zurgo and Ojutai; Orb of Dragonkind |
+| `field:choose.from` | 6 | Ureni of the Unwritten; Hellkite Courser; Scion of the Ur-Dragon; Herald's Horn; Zurgo and Ojutai; Orb of Dragonkind |
+| `step:add_counters` | 6 | Ramos, Dragon Engine; The Great Henge; Crucible of the Spirit Dragon; Dragon's Hoard; Dragonstorm Globe; Scourge of the Throne |
 | `timing` | 6 | Mox Jasper; Rivaz of the Claw; Mox Opal; Ramos, Dragon Engine; Sarkhan Unbroken; Temple of the False God |
 | `trigger:becomes_target` | 6 | Goldspan Dragon; Scalelord Reckoner; Rith, Liberated Primeval; Miirym, Sentinel Wyrm; Roaming Throne; Scavenger Regent // Exude Toxin |
 | `trigger:intervening_if` | 6 | Tiamat; Rivaz of the Claw; Rith, Liberated Primeval; Hellkite Tyrant; Garruk's Uprising; Scourge of the Throne |
@@ -2229,8 +2228,6 @@ Implementation: needed (timing)
 | `step:scry` | 3 | Path of Ancestry; Temple of Deceit; Temple of Silence |
 | `cast_option` | 2 | Scion of Draco; The Great Henge |
 | `cost_reduction:variable` | 2 | Scion of Draco; The Great Henge |
-| `field:repeat_for_each.over` | 2 | Call the Spirit Dragons; Thrakkus the Butcher |
-| `field:repeat_for_each.steps` | 2 | Call the Spirit Dragons; Thrakkus the Butcher |
 | `field:search_library.reveal` | 2 | Tiamat; Sarkhan's Triumph |
 | `field:untap_target.all` | 2 | Hellkite Charger; Scourge of the Throne |
 | `field:untap_target.filter` | 2 | Hellkite Charger; Scourge of the Throne |
@@ -2239,8 +2236,8 @@ Implementation: needed (timing)
 | `predicate:step_done` | 2 | Scion of the Ur-Dragon; Hellkite Charger |
 | `quantity:stat` | 2 | Terror of the Peaks; Thrakkus the Butcher |
 | `static:addTypes` | 2 | Roaming Throne; Yavimaya, Cradle of Growth |
+| `step:copy` | 2 | Sarkhan, Soul Aflame; Miirym, Sentinel Wyrm |
 | `step:extra_combat` | 2 | Hellkite Charger; Scourge of the Throne |
-| `step:repeat_for_each` | 2 | Call the Spirit Dragons; Thrakkus the Butcher |
 | `step:reveal` | 2 | Herald's Horn; Orb of Dragonkind |
 | `step:shuffle` | 2 | Scion of the Ur-Dragon; Scavenger Regent // Exude Toxin |
 | `trigger:batch` | 2 | The Ur-Dragon; Zurgo and Ojutai |
@@ -2250,7 +2247,10 @@ Implementation: needed (timing)
 | `cost:loyalty` | 1 | Sarkhan Unbroken |
 | `duration:until` | 1 | Ancient Silver Dragon |
 | `face` | 1 | Scavenger Regent // Exude Toxin |
+| `field:copy.exceptAddTypes` | 1 | Sarkhan, Soul Aflame |
+| `field:copy.exceptName` | 1 | Sarkhan, Soul Aflame |
 | `field:copy.notLegendary` | 1 | Miirym, Sentinel Wyrm |
+| `field:copy.of` | 1 | Sarkhan, Soul Aflame |
 | `field:copy.token` | 1 | Miirym, Sentinel Wyrm |
 | `field:create_delayed_trigger.steps` | 1 | Hellkite Courser |
 | `field:create_delayed_trigger.trigger` | 1 | Hellkite Courser |
@@ -2262,12 +2262,13 @@ Implementation: needed (timing)
 | `field:gain_control.filter` | 1 | Hellkite Tyrant |
 | `field:gain_control.who` | 1 | Hellkite Tyrant |
 | `field:grant_effect.appliesTo` | 1 | Mistrise Village |
-| `field:grant_effect.exceptName` | 1 | Sarkhan, Soul Aflame |
 | `field:mass_pump.who` | 1 | Silumgar, the Drifting Death |
 | `field:move_card_zone.filter` | 1 | The Ur-Dragon |
 | `field:move_card_zone.from` | 1 | The Ur-Dragon |
 | `field:reanimate.amount` | 1 | Ancient Brass Dragon |
 | `field:reanimate.reflexive` | 1 | Ancient Brass Dragon |
+| `field:repeat_for_each.over` | 1 | Thrakkus the Butcher |
+| `field:repeat_for_each.steps` | 1 | Thrakkus the Butcher |
 | `field:search_library.anyNumber` | 1 | Sarkhan Unbroken |
 | `field:search_library.distinctNames` | 1 | Tiamat |
 | `field:search_library.excludeNamed` | 1 | Tiamat |
@@ -2275,7 +2276,6 @@ Implementation: needed (timing)
 | `field:search_library.who` | 1 | Boseiju, Who Endures |
 | `field:untap_target.optionalCost` | 1 | Hellkite Charger |
 | `filter:chosenColor` | 1 | Three Tree City |
-| `filter:colored` | 1 | Call the Spirit Dragons |
 | `filter:isCommander` | 1 | Hellkite Courser |
 | `modes` | 1 | Crux of Fate |
 | `predicate:cast_from` | 1 | Rivaz of the Claw |
@@ -2295,7 +2295,6 @@ Implementation: needed (timing)
 | `scripted:cost_reduction_colored_mana_only` | 1 | Morophon, the Boundless |
 | `scripted:count_spell_colors` | 1 | Ramos, Dragon Engine |
 | `scripted:domain_count_distinct_basic_land_types` | 1 | Scion of Draco |
-| `scripted:excess_damage_dealt_to_opponent_creature_or_planeswalker` | 1 | Rith, Liberated Primeval |
 | `scripted:exert_and_haste_if_spent_on_creature_spell` | 1 | Arena of Glory |
 | `scripted:look_at_top_card_any_time` | 1 | Korlessa, Scale Singer |
 | `scripted:mana_rider_text` | 1 | Path of Ancestry |
@@ -2306,9 +2305,9 @@ Implementation: needed (timing)
 | `scripted:types_lands_you_control_could_produce` | 1 | Reflecting Pool |
 | `scripted:win_the_game` | 1 | Hellkite Tyrant |
 | `static:costMod_quantity` | 1 | Morophon, the Boundless |
-| `step:copy` | 1 | Miirym, Sentinel Wyrm |
 | `step:create_delayed_trigger` | 1 | Hellkite Courser |
 | `step:gain_control` | 1 | Hellkite Tyrant |
+| `step:repeat_for_each` | 1 | Thrakkus the Butcher |
 | `targets:multi` | 1 | Ancient Brass Dragon |
 | `trigger:dealt_damage` | 1 | Wrathful Red Dragon |
 | `trigger:nth` | 1 | Scourge of the Throne |

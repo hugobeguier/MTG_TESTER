@@ -16,7 +16,7 @@
 
 import type { Ability, ObjectFilter, PlayerRef, Prompt, ReplacementSpec, Step } from "../schema";
 import { chars, emit, label, NeedAsk, obj, printedAbilities, Reject, takeAnswer, tryObj, Unsupported, type Run } from "./core";
-import { getIndex } from "./layers";
+import { getIndex, grantedEnterAbilities } from "./layers";
 import { durables } from "./durable";
 import { evalPredicate, evalQuantity, matchesFilter, resolvePlayers, type QCtx } from "./query";
 import { changeLife, decide, runInline, standardCounterPT, tokenDefFromStep, type AskSpec } from "./steps";
@@ -175,6 +175,7 @@ function candidates(r: Run, ev: ReplEvent, done: Set<string>): Cand[] {
   const o = id ? tryObj(r, id) : undefined;
   if (o && o.zone !== "battlefield" && (ev.kind === "enter" || ev.kind === "zone")) {
     for (const a of printedAbilities(r, o)) if (a.kind === "replacement") consider(o.id, a, ev.kind === "enter" ? ev.controller : o.controller, o.timestamp);
+    if (ev.kind === "enter") for (const a of grantedEnterAbilities(r, o)) if (!printedAbilities(r, o).some((x) => x.id === a.id)) consider(o.id, a, ev.controller, o.timestamp);
   }
   return out.sort((a, b) => Number(b.self) - Number(a.self) || a.ts - b.ts || a.key.localeCompare(b.key));
 }
@@ -418,7 +419,7 @@ export function applyReplacements(r: Run, ev: ReplEvent): ReplEvent {
   const idx = getIndex(r);
   const id = eventObjectId(ev);
   const o = id ? tryObj(r, id) : undefined;
-  const own = !!o && o.zone !== "battlefield" && (ev.kind === "enter" || ev.kind === "zone") && printedAbilities(r, o).some((a) => a.kind === "replacement");
+  const own = !!o && o.zone !== "battlefield" && (ev.kind === "enter" || ev.kind === "zone") && (printedAbilities(r, o).some((a) => a.kind === "replacement") || (ev.kind === "enter" && idx.l6 && grantedEnterAbilities(r, o).length > 0));
   if (!idx.repls.length && !own && !durables(r).some((d) => d.replacement)) return ev;
   const done = new Set<string>(r.activeRepl ?? []);
   let cur: ReplEvent = ev;

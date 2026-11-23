@@ -547,10 +547,10 @@ Re-rendered plain English:
 
 ```
 Braids, Arisen Nightmare [draft]
-  [a1] triggered [needed: needs ref:sacrificed, quantity:players_count, field:sacrifice_permanent.filter, field:sacrifice_permanent.sharesCardTypeWith, field:sacrifice_permanent.who, predicate:step_done, field:life_change.amount, field:life_change.lose, field:life_change.onlyForPlayersWhoDidNot, field:life_change.who, predicate:all, predicate:not]
+  [a1] triggered [needed: needs ref:sacrificed, quantity:players_count, field:sacrifice_permanent.filter, field:sacrifice_permanent.sharesCardTypeWith, field:sacrifice_permanent.who, predicate:step_done, field:life_change.amount, field:life_change.lose, field:life_change.onlyForPlayersWhoDidNot, field:life_change.who]
     Oracle: At the beginning of your end step, you may sacrifice an artifact, creature, enchantment, land, or planeswalker. If you do, each opponent may sacrifice a permanent of their choice that shares a card type with it. For each opponent who doesn't, that player loses 2 life and you draw a card.
     Trigger: At the beginning of your end step
-    Effect: You may sacrifice an artifact, creature, enchantment, land, or planeswalker you control. Then, IF you did (s1): you may each opponent sacrifices a permanent. Then, IF you did (s1) and it is not true that that player did (s2): each opponent gains 2 life. Then, IF you did (s1): draw the number of opponents for which it is not true that that player did (s2) cards.
+    Effect: You may sacrifice an artifact, creature, enchantment, land, or planeswalker you control. Then, IF you did (s1): you may each opponent sacrifices a permanent. Then, IF you did (s1): each opponent gains 2 life. Then, IF you did (s1): draw the number of opponents for which it is not true that that player did (s2) cards.
 ```
 
 Player prompts:
@@ -558,7 +558,7 @@ Player prompts:
 - Braids, Arisen Nightmare: optional: Do you want to sacrifice an artifact, creature, enchantment, land, or planeswalker you control?
 - Braids, Arisen Nightmare: optional: Do you want to each opponent sacrifices a permanent?
 
-Implementation: needed (ref:sacrificed, quantity:players_count, field:sacrifice_permanent.filter, field:sacrifice_permanent.sharesCardTypeWith, field:sacrifice_permanent.who, predicate:step_done, field:life_change.amount, field:life_change.lose, field:life_change.onlyForPlayersWhoDidNot, field:life_change.who, predicate:all, predicate:not)
+Implementation: needed (ref:sacrificed, quantity:players_count, field:sacrifice_permanent.filter, field:sacrifice_permanent.sharesCardTypeWith, field:sacrifice_permanent.who, predicate:step_done, field:life_change.amount, field:life_change.lose, field:life_change.onlyForPlayersWhoDidNot, field:life_change.who)
 
 ### Sheoldred, Whispering One
 
@@ -1570,7 +1570,6 @@ Implementation: needed (replacement:would_enter, cost:sacrifice, step:search_lib
 | `field:move_card_zone.who` | 2 | Sheoldred // The True Scriptures; Living Death |
 | `filter:notSubtypes` | 2 | Mikaeus, the Unhallowed; Junji, the Midnight Sky |
 | `keyword:enchant` | 2 | Animate Dead; Journey to Eternity // Atzal, Cave of Eternity |
-| `predicate:not` | 2 | Plaguecrafter; Braids, Arisen Nightmare |
 | `predicate:stat` | 2 | Meren of Clan Nel Toth; Shifting Woodland |
 | `quantity:life_lost_this_way` | 2 | Gray Merchant of Asphodel; Kokusho, the Evening Star |
 | `static:addTypes` | 2 | Urborg, Tomb of Yawgmoth; Yavimaya, Cradle of Growth |
@@ -1617,8 +1616,8 @@ Implementation: needed (replacement:would_enter, cost:sacrifice, step:search_lib
 | `filter:isCommander` | 1 | Command Beacon |
 | `keyword:exploit` | 1 | Sidisi, Undead Vizier |
 | `keyword:landwalk` | 1 | Sheoldred, Whispering One |
-| `predicate:all` | 1 | Braids, Arisen Nightmare |
 | `predicate:compare` | 1 | Susur Secundi, Void Altar |
+| `predicate:not` | 1 | Plaguecrafter |
 | `predicate:source_state` | 1 | Animate Dead |
 | `quantity:count_this_turn` | 1 | Spymaster's Vault |
 | `quantity:devotion` | 1 | Gray Merchant of Asphodel |

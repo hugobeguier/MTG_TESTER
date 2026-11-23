@@ -2,16 +2,20 @@
 // step: never mutate before asking. Wrapped steps keep their base behaviour for the fields they already handled.
 
 import type { ObjectFilter, Prompt, Step } from "../schema";
-import { chars, emit, label, moveObject, player, tryObj, Unsupported, type Run } from "./core";
+import { untapObject, chars, emit, label, moveObject, player, tick, tryObj, Unsupported, type Run } from "./core";
 import { addDurable } from "./durable";
 import { addLink } from "./links";
 import { evalQuantity, objectsMatching, resolveObjs, resolvePlayers } from "./query";
 import { addRegenShield } from "./regen";
 import { defenderOptions } from "./combat";
-import { setResult } from "./saved";
+import { playerHas } from "./layers";
+import { lookedLive, saveList, setResult } from "./saved";
+import { targetHooks } from "./core";
+import { isObjId } from "./types";
+import { shuffleInPlace } from "./core";
 import { recordMilled, revealUntilRun } from "./reveal7";
 import { checkCounterAnswer, counterSpec } from "./counters7";
-import { addCounters, dealDamage, decide, destroyObject, discardCard, fallbackPromptOf, players, refs, type AskSpec, type Handler, type StepResult, type StepSpec } from "./steps";
+import { addCounters, changeLife, dealDamage, decide, destroyObject, discardCard, fallbackPromptOf, players, refs, sacrificeObject, type AskSpec, type Handler, type StepResult, type StepSpec } from "./steps";
 import type { Env, ObjId } from "./types";
 
 import { addTemporaryPT as addPump } from "./steps";
@@ -19,7 +23,79 @@ const qty = (r: Run, env: Env, step: Step, key = "amount", dflt = 1): number => 
 const cardOptions = (r: Run, ids: ObjId[]) => ids.map((id) => ({ id, label: label(r, id) }));
 
 export const STEPS7: Record<string, StepSpec> = {};
-export const INTERNAL7: Record<string, Handler> = {};
+export const INTERNAL7: Record<string, Handler> = {
+  /** a copy on the stack: its controller may choose new targets, slot by slot (copy.chooseNewTargets) */
+  __retarget: (r, ex, step, answer) => {
+    const item = r.s.stack.find((i) => i.id === step.itemId);
+    if (!item) return "done";
+    let pi = Number(step.pi), si = Number(step.si);
+    for (; pi < item.parts.length; pi++, si = 0) {
+      const part = item.parts[pi];
+      for (; si < part.specs.length; si++) {
+        const spec = part.specs[si], cur = part.targets[spec.id] ?? [];
+        if (!cur.length) continue;
+        const q = { controller: item.controller, source: item.sourceId, x: item.x };
+        const cands = [...new Set([...(targetHooks.candidates?.(r, spec, q, item.objectId) ?? []), ...cur.filter((t) => !isObjId(t) || tryObj(r, t))])];
+        const d = decide({ kind: "choose_targets", player: item.controller, prompt: fallbackPromptOf(r, ex.env, "new targets", `Choose the target${cur.length === 1 ? "" : "s"} of the copy (choosing the same ones keeps them).`), options: cands.map((id) => ({ id, label: isObjId(id) ? label(r, id) : `player ${id}` })), min: cur.length, max: cur.length }, answer);
+        if ("ask" in d) return d;
+        part.targets[spec.id] = d.ids;
+        return { push: [{ kind: "__retarget" as never, itemId: step.itemId, pi, si: si + 1 } as unknown as Step] };
+      }
+    }
+    return "done";
+  },
+  /** the controller picks ONE of explicit objects and it is saved under `saveAs` */
+  __choose_ids: (r, ex, step, answer) => {
+    const ids = (step.ids as ObjId[]).filter((id) => tryObj(r, id)?.zone === "battlefield");
+    if (ids.length <= 1) { saveList(r, ex.env, String(step.saveAs), ids); return "done"; }
+    const d = decide({ kind: "choose_cards", player: ex.env.controller, prompt: fallbackPromptOf(r, ex.env, "choose one", "Choose one of them."), options: cardOptions(r, ids), min: 1, max: 1 }, answer);
+    if ("ask" in d) return d;
+    saveList(r, ex.env, String(step.saveAs), d.ids);
+    return "done";
+  },
+  __spirit_note: (r, ex) => { const live = (ex.env.chosen.chosen ?? []).filter((id) => tryObj(r, id)?.zone === "battlefield"); ex.env.chosen.__sd = [...new Set([...(ex.env.chosen.__sd ?? []), ...live])]; return "done"; },
+  __spirit_win: (r, ex) => {
+    const n = (ex.env.chosen.__sd ?? []).length;
+    if (n >= 5 && !playerHas(r, ex.env.controller, "can't win the game") && !r.s.gameOver) { r.s.gameOver = { winner: ex.env.controller, reason: `${label(r, ex.env.source)}: you put +1/+1 counters on five Dragons and win the game` }; emit(r, { type: "game_over", ...r.s.gameOver }); }
+    return "done";
+  },
+  /** Braids, Arisen Nightmare: this player MAY sacrifice a permanent that shares a card type with what was sacrificed; the answer is theirs alone (decision addressed to them) */
+  __sacrifice_shares: (r, ex, step, answer) => {
+    const pid = String(step.player), env = ex.env, types = env.sacrificedTypes ?? [];
+    const mine = r.s.battlefield.filter((id) => r.s.objects[id].controller === pid && chars(r, id).types.some((t) => types.includes(t)));
+    if (!mine.length) return "done";
+    const d = decide({ kind: "choose_cards", player: pid, prompt: (step.prompt as Prompt | undefined) ?? fallbackPromptOf(r, env, "sacrifice", `You may sacrifice a permanent that shares a card type with ${types.join(" / ")}. Choose one, or none.`), options: cardOptions(r, mine), min: 0, max: 1 }, answer);
+    if ("ask" in d) return d;
+    if (d.ids.length) { for (const id of d.ids) sacrificeObject(r, id); ((env.doneBy ??= {})[String(step.stepId)] ??= []).push(pid); }
+    return "done";
+  },
+  /** "as many times as you choose, ..." (Lim-Dul's Vault): ask whether to do the nested steps once more; each answer "yes" runs them and asks again */
+  __repeat_ask: (r, ex, step, answer) => {
+    const prompt = (step.prompt as Prompt | undefined) ?? fallbackPromptOf(r, ex.env, "repeat", "Do this (again)?");
+    const d = decide({ kind: "choose_yes_no", player: ex.env.controller, prompt, options: [{ id: "yes", label: "Yes" }, { id: "no", label: "No" }], min: 1, max: 1 }, answer);
+    if ("ask" in d) return d;
+    return d.yes ? { push: [...(step.inner as Step[]), step] } : "done";
+  },
+  /** "put any number of target creature cards with total mana value X or less ... onto the battlefield" (Ancient Brass Dragon): picked one at a time, only cards that still fit the budget are offered */
+  __reanimate_pick: (r, ex, step, answer) => {
+    const env = ex.env, base = step.base as Step, picked = step.picked as ObjId[];
+    const budget = evalQuantity(r, base.amount as never, env);
+    const used = picked.reduce((n, id) => n + chars(r, id).mv, 0);
+    const tspec = typeof base.target === "string" ? env.item.parts.flatMap((pp) => pp.specs).find((sp) => sp.id === base.target) : undefined;
+    const f = ((base.filter ?? tspec?.filter ?? {}) as ObjectFilter);
+    const cands = objectsMatching(r, { ...f, zone: f.zone ?? "graveyard", owner: undefined }, env).filter((id) => !picked.includes(id) && used + chars(r, id).mv <= budget);
+    const finish = (): StepResult => {
+      const ctl = resolvePlayers(r, base.who ?? "you", env)[0];
+      for (const t of picked) { const o = tryObj(r, t); if (o && o.zone === "graveyard") { moveObject(r, t, "battlefield", { controller: ctl }); emit(r, { type: "reanimated", id: t }); (env.created ??= []).push(t); } }
+      return "done";
+    };
+    if (!cands.length) return finish();
+    const d = decide({ kind: "choose_cards", player: env.controller, prompt: fallbackPromptOf(r, env, "reanimate", `Choose a creature card (total mana value ${budget} or less; ${budget - used} left), or none to stop.`), options: cardOptions(r, cands), min: 0, max: 1 }, answer);
+    if ("ask" in d) return d;
+    if (!d.ids.length) return finish();
+    return { push: [{ kind: "__reanimate_pick", base, picked: [...picked, d.ids[0]] } as unknown as Step] };
+  },
+};
 
 type Pre = (r: Run, ex: Parameters<Handler>[1], step: Step, answer: Parameters<Handler>[3]) => StepResult | undefined;
 /** Extend a base step: `extra` are the new fields, `pre` may take over a run (returning a result) or fall through to the base behaviour. */
@@ -74,7 +150,8 @@ export function steps7(base: Record<string, StepSpec>): void {
     return { push: players(r, ex.env, step).map((p) => ({ kind: "__discard_up_to" as never, player: p, n: qty(r, ex.env, step), id: step.id, saveAs: step.saveAs, prompt: step.prompt }) as Step) };
   });
   // reanimate of several cards: each with a different mana value / all matching
-  extend(base, "reanimate", ["differentManaValues", "all", "filter"], (r, ex, step) => {
+  extend(base, "reanimate", ["differentManaValues", "all", "filter", "amount"], (r, ex, step) => {
+    if (step.amount !== undefined && !step.all) return { push: [{ kind: "__reanimate_pick", base: step, picked: [] } as unknown as Step] };
     if (!step.differentManaValues && !step.all) return undefined;
     const ctl = resolvePlayers(r, step.who ?? "you", ex.env)[0];
     const f = (step.filter ?? {}) as ObjectFilter;
@@ -97,6 +174,58 @@ export function steps7(base: Record<string, StepSpec>): void {
     return { push: [{ kind: "__counters_pick" as never, on: id, n, upTo: !!step.upTo, saveAs: step.saveAs, prompt: step.prompt } as Step] };
   });
   extend(base, "grant_effect", ["appliesTo"]);
+  extend(base, "sacrifice_permanent", ["sharesCardTypeWith"], (r, ex, step) => {
+    if (step.sharesCardTypeWith === undefined) return undefined;
+    if (step.sharesCardTypeWith !== "sacrificed") throw new Unsupported("field:sacrifice_permanent.sharesCardTypeWith");
+    return { push: players(r, ex.env, step).map((p) => ({ kind: "__sacrifice_shares" as never, player: p, stepId: step.id, prompt: step.prompt }) as Step) };
+  });
+  // life loss only for the players of the group who did NOT do an earlier per-player step (Braids: "for each opponent who doesn't, that player loses 2 life")
+  extend(base, "life_change", ["onlyForPlayersWhoDidNot"], (r, ex, step) => {
+    if (step.onlyForPlayersWhoDidNot === undefined) return undefined;
+    const done = ex.env.doneBy?.[String(step.onlyForPlayersWhoDidNot)] ?? [];
+    const raw = step.lifeDelta !== undefined ? evalQuantity(r, step.lifeDelta as never, ex.env) : qty(r, ex.env, step, "amount", 0);
+    const delta = step.lose ? -Math.abs(raw) : raw;
+    let lost = 0;
+    for (const p of players(r, ex.env, step).filter((x) => !done.includes(x))) { const before = player(r, p).life; changeLife(r, ex.env, p, delta); if (delta < 0) lost += Math.max(0, before - player(r, p).life); }
+    if (delta < 0) ex.env.lastLifeLost = lost;
+    return "done";
+  });
+  extend(base, "repeat_for_each", ["repeatCount"], (_r, _ex, step) => {
+    if (step.repeatCount === undefined) return undefined;
+    if (step.repeatCount !== "as_many_as_you_choose") throw new Unsupported("field:repeat_for_each.repeatCount");
+    return { push: [{ kind: "__repeat_ask" as never, inner: step.steps ?? [], prompt: step.prompt } as Step] };
+  });
+  // shuffle everything except the cards just looked at (Lim-Dul's Vault: they are put on top afterwards)
+  extend(base, "shuffle", ["exceptLooked"], (r, ex, step) => {
+    if (!step.exceptLooked) return undefined;
+    for (const p of resolvePlayers(r, step.who ?? "you", ex.env)) {
+      const lib = player(r, p).library, held = lookedLive(r, ex.env).filter((id) => lib.includes(id));
+      const rest = lib.filter((id) => !held.includes(id));
+      shuffleInPlace(r, rest); lib.splice(0, lib.length, ...held, ...rest);
+      emit(r, { type: "shuffle", player: p });
+    }
+    return "done";
+  });
+  // Aminatou, the Fateshifter: every player gains control of the nonland permanents (other than the source) controlled by the next player in the chosen direction
+  extend(base, "gain_control", ["rotate", "excludeSelf"], (r, ex, step) => {
+    if (step.rotate === undefined) return undefined;
+    if (step.rotate !== "next_player_in_chosen_direction") throw new Unsupported("field:gain_control.rotate");
+    const env = ex.env;
+    const dir = tryObj(r, env.source)?.chosen?.mode;
+    if (dir !== "left" && dir !== "right") throw new Unsupported("field:gain_control.rotate", "no direction was chosen");
+    const seats = r.s.players.filter((p) => !p.hasLost).map((p) => p.id);
+    // the next player to the left is the next in turn order; a permanent controlled by Q goes to the player whose next player (in that direction) is Q
+    const dest = (q: string): string => { const i = seats.indexOf(q); return seats[(i + (dir === "left" ? -1 : 1) + seats.length) % seats.length]; };
+    const moves = objectsMatching(r, (step.filter ?? {}) as ObjectFilter, env).filter((id) => !(step.excludeSelf && id === env.source)).map((id) => ({ id, to: dest(tryObj(r, id)!.controller) }));
+    for (const m of moves) {
+      const o = tryObj(r, m.id);
+      if (!o || o.zone !== "battlefield" || o.controller === m.to) continue;
+      const was = o.controller;
+      o.controller = m.to; o.controlledSince = tick(r);
+      emit(r, { type: "control_changed", id: m.id, from: was, to: m.to });
+    }
+    return "done";
+  });
   // "you and target opponent each draw / create": the same step also for `alsoWho` (run once per extra player, "that player")
   for (const kind of ["draw_cards", "create_tokens", "damage_target"]) {
     const b = base[kind];
@@ -233,7 +362,7 @@ export function steps7(base: Record<string, StepSpec>): void {
       if ("ask" in d) return d;
       ids = d.ids;
     }
-    for (const id of ids) { const o = tryObj(r, id); if (o && o.tapped) { o.tapped = false; emit(r, { type: "untap", id }); } }
+    for (const id of ids) { const o = tryObj(r, id); if (o && o.tapped) untapObject(r, o); }
     return "done";
   };
   INTERNAL7.__discard_up_to = (r, ex, step, answer) => {

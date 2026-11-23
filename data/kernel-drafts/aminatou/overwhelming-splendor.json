@@ -40,7 +40,7 @@
           "types": [
             "creature"
           ],
-          "controller": "opponent"
+          "controller": "enchanted_player"
         },
         "modify": [
           {

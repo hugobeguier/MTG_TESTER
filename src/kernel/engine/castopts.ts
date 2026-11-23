@@ -79,14 +79,26 @@ export function grantedMorph(r: Run, o: GameObject): CastOption[] {
   return has ? [{ id: "morph", kind: "alternative", from: "hand", cost: [{ mana: "{3}" } as Cost], replacesManaCost: true, optional: false } as CastOption] : [];
 }
 
+/** "Dragon creature" style spell descriptions: every word is a card type or a subtype of the card (its own face). */
+function spellWordsMatch(r: Run, o: GameObject, spec: string): boolean {
+  const m = faceMeta(defOf(r, o)!, o);
+  const types = (m.types ?? []).map((x) => x.toLowerCase()), subs = (m.subtypes ?? []).map((x) => x.toLowerCase());
+  return spec.split(/\s+/).filter(Boolean).every((w) => types.includes(w.toLowerCase()) || subs.includes(w.toLowerCase()));
+}
+
 export function grantedFree(r: Run, o: GameObject): CastOption[] {
-  if (o.zone !== "hand" && !(o.zone === "library" && isTopCard(r, o.id))) return [];
+  if (o.zone !== "hand" && o.zone !== "graveyard" && !(o.zone === "library" && isTopCard(r, o.id))) return [];
   const out: CastOption[] = [];
   for (const id of r.s.battlefield) {
     const p = r.s.objects[id];
     if (!p || p.controller !== o.owner) continue;
     for (const a of abilitiesOf(r, p)) {
       const h = a.scripted?.handler;
+      if (o.zone === "graveyard") { // Rivaz of the Claw: once during each of your turns, cast a Dragon creature spell from your graveyard
+        if (h === "cast_from_graveyard_permission" && r.s.turn.active === o.owner && !r.s.activations[`t:${id}:grave1`] && spellWordsMatch(r, o, String((a.scripted?.params as { spells?: string } | undefined)?.spells ?? ""))) out.push({ id: "grave1:" + id, kind: "cast_from_zone", from: "graveyard", cost: [], replacesManaCost: false, optional: false } as CastOption);
+        continue;
+      }
+      if (h === "cast_enchantment_paying_life" && o.zone === "hand" && r.s.turn.active === o.owner && !r.s.activations[`t:${id}:lifecast`] && faceMeta(defOf(r, o)!, o).types.includes("enchantment")) { out.push({ id: "lifecast1:" + id, kind: "alternative", from: "hand", cost: [{ life: { ref: "stat", of: "self", stat: "mana_value" } } as unknown as Cost], replacesManaCost: true, optional: false } as CastOption); continue; } // Demon of Fate's Design: pay life equal to its mana value instead of its mana cost
       if (h === "cast_without_paying_mana_cost" && o.zone === "hand") { const sp = String((a.scripted?.params as { spells?: string } | undefined)?.spells ?? ""); if (!sp || faceMeta(defOf(r, o)!, o).subtypes?.some((x) => x.toLowerCase() === sp.toLowerCase())) out.push({ id: "free-hand:" + id, kind: "alternative", from: "hand", cost: [], replacesManaCost: true, optional: false } as CastOption); } // Dracogenesis: Dragon spells
       else if (h === "free_cast_from_hand" && o.zone === "hand") out.push({ id: "free-hand:" + id, kind: "alternative", from: "hand", cost: [], replacesManaCost: true, optional: false } as CastOption);
       else if (h === "free_cast_once_per_turn" && r.s.turn.active === o.owner && !r.s.activations[`t:${id}:freecast`] && !out.some((c) => c.id.startsWith("freecast1:"))) out.push({ id: "freecast1:" + id, kind: "alternative", from: o.zone, cost: [], replacesManaCost: true, optional: false } as CastOption);

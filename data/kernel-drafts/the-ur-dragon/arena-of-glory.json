@@ -78,7 +78,21 @@
       },
       "implementation": "needed",
       "needs": [
-        "scripted:exert_and_haste_if_spent_on_creature_spell"
+        "scripted:exert_and_haste_if_spent_on_creature_spell",
+        "step:grant_effect",
+        "field:grant_effect.modify"
+      ],
+      "steps": [
+        {
+          "kind": "grant_effect",
+          "target": "event_object",
+          "modify": [
+            {
+              "grant": "haste"
+            }
+          ],
+          "duration": "until_end_of_turn"
+        }
       ]
     }
   ],

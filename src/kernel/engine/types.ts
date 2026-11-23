@@ -78,12 +78,16 @@ export interface GameObject {
   /** Auras/Equipment: the object this one is attached to; valid only while that object is on the battlefield with the same timestamp */
   attachedTo?: ObjId;
   attachedToTs?: number;
+  /** an Aura that enchants a PLAYER (Overwhelming Splendor, Shadow of the Second Sun): that player; the Aura is put into the graveyard when the player has lost */
+  attachedPlayer?: PlayerId;
   /** the X this permanent was cast with ("enters with X counters") */
   castX?: number;
   /** "As this enters, choose a color": remembered by the choose step (remember: true), read back by chosen_is / mana */
   chosen?: { color?: string; mode?: string; type?: string; cardType?: string; landType?: string; name?: string };
   /** exiled / put onto the battlefield face down: only the owner may know what it is (viewFor hides the name from everyone else) */
   faceDown?: boolean;
+  /** exerted (CR 701.43): the turn it was exerted; it does not untap during its controller's next untap step (cleared there) */
+  exerted?: number;
   /** prepared (Secrets of Strixhaven): while true the permanent can cast a copy of its other face's spell (core.preparedAbility) */
   prepared?: boolean;
   /** an Aura that enchants a card that is not on the battlefield (Animate Dead: "enchant creature card in a graveyard"): that card, until the aura's ETB rewrites it (SBA 704.5m skips it) */
@@ -162,6 +166,8 @@ export interface TriggerContext {
   lki?: Lki;
   /** cast triggers: how the spell was cast (so "if it was kicked" / "if an additional cost was paid" can be read) */
   cast?: CastInfo;
+  /** "whenever one or more ... enter": every object that entered in the same batch and matches (Twilight Diviner: "a token that's a copy of ONE of them") */
+  batchObjs?: ObjId[];
   /** X of the ability that caused the trigger (cycling {X}{1}{U}: "When you cycle this card, create an X/X Shark") */
   x?: number;
 }
@@ -213,7 +219,9 @@ export interface ContinuousEffect {
   base?: { power: number; toughness: number };
   addTypes?: string[];
   setColors?: string[];
-  until: "end_of_turn";
+  /** an ability the object gained ("it gains a dies trigger"): a spell keeps it as the permanent it becomes (core.moveObject re-stamps it); it ends when the object leaves the battlefield */
+  ability?: import("../schema").Ability;
+  until: "end_of_turn" | "leaves";
 }
 
 // ---------------------------------------------------------------- durable effects and delayed triggers (kernel step 5)
@@ -333,6 +341,10 @@ export interface GameState {
   combat: CombatState | null;
   /** additional combat phases still to come this turn (extra_combat) */
   extraCombats: number;
+  /** additional beginning phases still to come this turn (Shadow of the Second Sun): after the current postcombat main phase */
+  extraBeginnings?: number;
+  /** true while the added untap / upkeep / draw steps are being played (the draw step is followed by the end step) */
+  inExtraBeginning?: boolean;
   /** the monarch (kernel step 6): draws at their end step; combat damage to them by a creature steals it */
   monarch?: PlayerId;
   /** player-scoped durable effects (older states may lack the field: read it with `?? []`) */
@@ -410,6 +422,8 @@ export interface Draft {
   triggerId?: string;
   /** where the card came from (to put it back on cancel) */
   origin?: { zone: Zone; index: number };
+  /** a prepared permanent whose spell copy this cast is: it stops being prepared once the spell is cast */
+  preparedFrom?: ObjId;
   payWith?: ObjId[];
   autoPay?: boolean;
   /** "for each opponent" target slots: opponents already asked and the targets picked so far, by slot id */
@@ -472,13 +486,19 @@ export interface Env {
   looked?: string[];
   /** the player the current repeat_for_each iteration is about ("that player") */
   thatPlayer?: PlayerId;
+  /** per-player results of steps that every player of a group answers for themselves (Braids: "each opponent may sacrifice ..."): step id -> players who did it */
+  doneBy?: Record<string, PlayerId[]>;
+  /** the card types of the permanent(s) a sacrifice step just sacrificed (read by sharesCardTypeWith) */
+  sacrificedTypes?: string[];
+  /** the objects of the batch that triggered this ability (TriggerContext.batchObjs) */
+  batchObjs?: ObjId[];
 }
 export interface Exec { frames: Frame[]; env: Env; partIndex: number }
 
 // ---------------------------------------------------------------- actions
 
 export type Action =
-  | { type: "castSpell"; player: PlayerId; cardId: ObjId; modes?: string[]; targets?: Record<string, string[]>; x?: number; payWith?: ObjId[]; autoPay?: boolean;
+  | { type: "castSpell"; player: PlayerId; cardId: ObjId; /** internal: castPrepared */ preparedFrom?: ObjId; modes?: string[]; targets?: Record<string, string[]>; x?: number; payWith?: ObjId[]; autoPay?: boolean;
       /** how each Phyrexian mana symbol is paid, in cost order (asked as a decision when omitted) */
       phyrexian?: Array<"mana" | "life">;
       /** artifacts to tap for improvise (asked as a decision when omitted) */
@@ -492,6 +512,10 @@ export type Action =
   | { type: "passPriority"; player: PlayerId; fastForward?: boolean }
   | { type: "answerDecision"; player: PlayerId; decisionId: string; choice: Choice }
   | { type: "advancePhase"; player: PlayerId }
+  /** a special action (CR 116.2b / 702.37e): turn a face-down permanent you control face up by paying its morph cost. It does not use the stack and you keep priority. */
+  | { type: "turnFaceUp"; player: PlayerId; objectId: ObjId; payWith?: ObjId[]; autoPay?: boolean }
+  /** cast a copy of the other face's spell of a prepared permanent you control: a REAL spell (cast triggers, can be countered); it stops being prepared */
+  | { type: "castPrepared"; player: PlayerId; objectId: ObjId; targets?: Record<string, string[]>; payWith?: ObjId[]; autoPay?: boolean }
   /** the active player's turn-based action in the declare attackers step; an empty list = no attack. Attack taxes are paid from the pool / by tapping sources (payWith, autoPay as for casting). */
   | { type: "declareAttackers"; player: PlayerId; attackers: Array<{ id: ObjId; defender: string }>; payWith?: ObjId[]; autoPay?: boolean }
   /** a defending player's declaration; each block names one of the player's own creatures and the attacker it blocks */

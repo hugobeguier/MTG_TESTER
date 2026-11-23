@@ -88,12 +88,9 @@
         "whose": "yours",
         "interveningIf": {
           "check": "did_this_turn",
-          "event": "dealt_damage",
+          "event": "excess_damage",
           "actor": "opponent"
         }
-      },
-      "scripted": {
-        "handler": "excess_damage_dealt_to_opponent_creature_or_planeswalker"
       },
       "steps": [
         {
@@ -113,7 +110,6 @@
       ],
       "implementation": "needed",
       "needs": [
-        "scripted:excess_damage_dealt_to_opponent_creature_or_planeswalker",
         "trigger:intervening_if",
         "field:create_tokens.tokenKeywords"
       ]

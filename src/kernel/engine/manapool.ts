@@ -27,6 +27,8 @@ export interface ManaUnit {
 /** What mana is being spent on: a spell (its stack object) or an activated ability (its source). `spent` collects the colors used. */
 export interface SpendCtx {
   spell?: ObjId;
+  /** an activated ability that was paid with this mana: the id of its stack item (what a rider copies) */
+  itemId?: string;
   abilitySource?: ObjId;
   spent: ManaColor[];
   /** riders of the units spent (queued by `flushRiders`) */
@@ -90,7 +92,7 @@ export function flushRiders(r: Run, pid: PlayerId, ctx: SpendCtx): void {
     if (rd.riderIf && !(ctx.spell && matchesFilter(r, ctx.spell, rd.riderIf, { controller: pid, source: rd.source ?? ctx.spell }))) continue;
     const q: QueuedTrigger = {
       id: `rd${r.s.nextId++}`, sourceId: rd.source ?? ctx.spell ?? "", abilityId: "__rider", controller: pid,
-      ctx: { eventObj: ctx.spell }, label: "mana rider", delayed: { steps: rd.steps, targets: {} }
+      ctx: { eventObj: ctx.spell ?? ctx.itemId }, label: "mana rider", delayed: { steps: rd.steps, targets: {} }
     };
     r.s.triggerQueue.push(q);
   }

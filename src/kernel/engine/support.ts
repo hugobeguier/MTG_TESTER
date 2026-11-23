@@ -2,6 +2,7 @@
 // Returns capability names in the same "kind:detail" style as `needs` in the card JSON. resolve() refuses to cast /
 // play / activate anything with a non-empty result (strict mode), so nothing is ever silently skipped.
 
+import { STEP10_HANDLERS } from "./step10";
 import { TOP_GRANTS, TOP_HANDLERS } from "./topcast";
 import { SYNTHESISED_KEYWORDS } from "./keywords8";
 import type { Ability, Cost, ObjectFilter, Predicate, Quantity, Step } from "../schema";
@@ -23,10 +24,10 @@ const PASSIVE_KEYWORDS = new Set([
   // "enchant <filter>": the Aura's target is the spell's own target (resolve.ts attaches it on resolution, SBA 704.5m)
   "enchant",
   // label-only keywords: the faces / rules they name are modelled by the abilities themselves
-  "back_face", "back face", "improvise", "convoke", "dredge", "cumulative_upkeep", "cumulative upkeep", "morph"
+  "back_face", "back face", "improvise", "convoke", "dredge", "cumulative_upkeep", "cumulative upkeep", "morph", "choose_a_background", "choose a background"
 ]);
 /** Keywords a static ability may grant / remove: only the passive ones the engine reads from chars().keywords. */
-const isPassive = (k: string) => (PASSIVE_KEYWORDS.has(k.toLowerCase()) && k.toLowerCase() !== "enchant") || SYNTHESISED_KEYWORDS.has(k.toLowerCase());
+const isPassive = (k: string) => (PASSIVE_KEYWORDS.has(k.toLowerCase()) && k.toLowerCase() !== "enchant") || SYNTHESISED_KEYWORDS.has(k.toLowerCase().split(" ")[0]);
 const TOKEN_FILTER_KEYS = new Set(["types", "notTypes", "subtypes", "notSubtypes", "colors", "notColors", "controller", "token", "anyOf", "colored"]);
 const SUPPORTED_PREDICATES = new Set([
   "cast_during", "cast_from", "turn_is", "phase_is", "controls", "life", "zone_count", "did_this_turn", "nth_this_turn", "compare",
@@ -38,7 +39,7 @@ const COMBAT_TRIGGER_EVENTS = new Set(["attack", "block", "deals_damage", "deals
 export const SUPPORTED_TRIGGER_EVENTS = new Set(["etb", "dies", "cast", "begin_step", "cycle", "leaves", "becomes_target", "unspecified", ...COMBAT_TRIGGER_EVENTS, ...SIMPLE_TRIGGER_EVENTS]);
 const SUPPORTED_BEGIN_STEPS = new Set(["upkeep", "end_step", "draw", "beginning_of_combat", "declare_attackers", "declare_blockers", "end_of_combat", "precombat_main", "postcombat_main"]);
 /** Scripted markers the engine implements (resolve.ts). A scripted ability is otherwise reported as unsupported. */
-export const SCRIPTED_HANDLERS: ReadonlySet<string> = new Set(["roll_d20_result_is_X", "storm", "become_monarch", "crew", "can_be_your_commander", "next_spell_gains_keyword", "next_spell_this_turn_cant_be_countered", "improvise", "tapped_for_colorless_mana", "mana_colors_an_opponent_land_could_produce", "colors_lands_opponents_control_could_produce", "surveil_additional_cards", "win_the_game", "cast_without_paying_mana_cost", "attack_tax_per_enchantment", "cast_spells_as_though_flash", "types_lands_you_control_could_produce", "tapped_for_mana", "untap_during_each_other_players_untap_step", "mana_spent_on_creature_sharing_type_with_commander", "mana_rider_text", "free_cast_from_hand", "free_cast_once_per_turn", "copy_spell_or_ability_when_mana_spent", ...TOP_HANDLERS]);
+export const SCRIPTED_HANDLERS: ReadonlySet<string> = new Set(["roll_d20_result_is_X", "storm", "become_monarch", "crew", "can_be_your_commander", "next_spell_gains_keyword", "next_spell_this_turn_cant_be_countered", "improvise", "tapped_for_colorless_mana", "mana_colors_an_opponent_land_could_produce", "colors_lands_opponents_control_could_produce", "surveil_additional_cards", "win_the_game", "cast_without_paying_mana_cost", "attack_tax_per_enchantment", "cast_spells_as_though_flash", "types_lands_you_control_could_produce", "tapped_for_mana", "untap_during_each_other_players_untap_step", "mana_spent_on_creature_sharing_type_with_commander", "mana_rider_text", "free_cast_from_hand", "free_cast_once_per_turn", "copy_spell_or_ability_when_mana_spent", ...TOP_HANDLERS, ...STEP10_HANDLERS]);
 const PLAIN_COST = /^(\{(\d+|[WUBRGC])\})+$/;
 
 const add = (out: string[], v: string) => { if (!out.includes(v)) out.push(v); };
@@ -131,7 +132,8 @@ function checkStep(s: Step, out: string[]): void {
   if (s.kind === "create_emblem") for (const a of ((s.emblem as { abilities?: Ability[] } | undefined)?.abilities ?? [])) abilityUnsupported({ ...a, zone: "battlefield" }).forEach((n) => add(out, n)); // emblem abilities work from the command zone, judged as if on the battlefield
   if (s.kind === "reveal" && !(s.until !== undefined || s.what === "top_card_of_library" || (s.what === undefined && (s.target || s.filter)))) add(out, `field:reveal.what=${String(s.what)}`);
   if (s.kind === "repeat_for_each") {
-    if (typeof s.over === "string" ? !REPEAT_PLAYER_REFS.includes(s.over) : !s.over) add(out, `field:repeat_for_each.over`);
+    if (s.repeatCount === "as_many_as_you_choose" && !s.over) { /* repeat while the player says yes (steps7 __repeat_ask) */ }
+    else if (typeof s.over === "string" ? !REPEAT_PLAYER_REFS.includes(s.over) : !s.over) add(out, `field:repeat_for_each.over`);
     if (s.over && typeof s.over === "object") checkFilter(s.over as object, out);
   }
   if (s.kind === "grant_effect" && !s.target && !s.filter) {
@@ -190,7 +192,7 @@ function checkStatic(a: Ability, out: string[]): void {
     else if (PLAYER_AFFECTS.has(aff) && (playerMods || playerStatic)) { /* costMod / extraLandDrops / player grants read the player */ }
     else add(out, `static:affects:${aff}`);
   } else checkFilter(aff, out);
-  if (typeof aff !== "string" && playerMods) add(out, "static:affects:filter_for_player_effect");
+  if (typeof aff !== "string" && playerMods && (a as { onlyIfTargets?: string }).onlyIfTargets !== "self") add(out, "static:affects:filter_for_player_effect");
   if (typeof aff === "string" && PLAYER_AFFECTS.has(aff) && !playerMods && !playerStatic) add(out, `static:affects:${aff}`);
   for (const m of sp.modify) {
     if (playerStatic) continue;
@@ -277,6 +279,7 @@ function zoneSupported(a: Ability): boolean {
   if (a.kind === "activated" && (a.zone === "hand" || a.zone === "graveyard")) return true;
   if (a.kind === "triggered" && a.zone === "hand" && a.trigger?.event === "cycle") return true;
   if (a.kind === "triggered" && a.zone === "stack" && a.trigger?.event === "cast" && (a.trigger.subject === "self")) return true;
+  if (a.kind === "scripted" && a.zone === "hand" && a.scripted?.handler === "flash_if_targets_commander") return true;
   return false;
 }
 
@@ -321,16 +324,16 @@ export function abilityUnsupported(a: Ability): string[] {
       if (t.event === "begin_step" && !(t.step && SUPPORTED_BEGIN_STEPS.has(t.step))) add(out, `trigger:begin_step:${t.step ?? "?"}`);
       for (const k of ["fromZone", "toZone", "chapters", "notFromZone"] as const) if (t[k] !== undefined && !((t.event === "leaves" || t.event === "etb") && (k === "fromZone" || k === "toZone")) && !(t.event === "unspecified" && t.toZone !== undefined && (k === "toZone" || k === "notFromZone" || k === "fromZone")) && !(t.event === "counter_put" && k === "chapters")) add(out, `trigger:${k}`);
       // state trigger: event unspecified on the permanent itself with a condition (queueStateTriggers); anything else "unspecified" is not modelled
-      if (t.event === "unspecified" && !(tr.interveningIf && (t.subject === undefined || t.subject === "self")) && t.toZone === undefined) add(out, "trigger:unspecified");
+      if (t.event === "unspecified" && !(tr.interveningIf && (t.subject === undefined || t.subject === "self")) && t.toZone === undefined && !(t !== tr && t.subject === "you")) add(out, "trigger:unspecified"); // an alsoOn "you ... unspecified" is the Room unlock (Fear of Sleep Paralysis): no Room cards exist, so it never happens
       if (t.batch && !(["attack", "deals_combat_damage_to_player", "counter_put", "dies", "leaves", "etb"].includes(t.event))) add(out, "trigger:batch");
       if (t.minCount !== undefined && !(t.batch && combat)) add(out, "trigger:minCount");
       if (t.defender !== undefined && t.event !== "attack") add(out, "trigger:defender");
       if (t.damageSource !== undefined && t.event !== "dealt_damage" && t.event !== "deals_damage") add(out, "trigger:damageSource");
-      if (t.nth && (t.nth.per !== "turn" || !(t.event === "cast" || ["draw", "gain_life", "lose_life", "discard", "mill", "sacrifice", "token_created", "commit_crime"].includes(t.event)))) add(out, "trigger:nth");
+      if (t.nth && (t.nth.per !== "turn" || !(t.event === "cast" || t.event === "attack" || ["draw", "gain_life", "lose_life", "discard", "mill", "sacrifice", "token_created", "commit_crime"].includes(t.event)))) add(out, "trigger:nth");
       if (t.subject && typeof t.subject === "object") checkFilter(t.subject, out);
       if (t.subject && typeof t.subject === "string") {
         const base = ["self", "you", "opponent", "each_opponent", "each_player"];
-        if (!base.includes(t.subject) && !((combat || SIMPLE_TRIGGER_EVENTS.has(t.event) || t.event === "dies" || t.event === "leaves") && (t.subject === "enchanted" || t.subject === "equipped"))) add(out, `trigger:subject:${t.subject}`);
+        if (!base.includes(t.subject) && !(t.subject === "enchanted" && t.event === "begin_step") && !((combat || SIMPLE_TRIGGER_EVENTS.has(t.event) || t.event === "dies" || t.event === "leaves") && (t.subject === "enchanted" || t.subject === "equipped"))) add(out, `trigger:subject:${t.subject}`);
       }
       if (t.damageSource) checkFilter(t.damageSource, out);
     }
