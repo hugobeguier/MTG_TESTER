@@ -222,7 +222,7 @@ describe("KernelSession: unresolved things reach the log and the sink, the game 
     t.state.objects[id].cardName = "Frobnicate";
     const records: UnresolvedRecord[] = [];
     const ks = KernelSession.fromState(t.state, { ctx: ctx2, sink: (r) => records.push(r), gameId: "g1", deckNames: ["Wretched Ranks"], seats: { p1: { kind: "human" } } });
-    expect(ks.dispatch("p1", { type: "castSpell", player: "p1", cardId: id }).ok).toBe(true);
+    expect(ks.dispatch("p1", { type: "castSpell", player: "p1", cardId: id, autoPay: true }).ok).toBe(true); // autoPay: the suggestion (a human seat otherwise pays by hand)
     ks.dispatch("p1", { type: "passPriority", player: "p1" });
     const r = ks.dispatch("p2", { type: "passPriority", player: "p2" });
     expect(r.ok).toBe(true);

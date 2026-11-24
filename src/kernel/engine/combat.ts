@@ -13,7 +13,9 @@ import { protectedFrom } from "./protection";
 import type { ObjectFilter } from "../schema";
 import { attackerEntry, chars, defenderPlayer, emit, isSummoningSick, label, obj, parseManaCost, player, Reject, tick, tryObj, alive, type ParsedCost, type Run } from "./core";
 import { goadersOf, restrictionsOf } from "./layers";
-import { autoTapFor, payFromPool } from "./mana";
+import { autoTapFor, costString, isManualPayer, payFromPool, poolShortfall } from "./mana";
+import { effectivePool } from "./manapool";
+import { poolText } from "./payspec";
 import { durables } from "./durable";
 import { evalPredicate, matchesFilter, type QCtx } from "./query";
 import { changeLife, dealDamage, type AskSpec } from "./steps";
@@ -113,6 +115,10 @@ function addCost(into: ParsedCost, cost: ParsedCost): void {
 function payTax(r: Run, pid: PlayerId, total: ParsedCost, a: { payWith?: ObjId[]; autoPay?: boolean }, what: string): void {
   if (total.mv === 0) return;
   if (payFromPool(r, pid, total, 0)) return;
+  if (isManualPayer(r, pid) && a.payWith === undefined && a.autoPay !== true) {
+    // paying by hand: the tax comes from the pool; the player taps sources (mana abilities work while a declaration waits) and declares again
+    throw new Reject("cannot_pay", `The ${what} tax is ${costString(total)}: your pool holds ${poolText(effectivePool(r, pid) as Record<string, number>) || "no mana"}, ${poolShortfall(r, pid, total, 0)} more needed. Tap mana sources, then declare again.`);
+  }
   const allowTap = a.payWith !== undefined || a.autoPay !== false;
   if (!(allowTap && autoTapFor(r, pid, total, 0, a.payWith) && payFromPool(r, pid, total, 0))) throw new Reject("cannot_pay", `cannot pay the ${what} tax`);
   emit(r, { type: "tax_paid", player: pid, what });

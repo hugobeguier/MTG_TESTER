@@ -108,6 +108,7 @@ export function decisionView(state: GameState, viewer: PlayerId, env: ToSessionE
   if (!p) return {};
   const title = p.prompt?.title || p.kind;
   if (p.player !== viewer) return { waitingFor: { player: p.player, kind: p.kind, title } };
+  if (p.kind === "pay_mana") return {}; // paying by hand is the table's payment banner (kernelPayment.ts), never a dialog
   const options: DecisionOptionView[] = p.options.map((o) => {
     if (p.kind === "order_triggers" || p.kind === "order_replacements") { // entries come from an ability: show its source card and the card that caused it
       const zoneOf = (id: string) => (state.objects[id]?.zone ?? "battlefield") as VisibleCard["zone"];

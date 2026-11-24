@@ -1,5 +1,6 @@
 // Controller-level tests of phase 5: click-to-pick on the board (the real targeted spell Go for the Throat), the shared selection state, the list fallback,
 // castable hand-card hints, and the decision dialog's markup for pick / order / split.
+import { payIfAsked } from "./kernelPaymentKit";
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createElement } from "react";
@@ -68,6 +69,7 @@ describe("click targets on the board", () => {
 
     c.boardPick()!.onToggleCard(victim);
     c.boardPick()!.onConfirm();
+    payIfAsked(c);
     expect(c.table().decision).toBeUndefined();
     expect(ks.state.stack).toHaveLength(1);
     expect(ks.state.stack[0].parts[0].targets).toBeDefined();

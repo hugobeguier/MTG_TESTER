@@ -18,6 +18,7 @@ import { evaluateWindow, hasResponse, type WindowVerdict } from "./kernelStops";
 import { DEFAULT_STOP_SETTINGS, stopKey, type PriorityStopSettings } from "@/lib/priorityStops";
 import { toggleYield, type SeatYield } from "@/engine/yieldPolicy";
 import { stackSession, type StackIndex } from "./tokenStacks";
+import { paymentOf, payableSources, suggestionFor } from "./kernelPayment";
 
 /** the driver never takes more than this many automatic actions in one turn (a loop guard, not a rule) */
 export const MAX_AUTO_ACTIONS_PER_TURN = 150;
@@ -289,9 +290,12 @@ export class KernelGameController {
     this.consumeHold();
     const seen = this.beforeStep();
     const res: DispatchResult = this.ks.dispatch(this.human, action);
-    if (res.ok || this.ks.version !== before) { this.stackChosen = undefined; this.attackPicks = {}; this.blockPicks = {}; this.blockIdx = 0; this.failures = 0; this.observe(seen, action); this.bump(); return res.ok; }
-    if (!res.stale) this.note(`Can't do that: ${res.error?.message ?? "the engine refused"}.`, "Rules");
-    else this.bump();
+    if (res.ok || this.ks.version !== before) { if (action.type === "declareAttackers" || action.type === "declareBlockers") this.declTax = undefined; this.stackChosen = undefined; this.attackPicks = {}; this.blockPicks = {}; this.blockIdx = 0; this.failures = 0; this.observe(seen, action); this.bump(); return res.ok; }
+    if (!res.stale) {
+      this.note(`Can't do that: ${res.error?.message ?? "the engine refused"}.`, "Rules");
+      // an attack / block tax the pool does not cover: the payment banner stays up while the player taps sources, then declares again
+      if ((action.type === "declareAttackers" || action.type === "declareBlockers") && res.error?.code === "cannot_pay" && /\btax\b/i.test(res.error.message)) this.declTax = { message: res.error.message, action };
+    } else this.bump();
     return false;
   }
 
@@ -366,7 +370,7 @@ export class KernelGameController {
     // not listed: ask the engine directly so the player gets its reason ("wrong timing", "cannot pay", ...)
     const o = this.ks.state.objects[id];
     const isLand = !!o && !!this.ks.ctx.cards(o.cardName)?.types.includes("land");
-    this.act(isLand ? { type: "playLand", player: this.human, cardId: id } : { type: "castSpell", player: this.human, cardId: id, autoPay: true });
+    this.act(isLand ? { type: "playLand", player: this.human, cardId: id } : { type: "castSpell", player: this.human, cardId: id });
   };
 
   playCardFace = (seatId: string, cardId: string, faceIndex: number): void => {
@@ -382,7 +386,7 @@ export class KernelGameController {
     const cmd = this.legalNow().find((a) => a.kind === "castSpell" && a.zone === "command" && a.action);
     if (cmd?.action) { this.act(cmd.action); return; }
     const id = this.ks.state.players.find((p) => p.id === this.human)?.command[0];
-    if (id) this.act({ type: "castSpell", player: this.human, cardId: id, autoPay: true }); else this.note("There is no commander in the command zone.", "Rules");
+    if (id) this.act({ type: "castSpell", player: this.human, cardId: id }); else this.note("There is no commander in the command zone.", "Rules");
   };
 
   /** cast from exile / graveyard (flashback, permissions): the kernel lists those casts itself */
@@ -540,7 +544,7 @@ export class KernelGameController {
     const must = d.attackers.filter((a) => a.mustAttack && !(a.id in this.attackPicks)).map((a) => a.id);
     const picks = { ...this.attackPicks };
     for (const id of must) { const a = d.attackers.find((x) => x.id === id); if (a?.defenders[0]) { picks[id] = a.defenders[0].id; this.note(`${a.name} must attack: added to the attack.`, "Rules"); } }
-    return this.act({ type: "declareAttackers", player: this.human, attackers: Object.entries(picks).map(([id, defender]) => ({ id, defender })), autoPay: true });
+    return this.act({ type: "declareAttackers", player: this.human, attackers: Object.entries(picks).map(([id, defender]) => ({ id, defender })) });
   };
   noAttack = (): boolean => { this.attackPicks = {}; return this.confirmAttackers() || this.act({ type: "declareAttackers", player: this.human, attackers: [] }); };
 
@@ -649,9 +653,9 @@ export class KernelGameController {
   passCurrentBlock = (): boolean => this.settleCurrentBlock([]);
 
   /** everything picked so far, sent as the one declaration the kernel wants */
-  confirmBlockers = (): boolean => this.declaration()?.kind === "blockers" && this.act({ type: "declareBlockers", player: this.human, blocks: Object.entries(this.blockPicks).flatMap(([attacker, bl]) => bl.map((blocker) => ({ blocker, attacker }))), autoPay: true });
+  confirmBlockers = (): boolean => this.declaration()?.kind === "blockers" && this.act({ type: "declareBlockers", player: this.human, blocks: Object.entries(this.blockPicks).flatMap(([attacker, bl]) => bl.map((blocker) => ({ blocker, attacker }))) });
   /** no blocks at all (tests and the automatic skip) */
-  passBlocks = (): boolean => { this.blockPicks = {}; return this.declaration()?.kind === "blockers" && this.act({ type: "declareBlockers", player: this.human, blocks: [], autoPay: true }); };
+  passBlocks = (): boolean => { this.blockPicks = {}; return this.declaration()?.kind === "blockers" && this.act({ type: "declareBlockers", player: this.human, blocks: [] }); };
 
   // ---- everything the kernel has no meaning for
 
@@ -852,8 +856,57 @@ export class KernelGameController {
     if (this.pickSel?.id !== d.id) this.pickSel = { id: d.id, ids: [], list: false };
     return this.pickSel;
   }
+  // ------------------------------------------------------------------ paying by hand (kernelPayment.ts)
+
+  /** the 'Auto-pay (suggest)' proposal for the open payment: shown on the table first, tapped only when the player confirms it */
+  private paySuggestion: { decisionId: string; ids: ObjId[] | null } | undefined;
+  /** an attack / block declaration refused because its tax is not in the pool */
+  private declTax: { message: string; action: Action } | undefined;
+  private tableIdOf(id: ObjId): string { const t = this.ks.legacyIdOf(id) ?? id; return this.stackIndex.repOf.get(t) ?? t; }
+
+  /** The payment banner (the legacy board-pick banner): the total with its parts, the pool, what is missing; glowing sources to click; Auto-pay (suggest) / Cancel. */
+  paymentPick(): KernelBoardPick | undefined {
+    const model = paymentOf(this.ks.state, this.human);
+    const tax = !model && this.declTax && this.declaration() ? this.declTax : undefined;
+    if (!model && !tax) return undefined;
+    this.table();
+    const legal = this.legalNow();
+    const sources = payableSources(legal);
+    const suggestion = model ? (this.paySuggestion?.decisionId === model.decisionId ? this.paySuggestion.ids : undefined) : undefined;
+    const uniq = (ids: string[]) => [...new Set(ids)];
+    const base = {
+      legalCardIds: uniq(sources.map((id) => this.tableIdOf(id))), legalSeatIds: [] as string[],
+      selectedCardIds: uniq((suggestion ?? []).map((id) => this.tableIdOf(id))), selectedSeatIds: [] as string[],
+      onToggleCard: (cardId: string) => this.toggleTap(this.human, cardId),
+      onToggleSeat: () => undefined,
+      allowTapKey: true
+    };
+    if (tax) {
+      return { ...base, title: tax.action.type === "declareAttackers" ? "Attack tax" : "Block tax", instruction: tax.message, summary: "Tap sources for the tax (click the glowing permanents), then declare again.", canConfirm: true, confirmLabel: "Declare again",
+        onConfirm: () => { this.act(tax.action); }, onCancel: () => { this.declTax = undefined; this.bump(); } };
+    }
+    const m = model!;
+    return {
+      ...base,
+      title: m.title, instruction: m.instruction,
+      summary: suggestion ? `Suggested: ${suggestion.map((id) => this.nameOf(id)).join(", ") || "nothing more to tap"}. Press the button to tap them.` : suggestion === null ? "No automatic suggestion (Treasures and damaging sources are never suggested): tap sources yourself." : "Click the glowing permanents to tap them for mana; the cost is paid as soon as your pool covers it.",
+      canConfirm: suggestion !== null,
+      confirmLabel: suggestion?.length ? `Tap the suggested sources (${suggestion.length})` : "Auto-pay (suggest)",
+      onConfirm: () => {
+        if (suggestion?.length) { this.answer(m.decisionId, { ids: ["pay"], payWith: suggestion }); return; }
+        this.paySuggestion = { decisionId: m.decisionId, ids: suggestionFor(this.ks.state, this.ks.ctx, this.human) ?? null };
+        this.bump();
+      },
+      onCancel: () => { this.paySuggestion = undefined; this.answer(m.decisionId, { ids: ["cancel"] }); }
+    };
+  }
+  /** is a payment (or a taxed declaration) waiting for the human? */
+  paying(): boolean { return !!paymentOf(this.ks.state, this.human) || !!(this.declTax && this.declaration()); }
+
   /** the current board pick (undefined when the decision is not board-clickable, or the player asked for the list) */
   boardPick(): KernelBoardPick | undefined {
+    const pay = this.paymentPick();
+    if (pay) return pay;
     const d = this.table().decision;
     if (!d || !classifyDecision(d).board) return undefined;
     const sel = this.selFor(d);

@@ -209,6 +209,27 @@ export function morphCostOf(r: Run, o: GameObject): string | undefined {
   return typeof mk?.keyword?.param === "string" ? mk.keyword.param : undefined;
 }
 export function abilitiesOf(r: Run, o: GameObject): Ability[] {
+  return withChosenColor(o, abilitiesOfRaw(r, o));
+}
+const COLOR_SYMBOL: Record<string, string> = { white: "W", blue: "U", black: "B", red: "R", green: "G" };
+/**
+ * "Add one mana of the chosen color" (Thriving lands, Banners, Three Tree City): the color is remembered on the permanent (o.chosen.color), so a mana ability that
+ * produces it is read as that fixed color. A read-time substitution (the ability keeps its id and index), so it holds through every layer change, control change and phasing.
+ * With no color remembered the ability stays as written and produces nothing.
+ */
+function withChosenColor(o: GameObject, abilities: Ability[]): Ability[] {
+  const col = o.chosen?.color;
+  const isChosen = (a: Ability) => a.kind === "mana" && !!a.mana?.produces.some((m) => "chosenColor" in m);
+  if (!col || !abilities.some(isChosen)) return abilities;
+  const sym = COLOR_SYMBOL[col.toLowerCase()] ?? col.toUpperCase();
+  if (!/^[WUBRGC]$/.test(sym)) return abilities;
+  return abilities.map((a) => (!isChosen(a) ? a : {
+    ...a,
+    text: a.text.replace(/(?:one )?mana of the chosen colou?r|the chosen colou?r/i, `{${sym}}`),
+    mana: { ...a.mana!, produces: a.mana!.produces.map((m) => ("chosenColor" in m ? { ...(m.restriction ? { restriction: m.restriction } : {}), ...(m.abilitiesOf ? { abilitiesOf: m.abilitiesOf } : {}), colors: `{${sym}}`.repeat(m.chosenColor) } : m)) }
+  }));
+}
+function abilitiesOfRaw(r: Run, o: GameObject): Ability[] {
   if (o.faceDown && o.zone === "battlefield") return baseChars(r, o).abilities;
   if (o.zone === "battlefield" && layerSixActive(r)) return chars(r, o.id).abilities;
   if (o.leftWith && (o.zone === "graveyard" || o.zone === "exile")) return [...printedAbilities(r, o), ...o.leftWith];

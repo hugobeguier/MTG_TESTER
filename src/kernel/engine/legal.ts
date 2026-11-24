@@ -20,6 +20,7 @@ import { permissionsFor } from "./durable";
 import { attackProblem, blockProblem, defenderOptions, legalAttackers } from "./combat";
 import { goadersOf, hostOf, mustAttack, restrictionsOf } from "./layers";
 import { doorCost, resolve, untapForManaProblem } from "./resolve";
+import { isManualPayer, manaAbilities, productionOfAbility } from "./mana";
 import type { Action, Choice, DecisionKind, EngineContext, GameState, ObjId, PendingView, PlayerId } from "./types";
 import { isObjId } from "./types";
 
@@ -123,13 +124,16 @@ export function legalActions(state: GameState, player: PlayerId, ctx: EngineCont
   if (state.pending) {
     if (state.pending.player !== player) return [];
     const { ctx: _c, ...view } = state.pending; void _c;
-    return [{ id: `answer:${view.id}`, kind: "answerDecision", player, label: view.prompt?.title || view.kind, pending: view, choices: choicesOf(view) }];
+    const answer: LegalAction = { id: `answer:${view.id}`, kind: "answerDecision", player, label: view.prompt?.title || view.kind, pending: view, choices: choicesOf(view) };
+    // paying by hand: while the cost is not covered the player also taps sources (mana abilities) or takes a tap back
+    return view.kind === "pay_mana" ? [answer, ...payTaps(state, r, player, ctx)] : [answer];
   }
   // 2. a declaration (attackers / blockers) is a turn-based action
   const ex = state.combat?.expect;
   if (ex) {
-    if (ex.kind === "attackers") return ex.player === player ? [attackDeclaration(r, player, ctx)] : [];
-    if (ex.players.includes(player)) return [blockDeclaration(r, player, ctx)];
+    const taps = (): LegalAction[] => (isManualPayer(r, player) ? payTaps(state, r, player, ctx) : []); // a tax is paid from the pool: tap before declaring
+    if (ex.kind === "attackers") return ex.player === player ? [attackDeclaration(r, player, ctx), ...taps()] : [];
+    if (ex.players.includes(player)) return [blockDeclaration(r, player, ctx), ...taps()];
     return [];
   }
   // 3. priority
@@ -175,8 +179,9 @@ export function legalActions(state: GameState, player: PlayerId, ctx: EngineCont
     const bases = baseChoices(r, o, player, o.zone);
     const ways: Array<string | undefined> = bases.length > 1 || (bases.length === 1 && bases[0] !== null) ? bases.map((b) => (b ? b.id : "normal")) : [undefined];
     for (const face of faceVariants) for (const way of ways) {
-      const action: Action = { type: "castSpell", player, cardId: id, autoPay: true, ...(face ? { face } : {}), ...(way ? { option: way } : {}) };
-      const pr = probe(state, action, ctx, true);
+      const probed: Action = { type: "castSpell", player, cardId: id, autoPay: true, ...(face ? { face } : {}), ...(way ? { option: way } : {}) };
+      const action = shown(r, player, probed);
+      const pr = probe(state, probed, ctx, true);
       if (!pr.ok) continue;
       const nm = face ?? cardName(r, id);
       add({ id: `castSpell:${id}${face ? `:${face}` : ""}${way ? `:${way}` : ""}`, kind: "castSpell", player, objectId: id, ...(face ? { face } : {}), ...(way ? { option: way } : {}), zone: o.zone, label: `Cast ${nm}${way && way !== "normal" ? ` (${way})` : ""}`, action, ...(pr.asks ? { asks: pr.asks } : {}), ...(pr.targetOptions ? { targetOptions: pr.targetOptions } : {}) });
@@ -194,8 +199,9 @@ export function legalActions(state: GameState, player: PlayerId, ctx: EngineCont
       if (ab.kind !== "activated" && ab.kind !== "mana") continue;
       if ((ab.zone ?? "battlefield") !== o.zone) continue;
       if (ab.kind === "mana" && opts.mana === false) continue;
-      const action: Action = { type: "activateAbility", player, sourceId: id, abilityId: ab.id, autoPay: true };
-      const pr = probe(state, action, ctx, ab.kind !== "mana");
+      const probed: Action = { type: "activateAbility", player, sourceId: id, abilityId: ab.id, autoPay: true };
+      const action = shown(r, player, probed);
+      const pr = probe(state, probed, ctx, ab.kind !== "mana");
       if (!pr.ok) continue;
       add({ id: `activateAbility:${id}:${ab.id}`, kind: "activateAbility", player, objectId: id, abilityId: ab.id, zone: o.zone, isMana: ab.kind === "mana", label: `${cardName(r, id)}: ${ab.text}`, action, ...(pr.asks ? { asks: pr.asks } : {}), ...(pr.targetOptions ? { targetOptions: pr.targetOptions } : {}) });
     }
@@ -206,20 +212,23 @@ export function legalActions(state: GameState, player: PlayerId, ctx: EngineCont
     const o = state.objects[id];
     if (!o || o.controller !== player) continue;
     if (o.faceDown) {
-      const action: Action = { type: "turnFaceUp", player, objectId: id, autoPay: true };
-      if (probe(state, action, ctx, false).ok) add({ id: `turnFaceUp:${id}`, kind: "turnFaceUp", player, objectId: id, zone: o.zone, label: `Turn ${cardName(r, id)} face up (morph)`, action });
+      const probed: Action = { type: "turnFaceUp", player, objectId: id, autoPay: true };
+      const action = shown(r, player, probed);
+      if (probe(state, probed, ctx, false).ok) add({ id: `turnFaceUp:${id}`, kind: "turnFaceUp", player, objectId: id, zone: o.zone, label: `Turn ${cardName(r, id)} face up (morph)`, action });
     }
     const rdef = defOf(r, o);
     if (rdef?.layout === "room") { // Rooms: unlock a locked door (special action, sorcery timing)
       for (const face of faceNames(rdef)) {
         if ((o.unlocked ?? []).includes(face)) continue;
-        const action: Action = { type: "unlockDoor", player, objectId: id, face, autoPay: true };
-        if (probe(state, action, ctx, false).ok) add({ id: `unlockDoor:${id}:${face}`, kind: "unlockDoor", player, objectId: id, zone: o.zone, label: `Unlock the ${face} door of ${o.cardName}${doorCost(rdef, face) ? ` (${doorCost(rdef, face)})` : ""}`, action });
+        const probed: Action = { type: "unlockDoor", player, objectId: id, face, autoPay: true };
+        const action = shown(r, player, probed);
+        if (probe(state, probed, ctx, false).ok) add({ id: `unlockDoor:${id}:${face}`, kind: "unlockDoor", player, objectId: id, zone: o.zone, label: `Unlock the ${face} door of ${o.cardName}${doorCost(rdef, face) ? ` (${doorCost(rdef, face)})` : ""}`, action });
       }
     }
     if (o.prepared) {
-      const action: Action = { type: "castPrepared", player, objectId: id, autoPay: true };
-      const pr = probe(state, action, ctx, true);
+      const probed: Action = { type: "castPrepared", player, objectId: id, autoPay: true };
+      const action = shown(r, player, probed);
+      const pr = probe(state, probed, ctx, true);
       if (pr.ok) add({ id: `castPrepared:${id}`, kind: "castPrepared", player, objectId: id, zone: o.zone, label: `Cast a copy of the prepared spell of ${cardName(r, id)}`, action, ...(pr.asks ? { asks: pr.asks } : {}), ...(pr.targetOptions ? { targetOptions: pr.targetOptions } : {}) });
     }
   }
@@ -231,6 +240,36 @@ export function legalActions(state: GameState, player: PlayerId, ctx: EngineCont
     }
   }
   add({ id: "passPriority", kind: "passPriority", player, label: state.stack.length ? "Pass (let the top of the stack resolve)" : "Pass priority", action: { type: "passPriority", player } });
+  return out;
+}
+
+/** The action a player is shown: a player who pays by hand (config.manualPay) gets it without `autoPay` (the cost is paid from their pool); the probe above still runs with autoPay. */
+function shown(r: Run, player: PlayerId, a: Action): Action {
+  if (!isManualPayer(r, player) || !("autoPay" in a)) return a;
+  const { autoPay: _a, ...rest } = a as Action & { autoPay?: boolean }; void _a;
+  return rest as Action;
+}
+
+/** While paying by hand: every mana ability the player may activate right now (a color is probed when the ability needs one) and the taps that can be taken back. */
+function payTaps(state: GameState, r: Run, player: PlayerId, ctx: EngineContext): LegalAction[] {
+  const out: LegalAction[] = [];
+  for (const id of state.battlefield) {
+    const o = state.objects[id];
+    if (!o || o.controller !== player) continue;
+    let abs: Ability[];
+    try { abs = manaAbilities(r, o); } catch { continue; }
+    for (const ab of abs) {
+      const action: Action = { type: "activateAbility", player, sourceId: id, abilityId: ab.id };
+      let color: string | undefined;
+      try { const pr = productionOfAbility(r, player, ab); color = "alternatives" in pr ? pr.alternatives[0]?.join("") : "choose" in pr && pr.choose.options.length > 1 ? pr.choose.options[0] : undefined; } catch { /* the probe reports it */ }
+      if (!probe(state, color ? { ...action, color } as Action : action, ctx, false).ok) continue;
+      out.push({ id: `activateAbility:${id}:${ab.id}`, kind: "activateAbility", player, objectId: id, abilityId: ab.id, zone: o.zone, isMana: true, label: `${cardName(r, id)}: ${ab.text}`, action });
+    }
+  }
+  for (const t of state.players.find((p) => p.id === player)?.manaTaps ?? []) {
+    const action: Action = { type: "untapForMana", player, permanentId: t.source };
+    if (!untapForManaProblem(r, action as Extract<Action, { type: "untapForMana" }>)) out.push({ id: `untapForMana:${t.source}`, kind: "untapForMana", player, objectId: t.source, zone: "battlefield", label: `Untap ${cardName(r, t.source)} (take back its mana)`, action });
+  }
   return out;
 }
 

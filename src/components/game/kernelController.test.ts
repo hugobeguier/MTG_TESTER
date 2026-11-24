@@ -1,5 +1,6 @@
 // Headless tests for the kernel game controller on real Wretched Ranks cards: a scripted human turn (land, targeted spell, attack, pass), the AI turn, the decision
 // answer flow (stale answers ignored), inert intents, the dev flag, and the hand-off gate.
+import { payIfAsked } from "./kernelPaymentKit";
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createElement } from "react";
@@ -101,6 +102,7 @@ describe("a scripted human turn on the kernel", () => {
     expect(c.answer("d-stale", { ids: [victim] })).toBe(false);
     expect(ks.version).toBe(v);
     expect(c.answer(d.id, { ids: [victim] })).toBe(true);
+    payIfAsked(c);
     expect(c.table().decision).toBeUndefined();
     expect(ks.state.stack).toHaveLength(1);
     // answering the same id again is a quiet no-op

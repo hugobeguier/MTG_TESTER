@@ -13,11 +13,12 @@ import {
   , untapObject, morphCostOf, newObject, targetHooks
 } from "./core";
 import { emitUnresolved, reportAbilityNotPerformed, reportCast } from "./unresolved";
-import { autoTapFor, manaHooks, addMana, withTapBonus, manaAbilityActivatable, manaAbilityUsable, payManaAbilityCosts, payFromPool, phyrexianOptions, productionOfAbility, settleCost, totalPotentialMana } from "./mana";
+import { autoTapFor, costString, isManualPayer, manaHooks, addMana, withTapBonus, manaAbilityActivatable, manaAbilityUsable, payManaAbilityCosts, payFromPool, phyrexianOptions, poolCovers, poolShortfall, productionOfAbility, settleCost, totalPotentialMana } from "./mana";
 import { evalPredicate, evalQuantity, matchesFilter, objectsMatching, resolveObjs, type QCtx } from "./query";
 import { addCounters, changeLife, decide, discardCard, runExec, sacrificeObject, startExec, type AskSpec } from "./steps";
 import { costCandidates, costCount, costNoun, costOptions, needsChoice, payChoiceCost, type ChoiceCost } from "./costs";
 import { callTheSpiritDragonsSteps } from "./step10";
+import { paySpec, type PaymentPlan } from "./payspec";
 import { hostOf, invalidateIndex, landDrops, spellColoredReduction, spellCostDelta, targetCostExtras } from "./layers";
 import { anyFirstStrike, applyDamage, blockersToDeclare, checkAssignment, declareAttackers, declareBlockers, gatherDamage, legalAttackers, newCombat } from "./combat";
 import { abilityUnsupported, cardUnsupported, SUPPORTED_TRIGGER_EVENTS } from "./support";
@@ -25,7 +26,7 @@ import { unattachIllegal } from "./attach";
 import { affinityReduction, hasImprovise, improviseCandidates, peekNextSpellGrants, takeNextSpellGrants } from "./castgrants";
 import { askCommandZone, overCommanderLimit } from "./commander";
 import { checkCounterAnswer, counterCandidates, counterCount, counterSpec } from "./counters7";
-import { addUnits, emptyPools, flushRiders, poolSize as manaPoolSize, type SpendCtx } from "./manapool";
+import { addUnits, effectivePool, emptyPools, flushRiders, poolSize as manaPoolSize, type SpendCtx } from "./manapool";
 import { clearRegenShields, regenerates } from "./regen";
 import { ofOpponent, opponentIds, slotUsesX, targetBounds, totalMax } from "./targets7";
 import { addDurable, expiryFor, consumePermission, expireDurable, hasFlag, permissionIdOf, permissionOptions, permissionsFor, delayeds } from "./durable";
@@ -35,7 +36,7 @@ import { castableFaces, playableFaces } from "./faces";
 import { leaveGame } from "./leave";
 import { addedSteps, baseChoices, castTags, grantedFree, grantedMorph, grantedTop, mandatoryExtras, optionalExtras, optionLabel, selectedOptions, spellExtraCosts, spellManaString } from "./castopts";
 import type {
-  Action, CardDef, CastInfo, Choice, DecisionOption, Draft, EngineContext, Exec, GameEvent, GameObject, GameState, Lki, ObjId, Part, Pending, PendingView, PlayerId,
+  Action, CardDef, CastInfo, Choice, DecisionOption, Draft, EngineContext, Exec, GameEvent, GameObject, GameState, Lki, ObjId, Part, PayInfo, Pending, PendingView, PlayerId,
   QueuedTrigger, ResolveResult, StackItem, TriggerContext
 } from "./types";
 import { isObjId } from "./types";
@@ -121,6 +122,8 @@ function dispatch(r: Run, a: Action): void {
   if (p.hasLost) throw new Reject("game_over", `${a.player} has lost the game`);
   if (a.type === "answerDecision") return answer(r, a);
   if (a.type !== "activateAbility" && a.type !== "untapForMana") clearManaTaps(r); // anything but a mana tap (or its take-back) closes every take-back window
+  // paying by hand (CR 601.2g-h, 117.3): while a `pay_mana` question is open (or a declaration waits for its tax) the player activates mana abilities / takes taps back
+  if ((a.type === "activateAbility" || a.type === "untapForMana") && (r.s.pending ? r.s.pending.kind === "pay_mana" && r.s.pending.player === a.player : !!r.s.combat?.expect)) return payTap(r, a);
   if (r.s.pending) throw new Reject("decision_pending", `decision ${r.s.pending.id} for ${r.s.pending.player} must be answered first`);
   if (a.type === "declareAttackers") return doDeclareAttackers(r, a);
   if (a.type === "declareBlockers") return doDeclareBlockers(r, a);
@@ -262,7 +265,7 @@ function costX(r: Run, d: Draft, a: Ability | undefined): boolean {
 }
 
 /** Runs the choice stages in order. Returns the ask spec when a decision is needed, else commits the item. */
-function advanceDraft(r: Run, d: Draft, answerIn?: Choice): { ask: AskSpec; stage: "face" | "option" | "extras" | "gift" | "modes" | "targets" | "x" | "color" | "costs" | "phyrexian" | "counters" | "improvise" } | "committed" {
+function advanceDraft(r: Run, d: Draft, answerIn?: Choice): { ask: AskSpec; stage: "face" | "option" | "extras" | "gift" | "modes" | "targets" | "x" | "color" | "costs" | "phyrexian" | "counters" | "improvise" | "pay" } | "committed" {
   let answerLeft = answerIn;
   const name = cardName(r, d);
   const a = abilityOfDraft(r, d);
@@ -509,6 +512,16 @@ function advanceDraft(r: Run, d: Draft, answerIn?: Choice): { ask: AskSpec; stag
     }
   }
 
+  // ---- paying by hand: the pool is all that pays; a short pool is a question (the player taps sources, or cancels), never an automatic tap
+  if (paysByHand(r, d)) {
+    const plan = paymentPlan(r, d, a);
+    if (plan && !poolCovers(r, d.player, plan.need, plan.x, plan.ctx)) {
+      // never ask for a payment that no amount of tapping could make: say so at once (nothing has happened yet)
+      if (plan.need.mv + plan.need.x * plan.x > totalPotentialMana(r, d.player)) throw new Reject("cannot_pay", `cannot pay ${costString(plan.need, plan.x)}: your pool and untapped mana sources can make at most ${totalPotentialMana(r, d.player)} mana`);
+      return { ask: paySpec(r, d.player, plan), stage: "pay" };
+    }
+  }
+
   commitDraft(r, d, a);
   return "committed";
 }
@@ -524,10 +537,11 @@ function payMana(r: Run, pid: PlayerId, rawCost: ReturnType<typeof parseManaCost
   const used = d.phyUsed ?? 0;
   const phy = d.phy?.slice(used, used + nPhy);
   d.phyUsed = used + nPhy;
-  const { cost, life } = settleCost(r, pid, rawCost, phy, d.payWith);
+  const byHand = paysByHand(r, d);
+  const { cost, life } = settleCost(r, pid, rawCost, phy, byHand ? [] : d.payWith);
   if (life > 0 && player(r, pid).life < life) throw new Reject("cannot_pay", "not enough life to pay the Phyrexian mana");
   if (payFromPool(r, pid, cost, x, ctx)) { if (life > 0) changeLife(r, undefined, pid, -life); return; }
-  const allowTap = d.payWith !== undefined || d.autoPay !== false;
+  const allowTap = !byHand && (d.payWith !== undefined || d.autoPay !== false);
   if (!(allowTap && autoTapFor(r, pid, cost, x, d.payWith, exclude, ctx) && payFromPool(r, pid, cost, x, ctx))) throw new Reject("cannot_pay", "cannot pay the mana cost with the available mana");
   if (life > 0) changeLife(r, undefined, pid, -life);
 }
@@ -613,6 +627,88 @@ function payAbilityCosts(r: Run, d: Draft, costs: Cost[], a?: Ability): { sacrif
   return paid;
 }
 
+/** The mana cost of a spell as it is cast, before improvise: base cost (the chosen way), commander tax, targeting taxes, cost increases / reductions. Pure. */
+function computeSpellCost(r: Run, d: Draft, src: GameObject): { cost: ReturnType<typeof parseManaCost>; tax: number; tx: ReturnType<typeof targetCostExtras>; delta: number; base: ReturnType<typeof parseManaCost> } {
+  const pid = d.player;
+  const tax = d.origin?.zone === "command" ? 2 * (player(r, pid).commanderCasts[src.id] ?? 0) : 0;
+  const base = parseManaCost(spellManaString(r, d));
+  const cost = parseManaCost(spellManaString(r, d));
+  cost.generic += tax; cost.mv += tax;
+  const tx = targetCostExtras(r, pid, (d.parts ?? []).flatMap((pp) => Object.values(pp.targets).flat()).filter(isObjId));
+  const delta = spellCostDelta(r, pid, src.id) + tx.generic;
+  if (delta) { const g = Math.max(0, cost.generic + delta); cost.mv += g - cost.generic; cost.generic = g; }
+  for (const col of spellColoredReduction(r, pid, src.id)) if ((cost.colored[col] ?? 0) > 0) { cost.colored[col]--; cost.mv--; } // Morophon: only colored mana is reduced
+  { const aff = affinityReduction(r, pid, d.grants); if (aff) { const g = Math.max(0, cost.generic - aff); cost.mv -= cost.generic - g; cost.generic = g; } }
+  return { cost, tax, tx, delta, base };
+}
+
+/** `count` artifacts tapped for improvise pay for that much of the generic part (the X part is folded into the generic mana still to pay). */
+function foldImprovise(cost: ReturnType<typeof parseManaCost>, count: number, x: number): void {
+  const total = cost.generic + cost.x * x;
+  const n = Math.min(count, total);
+  cost.mv -= Math.min(n, cost.generic);
+  cost.generic = total - n; cost.x = 0;
+}
+
+/** Does this draft pay by hand (the pool only; a short pool opens a `pay_mana` decision)? An explicit `payWith` / `autoPay: true` is the suggestion and still taps. */
+const paysByHand = (r: Run, d: Draft): boolean => isManualPayer(r, d.player) && d.autoPay !== true && d.payWith === undefined;
+
+
+/**
+ * What the draft is about to pay in mana, as ONE cost (pool-only settling of hybrid / Phyrexian symbols): the shown total with its parts.
+ * Pure: nothing is spent, `d` is not changed. undefined = nothing to pay.
+ */
+function paymentPlan(r: Run, d: Draft, a: Ability | undefined): PaymentPlan | undefined {
+  const pid = d.player;
+  const raws: Array<{ raw: ReturnType<typeof parseManaCost>; label: string }> = [];
+  const parts: PayInfo["parts"] = [];
+  let life = 0;
+  let ctx: SpendCtx;
+  const x = d.x ?? 0;
+  const name = cardName(r, d);
+  let what: string;
+  if (d.kind === "spell") {
+    const src = obj(r, d.sourceId);
+    const { cost, tax, tx, delta, base } = computeSpellCost(r, d, src);
+    const adj = cost.mv - base.mv - tax; // cost increases (+) and reductions (-), whatever their source
+    const before = cost.generic + cost.x * x;
+    if (d.improvised?.length) foldImprovise(cost, d.improvised.length, x);
+    parts.push({ label: "Mana cost", cost: costString(base, x) });
+    if (tax) parts.push({ label: "Commander tax", cost: `{${tax}}` });
+    if (adj !== 0 || delta !== 0) parts.push({ label: adj >= 0 ? "Cost increases" : "Cost reductions", cost: `${adj >= 0 ? "+" : "-"}{${Math.abs(adj || delta)}}` });
+    if (d.improvised?.length) parts.push({ label: "Improvise", cost: `-{${Math.min(d.improvised.length, before)}}` });
+    raws.push({ raw: cost, label: "spell" });
+    for (const c of spellExtraCosts(r, d)) if ("mana" in c) { const pc = parseManaCost((c as { mana: string }).mana); raws.push({ raw: pc, label: "extra" }); parts.push({ label: "Additional cost", cost: costString(pc, x) }); }
+    life += tx.life;
+    ctx = { spell: d.objectId, spent: [] };
+    what = `Cast ${name}`;
+  } else {
+    if (!a) return undefined;
+    let reduction = abilityReduction(r, d, a);
+    for (const c of a.costs ?? []) if ("mana" in c) {
+      const pc = parseManaCost(c.mana);
+      if (reduction > 0) { const g = Math.max(0, pc.generic - reduction); reduction -= pc.generic - g; pc.mv -= pc.generic - g; pc.generic = g; }
+      raws.push({ raw: pc, label: "ability" });
+      parts.push({ label: "Ability cost", cost: costString(pc, x) });
+    }
+    ctx = { abilitySource: d.sourceId, spent: [] };
+    what = `Activate ${name}`;
+  }
+  if (!raws.length) return undefined;
+  const need = parseManaCost("");
+  let used = d.phyUsed ?? 0;
+  for (const { raw } of raws) {
+    const nPhy = raw.phyrexian?.length ?? 0;
+    const phy = d.phy?.slice(used, used + nPhy);
+    used += nPhy;
+    const s = settleCost(r, pid, raw, phy, []);
+    life += s.life;
+    need.generic += s.cost.generic; need.mv += s.cost.mv; need.x += s.cost.x;
+    for (const [k, n] of Object.entries(s.cost.colored)) need.colored[k] = (need.colored[k] ?? 0) + n;
+  }
+  return { need, x, life, parts, ctx, what };
+}
+
 function commitDraft(r: Run, d: Draft, a: Ability | undefined): void {
   const pid = d.player;
   const src = obj(r, d.sourceId);
@@ -622,9 +718,6 @@ function commitDraft(r: Run, d: Draft, a: Ability | undefined): void {
 
   if (d.kind === "spell") {
     spellCard = src;
-    const tax = d.origin?.zone === "command" ? 2 * (player(r, pid).commanderCasts[src.id] ?? 0) : 0;
-    const cost = parseManaCost(spellManaString(r, d));
-    cost.generic += tax; cost.mv += tax;
     if (hasCondFlash(r, src) && !r.ignoreTiming) {
       const c0 = chars(r, src.id), spellAb = printedAbilities(r, src).find((x) => x.kind === "spell_effect");
       const natural = c0.types.includes("instant") || c0.keywords.includes("flash") || flashGrantCovers(r, pid, src.id) || spellAb?.timing?.speed === "instant";
@@ -632,20 +725,14 @@ function commitDraft(r: Run, d: Draft, a: Ability | undefined): void {
       const hitsCommander = (d.parts ?? []).some((pp) => Object.values(pp.targets).flat().some((t) => isObjId(t) && !!tryObj(r, t)?.isCommander));
       if (!natural && !main && !hitsCommander) throw new Reject("wrong_timing", `${c0.name} can only be cast at instant speed if it targets a commander`);
     }
-    const tx = targetCostExtras(r, pid, (d.parts ?? []).flatMap((pp) => Object.values(pp.targets).flat()).filter(isObjId));
-    const delta = spellCostDelta(r, pid, src.id) + tx.generic;
+    const { cost, tx } = computeSpellCost(r, d, src);
     if (tx.life > 0 && player(r, pid).life < tx.life) throw new Reject("cannot_pay", "not enough life to pay the additional cost of targeting that permanent");
-    if (delta) { const g = Math.max(0, cost.generic + delta); cost.mv += g - cost.generic; cost.generic = g; }
-    for (const col of spellColoredReduction(r, pid, src.id)) if ((cost.colored[col] ?? 0) > 0) { cost.colored[col]--; cost.mv--; } // Morophon: only colored mana is reduced
-    { const aff = affinityReduction(r, pid, d.grants); if (aff) { const g = Math.max(0, cost.generic - aff); cost.mv -= cost.generic - g; cost.generic = g; } }
     // improvise: each tapped artifact pays for {1} of the generic part
     if (d.improvised?.length) {
       for (const id of d.improvised) { const ao = tryObj(r, id); if (!ao || ao.tapped || ao.zone !== "battlefield") throw new Reject("cannot_pay", `${label(r, id)} cannot be tapped for improvise`); }
-      const total = cost.generic + cost.x * (d.x ?? 0);
-      const n = Math.min(d.improvised.length, total);
+      const n = Math.min(d.improvised.length, cost.generic + cost.x * (d.x ?? 0));
       for (const id of d.improvised.slice(0, n)) { obj(r, id).tapped = true; emit(r, { type: "tap", id, player: pid, improvise: true }); }
-      cost.mv -= Math.min(n, cost.generic);
-      cost.generic = total - n; cost.x = 0; // the X part is folded into the generic mana still to pay
+      foldImprovise(cost, d.improvised.length, d.x ?? 0);
     }
     src.castX = d.x;
     if (d.grants?.length) takeNextSpellGrants(r, pid); // the grants are used up when the spell is really cast (cancelling keeps them)
@@ -866,7 +953,7 @@ function activateAbility(r: Run, a: Extract<Action, { type: "activateAbility" }>
   if ((ab.zone ?? "battlefield") !== src.zone) throw new Reject("cannot_activate", `${a.abilityId} can only be activated from ${ab.zone ?? "the battlefield"}, not from ${src.zone}`);
   if (continuing(r) && reportAbilityNotPerformed(r, src.id, ab)) return; // an unsupported cost / target / timing / zone: the ability is NOT performed (nothing paid, nothing on the stack)
   assertSupported(r, src, ab);
-  if (ab.kind === "mana") return activateMana(r, a.player, src, ab, a.color);
+  if (ab.kind === "mana") return activateMana(r, a.player, src, ab, a.color, undefined, undefined, undefined, a.autoPay);
   clearManaTaps(r); // a real ability: the take-back window of every earlier tap is over
   if (ab.scripted?.handler === "crew") return activateCrew(r, a, src, ab);
   const loyalty = (ab.costs ?? []).some((c) => "loyalty" in c);
@@ -914,7 +1001,7 @@ function runManaSteps(r: Run, pid: PlayerId, src: GameObject, ab: Ability): void
 }
 manaHooks.runSteps = runManaSteps;
 
-function activateMana(r: Run, pid: PlayerId, src: GameObject, ab: Ability, color?: string, answer?: Choice, savedChoices?: Record<number, ObjId[]>, xIn?: number): void {
+function activateMana(r: Run, pid: PlayerId, src: GameObject, ab: Ability, color?: string, answer?: Choice, savedChoices?: Record<number, ObjId[]>, xIn?: number, autoPay?: boolean): void {
   if (!manaAbilityActivatable(r, src, ab)) throw new Reject("cannot_activate", `${label(r, src.id)} cannot produce mana right now (tapped or summoning sick)`);
   // "X mana in any combination of colors" paid for by "Tap X untapped tokens" (Hazel of the Rootbloom): X is chosen first, then what to tap, then the colors
   const variable = ab.mana?.produces.length === 1 && "anyColorAmount" in ab.mana.produces[0];
@@ -988,7 +1075,8 @@ function activateMana(r: Run, pid: PlayerId, src: GameObject, ab: Ability, color
     const { cost, life } = settleCost(r, pid, parseManaCost(c.mana));
     const sctx = { abilitySource: src.id, spent: [] as never[] };
     if (life > 0 && player(r, pid).life < life) throw new Reject("cannot_pay", "not enough life to pay the Phyrexian mana");
-    if (!payFromPool(r, pid, cost, 0, sctx) && !(autoTapFor(r, pid, cost, 0, undefined, [src.id], sctx) && payFromPool(r, pid, cost, 0, sctx))) throw new Reject("cannot_pay", "cannot pay the mana cost of this mana ability");
+    const byHand = isManualPayer(r, pid) && autoPay !== true; // the {1} of a Signet comes from YOUR pool: tap another source first
+    if (!payFromPool(r, pid, cost, 0, sctx) && !(!byHand && autoTapFor(r, pid, cost, 0, undefined, [src.id], sctx) && payFromPool(r, pid, cost, 0, sctx))) throw new Reject("cannot_pay", byHand ? `${label(r, src.id)} needs ${costString(cost)} from your mana pool: tap another source for it first` : "cannot pay the mana cost of this mana ability");
     if (life > 0) changeLife(r, undefined, pid, -life);
   }
   for (const c of costs) if ("life" in c) { // Hazel of the Rootbloom: "Pay 2 life" is part of the mana ability
@@ -1034,6 +1122,43 @@ function untapForMana(r: Run, a: Extract<Action, { type: "untapForMana" }>): voi
   p.manaTaps = p.manaTaps!.filter((t) => t !== tap);
   o.tapped = false;
   emit(r, { type: "mana_tap_retracted", player: a.player, id: o.id, colors: tap.colors });
+}
+
+/**
+ * A mana tap (or its take-back) while paying by hand: during an open `pay_mana` question, or while a declaration waits (attack / block taxes are paid from the
+ * pool). Only mana abilities that need no decision of their own (a color is given in `color`); the question is re-evaluated after every tap and the payment
+ * is made as soon as the pool covers the cost.
+ */
+function payTap(r: Run, a: Extract<Action, { type: "activateAbility" | "untapForMana" }>): void {
+  const inPay = r.s.pending?.kind === "pay_mana";
+  const ex = r.s.combat?.expect;
+  if (!inPay && ex && !(ex.kind === "attackers" ? [ex.player] : ex.players).includes(a.player)) throw new Reject("declaration_pending", "waiting for another player's declaration");
+  const refuse = (why: string): never => { throw new Reject(inPay ? "decision_pending" : "declaration_pending", why); };
+  if (a.type === "activateAbility") {
+    const src = r.s.objects[a.sourceId];
+    const ab = src ? abilitiesOf(r, src).find((x) => x.id === a.abilityId) : undefined;
+    if (!ab || ab.kind !== "mana") return refuse(inPay ? "pay the cost (tap mana sources) or cancel first" : "declare first: only mana abilities can be activated now");
+    const variable = ab.mana?.produces.length === 1 && "anyColorAmount" in ab.mana.produces[0];
+    if (variable || (ab.costs ?? []).some((c) => needsChoice(c))) return refuse(`${label(r, src.id)} needs a decision of its own: activate it before casting`);
+    try {
+      const pr = productionOfAbility(r, a.player, ab);
+      if (!a.color && ("alternatives" in pr || ("choose" in pr && pr.choose.options.length > 1))) throw new Reject("invalid_choice", `${label(r, src.id)}: say which color of mana to add`);
+    } catch (e) { if (e instanceof Reject) throw e; /* unsupported production: activateAbility reports it */ }
+    activateAbility(r, a);
+  } else untapForMana(r, a);
+  if (inPay) {
+    const p = r.s.pending!;
+    r.s.pending = null;
+    if (p.ctx.t === "draft") startDraft(r, p.ctx.draft, p.cancellable);
+    else if (p.ctx.t === "exec") continueExec(r, p.ctx.exec);
+    else if (p.ctx.t === "special") runSpecial(r, p.ctx.action);
+    if ((r.s.pending as Pending | null)?.kind !== "pay_mana") clearManaTaps(r); // paid: the take-back window of the taps that paid is over
+  } else if (!r.s.pending) { r.s.priority = null; r.s.priorityAfter = null; } // declaring: nobody holds priority yet
+}
+
+function runSpecial(r: Run, a: Action): void {
+  if (a.type === "unlockDoor") unlockDoor(r, a);
+  else if (a.type === "turnFaceUp") turnFaceUp(r, a);
 }
 
 function clearManaTaps(r: Run): void { for (const p of r.s.players) if (p.manaTaps?.length) p.manaTaps = []; }
@@ -1083,11 +1208,22 @@ function turnFaceUp(r: Run, a: Extract<Action, { type: "turnFaceUp" }>): void {
   const cost = morphCostOf(r, o);
   if (!cost) throw new Reject("cannot_activate", "that face-down permanent has no morph cost");
   const d: Draft = { kind: "activated", player: a.player, sourceId: o.id, abilityId: "kw:unmorph", payWith: a.payWith, autoPay: a.autoPay };
+  if (askSpecialPayment(r, a, d, parseManaCost(cost), `Turn ${label(r, o.id)} face up`, "Morph cost")) return;
   payMana(r, a.player, parseManaCost(cost), 0, d, [], { abilitySource: o.id, spent: [] });
   o.faceDown = undefined; invalidateIndex(r);
   emit(r, { type: "turned_face_up", id: o.id, player: a.player });
   r.s.passes = [];
   finish(r, a.player);
+}
+
+/** A special action paid by hand with a short pool: opens the `pay_mana` question (every tap re-runs the same action); true = the question is open, the caller stops. */
+function askSpecialPayment(r: Run, a: Action, d: Draft, cost: ReturnType<typeof parseManaCost>, what: string, partLabel: string): boolean {
+  if (!paysByHand(r, d)) return false;
+  const sp: SpendCtx = { abilitySource: d.sourceId, spent: [] };
+  const { cost: need, life } = settleCost(r, d.player, cost, undefined, []);
+  if (poolCovers(r, d.player, need, 0, sp)) return false;
+  setPending(r, paySpec(r, d.player, { need, x: 0, life, parts: [{ label: partLabel, cost: costString(cost) }], ctx: sp, what }), { t: "special", action: a }, true);
+  return true;
 }
 
 /** The mana cost of one door (face) of a Room. */
@@ -1115,6 +1251,7 @@ function unlockDoor(r: Run, a: Extract<Action, { type: "unlockDoor" }>): void {
   let cut = 0;
   for (const id of r.s.battlefield) { const x = r.s.objects[id]; if (x && x.controller === a.player) for (const ab of abilitiesOf(r, x)) if (ab.scripted?.handler === "unlock_cost_reduction") cut += Number(/(\d+)/.exec(String((ab.scripted.params as { amount?: string } | undefined)?.amount ?? "1"))?.[1] ?? 1); }
   const reduced = Math.min(cut, parsed.generic); parsed.generic -= reduced; parsed.mv -= reduced;
+  if (askSpecialPayment(r, a, d, parsed, `Unlock the ${a.face} door of ${label(r, o.id)}`, "Unlock cost")) return;
   payMana(r, a.player, parsed, 0, d, [], { abilitySource: o.id, spent: [] });
   o.unlocked = [...(o.unlocked ?? []), a.face];
   invalidateIndex(r);
@@ -1348,7 +1485,11 @@ function answer(r: Run, a: Extract<Action, { type: "answerDecision" }>): void {
   if (pend.id !== a.decisionId) throw new Reject("wrong_decision", `pending decision is ${pend.id}, not ${a.decisionId}`);
   const choice = a.choice;
   const ctx = pend.ctx;
-  if (choice.cancel) {
+  if (ctx.t === "special") { // a special action's payment: Pay re-checks the pool, Cancel drops the action (nothing was paid)
+    if (choice.cancel || choice.ids?.[0] === "cancel") { r.s.pending = null; r.s.priority = pend.player; r.s.priorityAfter = null; return; }
+    r.s.pending = null; runSpecial(r, choice.payWith?.length ? ({ ...ctx.action, payWith: choice.payWith, autoPay: true } as Action) : ctx.action); return;
+  }
+  if (choice.cancel || (pend.kind === "pay_mana" && ctx.t === "draft" && choice.ids?.[0] === "cancel")) {
     if (!pend.cancellable || ctx.t !== "draft") throw new Reject("invalid_choice", "this decision cannot be cancelled");
     const d = ctx.draft;
     if (d.kind === "spell" && d.origin) {
@@ -1377,6 +1518,7 @@ function answer(r: Run, a: Extract<Action, { type: "answerDecision" }>): void {
         activateMana(r, d.player, src, ab, undefined, choice, d.costChoices, d.xChosen ? d.x : undefined);
         return;
       }
+      if (pend.kind === "pay_mana" && choice.payWith?.length) { d.payWith = [...choice.payWith]; d.autoPay = true; } // the confirmed suggestion: pay the rest by tapping exactly these sources
       startDraft(r, d, pend.cancellable, choice);
       return;
     }

@@ -8,6 +8,7 @@ import { MANA_COLORS } from "./types";
 import { addUnits, effectivePool, takeMana, unitFits, unitsOf, type SpendCtx } from "./manapool";
 import { evalPredicate, objectsMatching } from "./query";
 
+
 /** What a mana ability yields. `props`: spending restrictions / lasting (ManaUnit fields) that make the mana special. `alternatives`: "{W}{W}, {W}{B}, or {B}{B}", the player picks one. */
 export type UnitProps = { restriction?: import("../schema").ObjectFilter; abilities?: import("../schema").ObjectFilter; keep?: boolean; rider?: import("../schema").Step[]; riderIf?: import("../schema").ObjectFilter };
 /** mana abilities whose `steps` are a RIDER of the mana produced (run when it is spent on a spell), not an effect of the ability itself */
@@ -100,6 +101,12 @@ export const manaHooks: { runSteps?: (r: Run, pid: PlayerId, src: GameObject, a:
 
 /** A mana ability that costs its controller something (damage / life) when used: automatic payment prefers every free source before one of these. */
 export const manaAbilityHurts = (a: Ability): boolean => !!a.steps?.some((s) => s.kind === "damage_target" || s.kind === "life_change") && !a.scripted?.handler;
+
+/** A mana ability that sacrifices its source (Treasure, Lotus Petal): used up, so a payment only reaches for it when nothing else will do. */
+export const manaAbilityOneShot = (a: Ability): boolean => (a.costs ?? []).some((c) => "sacrifice" in c && c.sacrifice === "self");
+
+/** How a payment chooses sources: `noOneShot` / `noHurt` never use sacrifice-self / damaging sources; `keep` = mana colors the rest of the hand needs (sources making them are used later). */
+export interface TapPolicy { noOneShot?: boolean; noHurt?: boolean; keep?: Partial<Record<ManaColor, number>> }
 
 /** Mana abilities of an object (kind "mana"). */
 export const manaAbilities = (r: Run, o: GameObject): Ability[] => abilitiesOf(r, o).filter((a) => a.kind === "mana" && !(continuing(r) && continueHooks.unusable?.(a))); // continue mode: a mana ability the engine cannot run is never used by automatic payment (activating it by hand reports it)
@@ -228,13 +235,13 @@ function deductGeneric(work: ManaPool, n: number, keep: Record<string, number>):
  * payment of their own ("{1}, {T}: Add {U}{R}") are used last, and only when their output is larger than the generic cost they consume
  * (the net gain): that cost is paid out of the mana made by the other sources.
  */
-export function autoTapFor(r: Run, pid: PlayerId, need0: ParsedCost, x: number, only?: ObjId[], exclude: ObjId[] = [], ctx?: SpendCtx): boolean {
+export function autoTapFor(r: Run, pid: PlayerId, need0: ParsedCost, x: number, only?: ObjId[], exclude: ObjId[] = [], ctx?: SpendCtx, policy?: TapPolicy): boolean {
   const need = relaxColors(r, need0);
   type Src = { o: GameObject; a: Ability; pay?: number };
   const sources: Src[] = r.s.battlefield
     .map((id) => r.s.objects[id])
     .filter((o) => o.controller === pid && (!only || only.includes(o.id)) && !exclude.includes(o.id))
-    .flatMap((o): Src[] => manaAbilities(r, o).flatMap((a): Src[] => {
+    .flatMap((o): Src[] => manaAbilities(r, o).filter((a) => !(policy?.noOneShot && manaAbilityOneShot(a)) && !(policy?.noHurt && manaAbilityHurts(a))).flatMap((a): Src[] => {
       if (manaAbilityUsable(r, o, a) && autoTappable(r, pid, a, ctx)) return [{ o, a }];
       const pay = paidGenericCost(a);
       if (pay === undefined || o.zone !== "battlefield" || ((a.costs ?? []).some((c) => "tap" in c) && (o.tapped || isSummoningSick(r, o))) || !autoTappable(r, pid, a, ctx)) return [];
@@ -247,7 +254,9 @@ export function autoTapFor(r: Run, pid: PlayerId, need0: ParsedCost, x: number, 
   const best = new Map<ObjId, number>();
   for (const s of sources) best.set(s.o.id, Math.max(best.get(s.o.id) ?? 0, size(s)));
   const waste = (s: Src): number => (best.get(s.o.id) ?? 0) - size(s);
-  sources.sort((s1, s2) => Number(manaAbilityHurts(s1.a)) - Number(manaAbilityHurts(s2.a)) || flex(s1) - flex(s2) || waste(s1) - waste(s2) || Number(s1.o.id.slice(1)) - Number(s2.o.id.slice(1)));
+  // colors the rest of the hand needs: a source that makes them goes later (the policy of the suggestion / the AI; the plain automatic payment has none)
+  const keepScore = (s: Src): number => { if (!policy?.keep) return 0; try { const pr = productionOfAbility(r, pid, s.a); const cs = "fixed" in pr ? pr.fixed : "choose" in pr ? pr.choose.options : pr.alternatives.flat(); return cs.reduce((n, c) => n + (policy.keep![c] ?? 0), 0); } catch { return 0; } };
+  sources.sort((s1, s2) => Number(manaAbilityOneShot(s1.a)) - Number(manaAbilityOneShot(s2.a)) || Number(manaAbilityHurts(s1.a)) - Number(manaAbilityHurts(s2.a)) || flex(s1) - flex(s2) || keepScore(s1) - keepScore(s2) || waste(s1) - waste(s2) || Number(s1.o.id.slice(1)) - Number(s2.o.id.slice(1)));
   const used = new Set<ObjId>();
   const colorsOf = (s: Src, want?: ManaColor): ManaColor[] => {
     const prod = productionOfAbility(r, pid, s.a);
@@ -377,4 +386,50 @@ export function phyrexianOptions(r: Run, pid: PlayerId, cost: ParsedCost, chosen
   for (let k = 0; k < i; k++) if (chosen[k] === "mana") { const c = cost.phyrexian![k].find((x) => (avail[x] ?? 0) > 0); if (c) avail[c]--; }
   const lifeSpent = chosen.slice(0, i).filter((x) => x === "life").length * 2;
   return { mana: sym.some((c) => (avail[c] ?? 0) > 0), life: p.life - lifeSpent >= 2 };
+}
+
+// ================================================================ paying by hand (CR 601.2g-h, 117.3)
+
+/** Does this player pay mana costs by hand (config.manualPay)? Then spending mana never taps a source: the pool is all that pays. */
+export const isManualPayer = (r: Run, pid: PlayerId): boolean => !!r.s.config.manualPay?.includes(pid);
+
+/** Can the pool alone (plus restricted units that fit `ctx`) pay `need`? Nothing is spent. */
+export function poolCovers(r: Run, pid: PlayerId, need0: ParsedCost, x: number, ctx?: SpendCtx): boolean {
+  return covers(effectivePool(r, pid, ctx), relaxColors(r, need0), x);
+}
+
+const SYM = (c: string): string => `{${c}}`;
+
+/** What the pool still lacks of `need`, as a mana string ("{2}{U}"; "" when it covers the cost). */
+export function poolShortfall(r: Run, pid: PlayerId, need0: ParsedCost, x: number, ctx?: SpendCtx): string {
+  const need = relaxColors(r, need0);
+  const work = { ...effectivePool(r, pid, ctx) } as Record<string, number>;
+  let out = "";
+  for (const c of ["W", "U", "B", "R", "G", "C"]) { const n = need.colored[c] ?? 0; const have = Math.min(work[c] ?? 0, n); work[c] = (work[c] ?? 0) - have; if (n > have) out += SYM(c).repeat(n - have); }
+  for (const [c, n] of Object.entries(need.colored)) if (!["W", "U", "B", "R", "G", "C"].includes(c)) out += SYM(c).repeat(n);
+  const left = Object.values(work).reduce((s, v) => s + v, 0);
+  const g = need.generic + need.x * x - left;
+  return (g > 0 ? SYM(String(g)) : "") + out;
+}
+
+/** The colored part first, as the cards print it: a cost string "{3}{U}{G}" of a parsed cost. */
+export function costString(c: ParsedCost, x = 0): string {
+  const g = c.generic + c.x * x;
+  let s = g > 0 ? SYM(String(g)) : "";
+  for (const k of ["W", "U", "B", "R", "G", "C"]) s += SYM(k).repeat(c.colored[k] ?? 0);
+  for (const [k, n] of Object.entries(c.colored)) if (!["W", "U", "B", "R", "G", "C"].includes(k)) s += SYM(k).repeat(n);
+  return s;
+}
+
+/**
+ * The sources the SUGGESTION taps for `need` (what 'Auto-pay (suggest)' shows, what the AI starts from): a dry run of `autoTapFor` that never uses
+ * sacrifice-self or damaging sources, prefers sources whose colors the rest of the hand does not need, and touches nothing. undefined = it cannot be paid that way.
+ */
+export function suggestTaps(r0: Run, pid: PlayerId, need: ParsedCost, x: number, ctx?: SpendCtx, policy: TapPolicy = { noOneShot: true, noHurt: true }, exclude: ObjId[] = []): ObjId[] | undefined {
+  const r: Run = { s: structuredClone(r0.s), events: [], defs: r0.defs, ...(r0.db ? { db: r0.db } : {}), scanned: 0 }; // a throwaway copy: the caller's game is never touched
+  if (poolCovers(r, pid, need, x, ctx)) return [];
+  if (!autoTapFor(r, pid, need, x, undefined, exclude, ctx, policy)) return undefined;
+  const tapped: ObjId[] = [];
+  for (const e of r.events) if (e.type === "tap" && (e as { forMana?: boolean }).forMana) tapped.push((e as unknown as { id: ObjId }).id);
+  return tapped;
 }

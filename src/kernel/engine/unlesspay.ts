@@ -6,7 +6,8 @@ import type { Cost, Prompt, Step } from "../schema";
 import { label, parseManaCost, player, Reject, type Run } from "./core";
 import { evalQuantity, resolvePlayers } from "./query";
 import { costCandidates, costCount, costOptions, payChoiceCost, type ChoiceCost } from "./costs";
-import { autoTapFor, payFromPool, totalPotentialMana } from "./mana";
+import { autoTapFor, costString, isManualPayer, payFromPool, poolCovers, totalPotentialMana } from "./mana";
+import { paySpec } from "./payspec";
 import { invalidateIndex } from "./layers";
 import { changeLife, decide, type AskSpec, type StepResult } from "./steps";
 import type { Choice, Env, PlayerId } from "./types";
@@ -42,24 +43,53 @@ function canPay(r: Run, payer: PlayerId, u: UnlessPay, env: Env): boolean {
   return player(r, payer).life >= lifeNeeded(u);
 }
 
+/** The step remembers (on the step object itself, which lives in the running frame) that its payer chose to pay and is tapping sources. */
+type PayState = Step & { __paying?: boolean; __n?: number };
+
+/**
+ * Paying by hand: undefined = the pool covers the cost (pay now), `{ ask }` = the payer taps sources (a `pay_mana` question, re-asked after every tap until
+ * the pool covers it), "declined" = the payer cancelled (the "unless" effect happens / the "may pay" effect does not).
+ */
+function payByHand(r: Run, env: Env, payer: PlayerId, cost: ReturnType<typeof parseManaCost>, x: number, step: Step, answer: Choice | undefined): { ask: AskSpec } | "declined" | undefined {
+  const st = step as PayState;
+  if (answer?.payWith?.length && !poolCovers(r, payer, cost, x)) autoTapFor(r, payer, cost, x, answer.payWith); // the confirmed suggestion: tap exactly those sources
+  if (poolCovers(r, payer, cost, x)) { st.__paying = false; return undefined; }
+  const spec = paySpec(r, payer, { need: cost, x, life: 0, parts: [{ label: "Cost", cost: costString(cost, x) }], ctx: { spent: [] }, what: `Pay for ${label(r, env.source)}` });
+  st.__paying = true;
+  const d = decide(spec, answer);
+  if ("ask" in d) return d;
+  if (d.ids[0] === "cancel") { st.__paying = false; return "declined"; }
+  return { ask: spec }; // "Pay" while the pool is still short: the question stays open
+}
+
 export function unlessHandler(r: Run, env: Env, step: Step, answer: Choice | undefined): StepResult {
   const u = step.pay as UnlessPay;
   const inner = step.inner as Step;
   const payer = resolvePlayers(r, u.payer as never, env)[0];
   const anyC = u.cost.find((c) => "mana" in c && (c as { anyAmount?: boolean }).anyAmount) as { mana: string } | undefined;
-  if (anyC && payer && u.inverse) return payAnyAmount(r, env, payer, anyC.mana, u, inner, answer);
-  if (!payer || !canPay(r, payer, u, env)) return u.inverse ? "done" : { push: [inner] };
-  const spec: AskSpec = {
-    kind: "pay_unless", player: payer,
-    prompt: u.prompt ?? { title: `${label(r, env.source)}: pay or not`, instruction: u.inverse ? "Do you want to pay? If you do, the effect happens." : "Do you want to pay? If you don't, the effect happens." },
-    options: [{ id: "yes", label: "Pay" }, { id: "no", label: "Don't pay" }], min: 1, max: 1
-  };
-  const d = decide(spec, answer);
-  if ("ask" in d) return d;
-  if (!d.yes) return u.inverse ? "done" : { push: [inner] };
+  if (anyC && payer && u.inverse) return payAnyAmount(r, env, payer, anyC.mana, u, inner, answer, step);
+  const resumed = !!(step as PayState).__paying; // the payer said "pay" and is tapping sources (paying by hand)
+  if (!resumed) {
+    if (!payer || !canPay(r, payer, u, env)) return u.inverse ? "done" : { push: [inner] };
+    const spec: AskSpec = {
+      kind: "pay_unless", player: payer,
+      prompt: u.prompt ?? { title: `${label(r, env.source)}: pay or not`, instruction: u.inverse ? "Do you want to pay? If you do, the effect happens." : "Do you want to pay? If you don't, the effect happens." },
+      options: [{ id: "yes", label: "Pay" }, { id: "no", label: "Don't pay" }], min: 1, max: 1
+    };
+    const d = decide(spec, answer);
+    if ("ask" in d) return d;
+    if (!d.yes) return u.inverse ? "done" : { push: [inner] };
+    answer = undefined;
+  }
+  if (!payer) return u.inverse ? "done" : { push: [inner] };
   const { cost, x } = manaNeeded(r, u, env);
   if (cost.mv + cost.x * x > 0 || cost.x > 0) {
-    if (!(payFromPool(r, payer, cost, x) || (autoTapFor(r, payer, cost, x) && payFromPool(r, payer, cost, x)))) throw new Reject("cannot_pay", "cannot pay");
+    if (isManualPayer(r, payer)) {
+      const w = payByHand(r, env, payer, cost, x, step, answer);
+      if (w === "declined") return u.inverse ? "done" : { push: [inner] };
+      if (w) return w;
+      if (!payFromPool(r, payer, cost, x)) throw new Reject("cannot_pay", "cannot pay");
+    } else if (!(payFromPool(r, payer, cost, x) || (autoTapFor(r, payer, cost, x) && payFromPool(r, payer, cost, x)))) throw new Reject("cannot_pay", "cannot pay");
   }
   const life = lifeNeeded(u);
   if (life > 0) changeLife(r, env, payer, -life);
@@ -69,7 +99,7 @@ export function unlessHandler(r: Run, env: Env, step: Step, answer: Choice | und
 }
 
 /** "You may pay any amount of {R}. When you do, ...": choose how many (0 = none), pay that many, then the inner step runs with X = that amount. */
-function payAnyAmount(r: Run, env: Env, payer: PlayerId, sym: string, u: UnlessPay, inner: Step, answer: Choice | undefined): StepResult {
+function payAnyAmount(r: Run, env: Env, payer: PlayerId, sym: string, u: UnlessPay, inner: Step, answer: Choice | undefined, step: Step): StepResult {
   const one = parseManaCost(sym);
   const affordable = (n: number): boolean => {
     const cost = parseManaCost(sym.repeat(n));
@@ -80,12 +110,24 @@ function payAnyAmount(r: Run, env: Env, payer: PlayerId, sym: string, u: UnlessP
   for (let n = Math.min(totalPotentialMana(r, payer), 50); n >= 1; n--) if (affordable(n)) { max = n; break; }
   if (max <= 0 || one.mv === 0) return "done";
   const spec: AskSpec = { kind: "choose_number", player: payer, prompt: u.prompt ?? { title: `${label(r, env.source)}: pay any amount`, instruction: `Choose how many ${sym} to pay (0 to pay nothing).` }, options: [], min: 0, max, numeric: true };
-  const d = decide(spec, answer);
-  if ("ask" in d) return d;
-  const n = d.number ?? 0;
+  const st = step as PayState;
+  let n: number;
+  if (st.__paying && st.__n) n = st.__n; // resumed: the amount was chosen, the payer is tapping sources
+  else {
+    const d = decide(spec, answer);
+    if ("ask" in d) return d;
+    n = d.number ?? 0;
+    answer = undefined;
+  }
   if (n <= 0) return "done";
   const cost = parseManaCost(sym.repeat(n));
-  if (!(payFromPool(r, payer, cost, 0) || (autoTapFor(r, payer, cost, 0) && payFromPool(r, payer, cost, 0)))) throw new Reject("cannot_pay", "cannot pay");
+  if (isManualPayer(r, payer)) {
+    st.__n = n;
+    const w = payByHand(r, env, payer, cost, 0, step, answer);
+    if (w === "declined") return "done";
+    if (w) return w;
+    if (!payFromPool(r, payer, cost, 0)) throw new Reject("cannot_pay", "cannot pay");
+  } else if (!(payFromPool(r, payer, cost, 0) || (autoTapFor(r, payer, cost, 0) && payFromPool(r, payer, cost, 0)))) throw new Reject("cannot_pay", "cannot pay");
   env.x = n;
   return { push: [inner] };
 }

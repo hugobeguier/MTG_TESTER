@@ -294,6 +294,8 @@ export interface Config {
   skipFirstDraw: boolean;
   maxEventsPerPass: number;
   handSize: number;
+  /** players who pay mana costs BY HAND (CR 601.2g-h / 117.3): spending mana never taps a source for them; a cost the pool cannot cover opens a `pay_mana` decision in which they tap sources (or cancel). An action with `autoPay: true` / `payWith` is the explicit "suggest" and still taps. Others (AI, tests, observer) are paid for automatically. */
+  manualPay?: PlayerId[];
   /** observer only: mirror what a HEADLESS legacy game does not run (the self-play orchestrator has no React hooks): triggers of these events are never put on the stack, and combat damage does not move the monarchy */
   /** a lone survivor who "can't win the game" (Herald of Eternal Dawn's opponents): "draw" (default: simulations record a draw, nobody can ever win) or "continue" (the real rule 104.3: the game simply goes on) */
   loneSurvivorCannotWin?: "draw" | "continue";
@@ -386,7 +388,23 @@ export interface GameState {
 
 export type DecisionKind =
   | "choose_modes" | "choose_targets" | "choose_x" | "choose_cards" | "choose_yes_no" | "choose_color"
-  | "order_triggers" | "cast_target_player" | "order_replacements" | "assign_damage" | "choose_option" | "choose_number" | "pay_unless" | "choose_cast_option" | "assign_mana" | "assign_counters" | "order_library";
+  | "order_triggers" | "cast_target_player" | "order_replacements" | "assign_damage" | "choose_option" | "choose_number" | "pay_unless" | "choose_cast_option" | "assign_mana" | "assign_counters" | "order_library" | "pay_mana";
+
+/** `pay_mana` decision: what is being paid for and what is still missing (the player taps sources through `activateAbility` / `untapForMana` while it is open). */
+export interface PayInfo {
+  /** the whole mana cost, e.g. "{3}{U}{G}" (a Phyrexian symbol paid with life is not in it) */
+  cost: string;
+  /** where it comes from: base cost, commander tax, cost increases / reductions, additional costs */
+  parts: Array<{ label: string; cost: string }>;
+  /** what the pool still lacks, e.g. "{2}" ("" = covered) */
+  remaining: string;
+  /** life that will be paid in addition (Phyrexian symbols, targeting taxes) */
+  life: number;
+  /** the mana pool right now (colors that have mana) */
+  pool: Record<string, number>;
+  /** what the payment is for ("Cast X", "Activate X", "Pay for X", "Attack tax") */
+  what: string;
+}
 
 /**
  * One listed option. Ordering decisions (order_triggers / order_replacements) also say where the entry comes from so the table can show the cards:
@@ -416,6 +434,8 @@ export interface PendingView {
   /** order_library (scry / surveil / "put them back in any order"): `to` = where the cards NOT kept in the ordered stack may go ("none" = every card is placed in the stack);
    *  `stack` = which end of the library the ordered stack goes to. The answer is `place`: { toBottom, toGraveyard, top } (see Choice.place). */
   placement?: { to: "bottom" | "graveyard" | "none"; stack: "top" | "bottom" };
+  /** pay_mana: the cost, its parts and what is missing */
+  pay?: PayInfo;
   cancellable: boolean;
 }
 
@@ -425,10 +445,12 @@ export interface Pending extends PendingView {
 }
 
 export type PendingCtx =
-  | { t: "draft"; draft: Draft; stage: "face" | "option" | "extras" | "gift" | "modes" | "targets" | "x" | "color" | "costs" | "crew" | "phyrexian" | "counters" | "improvise"; partIndex?: number; specIndex?: number }
+  | { t: "draft"; draft: Draft; stage: "face" | "option" | "extras" | "gift" | "modes" | "targets" | "x" | "color" | "costs" | "crew" | "phyrexian" | "counters" | "improvise" | "pay"; partIndex?: number; specIndex?: number }
   | { t: "exec"; exec: Exec }
   | { t: "triggers"; stage: "order" | "targets"; player: PlayerId; triggerId?: string; draft?: Draft }
   | { t: "cleanup_discard" }
+  /** a special action (unmorph, unlock a door) waiting for its payment: paying by hand re-runs `action` after every tap (resolve.ts askSpecialPayment) */
+  | { t: "special"; action: Action }
   /** combat damage waiting for an attacker's controller to divide its damage among several blockers (combat.ts) */
   | { t: "combat_damage"; which: "first" | "regular"; assigned: Record<ObjId, Record<string, number>>; attacker: ObjId }
   /** a replacement-ordering question: answering re-runs `action` from `base` with the recorded answers (see replacements.ts) */
@@ -563,6 +585,8 @@ export interface Choice {
   /** order_library: every listed card exactly once. toBottom / toGraveyard: the cards sent there (toBottom: first = closest to the top of the bottom group); top: the ordered stack
    *  (first = the next card drawn, or the card nearest the top of the bottom group when the stack goes to the bottom). The legacy `ids` answer is still accepted. */
   place?: { toBottom?: string[]; toGraveyard?: string[]; top?: string[] };
+  /** pay_mana, answered with ids ["pay"]: "pay the rest by tapping exactly these sources" (the confirmed 'Auto-pay (suggest)'); without it Pay only re-checks the pool */
+  payWith?: ObjId[];
 }
 
 export type EventBase = { type: string; [k: string]: unknown };

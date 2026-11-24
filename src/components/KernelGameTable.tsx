@@ -91,15 +91,15 @@ export function KernelGameTable({ controller, onBack }: { controller: KernelGame
   const degraded = controller.ks.degraded;
   const pick = controller.boardPick();
   const hints = controller.handHints();
-  const vis = useDecisionVisibility(table.decision?.id);
+  const vis = useDecisionVisibility(table.decision?.id ?? (controller.paying() ? "kernel-payment" : undefined)); // the payment banner is one window across taps (each tap is a new decision id)
   useDecisionKeys(pick, vis.hidden);
   const onKernelCardAction = (id: string) => { controller.closeInspect(); controller.doOption(id); };
   return (
     <main className={`app-shell game-shell${vis.hidden ? " kernel-choice-hidden" : ""}`}>
-      {table.decision ? (
+      {table.decision || pick ? (
         <button type="button" className={`choice-minimize-toggle kernel-choice-toggle${vis.hidden ? " is-minimized" : ""}`} onClick={vis.toggle} data-testid="kernel-choice-toggle"
           title={vis.hidden ? "Show the choice again (Esc)" : `Hide the choice to look at the table; it stays pending. ${hideHint}`}>
-          {vis.hidden ? showLabel(table.decision.title) : "Hide choice (Esc)"}
+          {vis.hidden ? showLabel(table.decision?.title ?? pick!.title) : "Hide choice (Esc)"}
         </button>
       ) : null}
       {table.session.status === "complete" ? (
@@ -130,7 +130,7 @@ export function KernelGameTable({ controller, onBack }: { controller: KernelGame
         holdPriorityOnce={controller.isHoldArmed()}
         kernelTurnNumber={table.session.turn}
         kernelStepId={controller.ks.state.turn.phase}
-        kernelWaiting={table.decision ? { seatId: human, kind: "choice" } : table.waitingFor ? { seatId: table.waitingFor.player, kind: "choice" } : table.declaring?.players[0] ? { seatId: table.declaring.players[0], kind: table.declaring.kind } : undefined}
+        kernelWaiting={table.decision || controller.paying() ? { seatId: human, kind: "choice" } : table.waitingFor ? { seatId: table.waitingFor.player, kind: "choice" } : table.declaring?.players[0] ? { seatId: table.declaring.players[0], kind: table.declaring.kind } : undefined}
         kernelPick={pick}
         manaChoice={controller.manaChoice()}
         hoverLogCards

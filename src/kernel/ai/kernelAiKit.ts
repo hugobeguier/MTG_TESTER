@@ -27,7 +27,8 @@ export interface Move { action: Action; label: string; chosen: boolean }
 export function choose(t: Table, seat: PlayerId, memory: AiMemory = { banned: new Set() }): { action?: Action; memory: AiMemory; label: string } {
   const acts = legalActions(t.state, seat, ctx);
   const action = chooseAiAction(acts, t.state, ctx, seat, memory);
-  const hit = acts.find((a) => a.action && JSON.stringify(a.action) === JSON.stringify(action));
+  const bare = (x: Action | undefined) => JSON.stringify(x && { ...x, payWith: undefined, autoPay: undefined }); // the AI attaches the sources it plans to tap (payWith)
+  const hit = acts.find((a) => a.action && bare(a.action) === bare(action));
   return { action, memory, label: hit?.label ?? action?.type ?? "none" };
 }
 

@@ -37,7 +37,7 @@ import { INTERNAL11, STEPS11 } from "./step11";
 import { addDurable, expiryFor, hasFlag, SUPPORTED_DURABLE_DURATIONS } from "./durable";
 import { countersTransferSteps, INTERNAL6, STEPS6, wrapRevealStep } from "./steps6";
 
-export interface AskSpec { kind: DecisionKind; player: PlayerId; prompt: Prompt; options: DecisionOption[]; min: number; max: number; repeatable?: boolean; numeric?: boolean; mana?: { total: number; colors: string[] }; counters?: { min: number; max: number; available: Record<string, number> }; placement?: { to: "bottom" | "graveyard" | "none"; stack: "top" | "bottom" } }
+export interface AskSpec { kind: DecisionKind; player: PlayerId; prompt: Prompt; options: DecisionOption[]; min: number; max: number; repeatable?: boolean; numeric?: boolean; mana?: { total: number; colors: string[] }; counters?: { min: number; max: number; available: Record<string, number> }; placement?: { to: "bottom" | "graveyard" | "none"; stack: "top" | "bottom" }; pay?: import("./types").PayInfo }
 export type StepResult = "done" | { ask: AskSpec } | { push: Step[] };
 export type StepStatus = { status: "done" } | { status: "ask"; spec: AskSpec };
 

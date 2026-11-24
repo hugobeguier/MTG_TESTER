@@ -87,6 +87,8 @@ export interface KernelBoardPick {
   onList?: () => void;
   /** the card the question comes from: shown in the banner, hover for the full card */
   sourceCard?: VisibleCard;
+  /** the payment banner: the T key still taps the hovered permanent for mana */
+  allowTapKey?: boolean;
 }
 
 interface ThreeGameTableProps {
@@ -1471,7 +1473,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
       const key = event.key.toLowerCase();
       if (key === "t" && active) {
         const hovered = hoveredCardRef.current;
-        if (!hovered || propsRef.current.kernelPick) return;
+        if (!hovered || (propsRef.current.kernelPick && !propsRef.current.kernelPick.allowTapKey)) return;
         propsRef.current.onToggleTapCard?.(hovered.seatId, hovered.card.id, hovered.location);
       } else if (key === "w") movementKeys.current.forward = active;
       else if (key === "a") movementKeys.current.left = active;

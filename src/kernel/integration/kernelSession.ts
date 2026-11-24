@@ -100,6 +100,13 @@ export class KernelSession {
     }
     for (const p of state.players) this.logs.set(p.id, []);
     this.logs.set(SPECTATOR, []);
+    this.applyManualPay();
+  }
+
+  /** Human seats pay mana costs BY HAND (CR 601.2g-h): the engine never taps their sources for them (see config.manualPay); agents, the observer and tests are paid for automatically. */
+  private applyManualPay(): void {
+    const humans = this.st.players.map((p) => p.id).filter((id) => this.opts.seats?.[id]?.kind === "human");
+    if (humans.length) this.st.config.manualPay = humans; else delete this.st.config.manualPay;
   }
 
   // ------------------------------------------------------------------ creation

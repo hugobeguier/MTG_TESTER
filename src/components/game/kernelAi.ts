@@ -6,6 +6,7 @@
 import { defaultAnswer } from "@/kernel/observer/actions";
 import { effectiveView, type LegalAction } from "@/kernel/engine/legal";
 import { chooseDecision, planMain } from "@/kernel/ai/plan";
+import { withPlannedPayment } from "@/kernel/ai/payment";
 import type { ScriptEntry } from "@/kernel/ai/simulate";
 import type { Action, Choice, EngineContext, GameState, PlayerId } from "@/kernel/engine/types";
 
@@ -107,7 +108,7 @@ export function chooseAiAction(acts: LegalAction[], state: GameState, ctx: Engin
     if (land) return land.action;
     // lookahead: simulate each cast / activation (with its X, modes, targets, optional costs) and take the one that improves the position most; a no-op is never chosen
     const plan = planMain(acts, state, ctx, seat, memory.banned, (memory.usage ??= {}));
-    if (plan) { memory.script = plan.script; memory.usage![plan.id] = (memory.usage![plan.id] ?? 0) + 1; return plan.action; }
+    if (plan) { memory.script = plan.script; memory.usage![plan.id] = (memory.usage![plan.id] ?? 0) + 1; return withPlannedPayment(plan.action, state, ctx, seat, plan.script); } // the payment is planned before the cast (kernel/ai/payment.ts)
   }
   if (mine && emptyStack) return { type: "advancePhase", player: seat };
   return acts.find((a) => a.kind === "passPriority")?.action ?? { type: "passPriority", player: seat };
@@ -129,5 +130,5 @@ function counterResponse(acts: LegalAction[], state: GameState, ctx: EngineConte
   });
   if (!pick) return undefined;
   responded.add(top.id);
-  return pick.action;
+  return pick.action && withPlannedPayment(pick.action, state, ctx, seat);
 }

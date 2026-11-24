@@ -1,3 +1,4 @@
+import { payIfAsked } from "./kernelPaymentKit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { classifyChange, delayFor, PacingClock, PACE_ITEM_MS, PHASE_PACE_CAP_MS, type PaceSnap } from "./kernelPacing";
 import { DEFAULT_STOP_SETTINGS } from "@/lib/priorityStops";
@@ -118,7 +119,8 @@ describe("controller pacing (driver)", () => {
     const stop = c.startDriver();
     c.playCard("p1", spell);
     // the spell may need a target answer
-    if (ks.state.pending) { const d = c.table().decision!; c.answer(d.id, { ids: [victim] }); }
+    if (ks.state.pending && c.table().decision) { const d = c.table().decision!; c.answer(d.id, { ids: [victim] }); }
+    payIfAsked(c);
     expect(ks.state.stack.length).toBe(1);
     expect(pacing.remaining()).toBe(2500);
     expect(c.isPacing()).toBe(true);
@@ -139,7 +141,8 @@ describe("controller pacing (driver)", () => {
     const { ks, c, pacing, spell, victim } = game("normal");
     const stop = c.startDriver();
     c.playCard("p1", spell);
-    if (ks.state.pending) { const d = c.table().decision!; c.answer(d.id, { ids: [victim] }); }
+    if (ks.state.pending && c.table().decision) { const d = c.table().decision!; c.answer(d.id, { ids: [victim] }); }
+    payIfAsked(c);
     expect(pacing.active).toBe(true);
     c.skipPacing();
     expect(pacing.active).toBe(false);
@@ -151,7 +154,8 @@ describe("controller pacing (driver)", () => {
   it("Off is instant: no wait is ever recorded", () => {
     const { ks, c, pacing, spell, victim } = game("off");
     c.playCard("p1", spell);
-    if (ks.state.pending) { const d = c.table().decision!; c.answer(d.id, { ids: [victim] }); }
+    if (ks.state.pending && c.table().decision) { const d = c.table().decision!; c.answer(d.id, { ids: [victim] }); }
+    payIfAsked(c);
     expect(pacing.remaining()).toBe(0);
   });
 

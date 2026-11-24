@@ -1,5 +1,6 @@
 // Phase 6: the human's priority windows on the kernel (stops, yield, full control, stop next), responding to an AI spell, the AI's counterspell response,
 // and loop guards. All headless on real cards (Go for the Throat, Undead Augur, Counterspell ...).
+import { payIfAsked } from "./kernelPaymentKit";
 import { describe, expect, it } from "vitest";
 import { ctx, mini } from "@/kernel/integration/testgame";
 import { KernelSession } from "@/kernel/integration/kernelSession";
@@ -70,6 +71,7 @@ describe("human priority windows on an opponent's turn", () => {
     expect(d.kind).toBe("choose_targets");
     const augur = ks.state.battlefield.find((id) => ks.state.objects[id].cardName === "Undead Augur")!;
     expect(c.answer(d.id, { ids: [augur] })).toBe(true);
+    payIfAsked(c);
     expect(ks.state.stack).toHaveLength(2);
     // our spell is on top: resolve everything (we stop again on the new stack item only if the window rules say so; pass until empty)
     for (let i = 0; i < 12 && ks.state.stack.length; i++) { if (c.needsStep()) c.step(); else c.passPriority(); }
@@ -232,6 +234,7 @@ describe("AI responses", () => {
     const { ks, c, inHand } = game({ humanHand: ["Undead Augur"], aiHand: ["Counterspell"], aiLands: ["Island", "Island"] });
     // Counterspell costs UU: the AI has two Islands
     c.playCard("p1", inHand(0, "Undead Augur"));
+    payIfAsked(c);
     expect(ks.state.stack).toHaveLength(1);
     // the human auto-passes (nothing to respond with), the AI answers
     settle(c, 20);
@@ -244,6 +247,7 @@ describe("AI responses", () => {
   it("the AI without the mana (or without a counterspell) just passes and the spell resolves", () => {
     const { ks, c, inHand } = game({ humanHand: ["Undead Augur"], aiHand: ["Counterspell"], aiLands: ["Island"] });
     c.playCard("p1", inHand(0, "Undead Augur"));
+    payIfAsked(c);
     settle(c, 20);
     expect(ks.state.battlefield.some((id) => ks.state.objects[id].cardName === "Undead Augur")).toBe(true);
   });
