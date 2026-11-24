@@ -136,7 +136,7 @@ export function baseChoices(r: Run, card: GameObject, pid: PlayerId, origin: str
     if (c.kind === "cast_from_zone" && c.from === "hand" && !perm) continue; // adds nothing: the normal way already casts from hand
     if (condOk(r, c, pid, card)) out.push(c);
   }
-  return out;
+  return out.sort((a, b) => Number(isFreeOption(b)) - Number(isFreeOption(a))); // a free cast is the default (offered first); the normal way stays available
 }
 
 /** Optional extras the caster may add (kicker, gift, optional additional cost, escalate); mandatory additional costs are returned by `mandatoryExtras`. */
@@ -149,12 +149,20 @@ export function mandatoryExtras(r: Run, card: GameObject, pid: PlayerId, origin:
 
 const costText = (cs: Cost[]): string => cs.map((c) => ("mana" in c ? c.mana : "life" in c ? "pay life" : "sacrifice" in c ? "sacrifice" : "discard" in c ? "discard" : "exileFrom" in c ? "exile cards" : "tapOther" in c ? "tap creatures" : "")).filter(Boolean).join(" + ");
 
+/** A free cast ("without paying its mana cost", CR 118.9): an alternative cost with nothing in it (Omniscience, Dracogenesis, One with the Multiverse, Rishkar's Expertise). */
+export const isFreeOption = (c: CastOption | null): boolean => !!c && (c.kind === "alternative" || (c.kind === "cast_from_zone" && c.id.startsWith("perm:"))) && c.replacesManaCost === true && c.cost.length === 0;
+/** The permanent that grants an option ("free-hand:#9" -> #9), when its id names one. */
+const grantSource = (c: CastOption): string | undefined => /^(?:free-hand|freecast1|lifecast1|grave1):(.+)$/.exec(c.id)?.[1];
+
 export function optionLabel(c: CastOption | null, r?: Run, card?: GameObject): string {
-  if (c === null) return "Cast normally";
+  if (c === null) return "Pay its mana cost";
+  const src = r && grantSource(c) ? ` (${label(r, grantSource(c)!)})` : "";
+  if (isFreeOption(c)) return `Cast without paying its mana cost${src}`;
+  if (c.id.startsWith("lifecast1:")) return `Pay life equal to its mana value instead of its mana cost${src}`;
   const cost = costText(c.cost);
   const nm = c.kind === "cast_from_zone" ? `Cast from your ${c.from}` : c.kind[0].toUpperCase() + c.kind.slice(1);
-  void r; void card;
-  return cost ? `${nm} (${cost})` : nm;
+  void card;
+  return cost ? `${nm} (${cost})` : `${nm}${src}`;
 }
 
 /** The option ids and kinds recorded as paid ("kicked" reads kind kicker, "was cast with escape" reads kind escape). */

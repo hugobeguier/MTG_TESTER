@@ -1,0 +1,423 @@
+{
+  "card": "Archaeomancer's Map",
+  "status": "accepted",
+  "oracle": "When this artifact enters, search your library for up to two basic Plains cards, reveal them, put them into your hand, then shuffle.\nWhenever a land an opponent controls enters, if that player controls more lands than you, you may put a land card from your hand onto the battlefield.",
+  "scenarios": [
+    {
+      "name": "Enters: fetch two basic Plains into hand",
+      "setup": {
+        "p1": {
+          "hand": [
+            "Archaeomancer's Map"
+          ],
+          "battlefield": [
+            "Plains",
+            "Plains",
+            "Plains"
+          ],
+          "library": [
+            "Plains",
+            "Island",
+            "Plains",
+            "Vanilla 1/1",
+            "Plains"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "cast",
+          "player": "p1",
+          "card": "Archaeomancer's Map"
+        },
+        {
+          "do": "resolve",
+          "answers": [
+            {
+              "pick": [
+                "Plains",
+                "Plains"
+              ]
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "check": "zone",
+          "player": "p1",
+          "zone": "hand",
+          "cards": {
+            "exactly": [
+              "Plains",
+              "Plains"
+            ]
+          },
+          "why": "Oracle: up to two basic Plains cards are put into your hand"
+        },
+        {
+          "check": "zone",
+          "player": "p1",
+          "zone": "library",
+          "cards": {
+            "atLeast": [
+              "Island",
+              "Vanilla 1/1",
+              "Plains"
+            ]
+          },
+          "why": "The rest stays in the library (one Plains and the other cards)"
+        },
+        {
+          "check": "zone",
+          "player": "p1",
+          "zone": "library",
+          "count": 3,
+          "why": "Five cards minus the two fetched"
+        },
+        {
+          "check": "permanent",
+          "ref": "Archaeomancer's Map",
+          "zone": "battlefield",
+          "why": "The artifact resolved"
+        }
+      ]
+    },
+    {
+      "name": "Enters: may fetch fewer than two (here none)",
+      "setup": {
+        "p1": {
+          "hand": [
+            "Archaeomancer's Map"
+          ],
+          "battlefield": [
+            "Plains",
+            "Plains",
+            "Plains"
+          ],
+          "library": [
+            "Plains",
+            "Plains",
+            "Island"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "cast",
+          "player": "p1",
+          "card": "Archaeomancer's Map"
+        },
+        {
+          "do": "resolve",
+          "answers": [
+            {
+              "none": true
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "check": "zone",
+          "player": "p1",
+          "zone": "hand",
+          "count": 0,
+          "why": "Oracle: 'up to two': choosing none fetches nothing"
+        },
+        {
+          "check": "zone",
+          "player": "p1",
+          "zone": "library",
+          "count": 3,
+          "why": "No card left the library"
+        }
+      ]
+    },
+    {
+      "name": "Enters with no basic Plains in the library: nothing fetched, no error",
+      "setup": {
+        "p1": {
+          "hand": [
+            "Archaeomancer's Map"
+          ],
+          "battlefield": [
+            "Plains",
+            "Plains",
+            "Plains"
+          ],
+          "library": [
+            "Island",
+            "Vanilla 1/1"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "cast",
+          "player": "p1",
+          "card": "Archaeomancer's Map"
+        },
+        {
+          "do": "resolve",
+          "answers": [
+            {
+              "none": true
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "check": "zone",
+          "player": "p1",
+          "zone": "hand",
+          "count": 0,
+          "why": "Only basic Plains can be fetched"
+        },
+        {
+          "check": "zone",
+          "player": "p1",
+          "zone": "library",
+          "count": 2,
+          "why": "Library keeps both cards"
+        },
+        {
+          "check": "pending",
+          "present": false,
+          "why": "Nothing left to decide"
+        }
+      ]
+    },
+    {
+      "name": "Opponent's land enters and they control more lands: may put a land from hand onto the battlefield",
+      "knownFailure": "DRAFT BUG: the draft models the single 'you may' as TWO optional steps (choose a land? yes/no, then put it onto the battlefield? yes/no), so the player is asked twice.",
+      "active": "p2",
+      "setup": {
+        "p1": {
+          "battlefield": [
+            "Archaeomancer's Map",
+            "Plains"
+          ],
+          "hand": [
+            "Island"
+          ]
+        },
+        "p2": {
+          "battlefield": [
+            "Island"
+          ],
+          "hand": [
+            "Island"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "playLand",
+          "player": "p2",
+          "card": "Island",
+          "expect": [
+            {
+              "check": "stack",
+              "items": {
+                "atLeast": [
+                  "Archaeomancer's Map (triggered)"
+                ]
+              },
+              "why": "Oracle: p2 now controls 2 lands, more than your 1: the ability triggers"
+            }
+          ]
+        },
+        {
+          "do": "resolve",
+          "answers": [
+            {
+              "kind": "choose_yes_no",
+              "yes": true
+            },
+            {
+              "kind": "choose_cards",
+              "pick": [
+                "Island"
+              ]
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "check": "zone",
+          "player": "p1",
+          "zone": "battlefield",
+          "cards": {
+            "atLeast": [
+              "Plains",
+              "Island"
+            ]
+          },
+          "why": "Oracle: you may put a land card from your hand onto the battlefield"
+        },
+        {
+          "check": "zone",
+          "player": "p1",
+          "zone": "hand",
+          "count": 0,
+          "why": "The land left the hand"
+        }
+      ]
+    },
+    {
+      "name": "Opponent's land enters but they do not control more lands than you: no trigger",
+      "active": "p2",
+      "setup": {
+        "p1": {
+          "battlefield": [
+            "Archaeomancer's Map",
+            "Plains"
+          ],
+          "hand": [
+            "Island"
+          ]
+        },
+        "p2": {
+          "hand": [
+            "Island"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "playLand",
+          "player": "p2",
+          "card": "Island",
+          "expect": [
+            {
+              "check": "stack",
+              "count": 0,
+              "why": "Intervening 'if': p2 controls 1 land, you control 1: not more, so it never triggers (CR 603.4)"
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "check": "zone",
+          "player": "p1",
+          "zone": "hand",
+          "cards": {
+            "exactly": [
+              "Island"
+            ]
+          },
+          "why": "Nothing was put onto the battlefield"
+        }
+      ]
+    },
+    {
+      "name": "Your own land entering does not trigger it",
+      "setup": {
+        "p1": {
+          "battlefield": [
+            "Archaeomancer's Map"
+          ],
+          "hand": [
+            "Island",
+            "Island"
+          ]
+        },
+        "p2": {
+          "battlefield": [
+            "Island",
+            "Island",
+            "Island"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "playLand",
+          "player": "p1",
+          "card": "Island",
+          "expect": [
+            {
+              "check": "stack",
+              "count": 0,
+              "why": "Oracle: 'a land an OPPONENT controls enters'"
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "check": "zone",
+          "player": "p1",
+          "zone": "hand",
+          "count": 1,
+          "why": "The other Island stays in hand"
+        }
+      ]
+    },
+    {
+      "name": "Four players: compares only the entering player's lands with yours, not all opponents together",
+      "players": 4,
+      "active": "p3",
+      "setup": {
+        "p1": {
+          "battlefield": [
+            "Archaeomancer's Map",
+            "Plains",
+            "Plains"
+          ],
+          "hand": [
+            "Island"
+          ]
+        },
+        "p2": {
+          "battlefield": [
+            "Island",
+            "Island",
+            "Island",
+            "Island",
+            "Island"
+          ]
+        },
+        "p3": {
+          "battlefield": [
+            "Island"
+          ],
+          "hand": [
+            "Island"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "playLand",
+          "player": "p3",
+          "card": "Island",
+          "expect": [
+            {
+              "check": "stack",
+              "count": 0,
+              "why": "'That player controls more lands than you': p3 has 2, you have 2 (p2's five lands are irrelevant): no trigger"
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "check": "zone",
+          "player": "p1",
+          "zone": "hand",
+          "cards": {
+            "exactly": [
+              "Island"
+            ]
+          },
+          "why": "Nothing happened"
+        }
+      ]
+    }
+  ]
+}

@@ -16,6 +16,8 @@ import type { UnresolvedRecord } from "../../lib/unresolvedLog";
 import { toKernelState } from "../observer/adapter";
 import type { DraftLookup } from "../observer/draftLookup";
 import { formatEvents, namesForViewer } from "./eventLog";
+import { StackLogBuilder } from "./stackLog";
+import { fingerprint, type RecordedStep } from "./replayFile";
 import { packDraftLookup } from "./packLookup";
 import { displayFromDef, type DisplayCard, type PackKit } from "./cardPack";
 import { SPECTATOR, toSession, type SeatMeta, type ToSessionEnv } from "./toSession";
@@ -87,6 +89,11 @@ export class KernelSession {
   private degradedWhy?: string;
   private legacyIds?: ReadonlyMap<ObjId, string>;
   private readonly opts: KernelSessionOptions;
+  /** the stack / trigger resolution log, one per viewer (events are filtered per viewer, names too) */
+  private stackLogs = new Map<string, StackLogBuilder>();
+  /** replay recording: the state the game started from and every accepted action since, in order (see replayFile.ts) */
+  private initial: GameState;
+  private steps: RecordedStep[] = [];
 
   private constructor(state: GameState, opts: KernelSessionOptions, legacyIds?: ReadonlyMap<ObjId, string>) {
     this.st = state;
@@ -94,6 +101,7 @@ export class KernelSession {
     this.ctx = opts.ctx;
     this.gameId = opts.gameId ?? `kernel-${state.seed}`;
     this.legacyIds = legacyIds;
+    this.initial = structuredClone(state);
     if (opts.sink) {
       const bc: BridgeContext = { gameId: this.gameId, decks: opts.deckNames, seatKindOf: (id) => (opts.seats?.[id]?.kind === "human" ? "human" : "agent"), ...(opts.now ? { now: opts.now } : {}) };
       this.bridge = new UnresolvedBridge(bc, opts.sink);
@@ -101,6 +109,8 @@ export class KernelSession {
     for (const p of state.players) this.logs.set(p.id, []);
     this.logs.set(SPECTATOR, []);
     this.applyManualPay();
+    this.initial = structuredClone(this.st);
+    for (const id of this.logs.keys()) this.stackLogs.set(id, this.newStackLog());
   }
 
   /** Human seats pay mana costs BY HAND (CR 601.2g-h): the engine never taps their sources for them (see config.manualPay); agents, the observer and tests are paid for automatically. */
@@ -139,6 +149,8 @@ export class KernelSession {
     const seats = { ...Object.fromEntries(session.seats.map((s) => [s.id, { kind: s.kind, agentName: s.agentName, remoteSlot: s.remoteSlot } as SeatMeta])), ...(o.seats ?? {}) };
     const ks = new KernelSession(adapt.state, { ...o, display, seats, gameId: o.gameId ?? session.id }, adapt.toLegacy);
     ks.advanceToPriority();
+    ks.initial = structuredClone(ks.st); ks.steps = []; // the replay starts from the position after the hand-off
+    for (const id of ks.logs.keys()) ks.stackLogs.set(id, ks.newStackLog());
     return ks;
   }
 
@@ -197,6 +209,16 @@ export class KernelSession {
   eventsFor(viewer: PlayerId, events: readonly GameEvent[]): GameEvent[] { return eventsFor(this.st, viewer, [...events]); }
   /** the game log lines for `viewer`, newest first */
   log(viewer: PlayerId): readonly LogLine[] { return this.logs.get(viewer) ?? []; }
+  /** the stack / trigger resolution log as `viewer` may see it (stackLog.ts) */
+  stackLog(viewer: PlayerId): StackLogBuilder { let b = this.stackLogs.get(viewer); if (!b) { b = this.newStackLog(); this.stackLogs.set(viewer, b); } return b; }
+  private newStackLog(): StackLogBuilder {
+    return new StackLogBuilder({
+      where: (id) => (id ? this.st.objects[id]?.zone : undefined),
+      textOf: (id) => { const o = id ? this.st.objects[id] : undefined; if (!o) return undefined; const n = o.token?.name ?? o.cardName; return this.opts.display?.(n)?.oracleText; }
+    });
+  }
+  /** the recording of this game: the state it started from and every accepted action in order (the engine is deterministic, so this replays the exact game) */
+  recording(): { initialState: GameState; steps: readonly RecordedStep[]; seats: Record<PlayerId, SeatMeta> | undefined } { return { initialState: this.initial, steps: this.steps, seats: this.opts.seats }; }
   /** everything `player` may start now */
   legal(player: PlayerId, o?: LegalOptions): LegalAction[] { return legalActions(this.st, player, this.ctx, o); }
 
@@ -217,6 +239,7 @@ export class KernelSession {
     if (res.error && res.error.code !== "loop_detected") return { ok: false, error: res.error, ...(STALE.has(res.error.code) ? { stale: true } : {}), events: res.events, version: this.ver };
     this.st = res.state;
     this.ver++;
+    this.steps.push({ p: player, a: structuredClone(action), fp: fingerprint(this.st) });
     this.appendLog(res.events);
     return { ok: !res.error, ...(res.error ? { error: res.error } : {}), events: res.events, ...(res.pending ? { pending: res.pending } : {}), version: this.ver };
   }
@@ -234,6 +257,7 @@ export class KernelSession {
       const old = this.logs.get(viewer)!;
       this.logs.set(viewer, [...lines.reverse(), ...old].slice(0, max)); // newest first, like GameSession.events
     }
+    for (const [viewer, b] of this.stackLogs) b.push(eventsFor(this.st, viewer, [...events]), namesForViewer(this.st, viewer));
     this.logSeq += events.length;
   }
 

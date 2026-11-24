@@ -1,0 +1,266 @@
+{
+  "card": "Thriving Isle",
+  "status": "accepted",
+  "oracle": "This land enters tapped. As it enters, choose a color other than blue.\n{T}: Add {U} or one mana of the chosen color.",
+  "scenarios": [
+    {
+      "name": "Played from hand: enters tapped and asks for a colour other than blue",
+      "setup": {
+        "p1": {
+          "hand": [
+            "Thriving Isle"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "playLand",
+          "player": "p1",
+          "card": "Thriving Isle",
+          "expect": [
+            {
+              "check": "pending",
+              "present": true,
+              "options": {
+                "atLeast": [
+                  "White",
+                  "Black",
+                  "Red",
+                  "Green"
+                ],
+                "noneOf": [
+                  "Blue"
+                ]
+              },
+              "why": "Oracle: 'As it enters, choose a color other than blue'"
+            }
+          ]
+        },
+        {
+          "do": "answer",
+          "answers": [
+            {
+              "pick": [
+                "Red"
+              ]
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "check": "permanent",
+          "ref": "Thriving Isle",
+          "zone": "battlefield",
+          "tapped": true,
+          "chosenColor": "R",
+          "why": "Oracle: this land enters tapped; the chosen colour is remembered"
+        },
+        {
+          "check": "pending",
+          "present": false,
+          "why": "The colour decision was answered"
+        }
+      ]
+    },
+    {
+      "name": "Taps for blue",
+      "setup": {
+        "p1": {
+          "battlefield": [
+            {
+              "card": "Thriving Isle",
+              "chosen": {
+                "color": "R"
+              }
+            }
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "tapForMana",
+          "player": "p1",
+          "permanent": "Thriving Isle",
+          "color": "U"
+        }
+      ],
+      "expect": [
+        {
+          "check": "pool",
+          "player": "p1",
+          "equals": {
+            "U": 1
+          },
+          "why": "Oracle: {T}: Add {U} or one mana of the chosen color"
+        },
+        {
+          "check": "permanent",
+          "ref": "Thriving Isle",
+          "tapped": true,
+          "why": "Tapping is the cost"
+        }
+      ]
+    },
+    {
+      "name": "Taps for the chosen colour (red)",
+      "setup": {
+        "p1": {
+          "battlefield": [
+            {
+              "card": "Thriving Isle",
+              "chosen": {
+                "color": "R"
+              }
+            }
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "tapForMana",
+          "player": "p1",
+          "permanent": "Thriving Isle",
+          "color": "R"
+        }
+      ],
+      "expect": [
+        {
+          "check": "pool",
+          "player": "p1",
+          "equals": {
+            "R": 1
+          },
+          "why": "Oracle: or one mana of the chosen color (red)"
+        },
+        {
+          "check": "permanent",
+          "ref": "Thriving Isle",
+          "tapped": true,
+          "why": "Tapping is the cost"
+        }
+      ]
+    },
+    {
+      "name": "Taps for a different chosen colour (green)",
+      "setup": {
+        "p1": {
+          "battlefield": [
+            {
+              "card": "Thriving Isle",
+              "chosen": {
+                "color": "G"
+              }
+            }
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "tapForMana",
+          "player": "p1",
+          "permanent": "Thriving Isle",
+          "color": "G"
+        }
+      ],
+      "expect": [
+        {
+          "check": "pool",
+          "player": "p1",
+          "equals": {
+            "G": 1
+          },
+          "why": "Oracle: one mana of the chosen color (green)"
+        }
+      ]
+    },
+    {
+      "name": "Its chosen colour pays for a red spell",
+      "setup": {
+        "p1": {
+          "hand": [
+            "Lightning Bolt"
+          ],
+          "battlefield": [
+            {
+              "card": "Thriving Isle",
+              "chosen": {
+                "color": "R"
+              }
+            }
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "cast",
+          "player": "p1",
+          "card": "Lightning Bolt",
+          "targets": [
+            "p2"
+          ]
+        },
+        {
+          "do": "resolve"
+        }
+      ],
+      "expect": [
+        {
+          "check": "life",
+          "player": "p2",
+          "value": 37,
+          "why": "The Isle paid {R} through its chosen colour, so the Bolt resolved"
+        },
+        {
+          "check": "permanent",
+          "ref": "Thriving Isle",
+          "tapped": true,
+          "why": "The Isle was tapped for the cost"
+        }
+      ]
+    },
+    {
+      "name": "A Thriving Isle that chose green cannot pay for a red spell",
+      "setup": {
+        "p1": {
+          "hand": [
+            "Lightning Bolt"
+          ],
+          "battlefield": [
+            {
+              "card": "Thriving Isle",
+              "chosen": {
+                "color": "G"
+              }
+            }
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "cast",
+          "player": "p1",
+          "card": "Lightning Bolt",
+          "targets": [
+            "p2"
+          ],
+          "expectRejected": "cannot_pay"
+        }
+      ],
+      "expect": [
+        {
+          "check": "permanent",
+          "ref": "Thriving Isle",
+          "tapped": false,
+          "why": "Nothing was paid"
+        },
+        {
+          "check": "life",
+          "player": "p2",
+          "value": 40,
+          "why": "The spell was never cast"
+        }
+      ]
+    }
+  ]
+}

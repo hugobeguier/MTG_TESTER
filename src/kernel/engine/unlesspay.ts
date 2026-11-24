@@ -3,7 +3,7 @@
 // (with {X} from `unlessPay.x`) and life. Imported by steps.ts.
 
 import type { Cost, Prompt, Step } from "../schema";
-import { label, parseManaCost, player, Reject, type Run } from "./core";
+import { emit, label, parseManaCost, player, Reject, type Run } from "./core";
 import { evalQuantity, resolvePlayers } from "./query";
 import { costCandidates, costCount, costOptions, payChoiceCost, type ChoiceCost } from "./costs";
 import { autoTapFor, costString, isManualPayer, payFromPool, poolCovers, totalPotentialMana } from "./mana";
@@ -62,6 +62,13 @@ function payByHand(r: Run, env: Env, payer: PlayerId, cost: ReturnType<typeof pa
   return { ask: spec }; // "Pay" while the pool is still short: the question stays open
 }
 
+/** stack log: the outcome of an "unless <payer> pays" / "you may pay" clause, in words the log can print (cost text, who, what happened) */
+function logUnless(r: Run, env: Env, payer: PlayerId | undefined, u: UnlessPay, outcome: "paid" | "declined" | "cannot"): void {
+  const x = u.x === undefined ? 0 : evalQuantity(r, u.x as never, env);
+  const cost = u.cost.map((c) => ("mana" in c ? c.mana.replace(/\{X\}/g, `{${x}}`) : "life" in c ? `${String(c.life)} life` : Object.keys(c)[0])).join(" + ");
+  emit(r, { type: "unless_pay", source: env.source, ...(payer ? { payer } : {}), cost, outcome, inverse: !!u.inverse });
+}
+
 export function unlessHandler(r: Run, env: Env, step: Step, answer: Choice | undefined): StepResult {
   const u = step.pay as UnlessPay;
   const inner = step.inner as Step;
@@ -70,7 +77,7 @@ export function unlessHandler(r: Run, env: Env, step: Step, answer: Choice | und
   if (anyC && payer && u.inverse) return payAnyAmount(r, env, payer, anyC.mana, u, inner, answer, step);
   const resumed = !!(step as PayState).__paying; // the payer said "pay" and is tapping sources (paying by hand)
   if (!resumed) {
-    if (!payer || !canPay(r, payer, u, env)) return u.inverse ? "done" : { push: [inner] };
+    if (!payer || !canPay(r, payer, u, env)) { logUnless(r, env, payer, u, "cannot"); return u.inverse ? "done" : { push: [inner] }; }
     const spec: AskSpec = {
       kind: "pay_unless", player: payer,
       prompt: u.prompt ?? { title: `${label(r, env.source)}: pay or not`, instruction: u.inverse ? "Do you want to pay? If you do, the effect happens." : "Do you want to pay? If you don't, the effect happens." },
@@ -78,7 +85,7 @@ export function unlessHandler(r: Run, env: Env, step: Step, answer: Choice | und
     };
     const d = decide(spec, answer);
     if ("ask" in d) return d;
-    if (!d.yes) return u.inverse ? "done" : { push: [inner] };
+    if (!d.yes) { logUnless(r, env, payer, u, "declined"); return u.inverse ? "done" : { push: [inner] }; }
     answer = undefined;
   }
   if (!payer) return u.inverse ? "done" : { push: [inner] };
@@ -86,13 +93,14 @@ export function unlessHandler(r: Run, env: Env, step: Step, answer: Choice | und
   if (cost.mv + cost.x * x > 0 || cost.x > 0) {
     if (isManualPayer(r, payer)) {
       const w = payByHand(r, env, payer, cost, x, step, answer);
-      if (w === "declined") return u.inverse ? "done" : { push: [inner] };
+      if (w === "declined") { logUnless(r, env, payer, u, "declined"); return u.inverse ? "done" : { push: [inner] }; }
       if (w) return w;
       if (!payFromPool(r, payer, cost, x)) throw new Reject("cannot_pay", "cannot pay");
     } else if (!(payFromPool(r, payer, cost, x) || (autoTapFor(r, payer, cost, x) && payFromPool(r, payer, cost, x)))) throw new Reject("cannot_pay", "cannot pay");
   }
   const life = lifeNeeded(u);
   if (life > 0) changeLife(r, env, payer, -life);
+  logUnless(r, env, payer, u, "paid");
   const dc = discardCost(u);
   if (dc) return { push: [{ kind: "__unless_discard" as never, player: payer, cost: dc, prompt: u.prompt } as Step, ...(u.inverse ? [inner] : [])] };
   return u.inverse ? { push: [inner] } : "done";

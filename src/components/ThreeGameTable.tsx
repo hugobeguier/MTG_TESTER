@@ -2175,7 +2175,8 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
               : undefined
           }
           sacrificeAbilities={
-            inspectedActionOwner?.seat.kind === "human" && inspectedActionOwner.zone === "battlefield"
+            // kernel mode lists every legal activated ability itself (extraActions), whatever the legacy text parsers recognise
+            !props.kernelCardActions && inspectedActionOwner?.seat.kind === "human" && inspectedActionOwner.zone === "battlefield"
               ? parseGenericSacrificeAbilities(abilityOracleText(props.inspectedCard))
               : []
           }
@@ -2185,7 +2186,8 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
               : undefined
           }
           tapAbilities={
-            inspectedActionOwner?.seat.kind === "human" &&
+            // kernel mode lists every legal activated ability itself (extraActions), whatever the legacy text parsers recognise
+            !props.kernelCardActions && inspectedActionOwner?.seat.kind === "human" &&
             inspectedActionOwner.zone === "battlefield" &&
             // A tapped permanent can still have an ability that taps OTHER creatures instead (Cryptbreaker).
             (!props.inspectedCard.tapped || parseGenericTapAbilities(abilityOracleText(props.inspectedCard)).some((ability) => ability.costTapCreatures))
@@ -2198,7 +2200,8 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
               : undefined
           }
           scriptedAbilities={
-            inspectedActionOwner?.seat.kind === "human" && (inspectedActionOwner.zone === "battlefield" || inspectedActionOwner.zone === "hand" || inspectedActionOwner.zone === "graveyard")
+            // kernel mode lists every legal activated ability itself (extraActions), whatever the legacy text parsers recognise
+            !props.kernelCardActions && inspectedActionOwner?.seat.kind === "human" && (inspectedActionOwner.zone === "battlefield" || inspectedActionOwner.zone === "hand" || inspectedActionOwner.zone === "graveyard")
               ? scriptedAbilitiesFor(props.inspectedCard, inspectedActionOwner.zone).map((ability) => ({ id: ability.id, label: ability.label(props.inspectedCard!) }))
               : []
           }
@@ -2208,7 +2211,8 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
               : undefined
           }
           selfUntapAbilities={
-            inspectedActionOwner?.seat.kind === "human" && inspectedActionOwner.zone === "battlefield" && props.inspectedCard.tapped
+            // kernel mode lists every legal activated ability itself (extraActions), whatever the legacy text parsers recognise
+            !props.kernelCardActions && inspectedActionOwner?.seat.kind === "human" && inspectedActionOwner.zone === "battlefield" && props.inspectedCard.tapped
               ? parseSelfUntapAbilities(abilityOracleText(props.inspectedCard))
               : []
           }
@@ -2218,7 +2222,8 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
               : undefined
           }
           genericManaAbilities={
-            inspectedActionOwner?.seat.kind === "human" && inspectedActionOwner.zone === "battlefield"
+            // kernel mode lists every legal activated ability itself (extraActions), whatever the legacy text parsers recognise
+            !props.kernelCardActions && inspectedActionOwner?.seat.kind === "human" && inspectedActionOwner.zone === "battlefield"
               ? parseGenericManaAbilities(abilityOracleText(props.inspectedCard))
               : []
           }
@@ -2233,12 +2238,14 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
               : undefined
           }
           onActivateEquip={
-            inspectedActionOwner?.seat.kind === "human" && inspectedActionOwner.zone === "battlefield" && isEquipment(props.inspectedCard) && equipCost(props.inspectedCard.oracleText) !== undefined
+            // kernel mode lists every legal activated ability itself (extraActions), whatever the legacy text parsers recognise
+            !props.kernelCardActions && inspectedActionOwner?.seat.kind === "human" && inspectedActionOwner.zone === "battlefield" && isEquipment(props.inspectedCard) && equipCost(props.inspectedCard.oracleText) !== undefined
               ? () => props.onActivateEquip?.(inspectedActionOwner.seat.id, props.inspectedCard!.id)
               : undefined
           }
           onActivateManlandAnimation={
-            inspectedActionOwner?.seat.kind === "human" &&
+            // kernel mode lists every legal activated ability itself (extraActions), whatever the legacy text parsers recognise
+            !props.kernelCardActions && inspectedActionOwner?.seat.kind === "human" &&
             inspectedActionOwner.zone === "battlefield" &&
             !props.inspectedCard.temporaryAnimatedAsCreature &&
             parseManlandAnimation(abilityOracleText(props.inspectedCard)) !== undefined
@@ -2297,7 +2304,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
               : undefined
           }
           onActivateLoyalty={
-            inspectedActionOwner?.seat.kind === "human" && inspectedActionOwner.zone === "battlefield" && props.inspectedCard.typeLine.includes("Planeswalker")
+            !props.kernelCardActions && inspectedActionOwner?.seat.kind === "human" && inspectedActionOwner.zone === "battlefield" && props.inspectedCard.typeLine.includes("Planeswalker")
               ? (cost, text) => props.onActivateLoyalty?.(inspectedActionOwner.seat.id, props.inspectedCard!.id, cost, text)
               : undefined
           }

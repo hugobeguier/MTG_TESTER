@@ -1,0 +1,241 @@
+{
+  "card": "Omniscience",
+  "status": "accepted",
+  "oracle": "You may cast spells from your hand without paying their mana costs.",
+  "scenarios": [
+    {
+      "name": "Casts a spell from hand with no mana at all",
+      "setup": {
+        "p1": {
+          "battlefield": [
+            "Omniscience"
+          ],
+          "hand": [
+            "Vanilla 5/5"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "cast",
+          "player": "p1",
+          "card": "Vanilla 5/5",
+          "way": "free",
+          "expect": [
+            {
+              "check": "stack",
+              "items": {
+                "exactly": [
+                  "Vanilla 5/5 (spell)"
+                ]
+              },
+              "why": "Casting without paying its mana cost still uses the stack (CR 601.2)"
+            }
+          ]
+        },
+        {
+          "do": "resolve"
+        }
+      ],
+      "expect": [
+        {
+          "check": "zone",
+          "player": "p1",
+          "zone": "battlefield",
+          "cards": {
+            "atLeast": [
+              "Vanilla 5/5"
+            ]
+          },
+          "why": "Oracle: you may cast spells from your hand without paying their mana costs (the 5-mana creature with no lands)"
+        }
+      ]
+    },
+    {
+      "name": "Omniscience is listed as a free way to cast",
+      "setup": {
+        "p1": {
+          "battlefield": [
+            "Omniscience"
+          ],
+          "hand": [
+            "Vanilla 3/3"
+          ]
+        }
+      },
+      "steps": [],
+      "expect": [
+        {
+          "check": "legal",
+          "player": "p1",
+          "action": "cast",
+          "card": "Vanilla 3/3",
+          "free": true,
+          "exists": true,
+          "why": "Oracle: you MAY cast spells from your hand without paying"
+        }
+      ]
+    },
+    {
+      "name": "It is a choice: the spell can still be cast by paying its cost",
+      "setup": {
+        "p1": {
+          "battlefield": [
+            "Omniscience",
+            "Island",
+            "Island",
+            "Island"
+          ],
+          "hand": [
+            "Vanilla 3/3"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "cast",
+          "player": "p1",
+          "card": "Vanilla 3/3",
+          "way": "normal"
+        },
+        {
+          "do": "resolve"
+        }
+      ],
+      "expect": [
+        {
+          "check": "zone",
+          "player": "p1",
+          "zone": "battlefield",
+          "cards": {
+            "atLeast": [
+              "Vanilla 3/3"
+            ]
+          },
+          "why": "Casting normally works too"
+        },
+        {
+          "check": "permanent",
+          "ref": "Island#1",
+          "tapped": true,
+          "why": "'You MAY cast without paying': paying normally spends the mana"
+        },
+        {
+          "check": "permanent",
+          "ref": "Island#2",
+          "tapped": true,
+          "why": "'You MAY cast without paying': paying normally spends the mana"
+        },
+        {
+          "check": "permanent",
+          "ref": "Island#3",
+          "tapped": true,
+          "why": "'You MAY cast without paying': paying normally spends the mana"
+        }
+      ]
+    },
+    {
+      "name": "Without Omniscience a spell cannot be cast with no mana",
+      "setup": {
+        "p1": {
+          "hand": [
+            "Vanilla 3/3"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "cast",
+          "player": "p1",
+          "card": "Vanilla 3/3",
+          "expectRejected": "cannot_pay"
+        }
+      ],
+      "expect": [
+        {
+          "check": "legal",
+          "player": "p1",
+          "action": "cast",
+          "card": "Vanilla 3/3",
+          "exists": false,
+          "why": "Baseline: no mana, no Omniscience, no way to cast it"
+        }
+      ]
+    },
+    {
+      "name": "It only helps its controller",
+      "active": "p2",
+      "players": 2,
+      "setup": {
+        "p1": {
+          "battlefield": [
+            "Omniscience"
+          ]
+        },
+        "p2": {
+          "hand": [
+            "Vanilla 3/3"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "cast",
+          "player": "p2",
+          "card": "Vanilla 3/3",
+          "expectRejected": "cannot_pay"
+        }
+      ],
+      "expect": [
+        {
+          "check": "legal",
+          "player": "p2",
+          "action": "cast",
+          "card": "Vanilla 3/3",
+          "exists": false,
+          "why": "Oracle: 'You may cast' refers to Omniscience's controller only"
+        }
+      ]
+    },
+    {
+      "name": "It works for instants too, including on an opponent's turn",
+      "active": "p2",
+      "setup": {
+        "p1": {
+          "battlefield": [
+            "Omniscience"
+          ],
+          "hand": [
+            "Lightning Bolt"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "pass",
+          "player": "p2"
+        },
+        {
+          "do": "cast",
+          "player": "p1",
+          "card": "Lightning Bolt",
+          "way": "free",
+          "targets": [
+            "p2"
+          ]
+        },
+        {
+          "do": "resolve"
+        }
+      ],
+      "expect": [
+        {
+          "check": "life",
+          "player": "p2",
+          "value": 37,
+          "why": "Instants cast for free at instant speed (Omniscience changes only the cost)"
+        }
+      ]
+    }
+  ]
+}

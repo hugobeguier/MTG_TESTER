@@ -59,7 +59,7 @@ export function copySpell(r: Run, spellObj: GameObject, controller: PlayerId): O
     ...(item.sacrificed?.length ? { sacrificed: [...item.sacrificed], costLki: structuredClone(item.costLki ?? {}) } : {})
   };
   r.s.stack.push(ci);
-  emit(r, { type: "spell_copied", id: copy.id, of: spellObj.id, controller });
+  emit(r, { type: "spell_copied", id: copy.id, of: spellObj.id, controller, item: ci.id, depth: r.s.stack.length });
   tick(r);
   return copy.id;
 }
@@ -114,7 +114,7 @@ export const copyStep: StepSpec = {
       const who0: PlayerId = resolvePlayers(r, (step.controller ?? step.who ?? "you") as never, env)[0];
       const ci: StackItem = { ...structuredClone(item), id: `s${r.s.nextId++}`, controller: who0 };
       r.s.stack.push(ci);
-      emit(r, { type: "ability_copied", of: item.id, controller: who0 });
+      emit(r, { type: "ability_copied", of: item.id, controller: who0, item: ci.id, depth: r.s.stack.length, source: ci.sourceId });
       tick(r);
       return step.chooseNewTargets ? { push: [{ kind: "__retarget" as never, itemId: ci.id, pi: 0, si: 0 } as unknown as Step] } : "done";
     }

@@ -13,6 +13,7 @@ import { PACE_SPEEDS, type PaceSpeed } from "./game/kernelPacing";
 import { ThreeGameTable } from "./ThreeGameTable";
 import { GameOverDialog } from "./GameOverDialog";
 import { KernelDecisionDialog } from "./KernelDecisionDialog";
+import { KernelStackLog } from "./KernelStackLog";
 
 /** Enter confirms a click-on-the-board pick while its banner shows (the dialog handles its own Enter). Cancel is the banner's button, never a key. */
 function useDecisionKeys(pick: KernelBoardPick | undefined, hidden: boolean): void {
@@ -45,6 +46,21 @@ function useDecisionVisibility(decisionId: string | undefined): { hidden: boolea
     return () => window.removeEventListener("keydown", onKey);
   }, [decisionId]);
   return { hidden, toggle: () => setVis((v) => toggleHidden(v, decisionId)), setHidden: (h) => setVis((v) => setHiddenState(v, decisionId, h)) };
+}
+
+/** L opens / closes the stack log (ignored while typing or with a modifier key held) */
+function useStackLogKey(toggle: () => void): void {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() !== "l" || e.ctrlKey || e.metaKey || e.altKey) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      e.preventDefault();
+      toggle();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [toggle]);
 }
 
 const PACE_LABELS: Record<PaceSpeed, string> = { off: "Off", fast: "Fast", normal: "Normal", slow: "Slow" };
@@ -85,6 +101,8 @@ export function KernelGameTable({ controller, onBack }: { controller: KernelGame
   useSyncExternalStore(controller.subscribe, controller.getVersion, controller.getVersion);
   useKernelDriver(controller);
   usePacingSkipKey(controller);
+  const [stackLogOpen, setStackLogOpen] = useState(false);
+  useStackLogKey(() => setStackLogOpen((o) => !o));
   const table = controller.table();
   const human = controller.human;
   const thinking = controller.thinkingSeat();
@@ -113,6 +131,7 @@ export function KernelGameTable({ controller, onBack }: { controller: KernelGame
               Kernel engine (dev){degraded ? ` - degraded: ${degraded}` : ""}
             </div>
             <PacingControls controller={controller} />
+            <button type="button" className="kernel-small" data-testid="kernel-stack-log-toggle" aria-pressed={stackLogOpen} onClick={() => setStackLogOpen((o) => !o)} title="How spells and triggers resolved, step by step (L)">Stack log (L)</button>
           </div>
         )}
         stackFeed={controller.stackFeed()}
@@ -144,6 +163,7 @@ export function KernelGameTable({ controller, onBack }: { controller: KernelGame
         {...(controller.tableProps() as object)}
         {...(controller.combatProps() as object)}
       />
+      {stackLogOpen ? <KernelStackLog controller={controller} session={table.session} onClose={() => setStackLogOpen(false)} /> : null}
       {table.decision && !pick ? <KernelDecisionDialog key={table.decision.id} decision={table.decision} hidden={vis.hidden} onHide={() => vis.setHidden(true)} onAnswer={controller.answer} sourceArt={controller.decisionSourceArt()} onBoard={classifyDecision(table.decision).board ? () => controller.showList(table.decision!.id, false) : undefined} /> : null}
     </main>
   );

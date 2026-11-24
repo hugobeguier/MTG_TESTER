@@ -34,7 +34,7 @@ import { isTopCard, refreshTopLookers, topPerms } from "./topcast";
 import { cantCastCard, flashGrantCovers, playerCantCast, playerHas } from "./layers";
 import { castableFaces, playableFaces } from "./faces";
 import { leaveGame } from "./leave";
-import { addedSteps, baseChoices, castTags, grantedFree, grantedMorph, grantedTop, mandatoryExtras, optionalExtras, optionLabel, selectedOptions, spellExtraCosts, spellManaString } from "./castopts";
+import { addedSteps, baseChoices, isFreeOption, castTags, grantedFree, grantedMorph, grantedTop, mandatoryExtras, optionalExtras, optionLabel, selectedOptions, spellExtraCosts, spellManaString } from "./castopts";
 import type {
   Action, CardDef, CastInfo, Choice, DecisionOption, Draft, EngineContext, Exec, GameEvent, GameObject, GameState, Lki, ObjId, Part, PayInfo, Pending, PendingView, PlayerId,
   QueuedTrigger, ResolveResult, StackItem, TriggerContext
@@ -296,7 +296,7 @@ function advanceDraft(r: Run, d: Draft, answerIn?: Choice): { ask: AskSpec; stag
       if (bases.length > 1) {
         const spec: AskSpec = {
           kind: "choose_cast_option", player: d.player, prompt: { title: `${name}: how do you want to cast it?`, instruction: "Choose how to cast this spell." },
-          options: bases.map((b) => ({ id: b ? b.id : "normal", label: optionLabel(b) })), min: 1, max: 1
+          options: bases.map((b) => ({ id: b ? b.id : "normal", label: optionLabel(b, r, card) })), min: 1, max: 1
         };
         const dec = decide(spec, answerLeft);
         if ("ask" in dec) return { ask: dec.ask, stage: "option" };
@@ -310,7 +310,7 @@ function advanceDraft(r: Run, d: Draft, answerIn?: Choice): { ask: AskSpec; stag
       if (opts.length) {
         const spec: AskSpec = {
           kind: "choose_cast_option", player: d.player, prompt: { title: `${name}: optional costs`, instruction: "Choose any optional costs to pay (kicker, gift, additional costs), or none." },
-          options: opts.map((c) => ({ id: c.id, label: optionLabel(c) })), min: 0, max: opts.length
+          options: opts.map((c) => ({ id: c.id, label: optionLabel(c, r, card) })), min: 0, max: opts.length
         };
         const dec = decide(spec, answerLeft);
         if ("ask" in dec) return { ask: dec.ask, stage: "extras" };
@@ -673,7 +673,9 @@ function paymentPlan(r: Run, d: Draft, a: Ability | undefined): PaymentPlan | un
     const adj = cost.mv - base.mv - tax; // cost increases (+) and reductions (-), whatever their source
     const before = cost.generic + cost.x * x;
     if (d.improvised?.length) foldImprovise(cost, d.improvised.length, x);
-    parts.push({ label: "Mana cost", cost: costString(base, x) });
+    const waived = selectedOptions(r, d).find((c) => isFreeOption(c)); // CR 118.9c: only the mana cost is waived; taxes, increases and additional costs are still owed
+    if (waived) parts.push({ label: `Mana cost waived${/:(.+)$/.test(waived.id) ? ` by ${label(r, /:(.+)$/.exec(waived.id)![1])}` : ""}`, cost: "{0}" });
+    else parts.push({ label: "Mana cost", cost: costString(base, x) });
     if (tax) parts.push({ label: "Commander tax", cost: `{${tax}}` });
     if (adj !== 0 || delta !== 0) parts.push({ label: adj >= 0 ? "Cost increases" : "Cost reductions", cost: `${adj >= 0 ? "+" : "-"}{${Math.abs(adj || delta)}}` });
     if (d.improvised?.length) parts.push({ label: "Improvise", cost: `-{${Math.min(d.improvised.length, before)}}` });
@@ -715,6 +717,7 @@ function commitDraft(r: Run, d: Draft, a: Ability | undefined): void {
   let spellCard: GameObject | undefined;
   let paidCosts: ReturnType<typeof payAbilityCosts> | undefined;
   let spend: SpendCtx | undefined;
+  let paidInfo: Record<string, unknown> | undefined;
 
   if (d.kind === "spell") {
     spellCard = src;
@@ -725,7 +728,8 @@ function commitDraft(r: Run, d: Draft, a: Ability | undefined): void {
       const hitsCommander = (d.parts ?? []).some((pp) => Object.values(pp.targets).flat().some((t) => isObjId(t) && !!tryObj(r, t)?.isCommander));
       if (!natural && !main && !hitsCommander) throw new Reject("wrong_timing", `${c0.name} can only be cast at instant speed if it targets a commander`);
     }
-    const { cost, tx } = computeSpellCost(r, d, src);
+    const { cost, tx, tax: cmdTax } = computeSpellCost(r, d, src);
+    paidInfo = { mana: costString(cost, d.x ?? 0), ...(cmdTax > 0 ? { commanderTax: cmdTax } : {}), ...(tx.life > 0 ? { life: tx.life } : {}) }; // stack log: what was paid (the total after reductions / tax)
     if (tx.life > 0 && player(r, pid).life < tx.life) throw new Reject("cannot_pay", "not enough life to pay the additional cost of targeting that permanent");
     // improvise: each tapped artifact pays for {1} of the generic part
     if (d.improvised?.length) {
@@ -786,16 +790,34 @@ function commitDraft(r: Run, d: Draft, a: Ability | undefined): void {
   r.s.passes = [];
   for (const part of item.parts) for (const ids of Object.values(part.targets)) for (const tid of ids) if (isObjId(tid)) emit(r, { type: "becomes_target", id: tid, by: item.objectId ?? item.id, player: pid });
   commitCrime(r, item, pid);
+  // stack log (additive fields): which stack item this is, where it went, what it needs and what it cost
+  const stackInfo = {
+    item: item.id, depth: r.s.stack.length, x: item.x,
+    ...(item.parts.some((p) => p.modeId) ? { modes: item.parts.map((p) => p.modeId).filter((m): m is string => !!m) } : {}),
+    ...(a?.text ? { text: a.text.replace(/\s+/g, " ").slice(0, 600) } : {})
+  };
   if (d.kind === "triggered") {
+    const qt = r.s.triggerQueue.find((t) => t.id === d.triggerId);
     r.s.triggerQueue = r.s.triggerQueue.filter((t) => t.id !== d.triggerId);
-    emit(r, { type: "trigger_on_stack", source: d.sourceId, ability: d.abilityId, controller: pid });
+    const tc = d.trigger;
+    emit(r, {
+      type: "trigger_on_stack", source: d.sourceId, ability: d.abilityId, controller: pid, ...stackInfo,
+      targets: item.parts.map((p) => p.targets),
+      ...(tc?.eventObj ? { cause: tc.eventObj } : {}), ...(tc?.eventPlayer ? { causePlayer: tc.eventPlayer } : {}),
+      ...(a?.trigger?.event ? { causeEvent: a.trigger.event } : {}),
+      ...(a?.kind !== "triggered" ? { delayed: true, label: qt?.label } : {}),
+      ...(qt?.ordered ? { ordered: true } : {})
+    });
   } else if (d.kind === "spell") {
     const c = chars(r, src.id);
-    emit(r, { type: "cast", id: src.id, player: pid, name: c.name, from: d.cast?.from, targets: item.parts.map((p) => p.targets) });
+    emit(r, { type: "cast", id: src.id, player: pid, name: c.name, from: d.cast?.from, targets: item.parts.map((p) => p.targets), ...stackInfo, ...(src.isCopy ? { copy: true } : {}), paid: { ...paidInfo, ...(d.cast?.spent?.length ? { spent: d.cast.spent } : {}), ...(paidCosts?.sacrificed.length ? { sacrificed: paidCosts.sacrificed } : {}) } });
     r.s.turnLog.push({ type: "cast", player: pid, id: src.id, name: c.name, types: c.types, ts: r.s.clock });
     r.s.priorityAfter = pid;
   } else {
-    emit(r, { type: "ability_activated", source: d.sourceId, ability: d.abilityId, player: pid });
+    emit(r, {
+      type: "ability_activated", source: d.sourceId, ability: d.abilityId, player: pid, ...stackInfo, targets: item.parts.map((p) => p.targets),
+      paid: { ...(a?.costs?.length ? { costs: a.costs.map((c) => ("mana" in c ? c.mana : "life" in c ? `${String(c.life)} life` : "tap" in c ? "{T}" : Object.keys(c)[0])) } : {}), ...(paidCosts?.sacrificed.length ? { sacrificed: paidCosts.sacrificed } : {}) }
+    });
     r.s.priorityAfter = pid;
   }
   void spellCard;
@@ -1319,15 +1341,16 @@ function resolveTop(r: Run): void {
   if (item.trigger?.lki && item.trigger.eventObj) r.s.lki[item.trigger.eventObj] = item.trigger.lki; // the object that left / died: "if it had counters", "put those counters"
   const src = tryObj(r, item.sourceId);
   r.s.priorityAfter = null;
+  emit(r, { type: "resolving", item: item.id, kind: item.kind, source: item.sourceId, ability: item.abilityId, controller: item.controller, ...(item.objectId ? { id: item.objectId } : {}), left: r.s.stack.length }); // stack log: this item is now resolving
   const ok = legalizeTargets(r, item);
   if (!ok) {
-    emit(r, { type: "spell_fizzled", id: item.objectId ?? item.sourceId, kind: item.kind });
+    emit(r, { type: "spell_fizzled", id: item.objectId ?? item.sourceId, kind: item.kind, item: item.id });
     if (item.kind === "spell" && src) moveObject(r, src.id, "graveyard");
     finish(r); return;
   }
   const ab = src ? abilitiesOf(r, src).find((a) => a.id === item.abilityId) : undefined;
   if (item.kind === "triggered" && ab?.trigger?.interveningIf && !evalPredicate(r, ab.trigger.interveningIf, { controller: item.controller, source: item.sourceId, eventObj: item.trigger?.eventObj, eventPlayer: item.trigger?.eventPlayer, defenders: item.trigger?.defenders, cast: item.cast, x: item.x })) {
-    emit(r, { type: "trigger_fizzled", source: item.sourceId }); finish(r); return;
+    emit(r, { type: "trigger_fizzled", source: item.sourceId, item: item.id, reason: "intervening if" }); finish(r); return;
   }
   if (item.kind === "spell") {
     const c = chars(r, src!.id);
@@ -1342,7 +1365,7 @@ function resolveTop(r: Run): void {
       if (moved && h && h.zone === "graveyard") { moved.auraTarget = h.id; moved.attachedTo = h.id; moved.attachedToTs = h.timestamp; } // Animate Dead: enchants a card in a graveyard until its ETB trigger resolves
       if (moved && hostPlayer && moved.zone === "battlefield") { moved.attachedPlayer = hostPlayer; emit(r, { type: "attached", id: moved.id, to: hostPlayer }); }
       if (moved && h && h.zone === "battlefield") { moved.attachedTo = h.id; moved.attachedToTs = h.timestamp; emit(r, { type: "attached", id: moved.id, to: h.id }); }
-      emit(r, { type: "spell_resolved", id: src!.id, player: item.controller });
+      emit(r, { type: "spell_resolved", id: src!.id, player: item.controller, item: item.id, left: r.s.stack.length });
       // cast from the top of the library by Thundermane Dragon: it gains haste until end of turn
       if (moved && moved.zone === "battlefield" && (item.cast?.paid ?? []).includes("top-library-haste")) r.s.effects.push({ id: `e${r.s.nextId++}`, timestamp: tick(r), objectId: moved.id, objectTimestamp: moved.timestamp, grant: "haste", until: "end_of_turn" });
       // evoke: when the permanent enters, a trigger sacrifices it
@@ -1377,8 +1400,8 @@ function continueExec(r: Run, ex: Exec, answerIn?: Choice): void {
   if (item.kind === "spell" && item.objectId) {
     const o = tryObj(r, item.objectId);
     if (o && o.zone === "stack") moveObject(r, item.objectId, "graveyard");
-    emit(r, { type: "spell_resolved", id: item.objectId, player: item.controller });
-  } else emit(r, { type: "ability_resolved", source: item.sourceId, kind: item.kind });
+    emit(r, { type: "spell_resolved", id: item.objectId, player: item.controller, item: item.id, left: r.s.stack.length });
+  } else emit(r, { type: "ability_resolved", source: item.sourceId, kind: item.kind, item: item.id, left: r.s.stack.length });
   if (runCastNow(r)) return;
   finish(r);
 }
@@ -1532,6 +1555,8 @@ function answer(r: Run, a: Extract<Action, { type: "answerDecision" }>): void {
         const others = r.s.triggerQueue.filter((t) => t.controller !== ctx.player);
         const ordered = dec.ids.map((id) => ({ ...group.find((t) => t.id === id)!, ordered: true }));
         r.s.triggerQueue = [...others, ...ordered];
+        // stack log: the player's chosen order (first = goes on the stack first = resolves last)
+        emit(r, { type: "triggers_ordered", player: ctx.player, order: ordered.map((t) => ({ trigger: t.id, source: t.sourceId, ability: t.abilityId, label: t.label, ...(t.ctx.eventObj ? { cause: t.ctx.eventObj } : {}) })) });
         finish(r);
       }
       return;

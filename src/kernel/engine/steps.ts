@@ -73,8 +73,8 @@ export function changeLife(r: Run, env: Env | undefined, pid: PlayerId, delta: n
   delta = delta > 0 ? ev.amount : -ev.amount;
   const p = player(r, pid);
   p.life += delta;
-  if (delta > 0) { emit(r, { type: "life_gain", player: pid, amount: delta }); r.s.turnLog.push({ type: "gain_life", player: pid, amount: delta, ts: r.s.clock }); }
-  else { emit(r, { type: "life_loss", player: pid, amount: -delta }); r.s.turnLog.push({ type: "lose_life", player: pid, amount: -delta, ts: r.s.clock }); if (env) env.lastLifeLost = -delta; }
+  if (delta > 0) { emit(r, { type: "life_gain", player: pid, amount: delta, life: p.life }); r.s.turnLog.push({ type: "gain_life", player: pid, amount: delta, ts: r.s.clock }); }
+  else { emit(r, { type: "life_loss", player: pid, amount: -delta, life: p.life }); r.s.turnLog.push({ type: "lose_life", player: pid, amount: -delta, ts: r.s.clock }); if (env) env.lastLifeLost = -delta; }
   runAfter(r, ev);
 }
 
@@ -386,15 +386,16 @@ const STEPS: Record<string, StepSpec> = {
       const mods = ((step.modify ?? []) as Array<Record<string, unknown>>).map((m) => (m.cant === "be_blocked" && Object.keys(m).length === 1 ? { grant: "unblockable" } : m)); // "it can't be blocked this turn" = unblockable for the turn
       const GRANTABLE = ["grant", "lose", "setBasePT", "addTypes", "setTypes", "setColors", "pt"];
       for (const m of mods) if (Object.keys(m).length !== 1 || !GRANTABLE.includes(Object.keys(m)[0])) throw new Unsupported(`field:grant_effect.modify.${Object.keys(m)[0]}`);
+      const until = step.duration === undefined ? "leaves" as const : "end_of_turn" as const; // no duration in the text = the effect lasts as long as the object stays that permanent (Zur: "becomes a creature"; Memnarch: "lasts indefinitely")
       const granted = step.target ? refs(r, ex.env, step) : objectsMatching(r, step.filter as ObjectFilter, ex.env);
       for (const id of granted) for (const m of mods) {
-        if ("grant" in m) addEffect(r, id, { grant: String(m.grant).toLowerCase() });
-        else if ("lose" in m) addEffect(r, id, { lose: String(m.lose) });
-        else if ("pt" in m) { const b = m.pt as { power: never; toughness: never }; addEffect(r, id, { power: evalQuantity(r, b.power, ex.env), toughness: evalQuantity(r, b.toughness, ex.env) }); }
-        else if ("setBasePT" in m) { const b = m.setBasePT as { power: never; toughness: never }; addEffect(r, id, { base: { power: evalQuantity(r, b.power, ex.env), toughness: evalQuantity(r, b.toughness, ex.env) } }); }
-        else if ("addTypes" in m) addEffect(r, id, { addTypes: m.addTypes as string[] });
-        else if ("setTypes" in m) addEffect(r, id, { setTypes: m.setTypes as string[] });
-        else addEffect(r, id, { setColors: m.setColors as string[] });
+        if ("grant" in m) addEffect(r, id, { grant: String(m.grant).toLowerCase() }, until);
+        else if ("lose" in m) addEffect(r, id, { lose: String(m.lose) }, until);
+        else if ("pt" in m) { const b = m.pt as { power: never; toughness: never }; addEffect(r, id, { power: evalQuantity(r, b.power, ex.env), toughness: evalQuantity(r, b.toughness, ex.env) }, until); }
+        else if ("setBasePT" in m) { const b = m.setBasePT as { power: never; toughness: never }; addEffect(r, id, { base: { power: evalQuantity(r, b.power, ex.env), toughness: evalQuantity(r, b.toughness, ex.env) } }, until); }
+        else if ("addTypes" in m) addEffect(r, id, { addTypes: m.addTypes as string[] }, until);
+        else if ("setTypes" in m) addEffect(r, id, { setTypes: m.setTypes as string[] }, until);
+        else addEffect(r, id, { setColors: m.setColors as string[] }, until);
       }
       return "done";
     }
@@ -513,7 +514,7 @@ const STEPS: Record<string, StepSpec> = {
         if (i < 0) continue;
         if (isObjId(t) && cantBeCountered(r, t)) { emit(r, { type: "counter_failed", id: t, by: ex.env.source, reason: "can't be countered" }); continue; }
         const [item] = r.s.stack.splice(i, 1);
-        emit(r, { type: "spell_countered", id: t, by: ex.env.source, controller: item.controller });
+        emit(r, { type: "spell_countered", id: t, by: ex.env.source, controller: item.controller, item: item.id, left: r.s.stack.length, ...(item.objectId ? {} : { ability: true, source: item.sourceId }) });
         if (item.objectId) moveObject(r, t, "graveyard");
       }
       return "done";
@@ -540,7 +541,8 @@ const STEPS: Record<string, StepSpec> = {
   choose: chooseStep,
   if_else: {
     fields: ["if", "then", "else"],
-    run: (r, ex, step) => ({ push: (evalPredicate(r, step.if!, ex.env) ? step.then : step.else) ?? [] })
+    // no `if` + optionalCost = "you may pay {B}. If you do, ...": the payment itself was the choice (the later step reads step_done), nothing to branch on (Nihil Spellbomb)
+    run: (r, ex, step) => (step.if === undefined && !step.then && !step.else ? "done" : { push: (evalPredicate(r, step.if!, ex.env) ? step.then : step.else) ?? [] })
   }
 };
 
@@ -560,10 +562,10 @@ function requireEot(step: Step): void {
 
 export function addTemporaryPT(r: Run, id: ObjId, power: number, toughness: number): void { addEffect(r, id, { power, toughness }); }
 
-function addEffect(r: Run, id: ObjId, e: Partial<Pick<ContinuousEffect, "power" | "toughness" | "grant" | "lose" | "base" | "addTypes" | "setTypes" | "setColors">>): void {
+function addEffect(r: Run, id: ObjId, e: Partial<Pick<ContinuousEffect, "power" | "toughness" | "grant" | "lose" | "base" | "addTypes" | "setTypes" | "setColors">>, until: ContinuousEffect["until"] = "end_of_turn"): void {
   const o = tryObj(r, id);
   if (!o || (o.zone !== "battlefield" && !(o.zone === "stack" && e.grant))) return; // a keyword granted to a creature SPELL ("it gains haste") stays on the permanent it becomes (core.moveObject re-stamps it)
-  r.s.effects.push({ id: `e${r.s.effects.length}_${r.s.clock}`, timestamp: tick(r), objectId: id, objectTimestamp: o.timestamp, until: "end_of_turn", ...e });
+  r.s.effects.push({ id: `e${r.s.effects.length}_${r.s.clock}`, timestamp: tick(r), objectId: id, objectTimestamp: o.timestamp, until, ...e });
   emit(r, { type: "effect_added", id, ...e });
 }
 

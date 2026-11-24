@@ -412,6 +412,28 @@ function orderPrompt(ev: ReplEvent): Prompt {
   return { title: "Choose the order of replacement effects", instruction: `More than one replacement effect would change this ${EVENT_LABEL[ev.kind]}. Choose the one to apply first (the others apply afterwards if they still can).` };
 }
 
+/** Stack log: what one replacement changed about the event (amount / token count before and after, cancelled, destination). Plain data, no state. */
+function replSummary(a: ReplEvent, b: ReplEvent): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  const tokens = (e: ReplEvent) => (e.kind === "tokens" ? e.groups.reduce((n, g) => n + g.count, 0) : undefined);
+  if (b.cancelled && !a.cancelled) out.cancelled = true;
+  if ("amount" in a && "amount" in b && a.amount !== b.amount) { out.from = a.amount; out.to = b.amount; }
+  if (a.kind === "tokens" && b.kind === "tokens") {
+    const x = tokens(a)!, y = tokens(b)!;
+    if (x !== y) { out.from = x; out.to = y; }
+    const byName = new Map<string, number>();
+    for (const g of b.groups) byName.set(g.def.name, (byName.get(g.def.name) ?? 0) + g.count);
+    out.tokens = [...byName].map(([name, n]) => `${n} ${name}`);
+    out.who = b.player;
+  }
+  if (a.kind === "zone" && b.kind === "zone" && a.to !== b.to) { out.fromZone = a.to; out.toZone = b.to; out.id = b.id; }
+  if (a.kind === "enter" && b.kind === "enter") { out.id = b.id; if (!a.tapped && b.tapped) out.tapped = true; const ca = Object.values(a.counters).reduce((n, v) => n + v, 0), cb = Object.values(b.counters).reduce((n, v) => n + v, 0); if (cb !== ca) out.counters = cb; }
+  if ((b.kind === "gain_life" || b.kind === "lose_life" || b.kind === "draw") && "player" in b) out.who = b.player;
+  if (b.kind === "damage") { out.target = b.target; out.dmgSource = b.source; }
+  if (b.kind === "counters") out.id = b.id;
+  return out;
+}
+
 // ---------------------------------------------------------------- entry point
 
 /** Runs the event through every applicable replacement effect. Returns the (possibly changed or cancelled) event. */
@@ -430,8 +452,9 @@ export function applyReplacements(r: Run, ev: ReplEvent): ReplEvent {
     const pick = choose(r, cur, cands, done);
     done.add(pick.key);
     if (pick.spec.optional && !hasUnlessPay(pick) && !wantsToApply(r, cur, pick)) continue; // declined: this effect does not apply (and may not be offered again for this event)
+    const before = cur;
     cur = applyEffect(r, cur, pick);
-    emit(r, { type: "replacement_applied", source: pick.src, ability: pick.ability.id, event: cur.kind });
+    emit(r, { type: "replacement_applied", source: pick.src, ability: pick.ability.id, event: cur.kind, text: pick.ability.text.replace(/\s+/g, " ").slice(0, 300), contested: cands.length, ...replSummary(before, cur) });
   }
   return cur;
 }

@@ -27,3 +27,4 @@ data/observer/
 
 # Card packs for the kernel engine in the browser (npm run kernel:bundle-drafts): generated from data/kernel-drafts + data/cards.db.
 public/kernel-packs/
+data/kernel-specs/_results/

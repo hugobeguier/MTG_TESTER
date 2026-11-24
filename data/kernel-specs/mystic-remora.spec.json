@@ -1,0 +1,633 @@
+{
+  "card": "Mystic Remora",
+  "status": "accepted",
+  "oracle": "Cumulative upkeep {1}\nWhenever an opponent casts a noncreature spell, you may draw a card unless that player pays {4}.",
+  "scenarios": [
+    {
+      "name": "Opponent casts a noncreature spell and does not pay: Remora's controller draws",
+      "active": "p2",
+      "setup": {
+        "p1": {
+          "battlefield": [
+            "Mystic Remora"
+          ],
+          "library": [
+            "Grizzly Bears",
+            "Vanilla 3/3",
+            "Vanilla 1/1"
+          ]
+        },
+        "p2": {
+          "hand": [
+            "Vanilla Instant"
+          ],
+          "battlefield": [
+            "Island"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "cast",
+          "player": "p2",
+          "card": "Vanilla Instant",
+          "expect": [
+            {
+              "check": "stack",
+              "items": {
+                "exactly": [
+                  "Vanilla Instant (spell)",
+                  "Mystic Remora (triggered)"
+                ]
+              },
+              "why": "Oracle: whenever an opponent casts a noncreature spell, the ability triggers and goes on the stack above the spell (CR 603.3)"
+            }
+          ]
+        },
+        {
+          "do": "resolve",
+          "answers": [
+            {
+              "kind": "choose_yes_no",
+              "player": "p1",
+              "yes": true
+            },
+            {
+              "kind": "pay_unless",
+              "player": "p2",
+              "yes": false
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "check": "zone",
+          "player": "p1",
+          "zone": "hand",
+          "cards": {
+            "exactly": [
+              "Grizzly Bears"
+            ]
+          },
+          "why": "The opponent did not pay {4}: Remora's controller draws the top card"
+        },
+        {
+          "check": "zone",
+          "player": "p1",
+          "zone": "library",
+          "count": 2,
+          "why": "One card left the library"
+        }
+      ]
+    },
+    {
+      "name": "Remora's controller declines the optional draw",
+      "active": "p2",
+      "setup": {
+        "p1": {
+          "battlefield": [
+            "Mystic Remora"
+          ],
+          "library": [
+            "Grizzly Bears",
+            "Vanilla 3/3",
+            "Vanilla 1/1"
+          ]
+        },
+        "p2": {
+          "hand": [
+            "Vanilla Instant"
+          ],
+          "battlefield": [
+            "Island"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "cast",
+          "player": "p2",
+          "card": "Vanilla Instant"
+        },
+        {
+          "do": "resolve",
+          "answers": [
+            {
+              "kind": "choose_yes_no",
+              "player": "p1",
+              "yes": false
+            },
+            {
+              "kind": "pay_unless",
+              "player": "p2",
+              "yes": false
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "check": "zone",
+          "player": "p1",
+          "zone": "hand",
+          "count": 0,
+          "why": "Oracle: 'you MAY draw a card': declining draws nothing"
+        },
+        {
+          "check": "zone",
+          "player": "p1",
+          "zone": "library",
+          "count": 3,
+          "why": "Nothing was drawn"
+        }
+      ]
+    },
+    {
+      "name": "Opponent pays {4}: no draw and the opponent's mana is spent",
+      "active": "p2",
+      "setup": {
+        "p1": {
+          "battlefield": [
+            "Mystic Remora"
+          ],
+          "library": [
+            "Grizzly Bears",
+            "Vanilla 3/3",
+            "Vanilla 1/1"
+          ]
+        },
+        "p2": {
+          "hand": [
+            "Vanilla Instant"
+          ],
+          "battlefield": [
+            "Island",
+            "Island",
+            "Island",
+            "Island",
+            "Island"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "cast",
+          "player": "p2",
+          "card": "Vanilla Instant"
+        },
+        {
+          "do": "resolve",
+          "answers": [
+            {
+              "kind": "choose_yes_no",
+              "player": "p1",
+              "yes": true
+            },
+            {
+              "kind": "pay_unless",
+              "player": "p2",
+              "yes": true
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "check": "zone",
+          "player": "p1",
+          "zone": "hand",
+          "count": 0,
+          "why": "Oracle: '... unless that player pays {4}': paying stops the draw"
+        },
+        {
+          "check": "permanent",
+          "ref": "Island#1",
+          "tapped": true,
+          "why": "{1} for the spell plus {4} paid for the tax uses all five Islands"
+        },
+        {
+          "check": "permanent",
+          "ref": "Island#2",
+          "tapped": true,
+          "why": "{1} for the spell plus {4} paid for the tax uses all five Islands"
+        },
+        {
+          "check": "permanent",
+          "ref": "Island#3",
+          "tapped": true,
+          "why": "{1} for the spell plus {4} paid for the tax uses all five Islands"
+        },
+        {
+          "check": "permanent",
+          "ref": "Island#4",
+          "tapped": true,
+          "why": "{1} for the spell plus {4} paid for the tax uses all five Islands"
+        },
+        {
+          "check": "permanent",
+          "ref": "Island#5",
+          "tapped": true,
+          "why": "{1} for the spell plus {4} paid for the tax uses all five Islands"
+        }
+      ]
+    },
+    {
+      "name": "Opponent's creature spell does not trigger Remora",
+      "active": "p2",
+      "setup": {
+        "p1": {
+          "battlefield": [
+            "Mystic Remora"
+          ],
+          "library": [
+            "Grizzly Bears",
+            "Vanilla 3/3",
+            "Vanilla 1/1"
+          ]
+        },
+        "p2": {
+          "hand": [
+            "Vanilla 2/2"
+          ],
+          "battlefield": [
+            "Island",
+            "Island"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "cast",
+          "player": "p2",
+          "card": "Vanilla 2/2"
+        },
+        {
+          "do": "resolve"
+        }
+      ],
+      "expect": [
+        {
+          "check": "zone",
+          "player": "p1",
+          "zone": "hand",
+          "count": 0,
+          "why": "Oracle: only NONcreature spells trigger it"
+        },
+        {
+          "check": "zone",
+          "player": "p2",
+          "zone": "battlefield",
+          "cards": {
+            "atLeast": [
+              "Vanilla 2/2"
+            ]
+          },
+          "why": "The creature spell resolved normally"
+        }
+      ]
+    },
+    {
+      "name": "Remora's controller's own noncreature spell does not trigger it",
+      "setup": {
+        "p1": {
+          "battlefield": [
+            "Mystic Remora",
+            "Island"
+          ],
+          "hand": [
+            "Vanilla Instant"
+          ],
+          "library": [
+            "Grizzly Bears",
+            "Vanilla 3/3"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "cast",
+          "player": "p1",
+          "card": "Vanilla Instant",
+          "expect": [
+            {
+              "check": "stack",
+              "items": {
+                "exactly": [
+                  "Vanilla Instant (spell)"
+                ]
+              },
+              "why": "Oracle: 'an OPPONENT casts': the controller's own spell does not trigger it"
+            }
+          ]
+        },
+        {
+          "do": "resolve"
+        }
+      ],
+      "expect": [
+        {
+          "check": "zone",
+          "player": "p1",
+          "zone": "hand",
+          "count": 0,
+          "why": "No draw happened"
+        },
+        {
+          "check": "zone",
+          "player": "p1",
+          "zone": "library",
+          "count": 2,
+          "why": "Library untouched"
+        }
+      ]
+    },
+    {
+      "name": "Four players: each opponent's noncreature spell triggers it separately",
+      "players": 4,
+      "active": "p2",
+      "setup": {
+        "p1": {
+          "battlefield": [
+            "Mystic Remora"
+          ],
+          "library": [
+            "Grizzly Bears",
+            "Vanilla 3/3",
+            "Vanilla 1/1"
+          ]
+        },
+        "p2": {
+          "hand": [
+            "Vanilla Instant"
+          ],
+          "battlefield": [
+            "Island"
+          ]
+        },
+        "p3": {
+          "hand": [
+            "Vanilla Instant"
+          ],
+          "battlefield": [
+            "Island"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "cast",
+          "player": "p2",
+          "card": "Vanilla Instant"
+        },
+        {
+          "do": "resolve",
+          "answers": [
+            {
+              "kind": "choose_yes_no",
+              "player": "p1",
+              "yes": true
+            },
+            {
+              "kind": "pay_unless",
+              "player": "p2",
+              "yes": false
+            }
+          ]
+        },
+        {
+          "do": "pass",
+          "player": "p2"
+        },
+        {
+          "do": "cast",
+          "player": "p3",
+          "card": "Vanilla Instant"
+        },
+        {
+          "do": "resolve",
+          "answers": [
+            {
+              "kind": "choose_yes_no",
+              "player": "p1",
+              "yes": true
+            },
+            {
+              "kind": "pay_unless",
+              "player": "p3",
+              "yes": false
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "check": "zone",
+          "player": "p1",
+          "zone": "hand",
+          "cards": {
+            "exactly": [
+              "Grizzly Bears",
+              "Vanilla 3/3"
+            ]
+          },
+          "why": "'An opponent' is any of the three opponents: two spells, two triggers, two draws (top card first)"
+        }
+      ]
+    },
+    {
+      "name": "Cumulative upkeep paid: age counter added and {1} paid",
+      "active": "p2",
+      "phase": "end_step",
+      "setup": {
+        "p1": {
+          "battlefield": [
+            {
+              "card": "Mystic Remora",
+              "counters": {}
+            },
+            "Island"
+          ],
+          "library": [
+            "Grizzly Bears",
+            "Vanilla 3/3"
+          ]
+        },
+        "p2": {}
+      },
+      "steps": [
+        {
+          "do": "advance",
+          "to": "upkeep",
+          "active": "p1",
+          "expect": [
+            {
+              "check": "stack",
+              "items": {
+                "atLeast": [
+                  "Mystic Remora (triggered)"
+                ]
+              },
+              "why": "Oracle: cumulative upkeep triggers at the beginning of its controller's upkeep (CR 702.24a)"
+            }
+          ]
+        },
+        {
+          "do": "resolve",
+          "answers": [
+            {
+              "kind": "pay_unless",
+              "player": "p1",
+              "yes": true
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "check": "permanent",
+          "ref": "Mystic Remora",
+          "zone": "battlefield",
+          "counters": {
+            "age": 1
+          },
+          "why": "CR 702.24a: put an age counter, then sacrifice it unless its controller pays its upkeep cost once per age counter ({1} x 1)"
+        },
+        {
+          "check": "permanent",
+          "ref": "Island",
+          "tapped": true,
+          "why": "{1} was paid by tapping the Island"
+        }
+      ]
+    },
+    {
+      "name": "Cumulative upkeep not paid: sacrificed",
+      "active": "p2",
+      "phase": "end_step",
+      "setup": {
+        "p1": {
+          "battlefield": [
+            {
+              "card": "Mystic Remora",
+              "counters": {}
+            },
+            "Island"
+          ],
+          "library": [
+            "Grizzly Bears",
+            "Vanilla 3/3"
+          ]
+        },
+        "p2": {}
+      },
+      "steps": [
+        {
+          "do": "advance",
+          "to": "upkeep",
+          "active": "p1"
+        },
+        {
+          "do": "resolve",
+          "answers": [
+            {
+              "kind": "pay_unless",
+              "player": "p1",
+              "yes": false
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "check": "zone",
+          "player": "p1",
+          "zone": "graveyard",
+          "cards": {
+            "exactly": [
+              "Mystic Remora"
+            ]
+          },
+          "why": "CR 702.24a: if the upkeep cost is not paid, sacrifice the permanent"
+        },
+        {
+          "check": "permanent",
+          "ref": "Island",
+          "tapped": false,
+          "why": "Nothing was paid"
+        }
+      ]
+    },
+    {
+      "name": "Cumulative upkeep with 2 age counters already costs {3}",
+      "active": "p2",
+      "phase": "end_step",
+      "setup": {
+        "p1": {
+          "battlefield": [
+            {
+              "card": "Mystic Remora",
+              "counters": {
+                "age": 2
+              }
+            },
+            "Island",
+            "Island",
+            "Island"
+          ],
+          "library": [
+            "Grizzly Bears",
+            "Vanilla 3/3"
+          ]
+        },
+        "p2": {}
+      },
+      "steps": [
+        {
+          "do": "advance",
+          "to": "upkeep",
+          "active": "p1"
+        },
+        {
+          "do": "resolve",
+          "answers": [
+            {
+              "kind": "pay_unless",
+              "player": "p1",
+              "yes": true
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "check": "permanent",
+          "ref": "Mystic Remora",
+          "zone": "battlefield",
+          "counters": {
+            "age": 3
+          },
+          "why": "CR 702.24a: a third age counter is added, the cost is {1} for each age counter = {3}"
+        },
+        {
+          "check": "permanent",
+          "ref": "Island#1",
+          "tapped": true,
+          "why": "{3} paid with all three Islands"
+        },
+        {
+          "check": "permanent",
+          "ref": "Island#2",
+          "tapped": true,
+          "why": "{3} paid with all three Islands"
+        },
+        {
+          "check": "permanent",
+          "ref": "Island#3",
+          "tapped": true,
+          "why": "{3} paid with all three Islands"
+        }
+      ]
+    }
+  ]
+}

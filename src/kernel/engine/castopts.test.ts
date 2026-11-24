@@ -241,7 +241,7 @@ describe("alternative costs (Flawless Maneuver, Blasphemous Edict)", () => {
     const fm = t.give("p1", "Flawless Maneuver", "hand");
     let res = castOk(t, "p1", fm);
     expect(kinds(res)).toBe("choose_cast_option");
-    expect(res.pending!.options.map((o) => o.id)).toEqual(["normal", "c1"]);
+    expect(res.pending!.options.map((o) => o.id)).toEqual(["c1", "normal"]);
     res = t.answer(res, { ids: ["c1"] });
     expect(res.pending).toBeUndefined();
     expect(t.state.battlefield.filter((id) => t.obj(id).tapped)).toHaveLength(0);

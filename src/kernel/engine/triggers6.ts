@@ -19,6 +19,7 @@ const LOG_TYPE: Record<string, string> = { draw: "draw", gain_life: "gain_life",
 
 function lkiOk(f: ObjectFilter, l: Lki, q: QCtx, id: string): boolean {
   const lc = (a: string[]) => a.map((x) => x.toLowerCase());
+  if (f.anyOf) { const { anyOf, ...rest } = f; return lkiOk(rest, l, q, id) && anyOf.some((a) => lkiOk(a, l, q, id)); } // "an artifact or creature" (Ravenous Squirrel): any alternative, plus the shared fields
   for (const k of Object.keys(f)) if (!["types", "notTypes", "subtypes", "notSubtypes", "colors", "controller", "owner", "token", "another", "named", "hasCounter", "zone"].includes(k)) throw new Unsupported(`filter:${k}@sacrifice_trigger`);
   if (f.types && !lc(f.types).every((t) => t === "permanent" || t === "card" || l.types.includes(t))) return false;
   if (f.notTypes && lc(f.notTypes).some((t) => l.types.includes(t))) return false;

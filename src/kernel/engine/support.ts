@@ -65,6 +65,7 @@ function checkQuantity(q: Quantity | undefined, out: string[]): void {
   if ("filter" in q) checkFilter(q.filter as object | undefined, out);
 }
 
+const SUPPORTED_PREDICATE_STATS: ReadonlySet<string> = new Set(["class_level", "monarch_exists", "controller_is_monarch", "power", "toughness", "mana_value", "card_types_in_your_graveyard", "was_cast", "entered_this_turn"]);
 function checkPredicate(p: Predicate | undefined, out: string[]): void {
   if (!p) return;
   if ("all" in p) return p.all.forEach((x) => checkPredicate(x, out));
@@ -72,6 +73,7 @@ function checkPredicate(p: Predicate | undefined, out: string[]): void {
   if ("not" in p) return checkPredicate(p.not, out);
   if ("unsupported" in p) return add(out, "predicate:unsupported");
   if (!SUPPORTED_PREDICATES.has(p.check)) return add(out, `predicate:${p.check}`);
+  if (p.check === "stat" && !(/^[a-z]+_counters$/.test(String(p.stat)) || SUPPORTED_PREDICATE_STATS.has(String(p.stat)))) add(out, `predicate:stat.${String(p.stat)}`); // query.evalPredicate throws Unsupported for any other stat (Shifting Woodland sat in a supported card for that reason)
   if (p.check === "did_this_turn" && !EVENT_TO_LOG[String(p.event)]) add(out, `event:${String(p.event)}`); // query.countLog only knows the events it logs
   if ("filter" in p) checkFilter(p.filter, out);
   if ("cmp" in p && p.cmp) checkQuantity(p.cmp.value, out);

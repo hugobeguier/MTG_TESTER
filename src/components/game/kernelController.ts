@@ -19,6 +19,7 @@ import { DEFAULT_STOP_SETTINGS, stopKey, type PriorityStopSettings } from "@/lib
 import { toggleYield, type SeatYield } from "@/engine/yieldPolicy";
 import { stackSession, type StackIndex } from "./tokenStacks";
 import { paymentOf, payableSources, suggestionFor } from "./kernelPayment";
+import { saveGameLog } from "./kernelGameLog";
 
 /** the driver never takes more than this many automatic actions in one turn (a loop guard, not a rule) */
 export const MAX_AUTO_ACTIONS_PER_TURN = 150;
@@ -349,6 +350,8 @@ export class KernelGameController {
     if (this.timer !== undefined && this.driverClear) { this.driverClear(this.timer); this.timer = undefined; }
     this.bump();
   };
+  /** "Save game log" (stack log panel): writes the replay file of this game through the dev-only route (kernelGameLog.ts) */
+  saveGameLog = (): ReturnType<typeof saveGameLog> => saveGameLog(this.ks, this.human);
   /** the stack dock's feed: the top item shows "Resolving..." while the table holds still on it, and the items that just resolved show what they did */
   stackFeed(): StackFeedEntry[] {
     if (!this.pacing) return [];
@@ -365,7 +368,7 @@ export class KernelGameController {
     const id = this.kid(cardId);
     const lands = this.legalFor("playLand", id);
     const casts = this.legalFor("castSpell", id);
-    const pick = lands[0] ?? casts.find((a) => !a.option || a.option === "normal") ?? casts[0];
+    const pick = lands[0] ?? casts.find((a) => a.free) ?? casts.find((a) => !a.option || a.option === "normal") ?? casts[0]; // a free-cast permission (Omniscience) is the default way; "Pay its mana cost" stays in the card actions
     if (pick?.action) { this.act(pick.action); return; }
     // not listed: ask the engine directly so the player gets its reason ("wrong timing", "cannot pay", ...)
     const o = this.ks.state.objects[id];
@@ -820,7 +823,8 @@ export class KernelGameController {
   cardActions(cardId: string): Array<{ id: string; label: string; title?: string }> {
     const id = this.kid(cardId);
     return this.options()
-      .filter((a) => a.objectId === id && (a.kind === "turnFaceUp" || a.kind === "unlockDoor" || a.kind === "castPrepared" || (a.kind === "castSpell" && !!a.option && a.option !== "normal")))
+      .filter((a) => a.objectId === id && (a.kind === "turnFaceUp" || a.kind === "activateAbility" || // every legal non-mana activated ability, whether or not the legacy text parsers recognise its wording (Zur's "becomes a creature")
+ a.kind === "unlockDoor" || a.kind === "castPrepared" || (a.kind === "castSpell" && !!a.option && a.option !== "normal")))
       .map((a) => ({ id: a.id, label: a.label, ...(a.asks ? { title: `Asks: ${a.asks.replace(/_/g, " ")}` } : {}) }));
   }
   /** can the selected hand card be cast / played right now (the dock's "Respond Selected") */

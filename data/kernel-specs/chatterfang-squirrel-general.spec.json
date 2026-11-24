@@ -1,0 +1,331 @@
+{
+  "card": "Chatterfang, Squirrel General",
+  "cards": [
+    "Utter Insignificance"
+  ],
+  "status": "accepted",
+  "oracle": "Forestwalk\nIf one or more tokens would be created under your control, those tokens plus that many 1/1 green Squirrel creature tokens are created instead.\n{B}, Sacrifice X Squirrels: Target creature gets +X/-X until end of turn.\n--\nFlash\nEnchant creature\nEnchanted creature loses all abilities and has base power and toughness 1/1.\n{2}{C}: Exile enchanted creature.",
+  "scenarios": [
+    {
+      "name": "Your token creation also makes the same number of 1/1 green Squirrels",
+      "setup": {
+        "p1": {
+          "hand": [
+            "Token Maker"
+          ],
+          "battlefield": [
+            "Chatterfang, Squirrel General",
+            "Island",
+            "Island"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "cast",
+          "player": "p1",
+          "card": "Token Maker"
+        },
+        {
+          "do": "resolve"
+        }
+      ],
+      "expect": [
+        {
+          "check": "tokens",
+          "player": "p1",
+          "name": "Soldier",
+          "count": 1,
+          "power": 1,
+          "toughness": 1,
+          "why": "The original 1/1 Soldier is still created (the effect says 'those tokens plus')"
+        },
+        {
+          "check": "tokens",
+          "player": "p1",
+          "name": "Squirrel",
+          "count": 1,
+          "power": 1,
+          "toughness": 1,
+          "colors": {
+            "exactly": [
+              "green"
+            ]
+          },
+          "subtypes": {
+            "atLeast": [
+              "Squirrel"
+            ]
+          },
+          "types": {
+            "atLeast": [
+              "creature"
+            ]
+          },
+          "why": "Oracle: plus that many 1/1 green Squirrel creature tokens (one Soldier -> one Squirrel)"
+        }
+      ]
+    },
+    {
+      "name": "An opponent's token creation is not changed",
+      "active": "p2",
+      "setup": {
+        "p1": {
+          "battlefield": [
+            "Chatterfang, Squirrel General"
+          ]
+        },
+        "p2": {
+          "hand": [
+            "Token Maker"
+          ],
+          "battlefield": [
+            "Island",
+            "Island"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "cast",
+          "player": "p2",
+          "card": "Token Maker"
+        },
+        {
+          "do": "resolve"
+        }
+      ],
+      "expect": [
+        {
+          "check": "tokens",
+          "player": "p2",
+          "name": "Soldier",
+          "count": 1,
+          "why": "p2 makes its Soldier"
+        },
+        {
+          "check": "tokens",
+          "player": "p2",
+          "name": "Squirrel",
+          "count": 0,
+          "why": "Oracle: 'tokens under YOUR control': p2 is not Chatterfang's controller"
+        },
+        {
+          "check": "tokens",
+          "player": "p1",
+          "count": 0,
+          "why": "Chatterfang's controller gets nothing from an opponent's tokens"
+        }
+      ]
+    },
+    {
+      "name": "Enchanted with Utter Insignificance (placed earlier): Chatterfang has lost its ability",
+      "setup": {
+        "p1": {
+          "battlefield": [
+            "Chatterfang, Squirrel General",
+            {
+              "card": "Utter Insignificance",
+              "attachedTo": "Chatterfang, Squirrel General"
+            },
+            "Island",
+            "Island"
+          ],
+          "hand": [
+            "Token Maker"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "cast",
+          "player": "p1",
+          "card": "Token Maker"
+        },
+        {
+          "do": "resolve"
+        }
+      ],
+      "expect": [
+        {
+          "check": "permanent",
+          "ref": "Chatterfang, Squirrel General",
+          "power": 1,
+          "toughness": 1,
+          "abilitiesStripped": true,
+          "attachments": {
+            "atLeast": [
+              "Utter Insignificance"
+            ]
+          },
+          "why": "Utter Insignificance: enchanted creature loses all abilities and has base P/T 1/1"
+        },
+        {
+          "check": "tokens",
+          "player": "p1",
+          "name": "Soldier",
+          "count": 1,
+          "why": "The token is still made"
+        },
+        {
+          "check": "tokens",
+          "player": "p1",
+          "name": "Squirrel",
+          "count": 0,
+          "why": "A permanent that lost all abilities has no replacement effect (CR 613.1f / 614.1): no extra Squirrels"
+        }
+      ]
+    },
+    {
+      "name": "Casting Utter Insignificance (flash) on Chatterfang stops the replacement afterwards",
+      "setup": {
+        "p1": {
+          "battlefield": [
+            "Chatterfang, Squirrel General",
+            "Island",
+            "Island"
+          ],
+          "hand": [
+            "Token Maker"
+          ]
+        },
+        "p2": {
+          "battlefield": [
+            "Island",
+            "Island"
+          ],
+          "hand": [
+            "Utter Insignificance"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "pass",
+          "player": "p1"
+        },
+        {
+          "do": "cast",
+          "player": "p2",
+          "card": "Utter Insignificance",
+          "targets": [
+            "Chatterfang, Squirrel General"
+          ]
+        },
+        {
+          "do": "resolve"
+        },
+        {
+          "do": "cast",
+          "player": "p1",
+          "card": "Token Maker"
+        },
+        {
+          "do": "resolve"
+        }
+      ],
+      "expect": [
+        {
+          "check": "permanent",
+          "ref": "Chatterfang, Squirrel General",
+          "power": 1,
+          "toughness": 1,
+          "abilitiesStripped": true,
+          "why": "Enchanted creature loses all abilities and becomes a base 1/1"
+        },
+        {
+          "check": "tokens",
+          "player": "p1",
+          "name": "Squirrel",
+          "count": 0,
+          "why": "Chatterfang lost all abilities before the tokens were created: no replacement (CR 614 needs the ability to exist)"
+        },
+        {
+          "check": "tokens",
+          "player": "p1",
+          "name": "Soldier",
+          "count": 1,
+          "why": "The Soldier is still created"
+        }
+      ]
+    },
+    {
+      "name": "Sacrifice X Squirrels: target creature gets +X/-X",
+      "setup": {
+        "p1": {
+          "battlefield": [
+            "Chatterfang, Squirrel General",
+            "Swamp",
+            {
+              "token": {
+                "name": "Squirrel",
+                "types": [
+                  "Creature"
+                ],
+                "subtypes": [
+                  "Squirrel"
+                ],
+                "colors": [
+                  "G"
+                ],
+                "power": 1,
+                "toughness": 1
+              },
+              "count": 2
+            }
+          ]
+        },
+        "p2": {
+          "battlefield": [
+            "Vanilla 5/5"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "activate",
+          "player": "p1",
+          "source": "Chatterfang, Squirrel General",
+          "ability": 1,
+          "x": 2,
+          "targets": [
+            "Vanilla 5/5"
+          ],
+          "answers": [
+            {
+              "pick": [
+                "Squirrel",
+                "Squirrel"
+              ]
+            }
+          ]
+        },
+        {
+          "do": "resolve"
+        }
+      ],
+      "expect": [
+        {
+          "check": "permanent",
+          "ref": "Vanilla 5/5",
+          "power": 7,
+          "toughness": 3,
+          "why": "Oracle: +X/-X with X = 2 Squirrels sacrificed: 5/5 becomes 7/3"
+        },
+        {
+          "check": "tokens",
+          "player": "p1",
+          "name": "Squirrel",
+          "count": 0,
+          "why": "Both Squirrels were sacrificed as a cost"
+        },
+        {
+          "check": "permanent",
+          "ref": "Swamp",
+          "tapped": true,
+          "why": "{B} was paid"
+        }
+      ]
+    }
+  ]
+}

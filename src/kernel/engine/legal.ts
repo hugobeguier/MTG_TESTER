@@ -15,7 +15,7 @@ import type { Ability } from "../schema";
 import { attackerEntry, abilitiesOf, chars, defOf, faceNames, isBlocking, isSummoningSick, printedAbilities, type Run } from "./core";
 import { withCardDb } from "./carddb";
 import { castableFaces, playableFaces } from "./faces";
-import { baseChoices } from "./castopts";
+import { baseChoices, isFreeOption } from "./castopts";
 import { permissionsFor } from "./durable";
 import { attackProblem, blockProblem, defenderOptions, legalAttackers } from "./combat";
 import { goadersOf, hostOf, mustAttack, restrictionsOf } from "./layers";
@@ -37,6 +37,8 @@ export interface LegalAction {
   face?: string;
   /** castSpell: the way of casting ("normal", "flashback", ...) when more than one exists */
   option?: string;
+  /** castSpell: this way casts the spell without paying its mana cost (a free-cast permission such as Omniscience); the UI and the AI default to it */
+  free?: boolean;
   zone?: string;
   isMana?: boolean;
   /** the first question the start of this cast / activation opens (targets, modes, X, a cast option ...); absent = it goes straight on the stack / resolves */
@@ -177,6 +179,7 @@ export function legalActions(state: GameState, player: PlayerId, ctx: EngineCont
     const faces = castableFaces(def);
     const faceVariants: Array<string | undefined> = faces.length > 1 ? faces : [undefined];
     const bases = baseChoices(r, o, player, o.zone);
+    const freeWays = new Set(bases.filter((b) => isFreeOption(b)).map((b) => b!.id));
     const ways: Array<string | undefined> = bases.length > 1 || (bases.length === 1 && bases[0] !== null) ? bases.map((b) => (b ? b.id : "normal")) : [undefined];
     for (const face of faceVariants) for (const way of ways) {
       const probed: Action = { type: "castSpell", player, cardId: id, autoPay: true, ...(face ? { face } : {}), ...(way ? { option: way } : {}) };
@@ -184,7 +187,9 @@ export function legalActions(state: GameState, player: PlayerId, ctx: EngineCont
       const pr = probe(state, probed, ctx, true);
       if (!pr.ok) continue;
       const nm = face ?? cardName(r, id);
-      add({ id: `castSpell:${id}${face ? `:${face}` : ""}${way ? `:${way}` : ""}`, kind: "castSpell", player, objectId: id, ...(face ? { face } : {}), ...(way ? { option: way } : {}), zone: o.zone, label: `Cast ${nm}${way && way !== "normal" ? ` (${way})` : ""}`, action, ...(pr.asks ? { asks: pr.asks } : {}), ...(pr.targetOptions ? { targetOptions: pr.targetOptions } : {}) });
+      const isFree = !!way && freeWays.has(way);
+      const freeSrc = (w: string): string => { const m = /:(.+)$/.exec(w); return m && state.objects[m[1]] ? ` (${cardName(r, m[1])})` : ""; };
+      add({ id: `castSpell:${id}${face ? `:${face}` : ""}${way ? `:${way}` : ""}`, kind: "castSpell", player, objectId: id, ...(face ? { face } : {}), ...(way ? { option: way } : {}), ...(isFree ? { free: true } : {}), zone: o.zone, label: isFree ? `Cast ${nm} without paying its mana cost${freeSrc(way!)}` : `Cast ${nm}${way && way !== "normal" ? ` (${way})` : ""}`, action, ...(pr.asks ? { asks: pr.asks } : {}), ...(pr.targetOptions ? { targetOptions: pr.targetOptions } : {}) });
     }
   }
 

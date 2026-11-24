@@ -19,6 +19,8 @@
     "kernel:validate-drafts": "vite-node -c vitest.config.ts scripts/validate-kernel-drafts.ts --",
     "kernel:check-copies": "vite-node -c vitest.config.ts scripts/check-kernel-copies.ts",
     "kernel:ai-selfplay": "vite-node -c vitest.config.ts scripts/kernel-ai-selfplay.ts --",
+    "kernel:spec": "vite-node -c vitest.config.ts scripts/kernel-spec.ts --",
+    "kernel:replay": "vite-node -c vitest.config.ts scripts/kernel-replay.ts --",
     "kernel:observe": "vite-node -c vitest.config.ts scripts/kernel-observer.ts --",
     "kernel:observe-replay": "vite-node -c vitest.config.ts scripts/kernel-observe-replay.ts --",
     "kernel:readiness": "vite-node -c vitest.config.ts scripts/kernel-readiness.ts --",

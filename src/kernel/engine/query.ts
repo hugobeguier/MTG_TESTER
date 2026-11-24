@@ -395,6 +395,12 @@ export function evalPredicate(r: Run, p: Predicate, q: QCtx): boolean {
       if (p.stat === "monarch_exists") return cmp(r.s.monarch !== undefined ? 1 : 0, p.cmp, r, q); // "if there is no monarch" (Crown of Gondor)
       if (p.stat === "controller_is_monarch") return cmp(r.s.monarch !== undefined && r.s.monarch === tryObj(r, ids[0])!.controller ? 1 : 0, p.cmp, r, q);
       if (p.stat === "power" || p.stat === "toughness" || p.stat === "mana_value") return cmp(evalQuantity(r, { ref: "stat", of: p.of, stat: p.stat }, q), p.cmp, r, q);
+      if (p.stat === "was_cast") return cmp(tryObj(r, ids[0])!.cast ? 1 : 0, p.cmp, r, q); // "if you cast it" (Tiamat): the permanent keeps how it was cast
+      if (p.stat === "entered_this_turn") return cmp(r.s.turnLog.some((e) => e.type === "etb" && e.id === ids[0]) ? 1 : 0, p.cmp, r, q); // "as long as it entered this turn" (Zurgo and Ojutai), the same turn-log test as the enteredThisTurn filter
+      if (p.stat === "card_types_in_your_graveyard") { // delirium (CR 702.131): the number of card types among the cards in the controller's graveyard
+        const types = new Set<string>(); for (const id of r.s.players.find((x) => x.id === q.controller)?.graveyard ?? []) for (const t of chars(r, id).types) types.add(t === "tribal" ? "kindred" : t);
+        return cmp(types.size, p.cmp, r, q);
+      }
       throw new Unsupported(`predicate:stat.${p.stat}`);
     }
     case "matches": { const ids = resolveObjs(r, p.obj, q); return ids.length > 0 && ids.every((id) => matchesFilter(r, id, p.filter, q)); }

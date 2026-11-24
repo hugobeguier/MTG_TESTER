@@ -1,0 +1,397 @@
+{
+  "card": "Lightning Bolt",
+  "status": "accepted",
+  "oracle": "Lightning Bolt deals 3 damage to any target.",
+  "scenarios": [
+    {
+      "name": "Bolt to the face",
+      "setup": {
+        "p1": {
+          "hand": [
+            "Lightning Bolt"
+          ],
+          "battlefield": [
+            "Mountain"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "cast",
+          "player": "p1",
+          "card": "Lightning Bolt",
+          "targets": [
+            "p2"
+          ],
+          "expect": [
+            {
+              "check": "stack",
+              "items": {
+                "exactly": [
+                  "Lightning Bolt (spell)"
+                ]
+              },
+              "why": "CR 601.2a / 405: a cast spell is on the stack until it resolves"
+            },
+            {
+              "check": "life",
+              "player": "p2",
+              "value": 40,
+              "why": "Nothing happens until the spell resolves (CR 608.1)"
+            }
+          ]
+        },
+        {
+          "do": "resolve"
+        }
+      ],
+      "expect": [
+        {
+          "check": "life",
+          "player": "p2",
+          "value": 37,
+          "why": "Oracle: deals 3 damage to any target (p2 starts at 40)"
+        },
+        {
+          "check": "zone",
+          "player": "p1",
+          "zone": "graveyard",
+          "cards": {
+            "exactly": [
+              "Lightning Bolt"
+            ]
+          },
+          "why": "CR 608.2m: an instant is put into its owner's graveyard as the last step of resolving"
+        },
+        {
+          "check": "zone",
+          "player": "p1",
+          "zone": "hand",
+          "count": 0,
+          "why": "The card left the hand when cast"
+        },
+        {
+          "check": "stack",
+          "count": 0,
+          "why": "The spell finished resolving"
+        },
+        {
+          "check": "permanent",
+          "ref": "Mountain",
+          "tapped": true,
+          "why": "Casting {R} costs the Mountain's mana (tapped for it)"
+        }
+      ]
+    },
+    {
+      "name": "Bolt kills a 2/2 creature",
+      "setup": {
+        "p1": {
+          "hand": [
+            "Lightning Bolt"
+          ],
+          "battlefield": [
+            "Mountain"
+          ]
+        },
+        "p2": {
+          "battlefield": [
+            "Vanilla 2/2"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "cast",
+          "player": "p1",
+          "card": "Lightning Bolt",
+          "targets": [
+            "Vanilla 2/2"
+          ]
+        },
+        {
+          "do": "resolve"
+        }
+      ],
+      "expect": [
+        {
+          "check": "zone",
+          "player": "p2",
+          "zone": "graveyard",
+          "cards": {
+            "exactly": [
+              "Vanilla 2/2"
+            ]
+          },
+          "why": "3 damage is lethal damage to a 2/2 (CR 120.6 / 704.5g): it is destroyed and put into its owner's graveyard"
+        },
+        {
+          "check": "zone",
+          "player": "p2",
+          "zone": "battlefield",
+          "count": 0,
+          "why": "The creature left the battlefield"
+        },
+        {
+          "check": "life",
+          "player": "p2",
+          "value": 40,
+          "why": "The player was not the target"
+        }
+      ]
+    },
+    {
+      "name": "Bolt does not kill a 5/5 and leaves 3 damage on it",
+      "setup": {
+        "p1": {
+          "hand": [
+            "Lightning Bolt"
+          ],
+          "battlefield": [
+            "Mountain"
+          ]
+        },
+        "p2": {
+          "battlefield": [
+            "Vanilla 5/5"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "cast",
+          "player": "p1",
+          "card": "Lightning Bolt",
+          "targets": [
+            "Vanilla 5/5"
+          ]
+        },
+        {
+          "do": "resolve"
+        }
+      ],
+      "expect": [
+        {
+          "check": "permanent",
+          "ref": "Vanilla 5/5",
+          "zone": "battlefield",
+          "damage": 3,
+          "power": 5,
+          "toughness": 5,
+          "why": "Oracle: 3 damage; a 5/5 survives with 3 damage marked (CR 120.6)"
+        }
+      ]
+    },
+    {
+      "name": "Bolt can be cast on an opponent's turn (instant) after that player passes priority",
+      "active": "p2",
+      "setup": {
+        "p1": {
+          "hand": [
+            "Lightning Bolt"
+          ],
+          "battlefield": [
+            "Mountain"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "pass",
+          "player": "p2"
+        },
+        {
+          "do": "cast",
+          "player": "p1",
+          "card": "Lightning Bolt",
+          "targets": [
+            "p2"
+          ]
+        },
+        {
+          "do": "resolve"
+        }
+      ],
+      "expect": [
+        {
+          "check": "life",
+          "player": "p2",
+          "value": 37,
+          "why": "CR 304.1: an instant can be cast any time its controller has priority, including during an opponent's turn"
+        }
+      ]
+    },
+    {
+      "name": "Bolt cannot be cast without red mana",
+      "setup": {
+        "p1": {
+          "hand": [
+            "Lightning Bolt"
+          ],
+          "battlefield": [
+            "Island"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "cast",
+          "player": "p1",
+          "card": "Lightning Bolt",
+          "targets": [
+            "p2"
+          ],
+          "expectRejected": "cannot_pay"
+        }
+      ],
+      "expect": [
+        {
+          "check": "zone",
+          "player": "p1",
+          "zone": "hand",
+          "cards": {
+            "exactly": [
+              "Lightning Bolt"
+            ]
+          },
+          "why": "A spell whose cost cannot be paid is not cast (CR 601.2h); the card stays in hand"
+        },
+        {
+          "check": "stack",
+          "count": 0,
+          "why": "Nothing was cast"
+        }
+      ]
+    },
+    {
+      "name": "Fizzles when its only target is exiled in response",
+      "setup": {
+        "p1": {
+          "hand": [
+            "Lightning Bolt"
+          ],
+          "battlefield": [
+            "Mountain"
+          ]
+        },
+        "p2": {
+          "hand": [
+            "Swords to Plowshares"
+          ],
+          "battlefield": [
+            "Plains",
+            "Vanilla 2/2"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "cast",
+          "player": "p1",
+          "card": "Lightning Bolt",
+          "targets": [
+            "Vanilla 2/2"
+          ]
+        },
+        {
+          "do": "pass",
+          "player": "p1"
+        },
+        {
+          "do": "cast",
+          "player": "p2",
+          "card": "Swords to Plowshares",
+          "targets": [
+            "Vanilla 2/2"
+          ]
+        },
+        {
+          "do": "resolve"
+        }
+      ],
+      "expect": [
+        {
+          "check": "zone",
+          "player": "p2",
+          "zone": "exile",
+          "cards": {
+            "exactly": [
+              "Vanilla 2/2"
+            ]
+          },
+          "why": "Swords: exile target creature"
+        },
+        {
+          "check": "life",
+          "player": "p2",
+          "value": 42,
+          "why": "Swords: its controller gains life equal to its power (2); Bolt did no damage because its only target was gone (CR 608.2b)"
+        },
+        {
+          "check": "zone",
+          "player": "p1",
+          "zone": "graveyard",
+          "cards": {
+            "exactly": [
+              "Lightning Bolt"
+            ]
+          },
+          "why": "CR 608.2b: a spell with all targets illegal does not resolve but still leaves the stack to the graveyard"
+        }
+      ]
+    },
+    {
+      "name": "Four players: only the chosen player is damaged",
+      "players": 4,
+      "setup": {
+        "p1": {
+          "hand": [
+            "Lightning Bolt"
+          ],
+          "battlefield": [
+            "Mountain"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "cast",
+          "player": "p1",
+          "card": "Lightning Bolt",
+          "targets": [
+            "p3"
+          ]
+        },
+        {
+          "do": "resolve"
+        }
+      ],
+      "expect": [
+        {
+          "check": "life",
+          "player": "p3",
+          "value": 37,
+          "why": "The target takes 3"
+        },
+        {
+          "check": "life",
+          "player": "p2",
+          "value": 40,
+          "why": "Not a target"
+        },
+        {
+          "check": "life",
+          "player": "p4",
+          "value": 40,
+          "why": "Not a target"
+        },
+        {
+          "check": "life",
+          "player": "p1",
+          "value": 40,
+          "why": "The caster is not affected"
+        }
+      ]
+    }
+  ]
+}

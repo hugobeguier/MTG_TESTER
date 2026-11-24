@@ -1,0 +1,397 @@
+{
+  "card": "Plaguecrafter",
+  "status": "accepted",
+  "oracle": "When this creature enters, each player sacrifices a creature or planeswalker of their choice. Each player who can't discards a card.",
+  "scenarios": [
+    {
+      "name": "Three players: sacrificers keep their hand, the player who cannot sacrifice discards",
+      "players": 3,
+      "active": "p2",
+      "setup": {
+        "p1": {
+          "battlefield": [
+            "Vanilla 2/2"
+          ],
+          "hand": [
+            "Island"
+          ]
+        },
+        "p2": {
+          "battlefield": [
+            "Swamp",
+            "Swamp",
+            "Swamp"
+          ],
+          "hand": [
+            "Plaguecrafter",
+            "Vanilla 1/1"
+          ]
+        },
+        "p3": {
+          "hand": [
+            "Island",
+            "Vanilla Sorcery"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "cast",
+          "player": "p2",
+          "card": "Plaguecrafter"
+        },
+        {
+          "do": "resolve",
+          "answers": [
+            {
+              "player": "p1",
+              "pick": [
+                "Vanilla 2/2"
+              ]
+            },
+            {
+              "player": "p2",
+              "pick": [
+                "Plaguecrafter"
+              ]
+            },
+            {
+              "player": "p3",
+              "pick": [
+                "Island"
+              ]
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "check": "zone",
+          "player": "p1",
+          "zone": "graveyard",
+          "cards": {
+            "exactly": [
+              "Vanilla 2/2"
+            ]
+          },
+          "why": "Oracle: each player sacrifices a creature of their choice (p1's only creature)"
+        },
+        {
+          "check": "zone",
+          "player": "p1",
+          "zone": "hand",
+          "cards": {
+            "exactly": [
+              "Island"
+            ]
+          },
+          "why": "Oracle: only a player who CAN'T sacrifice discards; p1 sacrificed so keeps the card"
+        },
+        {
+          "check": "zone",
+          "player": "p2",
+          "zone": "graveyard",
+          "cards": {
+            "exactly": [
+              "Plaguecrafter"
+            ]
+          },
+          "why": "Oracle: 'each player' includes its controller, whose only creature is Plaguecrafter itself"
+        },
+        {
+          "check": "zone",
+          "player": "p2",
+          "zone": "hand",
+          "cards": {
+            "exactly": [
+              "Vanilla 1/1"
+            ]
+          },
+          "why": "p2 sacrificed so does not discard"
+        },
+        {
+          "check": "zone",
+          "player": "p3",
+          "zone": "hand",
+          "count": 1,
+          "why": "p3 controls no creature or planeswalker so discards one card"
+        },
+        {
+          "check": "zone",
+          "player": "p3",
+          "zone": "graveyard",
+          "cards": {
+            "exactly": [
+              "Island"
+            ]
+          },
+          "why": "p3 chose Island to discard"
+        }
+      ]
+    },
+    {
+      "name": "Controller may sacrifice another creature instead of Plaguecrafter",
+      "active": "p2",
+      "setup": {
+        "p1": {
+          "hand": [
+            "Island",
+            "Island"
+          ]
+        },
+        "p2": {
+          "battlefield": [
+            "Swamp",
+            "Swamp",
+            "Swamp",
+            "Vanilla 1/1"
+          ],
+          "hand": [
+            "Plaguecrafter"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "cast",
+          "player": "p2",
+          "card": "Plaguecrafter"
+        },
+        {
+          "do": "resolve",
+          "answers": [
+            {
+              "player": "p2",
+              "pick": [
+                "Vanilla 1/1"
+              ]
+            },
+            {
+              "player": "p1",
+              "pick": [
+                "Island"
+              ]
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "check": "zone",
+          "player": "p2",
+          "zone": "battlefield",
+          "cards": {
+            "atLeast": [
+              "Plaguecrafter"
+            ],
+            "noneOf": [
+              "Vanilla 1/1"
+            ]
+          },
+          "why": "Oracle: sacrifices 'a creature of their choice': p2 chose the 1/1 and Plaguecrafter stays"
+        },
+        {
+          "check": "zone",
+          "player": "p2",
+          "zone": "graveyard",
+          "cards": {
+            "exactly": [
+              "Vanilla 1/1"
+            ]
+          },
+          "why": "The sacrificed creature is in the graveyard"
+        },
+        {
+          "check": "zone",
+          "player": "p1",
+          "zone": "hand",
+          "count": 1,
+          "why": "p1 has no creature or planeswalker: discards a card"
+        },
+        {
+          "check": "zone",
+          "player": "p1",
+          "zone": "graveyard",
+          "count": 1,
+          "why": "The discarded card"
+        }
+      ]
+    },
+    {
+      "name": "A player with no creature and an empty hand does nothing (no error)",
+      "active": "p2",
+      "setup": {
+        "p1": {},
+        "p2": {
+          "battlefield": [
+            "Swamp",
+            "Swamp",
+            "Swamp"
+          ],
+          "hand": [
+            "Plaguecrafter"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "cast",
+          "player": "p2",
+          "card": "Plaguecrafter"
+        },
+        {
+          "do": "resolve",
+          "answers": [
+            {
+              "player": "p2",
+              "pick": [
+                "Plaguecrafter"
+              ]
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "check": "zone",
+          "player": "p1",
+          "zone": "graveyard",
+          "count": 0,
+          "why": "Nothing to sacrifice and nothing to discard"
+        },
+        {
+          "check": "zone",
+          "player": "p2",
+          "zone": "graveyard",
+          "cards": {
+            "exactly": [
+              "Plaguecrafter"
+            ]
+          },
+          "why": "Its controller must sacrifice a creature: only Plaguecrafter"
+        },
+        {
+          "check": "pending",
+          "present": false,
+          "why": "Nothing is left to decide"
+        }
+      ]
+    },
+    {
+      "name": "Four players: every player including opponents sacrifices, only those without a creature discard",
+      "players": 4,
+      "active": "p1",
+      "setup": {
+        "p1": {
+          "battlefield": [
+            "Swamp",
+            "Swamp",
+            "Swamp"
+          ],
+          "hand": [
+            "Plaguecrafter"
+          ]
+        },
+        "p2": {
+          "battlefield": [
+            "Vanilla 3/3"
+          ],
+          "hand": [
+            "Island"
+          ]
+        },
+        "p3": {
+          "battlefield": [
+            "Vanilla 1/1",
+            "Vanilla 5/5"
+          ],
+          "hand": [
+            "Island"
+          ]
+        },
+        "p4": {
+          "hand": [
+            "Island"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "cast",
+          "player": "p1",
+          "card": "Plaguecrafter"
+        },
+        {
+          "do": "resolve",
+          "answers": [
+            {
+              "player": "p1",
+              "pick": [
+                "Plaguecrafter"
+              ]
+            },
+            {
+              "player": "p2",
+              "pick": [
+                "Vanilla 3/3"
+              ]
+            },
+            {
+              "player": "p3",
+              "pick": [
+                "Vanilla 1/1"
+              ]
+            },
+            {
+              "player": "p4",
+              "pick": [
+                "Island"
+              ]
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "check": "zone",
+          "player": "p3",
+          "zone": "battlefield",
+          "cards": {
+            "exactly": [
+              "Vanilla 5/5"
+            ]
+          },
+          "why": "p3 sacrificed exactly one creature of their choice (the 1/1)"
+        },
+        {
+          "check": "zone",
+          "player": "p2",
+          "zone": "hand",
+          "count": 1,
+          "why": "p2 sacrificed, no discard"
+        },
+        {
+          "check": "zone",
+          "player": "p3",
+          "zone": "hand",
+          "count": 1,
+          "why": "p3 sacrificed, no discard"
+        },
+        {
+          "check": "zone",
+          "player": "p4",
+          "zone": "hand",
+          "count": 0,
+          "why": "p4 had no creature: discards"
+        },
+        {
+          "check": "zone",
+          "player": "p4",
+          "zone": "graveyard",
+          "count": 1,
+          "why": "p4's discarded card"
+        }
+      ]
+    }
+  ]
+}

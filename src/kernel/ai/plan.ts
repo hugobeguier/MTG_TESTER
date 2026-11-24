@@ -29,7 +29,9 @@ function judge(leaf: Leaf, state: GameState, ctx: EngineContext, seat: PlayerId,
 }
 
 export function planMain(acts: LegalAction[], state: GameState, ctx: EngineContext, seat: PlayerId, banned: Set<string>, usage: Record<string, number>, work: Work = { n: 0, cap: DEFAULT_WORK }): Plan | undefined {
-  const roots = acts.filter((a) => a.action && !banned.has(a.id) && (a.kind === "castSpell" || (a.kind === "activateAbility" && !a.isMana)) && (usage[a.id] ?? 0) < 2);
+  const freeCards = new Set(acts.filter((a) => a.kind === "castSpell" && a.free && a.action && !banned.has(a.id)).map((a) => a.objectId + "|" + (a.face ?? "")));
+  // a free cast (Omniscience ...) is never worse than paying: the paid way of the same card and face is not even simulated
+  const roots = acts.filter((a) => a.action && !banned.has(a.id) && (a.kind === "castSpell" || (a.kind === "activateAbility" && !a.isMana)) && (usage[a.id] ?? 0) < 2 && !(a.kind === "castSpell" && !a.free && freeCards.has(a.objectId + "|" + (a.face ?? ""))));
   if (!roots.length) return undefined;
   const me = state.players.find((p) => p.id === seat)!;
   const base = evaluate(state, ctx, seat);
