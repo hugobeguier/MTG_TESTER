@@ -20,7 +20,7 @@ import { StackLogBuilder } from "./stackLog";
 import { fingerprint, type RecordedStep } from "./replayFile";
 import { packDraftLookup } from "./packLookup";
 import { displayFromDef, type DisplayCard, type PackKit } from "./cardPack";
-import { SPECTATOR, toSession, type SeatMeta, type ToSessionEnv } from "./toSession";
+import { cardForName, SPECTATOR, toSession, type SeatMeta, type ToSessionEnv } from "./toSession";
 import { toTableState, type TableState } from "./tableState";
 
 export { SPECTATOR };
@@ -243,6 +243,32 @@ export class KernelSession {
     this.appendLog(res.events);
     return { ok: !res.error, ...(res.error ? { error: res.error } : {}), events: res.events, ...(res.pending ? { pending: res.pending } : {}), version: this.ver };
   }
+
+  /** debug mode (sandbox.ts) is on for this game */
+  get sandbox(): boolean { return !!this.st.config.sandbox; }
+  /** True once debug mode was switched on or a debug action was used: replay files and the stack log say so */
+  get sandboxUsed(): boolean { return !!this.st.sandboxUsed; }
+  /** The host's debug-mode switch (recorded like any action: a replay shows when it was on). Never offered to a multiplayer guest. */
+  setSandbox(player: PlayerId, on: boolean): DispatchResult { return this.dispatch(player, { type: "sandboxMode", player, on }); }
+
+  /** Debug mode only (else empty): the viewer's OWN cards of a zone as tiles with art, for the debug picker; the library is listed top first. Ids are the kernel object ids. */
+  debugCards(viewer: PlayerId, zone: "library" | "hand" | "graveyard" | "exile"): VisibleCard[] {
+    if (!this.st.config.sandbox) return [];
+    const p = this.st.players.find((x) => x.id === viewer);
+    if (!p) return [];
+    const env = this.env(viewer);
+    const out: VisibleCard[] = [];
+    for (const id of p[zone]) {
+      const o = this.st.objects[id];
+      const card = o ? cardForName(env, o.cardName) : undefined;
+      if (card) out.push({ ...card, id, zone });
+    }
+    return out;
+  }
+  /** Debug mode only (else empty): every card name the loaded card packs know (what "Conjure card" can create) */
+  debugCardNames(): readonly string[] { return this.st.config.sandbox ? this.ctx.db?.cardNames() ?? [] : []; }
+  /** Debug mode only: a card by name as a tile (for the conjure list) */
+  debugCardByName(name: string): VisibleCard | undefined { return this.st.config.sandbox ? cardForName(this.env(this.st.players[0].id), name) : undefined; }
 
   /** Answer the open decision. A late answer to an old decision is refused with `stale: true` and changes nothing. */
   decide(player: PlayerId, decisionId: string, choice: Choice): DispatchResult { return this.dispatch(player, { type: "answerDecision", player, decisionId, choice }); }

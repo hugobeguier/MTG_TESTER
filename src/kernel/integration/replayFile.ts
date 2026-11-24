@@ -2,7 +2,7 @@
 // The engine is deterministic: the state the game started from (shuffled libraries and RNG state included) plus the ordered list of accepted actions and decision
 // answers (human AND AI: both go through KernelSession.dispatch) rebuilds the exact game. Each step carries a cheap fingerprint of the state after it, so a replay that
 // diverges (a changed engine, stale drafts) says at which step. Pure TypeScript: no fs here (the dev route and the script do the file I/O).
-import type { Action, EngineContext, GameState, PlayerId } from "../engine/types";
+import { SANDBOX_ACTION_TYPES, type Action, type EngineContext, type GameState, type PlayerId } from "../engine/types";
 import { KernelSession } from "./kernelSession";
 import type { DisplayCard } from "./cardPack";
 import type { SeatMeta } from "./toSession";
@@ -16,12 +16,15 @@ export function fingerprint(s: GameState): string {
 }
 
 export interface FinalSummary {
+  /** debug mode was switched on or a debug action used in this game: it was not a plain game */
+  sandboxUsed?: boolean;
   turn: number; phase: string; stack: number; gameOver: GameState["gameOver"];
   players: Array<{ id: string; name: string; life: number; hand: number; library: number; graveyard: number; exile: number; command: number; battlefield: string[] }>;
 }
 
 export function finalSummary(s: GameState): FinalSummary {
   return {
+    ...(s.sandboxUsed ? { sandboxUsed: true } : {}),
     turn: s.turn.number, phase: s.turn.phase, stack: s.stack.length, gameOver: s.gameOver,
     players: s.players.map((p) => ({
       id: p.id, name: p.name, life: p.life, hand: p.hand.length, library: p.library.length, graveyard: p.graveyard.length, exile: p.exile.length, command: p.command.length,
@@ -54,12 +57,14 @@ export interface ReplayFile {
   final: FinalSummary;
 }
 
+const sandboxNote = (ks: KernelSession): string => (ks.sandboxUsed ? "Debug mode was used in this game (see the Debug lines in the log).\n" : "");
+
 export function buildReplayFile(ks: KernelSession, o: { viewer: PlayerId; meta: ReplayMeta; savedAt?: string; recentLog?: readonly string[] }): ReplayFile {
   const rec = ks.recording();
   return {
     v: 1, savedAt: o.savedAt ?? new Date().toISOString(), meta: o.meta, seed: rec.initialState.seed, seats: rec.seats,
     initialState: rec.initialState, steps: [...rec.steps],
-    stackLog: stackLogText(ks.stackLog(o.viewer).groups),
+    stackLog: (ks.sandboxUsed ? "Debug mode was used in this game (see the Debug lines in the log).\n" : "") + stackLogText(ks.stackLog(o.viewer).groups),
     recentLog: (o.recentLog ?? ks.log(o.viewer).map((l) => l.message)).slice(0, 200),
     final: finalSummary(ks.state)
   };
@@ -67,7 +72,7 @@ export function buildReplayFile(ks: KernelSession, o: { viewer: PlayerId; meta: 
 
 // ---------------------------------------------------------------- validation (the dev route trusts nothing)
 
-const ACTIONS = new Set(["castSpell", "activateAbility", "untapForMana", "playLand", "passPriority", "answerDecision", "advancePhase", "turnFaceUp", "unlockDoor", "castPrepared", "declareAttackers", "declareBlockers"]);
+const ACTIONS = new Set(["castSpell", "activateAbility", "untapForMana", "playLand", "passPriority", "answerDecision", "advancePhase", "turnFaceUp", "unlockDoor", "castPrepared", "declareAttackers", "declareBlockers", ...SANDBOX_ACTION_TYPES]);
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const isStr = (v: unknown, max = 200): v is string => typeof v === "string" && v.length <= max;
 
@@ -135,5 +140,5 @@ export function replayGame(file: ReplayFile, ctx: EngineContext, o: { until?: nu
     if (fp !== step.fp) { divergence = { step: i, why: "state differs from the recording", expected: step.fp, got: fp }; break; }
   }
   const viewer = ks.state.players.some((p) => p.id === file.meta.human) ? file.meta.human : ks.state.players[0].id;
-  return { ks, applied, ...(divergence ? { divergence } : {}), stackLog: stackLogText(ks.stackLog(viewer).groups) };
+  return { ks, applied, ...(divergence ? { divergence } : {}), stackLog: sandboxNote(ks) + stackLogText(ks.stackLog(viewer).groups) };
 }

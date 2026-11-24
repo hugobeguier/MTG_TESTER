@@ -23,11 +23,12 @@ import { doorCost, resolve, untapForManaProblem } from "./resolve";
 import { isManualPayer, manaAbilities, productionOfAbility } from "./mana";
 import type { Action, Choice, DecisionKind, EngineContext, GameState, ObjId, PendingView, PlayerId } from "./types";
 import { isObjId } from "./types";
+import { sandboxLegal } from "./sandbox";
 
 export interface LegalAction {
   /** stable id: "<kind>:<object>[:<ability|face|option>]" (the same action keeps the same id from one call to the next) */
   id: string;
-  kind: "playLand" | "castSpell" | "activateAbility" | "untapForMana" | "turnFaceUp" | "unlockDoor" | "castPrepared" | "passPriority" | "declareAttackers" | "declareBlockers" | "answerDecision";
+  kind: "playLand" | "castSpell" | "sandboxCast" | "sandboxPlayLand" | "activateAbility" | "untapForMana" | "turnFaceUp" | "unlockDoor" | "castPrepared" | "passPriority" | "declareAttackers" | "declareBlockers" | "answerDecision";
   player: PlayerId;
   label: string;
   /** a ready action for `resolve` (casts / activations use autoPay; declarations and answers have their own fields below) */
@@ -115,6 +116,8 @@ export interface LegalOptions {
   mana?: boolean;
   /** also list `untapForMana` (taking back a mana tap). Off by default: it is a UI convenience, never a move for the AI, the stops logic or random play */
   untap?: boolean;
+  /** also list the debug-mode free casts / land plays (only while the game's debug mode is on). Off by default: never a move for the AI, the stops logic or random play */
+  sandbox?: boolean;
 }
 
 /** Everything `player` may start now. Empty for a player who has lost, a finished game, or when somebody else holds priority / owes a declaration or decision. */
@@ -245,6 +248,7 @@ export function legalActions(state: GameState, player: PlayerId, ctx: EngineCont
     }
   }
   add({ id: "passPriority", kind: "passPriority", player, label: state.stack.length ? "Pass (let the top of the stack resolve)" : "Pass priority", action: { type: "passPriority", player } });
+  if (opts.sandbox && state.config.sandbox) for (const s of sandboxLegal(r, player)) add(s);
   return out;
 }
 

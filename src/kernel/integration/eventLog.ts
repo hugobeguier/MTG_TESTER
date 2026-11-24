@@ -86,6 +86,9 @@ export function formatEvent(ev: KernelEvent, n: LogNames): { seatId?: string; me
       return { seatId: seat(ev.player), message: str(ev.message) || "A card could not be fully resolved.", detail: "Unresolved" };
     // a free cast ("cast it without paying") that could not start; public text only (the card is in a public zone, a face-down one shows as such)
     case "cast_now_failed": return { seatId: seat(ev.player), message: `Could not cast ${C(ev.id)}${ev.code === "illegal_target" ? ": no legal target" : ""}.` };
+    // debug mode (sandbox.ts): every debug action and the switch itself are public lines, marked so a bug report shows them
+    case "sandbox": return { seatId: seat(ev.player), message: str(ev.text) || "Debug: a debug action was used.", detail: "Debug" };
+    case "sandbox_mode": return { seatId: seat(ev.player), message: str(ev.text) || "Debug mode switched.", detail: "Debug" };
     case "trigger_removed": return { message: `${C(ev.source)}'s ability has no legal target and is removed.` };
     default: return undefined;
   }

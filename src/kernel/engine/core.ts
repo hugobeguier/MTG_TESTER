@@ -63,6 +63,8 @@ export interface Run {
   dtBorn?: Record<string, number>;
   /** a cast / land play that happens DURING the resolution of an ability ("you may play the exiled card"): timing restrictions are ignored (608.2g) */
   ignoreTiming?: boolean;
+  /** a debug cast / land play is running (sandbox.ts): castSpell accepts any own zone and marks the draft sandbox (every cost waived) */
+  sandbox?: boolean;
   /** cards the resolving ability lets its controller cast / play right after it finishes resolving (permission_to_play with no duration) */
   castNow?: Array<{ player: PlayerId; id: ObjId; ts: number; withoutPaying: boolean; /** "if you don't, put it into your hand": a cast that cannot be made moves the card there */ elseToHand?: boolean; /** cast with this option id (miracle) */ option?: string }>;
   /** a miracle cast is in progress: the miracle option may be chosen */

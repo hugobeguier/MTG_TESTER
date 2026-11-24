@@ -90,6 +90,10 @@ export function eventsFor(state: GameState, viewer: PlayerId, events: GameEvent[
         else out.push(ev);
         break;
       }
+      case "sandbox":
+        // debug mode (sandbox.ts): public, but what a tutor / conjure took from a hidden zone stays hidden from the other seats
+        out.push(ev.player !== viewer && (ev.action === "tutor" || ev.action === "conjure") ? { type: "sandbox", seq: ev.seq, player: ev.player, action: ev.action, text: "Debug: a card was moved by a debug action", hidden: true } as GameEvent : ev);
+        break;
       case "draw":
         out.push(ev.player === viewer ? ev : { type: "draw", seq: ev.seq, player: ev.player, hidden: true } as GameEvent);
         break;

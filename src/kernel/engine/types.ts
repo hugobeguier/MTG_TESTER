@@ -287,6 +287,8 @@ export interface DelayedTrigger {
 export type LogEntry = { type: string; player?: PlayerId; id?: ObjId; name?: string; types?: string[]; token?: boolean; amount?: number; ts: number };
 
 export interface Config {
+  /** debug mode (sandbox.ts): the sandbox* actions are accepted only while this is true; switched by the host through the `sandboxMode` action (never by a guest) */
+  sandbox?: boolean;
   /** true: abilities the engine cannot run on a card that enters play are ignored with an `unsupported_ignored` event instead of an error */
   lenient: boolean;
   /** what to do with a card / ability the engine cannot run: 'error' (default) refuses the action with code 'unsupported'; 'continue' (live-game mode) emits an `unresolved` event, skips only the unsupported step / clause and keeps playing (see unresolved.ts) */
@@ -380,6 +382,8 @@ export interface GameState {
   links?: Array<{ source: ObjId; sourceTs: number; object: ObjId; objectTs: number }>;
   /** per-opponent / per-spell commander bookkeeping (commander.ts) */
   commanderDamage?: Record<PlayerId, Record<ObjId, number>>;
+  /** true once any sandbox (debug) action was used or debug mode was switched on: replay files and the stack log show it */
+  sandboxUsed?: boolean;
   /** continue mode: '<objectId>|<abilityId>|<capabilities>' of continuous abilities already reported as unresolved (report once per object; never shown in a player view) */
   unresolvedSeen?: Record<string, 1>;
 }
@@ -511,6 +515,8 @@ export interface Draft {
   permSnap?: import("../schema").CastOption[];
   /** loyalty cost of a planeswalker ability, already applied while paying */
   loyaltyPaid?: boolean;
+  /** a debug (sandbox) cast: every cost is waived, timing is ignored, the spell otherwise runs the normal cast flow */
+  sandbox?: boolean;
 }
 
 export interface Frame { steps: Step[]; i: number }
@@ -576,7 +582,37 @@ export type Action =
   /** the active player's turn-based action in the declare attackers step; an empty list = no attack. Attack taxes are paid from the pool / by tapping sources (payWith, autoPay as for casting). */
   | { type: "declareAttackers"; player: PlayerId; attackers: Array<{ id: ObjId; defender: string }>; payWith?: ObjId[]; autoPay?: boolean }
   /** a defending player's declaration; each block names one of the player's own creatures and the attacker it blocks */
-  | { type: "declareBlockers"; player: PlayerId; blocks: Array<{ blocker: ObjId; attacker: ObjId }>; payWith?: ObjId[]; autoPay?: boolean };
+  | { type: "declareBlockers"; player: PlayerId; blocks: Array<{ blocker: ObjId; attacker: ObjId }>; payWith?: ObjId[]; autoPay?: boolean }
+  | SandboxAction;
+
+/** where a sandbox action puts a card */
+export type SandboxZone = "hand" | "battlefield" | "graveyard" | "exile" | "command" | "top_of_library" | "bottom_of_library";
+
+/**
+ * Debug-mode actions (sandbox.ts). Accepted only while config.sandbox is true (else error "sandbox_disabled"); sandboxMode itself is the host's switch. They are never listed by legalActions
+ * (unless asked for) and the AI / observer never use them. player is the seat the debug user acts as.
+ */
+export type SandboxAction =
+  | { type: "sandboxMode"; player: PlayerId; on: boolean }
+  /** cast a card of your own from hand / graveyard / exile / library / command zone with every cost waived and no timing restrictions; modes, X, targets are still chosen as usual */
+  | { type: "sandboxCast"; player: PlayerId; cardId: ObjId; face?: string; modes?: string[]; targets?: Record<string, string[]>; x?: number; extras?: string[] }
+  /** put a land of your own onto the battlefield from any zone: no land-drop limit, any timing */
+  | { type: "sandboxPlayLand"; player: PlayerId; cardId: ObjId; face?: string }
+  /** take any card of your own library (the whole library is visible to you) into a zone; shuffles (seeded) unless it goes on top / bottom */
+  | { type: "sandboxTutor"; player: PlayerId; cardId: ObjId; to?: SandboxZone }
+  | { type: "sandboxDraw"; player: PlayerId; count: number }
+  | { type: "sandboxShuffle"; player: PlayerId }
+  | { type: "sandboxSetLife"; player: PlayerId; life: number; target?: PlayerId }
+  /** any card (also an opponent's) to any zone; controller is for the battlefield */
+  | { type: "sandboxMove"; player: PlayerId; cardId: ObjId; to: SandboxZone; controller?: PlayerId }
+  /** change the counters of a permanent / card by delta (a player id adds counters to the player: poison, experience) */
+  | { type: "sandboxCounters"; player: PlayerId; cardId: ObjId | PlayerId; kind: string; delta: number }
+  | { type: "sandboxUntapAll"; player: PlayerId }
+  | { type: "sandboxAddMana"; player: PlayerId; colors: ManaColor[] }
+  /** a brand new copy of any card the host's card lookup knows, owned by player, put into a zone */
+  | { type: "sandboxConjureCard"; player: PlayerId; name: string; to?: SandboxZone };
+
+export const SANDBOX_ACTION_TYPES = ["sandboxMode", "sandboxCast", "sandboxPlayLand", "sandboxTutor", "sandboxDraw", "sandboxShuffle", "sandboxSetLife", "sandboxMove", "sandboxCounters", "sandboxUntapAll", "sandboxAddMana", "sandboxConjureCard"] as const;
 
 export interface Choice {
   ids?: string[]; number?: number; yes?: boolean; cancel?: boolean;
@@ -596,7 +632,7 @@ export type ErrorCode =
   | "game_over" | "decision_pending" | "no_decision" | "wrong_decision" | "not_your_priority" | "not_your_decision"
   | "wrong_timing" | "not_in_zone" | "not_owner" | "unknown_object" | "unknown_card" | "unknown_ability"
   | "illegal_target" | "invalid_choice" | "cannot_pay" | "cannot_activate" | "cannot_untap" | "unsupported" | "loop_detected"
-  | "not_castable" | "stack_not_empty" | "land_limit"
+  | "not_castable" | "stack_not_empty" | "land_limit" | "sandbox_disabled"
   // combat
   | "declaration_pending" | "not_declaring" | "not_your_declaration" | "illegal_attack" | "illegal_block" | "attack_requirement";
 

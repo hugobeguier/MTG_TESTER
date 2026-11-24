@@ -34,6 +34,7 @@ import { isTopCard, refreshTopLookers, topPerms } from "./topcast";
 import { cantCastCard, flashGrantCovers, playerCantCast, playerHas } from "./layers";
 import { castableFaces, playableFaces } from "./faces";
 import { leaveGame } from "./leave";
+import { isSandboxAction, runSandbox } from "./sandbox";
 import { addedSteps, baseChoices, isFreeOption, castTags, grantedFree, grantedMorph, grantedTop, mandatoryExtras, optionalExtras, optionLabel, selectedOptions, spellExtraCosts, spellManaString } from "./castopts";
 import type {
   Action, CardDef, CastInfo, Choice, DecisionOption, Draft, EngineContext, Exec, GameEvent, GameObject, GameState, Lki, ObjId, Part, PayInfo, Pending, PendingView, PlayerId,
@@ -121,6 +122,7 @@ function dispatch(r: Run, a: Action): void {
   if (!p) throw new Reject("unknown_object", `unknown player ${a.player}`);
   if (p.hasLost) throw new Reject("game_over", `${a.player} has lost the game`);
   if (a.type === "answerDecision") return answer(r, a);
+  if (a.type === "sandboxMode") return runSandbox(r, a, { castSpell, finish }); // the host's switch works even while a decision is open
   if (a.type !== "activateAbility" && a.type !== "untapForMana") clearManaTaps(r); // anything but a mana tap (or its take-back) closes every take-back window
   // paying by hand (CR 601.2g-h, 117.3): while a `pay_mana` question is open (or a declaration waits for its tax) the player activates mana abilities / takes taps back
   if ((a.type === "activateAbility" || a.type === "untapForMana") && (r.s.pending ? r.s.pending.kind === "pay_mana" && r.s.pending.player === a.player : !!r.s.combat?.expect)) return payTap(r, a);
@@ -133,6 +135,7 @@ function dispatch(r: Run, a: Action): void {
     if (a.type === "advancePhase" && ex.kind === "attackers" && ex.player === a.player) return doDeclareAttackers(r, { type: "declareAttackers", player: a.player, attackers: [] });
     throw new Reject("declaration_pending", ex.kind === "attackers" ? `${ex.player} must declare attackers (declareAttackers, an empty list = no attack)` : `blockers must be declared by ${ex.players.join(", ")} (declareBlockers)`);
   }
+  if (isSandboxAction(a)) return runSandbox(r, a, { castSpell, finish });
   if (r.s.priority !== a.player) throw new Reject("not_your_priority", `${a.player} does not have priority (${r.s.priority ?? "nobody"} does)`);
   switch (a.type) {
     case "castSpell": return castSpell(r, a);
@@ -144,6 +147,7 @@ function dispatch(r: Run, a: Action): void {
     case "turnFaceUp": return turnFaceUp(r, a);
     case "unlockDoor": return unlockDoor(r, a);
     case "castPrepared": return castPrepared(r, a);
+    default: throw new Reject("invalid_choice", `unknown action ${(a as { type: string }).type}`);
   }
 }
 
@@ -281,14 +285,14 @@ function advanceDraft(r: Run, d: Draft, answerIn?: Choice): { ask: AskSpec; stag
     card.face = dec.ids[0];
     d.faceDone = true;
     d.abilityId = printedAbilities(r, card).find((x) => x.kind === "spell_effect")?.id ?? "";
-    checkSpellTiming(r, card, d.player, d.origin!.zone);
+    if (!d.sandbox) checkSpellTiming(r, card, d.player, d.origin!.zone);
     return advanceDraft(r, d, answerLeft);
   }
 
   // ---- cast option stage (spells): HOW to cast it (normal / flashback / escape / alternative cost / from another zone), then the optional extras (kicker, gift, optional additional costs)
   if (d.kind === "spell" && !d.castChosen) {
     const card = obj(r, d.sourceId);
-    const origin = d.origin!.zone;
+    const origin = d.sandbox ? "hand" : d.origin!.zone; // a debug cast offers the kicker / additional costs a hand cast would
     if (!d.castBaseDone) {
       const bases = baseChoices(r, card, d.player, origin, d.permSnap);
       if (!bases.length) throw new Reject("not_castable", `${name} cannot be cast from ${origin} right now`);
@@ -368,7 +372,7 @@ function advanceDraft(r: Run, d: Draft, answerIn?: Choice): { ask: AskSpec; stag
     if (d.xChosen || !costX(r, d, a)) return undefined;
     const base = d.kind === "spell" ? parseManaCost(spellManaString(r, d)) : parseManaCost((a!.costs ?? []).filter((c) => "mana" in c).map((c) => (c as { mana: string }).mana).join(""));
     const fixed = base.mv;
-    let max = base.x > 0 ? Math.max(0, Math.floor((totalPotentialMana(r, d.player) - fixed) / Math.max(1, base.x))) : Infinity;
+    let max = d.sandbox ? 20 : base.x > 0 ? Math.max(0, Math.floor((totalPotentialMana(r, d.player) - fixed) / Math.max(1, base.x))) : Infinity;
     // X that appears in a NON-mana cost (pay X life, sacrifice X creatures) is capped by what can pay it
     for (const c of d.kind === "spell" ? spellExtraCosts(r, d) : []) {
       if (!JSON.stringify(c).includes('"ref":"X"')) continue;
@@ -454,7 +458,7 @@ function advanceDraft(r: Run, d: Draft, answerIn?: Choice): { ask: AskSpec; stag
   }
 
   // ---- improvise: tap artifacts to pay for generic mana (asked late, before the payment)
-  if (d.kind === "spell" && !d.improviseDone) {
+  if (d.kind === "spell" && !d.improviseDone && !d.sandbox) {
     d.improviseDone = true;
     const gcost = parseManaCost(spellManaString(r, d));
     const gen = gcost.generic + gcost.x * (d.x ?? 0); // an artifact pays for {1} of the whole generic cost, X included (CR 702.126a)
@@ -630,6 +634,7 @@ function payAbilityCosts(r: Run, d: Draft, costs: Cost[], a?: Ability): { sacrif
 /** The mana cost of a spell as it is cast, before improvise: base cost (the chosen way), commander tax, targeting taxes, cost increases / reductions. Pure. */
 function computeSpellCost(r: Run, d: Draft, src: GameObject): { cost: ReturnType<typeof parseManaCost>; tax: number; tx: ReturnType<typeof targetCostExtras>; delta: number; base: ReturnType<typeof parseManaCost> } {
   const pid = d.player;
+  if (d.sandbox) return { cost: parseManaCost(""), tax: 0, tx: targetCostExtras(r, pid, []), delta: 0, base: parseManaCost("") }; // debug cast: every cost is waived
   const tax = d.origin?.zone === "command" ? 2 * (player(r, pid).commanderCasts[src.id] ?? 0) : 0;
   const base = parseManaCost(spellManaString(r, d));
   const cost = parseManaCost(spellManaString(r, d));
@@ -659,6 +664,7 @@ const paysByHand = (r: Run, d: Draft): boolean => isManualPayer(r, d.player) && 
  * Pure: nothing is spent, `d` is not changed. undefined = nothing to pay.
  */
 function paymentPlan(r: Run, d: Draft, a: Ability | undefined): PaymentPlan | undefined {
+  if (d.sandbox) return undefined; // debug cast: nothing is paid
   const pid = d.player;
   const raws: Array<{ raw: ReturnType<typeof parseManaCost>; label: string }> = [];
   const parts: PayInfo["parts"] = [];
@@ -721,7 +727,7 @@ function commitDraft(r: Run, d: Draft, a: Ability | undefined): void {
 
   if (d.kind === "spell") {
     spellCard = src;
-    if (hasCondFlash(r, src) && !r.ignoreTiming) {
+    if (hasCondFlash(r, src) && !r.ignoreTiming && !d.sandbox) {
       const c0 = chars(r, src.id), spellAb = printedAbilities(r, src).find((x) => x.kind === "spell_effect");
       const natural = c0.types.includes("instant") || c0.keywords.includes("flash") || flashGrantCovers(r, pid, src.id) || spellAb?.timing?.speed === "instant";
       const main = r.s.turn.active === pid && MAIN.includes(r.s.turn.phase) && r.s.stack.length === 0;
@@ -745,7 +751,7 @@ function commitDraft(r: Run, d: Draft, a: Ability | undefined): void {
     if (d.cast) d.cast.spent = [...spend.spent];
     paidCosts = payAbilityCosts(r, d, spellExtraCosts(r, d));
     if (tx.life > 0) changeLife(r, undefined, pid, -tx.life);
-    if (d.origin?.zone === "command") player(r, pid).commanderCasts[src.id] = (player(r, pid).commanderCasts[src.id] ?? 0) + 1;
+    if (d.origin?.zone === "command" && !d.sandbox) player(r, pid).commanderCasts[src.id] = (player(r, pid).commanderCasts[src.id] ?? 0) + 1;
     const chosen = selectedOptions(r, d);
     if (chosen.some((c) => c.afterResolution === "exile")) src.exileInstead = true;
     for (const c of chosen) if (c.id.startsWith("freecast1:")) r.s.activations[`t:${c.id.slice(10)}:freecast`] = 1; // One with the Multiverse: once per turn
@@ -810,7 +816,7 @@ function commitDraft(r: Run, d: Draft, a: Ability | undefined): void {
     });
   } else if (d.kind === "spell") {
     const c = chars(r, src.id);
-    emit(r, { type: "cast", id: src.id, player: pid, name: c.name, from: d.cast?.from, targets: item.parts.map((p) => p.targets), ...stackInfo, ...(src.isCopy ? { copy: true } : {}), paid: { ...paidInfo, ...(d.cast?.spent?.length ? { spent: d.cast.spent } : {}), ...(paidCosts?.sacrificed.length ? { sacrificed: paidCosts.sacrificed } : {}) } });
+    emit(r, { type: "cast", id: src.id, player: pid, name: c.name, from: d.cast?.from, targets: item.parts.map((p) => p.targets), ...stackInfo, ...(src.isCopy ? { copy: true } : {}), ...(d.sandbox ? { sandbox: true } : {}), paid: { ...paidInfo, ...(d.cast?.spent?.length ? { spent: d.cast.spent } : {}), ...(paidCosts?.sacrificed.length ? { sacrificed: paidCosts.sacrificed } : {}) } });
     r.s.turnLog.push({ type: "cast", player: pid, id: src.id, name: c.name, types: c.types, ts: r.s.clock });
     r.s.priorityAfter = pid;
   } else {
@@ -867,7 +873,9 @@ function castSpell(r: Run, a: Extract<Action, { type: "castSpell" }>): void {
   const zoneOk = from === "stack" || from === "battlefield" ? false
     : (from === "hand" && p.hand.includes(o.id) && o.owner === a.player) || (from === "command" && p.command.includes(o.id) && !!o.isCommander && o.owner === a.player)
     // another zone only through a cast option (flashback, escape, "cast from your graveyard") or a granted permission
-    || ((from === "graveyard" || from === "exile" || from === "library" || from === "hand") && (p[from] as ObjId[]).includes(o.id) && baseChoices(r, o, a.player, from).length > 0);
+    || ((from === "graveyard" || from === "exile" || from === "library" || from === "hand") && (p[from] as ObjId[]).includes(o.id) && baseChoices(r, o, a.player, from).length > 0)
+    // a debug cast (sandbox.ts): any card of your own in any of your own zones
+    || (!!r.sandbox && o.owner === a.player && (from === "graveyard" || from === "exile" || from === "library" || from === "hand" || from === "command") && (p[from] as ObjId[]).includes(o.id));
   if (!zoneOk) throw new Reject("not_in_zone", `${label(r, o.id)} cannot be cast from ${o.zone} by ${a.player}`);
   const def = defOf(r, o)!;
   const c = chars(r, o.id);
@@ -898,7 +906,8 @@ function castSpell(r: Run, a: Extract<Action, { type: "castSpell" }>): void {
   if (a.phyrexian) draft.phyPreset = [...a.phyrexian];
   if (a.improvise) draft.improvisePreset = [...a.improvise];
   { const g = peekNextSpellGrants(r, a.player); if (g.length) { draft.grants = g; o.castGrants = g; } }
-  presetOptions(r, draft, o, a);
+  if (r.sandbox) { draft.sandbox = true; draft.castBase = ""; draft.castBaseDone = true; draft.permSnap = []; if (a.extras !== undefined) { draft.castExtras = [...a.extras]; draft.castExtrasDone = true; } }
+  else presetOptions(r, draft, o, a);
   preapply(r, draft, a);
   startDraft(r, draft, true);
 }

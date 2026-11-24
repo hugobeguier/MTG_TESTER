@@ -20,6 +20,7 @@ import { toggleYield, type SeatYield } from "@/engine/yieldPolicy";
 import { stackSession, type StackIndex } from "./tokenStacks";
 import { paymentOf, payableSources, suggestionFor } from "./kernelPayment";
 import { saveGameLog } from "./kernelGameLog";
+import { DEBUG_ACTION_PREFIX, debugCardAction, debugOptionAction, type DebugInput } from "./kernelDebug";
 
 /** the driver never takes more than this many automatic actions in one turn (a loop guard, not a rule) */
 export const MAX_AUTO_ACTIONS_PER_TURN = 150;
@@ -366,6 +367,7 @@ export class KernelGameController {
   playCard = (seatId: string, cardId: string, _pos?: unknown, _zone?: string): void => {
     if (seatId !== this.human) return this.inert("play a card for another seat");
     const id = this.kid(cardId);
+    if (this.freeCastOn()) return this.debugCast(id);
     const lands = this.legalFor("playLand", id);
     const casts = this.legalFor("castSpell", id);
     const pick = lands[0] ?? casts.find((a) => a.free) ?? casts.find((a) => !a.option || a.option === "normal") ?? casts[0]; // a free-cast permission (Omniscience) is the default way; "Pay its mana cost" stays in the card actions
@@ -379,6 +381,7 @@ export class KernelGameController {
   playCardFace = (seatId: string, cardId: string, faceIndex: number): void => {
     if (seatId !== this.human) return this.inert("play a card for another seat");
     const id = this.kid(cardId);
+    if (this.freeCastOn()) return this.debugCast(id);
     const options = [...this.legalFor("playLand", id), ...this.legalFor("castSpell", id)].filter((a) => a.face);
     const pick = options[faceIndex] ?? options[0];
     if (pick?.action) this.act(pick.action); else this.playCard(seatId, cardId);
@@ -386,6 +389,7 @@ export class KernelGameController {
 
   castCommander = (seatId: string): void => {
     if (seatId !== this.human) return this.inert("cast a commander for another seat");
+    if (this.freeCastOn()) { const cmd = this.ks.state.players.find((p) => p.id === this.human)?.command[0]; if (cmd) return this.debugCast(cmd); }
     const cmd = this.legalNow().find((a) => a.kind === "castSpell" && a.zone === "command" && a.action);
     if (cmd?.action) { this.act(cmd.action); return; }
     const id = this.ks.state.players.find((p) => p.id === this.human)?.command[0];
@@ -396,9 +400,44 @@ export class KernelGameController {
   castFromZone = (seatId: string, cardId: string): void => {
     if (seatId !== this.human) return this.inert("cast for another seat");
     const id = this.kid(cardId);
+    if (this.freeCastOn()) return this.debugCast(id);
     const pick = this.legalFor("castSpell", id).find((a) => a.action);
     if (pick?.action) this.act(pick.action); else this.note(`${this.nameOf(id)} can't be cast from there right now.`, "Rules");
   };
+
+  // ------------------------------------------------------------------ debug mode (kernelDebug.ts, engine/sandbox.ts)
+
+  /** debug mode is on for this game (the engine accepts the sandbox actions) */
+  debugOn(): boolean { return this.ks.sandbox; }
+  /** "Cast for free" mode: clicking a card of yours casts it with every cost waived */
+  freeCast = false;
+  private freeCastOn(): boolean { return this.freeCast && this.ks.sandbox; }
+  /** the Debug mode checkbox: records the switch in the game (log line, replay file) */
+  setDebug = (on: boolean): void => {
+    if (on === this.ks.sandbox) return;
+    if (!on) this.freeCast = false;
+    this.act({ type: "sandboxMode", player: this.human, on });
+    this.bump();
+  };
+  toggleFreeCast = (): void => { this.freeCast = !this.freeCast && this.ks.sandbox; this.bump(); };
+  /** one debug action for the human's seat; a refusal is a log note like any other */
+  debug = (input: DebugInput): boolean => this.act({ ...input, player: this.human } as Action);
+  private debugCast(id: ObjId): void {
+    const o = this.ks.state.objects[id];
+    const isLand = !!o && !!this.ks.ctx.cards(o.cardName)?.types.includes("land");
+    this.act(isLand ? { type: "sandboxPlayLand", player: this.human, cardId: id } : { type: "sandboxCast", player: this.human, cardId: id });
+  }
+  /** the debug picker's cards (library: the whole library, top first) and the conjure list's names */
+  debugCards = (zone: "library" | "hand" | "graveyard" | "exile"): VisibleCard[] => this.ks.debugCards(this.human, zone);
+  debugNames = (): readonly string[] => this.ks.debugCardNames();
+  debugCardByName = (name: string): VisibleCard | undefined => this.ks.debugCardByName(name);
+  /** the human's life total (the panel's +/- buttons) */
+  humanLife(): number { return this.ks.state.players.find((p) => p.id === this.human)?.life ?? 0; }
+  private debugCardEntry(cardId: string): ReturnType<typeof debugCardAction> {
+    const id = this.kid(cardId);
+    const o = this.ks.state.objects[id];
+    return debugCardAction(this.ks.sandbox, o && { zone: o.zone, owner: o.owner, id, isLand: !!this.ks.ctx.cards(o.cardName)?.types.includes("land") }, this.human);
+  }
 
   /** the open "which mana?" chooser of a permanent with several mana ways (a Talisman: {C}, or {W}/{U} and 1 damage); undefined when none is open */
   private manaPick: { cardName: string; options: ManaWay[] } | undefined;
@@ -822,6 +861,10 @@ export class KernelGameController {
   /** the ways of using one card that only the kernel lists (turn a morph face up, cast a prepared copy, flashback / alternative-cost casts); shown in the card's detail view */
   cardActions(cardId: string): Array<{ id: string; label: string; title?: string }> {
     const id = this.kid(cardId);
+    const dbg = this.debugCardEntry(cardId);
+    return [...this.normalCardActions(id), ...(dbg ? [dbg] : [])];
+  }
+  private normalCardActions(id: ObjId): Array<{ id: string; label: string; title?: string }> {
     return this.options()
       .filter((a) => a.objectId === id && (a.kind === "turnFaceUp" || a.kind === "activateAbility" || // every legal non-mana activated ability, whether or not the legacy text parsers recognise its wording (Zur's "becomes a creature")
  a.kind === "unlockDoor" || a.kind === "castPrepared" || (a.kind === "castSpell" && !!a.option && a.option !== "normal")))
@@ -839,6 +882,8 @@ export class KernelGameController {
   }
   /** hand cards that glow (castable / playable now) and, for the others, the reason shown in their tooltip; empty unless the human may act */
   handHints(): { castable: string[]; reasons: Record<string, string> } {
+    // free-cast mode (debug): every card of the hand can be cast; not cached (the mode flips without a game version change)
+    if (this.freeCastOn()) return { castable: (this.table().session.seats.find((x) => x.id === this.human)?.board.hand ?? []).map((c) => c.id), reasons: {} };
     if (this.hintCache?.ver === this.ks.version) return this.hintCache.hints;
     const s = this.ks.state;
     const holds = s.priority === this.human && !s.pending && !s.combat?.expect;
@@ -977,6 +1022,7 @@ export class KernelGameController {
 
   /** run one listed action by its stable id (a stale id is a quiet no-op) */
   doOption = (id: string): boolean => {
+    if (id.startsWith(DEBUG_ACTION_PREFIX)) { const d = debugOptionAction(id, (c) => { const o = this.ks.state.objects[c]; return !!o && !!this.ks.ctx.cards(o.cardName)?.types.includes("land"); }); return d ? this.debug(d) : false; }
     const a = this.legalNow().find((x) => x.id === id);
     if (!a?.action) { this.bump(); return false; }
     return this.act(a.action);

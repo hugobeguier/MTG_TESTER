@@ -200,6 +200,7 @@ export function spellManaString(r: Run, d: Draft): string {
 
 /** Non-mana costs of the selected options, in a stable order (their indices key `Draft.costChoices`). */
 export function spellExtraCosts(r: Run, d: Draft): Cost[] {
+  if (d.sandbox) return []; // debug cast: every cost is waived
   return selectedOptions(r, d).flatMap((c) => nonMana(c.cost));
 }
 

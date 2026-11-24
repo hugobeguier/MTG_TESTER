@@ -14,6 +14,7 @@ import { ThreeGameTable } from "./ThreeGameTable";
 import { GameOverDialog } from "./GameOverDialog";
 import { KernelDecisionDialog } from "./KernelDecisionDialog";
 import { KernelStackLog } from "./KernelStackLog";
+import { KernelDebugPanel, KernelDebugToggle } from "./KernelDebugPanel";
 
 /** Enter confirms a click-on-the-board pick while its banner shows (the dialog handles its own Enter). Cancel is the banner's button, never a key. */
 function useDecisionKeys(pick: KernelBoardPick | undefined, hidden: boolean): void {
@@ -132,6 +133,8 @@ export function KernelGameTable({ controller, onBack }: { controller: KernelGame
             </div>
             <PacingControls controller={controller} />
             <button type="button" className="kernel-small" data-testid="kernel-stack-log-toggle" aria-pressed={stackLogOpen} onClick={() => setStackLogOpen((o) => !o)} title="How spells and triggers resolved, step by step (L)">Stack log (L)</button>
+            <KernelDebugToggle controller={controller} />
+            <KernelDebugPanel controller={controller} busy={!!table.decision || controller.paying()} />
           </div>
         )}
         stackFeed={controller.stackFeed()}

@@ -2851,6 +2851,15 @@ ol {
 .kernel-pacing { align-items: center; display: flex; font-size: 11px; gap: 6px; }
 .kernel-pacing label { background: rgba(20, 20, 30, 0.7); border-radius: 8px; color: #fff; padding: 2px 6px; }
 .kernel-pacing button { background: #7a5cd6; border: 0; border-radius: 8px; color: #fff; cursor: pointer; padding: 2px 8px; }
+/* Debug mode (KernelDebugPanel.tsx / KernelDebugPicker.tsx): legacy panel look, legacy tokens only */
+.kernel-debug-toggle { white-space: nowrap; align-items: center; color: var(--muted); cursor: pointer; display: inline-flex; font-size: 0.78rem; gap: 0.25rem; }
+.kernel-debug-panel { align-items: center; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; display: flex; flex-wrap: wrap; gap: 0.35rem 0.6rem; left: 300px; max-width: min(46rem, calc(100vw - 340px)); padding: 0.4rem 0.6rem; position: fixed; top: 10px; z-index: 25; }
+.kernel-debug-title { font-size: 0.8rem; }
+.kernel-debug-row { align-items: center; display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.kernel-debug-row .kernel-small.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+.kernel-debug-mana { font-size: 0.78rem; height: 1.9rem; min-width: 1.9rem; padding: 0; width: 1.9rem; }
+.kernel-debug-dests { display: flex; flex-wrap: wrap; gap: 0.25rem; justify-content: center; max-width: 160px; }
+.kernel-debug-name { min-width: 8rem; padding: 0.4rem 0.6rem; }
 .kernel-log-card { cursor: help; text-decoration: underline dotted; }
 @media (max-width: 640px) { .kernel-head { flex-direction: column; } .kernel-preview { width: min(340px, 60vw); } }
 .kernel-chip { align-items: center; display: inline-flex; gap: 0.4rem; }
