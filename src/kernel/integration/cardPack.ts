@@ -33,6 +33,8 @@ export interface CardPack {
   deck: string;
   slug: string;
   generatedAt: string;
+  /** content hash of the deck's drafts when the pack was built (draftHash.ts); a pack whose hash differs from the current drafts is stale */
+  draftHash?: string;
   /** engine card definitions by card name (every drafted card of the deck, its basic lands, its commander) */
   cards: Record<string, CardDef>;
   /** printed data by name (the CardDb of the engine: faces, layout) */

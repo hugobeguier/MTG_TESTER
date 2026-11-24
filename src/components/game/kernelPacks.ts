@@ -3,7 +3,7 @@
 import { fetchPacks, packKit, type CardPack, type PackKit } from "@/kernel/integration/cardPack";
 import type { GameSession, VisibleCard } from "@/lib/types";
 
-export interface LoadedPacks { kit: PackKit; packs: CardPack[]; readyCommanders: Set<string> }
+export interface LoadedPacks { kit: PackKit; packs: CardPack[]; readyCommanders: Set<string>; /** set when the dev server says the packs are older than the card drafts: the kernel refuses to start on them */ stale?: string }
 
 let loaded: LoadedPacks | undefined;
 let inFlight: Promise<LoadedPacks | undefined> | undefined;
@@ -23,7 +23,13 @@ export function preloadKernelPacks(fetcher: typeof fetch = fetch, base = "/kerne
       if (!slugs.length) return undefined;
       const packs = await fetchPacks(slugs, base, fetcher);
       const ready = packs.filter((p) => p.unsupported.length === 0);
-      loaded = { kit: packKit(ready), packs: ready, readyCommanders: new Set(ready.map((p) => p.decks[0]?.commander).filter((c): c is string => !!c)) };
+      let stale: string | undefined;
+      try { // dev-only route (404 / not JSON in production): are the packs older than data/kernel-drafts?
+        const sr = await fetcher("/api/dev/kernel-packs");
+        const sj = sr.ok ? ((await sr.json()) as { stale?: unknown[]; message?: string }) : undefined;
+        if (sj?.stale?.length) { stale = sj.message ?? "Kernel packs are older than the card drafts: run npm run kernel:bundle-drafts"; console.error(`[kernel] ${stale}`); }
+      } catch { /* no check available */ }
+      loaded = { ...(stale ? { stale } : {}), kit: packKit(ready), packs: ready, readyCommanders: new Set(ready.map((p) => p.decks[0]?.commander).filter((c): c is string => !!c)) };
       return loaded;
     } catch {
       return undefined;
@@ -49,6 +55,7 @@ export type Readiness = { ok: true } | { ok: false; reason: string };
  */
 export function kernelReadiness(session: GameSession, packs: LoadedPacks | undefined): Readiness {
   if (!packs) return { ok: false, reason: "Kernel engine requested, but the card packs are not loaded (run `npm run kernel:bundle-drafts`); playing on the legacy engine." };
+  if (packs.stale) return { ok: false, reason: `Kernel engine requested, but ${packs.stale}; playing on the legacy engine.` };
   const humans = session.seats.filter((s) => s.kind === "human");
   if (humans.length !== 1 || humans.some((s) => s.remoteSlot)) return { ok: false, reason: "Kernel engine requested, but it only runs solo games (one human seat) for now; playing on the legacy engine." };
   for (const seat of session.seats) {

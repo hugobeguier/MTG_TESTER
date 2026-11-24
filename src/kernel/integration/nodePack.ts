@@ -6,6 +6,7 @@ import { loadDraftLookup, type DraftLookup } from "../observer/draftLookup";
 import { cardUnsupported } from "../engine/support";
 import { parseDeckList } from "../../lib/deckParser";
 import { loadCardCatalog, lookupCard } from "../../lib/cardCatalog";
+import { draftHash } from "./draftHash";
 import { displayFromDef, type CardPack, type DisplayCard, type PackDeck } from "./cardPack";
 import type { CardInfo } from "../engine/types";
 
@@ -63,5 +64,5 @@ export function buildPack(slug: string, opts: BuildPackOptions = {}): CardPack {
       : synth;
     if (!dl.noDraft.has(name)) { const sup = cardUnsupported(def); if (!sup.ok) unsupported.push({ name, needs: sup.all }); }
   }
-  return { version: 1, deck: index.deck, slug, generatedAt: new Date().toISOString(), cards, info, creatureTypes: [...dl.db.creatureTypes()], display, decks: deck ? [deck] : [], unsupported };
+  return { version: 1, deck: index.deck, slug, generatedAt: new Date().toISOString(), draftHash: draftHash(slug, root), cards, info, creatureTypes: [...dl.db.creatureTypes()], display, decks: deck ? [deck] : [], unsupported };
 }

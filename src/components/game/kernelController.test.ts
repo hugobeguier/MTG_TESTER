@@ -63,6 +63,7 @@ describe("hand-off gate and start", () => {
     expect(kernelReadiness(two, loaded)).toMatchObject({ ok: false, reason: expect.stringContaining("solo") });
     const other = { ...solo, seats: solo.seats.map((s, i) => (i === 1 ? { ...s, board: { ...s.board, commander: s.board.commander && { ...s.board.commander, name: "Some Other Commander" } } } : s)) };
     expect(kernelReadiness(other, loaded)).toMatchObject({ ok: false, reason: expect.stringContaining("not kernel-ready") });
+    expect(kernelReadiness(solo, { ...loaded!, stale: "Kernel packs are older than the card drafts: run npm run kernel:bundle-drafts" })).toMatchObject({ ok: false, reason: expect.stringContaining("older than the card drafts") });
   });
   it("startKernelGame builds a controller on the real opening position; an unready table stays legacy", () => {
     setLoadedKernelPacks(loaded);
