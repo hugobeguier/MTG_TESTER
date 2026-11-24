@@ -122,7 +122,7 @@ function affectsObject(r: Run, s: StaticSrc, id: ObjId): boolean {
   const f = a as ObjectFilter;
   const o = tryObj(r, id);
   if (!o) return false;
-  if (!f.zone && o.zone !== "battlefield") return false; // statics default to permanents
+  if (!f.zone && !f.anyOf?.some((sub) => sub.zone) && o.zone !== "battlefield") return false; // statics default to permanents (an anyOf alternative may name another zone: Secret Arcade's permanent spells)
   return matchesFilter(r, id, f, qctx(s));
 }
 

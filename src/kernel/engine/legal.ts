@@ -15,7 +15,7 @@ import type { Ability } from "../schema";
 import { attackerEntry, abilitiesOf, chars, defOf, faceNames, isBlocking, isSummoningSick, printedAbilities, type Run } from "./core";
 import { withCardDb } from "./carddb";
 import { castableFaces, playableFaces } from "./faces";
-import { baseChoices, isFreeOption } from "./castopts";
+import { baseChoices, isFreeOption, lifeCastLabel } from "./castopts";
 import { permissionsFor } from "./durable";
 import { attackProblem, blockProblem, defenderOptions, legalAttackers } from "./combat";
 import { goadersOf, hostOf, mustAttack, restrictionsOf } from "./layers";
@@ -192,7 +192,7 @@ export function legalActions(state: GameState, player: PlayerId, ctx: EngineCont
       const nm = face ?? cardName(r, id);
       const isFree = !!way && freeWays.has(way);
       const freeSrc = (w: string): string => { const m = /:(.+)$/.exec(w); return m && state.objects[m[1]] ? ` (${cardName(r, m[1])})` : ""; };
-      add({ id: `castSpell:${id}${face ? `:${face}` : ""}${way ? `:${way}` : ""}`, kind: "castSpell", player, objectId: id, ...(face ? { face } : {}), ...(way ? { option: way } : {}), ...(isFree ? { free: true } : {}), zone: o.zone, label: isFree ? `Cast ${nm} without paying its mana cost${freeSrc(way!)}` : `Cast ${nm}${way && way !== "normal" ? ` (${way})` : ""}`, action, ...(pr.asks ? { asks: pr.asks } : {}), ...(pr.targetOptions ? { targetOptions: pr.targetOptions } : {}) });
+      add({ id: `castSpell:${id}${face ? `:${face}` : ""}${way ? `:${way}` : ""}`, kind: "castSpell", player, objectId: id, ...(face ? { face } : {}), ...(way ? { option: way } : {}), ...(isFree ? { free: true } : {}), zone: o.zone, label: isFree ? `Cast ${nm} without paying its mana cost${freeSrc(way!)}` : way?.startsWith("lifecast1:") ? lifeCastLabel(r, o, face, way, nm) : `Cast ${nm}${way && way !== "normal" ? ` (${way})` : ""}`, action, ...(pr.asks ? { asks: pr.asks } : {}), ...(pr.targetOptions ? { targetOptions: pr.targetOptions } : {}) });
     }
   }
 

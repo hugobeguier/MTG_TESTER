@@ -84,7 +84,8 @@
       ]
     },
     {
-      "name": "Enters: may fetch fewer than two (here none)",
+      "name": "Three Plains in the library: exactly two go to hand, no question",
+      "description": "User rule: interchangeable candidates are taken automatically (maximum allowed)",
       "setup": {
         "p1": {
           "hand": [
@@ -97,8 +98,9 @@
           ],
           "library": [
             "Plains",
+            "Island",
             "Plains",
-            "Island"
+            "Plains"
           ]
         }
       },
@@ -109,28 +111,89 @@
           "card": "Archaeomancer's Map"
         },
         {
-          "do": "resolve",
-          "answers": [
-            {
-              "none": true
-            }
-          ]
+          "do": "resolve"
         }
       ],
       "expect": [
         {
+          "check": "pending",
+          "present": false,
+          "why": "The searched cards are all the same card (basic Plains): there is nothing to choose, so the player is not asked and gets the most the text allows (up to two)"
+        },
+        {
           "check": "zone",
           "player": "p1",
           "zone": "hand",
-          "count": 0,
-          "why": "Oracle: 'up to two': choosing none fetches nothing"
+          "cards": {
+            "exactly": [
+              "Plains",
+              "Plains"
+            ]
+          },
+          "why": "Oracle: search for up to two basic Plains cards, reveal them, put them into your hand"
         },
         {
           "check": "zone",
           "player": "p1",
           "zone": "library",
-          "count": 3,
-          "why": "No card left the library"
+          "count": 2,
+          "why": "Only the found Plains left the library"
+        }
+      ]
+    },
+    {
+      "name": "One Plains in the library: that one goes to hand, no question",
+      "description": "Fewer candidates than the count: all of them",
+      "setup": {
+        "p1": {
+          "hand": [
+            "Archaeomancer's Map"
+          ],
+          "battlefield": [
+            "Plains",
+            "Plains",
+            "Plains"
+          ],
+          "library": [
+            "Island",
+            "Plains",
+            "Vanilla 1/1"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "cast",
+          "player": "p1",
+          "card": "Archaeomancer's Map"
+        },
+        {
+          "do": "resolve"
+        }
+      ],
+      "expect": [
+        {
+          "check": "pending",
+          "present": false,
+          "why": "The searched cards are all the same card (basic Plains): there is nothing to choose, so the player is not asked and gets the most the text allows (up to two)"
+        },
+        {
+          "check": "zone",
+          "player": "p1",
+          "zone": "hand",
+          "cards": {
+            "exactly": [
+              "Plains"
+            ]
+          },
+          "why": "Oracle: search for up to two basic Plains cards, reveal them, put them into your hand"
+        },
+        {
+          "check": "zone",
+          "player": "p1",
+          "zone": "library",
+          "count": 2,
+          "why": "Only the found Plains left the library"
         }
       ]
     },
@@ -191,7 +254,6 @@
     },
     {
       "name": "Opponent's land enters and they control more lands: may put a land from hand onto the battlefield",
-      "knownFailure": "DRAFT BUG: the draft models the single 'you may' as TWO optional steps (choose a land? yes/no, then put it onto the battlefield? yes/no), so the player is asked twice.",
       "active": "p2",
       "setup": {
         "p1": {
@@ -235,12 +297,6 @@
             {
               "kind": "choose_yes_no",
               "yes": true
-            },
-            {
-              "kind": "choose_cards",
-              "pick": [
-                "Island"
-              ]
             }
           ]
         }

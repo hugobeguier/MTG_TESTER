@@ -1,0 +1,351 @@
+{
+  "card": "Demon of Fate's Design",
+  "cards": [
+    "Dictate of Erebos",
+    "Kenrith's Transformation",
+    "Secret Arcade"
+  ],
+  "status": "accepted",
+  "oracle": "Flying, trample\nOnce during each of your turns, you may cast an enchantment spell by paying life equal to its mana value rather than paying its mana cost.\n{2}{B}, Sacrifice another enchantment: This creature gets +X/+0 until end of turn, where X is the sacrificed enchantment's mana value.",
+  "notes": "Only the second ability is exercised here (the user reported it cannot be used). The Demon is not summoning-sick relevant: casting spells does not need it to be untapped.",
+  "scenarios": [
+    {
+      "name": "An enchantment is cast by paying life equal to its mana value, with no mana",
+      "setup": {
+        "p1": {
+          "battlefield": [
+            "Demon of Fate's Design"
+          ],
+          "hand": [
+            "Vanilla Enchantment"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "cast",
+          "player": "p1",
+          "card": "Vanilla Enchantment",
+          "way": "life"
+        },
+        {
+          "do": "resolve"
+        }
+      ],
+      "expect": [
+        {
+          "check": "life",
+          "player": "p1",
+          "value": 38,
+          "why": "Oracle: paying life equal to its mana value ({2} = 2) rather than its mana cost: 40 - 2"
+        },
+        {
+          "check": "permanent",
+          "ref": "Vanilla Enchantment",
+          "zone": "battlefield",
+          "why": "The spell resolved and entered the battlefield"
+        }
+      ]
+    },
+    {
+      "name": "A flash enchantment can be cast this way too (Dictate of Erebos, mana value 5)",
+      "setup": {
+        "p1": {
+          "battlefield": [
+            "Demon of Fate's Design"
+          ],
+          "hand": [
+            "Dictate of Erebos"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "cast",
+          "player": "p1",
+          "card": "Dictate of Erebos",
+          "way": "life"
+        },
+        {
+          "do": "resolve"
+        }
+      ],
+      "expect": [
+        {
+          "check": "life",
+          "player": "p1",
+          "value": 35,
+          "why": "Mana value {3}{B}{B} = 5 life"
+        },
+        {
+          "check": "permanent",
+          "ref": "Dictate of Erebos",
+          "zone": "battlefield",
+          "why": "The flash enchantment spell resolved onto the battlefield"
+        }
+      ]
+    },
+    {
+      "name": "An Aura that needs a target (Kenrith's Transformation) can be cast this way",
+      "setup": {
+        "p1": {
+          "battlefield": [
+            "Demon of Fate's Design",
+            "Vanilla 2/2"
+          ],
+          "hand": [
+            "Kenrith's Transformation"
+          ],
+          "library": [
+            "Island",
+            "Island"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "cast",
+          "player": "p1",
+          "card": "Kenrith's Transformation",
+          "way": "life",
+          "targets": [
+            [
+              "Vanilla 2/2"
+            ]
+          ]
+        },
+        {
+          "do": "resolve"
+        }
+      ],
+      "expect": [
+        {
+          "check": "life",
+          "player": "p1",
+          "value": 38,
+          "why": "Mana value {1}{G} = 2 life"
+        },
+        {
+          "check": "permanent",
+          "ref": "Kenrith's Transformation",
+          "attachedTo": "Vanilla 2/2",
+          "why": "The Aura resolved attached to its target"
+        }
+      ]
+    },
+    {
+      "name": "A Room is cast by half: life equals the mana value of the half that is cast",
+      "setup": {
+        "p1": {
+          "battlefield": [
+            "Demon of Fate's Design"
+          ],
+          "hand": [
+            "Secret Arcade"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "cast",
+          "player": "p1",
+          "card": "Secret Arcade",
+          "face": "Dusty Parlor",
+          "way": "life"
+        },
+        {
+          "do": "resolve"
+        }
+      ],
+      "expect": [
+        {
+          "check": "life",
+          "player": "p1",
+          "value": 37,
+          "why": "A Room spell cast as one half has that half's mana value (Dusty Parlor {2}{W} = 3); CR 709.3 / 202.3"
+        },
+        {
+          "check": "permanent",
+          "ref": "Dusty Parlor",
+          "unlocked": {
+            "exactly": [
+              "Dusty Parlor"
+            ]
+          },
+          "why": "The cast half's door is unlocked (CR 709.5)"
+        }
+      ]
+    },
+    {
+      "name": "Only once during each of your turns: the second enchantment needs mana",
+      "setup": {
+        "p1": {
+          "battlefield": [
+            "Demon of Fate's Design"
+          ],
+          "hand": [
+            "Vanilla Enchantment",
+            "Vanilla Enchantment"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "cast",
+          "player": "p1",
+          "card": "Vanilla Enchantment",
+          "way": "life"
+        },
+        {
+          "do": "resolve"
+        },
+        {
+          "do": "cast",
+          "player": "p1",
+          "card": "Vanilla Enchantment",
+          "expectRejected": "cannot_pay"
+        }
+      ],
+      "expect": [
+        {
+          "check": "life",
+          "player": "p1",
+          "value": 38,
+          "why": "Oracle: ONCE during each of your turns; the second cast cannot use it"
+        }
+      ]
+    },
+    {
+      "name": "Not on an opponent's turn: with priority in the opponent's turn and no mana, the flash enchantment cannot be cast",
+      "active": "p2",
+      "setup": {
+        "p1": {
+          "battlefield": [
+            "Demon of Fate's Design"
+          ],
+          "hand": [
+            "Dictate of Erebos"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "pass",
+          "player": "p2"
+        },
+        {
+          "do": "cast",
+          "player": "p1",
+          "card": "Dictate of Erebos",
+          "expectRejected": "cannot_pay"
+        }
+      ],
+      "expect": [
+        {
+          "check": "life",
+          "player": "p1",
+          "value": 40,
+          "why": "Oracle: once during each of YOUR turns; it is the opponent's turn"
+        }
+      ]
+    },
+    {
+      "name": "Cannot pay more life than you have (CR 119.4): at 4 life a mana value 5 enchantment is not castable this way",
+      "setup": {
+        "p1": {
+          "life": 4,
+          "battlefield": [
+            "Demon of Fate's Design"
+          ],
+          "hand": [
+            "Dictate of Erebos"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "cast",
+          "player": "p1",
+          "card": "Dictate of Erebos",
+          "expectRejected": "cannot_pay"
+        }
+      ],
+      "expect": [
+        {
+          "check": "life",
+          "player": "p1",
+          "value": 4,
+          "why": "CR 119.4: a player can pay life only if their life total is at least the payment"
+        }
+      ]
+    },
+    {
+      "name": "Exactly as much life as the mana value is allowed (life 2, mana value 2)",
+      "setup": {
+        "p1": {
+          "life": 2,
+          "battlefield": [
+            "Demon of Fate's Design"
+          ],
+          "hand": [
+            "Vanilla Enchantment"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "cast",
+          "player": "p1",
+          "card": "Vanilla Enchantment",
+          "way": "life"
+        },
+        {
+          "do": "resolve"
+        }
+      ],
+      "expect": [
+        {
+          "check": "life",
+          "player": "p1",
+          "value": 0,
+          "why": "CR 119.4: paying exactly your life total is allowed; you lose at the next state-based check, but the spell was cast"
+        },
+        {
+          "check": "player",
+          "player": "p1",
+          "hasLost": true,
+          "why": "CR 704.5a: a player with 0 life loses the game"
+        }
+      ]
+    },
+    {
+      "name": "A non-enchantment spell cannot use it",
+      "setup": {
+        "p1": {
+          "battlefield": [
+            "Demon of Fate's Design"
+          ],
+          "hand": [
+            "Vanilla Artifact"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "cast",
+          "player": "p1",
+          "card": "Vanilla Artifact",
+          "expectRejected": "cannot_pay"
+        }
+      ],
+      "expect": [
+        {
+          "check": "life",
+          "player": "p1",
+          "value": 40,
+          "why": "Oracle: an ENCHANTMENT spell"
+        }
+      ]
+    }
+  ]
+}

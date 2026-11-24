@@ -56,12 +56,12 @@ describe("search that only reveals (Cultivate, Dina's Guidance)", () => {
     const t = world(); t.lands("p1", "Forest", 3);
     const a = t.give("p1", "Island", "library");
     t.ok({ type: "castSpell", player: "p1", cardId: t.give("p1", "Cultivate", "hand") }); pass(t);
-    ans(t, { ids: [a] });
+    if (t.state.pending) ans(t, { ids: [a] }); // a single candidate is taken without a question
     expect(t.obj(a).zone).toBe("battlefield");
   });
   it("Dina's Guidance: the found creature goes to hand or graveyard by choice", () => {
     const t = world(); rich(t);
-    const c = t.give("p1", "Big Elf", "library");
+    const c = t.give("p1", "Big Elf", "library"); t.give("p1", "Fill A", "library");
     t.ok({ type: "castSpell", player: "p1", cardId: t.give("p1", "Dina's Guidance", "hand") }); pass(t);
     ans(t, { ids: [c] });
     expect(t.state.pending!.kind).toBe("choose_option");

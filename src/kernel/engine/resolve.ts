@@ -2027,7 +2027,8 @@ function runCastNow(r: Run): boolean {
   while (r.castNow?.length) {
     const q = r.castNow.shift()!;
     const o = tryObj(r, q.id);
-    if (!o || o.timestamp !== q.ts || r.s.pending) continue;
+    // never drop a free cast silently: the log says why it did not happen (the card changed zones, or another question was already open)
+    if (!o || o.timestamp !== q.ts || r.s.pending) { emit(r, { type: "cast_now_failed", player: q.player, id: q.id, code: r.s.pending && o ? "interrupted" : "gone", reason: r.s.pending && o ? "another decision was open" : "the card is no longer there" }); continue; }
     const snap = structuredClone(r.s), nEvents = r.events.length;
     r.ignoreTiming = true;
     try {

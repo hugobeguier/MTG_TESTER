@@ -34,7 +34,7 @@ function aiAttacks(ks: KernelSession, c: KernelGameController): void {
 describe("declaring attackers with the legacy UI", () => {
   it("offers 'Attack <player>' for a legal attacker, shows it attacking, and Continue declares it", () => {
     const { ks, c } = game("p1", ["Gravecrawler", "Undead Augur"], ["Undead Augur"]);
-    c.advanceTurn(); settle(c);
+    for (let i = 0; i < 8 && c.declaration()?.kind !== "attackers"; i++) { c.advanceTurn(); settle(c); } // one step per press: main, beginning of combat, declare attackers
     expect(c.declaration()?.kind).toBe("attackers");
     const gc = byName(c, "p1", "Gravecrawler");
     expect(c.combatProps().humanAttackTargets).toBeUndefined(); // nothing open in the inspector yet
@@ -55,7 +55,7 @@ describe("declaring attackers with the legacy UI", () => {
   });
   it("refuses an illegal attacker or defender with a log note", () => {
     const { c } = game("p1", ["Gravecrawler"], ["Undead Augur"]);
-    c.advanceTurn(); settle(c);
+    for (let i = 0; i < 8 && c.declaration()?.kind !== "attackers"; i++) { c.advanceTurn(); settle(c); } // one step per press: main, beginning of combat, declare attackers
     c.declareAttack("not-a-creature", "p2");
     c.declareAttack(byName(c, "p1", "Gravecrawler").id, "nobody");
     expect(c.table().session.events.filter((e) => e.detail === "Rules").length).toBe(2);

@@ -35,7 +35,7 @@ describe("token stacks on the kernel table", () => {
   });
   it("attacks with N of M tokens from the stack: the rest stay behind as their own stack", () => {
     const { c } = game(5);
-    c.advanceTurn(); settle(c);
+    for (let i = 0; i < 8 && c.declaration()?.kind !== "attackers"; i++) { c.advanceTurn(); settle(c); }
     expect(c.declaration()?.kind).toBe("attackers");
     const rep = mine(c).find((x) => x.token)!;
     c.inspectCard(rep);

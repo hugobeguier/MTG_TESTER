@@ -18,9 +18,8 @@ describe("real drafts", () => {
     expect(t.obj(victim).zone).toBe("exile");
     expect(res.pending).toMatchObject({ kind: "choose_yes_no", player: "p2" });
     res = t.answer(res, { yes: true });
-    expect(res.pending).toMatchObject({ kind: "choose_cards", player: "p2" });
-    expect(res.pending!.options.map((o) => o.label)).toEqual(["Forest"]);
-    t.answer(res, { ids: [res.pending!.options[0].id] });
+    // the only basic land is the only candidate: nothing to choose, so it is taken without a question
+    expect(res.pending).toBeUndefined();
     const land = t.state.battlefield.map((id) => t.obj(id)).find((o) => o.cardName === "Forest")!;
     expect(land).toMatchObject({ controller: "p2", tapped: true });
   });

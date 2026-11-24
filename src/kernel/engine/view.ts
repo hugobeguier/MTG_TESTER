@@ -82,6 +82,10 @@ export function eventsFor(state: GameState, viewer: PlayerId, events: GameEvent[
       case "looked_at":
         if (ev.player === viewer) out.push(ev);
         break;
+      case "search_auto":
+        // an automatic take of interchangeable cards: the others learn the count, the names only when they were revealed or went to a public zone
+        out.push(ev.player === viewer ? ev : { ...ev, other: true, ...(ev.reveal || (ev.to !== "hand" && ev.to !== "library") ? {} : { names: [] }) } as GameEvent);
+        break;
       case "unresolved": {
         // public: the fact that something could not be resolved. Only when the card sat in somebody else's hand / library does the viewer not learn its name or text
         const zone = ev.zone as Zone | undefined;

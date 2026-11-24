@@ -178,14 +178,13 @@ Archaeomancer's Map [draft]
   [a2] triggered [needed: needs trigger:intervening_if, predicate:compare, trigger:subject, step:choose, field:choose.count, field:choose.from, field:choose.saveAs, field:move_card_zone.from, field:move_card_zone.what]
     Oracle: Whenever a land an opponent controls enters, if that player controls more lands than you, you may put a land card from your hand onto the battlefield.
     Trigger: Whenever a land an opponent controls enters, if the number of lands that player controls is greater than the number of lands you control
-    Effect: You may choose a land card in your hand. Then, you may put a card onto the battlefield.
+    Effect: You may choose a land card in your hand. Then, put a card onto the battlefield.
 ```
 
 Player prompts:
 
 - Archaeomancer's Map: search: Choose a basic Plains from the library.
-- Archaeomancer's Map: optional: Do you want to choose a land card in your hand?
-- Archaeomancer's Map: optional: Do you want to put a card onto the battlefield?
+- Archaeomancer's Map: optional: Do you want to put a land card from your hand onto the battlefield?
 
 Implementation: needed (step:search_library, field:search_library.count, field:search_library.filter, field:search_library.reveal, field:search_library.shuffle, field:search_library.to, field:search_library.upTo, trigger:intervening_if, predicate:compare, trigger:subject, step:choose, field:choose.count, field:choose.from, field:choose.saveAs, field:move_card_zone.from, field:move_card_zone.what)
 
@@ -1110,7 +1109,7 @@ Re-rendered plain English:
 Secret Arcade [draft]
   [a1] static [needed: needs static, static:addTypes, face]
     Oracle: Secret Arcade: Nonland permanents you control and permanent spells you control are enchantments in addition to their other types.
-    Static: Nonland permanents you control are enchantments in addition to their other types
+    Static: Nonland permanents you control or permanent spells you control are enchantments in addition to their other types
   [a2] triggered [needed: needs targets:multi, face, step:add_counters, quantity:stat, field:add_counters.on]
     Oracle: Dusty Parlor: Whenever you cast an enchantment spell, put a number of +1/+1 counters equal to that spell's mana value on up to one target creature.
     Trigger: Whenever you cast an enchantment spell

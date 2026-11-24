@@ -1,0 +1,227 @@
+{
+  "card": "Mind's Dilation",
+  "cards": [
+    "Foundry Inspector"
+  ],
+  "status": "accepted",
+  "oracle": "Whenever an opponent casts their first spell each turn, that player exiles the top card of their library. If it's a nonland card, you may cast it without paying its mana cost.",
+  "notes": "User report: on the AI's turn Mind's Dilation exiled Foundry Inspector and the owner was never asked. The question is addressed to the Dilation's controller (p1) while p2 is the active player.",
+  "scenarios": [
+    {
+      "name": "The opponent's first spell exiles their top card (Foundry Inspector); its controller is asked and may cast it free",
+      "active": "p2",
+      "setup": {
+        "p1": {
+          "battlefield": [
+            "Mind's Dilation"
+          ]
+        },
+        "p2": {
+          "hand": [
+            "Vanilla Instant"
+          ],
+          "battlefield": [
+            "Island"
+          ],
+          "library": [
+            "Foundry Inspector",
+            "Island"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "cast",
+          "player": "p2",
+          "card": "Vanilla Instant"
+        },
+        {
+          "do": "resolve",
+          "answers": [
+            {
+              "kind": "choose_yes_no",
+              "player": "p1",
+              "yes": true,
+              "required": true
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "check": "zone",
+          "player": "p2",
+          "zone": "exile",
+          "count": 0,
+          "why": "The exiled card was cast, so it left exile"
+        },
+        {
+          "check": "permanent",
+          "ref": "Foundry Inspector",
+          "zone": "battlefield",
+          "controller": "p1",
+          "owner": "p2",
+          "why": "Oracle: you may cast it without paying its mana cost: p1 cast it, it resolved and entered under p1's control (owner stays p2)"
+        }
+      ]
+    },
+    {
+      "name": "Declining leaves the card in exile",
+      "active": "p2",
+      "setup": {
+        "p1": {
+          "battlefield": [
+            "Mind's Dilation"
+          ]
+        },
+        "p2": {
+          "hand": [
+            "Vanilla Instant"
+          ],
+          "battlefield": [
+            "Island"
+          ],
+          "library": [
+            "Foundry Inspector",
+            "Island"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "cast",
+          "player": "p2",
+          "card": "Vanilla Instant"
+        },
+        {
+          "do": "resolve",
+          "answers": [
+            {
+              "kind": "choose_yes_no",
+              "player": "p1",
+              "yes": false,
+              "required": true
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "check": "zone",
+          "player": "p2",
+          "zone": "exile",
+          "cards": {
+            "exactly": [
+              "Foundry Inspector"
+            ]
+          },
+          "why": "Oracle: that player exiles the top card; you only MAY cast it"
+        }
+      ]
+    },
+    {
+      "name": "A land is exiled with no question",
+      "active": "p2",
+      "setup": {
+        "p1": {
+          "battlefield": [
+            "Mind's Dilation"
+          ]
+        },
+        "p2": {
+          "hand": [
+            "Vanilla Instant"
+          ],
+          "battlefield": [
+            "Island"
+          ],
+          "library": [
+            "Island",
+            "Island"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "cast",
+          "player": "p2",
+          "card": "Vanilla Instant"
+        },
+        {
+          "do": "resolve"
+        }
+      ],
+      "expect": [
+        {
+          "check": "zone",
+          "player": "p2",
+          "zone": "exile",
+          "cards": {
+            "exactly": [
+              "Island"
+            ]
+          },
+          "why": "Oracle: the top card is exiled; the cast offer is only for a nonland card"
+        },
+        {
+          "check": "pending",
+          "present": false,
+          "why": "If it's a nonland card: a land gets no offer"
+        }
+      ]
+    },
+    {
+      "name": "Only the first spell each turn triggers it",
+      "active": "p2",
+      "setup": {
+        "p1": {
+          "battlefield": [
+            "Mind's Dilation"
+          ]
+        },
+        "p2": {
+          "hand": [
+            "Vanilla Instant",
+            "Vanilla Instant"
+          ],
+          "battlefield": [
+            "Island",
+            "Island"
+          ],
+          "library": [
+            "Island",
+            "Island",
+            "Island"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "cast",
+          "player": "p2",
+          "card": "Vanilla Instant"
+        },
+        {
+          "do": "resolve"
+        },
+        {
+          "do": "cast",
+          "player": "p2",
+          "card": "Vanilla Instant"
+        },
+        {
+          "do": "resolve"
+        }
+      ],
+      "expect": [
+        {
+          "check": "zone",
+          "player": "p2",
+          "zone": "exile",
+          "count": 1,
+          "why": "Oracle: their FIRST spell each turn: the second spell exiles nothing"
+        }
+      ]
+    }
+  ]
+}

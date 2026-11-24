@@ -335,6 +335,7 @@ interface StackDockProps {
   pendingType?: "spell" | "trigger" | "phase";
   canRespondSelected: boolean;
   onPass?: () => void;
+  passLabel?: string;
   onRespond?: () => void;
   onRespondSelected?: () => void;
   onResolveTrigger?: () => void;
@@ -437,7 +438,7 @@ function StackDock(props: StackDockProps) {
             {props.humanHasPriority ? (hasPrompts ? "Your chance to respond, before the choice appears." : "You have priority.") : `${props.seats.find((seat) => seat.id === props.prioritySeatId)?.name ?? "An agent"} has priority.`}
           </span>
           <div className="stack-dock-buttons">
-            <button type="button" className="stack-dock-pass" title="Pass priority (Space)" disabled={!props.humanHasPriority} onClick={props.onPass}>Pass Priority</button>
+            <button type="button" className="stack-dock-pass" title={props.passLabel ? "Pass priority (Space): passes once; the game moves on only when every player passes in turn" : "Pass priority (Space)"} disabled={!props.humanHasPriority} onClick={props.onPass}>{props.passLabel ?? "Pass Priority"}</button>
             <button type="button" disabled={!props.humanHasPriority || !props.canRespondSelected} onClick={props.onRespondSelected}>Respond Selected</button>
             <button type="button" disabled={!props.humanHasPriority} onClick={props.onRespond}>Review Response</button>
             {props.pendingType === "trigger" ? (
@@ -2121,10 +2122,23 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
                 Yield to End of Turn{props.yielding ? <span style={{ marginLeft: 6, padding: "0 6px", borderRadius: 8, background: "rgba(255,255,255,0.22)", fontSize: "0.8em" }}>Yielding</span> : null}
               </button>
             ) : null}
-            <button type="button" disabled={Boolean(props.pendingAction) || !humanIsActive} onClick={props.onAdvanceTurn}>
-              {humanIsActive && !props.pendingAction ? "Continue" : "Advance Phase"}
-            </button>
-            <button type="button" disabled={Boolean(props.pendingAction) || !humanIsActive} onClick={props.onEndTurn}>End Turn</button>
+            {props.kernelTurnNumber !== undefined ? (
+              <>
+                {/* kernel mode: three separate controls. Pass priority (Space, the dock) passes once; "Pass to next step" passes once and opens the very next window;
+                    "End turn" hurries through the rest of YOUR turn. They stay usable at the empty-stack window the kernel opens at a stop. */}
+                <button type="button" title="Pass priority once and stop at the very next window (the next step, or the next player's window)." disabled={!humanHasPriority || (Boolean(props.pendingAction) && props.pendingAction?.type !== "phase")} onClick={props.onAdvanceTurn}>
+                  Pass to next step
+                </button>
+                <button type="button" title="Hurry to the end of your turn (stops at a question or a declaration; opponents' windows follow the usual stops)." disabled={!humanIsActive || (Boolean(props.pendingAction) && props.pendingAction?.type !== "phase")} onClick={props.onEndTurn}>End turn</button>
+              </>
+            ) : (
+              <>
+                <button type="button" disabled={Boolean(props.pendingAction) || !humanIsActive} onClick={props.onAdvanceTurn}>
+                  {humanIsActive && !props.pendingAction ? "Continue" : "Advance Phase"}
+                </button>
+                <button type="button" disabled={Boolean(props.pendingAction) || !humanIsActive} onClick={props.onEndTurn}>End Turn</button>
+              </>
+            )}
           </div>
         )}
       </div>
@@ -2143,6 +2157,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
         pendingType={props.pendingAction?.type}
         canRespondSelected={Boolean(props.selectedCardCanRespond)}
         onPass={props.onPassPriority}
+        passLabel={props.kernelTurnNumber !== undefined ? "Pass priority (Space)" : undefined}
         onRespond={props.onRespond}
         onRespondSelected={props.onRespondWithSelectedCard}
         onResolveTrigger={props.onResolvePendingTrigger}

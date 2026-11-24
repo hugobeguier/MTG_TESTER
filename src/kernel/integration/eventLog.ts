@@ -70,6 +70,18 @@ export function formatEvent(ev: KernelEvent, n: LogNames): { seatId?: string; me
     case "counter_added": return { message: `${plural(num(ev.amount), `${str(ev.kind)} counter`)} put on ${C(ev.id)}.` };
     case "reveal": return { seatId: seat(ev.player), message: `${P(ev.player)} reveals ${Array.isArray(ev.names) ? (ev.names as string[]).join(", ") : "a card"}.` };
     case "looked_at": return { seatId: seat(ev.player), message: `You look at ${Array.isArray(ev.names) ? (ev.names as string[]).join(", ") : "a card"}.` };
+    case "search_auto": {
+      // "Archaeomancer's Map: put 2 Plains into your hand" (interchangeable cards are taken without a question); other seats see the count only
+      const nm = Array.isArray(ev.names) ? (ev.names as string[]) : [];
+      const count = num(ev.count);
+      const groups = new Map<string, number>();
+      for (const x of nm) groups.set(x, (groups.get(x) ?? 0) + 1);
+      const what = nm.length ? [...groups].map(([x, k]) => (k > 1 ? `${k} ${x}` : x)).join(", ") : plural(count, "card");
+      const mine = !ev.other;
+      const dest = ev.to === "hand" ? (mine ? "into your hand" : "into their hand") : ev.to === "battlefield" ? "onto the battlefield" : `into ${str(ev.to) || "play"}`;
+      const src = str(ev.source) ? `${C(ev.source)}: ` : "";
+      return { seatId: seat(ev.player), message: count ? `${src}${mine ? "put" : `${P(ev.player)} puts`} ${what} ${dest}.` : `${src}no card found.` };
+    }
     case "shuffle": return { seatId: seat(ev.player), message: `${P(ev.player)} shuffles their library.` };
     case "monarch_changed": return { seatId: seat(ev.player), message: `${P(ev.player)} becomes the monarch.` };
     case "control_changed": return { message: `${P(ev.to)} gains control of ${C(ev.id)}.` };
@@ -85,7 +97,7 @@ export function formatEvent(ev: KernelEvent, n: LogNames): { seatId?: string; me
       // continue mode: a part of a card the kernel could not resolve (public; a card in a hidden zone is nameless, see eventsFor)
       return { seatId: seat(ev.player), message: str(ev.message) || "A card could not be fully resolved.", detail: "Unresolved" };
     // a free cast ("cast it without paying") that could not start; public text only (the card is in a public zone, a face-down one shows as such)
-    case "cast_now_failed": return { seatId: seat(ev.player), message: `Could not cast ${C(ev.id)}${ev.code === "illegal_target" ? ": no legal target" : ""}.` };
+    case "cast_now_failed": return { seatId: seat(ev.player), message: `Could not cast ${C(ev.id)}${ev.code === "illegal_target" ? ": no legal target" : str(ev.reason) ? `: ${str(ev.reason)}` : ""}.` };
     // debug mode (sandbox.ts): every debug action and the switch itself are public lines, marked so a bug report shows them
     case "sandbox": return { seatId: seat(ev.player), message: str(ev.text) || "Debug: a debug action was used.", detail: "Debug" };
     case "sandbox_mode": return { seatId: seat(ev.player), message: str(ev.text) || "Debug mode switched.", detail: "Debug" };

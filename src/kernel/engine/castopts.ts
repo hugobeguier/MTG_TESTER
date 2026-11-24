@@ -9,7 +9,7 @@
 import type { Ability, CastOption, Cost, Step } from "../schema";
 import { getIndex, sourceIntact } from "./layers";
 import { isTopCard, topPerms } from "./topcast";
-import { abilitiesOf, continueHooks, continuing, defOf, faceMeta, label, opponentsOf, type Run } from "./core";
+import { abilitiesOf, continueHooks, continuing, defOf, faceMeta, faceNames, label, opponentsOf, type Run } from "./core";
 import { evalPredicate, matchesFilter } from "./query";
 import { permissionOptions, permissionOwner } from "./durable";
 import type { CastInfo, Draft, GameObject, PlayerId } from "./types";
@@ -86,6 +86,25 @@ function spellWordsMatch(r: Run, o: GameObject, spec: string): boolean {
   return spec.split(/\s+/).filter(Boolean).every((w) => types.includes(w.toLowerCase()) || subs.includes(w.toLowerCase()));
 }
 
+/** CR 119.4: life can be paid only up to the life total; a single-faced card whose mana value is above the owner's life is not offered the life way (a two-faced card is checked when the half is chosen) */
+function cannotAffordLife(r: Run, o: GameObject): boolean {
+  const def = defOf(r, o)!;
+  if (faceNames(def).length > 1) return false;
+  const cost = faceMeta(def, o).manaCost ?? "";
+  const mv = [...cost.matchAll(/\{([^}]+)\}/g)].reduce((n, m) => n + (/^\d+$/.test(m[1]) ? Number(m[1]) : /^X$/i.test(m[1]) ? 0 : 1), 0);
+  return (r.s.players.find((p) => p.id === o.owner)?.life ?? 0) < mv;
+}
+
+/** "Cast Dictate of Erebos by paying 5 life (Demon of Fate's Design)": the way's label for the cast buttons (the half's mana value for a two-faced card) */
+export function lifeCastLabel(r: Run, o: GameObject, face: string | undefined, way: string, name: string): string {
+  const mv = mvOfCost(faceMeta(defOf(r, o)!, face ? { ...o, face } : o).manaCost ?? "");
+  const src = grantSource({ id: way } as CastOption);
+  return `Cast ${name} by paying ${mv} life${src ? ` (${label(r, src)})` : ""}`;
+}
+function mvOfCost(cost: string): number {
+  return [...cost.matchAll(/\{([^}]+)\}/g)].reduce((n, m) => n + (/^\d+$/.test(m[1]) ? Number(m[1]) : /^X$/i.test(m[1]) ? 0 : 1), 0);
+}
+
 export function grantedFree(r: Run, o: GameObject): CastOption[] {
   if (o.zone !== "hand" && o.zone !== "graveyard" && !(o.zone === "library" && isTopCard(r, o.id))) return [];
   const out: CastOption[] = [];
@@ -98,7 +117,7 @@ export function grantedFree(r: Run, o: GameObject): CastOption[] {
         if (h === "cast_from_graveyard_permission" && r.s.turn.active === o.owner && !r.s.activations[`t:${id}:grave1`] && spellWordsMatch(r, o, String((a.scripted?.params as { spells?: string } | undefined)?.spells ?? ""))) out.push({ id: "grave1:" + id, kind: "cast_from_zone", from: "graveyard", cost: [], replacesManaCost: false, optional: false } as CastOption);
         continue;
       }
-      if (h === "cast_enchantment_paying_life" && o.zone === "hand" && r.s.turn.active === o.owner && !r.s.activations[`t:${id}:lifecast`] && faceMeta(defOf(r, o)!, o).types.includes("enchantment")) { out.push({ id: "lifecast1:" + id, kind: "alternative", from: "hand", cost: [{ life: { ref: "stat", of: "self", stat: "mana_value" } } as unknown as Cost], replacesManaCost: true, optional: false } as CastOption); continue; } // Demon of Fate's Design: pay life equal to its mana value instead of its mana cost
+      if (h === "cast_enchantment_paying_life" && o.zone === "hand" && r.s.turn.active === o.owner && !r.s.activations[`t:${id}:lifecast`] && faceMeta(defOf(r, o)!, o).types.includes("enchantment") && !cannotAffordLife(r, o)) { out.push({ id: "lifecast1:" + id, kind: "alternative", from: "hand", cost: [{ life: { ref: "stat", of: "self", stat: "mana_value" } } as unknown as Cost], replacesManaCost: true, optional: false } as CastOption); continue; } // Demon of Fate's Design: pay life equal to its mana value instead of its mana cost
       if (h === "cast_without_paying_mana_cost" && o.zone === "hand") { const sp = String((a.scripted?.params as { spells?: string } | undefined)?.spells ?? ""); if (!sp || faceMeta(defOf(r, o)!, o).subtypes?.some((x) => x.toLowerCase() === sp.toLowerCase())) out.push({ id: "free-hand:" + id, kind: "alternative", from: "hand", cost: [], replacesManaCost: true, optional: false } as CastOption); } // Dracogenesis: Dragon spells
       else if (h === "free_cast_from_hand" && o.zone === "hand") out.push({ id: "free-hand:" + id, kind: "alternative", from: "hand", cost: [], replacesManaCost: true, optional: false } as CastOption);
       else if (h === "free_cast_once_per_turn" && r.s.turn.active === o.owner && !r.s.activations[`t:${id}:freecast`] && !out.some((c) => c.id.startsWith("freecast1:"))) out.push({ id: "freecast1:" + id, kind: "alternative", from: o.zone, cost: [], replacesManaCost: true, optional: false } as CastOption);

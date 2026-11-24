@@ -127,55 +127,34 @@ describe("Archaeomancer's Map: search for up to two basic Plains, reveal, hand, 
 
   it("is fully supported", () => { expect(cardUnsupported(lookup("Archaeomancer's Map")!).all).toEqual([]); });
 
-  it("offers exactly the basic Plains of the library and lets the player take up to two", () => {
+  it("interchangeable candidates (three basic Plains): no question, the two the text allows go to hand, revealed, then shuffled", () => {
     const { t, res } = setup();
-    expect(res.pending).toMatchObject({ kind: "choose_cards", player: "p1", min: 0, max: 2 });
-    expect(res.pending!.options).toHaveLength(3);
-    expect(res.pending!.options.every((o) => o.label === "Plains")).toBe(true);
-    expect(t.state.pending).not.toBeNull();
-  });
-
-  it("takes the chosen cards to hand, reveals them publicly and shuffles", () => {
-    const { t, res } = setup();
-    const ids = res.pending!.options.map((o) => o.id).slice(0, 2);
-    const handBefore = t.p("p1").hand.length;
-    const done = t.answer(res, { ids });
-    expect(t.p("p1").hand.length).toBe(handBefore + 2);
+    expect(res.pending).toBeUndefined();
+    expect(t.state.pending).toBeNull();
+    expect(t.p("p1").hand.filter((id) => t.obj(id).cardName === "Plains")).toHaveLength(2);
     expect(t.p("p1").library).toHaveLength(3);
-    const types = done.events.map((e) => e.type);
-    expect(types).toContain("reveal");
-    expect(types).toContain("shuffle");
-    expect(done.events.find((e) => e.type === "reveal")).toMatchObject({ player: "p1", names: ["Plains", "Plains"] });
+    const types = res.events.map((e) => e.type);
+    expect(types).toContain("search_auto");
     expect(types.indexOf("reveal")).toBeLessThan(types.indexOf("shuffle"));
+    expect(res.events.find((e) => e.type === "reveal")).toMatchObject({ player: "p1", names: ["Plains", "Plains"] });
   });
 
-  it("may fail to find: choosing nothing is legal and the library is still shuffled", () => {
-    const { t, res } = setup();
-    const before = [...t.p("p1").library];
-    const done = t.answer(res, { ids: [] });
-    expect(t.p("p1").library).toHaveLength(5);
-    expect(done.events.map((e) => e.type)).toContain("shuffle");
-    expect(new Set(t.p("p1").library)).toEqual(new Set(before));
+  it("only one Plains left: that one is taken (no question); none left: no question, a log event, still shuffles", () => {
+    const one = fam(); one.lands("p1", "Plains", 3); for (const n of ["Plains", "Island"]) one.give("p1", n, "library");
+    cast(one, one.give("p1", "Archaeomancer's Map", "hand")); one.resolveTop(); const r1 = stack(one);
+    expect(r1.pending).toBeUndefined();
+    expect(one.p("p1").hand.map((id) => one.obj(id).cardName)).toEqual(["Plains"]);
+    const none = fam(); none.lands("p1", "Plains", 3); none.give("p1", "Island", "library");
+    cast(none, none.give("p1", "Archaeomancer's Map", "hand")); none.resolveTop(); const r0 = stack(none);
+    expect(r0.pending).toBeUndefined();
+    expect(none.p("p1").hand).toHaveLength(0);
+    expect(r0.events.find((e) => e.type === "search_auto")).toMatchObject({ count: 0 });
+    expect(r0.events.map((e) => e.type)).toContain("shuffle");
   });
 
   it("the shuffle is the seeded one: the same game shuffles the same way", () => {
     const a = setup(); const b = setup();
-    a.t.answer(a.res, { ids: [] }); b.t.answer(b.res, { ids: [] });
     expect(a.t.p("p1").library).toEqual(b.t.p("p1").library);
-  });
-
-  it("rejects more than two cards, and a card that is not a Plains", () => {
-    const { t, res } = setup();
-    const all = res.pending!.options.map((o) => o.id);
-    expect(t.do({ type: "answerDecision", player: "p1", decisionId: res.pending!.id, choice: { ids: all } }).error?.code).toBe("invalid_choice");
-    const island = t.p("p1").library.find((id) => t.obj(id).cardName === "Island")!;
-    expect(t.do({ type: "answerDecision", player: "p1", decisionId: res.pending!.id, choice: { ids: [island] } }).error?.code).toBe("invalid_choice");
-  });
-
-  it("a stale decision id is rejected", () => {
-    const { t, res } = setup();
-    expect(t.do({ type: "answerDecision", player: "p1", decisionId: "d999", choice: { ids: [] } }).error?.code).toBe("wrong_decision");
-    expect(t.state.pending?.id).toBe(res.pending!.id);
   });
 
   it("the second trigger: an opponent's land puts one of your hand lands onto the battlefield (optional choose, optional move)", () => {
@@ -188,10 +167,7 @@ describe("Archaeomancer's Map: search for up to two basic Plains, reveal, hand, 
     t.state = { ...t.state, turn: { ...t.state.turn, active: "p2" }, priority: "p2" };
     t.ok({ type: "playLand", player: "p2", cardId: t.p("p2").hand[0] });
     let res = t.resolveTop();
-    // "you may choose a land card in your hand" -> yes -> choose -> "you may put it" -> yes
-    expect(res.pending).toMatchObject({ kind: "choose_yes_no", player: "p1" });
-    res = t.answer(res, { yes: true });
-    // only one land card in hand: nothing to choose, straight to the second optional step
+    // ONE "you may put a land card from your hand onto the battlefield" question; with a single land in hand there is nothing more to choose
     expect(res.pending).toMatchObject({ kind: "choose_yes_no", player: "p1" });
     res = t.answer(res, { yes: true });
     expect(res.pending).toBeUndefined();
@@ -207,8 +183,8 @@ describe("Archaeomancer's Map: search for up to two basic Plains, reveal, hand, 
     t.state = { ...t.state, turn: { ...t.state.turn, active: "p2" }, priority: "p2" };
     t.ok({ type: "playLand", player: "p2", cardId: t.p("p2").hand[0] });
     let res = t.resolveTop();
-    res = t.answer(res, { yes: true });
-    res = t.answer(res, { yes: false });
+    res = t.answer(res, { yes: false }); // the single "you may" is asked once
+    expect(res.pending).toBeUndefined();
     expect(t.obj(hl).zone).toBe("hand");
   });
 });

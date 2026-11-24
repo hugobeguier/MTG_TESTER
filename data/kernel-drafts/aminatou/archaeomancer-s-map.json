@@ -100,16 +100,16 @@
           },
           "count": 1,
           "saveAs": "chosen",
-          "optional": true,
           "src": 0,
           "prompt": {
             "title": "Archaeomancer's Map: optional",
-            "instruction": "Do you want to choose a land card in your hand?",
+            "instruction": "Do you want to put a land card from your hand onto the battlefield?",
             "source": {
               "card": "Archaeomancer's Map",
               "ability": "a2"
             }
-          }
+          },
+          "optional": true
         },
         {
           "kind": "move_card_zone",
@@ -117,16 +117,7 @@
           "from": "hand",
           "moveTo": "battlefield",
           "who": "you",
-          "optional": true,
-          "src": 0,
-          "prompt": {
-            "title": "Archaeomancer's Map: optional",
-            "instruction": "Do you want to put a card onto the battlefield?",
-            "source": {
-              "card": "Archaeomancer's Map",
-              "ability": "a2"
-            }
-          }
+          "src": 0
         }
       ],
       "implementation": "needed",

@@ -115,8 +115,7 @@ describe("a scripted human turn on the kernel", () => {
     expect(ks.state.players[1].graveyard.some((id) => ks.state.objects[id].cardName === "Undead Augur")).toBe(true);
 
     // to combat: "next phase" from main, then the driver walks to the declaration
-    c.advanceTurn();
-    settle(c);
+    for (let i = 0; i < 8 && c.declaration()?.kind !== "attackers"; i++) { c.advanceTurn(); settle(c); } // one step per press: main, beginning of combat, declare attackers
     const decl = c.declaration();
     expect(decl?.kind).toBe("attackers");
     if (decl?.kind !== "attackers") return;

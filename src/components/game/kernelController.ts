@@ -370,6 +370,9 @@ export class KernelGameController {
     if (this.freeCastOn()) return this.debugCast(id);
     const lands = this.legalFor("playLand", id);
     const casts = this.legalFor("castSpell", id);
+    // a two-halved card (a Room, a split card) with several halves castable: never pick one silently (Secret Arcade vs Dusty Parlor cost differently and unlock different doors)
+    const faces = new Set(casts.map((a) => a.face).filter(Boolean));
+    if (!lands.length && faces.size > 1) { this.note(`${this.nameOf(id)} has ${faces.size} halves you can cast (${[...faces].join(", ")}): use the "Cast <half>" buttons or the card's actions.`, "Rules"); return; }
     const pick = lands[0] ?? casts.find((a) => a.free) ?? casts.find((a) => !a.option || a.option === "normal") ?? casts[0]; // a free-cast permission (Omniscience) is the default way; "Pay its mana cost" stays in the card actions
     if (pick?.action) { this.act(pick.action); return; }
     // not listed: ask the engine directly so the player gets its reason ("wrong timing", "cannot pay", ...)
@@ -513,13 +516,18 @@ export class KernelGameController {
     this.act({ type: "passPriority", player: this.human });
   };
 
-  /** "next phase": the active player's shortcut (nobody else gets priority); with a declaration open it means "no attack" */
+  /**
+   * "Pass to next step": ONE priority pass (the same rules action as Pass priority) that also arms "Stop Next" silently, so the very next window opens even where no stop is
+   * ticked: the game moves one step (or one player's window) and waits for the human again. It never runs on through the rest of the turn (End turn does that);
+   * with a declaration open it means "no more attackers" (legacy "Continue").
+   */
   advanceTurn = (): void => {
     const s = this.ks.state;
     if (s.pending) { this.note("Answer the open question first.", "Rules"); return; }
     if (this.declaration()?.kind === "attackers") { this.confirmAttackers(); return; } // legacy "Continue" in the declare attackers step: the attackers picked so far go in
-    if (s.turn.active === this.human && !s.stack.length) { this.act({ type: "advancePhase", player: this.human }); return; }
-    this.passPriority();
+    if (this.ks.actor !== this.human || s.combat?.expect) { this.note("You can't pass priority right now.", "Rules"); return; }
+    this.holdArmedAt = this.ks.version;
+    if (!this.act({ type: "passPriority", player: this.human })) this.holdArmedAt = undefined;
   };
 
   /** hurry to the end of the human's turn: stops at a question, a declaration, or when the turn passes to somebody else */
@@ -867,7 +875,7 @@ export class KernelGameController {
   private normalCardActions(id: ObjId): Array<{ id: string; label: string; title?: string }> {
     return this.options()
       .filter((a) => a.objectId === id && (a.kind === "turnFaceUp" || a.kind === "activateAbility" || // every legal non-mana activated ability, whether or not the legacy text parsers recognise its wording (Zur's "becomes a creature")
- a.kind === "unlockDoor" || a.kind === "castPrepared" || (a.kind === "castSpell" && !!a.option && a.option !== "normal")))
+ a.kind === "unlockDoor" || a.kind === "castPrepared" || (a.kind === "castSpell" && ((!!a.option && a.option !== "normal") || (!!a.face && this.options().filter((x) => x.kind === "castSpell" && x.objectId === id && x.face).length > 1)))))
       .map((a) => ({ id: a.id, label: a.label, ...(a.asks ? { title: `Asks: ${a.asks.replace(/_/g, " ")}` } : {}) }));
   }
   /** can the selected hand card be cast / played right now (the dock's "Respond Selected") */

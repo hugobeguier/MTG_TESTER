@@ -40,6 +40,14 @@ export const searchStep: StepSpec = {
     const min = noQuality && !(step.upTo || step.anyNumber) ? max : step.min !== undefined ? Math.min(Number(step.min), max) : 0;
 
     let found: ObjId[] = [];
+    // INTERCHANGEABLE candidates (every one is the same card name, e.g. basic Plains): there is nothing to choose, so the most the text allows is taken
+    // without a question (and the search still ends with the shuffle); a prompt stays whenever the names differ
+    if (max > 0 && cands.every((id) => chars(r, id).name === chars(r, cands[0]).name)) {
+      found = cands.slice(0, max);
+      emit(r, { type: "search_auto", player: searcher, source: env.source, names: names(r, found), count: found.length, to, reveal: !!step.reveal });
+      return finishSearch(r, env, step, searcher, owners, found);
+    }
+    if (max === 0) emit(r, { type: "search_auto", player: searcher, source: env.source, names: [], count: 0, to, reveal: false });
     if (max > 0) {
       const spec: AskSpec = {
         kind: "choose_cards", player: searcher,

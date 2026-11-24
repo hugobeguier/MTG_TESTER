@@ -46,11 +46,11 @@ describe("search_library", () => {
 
   it("fail to find: choose nothing, the library is shuffled anyway", () => {
     const t = fam();
-    t.give("p1", "Forest", "library"); const w = t.give("p1", "Evolving Wilds", "battlefield");
+    t.give("p1", "Forest", "library"); t.give("p1", "Island", "library"); const w = t.give("p1", "Evolving Wilds", "battlefield");
     t.ok({ type: "activateAbility", player: "p1", sourceId: w, abilityId: "a1" });
     const r2 = t.resolveTop();
     const done = t.answer(r2, { ids: [] });
-    expect(t.p("p1").library).toHaveLength(1);
+    expect(t.p("p1").library).toHaveLength(2);
     expect(done.events.map((e) => e.type)).toContain("shuffle");
     expect(done.events.find((e) => e.type === "library_searched")).toMatchObject({ found: 0 });
   });
@@ -67,27 +67,27 @@ describe("search_library", () => {
   it("a search for any card must take one; a search for a quality may find none", () => {
     const any = go([S({ kind: "search_library", who: "you", filter: {}, count: 1, to: "hand" })], (t) => { t.give("p1", "Fill A", "library"); t.give("p1", "Fill B", "library"); });
     expect(any.res.pending).toMatchObject({ min: 1, max: 1 });
-    const q = go([S({ kind: "search_library", who: "you", filter: { types: ["creature"] }, count: 1, to: "hand" })], (t) => { t.give("p1", "Fill A", "library"); });
+    const q = go([S({ kind: "search_library", who: "you", filter: { types: ["creature"] }, count: 1, to: "hand" })], (t) => { t.give("p1", "Fill A", "library"); t.give("p1", "Fill E", "library"); });
     expect(q.res.pending).toMatchObject({ min: 0, max: 1 });
   });
 
   it("destinations: hand, graveyard, top of library (shuffled first), battlefield", () => {
-    const hand = go([S({ kind: "search_library", who: "you", filter: { types: ["creature"] }, count: 1, to: "hand", reveal: true })], (t) => { t.give("p1", "Fill A", "library"); });
+    const hand = go([S({ kind: "search_library", who: "you", filter: { types: ["creature"] }, count: 1, to: "hand", reveal: true })], (t) => { t.give("p1", "Fill A", "library"); t.give("p1", "Fill E", "library"); });
     const id = hand.res.pending!.options[0].id;
     const r = hand.t.answer(hand.res, { ids: [id] });
     expect(hand.t.obj(id).zone).toBe("hand");
-    expect(r.events.find((e) => e.type === "reveal")).toMatchObject({ names: ["Fill A"] });
+    expect(r.events.find((e) => e.type === "reveal")).toMatchObject({ names: [hand.t.obj(id).cardName] });
 
-    const gy = go([S({ kind: "search_library", who: "you", filter: { types: ["creature"] }, count: 1, to: "graveyard" })], (t) => { t.give("p1", "Fill A", "library"); });
+    const gy = go([S({ kind: "search_library", who: "you", filter: { types: ["creature"] }, count: 1, to: "graveyard" })], (t) => { t.give("p1", "Fill A", "library"); t.give("p1", "Fill E", "library"); });
     gy.t.answer(gy.res, { ids: [gy.res.pending!.options[0].id] });
-    expect(nm(gy.t, gy.t.p("p1").graveyard)).toContain("Fill A");
+    expect(nm(gy.t, gy.t.p("p1").graveyard)).toContain(gy.t.obj(gy.res.pending!.options[0].id).cardName);
 
     const top = go([S({ kind: "search_library", who: "you", filter: { types: ["creature"] }, count: 1, to: "library", position: "top", shuffle: true })], (t) => { for (const n of ["Fill A", "Fill B", "Fill C", "Fill D"]) t.give("p1", n, "library"); });
     const pick = top.res.pending!.options.find((o) => o.label === "Fill B")!.id;
     top.t.answer(top.res, { ids: [pick] });
     expect(top.t.p("p1").library[0]).toBe(pick); // shuffled first, then put on top
 
-    const bf = go([S({ kind: "search_library", who: "you", filter: { types: ["creature"] }, count: 1, to: "battlefield" })], (t) => { t.give("p1", "Fill A", "library"); });
+    const bf = go([S({ kind: "search_library", who: "you", filter: { types: ["creature"] }, count: 1, to: "battlefield" })], (t) => { t.give("p1", "Fill A", "library"); t.give("p1", "Fill E", "library"); });
     const bid = bf.res.pending!.options[0].id;
     bf.t.answer(bf.res, { ids: [bid] });
     expect(bf.t.obj(bid)).toMatchObject({ zone: "battlefield", tapped: false });
@@ -101,21 +101,21 @@ describe("search_library", () => {
   });
 
   it("only the searching player is asked and only their library is offered", () => {
-    const { t, res } = go([S({ kind: "search_library", who: "you", filter: { types: ["creature"] }, count: 1, to: "hand" })], (t) => { t.give("p1", "Fill A", "library"); t.give("p2", "Fill B", "library"); });
+    const { t, res } = go([S({ kind: "search_library", who: "you", filter: { types: ["creature"] }, count: 1, to: "hand" })], (t) => { t.give("p1", "Fill A", "library"); t.give("p1", "Fill E", "library"); t.give("p2", "Fill B", "library"); });
     expect(res.pending!.player).toBe("p1");
-    expect(res.pending!.options.map((o) => o.label)).toEqual(["Fill A"]);
+    expect(res.pending!.options.map((o) => o.label).sort()).toEqual(["Fill A", "Fill E"]);
     expect(t.do({ type: "answerDecision", player: "p2", decisionId: res.pending!.id, choice: { ids: [] } }).error?.code).toBe("not_your_decision");
   });
 
   it("an answer naming a card of another library, or a stale id, is rejected", () => {
-    const { t, res } = go([S({ kind: "search_library", who: "you", filter: { types: ["creature"] }, count: 1, to: "hand" })], (t) => { t.give("p1", "Fill A", "library"); t.give("p2", "Fill B", "library"); });
+    const { t, res } = go([S({ kind: "search_library", who: "you", filter: { types: ["creature"] }, count: 1, to: "hand" })], (t) => { t.give("p1", "Fill A", "library"); t.give("p1", "Fill E", "library"); t.give("p2", "Fill B", "library"); });
     const theirs = t.p("p2").library[0];
     expect(t.do({ type: "answerDecision", player: "p1", decisionId: res.pending!.id, choice: { ids: [theirs] } }).error?.code).toBe("invalid_choice");
     expect(t.do({ type: "answerDecision", player: "p1", decisionId: "d900", choice: { ids: [] } }).error?.code).toBe("wrong_decision");
   });
 
   it("the found cards are saved (default name 'found') for later steps", () => {
-    const { t, res } = go([S({ kind: "search_library", who: "you", filter: { types: ["creature"] }, count: 1, to: "hand" }), S({ kind: "move_card_zone", what: "found", moveTo: "graveyard" })], (t) => { t.give("p1", "Fill A", "library"); });
+    const { t, res } = go([S({ kind: "search_library", who: "you", filter: { types: ["creature"] }, count: 1, to: "hand" }), S({ kind: "move_card_zone", what: "found", moveTo: "graveyard" })], (t) => { t.give("p1", "Fill A", "library"); t.give("p1", "Fill E", "library"); });
     const id = res.pending!.options[0].id;
     t.answer(res, { ids: [id] });
     expect(t.obj(id).zone).toBe("graveyard");
