@@ -53,6 +53,10 @@ export interface TokenDef {
   /** a token that is a copy of a card has that card's mana cost (so its mana value is right) and supertypes (legendary) */
   manaCost?: string;
   supertypes?: string[];
+  /** a token copy of a planeswalker enters with this many loyalty counters (the copied face's printed loyalty) */
+  loyalty?: number;
+  /** this token is a copy of another permanent (the copy step): the log says "a token copy of X" */
+  copy?: true;
 }
 
 // ---------------------------------------------------------------- state
@@ -98,6 +102,8 @@ export interface GameObject {
   dtHit?: boolean;
   /** flashback & co.: if this spell would leave the stack it is exiled instead (cleared whenever the object changes zone) */
   exileInstead?: boolean;
+  /** an adventure spell resolved: the card waits in exile and its owner may cast the front face from there (CR 715.4); cleared when it changes zone */
+  onAdventure?: boolean;
   /** the face this object currently shows (double-faced cards: set by casting a chosen face, playing a land face, transform); undefined = front */
   face?: string;
   /** Rooms (CR 709): the doors (face names) that are unlocked while this Room is on the battlefield; undefined / empty = both locked */
@@ -551,6 +557,8 @@ export interface Env {
   sacrificedTypes?: string[];
   /** the objects of the batch that triggered this ability (TriggerContext.batchObjs) */
   batchObjs?: ObjId[];
+  /** cards this resolution exiled with a link (linkExile): "the exiled card" of the same resolution means these, not older cards still linked to the source (Mind's Dilation) */
+  linkedNow?: ObjId[];
 }
 export interface Exec { frames: Frame[]; env: Env; partIndex: number }
 

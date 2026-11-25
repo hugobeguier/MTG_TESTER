@@ -93,6 +93,7 @@ export const moveStep: StepSpec = {
         { ...step, what: key, filter: undefined, who: step.who } as Step
       ] };
     }
+    if (step.linkExile && to === "exile") env.linkedNow ??= [];
     let ids = liveIds(r, env, sourceCards(r, env, step)).filter((id) => { const o = tryObj(r, id); return !!o && (o.zone !== "stack" || (to === "exile" && env.item.kind === "spell" && env.item.objectId === id)); }); // the resolving spell may exile ITSELF ("Exile Perch Protection")
 
     // ---- order of cards going to a library
@@ -111,7 +112,7 @@ export const moveStep: StepSpec = {
     let controller = env.controller;
     if (to === "battlefield") {
       const zoneForm = !step.target && !!(step.what === "all" || step.what === "top_of_library" || step.moveFrom || step.from);
-      if (step.underControlOf === "owner") controller = "" as PlayerId;
+      if (step.underControlOf === "owner" || step.who === "owner_of_target") controller = "" as PlayerId; // "under its owner's control": each card enters under ITS owner (also when the card is not a target slot: "target": "self", a saved object)
       else if (typeof step.what === "string" && step.what in env.chosen && step.who && resolvePlayers(r, step.who, env).length > 1) controller = "" as PlayerId;
       else if (!zoneForm && step.who) { const ws = resolvePlayers(r, step.who, env); controller = ws.length > 1 ? ("" as PlayerId) : ws[0] ?? env.controller; } // "each player puts all cards they exiled this way onto the battlefield": each card enters under its owner's control (Living Death)
     }
@@ -130,12 +131,19 @@ export const moveStep: StepSpec = {
       if (after?.zone === to) {
         moved.push(id);
         if (step.faceDown && to === "exile") after.faceDown = true;
-        if (step.linkExile && to === "exile") addLink(r, env.source, id);
+        if (step.linkExile && to === "exile") { addLink(r, env.source, id); (env.linkedNow ??= []).push(id); }
       }
     }
     if (to === "library" && step.shuffle) for (const p of new Set(ids.map((id) => obj(r, id).owner))) { shuffleInPlace(r, player(r, p).library); emit(r, { type: "shuffle", player: p }); }
     const order = to === "library" && step.position !== "bottom" ? [...moved].reverse() : moved;
     if (step.saveAs) saveList(r, env, String(step.saveAs), order);
+    else if (to === "battlefield") {
+      // "put it onto the battlefield. It gains haste": the saved card that just entered stays "it" for the steps that follow (Hellkite Courser), even though it is a new object
+      const ref = typeof step.target === "string" ? step.target : typeof step.what === "string" ? step.what : undefined;
+      const key = ref === "chosen" ? env.lastChosen : ref;
+      const saved = key ? env.chosen[key] : undefined;
+      if (saved) { const ts = (env.savedTs ??= {}); for (const id of moved) if (saved.includes(id)) ts[id] = obj(r, id).timestamp; }
+    }
     if (typeof step.saveHitAs === "string" && step.until) { // the card that ended an "until": the last card moved, when it satisfies the condition
       const hit = order.filter((id) => matchesFilter(r, id, { ...(step.until as ObjectFilter), zone: undefined, owner: undefined, controller: undefined } as ObjectFilter, env));
       saveList(r, env, step.saveHitAs, hit.slice(-1));

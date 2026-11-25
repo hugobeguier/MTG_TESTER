@@ -5,6 +5,7 @@
 
 import type { Ability, ObjectFilter } from "../schema";
 import { abilitiesOf, tryObj, type Run } from "./core";
+import { withCharsEpoch } from "./layers";
 import type { ObjId, PlayerId } from "./types";
 
 export interface TopPerm { filter: ObjectFilter; lands: boolean; haste: boolean }
@@ -41,6 +42,6 @@ export const isTopCard = (r: Run, id: ObjId): boolean => { const o = tryObj(r, i
 
 /** Players who currently see their own top card (stored on the state so the hidden-information view, which has no card definitions, can show it). */
 export function refreshTopLookers(r: Run): void {
-  const who = r.s.players.filter((p) => !p.hasLost && looksAtTop(r, p.id)).map((p) => p.id);
+  const who = withCharsEpoch(r, () => r.s.players.filter((p) => !p.hasLost && looksAtTop(r, p.id)).map((p) => p.id)); // pure reads: one shared characteristics memo for all players
   if (who.length) r.s.topLookers = who; else delete r.s.topLookers;
 }

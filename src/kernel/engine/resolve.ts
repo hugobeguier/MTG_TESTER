@@ -14,7 +14,7 @@ import {
 } from "./core";
 import { emitUnresolved, reportAbilityNotPerformed, reportCast } from "./unresolved";
 import { autoTapFor, costString, isManualPayer, manaHooks, addMana, withTapBonus, manaAbilityActivatable, manaAbilityUsable, payManaAbilityCosts, payFromPool, phyrexianOptions, poolCovers, poolShortfall, productionOfAbility, settleCost, totalPotentialMana } from "./mana";
-import { evalPredicate, evalQuantity, matchesFilter, objectsMatching, resolveObjs, type QCtx } from "./query";
+import { conditionFacts, evalPredicate, evalQuantity, matchesFilter, objectsMatching, resolveObjs, type QCtx } from "./query";
 import { addCounters, changeLife, decide, discardCard, runExec, sacrificeObject, startExec, type AskSpec } from "./steps";
 import { costCandidates, costCount, costNoun, costOptions, needsChoice, payChoiceCost, type ChoiceCost } from "./costs";
 import { callTheSpiritDragonsSteps } from "./step10";
@@ -25,14 +25,15 @@ import { abilityUnsupported, cardUnsupported, SUPPORTED_TRIGGER_EVENTS } from ".
 import { unattachIllegal } from "./attach";
 import { affinityReduction, hasImprovise, improviseCandidates, peekNextSpellGrants, takeNextSpellGrants } from "./castgrants";
 import { askCommandZone, overCommanderLimit } from "./commander";
+import { applyLegendRule } from "./legendrule";
 import { checkCounterAnswer, counterCandidates, counterCount, counterSpec } from "./counters7";
 import { addUnits, effectivePool, emptyPools, flushRiders, poolSize as manaPoolSize, type SpendCtx } from "./manapool";
 import { clearRegenShields, regenerates } from "./regen";
 import { ofOpponent, opponentIds, slotUsesX, targetBounds, totalMax } from "./targets7";
 import { addDurable, expiryFor, consumePermission, expireDurable, hasFlag, permissionIdOf, permissionOptions, permissionsFor, delayeds } from "./durable";
 import { isTopCard, refreshTopLookers, topPerms } from "./topcast";
-import { cantCastCard, flashGrantCovers, playerCantCast, playerHas } from "./layers";
-import { castableFaces, playableFaces } from "./faces";
+import { cantCastCard, flashGrantCovers, playerCantCast, playerHas, withCharsEpoch } from "./layers";
+import { castableFaces, isAdventureSpell, playableFaces } from "./faces";
 import { leaveGame } from "./leave";
 import { isSandboxAction, runSandbox } from "./sandbox";
 import { addedSteps, baseChoices, isFreeOption, castTags, grantedFree, grantedMorph, grantedTop, mandatoryExtras, optionalExtras, optionLabel, selectedOptions, spellExtraCosts, spellManaString } from "./castopts";
@@ -277,7 +278,7 @@ function advanceDraft(r: Run, d: Draft, answerIn?: Choice): { ask: AskSpec; stag
   // ---- face stage (modal double-faced / split cards): which face is cast; everything after reads that face
   if (d.kind === "spell" && !d.faceDone) {
     const card = obj(r, d.sourceId);
-    const faces = castableFaces(defOf(r, card)!);
+    const faces = castableFaces(defOf(r, card)!, card);
     const spec: AskSpec = { kind: "choose_cast_option", player: d.player, prompt: { title: `${name}: which face?`, instruction: "Choose the face to cast." }, options: faces.map((f) => ({ id: f, label: f })), min: 1, max: 1 };
     const dec = decide(spec, answerLeft);
     if ("ask" in dec) return { ask: dec.ask, stage: "face" };
@@ -885,7 +886,7 @@ function castSpell(r: Run, a: Extract<Action, { type: "castSpell" }>): void {
   assertSupported(r, o);
   if (continuing(r)) reportCast(r, o.id); // the spell ability / cast options the engine cannot run: reported now, the spell is still cast
   // double-faced cards: a preset face is validated now; with several castable faces and none given, the draft asks and re-checks the timing for the chosen one
-  const faces = a.preparedFrom && a.face ? [a.face] : castableFaces(def); // a prepared permanent's spell copy is cast as the other face whatever the card's layout
+  const faces = a.preparedFrom && a.face ? [a.face] : castableFaces(def, o); // a prepared permanent's spell copy is cast as the other face whatever the card's layout
   if (a.face !== undefined) { if (!faces.includes(a.face)) throw new Reject("invalid_choice", `"${a.face}" is not a face of ${def.name} that can be cast (${faces.join(", ")})`); o.face = a.face; }
   const deferTiming = faces.length > 1 && a.face === undefined;
   if (!deferTiming) checkSpellTiming(r, o, a.player, from);
@@ -1171,11 +1172,14 @@ function payTap(r: Run, a: Extract<Action, { type: "activateAbility" | "untapFor
     if (!ab || ab.kind !== "mana") return refuse(inPay ? "pay the cost (tap mana sources) or cancel first" : "declare first: only mana abilities can be activated now");
     const variable = ab.mana?.produces.length === 1 && "anyColorAmount" in ab.mana.produces[0];
     if (variable || (ab.costs ?? []).some((c) => needsChoice(c))) return refuse(`${label(r, src.id)} needs a decision of its own: activate it before casting`);
+    let act = a;
     try {
       const pr = productionOfAbility(r, a.player, ab);
-      if (!a.color && ("alternatives" in pr || ("choose" in pr && pr.choose.options.length > 1))) throw new Reject("invalid_choice", `${label(r, src.id)}: say which color of mana to add`);
+      // "any colour" / "W or U" / filter-land sources tapped while paying: no question can be opened (a payment is already pending), so the colour is picked for the
+      // player: the one the unpaid part of the cost needs most (the options are already limited, e.g. to the commander's colour identity)
+      if (!a.color && ("alternatives" in pr || ("choose" in pr && pr.choose.options.length > 1))) act = { ...a, color: helpfulColor(r.s.pending?.pay?.remaining ?? "", pr) };
     } catch (e) { if (e instanceof Reject) throw e; /* unsupported production: activateAbility reports it */ }
-    activateAbility(r, a);
+    activateAbility(r, act);
   } else untapForMana(r, a);
   if (inPay) {
     const p = r.s.pending!;
@@ -1185,6 +1189,18 @@ function payTap(r: Run, a: Extract<Action, { type: "activateAbility" | "untapFor
     else if (p.ctx.t === "special") runSpecial(r, p.ctx.action);
     if ((r.s.pending as Pending | null)?.kind !== "pay_mana") clearManaTaps(r); // paid: the take-back window of the taps that paid is over
   } else if (!r.s.pending) { r.s.priority = null; r.s.priorityAfter = null; } // declaring: nobody holds priority yet
+}
+
+/** Which colour (or filter-land alternative, e.g. "WB") of a variable-colour source helps pay `remaining` ("{2}{W}{U}") most; the first option when only generic mana is missing. */
+function helpfulColor(remaining: string, pr: ReturnType<typeof productionOfAbility>): string {
+  const need: Record<string, number> = {};
+  for (const m of remaining.matchAll(/\{([WUBRGC])\}/g)) need[m[1]] = (need[m[1]] ?? 0) + 1;
+  if ("alternatives" in pr) {
+    const score = (alt: string[]): number => { const left = { ...need }; let n = 0; for (const c of alt) if ((left[c] ?? 0) > 0) { left[c]--; n++; } return n; };
+    return pr.alternatives.reduce((best, alt) => (score(alt) > score(best) ? alt : best), pr.alternatives[0]).join("");
+  }
+  if ("choose" in pr) return pr.choose.options.reduce((best, c) => ((need[c] ?? 0) > (need[best] ?? 0) ? c : best), pr.choose.options[0]);
+  return "";
 }
 
 function runSpecial(r: Run, a: Action): void {
@@ -1358,8 +1374,14 @@ function resolveTop(r: Run): void {
     finish(r); return;
   }
   const ab = src ? abilitiesOf(r, src).find((a) => a.id === item.abilityId) : undefined;
-  if (item.kind === "triggered" && ab?.trigger?.interveningIf && !evalPredicate(r, ab.trigger.interveningIf, { controller: item.controller, source: item.sourceId, eventObj: item.trigger?.eventObj, eventPlayer: item.trigger?.eventPlayer, defenders: item.trigger?.defenders, cast: item.cast, x: item.x })) {
-    emit(r, { type: "trigger_fizzled", source: item.sourceId, item: item.id, reason: "intervening if" }); finish(r); return;
+  if (item.kind === "triggered" && ab?.trigger?.interveningIf) {
+    const qi: QCtx = { controller: item.controller, source: item.sourceId, eventObj: item.trigger?.eventObj, eventPlayer: item.trigger?.eventPlayer, defenders: item.trigger?.defenders, cast: item.cast, x: item.x };
+    if (!evalPredicate(r, ab.trigger.interveningIf, qi)) {
+      // CR 603.4: the condition is checked again on resolution; if it is false the ability is removed from the stack and does nothing (it is not "countered", it does not fizzle). The log says why.
+      const facts = conditionFacts(r, ab.trigger.interveningIf, qi);
+      emit(r, { type: "trigger_fizzled", source: item.sourceId, item: item.id, controller: item.controller, reason: "intervening if", text: ab.text.replace(/\s+/g, " ").slice(0, 600),...(item.trigger?.eventObj ? { cause: item.trigger.eventObj } : {}), ...(item.trigger?.eventPlayer ? { causePlayer: item.trigger.eventPlayer } : {}), ...(ab.trigger.event ? { causeEvent: ab.trigger.event } : {}), ...(facts ? { facts } : {}), left: r.s.stack.length });
+      finish(r); return;
+    }
   }
   if (item.kind === "spell") {
     const c = chars(r, src!.id);
@@ -1408,7 +1430,12 @@ function continueExec(r: Run, ex: Exec, answerIn?: Choice): void {
   const item = ex.env.item;
   if (item.kind === "spell" && item.objectId) {
     const o = tryObj(r, item.objectId);
-    if (o && o.zone === "stack") moveObject(r, item.objectId, "graveyard");
+    if (o && o.zone === "stack") {
+      const adv = isAdventureSpell(defOf(r, o), o); // a resolved Adventure spell goes to exile "on an adventure" (castable as the permanent from there)
+      moveObject(r, item.objectId, adv ? "exile" : "graveyard");
+      const n = adv ? tryObj(r, item.objectId) : undefined;
+      if (n && n.zone === "exile") n.onAdventure = true;
+    }
     emit(r, { type: "spell_resolved", id: item.objectId, player: item.controller, item: item.id, left: r.s.stack.length });
   } else emit(r, { type: "ability_resolved", source: item.sourceId, kind: item.kind, item: item.id, left: r.s.stack.length });
   if (runCastNow(r)) return;
@@ -1612,12 +1639,17 @@ function sba(r: Run): boolean {
         else o.commanderDeclined = true;
       }
     }
+    if (applyLegendRule(r)) changed = true; // 704.5j
     // creatures that die TOGETHER all still see each other's replacement effects (Kalitas exiles what dies in the same combat as Kalitas): the holders of a replacement ability are checked last
     const holdsReplacement = (id: ObjId): boolean => abilitiesOf(r, r.s.objects[id]).some((a) => a.kind === "replacement");
-    for (const id of [...r.s.battlefield].sort((a, b) => Number(holdsReplacement(a)) - Number(holdsReplacement(b)))) {
+    const sbaOrder = withCharsEpoch(r, () => r.s.battlefield.map((id) => ({ id, k: Number(holdsReplacement(id)) }))).sort((x, y) => x.k - y.k).map((x) => x.id); // keys computed once (a sort comparator re-derived the abilities of two permanents per comparison); the sort is stable, so the order is unchanged
+    // characteristics of every permanent in ONE shared pass (the memo makes a whole-battlefield pass cost about one chars() per permanent); valid until the first change below, then read live
+    const changedBefore = changed; changed = false;
+    const pre = withCharsEpoch(r, () => new Map(sbaOrder.map((id) => [id, chars(r, id)] as const)));
+    for (const id of sbaOrder) {
       const o = r.s.objects[id];
       if (!o || o.zone !== "battlefield") continue;
-      const c = chars(r, id);
+      const c = changed ? chars(r, id) : pre.get(id) ?? chars(r, id);
       if (c.subtypes.some((s) => s.toLowerCase() === "aura") && !hostOf(r, o) && !(o.attachedPlayer && !player(r, o.attachedPlayer).hasLost) && !(o.auraTarget && r.s.objects[o.auraTarget]?.zone === "graveyard")) { moveObject(r, id, "graveyard"); emit(r, { type: "sba_aura_unattached", id }); changed = true; continue; }
       if (unattachIllegal(r, o)) changed = true; // equipment whose host is gone or is no longer a creature (704.5n)
       if (c.types.includes("planeswalker") && (o.counters.loyalty ?? 0) <= 0) { moveObject(r, id, "graveyard"); emit(r, { type: "sba_zero_loyalty", id }); changed = true; continue; }
@@ -1627,6 +1659,7 @@ function sba(r: Run): boolean {
       if (c.toughness <= 0) { moveObject(r, id, "graveyard"); emit(r, { type: "sba_zero_toughness", id }); changed = true; }
       else if (o.damage >= c.toughness || (o.dtHit && o.damage > 0)) { if (destroyBySba(r, id)) changed = true; }
     }
+    changed = changed || changedBefore;
     if (!changed) break;
     any = true;
   }
@@ -1674,6 +1707,8 @@ function lkiMatches(f: ObjectFilter, l: Lki, q: QCtx, id: string): boolean {
   return true;
 }
 
+const conditionFactsOf = (r: Run, ab: Ability, q: QCtx) => (ab.trigger?.interveningIf ? conditionFacts(r, ab.trigger.interveningIf, q) : undefined);
+
 function queueTrigger(r: Run, src: ObjId, ab: Ability, controller: PlayerId, ctx: TriggerContext): void {
   const needs = abilityUnsupported(ab);
   if (needs.length && !continuing(r)) { // continue mode: a trigger with an unsupported frame never gets here (printedAbilities leaves it out); unsupported steps are skipped when it resolves
@@ -1681,7 +1716,11 @@ function queueTrigger(r: Run, src: ObjId, ab: Ability, controller: PlayerId, ctx
     throw new Unsupported(needs[0], `${label(r, src)}: triggered ability ${ab.id} needs ${needs.join(", ")}`, needs);
   }
   const q: QCtx = { controller, source: src, eventObj: ctx.eventObj, eventPlayer: ctx.eventPlayer, cast: ctx.cast, x: ctx.x, defenders: ctx.defenders };
-  if (ab.trigger?.interveningIf && !evalPredicate(r, ab.trigger.interveningIf, q)) return;
+  if (ab.trigger?.interveningIf && !evalPredicate(r, ab.trigger.interveningIf, q)) {
+    // CR 603.4: the condition was false when the event happened: it never triggers. Silent in play; debug mode (sandbox) leaves a line so a "why did it not trigger" report can be checked
+    if (r.s.config.sandbox) emit(r, { type: "trigger_not_triggered", source: src, ability: ab.id, controller, reason: "intervening if", text: ab.text.replace(/\s+/g, " ").slice(0, 300),...(ctx.eventObj ? { cause: ctx.eventObj } : {}), ...(conditionFactsOf(r, ab, q) ? { facts: conditionFactsOf(r, ab, q) } : {}) });
+    return;
+  }
   for (const c of ab.conditions ?? []) if (c.when === "static" && !evalPredicate(r, c.if, q)) return; // "as long as this Class is level 2 or higher" (the level abilities of a Class)
   // Roaming Throne: a triggered ability of ANOTHER creature you control of the chosen type triggers an additional time (once per such permanent)
   let times = 1;
@@ -1781,6 +1820,15 @@ function scanTriggers(r: Run): void {
     if (ev.type === "dies") {
       const l = ev.lki as Lki;
       if (!holders.some((h) => h.id === ev.id) && r.s.objects[ev.id as string]) holders.push({ id: ev.id as string, controller: l.controller, lki: true });
+    }
+    if (ev.type === "dies" || ev.type === "leaves") {
+      // CR 603.10a: permanents that left the battlefield in the same moment (one SBA batch, one Wrath) see each other leave / die: a watcher that died with the creature it
+      // watches (Athreos with its coin-counter creatures, Blood Artist in a sweeper) still triggers, controlled by whoever controlled it when it left
+      for (const e of r.events.slice(scanWindow)) {
+        if (e.type !== "leaves" || e.from !== "battlefield" || e.id === ev.id) continue;
+        const wid = e.id as string;
+        if (!holders.some((h) => h.id === wid) && r.s.objects[wid]) holders.push({ id: wid, controller: (e.lki as Lki).controller, lki: true });
+      }
     }
     if (ev.type === "damage" && ev.source && isObjId(ev.source as string)) {
       const sid = ev.source as string;

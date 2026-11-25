@@ -1,5 +1,6 @@
 // Everything besides the GameSession that the table is given for one viewer: priority, the stack panel, floating mana, and the viewer's open decision.
 // Pure functions of the kernel state (after viewFor redaction), like toSession.
+import { xNote } from "./stackLog";
 import { viewFor } from "../engine/view";
 import type { DecisionKind, DecisionOption, GameState, PendingView, PlayerId, StackItem } from "../engine/types";
 import type { GameSession, ManaPool, VisibleCard } from "../../lib/types";
@@ -81,10 +82,12 @@ export function stackViews(state: GameState, viewer: PlayerId, env: ToSessionEnv
     const cardName = visible ? view.objects[item.sourceId].token?.name ?? view.objects[item.sourceId].cardName : "a card";
     const def = src && !src.token ? env.ctx.cards(src.cardName) : undefined;
     const ability = def?.kernel.abilities.find((a) => a.id === item.abilityId);
-    const summary = ability?.text ?? (item.kind === "spell" ? cardName : item.trigger ? "triggered ability" : "ability");
+    const printed = ability?.text ?? (item.kind === "spell" ? cardName : item.trigger ? "triggered ability" : "ability");
+    const xn = xNote(item.x, ability?.text ?? (src && !src.token ? env.display?.(src.cardName)?.oracleText : undefined)); // the chosen X, visible to whoever decides to counter it
+    const summary = `${printed}${xn}`;
     const description = describe(state, view, item, env, summary);
     const sourceCard = visible ? cardForObject(state, viewer, env, item.sourceId, item.kind === "spell" ? "hand" : "battlefield") : undefined;
-    if (item.kind === "spell") out.push({ id: item.id, type: "spell", actorSeatId: item.controller, cardName, ...(sourceCard ? { cardTypeLine: sourceCard.typeLine, sourceCard } : {}), message: `${cardName} is on the stack.`, description });
+    if (item.kind === "spell") out.push({ id: item.id, type: "spell", actorSeatId: item.controller, cardName, ...(sourceCard ? { cardTypeLine: sourceCard.typeLine, sourceCard } : {}), message: `${cardName} is on the stack${xn}.`, description });
     else out.push({ id: item.id, type: "trigger", actorSeatId: item.controller, controllerSeatId: item.controller, sourceCardName: cardName, triggerKind: "common", message: summary, ...(sourceCard ? { sourceCard } : {}), description });
   }
   return out;

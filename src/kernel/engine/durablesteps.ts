@@ -2,6 +2,7 @@
 // player-scoped form of grant_effect (a replacement shield or a player flag for a while).
 
 import type { Step } from "../schema";
+import { describeStep } from "../prompts";
 import { Unsupported, tryObj, label, type Run } from "./core";
 import { resolveObjs, resolvePlayers } from "./query";
 import { addDelayed, addDurable, expiryFor, SUPPORTED_DURABLE_DURATIONS } from "./durable";
@@ -36,6 +37,19 @@ export const permissionStep: StepSpec = {
   }
 };
 
+/** "at the beginning of the next end step, return The Ur-Dragon to its owner's command zone": the readable line for the log and the trigger's stack label. */
+function describeDelayed(r: Run, steps: Step[], targets: Record<string, string[]>, source: string, at: { event: string; step?: string; whose?: string }): string {
+  const nameOf = (ref: string): string | undefined => {
+    const ids = ref === "self" ? [source] : targets[ref];
+    return ids?.length ? ids.map((i) => label(r, i)).join(" and ") : undefined;
+  };
+  const named = JSON.parse(JSON.stringify(steps), (_k, v) => (typeof v === "string" && /^(td+|__c|__e|self)$/.test(v) ? nameOf(v) ?? v : v)) as Step[];
+  const what = named.map((s) => { try { return describeStep(s); } catch { return String(s.kind).replace(/_/g, " "); } }).join(", then ") || "do something";
+  const step = (at.step ?? "").replace(/_/g, " ");
+  const when = at.event === "begin_step" ? `at the beginning of ${at.whose === "yours" ? "your" : at.whose === "opponents" ? "an opponent's" : "the"} next ${step}` : at.event === "dies" ? "when it dies this turn" : "when it leaves the battlefield";
+  return `${when}, ${what}`;
+}
+
 export const delayedStep: StepSpec = {
   fields: ["at", "trigger", "steps", "duration"],
   run: (r, ex, step) => {
@@ -57,7 +71,7 @@ export const delayedStep: StepSpec = {
       steps = JSON.parse(JSON.stringify(steps).replace(/"(target|what)":"enchanted"/g, '"$1":"__e"'));
     }
     for (const k of Object.keys(env.chosen)) if (steps && JSON.stringify(steps).includes(`"list":"${k}"`)) targets["__l_" + k] = (env.chosen[k] ?? []).filter((id) => id.startsWith("#")); // lists the delayed steps count ("for each of those cards still exiled")
-    const base = { source: env.source, controller: env.controller, steps, targets, ctx, label: `${label(r, env.source)}: delayed trigger` };
+    const base = { source: env.source, controller: env.controller, steps, targets, ctx, label: `${label(r, env.source)}: ${describeDelayed(r, steps, targets, env.source, at)}` };
     if (at.event === "begin_step") {
       if (!at.step || at.next === false) throw new Unsupported("field:create_delayed_trigger.at");
       addDelayed(r, { ...base, at: { event: "begin_step", step: at.step as never, whose: (at.whose as "yours" | "opponents" | "each" | undefined) ?? "yours" } });

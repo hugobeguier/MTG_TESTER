@@ -5,7 +5,7 @@
 // Pure and incremental: `StackLogBuilder.push(events, names)` after every action; nothing here reads or changes game state, so the same module serves the
 // table (live), the replay command and the tests. Lines are plain text (card names are made hoverable by the UI, like the action log).
 import type { GameEvent as KernelEvent } from "../engine/types";
-import { formatEvent, type LogNames } from "./eventLog";
+import { CAUSE_VERB, conditionLostText, conditionNotTriggeredText, formatEvent, type LogNames } from "./eventLog";
 
 export type StackLogCat = "spell" | "trigger" | "replacement" | "state" | "combat" | "effect";
 export const STACK_LOG_FILTERS: ReadonlyArray<{ cat: Exclude<StackLogCat, "effect">; label: string }> = [
@@ -45,11 +45,6 @@ export interface StackLogOptions {
 interface ItemMeta { kind: string; desc: string; level: number; cat: StackLogCat; head?: StackLogLine; rank?: number; lines: number }
 interface Batch { start: number; header: StackLogLine; notes: StackLogLine[]; items: Array<{ line: StackLogLine; meta: ItemMeta }>; level: number; group: StackLogGroup }
 
-const CAUSE_VERB: Record<string, string> = {
-  etb: "entered the battlefield", dies: "died", leaves: "left the battlefield", cast: "was cast", attack: "attacked", block: "blocked", draw: "drew", discard: "discarded",
-  gain_life: "gained life", lose_life: "lost life", sacrifice: "was sacrificed", becomes_target: "became a target", unlock_door: "had a door unlocked", token_created: "was created", counter_put: "got a counter",
-  deals_damage: "dealt damage", deals_combat_damage_to_player: "dealt combat damage to a player", dealt_damage: "was dealt damage"
-};
 const PHASE_NAME: Record<string, string> = {
   untap: "the untap step", upkeep: "upkeep", draw: "the draw step", precombat_main: "the precombat main phase", beginning_of_combat: "combat", declare_attackers: "declare attackers",
   declare_blockers: "declare blockers", first_strike_damage: "first-strike damage", combat_damage: "combat damage", end_of_combat: "the end of combat", postcombat_main: "the postcombat main phase", end_step: "the end step", cleanup: "cleanup"
@@ -58,6 +53,14 @@ const PHASE_NAME: Record<string, string> = {
 const num = (v: unknown): number | undefined => (typeof v === "number" ? v : undefined);
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 const short = (s: string, n: number): string => { const t = s.replace(/\s+/g, " ").trim(); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
+/** "X = 3" plus, when the text says so, the resulting numbers ("-X/-X" -> "-3/-3"): what a player needs to decide whether to counter an X spell / ability */
+export const xNote = (x: unknown, text?: string): string => {
+  if (typeof x !== "number" || !x) return "";
+  const m = /([+-])X\/([+-])X/.exec(text ?? "");
+  return ` (X = ${x}${m ? `, so ${m[1]}${x}/${m[2]}${x}` : ""})`;
+};
+/** the card / ability text with the chosen X appended, shown when a line is expanded */
+export const textWithX = (text: string | undefined, x: unknown): string | undefined => (text && typeof x === "number" && x && /\bX\b/.test(text) ? `${text}\n[X = ${x}]` : text);
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
 
 export class StackLogBuilder {
@@ -77,6 +80,8 @@ export class StackLogBuilder {
   private anchor: number | undefined; // nesting level for what is put on the stack next (inside whatever just resolved)
   private batch: Batch | undefined;
   private phase = "";
+  /** the "put into the command zone" line just written: the commander rule's own event right after it upgrades that line instead of adding a second one */
+  private cmdLine: { id: string; line: StackLogLine } | undefined;
   private lastDamage: { line: StackLogLine; player: string; amount: number } | undefined;
   private names: LogNames = { card: () => "a card", player: (id) => id ?? "someone" };
   private readonly maxGroups: number;
@@ -195,15 +200,15 @@ export class StackLogBuilder {
     const meta: ItemMeta = { kind: "spell", desc: `${name}${copy}`, level: 0, cat: "spell", lines: 0 };
     let g: StackLogGroup;
     if (!this.order.length || !this.cur) {
-      g = this.newGroup(`${this.P(ev.player)} casts ${name}${copy}${this.costText(paid)}`, "spell");
+      g = this.newGroup(`${this.P(ev.player)} casts ${name}${copy}${xNote(ev.x, this.cardDetail(ev.id))}${this.costText(paid)}`, "spell");
       meta.level = 0;
       const from = str(ev.from);
-      const head = this.addLine(g, 0, "spell", `Put on the stack${this.targetsText(ev)}${num(ev.x) ? `, X=${ev.x}` : ""}${from && from !== "hand" ? `, cast from ${from}` : ""}${Array.isArray(ev.modes) ? `, modes: ${(ev.modes as string[]).join(", ")}` : ""}.`, { item, head: true, ...(this.cardDetail(ev.id) ? { detail: this.cardDetail(ev.id) } : {}) });
+      const head = this.addLine(g, 0, "spell", `Put on the stack${this.targetsText(ev)}${xNote(ev.x, this.cardDetail(ev.id))}${from && from !== "hand" ? `, cast from ${from}` : ""}${Array.isArray(ev.modes) ? `, modes: ${(ev.modes as string[]).join(", ")}` : ""}.`, { item, head: true, ...(this.cardDetail(ev.id) ? { detail: textWithX(this.cardDetail(ev.id), ev.x) } : {}) });
       meta.head = head;
     } else {
       g = this.cur;
       meta.level = this.anchor !== undefined && this.resolving ? this.anchor : this.topLevel();
-      meta.head = this.addLine(g, meta.level, "spell", `${this.P(ev.player)} casts ${name}${copy}${this.costText(paid)}${this.targetsText(ev)}${num(ev.x) ? `, X=${ev.x}` : ""}.`, { item, head: true, ...(this.cardDetail(ev.id) ? { detail: this.cardDetail(ev.id) } : {}) });
+      meta.head = this.addLine(g, meta.level, "spell", `${this.P(ev.player)} casts ${name}${copy}${this.costText(paid)}${this.targetsText(ev)}${xNote(ev.x, this.cardDetail(ev.id))}.`, { item, head: true, ...(this.cardDetail(ev.id) ? { detail: textWithX(this.cardDetail(ev.id), ev.x) } : {}) });
     }
     this.anchor = undefined;
     if (item) { this.items.set(item, meta); this.order.push(item); }
@@ -213,13 +218,13 @@ export class StackLogBuilder {
     const item = str(ev.item);
     const paid = (ev.paid ?? undefined) as Record<string, unknown> | undefined;
     const meta: ItemMeta = { kind: "activated", desc: this.describe(ev), level: 0, cat: "spell", lines: 0 };
-    const text = `${this.P(ev.player)} activates ${this.describe(ev)}${this.costText(paid)}${this.targetsText(ev)}${num(ev.x) ? `, X=${ev.x}` : ""}`;
+    const text = `${this.P(ev.player)} activates ${this.describe(ev)}${this.costText(paid)}${this.targetsText(ev)}${xNote(ev.x, str(ev.text))}`;
     if (!this.order.length || !this.cur) {
       const g = this.newGroup(text, "spell");
-      meta.head = this.addLine(g, 0, "spell", "Put on the stack.", { item, head: true, ...(str(ev.text) ? { detail: str(ev.text) } : {}) });
+      meta.head = this.addLine(g, 0, "spell", `Put on the stack${xNote(ev.x, str(ev.text))}.`, { item, head: true, ...(str(ev.text) ? { detail: textWithX(str(ev.text), ev.x) } : {}) });
     } else {
       meta.level = this.anchor !== undefined && this.resolving ? this.anchor : this.topLevel();
-      meta.head = this.addLine(this.cur, meta.level, "spell", `${text}.`, { item, head: true, ...(str(ev.text) ? { detail: str(ev.text) } : {}) });
+      meta.head = this.addLine(this.cur, meta.level, "spell", `${text}.`, { item, head: true, ...(str(ev.text) ? { detail: textWithX(str(ev.text), ev.x) } : {}) });
     }
     this.anchor = undefined;
     if (item) { this.items.set(item, meta); this.order.push(item); }
@@ -233,6 +238,7 @@ export class StackLogBuilder {
     const desc = ev.type === "spell_copied" ? `copy of ${this.C(ev.id)}` : `copy of ${of}${ev.source ? ` (${this.C(ev.source)})` : ""}`;
     const meta: ItemMeta = { kind: "copy", desc, level, cat: "spell", lines: 0 };
     meta.head = this.addLine(g, level, "spell", `${this.P(ev.controller)} puts a ${desc} on the stack.`, { item, head: true });
+    if (this.resolving) this.resolving.meta.lines++; // a copy made by the resolving ability (Sunken Palace) is its visible effect
     if (item) { this.items.set(item, meta); this.order.push(item); }
   }
 
@@ -278,7 +284,7 @@ export class StackLogBuilder {
     const desc = this.describe(ev);
     const text = `${desc} (${this.P(ev.controller)})${this.targetsText(ev)}${cause ? ` - ${cause}` : ""} [stack position ${depth}]${ev.ordered ? "" : ""}`;
     const meta: ItemMeta = { kind: "triggered", desc, level: b.level, cat: "trigger", lines: 0 };
-    const line: StackLogLine = { id: ++this.lineSeq, depth: b.level + 1, cat: "trigger", text, item, head: true, ...(str(ev.text) ? { detail: str(ev.text) } : {}) };
+    const line: StackLogLine = { id: ++this.lineSeq, depth: b.level + 1, cat: "trigger", text, item, head: true, ...(str(ev.text) ? { detail: textWithX(str(ev.text), ev.x) } : {}) };
     meta.head = line;
     b.items.push({ line, meta });
     if (item) { this.items.set(item, meta); this.order.push(item); }
@@ -345,9 +351,13 @@ export class StackLogBuilder {
   }
 
   private onFizzled(ev: KernelEvent): void {
-    const what = ev.type === "spell_fizzled" ? this.C(ev.id) : `${this.C(ev.source)}'s trigger`;
-    const why = ev.type === "trigger_fizzled" ? "its condition is no longer true" : "all of its targets are illegal";
-    this.endResolving(ev, `${what} fizzles: ${why}.`);
+    if (ev.type === "trigger_fizzled") {
+      // CR 603.4: the intervening "if" is checked again on resolution; false = the ability is removed from the stack and does nothing
+      this.endResolving(ev, conditionLostText(ev, this.names), "trigger");
+      if (this.cur && this.order.length === 0) { this.cur.stackEmpty = true; this.anchor = undefined; }
+      return;
+    }
+    this.endResolving(ev, `${this.C(ev.id)} fizzles: all of its targets are illegal.`);
     if (this.cur && this.order.length === 0) { this.cur.stackEmpty = true; this.anchor = undefined; }
   }
 
@@ -382,13 +392,26 @@ export class StackLogBuilder {
     const g0 = this.cur;
     switch (ev.type) {
       case "sba_unattached": case "sba_aura_unattached": return void this.state(`${this.C(ev.id)} is put into the graveyard (not attached to anything legal).`);
+      case "aura_no_host": return void this.state(`${String(ev.name)} has nothing legal to enchant, so it does not enter the battlefield${ev.token ? " (the token ceases to exist)" : ""}.`);
       case "sba_zero_toughness": return void this.state(`${this.C(ev.id)} is put into the graveyard (toughness 0 or less).`);
+      case "sba_legend_rule": return void this.state(`${this.C(ev.id)} is put into the graveyard (legend rule).`);
       case "sba_zero_loyalty": return void this.state(`${this.C(ev.id)} is put into the graveyard (no loyalty).`);
       case "sba_zero_defense": return void this.state(`${this.C(ev.id)} is put into the graveyard (no defense).`);
       case "sba_saga_done": return void this.state(`${this.C(ev.id)} is sacrificed (final chapter done).`);
       case "player_lost": return void this.state(`${this.P(ev.player)} loses the game (${str(ev.reason).replace(/_/g, " ")}).`);
       case "destroyed": if (ev.lethalDamage === true) return void this.state(`${this.C(ev.id)} is destroyed (lethal damage).`); break;
-      case "commander_to_command_zone": return void this.state(`${this.C(ev.id)} returns to the command zone.`);
+      case "delayed_trigger_created": return void this.result(undefined, `Delayed trigger created: ${str(ev.label) || `${this.C(ev.source)}: a delayed effect`}.`);
+      case "zone_change": {
+        if (ev.to !== "command") break;
+        const line = this.result(undefined, `${this.C(ev.id)} is put into the command zone.`);
+        this.cmdLine = line ? { id: String(ev.id), line } : undefined;
+        return;
+      }
+      case "commander_to_command_zone": {
+        const prev = this.cmdLine; this.cmdLine = undefined;
+        if (prev && prev.id === ev.id) { prev.line.text = `State-based action: ${this.C(ev.id)} returns to the command zone (commander rule).`; prev.line.cat = "state"; return; }
+        return void this.state(`${this.C(ev.id)} returns to the command zone.`);
+      }
       case "life_gain": case "life_loss": {
         const amount = num(ev.amount) ?? 0, life = num(ev.life);
         const p = str(ev.player);
@@ -410,6 +433,9 @@ export class StackLogBuilder {
         return;
       }
       case "blockers_declared": { const n = num(ev.count) ?? 0; if (n > 0 && this.cur?.cat === "combat") this.result("combat", `${this.P(ev.player)} blocks with ${plural(n, "creature")}.`); return; }
+      case "nothing_to_choose": return void this.result(undefined, `${this.P(ev.player)} has no ${str(ev.zone) === "hand" ? "card in their hand" : str(ev.zone) ? `card in their ${str(ev.zone)}` : "legal choice"} to choose: nothing happens.`);
+      case "may_declined": return void this.result(undefined, `${this.P(ev.player)} chooses not to (${this.C(ev.source)}): nothing happens.`);
+      case "trigger_not_triggered": return void this.result("trigger", `Debug: ${conditionNotTriggeredText(ev, this.names)}`);
       case "trigger_removed": return void this.result("trigger", `${this.C(ev.source)}'s triggered ability has no legal target and is removed.`);
       case "effect_added": {
         const sign = (n: number) => (n >= 0 ? `+${n}` : `${n}`);

@@ -9,7 +9,7 @@ import { createInterface } from "node:readline";
 import path from "node:path";
 import { KernelSession } from "../src/kernel/integration/kernelSession";
 import { ctx, deckNames } from "../src/kernel/integration/testgame";
-import { chooseAiAction as chooseNew, type AiMemory } from "../src/components/game/kernelAi";
+import { chooseAiAction as chooseNew, freshMemory, type AiMemory } from "../src/components/game/kernelAi";
 import { chooseAiAction as chooseOld } from "./kernel-ai-baseline";
 import { evaluate } from "../src/kernel/ai/evaluate";
 import type { Action, PlayerId } from "../src/kernel/engine/types";
@@ -38,7 +38,7 @@ function playGame(spec: Spec): Result {
     const s = ks.state;
     if (s.turn.number > spec.turns) { r.reason = "turn cap"; break; }
     if (s.turn.number !== lastTurn) { lastTurn = s.turn.number; turnSteps = 0; }
-    if (memTurn !== s.turn.number) { for (const k of Object.keys(mem)) mem[k] = { banned: new Set() }; memTurn = s.turn.number; }
+    if (memTurn !== s.turn.number) { for (const k of Object.keys(mem)) mem[k] = freshMemory(mem[k]); memTurn = s.turn.number; }
     if (watch && !s.pending && s.stack.length === 0) {
       const ev = evaluate(s, ctx, watch.seat, watch.id);
       if (ev.sig === watch.sig) { r.noopCasts++; r.noopNames.push(watch.name); }

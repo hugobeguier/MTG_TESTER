@@ -53,6 +53,48 @@ describe("Mind's Dilation: 'you may cast it' while the trigger resolves", () => 
       expect(t.state.stack.map((s) => s.kind)).toEqual(["spell", "spell"]);
     }
   });
+  it("a later trigger offers only the card exiled by that resolution, not an older linked land", () => {
+    const t = realTable(["p1", "p2"], extra);
+    t.give("p1", "Mind's Dilation", "battlefield");
+    t.lands("p2", "Island", 3);
+    t.give("p2", "Forsaken Monument", "library");
+    t.give("p2", "Forest", "library");
+
+    const castOnNewTurn = () => {
+      const id = t.give("p2", "Fill Artifact", "hand");
+      t.state = { ...t.state, turn: { ...t.state.turn, active: "p2", number: t.state.turn.number + 1 }, priority: "p2", stack: [], passes: [], turnLog: [] } as never;
+      t.ok({ type: "castSpell", player: "p2", cardId: id });
+      return t.resolveTop();
+    };
+
+    expect(castOnNewTurn().pending).toBeUndefined();
+    expect(t.p("p2").exile.map((id) => t.obj(id).cardName)).toEqual(["Forest"]);
+
+    const offer = castOnNewTurn();
+    expect(offer.pending).toMatchObject({ kind: "choose_yes_no", player: "p1" });
+    const cast = t.answer(offer, { yes: true });
+    expect(cast.events.some((event) => event.type === "cast" && (event as { name?: string }).name === "Forsaken Monument")).toBe(true);
+    expect(t.p("p2").exile.map((id) => t.obj(id).cardName)).toEqual(["Forest"]);
+  });
+  it("an empty library does not re-offer a card linked by an earlier trigger", () => {
+    const t = realTable(["p1", "p2"], extra);
+    t.give("p1", "Mind's Dilation", "battlefield");
+    t.lands("p2", "Island", 3);
+    t.give("p2", "Forsaken Monument", "library");
+
+    const castOnNewTurn = () => {
+      const id = t.give("p2", "Fill Artifact", "hand");
+      t.state = { ...t.state, turn: { ...t.state.turn, active: "p2", number: t.state.turn.number + 1 }, priority: "p2", stack: [], passes: [], turnLog: [] } as never;
+      t.ok({ type: "castSpell", player: "p2", cardId: id });
+      return t.resolveTop();
+    };
+
+    const first = castOnNewTurn();
+    expect(first.pending).toMatchObject({ kind: "choose_yes_no" });
+    t.answer(first, { yes: false });
+    expect(castOnNewTurn().pending).toBeUndefined();
+    expect(t.p("p2").exile.map((id) => t.obj(id).cardName)).toEqual(["Forsaken Monument"]);
+  });
 });
 
 /** Gix (durable): "you may play lands and cast spells from among cards exiled this way without paying their mana costs". */

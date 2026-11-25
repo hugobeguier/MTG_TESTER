@@ -147,6 +147,7 @@ function condOk(r: Run, c: CastOption, pid: PlayerId, card: GameObject): boolean
 export function baseChoices(r: Run, card: GameObject, pid: PlayerId, origin: string, permSnap?: CastOption[]): Array<CastOption | null> {
   const out: Array<CastOption | null> = [];
   if ((origin === "hand" || origin === "command") && card.owner === pid) out.push(null);
+  if (origin === "exile" && card.onAdventure && card.owner === pid) out.push(null); // the permanent half of a card on an adventure
   for (const c of castOptionsOf(r, card, permSnap)) {
     if (!BASE_KINDS.has(c.kind) || !originOk(c, origin)) continue;
     const perm = c.id.startsWith("perm:");
@@ -195,7 +196,12 @@ export function paidTags(opts: CastOption[]): string[] {
 export function selectedOptions(r: Run, d: Draft): CastOption[] {
   if (d.kind !== "spell" || !d.castChosen) return [];
   const card = r.s.objects[d.sourceId];
-  const all = castOptionsOf(r, card, d.permSnap);
+  // The miracle flag is transient (set only while the miracle trigger resolves), but a cast paid by hand is re-advanced after every tap, long after that: a draft that
+  // already chose the miracle option must keep seeing it (Aminatou's granted, reduced miracle cost vanished after the first tap, so the total jumped back to the full mana cost).
+  const keep = d.castChosen.includes("miracle") && !r.castingMiracle;
+  if (keep) r.castingMiracle = true;
+  let all: CastOption[];
+  try { all = castOptionsOf(r, card, d.permSnap); } finally { if (keep) r.castingMiracle = false; }
   return d.castChosen.map((id) => all.find((c) => c.id === id)).filter((c): c is CastOption => !!c);
 }
 

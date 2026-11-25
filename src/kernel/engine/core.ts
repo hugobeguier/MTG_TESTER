@@ -11,6 +11,7 @@ import { computeChars, invalidateIndex, layerSixActive } from "./layers";
 import { applyReplacements, runAfter } from "./replacements";
 import { releaseUnexiled } from "./durable";
 import { askCommandZone } from "./commander";
+import { chooseAuraHost, type AuraHost } from "./aurahost";
 import { offerDredge } from "./dredge";
 import { maybeQueueMiracle } from "./miracle";
 
@@ -106,7 +107,7 @@ export function player(r: Run, id: PlayerId): PlayerState {
 }
 export function obj(r: Run, id: ObjId): GameObject {
   const o = r.s.objects[id];
-  if (!o) throw new Reject("unknown_object", `unknown object ${id}`);
+  if (!o) { if (process.env.TRACEOBJ) console.log(new Error("TRACE " + id).stack); throw new Reject("unknown_object", `unknown object ${id}`); }
   return o;
 }
 export const tryObj = (r: Run, id: string): GameObject | undefined => (isObjId(id) ? r.s.objects[id] : undefined);
@@ -190,7 +191,7 @@ export function currentFace(def: CardDef, o: GameObject): string | undefined {
   return o.face && names.includes(o.face) ? o.face : names[0];
 }
 /** The printed characteristics of the face this object shows. */
-export function faceMeta(def: CardDef, o: GameObject): { manaCost?: string; types: string[]; subtypes?: string[]; supertypes?: string[]; colors?: string[]; power?: number; toughness?: number } {
+export function faceMeta(def: CardDef, o: GameObject): { manaCost?: string; types: string[]; subtypes?: string[]; supertypes?: string[]; colors?: string[]; power?: number; toughness?: number; loyalty?: number } {
   const cur = currentFace(def, o);
   const names = faceNames(def);
   if (cur === undefined || cur === names[0]) return def;
@@ -299,7 +300,12 @@ export function baseChars(r: Run, o: GameObject): Chars {
   const pc = parseManaCost(m.manaCost);
   const colors = m.colors ?? [...new Set(pc.symbolColors ?? [])].filter((c) => c !== "C");
   const keywords = abilities.filter((a) => a.kind === "keyword" && a.keyword).map((a) => a.keyword!.name.toLowerCase().replace(/_/g, " "));
-  return { name: currentFace(d, o) ?? d.name, types: lc(m.types), subtypes: [...(m.subtypes ?? [])], supertypes: lc(m.supertypes), colors: [...colors], mv: pc.mv, power: m.power, toughness: m.toughness, keywords, abilities };
+  return { name: currentFace(d, o) ?? d.name, types: lc(m.types), subtypes: [...(m.subtypes ?? [])], supertypes: lc(m.supertypes), colors: [...colors], mv: backFaceMv(d, o) ?? pc.mv, power: m.power, toughness: m.toughness, keywords, abilities };
+}
+/** 202.3b: a transformed permanent (the back face of a transforming double-faced card) has the mana value of its FRONT face. */
+function backFaceMv(d: CardDef, o: GameObject): number | undefined {
+  const names = faceNames(d);
+  return d.layout === "transform" && names.length > 1 && currentFace(d, o) !== names[0] ? parseManaCost(d.manaCost).mv : undefined;
 }
 
 /**
@@ -357,6 +363,7 @@ export function moveObject(r: Run, id: ObjId, to: Zone, opts: MoveOpts = {}): Ga
   let tapped = !!opts.tapped;
   let enterCounters: Record<string, number> | undefined;
   let after: ReturnType<typeof applyReplacements> | undefined;
+  let auraHost: AuraHost | undefined;
   if (to === "battlefield") {
     const controller = opts.controller ?? o.owner;
     const keep = o.controller;
@@ -364,11 +371,22 @@ export function moveObject(r: Run, id: ObjId, to: Zone, opts: MoveOpts = {}): Ga
     const ev = applyReplacements(r, { kind: "enter", id, from, controller, tapped, counters: {}, x: o.castX });
     o.controller = keep;
     if (ev.cancelled || ev.kind !== "enter") { runAfter(r, ev); return r.s.objects[id]; }
+    // an Aura that enters without being cast chooses what it enchants as it enters (aurahost.ts); nothing legal = it does not enter
+    if (from !== "stack") {
+      const keepC = o.controller; o.controller = controller;
+      try { auraHost = chooseAuraHost(r, o, controller); } finally { o.controller = keepC; }
+      if (auraHost === "none") {
+        emit(r, { type: "aura_no_host", id, name: chars(r, id).name, player: controller, token: !!o.token });
+        if (o.token) { delete r.s.objects[id]; return undefined; }
+        return o;
+      }
+    }
     tapped = ev.tapped; enterCounters = { ...ev.counters };
     for (const [k, n] of Object.entries(opts.counters ?? {})) enterCounters[k] = (enterCounters[k] ?? 0) + n;
     opts = { ...opts, controller };
     after = ev;
     if (!o.token) { const dd = defOf(r, o); if (dd?.loyalty && lc(dd.types).includes("planeswalker")) enterCounters = { ...enterCounters, loyalty: (enterCounters?.loyalty ?? 0) + dd.loyalty }; }
+    else if (o.token.loyalty && lc(o.token.types).includes("planeswalker")) enterCounters = { ...enterCounters, loyalty: (enterCounters?.loyalty ?? 0) + o.token.loyalty }; // a token copy of a planeswalker enters with its loyalty
   } else {
     const ev = applyReplacements(r, { kind: "zone", id, from, to, position: opts.position });
     if (ev.cancelled || ev.kind !== "zone") { runAfter(r, ev); return r.s.objects[id]; }
@@ -393,7 +411,7 @@ export function moveObject(r: Run, id: ObjId, to: Zone, opts: MoveOpts = {}): Ga
   const kept = from === "stack" && to === "battlefield";
   if (!kept && from === "stack") r.s.effects = r.s.effects.filter((e) => e.objectId !== id);
   o.zone = to;
-  o.exileInstead = undefined;
+  o.exileInstead = undefined; o.onAdventure = undefined;
   o.faceDown = undefined; o.prepared = undefined; o.auraTarget = undefined;
   o.commanderDeclined = undefined;
   if (to !== "battlefield" && to !== "stack") o.face = undefined; // a card in any other zone shows its front face
@@ -411,6 +429,10 @@ export function moveObject(r: Run, id: ObjId, to: Zone, opts: MoveOpts = {}): Ga
     o.tapped = tapped;
     if (enterCounters) for (const [k, n] of Object.entries(enterCounters)) if (n > 0) o.counters[k] = (o.counters[k] ?? 0) + n;
     r.s.battlefield.push(id);
+    if (auraHost && auraHost !== "none") {
+      if ("host" in auraHost) { const h = r.s.objects[auraHost.host]; o.attachedTo = h.id; o.attachedToTs = h.timestamp; emit(r, { type: "attached", id, to: h.id }); }
+      else { o.attachedPlayer = auraHost.player; emit(r, { type: "attached", id, to: auraHost.player }); }
+    }
   } else if (to === "library") {
     const lib = player(r, o.owner).library;
     if (opts.position === "bottom") lib.push(id); else lib.unshift(id);
@@ -434,8 +456,8 @@ export function moveObject(r: Run, id: ObjId, to: Zone, opts: MoveOpts = {}): Ga
     }
   }
   const ceases = (o.token || o.isCopy) && to !== "battlefield" && !(o.isCopy && !o.token && to === "stack");
-  // a token with its own "when this dies / leaves" trigger stays as an inert record (not in any zone list) so the trigger can find its source; other tokens vanish
-  const keep = ceases && !!o.token && !!(o.copyDef ?? o.token).abilities?.some((a) => a.kind === "triggered" && (a.trigger?.event === "dies" || a.trigger?.event === "leaves"));
+  // a token with its own "when this dies / leaves / enters" trigger (an entering token the legend rule removes still has its enters trigger go on the stack) stays as an inert record (not in any zone list) so the trigger can find its source; other tokens vanish
+  const keep = ceases && !!o.token && !!(o.copyDef ?? o.token).abilities?.some((a) => a.kind === "triggered" && (a.trigger?.event === "dies" || a.trigger?.event === "leaves" || a.trigger?.event === "etb" || a.trigger?.alsoOn?.some((x) => x.event === "etb" || x.event === "dies" || x.event === "leaves")));
   if (ceases && !keep) delete r.s.objects[id];
   if (after) runAfter(r, after); // "also" steps of the replacement effects that applied, after the move
   return ceases ? undefined : o;

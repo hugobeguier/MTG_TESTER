@@ -35,7 +35,35 @@ export function namesForViewer(state: GameState, viewer: string): LogNames {
 
 const num = (v: unknown): number => (typeof v === "number" ? v : 0);
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
+const short = (s: string, n: number): string => { const t = s.replace(/\s+/g, " ").trim(); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
+
+export const CAUSE_VERB: Record<string, string> = {
+  etb: "entered the battlefield", dies: "died", leaves: "left the battlefield", cast: "was cast", attack: "attacked", block: "blocked", draw: "drew", discard: "discarded",
+  gain_life: "gained life", lose_life: "lost life", sacrifice: "was sacrificed", becomes_target: "became a target", unlock_door: "had a door unlocked", token_created: "was created", counter_put: "got a counter",
+  deals_damage: "dealt damage", deals_combat_damage_to_player: "dealt combat damage to a player", dealt_damage: "was dealt damage"
+};
+
+/**
+ * The line for a triggered ability removed on resolution because its intervening "if" is no longer true (CR 603.4), shared with the action log:
+ * "Archaeomancer's Map (because Island entered): condition no longer true on resolution (Sable controls 4 lands, you control 4): no effect."
+ */
+export function conditionLostText(ev: KernelEvent, names: LogNames): string {
+  const C = (id: unknown) => names.card(typeof id === "string" ? id : undefined);
+  const P = (id: unknown) => names.player(typeof id === "string" ? id : undefined);
+  const verb = CAUSE_VERB[str(ev.causeEvent)] ?? "triggered it";
+  const why = typeof ev.cause === "string" && ev.cause ? ` (because ${C(ev.cause)} ${verb})` : typeof ev.causePlayer === "string" && ev.causePlayer ? ` (because ${P(ev.causePlayer)} ${verb})` : "";
+  const f = ev.facts as { op?: string; left?: { n: number; player?: string; what?: string }; right?: { n: number; player?: string; what?: string } } | undefined;
+  const side = (x: { n: number; player?: string; what?: string } | undefined) => (x ? (x.player ? `${P(x.player)} ${P(x.player).toLowerCase() === "you" ? "control" : "controls"} ${x.n}${x.what ? ` ${x.what}` : ""}` : `${x.n}`) : "");
+  const clause = /\b(if [^,.;]+)/i.exec(str(ev.text))?.[1];
+  const detail = f?.left && f.right ? ` (${side(f.left)}, ${side(f.right)})` : clause ? ` (${short(clause, 80)})` : "";
+  return `${C(ev.source)}${why}: condition no longer true on resolution${detail}: no effect.`;
+}
+
+/** Debug mode only: a trigger that did not go on the stack because its intervening "if" was false when the event happened (CR 603.4). */
+export function conditionNotTriggeredText(ev: KernelEvent, names: LogNames): string {
+  return conditionLostText(ev, names).replace(": condition no longer true on resolution", " did not trigger: its condition was false when the event happened").replace(/: no effect\.$/, ".");
+}
 
 /** One log line, or undefined for events that are bookkeeping (phase changes, taps, mana, effects). */
 export function formatEvent(ev: KernelEvent, n: LogNames): { seatId?: string; message: string; detail?: string } | undefined {
@@ -52,7 +80,7 @@ export function formatEvent(ev: KernelEvent, n: LogNames): { seatId?: string; me
     case "spell_countered": return { seatId: seat(ev.controller), message: `${C(ev.id)} is countered.` };
     case "spell_fizzled": return { message: `${C(ev.id)} fizzles (no legal target).` };
     case "etb": return ev.from === "stack" ? undefined : { seatId: seat(ev.player), message: `${C(ev.id)} enters the battlefield.` };
-    case "token_created": return { seatId: seat(ev.player), message: `${P(ev.player)} creates ${C(ev.id)}.` };
+    case "token_created": { const nm = str(ev.name) || C(ev.id); return { seatId: seat(ev.player), message: ev.copy === true ? `${P(ev.player)} creates a token copy of ${nm}.` : `${P(ev.player)} creates ${nm}.` }; }
     case "dies": return { seatId: seat(ev.player), message: `${str((ev.lki as { name?: string } | undefined)?.name) || C(ev.id)} dies.` };
     case "destroyed": return { message: `${C(ev.id)} is destroyed.` };
     case "exiled": return { message: `${C(ev.id)} is exiled.` };
@@ -101,7 +129,15 @@ export function formatEvent(ev: KernelEvent, n: LogNames): { seatId?: string; me
     // debug mode (sandbox.ts): every debug action and the switch itself are public lines, marked so a bug report shows them
     case "sandbox": return { seatId: seat(ev.player), message: str(ev.text) || "Debug: a debug action was used.", detail: "Debug" };
     case "sandbox_mode": return { seatId: seat(ev.player), message: str(ev.text) || "Debug mode switched.", detail: "Debug" };
+    // CR 603.4: an intervening "if" that is no longer true on resolution: the ability is removed and does nothing (said for EACH such trigger, never silently)
+    case "trigger_fizzled": return { seatId: seat(ev.controller), message: conditionLostText(ev, n) };
+    case "nothing_to_choose": return { seatId: seat(ev.player), message: `${C(ev.source)}: ${P(ev.player)} has no ${str(ev.zone) === "hand" ? "card in their hand" : str(ev.zone) ? `card in their ${str(ev.zone)}` : "legal choice"} to choose: nothing happens.` };
+    case "may_declined": return { seatId: seat(ev.player), message: `${P(ev.player)} chooses not to (${C(ev.source)}).` };
+    case "trigger_not_triggered": return { seatId: seat(ev.controller), message: `Debug: ${conditionNotTriggeredText(ev, n)}`, detail: "Debug" };
+    case "delayed_trigger_created": return { seatId: seat(ev.controller), message: `Delayed trigger created: ${str(ev.label) || `${C(ev.source)}: a delayed effect`}.` };
     case "trigger_removed": return { message: `${C(ev.source)}'s ability has no legal target and is removed.` };
+    // a card returned to its owner's hand from the graveyard / exile (Heliod's ETB, Regrowth effects): no other event says so ("bounced" is the battlefield case)
+    case "zone_change": if (ev.to === "command") return { seatId: seat(ev.owner), message: `${C(ev.id)} is put into the command zone.` }; return ev.to === "hand" && (ev.from === "graveyard" || ev.from === "exile") && !ev.hidden ? { seatId: seat(ev.owner), message: `${C(ev.id)} returns from the ${str(ev.from)} to ${P(ev.owner)}'s hand.` } : undefined;
     default: return undefined;
   }
 }

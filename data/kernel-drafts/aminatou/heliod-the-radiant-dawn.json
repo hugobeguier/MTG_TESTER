@@ -49,8 +49,10 @@
       "implementation": "needed",
       "needs": [
         "filter:notSubtypes",
-        "field:move_card_zone.from"
-      ]
+        "field:move_card_zone.from",
+        "face"
+      ],
+      "face": "Heliod, the Radiant Dawn"
     },
     {
       "id": "a2",
@@ -76,8 +78,10 @@
       ],
       "implementation": "needed",
       "needs": [
-        "step:transform"
-      ]
+        "step:transform",
+        "face"
+      ],
+      "face": "Heliod, the Radiant Dawn"
     },
     {
       "id": "a3",
@@ -100,8 +104,10 @@
       },
       "implementation": "needed",
       "needs": [
-        "scripted:cast_spells_as_though_flash"
-      ]
+        "scripted:cast_spells_as_though_flash",
+        "face"
+      ],
+      "face": "Heliod, the Warped Eclipse"
     },
     {
       "id": "a4",
@@ -137,8 +143,10 @@
       "needs": [
         "static",
         "quantity:count_this_turn",
-        "static:costMod_quantity"
-      ]
+        "static:costMod_quantity",
+        "face"
+      ],
+      "face": "Heliod, the Warped Eclipse"
     }
   ],
   "review": {

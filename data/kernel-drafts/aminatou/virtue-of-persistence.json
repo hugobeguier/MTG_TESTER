@@ -43,7 +43,8 @@
         }
       ],
       "implementation": "implemented",
-      "needs": []
+      "needs": [],
+      "face": "Virtue of Persistence"
     },
     {
       "id": "a2",
@@ -89,7 +90,8 @@
         }
       ],
       "implementation": "implemented",
-      "needs": []
+      "needs": [],
+      "face": "Locthwain Scorn"
     }
   ],
   "review": {

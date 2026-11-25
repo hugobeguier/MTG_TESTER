@@ -110,7 +110,8 @@ describe("channel (Eiganjo): mana + discard from hand, cost reduction on the abi
     const t = table();
     t.lands("p1", "Plains", 3);
     const eig = t.give("p1", "Eiganjo, Seat of the Empire", "hand");
-    for (let i = 0; i < legends; i++) t.give("p1", "Jarad, Golgari Lich Lord", "battlefield");
+    const LEGENDS = ["Jarad, Golgari Lich Lord", "Sephara, Sky's Blade", "Ygra, Eater of All", "Emry, Lurker of the Loch"]; // distinct names: two of the same would meet the legend rule
+    for (let i = 0; i < legends; i++) t.give("p1", LEGENDS[i], "battlefield");
     const atk = t.give("p2", "Bear Cub", "battlefield");
     t.state.combat = { attackers: [{ id: atk, ts: t.obj(atk).timestamp, defender: "p1", blockers: [], blocked: false }], dealtFirst: [], expect: null };
     return { t, eig, atk };
@@ -131,7 +132,7 @@ describe("channel (Eiganjo): mana + discard from hand, cost reduction on the abi
   });
 
   it("the reduction never goes below the coloured part", () => {
-    const { t, eig, atk } = setup(5);
+    const { t, eig, atk } = setup(4);
     actOk(t, "p1", eig, "a2", { targets: { t1: [atk] } });
     expect(tapped(t)).toBe(1);
   });

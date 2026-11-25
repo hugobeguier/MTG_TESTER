@@ -93,3 +93,23 @@ describe("lands entering from a spell", () => {
     }
   });
 });
+
+describe("intervening if: what is said about a trigger that does not happen (CR 603.4)", () => {
+  it("condition false when the land enters: it never triggers and (outside debug mode) leaves no event at all", () => {
+    const t = realTable(P2);
+    t.give("p1", "Archaeomancer's Map", "battlefield"); t.lands("p1", "Island", 5); t.lands("p2", "Island", 1);
+    t.state.turn.active = "p2"; t.state.priority = "p2";
+    const res = t.ok({ type: "playLand", player: "p2", cardId: t.give("p2", "Island", "hand") });
+    expect(res.events.some((e) => e.type === "trigger_not_triggered" || e.type === "trigger_fizzled")).toBe(false);
+  });
+  it("debug mode: the same case leaves a 'did not trigger' event with the numbers", () => {
+    const t = realTable(P2);
+    t.state.config.sandbox = true;
+    t.give("p1", "Archaeomancer's Map", "battlefield"); t.lands("p1", "Island", 5); t.lands("p2", "Island", 1);
+    t.state.turn.active = "p2"; t.state.priority = "p2";
+    const res = t.ok({ type: "playLand", player: "p2", cardId: t.give("p2", "Island", "hand") });
+    const ev = res.events.find((e) => e.type === "trigger_not_triggered") as { facts?: { left: { n: number }; right: { n: number } } } | undefined;
+    expect(ev?.facts?.left.n).toBe(2);
+    expect(ev?.facts?.right.n).toBe(5);
+  });
+});

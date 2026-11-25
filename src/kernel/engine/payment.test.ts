@@ -115,8 +115,7 @@ describe("one-shot and painful sources are only used when the player picks them"
     expect(t.obj(tr)?.zone).toBe("battlefield");
     expect(t.do({ type: "answerDecision", player: "p1", decisionId: pend(t).id, choice: { ids: ["pay"] } }).error).toBeUndefined(); // "Pay" while short: still open
     expect(pend(t).kind).toBe("pay_mana");
-    expect(tap(t, tr, "t:treasure").error?.code).toBe("invalid_choice"); // which color?
-    expect(tap(t, tr, "t:treasure", "U").error).toBeUndefined();
+    expect(tap(t, tr, "t:treasure").error).toBeUndefined(); // no color said while paying: the one the cost needs ({U}) is chosen
     expect(t.state.pending).toBeNull();
     expect(t.state.stack).toHaveLength(1);
     expect(t.state.objects[tr]).toBeUndefined();

@@ -35,9 +35,10 @@ describe("token copies of permanents (Extravagant Replication, Saheeli's Artistr
     expect(t.state.pending?.kind ?? t.state.stack[0]?.kind).toBeDefined();
     // targets: only "another nonland permanent you control" (the King; the Replication itself is excluded as the source)
     let res;
-    while (t.state.pending) res = t.answer({ pending: t.state.pending } as never, { ids: [king1] });
+    // Test King is legendary: its copy meets the legend rule (704.5j); the player keeps the token
+    while (t.state.pending) { const pd = t.state.pending as unknown as { prompt: { title: string }; options: Array<{ id: string; label: string }> }; res = t.answer({ pending: pd } as never, { ids: [/Legend rule/.test(pd.prompt.title) ? pd.options.find((o) => /token/.test(o.label))!.id : king1] }); }
     void res;
-    for (let i = 0; i < 4 && t.state.stack.length; i++) t.ok({ type: "passPriority", player: t.state.priority!, fastForward: true });
+    for (let i = 0; i < 4 && t.state.stack.length; i++) { if (t.state.pending) { const pd = t.state.pending as unknown as { prompt: { title: string }; options: Array<{ id: string; label: string }> }; t.answer({ pending: pd } as never, { ids: [pd.options.find((o) => /token/.test(o.label))!.id] }); continue; } t.ok({ type: "passPriority", player: t.state.priority!, fastForward: true }); }
     const copies = tokens(t, "Test King");
     expect(copies).toHaveLength(1);
     expect(copies[0].controller).toBe("p1");
@@ -53,16 +54,17 @@ describe("token copies of permanents (Extravagant Replication, Saheeli's Artistr
     t.lands("p1", "Island", 4); t.lands("p1", "Mountain", 0);
     const king1 = t.give("p1", "Test King", "battlefield", { counters: { "+1/+1": 2 } });
     t.state.objects[king1].damage = 1;
+    expect(chr(t, king1).power).toBe(5);
     const art = t.give("p1", "Saheeli's Artistry", "hand");
     let res = t.ok({ type: "castSpell", player: "p1", cardId: art, modes: ["m2"] });
     res = t.answer(res, { ids: [king1] });
     t.pass("p1", "p2");
+    while (t.state.pending) { const pd = t.state.pending as unknown as { prompt: { title: string }; options: Array<{ id: string; label: string }> }; t.answer({ pending: pd } as never, { ids: [pd.options.find((o) => /token/.test(o.label))!.id] }); } // legend rule: keep the token
     const copy = tokens(t, "Test King")[0];
     expect(copy.id).not.toBe(king1);
     expect(copy.counters).toEqual({});
     expect(copy.damage).toBe(0);
     expect(chr(t, copy.id).power).toBe(3); // 3/3 base, no counters
-    expect(chr(t, king1).power).toBe(5);
   });
 
   it("Saheeli's Artistry: both modes; the creature copy is also an artifact (exception), the artifact copy is plain", () => {

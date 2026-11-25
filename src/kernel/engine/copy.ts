@@ -11,7 +11,7 @@
 // new targets, copies that enter tapped / attacking, `forEach`, `chooseOne`, extra abilities on the copy.
 
 import type { Ability, Step } from "../schema";
-import { baseChars, chars, defOf, emit, label, newObject, opponentsOf, player, tick, tryObj, Unsupported, type Run } from "./core";
+import { baseChars, chars, defOf, faceMeta, isRoomOnBattlefield, emit, label, newObject, opponentsOf, player, tick, tryObj, Unsupported, type Run } from "./core";
 import { addDelayed } from "./durable";
 import { evalQuantity, objectsMatching, resolveObjs, resolvePlayers } from "./query";
 import { invalidateIndex } from "./layers";
@@ -25,14 +25,17 @@ export const COPY_FIELDS = ["what", "target", "count", "token", "controller", "n
 export function copiableDef(r: Run, o: GameObject): TokenDef {
   if (o.token || o.copyDef) return structuredClone((o.copyDef ?? o.token)!);
   const c = baseChars(r, o);
+  const d = defOf(r, o)!, m = faceMeta(d, o); // the copied FACE's mana cost and loyalty (a back face has no mana cost: the token's mana value is 0, 707.8)
   return {
     name: c.name, types: [...c.types], subtypes: [...c.subtypes], supertypes: [...c.supertypes], colors: [...c.colors],
-    power: c.power, toughness: c.toughness, keywords: [], abilities: structuredClone(c.abilities), manaCost: defOf(r, o)!.manaCost
+    power: c.power, toughness: c.toughness, keywords: [], abilities: structuredClone(c.abilities), manaCost: isRoomOnBattlefield(d, o) ? d.manaCost : m.manaCost,
+    ...(m.loyalty !== undefined && c.types.includes("planeswalker") ? { loyalty: m.loyalty } : {})
   };
 }
 
 function applyExceptions(def: TokenDef, step: Step): TokenDef {
   const d = structuredClone(def);
+  d.copy = true;
   if (step.exceptName) d.name = String(step.exceptName);
   if (step.notLegendary) d.supertypes = (d.supertypes ?? []).filter((s) => s.toLowerCase() !== "legendary");
   for (const t of (step.exceptAddTypes as string[] | undefined) ?? []) {
@@ -174,7 +177,7 @@ export const copyStep: StepSpec = {
       const key = "t901";
       addDelayed(r, {
         source: env.source, controller: env.controller, steps: [{ kind: "exile_target", target: key } as Step], targets: { [key]: [...env.created] }, ctx: {},
-        at: { event: "begin_step", step: exileAt === "end_of_combat" ? "end_of_combat" : "end_step", whose: "each" }, label: `${label(r, env.source)}: exile the copies`
+        at: { event: "begin_step", step: exileAt === "end_of_combat" ? "end_of_combat" : "end_step", whose: "each" }, label: `${label(r, env.source)}: at the beginning of the ${exileAt === "end_of_combat" ? "end of combat" : "next end step"}, exile ${env.created.map((i) => label(r, i)).join(" and ")}`
       });
     }
     // "You may choose new targets for the copy": the controller of the copy re-chooses each target slot (keeping the same targets is allowed)

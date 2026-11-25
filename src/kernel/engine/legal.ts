@@ -42,6 +42,8 @@ export interface LegalAction {
   free?: boolean;
   zone?: string;
   isMana?: boolean;
+  /** mana abilities: what this ability can really produce, read from its structured production and never from its text: one entry per choice the player can pass as `color` ("U", or "WB" for a filter land's alternative); one entry = fixed output; absent = any colour / unreadable */
+  manaOptions?: string[];
   /** the first question the start of this cast / activation opens (targets, modes, X, a cast option ...); absent = it goes straight on the stack / resolves */
   asks?: DecisionKind;
   /** when `asks` is choose_targets: the object / player ids that can be chosen first */
@@ -179,7 +181,7 @@ export function legalActions(state: GameState, player: PlayerId, ctx: EngineCont
     const def = defOf(r, o);
     if (!def) continue;
     if (def.types.includes("land") && faceNames(def).length <= 1) continue; // lands are played, not cast
-    const faces = castableFaces(def);
+    const faces = castableFaces(def, o);
     const faceVariants: Array<string | undefined> = faces.length > 1 ? faces : [undefined];
     const bases = baseChoices(r, o, player, o.zone);
     const freeWays = new Set(bases.filter((b) => isFreeOption(b)).map((b) => b!.id));
@@ -211,7 +213,7 @@ export function legalActions(state: GameState, player: PlayerId, ctx: EngineCont
       const action = shown(r, player, probed);
       const pr = probe(state, probed, ctx, ab.kind !== "mana");
       if (!pr.ok) continue;
-      add({ id: `activateAbility:${id}:${ab.id}`, kind: "activateAbility", player, objectId: id, abilityId: ab.id, zone: o.zone, isMana: ab.kind === "mana", label: `${cardName(r, id)}: ${ab.text}`, action, ...(pr.asks ? { asks: pr.asks } : {}), ...(pr.targetOptions ? { targetOptions: pr.targetOptions } : {}) });
+      add({ id: `activateAbility:${id}:${ab.id}`, kind: "activateAbility", player, objectId: id, abilityId: ab.id, zone: o.zone, isMana: ab.kind === "mana", ...(ab.kind === "mana" ? manaOptionsOf(r, player, ab) : {}), label: `${cardName(r, id)}: ${ab.text}`, action, ...(pr.asks ? { asks: pr.asks } : {}), ...(pr.targetOptions ? { targetOptions: pr.targetOptions } : {}) });
     }
   }
 
@@ -259,6 +261,17 @@ function shown(r: Run, player: PlayerId, a: Action): Action {
   return rest as Action;
 }
 
+/** The colours a mana ability can really produce (LegalAction.manaOptions): the UI offers exactly these, so the ability's text can never decide which colour a button gives. */
+function manaOptionsOf(r: Run, player: PlayerId, ab: Ability): { manaOptions?: string[] } {
+  try {
+    const pr = productionOfAbility(r, player, ab);
+    if ("alternatives" in pr) return { manaOptions: pr.alternatives.map((a) => a.join("")) };
+    // "any colour" / commander-identity sources (one open-ended spec) stay one button: the engine asks the colour (or picks it while paying)
+    if ("choose" in pr) return (ab.mana?.produces.length ?? 0) > 1 ? { manaOptions: [...pr.choose.options] } : {};
+    return pr.fixed.length ? { manaOptions: [pr.fixed.join("")] } : {};
+  } catch { return {}; }
+}
+
 /** While paying by hand: every mana ability the player may activate right now (a color is probed when the ability needs one) and the taps that can be taken back. */
 function payTaps(state: GameState, r: Run, player: PlayerId, ctx: EngineContext): LegalAction[] {
   const out: LegalAction[] = [];
@@ -272,7 +285,7 @@ function payTaps(state: GameState, r: Run, player: PlayerId, ctx: EngineContext)
       let color: string | undefined;
       try { const pr = productionOfAbility(r, player, ab); color = "alternatives" in pr ? pr.alternatives[0]?.join("") : "choose" in pr && pr.choose.options.length > 1 ? pr.choose.options[0] : undefined; } catch { /* the probe reports it */ }
       if (!probe(state, color ? { ...action, color } as Action : action, ctx, false).ok) continue;
-      out.push({ id: `activateAbility:${id}:${ab.id}`, kind: "activateAbility", player, objectId: id, abilityId: ab.id, zone: o.zone, isMana: true, label: `${cardName(r, id)}: ${ab.text}`, action });
+      out.push({ id: `activateAbility:${id}:${ab.id}`, kind: "activateAbility", player, objectId: id, abilityId: ab.id, zone: o.zone, isMana: true, ...manaOptionsOf(r, player, ab), label: `${cardName(r, id)}: ${ab.text}`, action });
     }
   }
   for (const t of state.players.find((p) => p.id === player)?.manaTaps ?? []) {

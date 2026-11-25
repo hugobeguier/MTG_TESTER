@@ -110,7 +110,7 @@
           "steps": [
             {
               "kind": "copy",
-              "target": "event_object",
+              "target": "iterated",
               "token": true,
               "gainKeywords": [
                 "haste"

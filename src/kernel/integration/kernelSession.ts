@@ -214,7 +214,7 @@ export class KernelSession {
   private newStackLog(): StackLogBuilder {
     return new StackLogBuilder({
       where: (id) => (id ? this.st.objects[id]?.zone : undefined),
-      textOf: (id) => { const o = id ? this.st.objects[id] : undefined; if (!o) return undefined; const n = o.token?.name ?? o.cardName; return this.opts.display?.(n)?.oracleText; }
+      textOf: (id) => { const o = id ? this.st.objects[id] : undefined; if (!o) return undefined; const n = o.token?.name ?? o.cardName; return this.opts.display?.(n)?.oracleText ?? this.ctx.db?.card(n)?.oracle ?? this.ctx.cards(n)?.kernel?.abilities?.map((x) => x.text).filter(Boolean).join("\n"); }
     });
   }
   /** the recording of this game: the state it started from and every accepted action in order (the engine is deterministic, so this replays the exact game) */

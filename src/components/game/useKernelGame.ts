@@ -17,6 +17,7 @@ import { type GameContext } from "./context";
 import { KernelGameController } from "./kernelController";
 import { appPacingClock, type PacingClock } from "./kernelPacing";
 import { kernelReadiness, loadedKernelPacks, preloadKernelPacks, type Readiness } from "./kernelPacks";
+import { createAiWorkerRunner } from "./kernelAiWorkerClient";
 
 export type KernelStarter = (finished: GameSession) => Readiness;
 
@@ -65,5 +66,12 @@ export function useKernelGame(ctx: GameContext, opts: { enabled: boolean }): { c
 
 /** Drive the AI seats of a kernel game (and the human's automatic passes) until the component unmounts. */
 export function useKernelDriver(controller: KernelGameController | null): void {
-  useEffect(() => (controller ? controller.startDriver() : undefined), [controller]);
+  useEffect(() => {
+    if (!controller) return undefined;
+    // the AI thinks in a Web Worker (kernelAiWorker.ts) so a big late-game board never freezes the page; no Worker / no packs = it thinks in-process as before
+    const slugs = loadedKernelPacks()?.packs.map((p) => p.slug) ?? [];
+    if (slugs.length && !controller.hasAiRunner()) controller.setAiRunner(createAiWorkerRunner(slugs));
+    const stop = controller.startDriver();
+    return () => { stop(); controller.setAiRunner(undefined); };
+  }, [controller]);
 }

@@ -101,6 +101,7 @@ function PacingControls({ controller }: { controller: KernelGameController }) {
 export function KernelGameTable({ controller, onBack }: { controller: KernelGameController; onBack: () => void }) {
   useSyncExternalStore(controller.subscribe, controller.getVersion, controller.getVersion);
   useKernelDriver(controller);
+  useEffect(() => { if (process.env.NODE_ENV !== "production") (window as unknown as { __kc?: unknown }).__kc = controller; }, [controller]); // dev-only console hook (window.__kc)
   usePacingSkipKey(controller);
   const [stackLogOpen, setStackLogOpen] = useState(false);
   useStackLogKey(() => setStackLogOpen((o) => !o));
@@ -158,6 +159,7 @@ export function KernelGameTable({ controller, onBack }: { controller: KernelGame
         hoverLogCards
         kernelCastableIds={hints.castable}
         kernelHandReasons={hints.reasons}
+        kernelCommanderCast={controller.commanderCast()}
         kernelCardActions={(id) => controller.cardActions(id)}
         onKernelCardAction={onKernelCardAction}
         selectedCardCanRespond={controller.selectedCanRespond()}

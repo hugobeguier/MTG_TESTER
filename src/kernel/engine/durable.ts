@@ -74,7 +74,7 @@ export function addDelayed(r: Run, t: Omit<DelayedTrigger, "id">): DelayedTrigge
   const d: DelayedTrigger = { ...t, id: `dt${r.s.nextId++}` };
   delayeds(r).push(d);
   (r.dtBorn ??= {})[d.id] = r.events.length; // events already emitted in this run cannot fire it ("next end step" = a later one)
-  emit(r, { type: "delayed_trigger_created", id: d.id, source: d.source, controller: d.controller });
+  emit(r, { type: "delayed_trigger_created", id: d.id, source: d.source, controller: d.controller, label: d.label, at: d.at.event });
   return d;
 }
 

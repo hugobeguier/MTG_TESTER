@@ -121,6 +121,7 @@ export function steps7(base: Record<string, StepSpec>): void {
   // exile_target: linked exile, "until this leaves the battlefield"
   extend(base, "exile_target", ["linkExile", "who", "duration"], (r, ex, step) => {
     const env = ex.env;
+    if (step.linkExile) env.linkedNow ??= [];
     const dur = step.duration as string | undefined;
     if (dur !== undefined && dur !== "while_source_on_battlefield") throw new Unsupported(`duration:${String(dur)}`);
     const srcObj = tryObj(r, env.source);
@@ -132,7 +133,7 @@ export function steps7(base: Record<string, StepSpec>): void {
       moveObject(r, t, "exile"); emit(r, { type: "exiled", id: t });
       const after = tryObj(r, t);
       if (!after || after.zone !== "exile") continue;
-      if (step.linkExile) addLink(r, env.source, t);
+      if (step.linkExile) { addLink(r, env.source, t); (env.linkedNow ??= []).push(t); }
       if (dur === "while_source_on_battlefield" && srcObj) addDurable(r, { owner: env.controller, source: env.source, expires: { ev: "never" }, unexile: { objectId: t, objectTs: after.timestamp, sourceId: env.source, sourceTs: srcObj.timestamp } });
     }
     return "done";

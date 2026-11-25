@@ -474,6 +474,328 @@
           "why": "Nothing happened"
         }
       ]
+    },
+    {
+      "name": "Myriad Landscape: two lands enter at once, both see the final land count: two triggers",
+      "description": "CR 603.2 / 603.4: both lands enter simultaneously; each triggers the ability (one per land) and the condition is checked with the state after the event: p2 has 4 lands, p1 3",
+      "active": "p2",
+      "setup": {
+        "p1": {
+          "battlefield": [
+            "Archaeomancer's Map",
+            "Plains",
+            "Plains",
+            "Plains"
+          ],
+          "hand": [
+            "Forest",
+            "Forest"
+          ]
+        },
+        "p2": {
+          "battlefield": [
+            "Island",
+            "Island",
+            "Myriad Landscape"
+          ],
+          "library": [
+            "Island",
+            "Island",
+            "Island",
+            "Island"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "activate",
+          "player": "p2",
+          "source": "Myriad Landscape",
+          "ability": "Search your library",
+          "expect": [
+            {
+              "check": "stack",
+              "items": {
+                "exactly": [
+                  "Myriad Landscape (activated)"
+                ]
+              },
+              "why": "CR 602.2a: the activated ability is on the stack"
+            }
+          ]
+        },
+        {
+          "do": "resolve",
+          "answers": [
+            {
+              "pick": [
+                "Island"
+              ]
+            },
+            {
+              "pick": [
+                "Island"
+              ]
+            },
+            {
+              "kind": "order_triggers",
+              "player": "p1",
+              "pick": [
+                {
+                  "index": 0
+                },
+                {
+                  "index": 1
+                }
+              ]
+            },
+            {
+              "kind": "choose_yes_no",
+              "player": "p1",
+              "yes": true,
+              "required": true
+            },
+            {
+              "pick": [
+                "Forest"
+              ]
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "check": "zone",
+          "player": "p2",
+          "zone": "battlefield",
+          "count": 4,
+          "why": "Oracle: two basic lands put onto the battlefield (3 lands minus the sacrificed Landscape plus 2 = 4)"
+        },
+        {
+          "check": "events",
+          "type": "trigger_fizzled",
+          "count": 1,
+          "why": "CR 603.4 / 608.2: the second trigger is checked again on resolution; after the first land you put onto the battlefield (4 vs 4) it is removed without effect"
+        },
+        {
+          "check": "zone",
+          "player": "p1",
+          "zone": "battlefield",
+          "count": 5,
+          "why": "Map + 3 Plains + the one Forest the first trigger put onto the battlefield (p1 lands = 4)"
+        },
+        {
+          "check": "zone",
+          "player": "p1",
+          "zone": "hand",
+          "cards": {
+            "exactly": [
+              "Forest"
+            ]
+          },
+          "why": "Only the first trigger put a land onto the battlefield; the second was removed by its intervening if"
+        }
+      ]
+    },
+    {
+      "name": "Myriad Landscape: you have 2 lands, both triggers stay true and both ask",
+      "description": "p1 3 lands after... 2 lands: both triggers resolve in full",
+      "active": "p2",
+      "setup": {
+        "p1": {
+          "battlefield": [
+            "Archaeomancer's Map",
+            "Plains",
+            "Plains"
+          ],
+          "hand": [
+            "Forest",
+            "Forest"
+          ]
+        },
+        "p2": {
+          "battlefield": [
+            "Island",
+            "Island",
+            "Myriad Landscape"
+          ],
+          "library": [
+            "Island",
+            "Island",
+            "Island",
+            "Island"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "activate",
+          "player": "p2",
+          "source": "Myriad Landscape",
+          "ability": "Search your library",
+          "expect": [
+            {
+              "check": "stack",
+              "items": {
+                "exactly": [
+                  "Myriad Landscape (activated)"
+                ]
+              },
+              "why": "CR 602.2a: the activated ability is on the stack"
+            }
+          ]
+        },
+        {
+          "do": "resolve",
+          "answers": [
+            {
+              "pick": [
+                "Island"
+              ]
+            },
+            {
+              "pick": [
+                "Island"
+              ]
+            },
+            {
+              "kind": "order_triggers",
+              "player": "p1",
+              "pick": [
+                {
+                  "index": 0
+                },
+                {
+                  "index": 1
+                }
+              ]
+            },
+            {
+              "kind": "choose_yes_no",
+              "player": "p1",
+              "yes": true,
+              "required": true
+            },
+            {
+              "pick": [
+                "Forest"
+              ]
+            },
+            {
+              "kind": "choose_yes_no",
+              "player": "p1",
+              "yes": true,
+              "required": true
+            },
+            {
+              "pick": [
+                "Forest"
+              ]
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "check": "zone",
+          "player": "p1",
+          "zone": "battlefield",
+          "count": 5,
+          "why": "Map + 2 Plains + 2 Forests: after the first put p1 has 3 lands, p2 still 4 > 3, so the second also resolves"
+        },
+        {
+          "check": "zone",
+          "player": "p1",
+          "zone": "hand",
+          "count": 0,
+          "why": "Both triggers put a land onto the battlefield"
+        }
+      ]
+    },
+    {
+      "name": "Myriad Landscape: you have 4 lands, no trigger at all",
+      "description": "p2 ends with 4 lands, p1 with 4: not more",
+      "active": "p2",
+      "setup": {
+        "p1": {
+          "battlefield": [
+            "Archaeomancer's Map",
+            "Plains",
+            "Plains",
+            "Plains",
+            "Plains"
+          ],
+          "hand": [
+            "Forest"
+          ]
+        },
+        "p2": {
+          "battlefield": [
+            "Island",
+            "Island",
+            "Myriad Landscape"
+          ],
+          "library": [
+            "Island",
+            "Island",
+            "Island",
+            "Island"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "do": "activate",
+          "player": "p2",
+          "source": "Myriad Landscape",
+          "ability": "Search your library",
+          "expect": [
+            {
+              "check": "stack",
+              "items": {
+                "exactly": [
+                  "Myriad Landscape (activated)"
+                ]
+              },
+              "why": "CR 602.2a: the activated ability is on the stack"
+            }
+          ]
+        },
+        {
+          "do": "resolve",
+          "answers": [
+            {
+              "pick": [
+                "Island"
+              ]
+            },
+            {
+              "pick": [
+                "Island"
+              ]
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "check": "events",
+          "type": "trigger_fizzled",
+          "count": 0,
+          "why": "CR 603.4: the condition was false when the lands entered (4 vs 4): it never triggered, so nothing is shown"
+        },
+        {
+          "check": "zone",
+          "player": "p1",
+          "zone": "hand",
+          "cards": {
+            "exactly": [
+              "Forest"
+            ]
+          },
+          "why": "Nothing triggered, nothing was asked"
+        }
+      ]
     }
   ]
 }

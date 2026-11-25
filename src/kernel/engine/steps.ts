@@ -16,7 +16,7 @@ import type { Choice, DecisionKind, DecisionOption, Env, Exec, ObjId, PlayerId, 
 import type { Ability } from "../schema";
 import type { ContinuousEffect } from "./types";
 import { isObjId } from "./types";
-import { chooseStep } from "./choose";
+import { chooseCandidates, chooserOf, chooseStep } from "./choose";
 import { moveStep } from "./moves";
 import { applyScry, placementSpec, readPlacement } from "./placement";
 import { lookTopStep, revealStep, searchPickStep, searchStep } from "./library";
@@ -165,7 +165,7 @@ export function createToken(r: Run, pid: PlayerId, def: TokenDef, tapped: boolea
   moveObject(r, o.id, "battlefield", { controller: pid, tapped });
   if (r.s.objects[o.id]?.zone !== "battlefield") { delete r.s.objects[o.id]; return; } // an enter replacement kept it off the battlefield
   created.push(o.id);
-  emit(r, { type: "token_created", id: o.id, player: pid });
+  emit(r, { type: "token_created", id: o.id, player: pid, name: def.name, ...(def.copy ? { copy: true } : {}) });
   r.s.turnLog.push({ type: "token_created", id: o.id, player: pid, name: def.name, types: def.types.map((t) => t.toLowerCase()), token: true, ts: r.s.clock });
 }
 
@@ -290,11 +290,11 @@ const STEPS: Record<string, StepSpec> = {
     fields: ["filter"],
     run: (r, ex, step) => { for (const id of objectsMatching(r, (step.filter ?? {}) as ObjectFilter, ex.env)) moveObject(r, id, "hand"); return "done"; }
   },
-  reanimate: {
+  reanimate: { // (event_object may also be in exile: Athreos returns a creature that was put into exile)
     fields: ["target", "who", "tapped", "anyGraveyard"], // anyGraveyard: only the target spec differs (any player's graveyard)
     run: (r, ex, step) => {
       const ctl = resolvePlayers(r, step.who ?? "you", ex.env)[0];
-      for (const t of refs(r, ex.env, step)) { const o = tryObj(r, t); if (o && o.zone === "graveyard") { moveObject(r, t, "battlefield", { controller: ctl, tapped: !!step.tapped }); emit(r, { type: "reanimated", id: t }); (ex.env.created ??= []).push(t); } }
+      for (const t of refs(r, ex.env, step)) { const o = tryObj(r, t); if (o && (o.zone === "graveyard" || (o.zone === "exile" && step.target === "event_object"))) { moveObject(r, t, "battlefield", { controller: ctl, tapped: !!step.tapped }); emit(r, { type: "reanimated", id: t }); (ex.env.created ??= []).push(t); } }
       return "done";
     }
   },
@@ -648,6 +648,13 @@ const INTERNAL: Record<string, Handler> = {
     const spec: AskSpec = { kind: "choose_yes_no", player: (step.asker as PlayerId | undefined) ?? ex.env.controller, prompt: step.prompt!, options: [{ id: "yes", label: "Yes" }, { id: "no", label: "No" }], min: 1, max: 1 };
     const d = decide(spec, answer);
     if ("ask" in d) return d;
+    if (!d.yes) {
+      // "you may cast it" (permission_to_play): the log names the card(s) that were offered
+      const inner = step.inner as Step | undefined;
+      let offered: ObjId[] | undefined;
+      if (inner?.kind === "permission_to_play") { try { offered = resolveObjs(r, String(inner.what ?? inner.target), ex.env); } catch { offered = undefined; } }
+      emit(r, { type: "may_declined", source: ex.env.source, ability: ex.env.item.abilityId, player: (step.asker as PlayerId | undefined) ?? ex.env.controller, item: ex.env.item.id, ...(offered?.length ? { cards: offered, withoutPaying: !!(inner?.withoutPaying || inner?.withoutPayingManaCost) } : {}) }); // the log says the player chose not to
+    }
     return d.yes ? { push: [step.inner as Step] } : "done";
   },
   // "an opponent" (who: "opponent") with several opponents: the controller chooses one (CR 608.2d); the auto-pick for a single opponent never asks
@@ -822,6 +829,15 @@ export function runExec(r: Run, ex: Exec, answer?: Choice): StepStatus {
       }
       if (step.optional && step.repeatCount === undefined && step.sharesCardTypeWith === undefined && !(step as Step & { __asked?: boolean }).__asked && !isDurablePermission(step)) { // a durable permission ("until end of turn" / for as long as it stays exiled) is always granted: the player decides when (and whether) to cast, not up front // "as many times as you choose" asks on every round instead (steps7 __repeat_ask)
         const inner = { ...step, optional: false, condition: undefined, __asked: true } as Step;
+        // "you may put a land card from your hand onto the battlefield" with no land card in hand: nothing to decide, so no question; the log says so (CR 608.2: do as much as possible)
+        if (step.kind === "choose" && !step.choice && step.from && !step.fromLooked && !step.fromRevealed && !step.fromMilled) {
+          let chooser: PlayerId | undefined; try { chooser = chooserOf(r, ex.env, step); } catch { chooser = undefined; }
+          if (chooser && !chooseCandidates(r, ex.env, step, chooser).length) {
+            emit(r, { type: "nothing_to_choose", source: ex.env.source, ability: ex.env.item.abilityId, player: chooser, zone: (step.from as ObjectFilter).zone ?? "battlefield", item: ex.env.item.id });
+            frame.steps = [...frame.steps]; frame.steps[frame.i] = inner;
+            continue;
+          }
+        }
         const asker = step.kind === "search_library" || (step.kind === "choose" && step.who) ? resolvePlayers(r, step.who ?? "you", ex.env)[0] : undefined; // "its controller MAY search" / "each player MAY choose a creature": they decide
         const may: Step = { kind: "__may" as never, inner, asker, prompt: step.prompt ?? promptForMay(label(r, ex.env.source), String(step.kind).replace(/_/g, " ")) } as Step;
         frame.steps = [...frame.steps]; frame.steps[frame.i] = may;

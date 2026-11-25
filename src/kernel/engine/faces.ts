@@ -11,12 +11,16 @@ import { emit, faceNames, defOf, tryObj, type Run } from "./core";
 import { invalidateIndex } from "./layers";
 import { resolveObjs } from "./query";
 import type { StepSpec } from "./steps";
-import type { CardDef } from "./types";
+import type { CardDef, GameObject } from "./types";
+
+/** The spell is the Adventure half of an adventurer card: when it resolves the card goes to exile "on an adventure" instead of the graveyard (CR 715.4). */
+export function isAdventureSpell(def: CardDef | undefined, o: GameObject): boolean { return def?.layout === "adventure" && !!o.face && !o.isCopy && !!def.faces?.[o.face]?.subtypes?.some((s) => s.toLowerCase() === "adventure"); }
 
 /** The faces a player may CAST (zero or one: nothing to choose; several: the cast asks). */
-export function castableFaces(def: CardDef): string[] {
+export function castableFaces(def: CardDef, o?: GameObject): string[] {
   const names = faceNames(def);
   if (names.length <= 1) return names;
+  if (def.layout === "adventure") return o?.onAdventure ? [names[0]] : names; // either half from hand; only the permanent from exile once the adventure has resolved
   if (def.layout === "room") return names; // either half of a Room may be cast (CR 709.3)
   // a land face is played, never cast
   return def.layout === "modal_dfc" || def.layout === "split" ? names.filter((n, i) => i === 0 || !def.faces?.[n]?.types.includes("land")) : [names[0]];

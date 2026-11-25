@@ -273,6 +273,8 @@ interface ThreeGameTableProps {
   /** Kernel mode: hand card ids that can be cast / played right now (a glow) and the reason shown on the others */
   kernelCastableIds?: string[];
   kernelHandReasons?: Record<string, string>;
+  // Kernel mode: whether the commander in the command zone can be cast right now (timing + full cost incl. tax from sources and/or the pool). Castable -> it can be dragged onto the battlefield like a hand card.
+  kernelCommanderCast?: { castable: boolean; cardId?: string; reason?: string };
   /** Kernel mode: extra buttons for a card's detail view (turn face up, cast prepared, flashback / alternative-cost casts) that only the kernel lists, and what they do */
   kernelCardActions?: (cardId: string) => Array<{ id: string; label: string; title?: string }>;
   onKernelCardAction?: (actionId: string) => void;
@@ -877,6 +879,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
   const pointer = useRef({ down: false, button: 0, x: 0, y: 0, moved: false });
   const hoveredCardRef = useRef<CardUserData | undefined>(undefined);
   const draggedBattlefieldCardRef = useRef<CardUserData | undefined>(undefined);
+  const draggedCommanderRef = useRef<CardUserData | undefined>(undefined);
   const draggedHandCardRef = useRef<VisibleCard | undefined>(undefined);
   const dropGhostRef = useRef<THREE.Group | null>(null);
   // Screen-space anchors for the agent-hand overlays (see the animate() loop) — kept out of React
@@ -1356,7 +1359,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
       hoveredCardRef.current = data?.kind === "card" && data.card && data.seatId && data.location ? (data as CardUserData) : undefined;
       const hovered = hoveredCardRef.current;
       syncAltPreview();
-      renderer.domElement.style.cursor = hovered?.location === "battlefield" && hovered.seatId === hostHumanSeat(propsRef.current.session.seats)?.id ? "grab" : hovered || data?.kind === "zone" || (data?.kind === "player" && (propsRef.current.session.seats.find((seat) => seat.id === data.seatId)?.emblems?.length ?? 0) > 0) ? "pointer" : "";
+      renderer.domElement.style.cursor = (hovered?.location === "battlefield" || (hovered?.location === "command" && propsRef.current.kernelCommanderCast?.castable)) && hovered.seatId === hostHumanSeat(propsRef.current.session.seats)?.id ? "grab" : hovered || data?.kind === "zone" || (data?.kind === "player" && (propsRef.current.session.seats.find((seat) => seat.id === data.seatId)?.emblems?.length ?? 0) > 0) ? "pointer" : "";
     };
 
     const getTablePosition = (event: PointerEvent, seatId: string) => {
@@ -1387,6 +1390,11 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
       if (draggedBattlefieldCardRef.current) {
         renderer.domElement.style.cursor = "grabbing";
       }
+      // The commander in the command zone is draggable onto the battlefield exactly when the kernel says it can be cast now (timing + cost incl. tax, pool counted)
+      const cmdCast = propsRef.current.kernelCommanderCast;
+      draggedCommanderRef.current =
+        !targeting && !propsRef.current.kernelPick && event.button === 0 && !event.shiftKey && cmdCast?.castable && hovered?.location === "command" && hovered.seatId === humanId && (!cmdCast.cardId || cmdCast.cardId === hovered.card.id) ? hovered : undefined;
+      if (draggedCommanderRef.current) renderer.domElement.style.cursor = "grabbing";
       renderer.domElement.setPointerCapture(event.pointerId);
     };
 
@@ -1403,6 +1411,20 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
         propsRef.current.onMoveBattlefieldCard?.(draggedCard.seatId, draggedCard.card.id, getTablePosition(event, draggedCard.seatId), "drag");
         return;
       }
+      const draggedCommander = draggedCommanderRef.current;
+      if (draggedCommander) {
+        // the same yellow landing preview a dragged hand card shows (permanents only: an instant/sorcery commander resolves straight to the graveyard)
+        const ghost = dropGhostRef.current;
+        if (ghost && pointer.current.moved && !/instant|sorcery/i.test(draggedCommander.card.typeLine)) {
+          const pos = getTablePosition(event, draggedCommander.seatId);
+          const seatIndex = Math.max(0, propsRef.current.session.seats.findIndex((seat) => seat.id === draggedCommander.seatId));
+          ghost.position.x = pos.x;
+          ghost.position.z = pos.z;
+          ghost.rotation.z = PLAYER_AREAS[seatIndex]?.rot ?? 0;
+          ghost.visible = true;
+        }
+        return;
+      }
       if (pointer.current.button === 2 || event.shiftKey) {
         // Pan relative to the current camera yaw (rotateDelta), not raw world axes, so the drag feels the same at any rotation.
         const pan = rotateDelta(dx, dy, cameraState.current.yaw, 0.025);
@@ -1415,6 +1437,21 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
     };
 
     const onPointerUp = (event: PointerEvent) => {
+      const draggedCommander = draggedCommanderRef.current;
+      if (draggedCommander) {
+        draggedCommanderRef.current = undefined;
+        if (dropGhostRef.current) dropGhostRef.current.visible = false;
+        pointer.current.down = false;
+        if (pointer.current.moved) {
+          // dropped on the battlefield: cast it, and it enters where the ghost showed. Dropped on a zone strip (graveyard / exile / library / command): nothing happens.
+          const pos = getTablePosition(event, draggedCommander.seatId);
+          if (!tableZoneAtPosition(propsRef.current.session, draggedCommander.seatId, pos)) propsRef.current.onCastCommander?.(draggedCommander.seatId, pos);
+          updateHoveredCard(event);
+          return;
+        }
+        pickCard(event); // a plain click still opens the inspector (with its Cast Commander button)
+        return;
+      }
       const draggedCard = draggedBattlefieldCardRef.current;
       // A pointerdown on one of the human's own battlefield cards always arms drag-to-reposition
       // (see onPointerDown), even for what's really just a click with no intent to move anything —
@@ -1453,6 +1490,8 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
       hoveredCardRef.current = undefined;
       syncAltPreview();
       draggedBattlefieldCardRef.current = undefined;
+      draggedCommanderRef.current = undefined;
+      if (dropGhostRef.current) dropGhostRef.current.visible = false;
       renderer.domElement.style.cursor = "";
       boardInputActive.current = document.activeElement === renderer.domElement;
       if (!boardInputActive.current) clearMovementKeys();
@@ -2126,7 +2165,7 @@ function ThreeGameTableInner(props: ThreeGameTableProps) {
               <>
                 {/* kernel mode: three separate controls. Pass priority (Space, the dock) passes once; "Pass to next step" passes once and opens the very next window;
                     "End turn" hurries through the rest of YOUR turn. They stay usable at the empty-stack window the kernel opens at a stop. */}
-                <button type="button" title="Pass priority once and stop at the very next window (the next step, or the next player's window)." disabled={!humanHasPriority || (Boolean(props.pendingAction) && props.pendingAction?.type !== "phase")} onClick={props.onAdvanceTurn}>
+                <button type="button" title="Pass priority once and stop at the very next window (the next step, or the next player's window). While you declare attackers it sends the attackers picked so far (none = no attack) and goes on to the next step." disabled={!(humanHasPriority || (props.kernelWaiting?.kind === "attackers" && props.kernelWaiting.seatId === human.id)) || (Boolean(props.pendingAction) && props.pendingAction?.type !== "phase")} onClick={props.onAdvanceTurn}>
                   Pass to next step
                 </button>
                 <button type="button" title="Hurry to the end of your turn (stops at a question or a declaration; opponents' windows follow the usual stops)." disabled={!humanIsActive || (Boolean(props.pendingAction) && props.pendingAction?.type !== "phase")} onClick={props.onEndTurn}>End turn</button>
@@ -5139,10 +5178,12 @@ function addCard(
   tappedOverride?: boolean,
   depth?: { y: number; renderOrder: number }
 ) {
-  const texture = makeCardTexture(card, selectedCardId === card.id);
+  const imageUrls = battlefieldImageUrls(card);
+  // the drawn placeholder face is only shown until the real image is there: when it is already cached (every rebuild after the first), skip drawing it (a 256x360 canvas per card per rebuild)
+  const readyImage = imageUrls.find((u) => !failedCardImageUrls.has(u));
+  const texture = (readyImage ? cardImageTextureCache.get(readyImage) : undefined) ?? makeCardTexture(card, selectedCardId === card.id);
   const material = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide });
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.72, 1.02), material);
-  const imageUrls = battlefieldImageUrls(card);
   if (imageUrls.length > 0) {
     applyImageTexture(imageUrls, material);
   }

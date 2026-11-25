@@ -184,7 +184,7 @@ function checkStep(s: Step, out: string[]): void {
     const v = s[k];
     // "on: you" of add_counters / remove_counters names a PLAYER (experience counters), see steps.ts addPlayerCounters
     const playerCounters = k === "on" && (s.kind === "add_counters" || s.kind === "remove_counters") && typeof v === "string" && ["you", "opponent", "each_opponent", "each_player", "that_player"].includes(v);
-    if (typeof v === "string" && !SUPPORTED_REFS.has(v) && !/^t\d+$/.test(v) && !playerCounters) add(out, `ref:${v}`);
+    if (typeof v === "string" && !SUPPORTED_REFS.has(v) && !/^(t\d+|__c|__e)$/.test(v) && !playerCounters) add(out, `ref:${v}`);
   }
   if (s.condition) checkPredicate(s.condition.if, out);
   checkPredicate(s.if, out);

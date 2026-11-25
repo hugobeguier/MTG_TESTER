@@ -6,6 +6,8 @@
 import { defaultAnswer } from "@/kernel/observer/actions";
 import { effectiveView, type LegalAction } from "@/kernel/engine/legal";
 import { chooseDecision, planMain } from "@/kernel/ai/plan";
+import { profileFromState, type DeckProfile } from "@/kernel/ai/profile";
+import { shouldCounter } from "@/kernel/ai/counter";
 import { withPlannedPayment } from "@/kernel/ai/payment";
 import type { ScriptEntry } from "@/kernel/ai/simulate";
 import type { Action, Choice, EngineContext, GameState, PlayerId } from "@/kernel/engine/types";
@@ -21,7 +23,12 @@ export interface AiMemory {
   script?: ScriptEntry[];
   /** how often each action id was chosen this turn (an ability is not used more than twice a turn) */
   usage?: Record<string, number>;
+  /** what this seat's own deck does (sacrifice outlets, recursion, payoffs, counters ...; kernel/ai/profile.ts), read once per game per seat (a memory may be shared by several AI seats): callers that reset the memory each turn carry it over (`freshMemory`) */
+  profiles?: Record<PlayerId, DeckProfile>;
 }
+
+/** a new per-turn memory that keeps the seat's deck profile */
+export function freshMemory(prev?: AiMemory): AiMemory { return { banned: new Set(), ...(prev?.profiles ? { profiles: prev.profiles } : {}) }; }
 
 function answerFor(a: LegalAction, state: GameState, ctx: EngineContext, seat: PlayerId, memory: AiMemory): Action | undefined {
   const p = a.pending;
@@ -48,7 +55,45 @@ function view(state: GameState, ctx: EngineContext, id: string) {
   try { return effectiveView(state, id, ctx); } catch { return undefined; }
 }
 
+/** Stable pseudo-random number in [0,1) from a string: the tie-break between equally attractive targets (never the seat order, which always favoured seat 0). */
+function hash01(key: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < key.length; i++) { h ^= key.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return ((h >>> 0) % 100000) / 100000;
+}
+
+/**
+ * How attractive each opponent is to attack for `seat` (higher = better): low life, a big board (threat), few untapped blockers (weak defence) and commander
+ * damage they dealt to this seat (revenge). The last term is a tiny hash of (turn, seat, opponent) so exact ties rotate between turns and seats instead of
+ * always going to the first opponent in the list.
+ */
+export function attackTargetScores(state: GameState, ctx: EngineContext, seat: PlayerId): Record<PlayerId, number> {
+  const out: Record<PlayerId, number> = {};
+  for (const p of state.players) {
+    if (p.id === seat) continue;
+    let power = 0, blockers = 0;
+    for (const id of state.battlefield) {
+      const o = state.objects[id];
+      if (!o || o.controller !== p.id) continue;
+      const v = view(state, ctx, id);
+      if (!v || !v.types.includes("creature")) continue;
+      power += Math.max(0, Number(v.power ?? 0));
+      if (!o.tapped) blockers++;
+    }
+    let revenge = 0;
+    for (const [id, n] of Object.entries(state.commanderDamage?.[seat] ?? {})) if (state.objects[id]?.owner === p.id) revenge += n;
+    out[p.id] = (40 - p.life) + 0.6 * power - 1.5 * blockers + 0.5 * revenge + 0.01 * hash01(`${state.turn.number}:${seat}:${p.id}`);
+  }
+  return out;
+}
+
+/** The defender with the highest score (ties in the score are already broken by its hash term). */
+export function pickDefender(pool: string[], scores: Record<PlayerId, number>): string {
+  return [...pool].sort((x, y) => (scores[y] ?? -Infinity) - (scores[x] ?? -Infinity))[0];
+}
+
 function attackDeclaration(a: LegalAction, state: GameState, ctx: EngineContext, seat: PlayerId): Action {
+  const scores = attackTargetScores(state, ctx, seat);
   const enemies = state.battlefield.filter((id) => state.objects[id].controller !== seat && !state.objects[id].tapped).map((id) => view(state, ctx, id)).filter((v): v is NonNullable<typeof v> => !!v && v.types.includes("creature"));
   const attackers: Array<{ id: string; defender: string }> = [];
   for (const c of a.attackers ?? []) {
@@ -59,10 +104,10 @@ function attackDeclaration(a: LegalAction, state: GameState, ctx: EngineContext,
     const safe = killers.length === 0 || (enemies.length <= 1 && power >= Math.max(...enemies.map((e) => Number(e.toughness ?? 0)), 0) && toughness > Math.max(...enemies.map((e) => Number(e.power ?? 0)), 0));
     if (!(safe || a.mustAttack?.includes(c.id))) continue;
     if (power <= 0 && !a.mustAttack?.includes(c.id)) continue;
-    // prefer a player over a planeswalker / battle; among players the one with the least life
+    // prefer a player over a planeswalker / battle; among players the most attractive target (attackTargetScores), never the seat order
     const players = c.defenders.filter((d) => !d.startsWith("#"));
     const pool = players.length ? players : c.defenders;
-    const defender = [...pool].sort((x, y) => (state.players.find((p) => p.id === x)?.life ?? 99) - (state.players.find((p) => p.id === y)?.life ?? 99))[0];
+    const defender = pickDefender(pool, scores);
     attackers.push({ id: c.id, defender });
   }
   return { type: "declareAttackers", player: seat, attackers };
@@ -107,7 +152,8 @@ export function chooseAiAction(acts: LegalAction[], state: GameState, ctx: Engin
     const land = acts.find((a) => a.kind === "playLand" && a.action && !memory.banned.has(a.id));
     if (land) return land.action;
     // lookahead: simulate each cast / activation (with its X, modes, targets, optional costs) and take the one that improves the position most; a no-op is never chosen
-    const plan = planMain(acts, state, ctx, seat, memory.banned, (memory.usage ??= {}));
+    const profile = ((memory.profiles ??= {})[seat] ??= profileFromState(state, ctx, seat));
+    const plan = planMain(acts, state, ctx, seat, memory.banned, (memory.usage ??= {}), undefined, profile);
     if (plan) { memory.script = plan.script; memory.usage![plan.id] = (memory.usage![plan.id] ?? 0) + 1; return withPlannedPayment(plan.action, state, ctx, seat, plan.script); } // the payment is planned before the cast (kernel/ai/payment.ts)
   }
   if (mine && emptyStack) return { type: "advancePhase", player: seat };
@@ -126,9 +172,29 @@ function counterResponse(acts: LegalAction[], state: GameState, ctx: EngineConte
   const pick = acts.find((a) => {
     if (a.kind !== "castSpell" || !a.action || a.zone !== "hand" || !a.objectId || memory.banned.has(a.id)) return false;
     if (!a.targetOptions?.includes(top.objectId!)) return false;
-    return !!view(state, ctx, a.objectId)?.abilities.some((x) => /\bcounter target (?:\w+ )*spell\b/i.test(x.text));
+    if (!view(state, ctx, a.objectId)?.abilities.some((x) => /\bcounter target (?:\w+ )*spell\b/i.test(x.text))) return false;
+    return shouldCounter(state, ctx, seat, top, a.objectId); // threat vs cost; soft counters only when the caster cannot pay (kernel/ai/counter.ts)
   });
   if (!pick) return undefined;
   responded.add(top.id);
   return pick.action && withPlannedPayment(pick.action, state, ctx, seat);
+}
+
+/**
+ * The action chooseAiAction would take, when that is known WITHOUT the legal-action list (which costs a dry run of every candidate action: ~0.5-5 s on a big board, and
+ * the AI asks for it at every priority pass of every phase). Only the windows where the policy can do nothing but pass / advance qualify: no open decision, no
+ * declaration, not an own empty-stack main phase (planMain), and no opponent spell on top of the stack (a possible counterspell). Everything else returns undefined
+ * and goes the normal way. Identical to the full path by construction (checked by kernelQuickAi.test.ts on whole games).
+ */
+export function quickAiAction(state: GameState, seat: PlayerId, memory: AiMemory = { banned: new Set() }): Action | undefined {
+  if (state.gameOver || state.pending || state.combat?.expect || state.priority !== seat) return undefined;
+  const me = state.players.find((p) => p.id === seat);
+  if (!me || me.hasLost) return undefined;
+  const mine = state.turn.active === seat;
+  const emptyStack = state.stack.length === 0;
+  if (mine && emptyStack && MAIN.includes(state.turn.phase)) return undefined;
+  const top = state.stack[state.stack.length - 1];
+  if (top && top.controller !== seat && top.kind === "spell" && top.objectId) return undefined;
+  memory.script = undefined;
+  return mine && emptyStack ? { type: "advancePhase", player: seat } : { type: "passPriority", player: seat };
 }

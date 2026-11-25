@@ -22,6 +22,8 @@ export interface QCtx {
   iterated?: string;
   eventObj?: string;
   eventPlayer?: PlayerId;
+  /** cards this resolution exiled with a link: linked_exile means only these while it is set */
+  linkedNow?: string[];
   /** attack batch: defenders attacked (attacked_defender) */
   defenders?: string[];
   amount?: number;
@@ -213,7 +215,7 @@ export function resolveObjs(r: Run, ref: string | undefined, q: QCtx): string[] 
     case "sacrificed": return q.sacrificed ?? [];
     case "looked_cards":
     case "rest_of_looked_cards": return lookedLive(r, { ...q, chosen: q.chosen ?? {} });
-    case "linked_exile": return linkedObjs(r, q.source);
+    case "linked_exile": { const all = linkedObjs(r, q.source); return q.linkedNow === undefined ? all : all.filter((id) => q.linkedNow!.includes(id)); }
     case "event_object": return q.eventObj ? [q.eventObj] : [];
     case "vote_winners": return q.chosen && "vote_winners" in q.chosen ? savedObjs(r, { ...q, chosen: q.chosen }, "vote_winners") : [];
     case "created": return q.created ?? [];
@@ -454,3 +456,25 @@ export function evalPredicate(r: Run, p: Predicate, q: QCtx): boolean {
 export function turnsTakenBy(r: Run, pid: PlayerId): number { return Math.max(r.s.turnsTaken?.[pid] ?? 0, r.s.turn.active === pid ? 1 : 0); }
 
 export function isSick(r: Run, id: ObjId): boolean { return isSummoningSick(r, obj(r, id)); }
+
+/** One side of a failed numeric condition, for the log: how many of what a player has ("p2 controls 4 lands"). */
+export interface ConditionSide { n: number; player?: PlayerId; what?: string }
+export interface ConditionFacts { op: string; left: ConditionSide; right: ConditionSide }
+
+const sideOf = (r: Run, qy: Quantity, q: QCtx): ConditionSide => {
+  const n = evalQuantity(r, qy, q);
+  if (typeof qy === "object" && !("math" in qy) && qy.ref === "count") {
+    const c = qy.of?.controller;
+    const player = c === "you" ? q.controller : c === "that_player" ? (q.thatPlayer ?? q.eventPlayer) : undefined;
+    const t = qy.of?.types?.[0]?.toLowerCase();
+    return { n, ...(player ? { player } : {}), what: t ? (t === "spell" || t.endsWith("s") ? t : `${t}s`) : "permanents" };
+  }
+  return { n };
+};
+
+/** The numbers behind a "compare" condition (the intervening "if" of a trigger), to word WHY it is no longer true; undefined for any other predicate. */
+export function conditionFacts(r: Run, p: Predicate, q: QCtx): ConditionFacts | undefined {
+  if ("all" in p) { for (const sub of p.all) { try { if (!evalPredicate(r, sub, q)) return conditionFacts(r, sub, q); } catch { return undefined; } } return undefined; }
+  if (!("check" in p) || p.check !== "compare") return undefined;
+  try { return { op: p.cmp.op, left: sideOf(r, p.left, q), right: sideOf(r, p.cmp.value, q) }; } catch { return undefined; }
+}

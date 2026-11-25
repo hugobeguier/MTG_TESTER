@@ -11,9 +11,11 @@ import type { KernelBoardPick, PendingActionView, StackFeedEntry } from "@/compo
 import { classifyChange, type PaceSnap, type PacingClock } from "./kernelPacing";
 import { boardPickModel, canConfirm, castHint, classifyDecision, confirmLabel, pickChoice, selectionHint, toggleSelection } from "./kernelDecisionView";
 import { legalActions, type LegalAction } from "@/kernel/engine/legal";
+import { resolve } from "@/kernel/engine/resolve";
 import type { Action, Choice, GameState, ObjId, PlayerId } from "@/kernel/engine/types";
 import type { GameEvent as LogLine, GameSession, VisibleCard } from "@/lib/types";
-import { chooseAiAction, type AiMemory } from "./kernelAi";
+import { chooseAiAction, freshMemory, quickAiAction, type AiMemory } from "./kernelAi";
+import { adoptMemory, fromWire, toWire, type AiRunner } from "./kernelAiWork";
 import { evaluateWindow, hasResponse, type WindowVerdict } from "./kernelStops";
 import { DEFAULT_STOP_SETTINGS, stopKey, type PriorityStopSettings } from "@/lib/priorityStops";
 import { toggleYield, type SeatYield } from "@/engine/yieldPolicy";
@@ -42,6 +44,13 @@ export function manaWays(entries: LegalAction[]): ManaWay[] {
     const clause = text.match(/\badd\s+([^.]*)\./i)?.[1] ?? "";
     const alts = clause.split(/\s+or\s+|,\s*(?:or\s+)?/).map((alt) => alt.match(/\{[^}]+\}/g) ?? []).filter((symbols) => symbols.length > 0);
     const strip = (symbols: string[]) => symbols.map((x) => x.replace(/[{}]/g, "")).join("");
+    // the kernel's own reading of what the ability produces wins over its text: a land split into two abilities ({U} / {B}) can carry the whole card text on each
+    const real = entry.manaOptions;
+    if (real?.length) {
+      if (real.length > 1) for (const o of real) out.push({ key: o, ...(hint ? { hint } : {}), action: { ...entry.action, color: o } });
+      else out.push({ key: alts.length === 1 ? strip(alts[0]) : real[0], ...(hint ? { hint } : {}), action: entry.action });
+      continue;
+    }
     if (alts.length > 1) for (const alt of alts) out.push({ key: strip(alt), ...(hint ? { hint } : {}), action: { ...entry.action, color: strip(alt) } });
     else out.push({ key: alts.length === 1 ? strip(alts[0]) : "Any", ...(hint ? { hint } : {}), action: entry.action });
   }
@@ -207,6 +216,7 @@ export class KernelGameController {
       if (m && m.base === ts.session && m.notes === this.notes) session = m.session;
       else { session = { ...ts.session, events: [...this.notes, ...ts.session.events] }; this.mergedCache = { base: ts.session, notes: this.notes, session }; }
     }
+    this.promotePendingDrops();
     if (this.positions.size) session = this.withPositions(session);
     if (Object.keys(this.attackPicks).length) session = this.withAttackPicks(session);
     this.rawSession = session;
@@ -231,6 +241,19 @@ export class KernelGameController {
 
   /** where the player dragged battlefield cards (purely visual: the kernel has no positions); cards keep their object identity unless they were moved */
   private positions = new Map<string, { x: number; z: number }>();
+  /**
+   * Where the player DROPPED a hand card (the yellow landing preview): the card is on the stack for a while, then enters; an object keeps its id across zones, so the spot
+   * is promoted to a real battlefield position when the card arrives, and forgotten when the cast did not happen (the card is back in a hand / library).
+   */
+  private pendingDrops = new Map<string, { x: number; z: number; ver: number }>();
+  private promotePendingDrops(): void {
+    for (const [tableId, pos] of this.pendingDrops) {
+      const zone = this.ks.state.objects[this.kid(tableId)]?.zone;
+      if (zone === "battlefield") { this.positions.set(tableId, { x: pos.x, z: pos.z }); this.pendingDrops.delete(tableId); }
+      // Only once the game has moved on since the drop (a table() read between the drop and the cast, with the card still in hand / command zone, must not forget it):
+      else if (zone !== "stack" && !this.ks.state.pending && this.ks.version > pos.ver) this.pendingDrops.delete(tableId); // refused, cancelled, countered or an instant resolved: no spot to keep. While a question is open (targets, payment banner) the card is still in its old zone: keep it
+    }
+  }
   private withPositions(session: GameSession): GameSession {
     let changed = false;
     const seats = session.seats.map((seat) => {
@@ -364,21 +387,23 @@ export class KernelGameController {
     return feed;
   }
 
-  playCard = (seatId: string, cardId: string, _pos?: unknown, _zone?: string): void => {
+  playCard = (seatId: string, cardId: string, pos?: { x: number; z: number }, _zone?: string): void => {
     if (seatId !== this.human) return this.inert("play a card for another seat");
     const id = this.kid(cardId);
+    // dropped on the battlefield: the yellow landing preview showed this spot, so the permanent keeps it when it enters (see promotePendingDrops)
+    const spot = this.keepDrop(id, pos);
     if (this.freeCastOn()) return this.debugCast(id);
     const lands = this.legalFor("playLand", id);
     const casts = this.legalFor("castSpell", id);
     // a two-halved card (a Room, a split card) with several halves castable: never pick one silently (Secret Arcade vs Dusty Parlor cost differently and unlock different doors)
     const faces = new Set(casts.map((a) => a.face).filter(Boolean));
-    if (!lands.length && faces.size > 1) { this.note(`${this.nameOf(id)} has ${faces.size} halves you can cast (${[...faces].join(", ")}): use the "Cast <half>" buttons or the card's actions.`, "Rules"); return; }
+    if (!lands.length && faces.size > 1) { this.dropRefused(spot, false); this.note(`${this.nameOf(id)} has ${faces.size} halves you can cast (${[...faces].join(", ")}): use the "Cast <half>" buttons or the card's actions.`, "Rules"); return; }
     const pick = lands[0] ?? casts.find((a) => a.free) ?? casts.find((a) => !a.option || a.option === "normal") ?? casts[0]; // a free-cast permission (Omniscience) is the default way; "Pay its mana cost" stays in the card actions
-    if (pick?.action) { this.act(pick.action); return; }
+    if (pick?.action) { this.dropRefused(spot, this.act(pick.action)); return; }
     // not listed: ask the engine directly so the player gets its reason ("wrong timing", "cannot pay", ...)
     const o = this.ks.state.objects[id];
     const isLand = !!o && !!this.ks.ctx.cards(o.cardName)?.types.includes("land");
-    this.act(isLand ? { type: "playLand", player: this.human, cardId: id } : { type: "castSpell", player: this.human, cardId: id });
+    this.dropRefused(spot, this.act(isLand ? { type: "playLand", player: this.human, cardId: id } : { type: "castSpell", player: this.human, cardId: id }));
   };
 
   playCardFace = (seatId: string, cardId: string, faceIndex: number): void => {
@@ -390,22 +415,65 @@ export class KernelGameController {
     if (pick?.action) this.act(pick.action); else this.playCard(seatId, cardId);
   };
 
-  castCommander = (seatId: string): void => {
-    if (seatId !== this.human) return this.inert("cast a commander for another seat");
-    if (this.freeCastOn()) { const cmd = this.ks.state.players.find((p) => p.id === this.human)?.command[0]; if (cmd) return this.debugCast(cmd); }
-    const cmd = this.legalNow().find((a) => a.kind === "castSpell" && a.zone === "command" && a.action);
-    if (cmd?.action) { this.act(cmd.action); return; }
+  /** remember where a card was dropped (the yellow landing preview) so the permanent enters there; see promotePendingDrops */
+  private keepDrop(id: ObjId, pos?: { x: number; z: number }): string | undefined {
+    if (!pos || !Number.isFinite(pos.x) || !Number.isFinite(pos.z)) return undefined;
+    const tableId = this.ks.legacyIdOf(id) ?? id;
+    this.pendingDrops.set(tableId, { x: pos.x, z: pos.z, ver: this.ks.version });
+    this.tableCache = undefined;
+    return tableId;
+  }
+  /** a cast that did not start (refused) leaves no spot behind; while a question (payment, targets) is open the card is still in its old zone, so the spot stays */
+  private dropRefused(tableId: string | undefined, accepted: boolean): void {
+    if (tableId && !accepted && !this.ks.state.pending) this.pendingDrops.delete(tableId);
+  }
+
+  /**
+   * Can the human cast their commander right now, and if not, why? The same answer the engine gives the cast button: the kernel lists a command-zone
+   * cast only when the timing is right AND the whole cost (mana cost + commander tax) can be paid from untapped sources and/or the floating mana pool.
+   * The reason is the engine's own refusal text. `cardId` is the table id of the commander (what the board shows).
+   */
+  commanderCast(): { castable: boolean; cardId?: string; reason?: string } {
+    if (this.freeCastOn()) return this.commanderCastNow();
+    if (this.cmdCache?.ver !== this.ks.version) this.cmdCache = { ver: this.ks.version, v: this.commanderCastNow() };
+    return this.cmdCache.v;
+  }
+  private cmdCache?: { ver: number; v: { castable: boolean; cardId?: string; reason?: string } };
+  private commanderCastNow(): { castable: boolean; cardId?: string; reason?: string } {
     const id = this.ks.state.players.find((p) => p.id === this.human)?.command[0];
-    if (id) this.act({ type: "castSpell", player: this.human, cardId: id }); else this.note("There is no commander in the command zone.", "Rules");
+    if (!id) return { castable: false, reason: "There is no commander in the command zone." };
+    const cardId = this.ks.legacyIdOf(id) ?? id;
+    if (this.freeCastOn()) return { castable: true, cardId };
+    const s = this.ks.state;
+    if (s.priority !== this.human || s.pending || s.combat?.expect) return { castable: false, cardId, reason: "You don't have priority" };
+    if (this.legalNow().some((a) => a.kind === "castSpell" && a.zone === "command" && a.objectId === id && a.action)) return { castable: true, cardId };
+    const why = resolve(s, { type: "castSpell", player: this.human, cardId: id, autoPay: true }, this.ks.ctx).error?.message;
+    return { castable: false, cardId, reason: why ?? "Not castable now: not enough mana or wrong timing" };
+  }
+
+  castCommander = (seatId: string, position?: { x: number; z: number }): void => {
+    if (seatId !== this.human) return this.inert("cast a commander for another seat");
+    const id = this.ks.state.players.find((p) => p.id === this.human)?.command[0];
+    if (!id) { this.note("There is no commander in the command zone.", "Rules"); return; }
+    const spot = this.keepDrop(id, position);
+    if (this.freeCastOn()) return this.debugCast(id);
+    const cmd = this.legalNow().find((a) => a.kind === "castSpell" && a.zone === "command" && a.action);
+    if (cmd?.action) { this.dropRefused(spot, this.act(cmd.action)); return; }
+    // not listed: say why in the log instead of leaving a silent no-op (a dragged commander always gets this message)
+    const c = this.commanderCast();
+    if (position && c.reason) { this.note(`Cannot cast ${this.nameOf(id)}: ${c.reason}`, "Rules"); this.dropRefused(spot, false); }
+    else this.dropRefused(spot, this.act({ type: "castSpell", player: this.human, cardId: id }));
   };
 
   /** cast from exile / graveyard (flashback, permissions): the kernel lists those casts itself */
-  castFromZone = (seatId: string, cardId: string): void => {
+  castFromZone = (seatId: string, cardId: string, position?: { x: number; z: number }): void => {
     if (seatId !== this.human) return this.inert("cast for another seat");
     const id = this.kid(cardId);
+    const spot = this.keepDrop(id, position);
     if (this.freeCastOn()) return this.debugCast(id);
     const pick = this.legalFor("castSpell", id).find((a) => a.action);
-    if (pick?.action) this.act(pick.action); else this.note(`${this.nameOf(id)} can't be cast from there right now.`, "Rules");
+    if (pick?.action) this.dropRefused(spot, this.act(pick.action));
+    else { this.note(`${this.nameOf(id)} can't be cast from there right now.`, "Rules"); this.dropRefused(spot, false); }
   };
 
   // ------------------------------------------------------------------ debug mode (kernelDebug.ts, engine/sandbox.ts)
@@ -1042,19 +1110,47 @@ export class KernelGameController {
   }
 
   /** One automatic action (an AI seat's choice, or the human's automatic pass). Returns false when it did nothing. Never throws. */
-  step(): boolean {
+  step(): boolean { return this.runStep(); }
+
+  /** the AI thinks in a worker (kernelAiWork.ts / kernelAiWorker.ts) instead of on the main thread; absent = in-process, as before */
+  private aiRunner?: AiRunner;
+  private thinking = false;
+  hasAiRunner(): boolean { return !!this.aiRunner; }
+  setAiRunner(r: AiRunner | undefined): void { this.aiRunner?.dispose?.(); this.aiRunner = r; }
+
+  /**
+   * step() for a driver that must not block rendering: when the AI seat needs real thinking (not a plain pass), the worker computes legal actions + the choice while the
+   * page keeps drawing; the result is applied only if the game did not move meanwhile. Same answer as step() (the AI is a pure function of state, seat and memory).
+   */
+  async stepAsync(): Promise<boolean> {
+    const s = this.ks.state;
+    const actor = this.ks.actor;
+    const runner = this.aiRunner;
+    if (!runner || !actor || actor === this.human || s.gameOver || this.ks.degraded || quickAiAction(s, actor, { banned: new Set() })) return this.step();
+    if (this.memoryTurn !== s.turn.number) { this.memory = freshMemory(this.memory); this.memoryTurn = s.turn.number; }
+    const ver = this.ks.version;
+    let reply;
+    try { reply = await runner.choose({ state: s, seat: actor, memory: toWire(this.memory) }); }
+    catch { this.aiRunner = undefined; return this.step(); } // the worker is broken: think in-process from now on
+    if (this.ks.version !== ver) return true; // the game moved on while the AI was thinking (a human click): the answer is stale, ask again
+    if (reply.error) { this.aiRunner = undefined; return this.step(); }
+    adoptMemory(this.memory, fromWire(reply.memory));
+    return this.runStep({ action: reply.action });
+  }
+
+  private runStep(decided?: { action: Action | undefined }): boolean {
     try {
       const s = this.ks.state;
       if (s.gameOver || this.ks.degraded) return false;
       const actor = this.ks.actor;
       if (!actor) return false;
       if (this.autoTurn.turn !== s.turn.number) { this.autoTurn = { turn: s.turn.number, count: 0 }; }
-      if (this.memoryTurn !== s.turn.number) { this.memory = { banned: new Set() }; this.memoryTurn = s.turn.number; }
+      if (this.memoryTurn !== s.turn.number) { this.memory = freshMemory(this.memory); this.memoryTurn = s.turn.number; }
       let action: Action | undefined;
       if (actor === this.human) action = this.humanAutoAction();
       else {
-        const acts = this.ks.legal(actor);
-        action = chooseAiAction(acts, s, this.ks.ctx, actor, this.memory);
+        action = decided ? decided.action : quickAiAction(s, actor, this.memory); // a plain pass / advance needs no legal-action list (kernelAi.ts)
+        if (!action && !decided) action = chooseAiAction(this.ks.legal(actor), s, this.ks.ctx, actor, this.memory);
         if (!action) { this.stall(`${this.nameOf(actor)} has no legal action`); return false; }
         if (this.autoTurn.count >= MAX_AUTO_ACTIONS_PER_TURN) action = fallbackPass(s, actor);
         else if (action.type === "advancePhase" && !s.stack.length && !s.combat?.expect && this.humanWindowAhead()) action = { type: "passPriority", player: actor };
@@ -1091,11 +1187,16 @@ export class KernelGameController {
     this.running = true;
     this.driverClear = clearT;
     const arm = (): void => {
-      if (!this.running || this.timer !== undefined || !this.needsStep()) return;
+      if (!this.running || this.timer !== undefined || this.thinking || !this.needsStep()) return;
       const human = this.ks.actor === this.human;
       // a visible change (a cast, a trigger, a resolution, combat) is shown for its pacing delay before anyone passes or advances; a new wait noted while a shorter timer runs re-arms
       const hold = this.pacing?.remaining() ?? 0;
-      this.timer = setT(() => { this.timer = undefined; if ((this.pacing?.remaining() ?? 0) > 0) { arm(); return; } this.step(); arm(); }, hold > 0 ? hold : this.pace(human ? 900 : 700));
+      this.timer = setT(() => {
+        this.timer = undefined;
+        if ((this.pacing?.remaining() ?? 0) > 0) { arm(); return; }
+        if (this.aiRunner) { this.thinking = true; void this.stepAsync().catch(() => false).finally(() => { this.thinking = false; arm(); }); return; }
+        this.step(); arm();
+      }, hold > 0 ? hold : this.pace(human ? 900 : 700));
     };
     const unsub = this.subscribe(arm);
     arm();

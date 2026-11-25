@@ -675,6 +675,7 @@ function describeMove(step: Step, t: () => string): string {
     case "exile": return `exile ${what}${step.faceDown ? " face down" : ""}`;
     case "hand": return `put ${what} into your hand`;
     case "battlefield": return `put ${what} onto the battlefield`;
+    case "command": return `return ${what} to its owner's command zone`;
     case "library": if (step.position) return `put ${what} on the ${String(step.position)} of its owner's library`; return `put ${what} into ${zoneDestination(to)}`;
     case "graveyard": return `put ${what} into ${zoneDestination(to)}`;
     default: return `move ${what} to ${String(to ?? "another zone")}`;
